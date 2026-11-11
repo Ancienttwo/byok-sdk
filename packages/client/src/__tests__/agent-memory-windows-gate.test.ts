@@ -41,7 +41,7 @@ describe('Windows Agent memory admission', () => {
       expect(isAgentMemorySecureFilesystemAvailable(false)).toBe(false);
       expect(isAgentMemorySecureFilesystemAvailable(true)).toBe(true);
       const helperBin = path.resolve('agent-memory-fs', 'win32-x64.exe');
-      const backend = helperAgentMemoryIntentBackend(helperBin);
+      const backend = helperAgentMemoryIntentBackend(helperBin, path.resolve("enrolled-root"));
       expect(release.verify).toHaveBeenCalledWith(helperBin, undefined);
       // No OS-crash or power-loss proof, so no strict barrier and no intents.
       expect(backend.strictLedgerBarrier).toBe(false);
@@ -51,7 +51,7 @@ describe('Windows Agent memory admission', () => {
 
   it('keeps both proofs for the macOS helper', async () => {
     await withProcess('darwin', 'arm64', () => {
-      const backend = helperAgentMemoryIntentBackend(path.resolve('agent-memory-fs', 'darwin-arm64'));
+      const backend = helperAgentMemoryIntentBackend(path.resolve('agent-memory-fs', 'darwin-arm64'), path.resolve('enrolled-root'));
       expect(backend.strictLedgerBarrier).toBe(true);
       expect(backend.conflictProvesNoRename).toBe(true);
     });
@@ -66,10 +66,10 @@ describe('Windows Agent memory admission', () => {
       expect(() => actualRelease.resolveAgentMemoryFilesystemHelper()).toThrow('SDK Agent memory helper is not admitted on this platform');
       const helperBin = path.resolve('unproved-agent-memory-fs.exe');
       release.verify.mockImplementationOnce(release.actualVerify!);
-      expect(() => helperAgentMemoryIntentBackend(helperBin)).toThrow('SDK Agent memory helper is not admitted on this platform');
+      expect(() => helperAgentMemoryIntentBackend(helperBin, path.resolve("enrolled-root"))).toThrow('SDK Agent memory helper is not admitted on this platform');
       release.verify.mockClear();
       await expect(openAgentMemoryFilesystemHelper({
-        helperBin, canonicalHome: path.resolve('unproved-home'), homeIdentity: { dev: 1n, ino: 2n },
+        helperBin, ancestorRoot: path.resolve('enrolled-root'), canonicalHome: path.resolve('unproved-home'), homeIdentity: { dev: 1n, ino: 2n },
       })).rejects.toThrow('not admitted on this platform');
       expect(release.verify).not.toHaveBeenCalled();
     });

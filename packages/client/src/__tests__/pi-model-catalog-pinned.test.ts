@@ -1,4 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai/models';
@@ -64,8 +67,9 @@ describe('keys Pi model catalog against the pinned pi-ai', () => {
     expect(table).toEqual(pinned);
   });
 
-  it('projects every representable entry to the pinned Pi model, field by field', () => {
+  it('projects every representable entry to the pinned Pi model, field by field', async () => {
     let representable = 0;
+    const providers: Record<string, any> = {};
     for (const { provider, model } of pinnedModels()) {
       const vendor = MODEL_PROVIDER_VENDORS[provider];
       const levels = PI_THINKING_LEVELS.map((thinkingLevel) => piModelConfigFromPinnedCatalog({
@@ -93,6 +97,9 @@ describe('keys Pi model catalog against the pinned pi-ai', () => {
       });
       const projected = (buildPiProviderProjection(profile, 'pi-rpc') as any).providers['byok-sdk-catalog-parity'];
       const entry = projected.models[0];
+      const id = `byok-sdk-${provider}-${model.api}`;
+      providers[id] ??= { ...projected, models: [] };
+      providers[id].models.push(entry);
       expect([provider, model.id, projected.api]).toEqual([provider, model.id, model.api]);
       const fields = ['id', 'name', 'input', 'reasoning', 'contextWindow', 'maxTokens', 'thinkingLevelMap', 'compat', 'inputLimits'];
       const pick = (source: Record<string, unknown>) => Object.fromEntries(fields.map((field) => [field, source[field] ?? null]));
@@ -102,6 +109,19 @@ describe('keys Pi model catalog against the pinned pi-ai', () => {
     }
     // Cerebras, Z.AI GLM, MiniMax and the other entries; a pi-ai upgrade that empties this set is a regression.
     expect(representable).toBeGreaterThan(0);
+    const root = await mkdtemp(path.join(os.tmpdir(), 'byok-catalog-compose-'));
+    try {
+      const modelsPath = path.join(root, 'models.json');
+      await writeFile(modelsPath, JSON.stringify({ providers }));
+      const runtime = await ModelRuntime.create({ authPath: path.join(root, 'auth.json'), modelsPath,
+        allowModelNetwork: false, refreshOnCreate: false });
+      expect(runtime.getError()).toBeUndefined();
+      for (const [id, provider] of Object.entries(providers)) {
+        for (const entry of provider.models) {
+          expect(runtime.getModel(id, entry.id)?.baseUrl, `${id}/${entry.id}`).toBe(provider.baseUrl);
+        }
+      }
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   it('accepts exactly the thinking levels Pi offers for each representable entry', () => {
@@ -137,7 +157,8 @@ describe('keys Pi model catalog against the pinned pi-ai', () => {
 
 /**
  * How a Pi branch on the provider id behaves for a projected profile, whose
- * Pi provider id is `byok-sdk-<ref>` rather than the catalog vendor id.
+ * Pi provider id defaults to `byok-sdk-<ref>`; a profile can declare `opencode-go`.
+ * - `declared`: the profile explicitly selects this provider id.
  * - `url`: the branch also matches the base URL, and every catalog vendor it
  *   names has a base_url that matches, so it behaves as for the built-in provider.
  * - `unreachable`: a byok projection never takes this branch differently
@@ -145,10 +166,10 @@ describe('keys Pi model catalog against the pinned pi-ai', () => {
  * - `differs`: a representable entry behaves differently from the built-in
  *   provider. Present before pi_model gained these compat keys; not fixed here.
  */
-type PiProviderBranch = readonly [file: string, line: string, kind: 'url' | 'unreachable' | 'differs', reason: string];
+type PiProviderBranch = readonly [file: string, line: string, kind: 'url' | 'declared' | 'unreachable' | 'differs', reason: string];
 
 const COPILOT = 'github-copilot is not a catalog vendor';
-const OPENCODE_GO = 'opencode-go is not a catalog vendor';
+const OPENCODE_GO = 'pi_model.providerId explicitly declares opencode-go with openai-completions';
 
 /** Every pinned pi-ai line that branches on a provider id, reviewed against pi-ai 1.5.0. */
 const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
@@ -156,10 +177,10 @@ const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
   ['api/anthropic-messages.js', 'if (model.provider !== "anthropic" || hasRequestAuth(apiKey, headers))', 'unreachable', 'federation runs only without a key; a byok launch always supplies one'],
   ['api/anthropic-messages.js', 'if (model.provider === "github-copilot") {', 'unreachable', COPILOT],
   ['api/anthropic-messages.js', 'if (model.provider === "github-copilot") {', 'unreachable', COPILOT],
-  ['api/openai-completions.js', 'const thinkingSignature = model.provider === "opencode-go" && foundReasoningField === "reasoning"', 'unreachable', OPENCODE_GO],
+  ['api/openai-completions.js', 'const thinkingSignature = model.provider === "opencode-go" && foundReasoningField === "reasoning"', 'declared', OPENCODE_GO],
   ['api/openai-completions.js', 'if (model.provider === "github-copilot") {', 'unreachable', COPILOT],
   ['api/openai-completions.js', 'if (model.provider === "openai")', 'unreachable', 'the openai vendor projects openai-responses only'],
-  ['api/openai-completions.js', 'if (model.provider === "opencode-go" && signature === "reasoning") {', 'unreachable', OPENCODE_GO],
+  ['api/openai-completions.js', 'if (model.provider === "opencode-go" && signature === "reasoning") {', 'declared', OPENCODE_GO],
   ['api/openai-completions.js', 'const isZai = provider === "zai" ||', 'url', 'zai base_url contains api.z.ai'],
   ['api/openai-completions.js', 'provider === "zai-coding-cn" ||', 'url', 'zai-coding-cn base_url contains open.bigmodel.cn'],
   ['api/openai-completions.js', 'const isTogether = provider === "together" || baseUrl.includes("api.together.ai") || baseUrl.includes("api.together.xyz");', 'url', 'together base_url contains api.together.ai'],
@@ -204,8 +225,8 @@ const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
   ['env-api-keys.js', 'if (provider === "amazon-bedrock") {', 'unreachable', 'environment key lookup; byok passes the key explicitly'],
   ['utils/identity.js', 'return target.provider === "openrouter" || target.baseUrl.includes("openrouter.ai");', 'url', 'openrouter base_url contains openrouter.ai'],
   ['utils/identity.js', 'return target.provider === "nvidia" || matchesHost(target.baseUrl, NVIDIA_NIM_HOST);', 'url', 'nvidia base_url host is integrate.api.nvidia.com'],
-  ['utils/identity.js', 'return (target.provider === "opencode" || target.provider === "opencode-go" || matchesHost(target.baseUrl, OPENCODE_HOST));', 'unreachable',
-    'opencode vendors are not in the catalog'],
+  ['utils/identity.js', 'return (target.provider === "opencode" || target.provider === "opencode-go" || matchesHost(target.baseUrl, OPENCODE_HOST));', 'declared',
+    'getOpenCodeSessionHeaders matches declared opencode-go, including gateways; it also matches the opencode.ai host'],
   ['utils/overflow.js', 'if (message.provider === "cerebras" && CEREBRAS_BODYLESS_OVERFLOW_PATTERN.test(message.errorMessage)) {', 'differs',
     'only an empty-body 400 differs: pinned openai 7.19.0 keeps a body without an error key, and the overflow body '
     + 'cerebras is reported to send matches the generic patterns under any provider id; no empty-body 400 overflow '
@@ -222,7 +243,7 @@ describe('pinned pi-ai branches on the provider id', () => {
       .filter((line) => PI_PROVIDER_BRANCH.test(line))
       .map((line) => `${file.replaceAll('\\', '/')}: ${line.trim()}`));
     const reviewed = REVIEWED_PI_PROVIDER_BRANCHES.map(([file, line]) => `${file}: ${line}`);
-    expect(found.sort(), 'review each new or changed branch for a byok-sdk-<ref> provider id and update the list')
+    expect(found.sort(), 'review each new or changed branch for a projected provider id and update the list')
       .toEqual(reviewed.sort());
   });
 });

@@ -1,10 +1,10 @@
-import { type DeviceRecord, enrollmentIdentityOf } from '../store';
-import { E2eeMemberClient } from '../e2ee-member-client';
-import { StoredDeviceProofSigner } from '../device-proof-signer';
-import { resumeDeviceMember } from '../device-member';
-import { DeviceMemberKeyring } from '../e2ee-keyring';
-import { declares, E2EE_MEMBER_KEM_EPOCH_CAPABILITY } from '../capabilities-client';
-import type { DaemonScope } from './scope';
+import { type DeviceRecord, enrollmentIdentityOf } from '../store.js';
+import { E2eeMemberClient } from '../e2ee-member-client.js';
+import { StoredDeviceProofSigner } from '../device-proof-signer.js';
+import { resumeDeviceMember } from '../device-member.js';
+import { DeviceMemberKeyring } from '../e2ee-keyring.js';
+import { declares, E2EE_MEMBER_KEM_EPOCH_CAPABILITY } from '../capabilities-client.js';
+import type { DaemonScope } from './scope.js';
 
 /** The device member: its client and its start on a paired device (#926). */
 

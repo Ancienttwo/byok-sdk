@@ -14,21 +14,21 @@ import {
   type CoreStores,
   type SkillPackStore,
 } from '@byok-sdk/core';
-import { createHmacTokenSigner, type TokenSigner } from '../auth/tokens';
-import { CLOUD_CAPABILITIES, capabilityDeclarationForPorts, declares } from '../capabilities';
-import { createWebCrypto } from '../crypto/web-crypto';
-import type { CloudCrypto } from '../crypto/port';
-import { createByokCloud, type ByokCloud, type ByokCloudOptions } from '../cloud';
-import { createInMemoryCloudStores, createInMemoryBlobBytes } from '../stores/in-memory/index';
-import type { MailboxWake } from '../mailbox-wake';
-import type { ProofReceiptRetentionOptions } from '../maintenance';
-import { createInProcessMailboxWake } from '../stores/in-memory/mailbox-wake';
-import type { BlobContentProxy, CloudStores } from '../stores/ports';
-import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract';
+import { createHmacTokenSigner, type TokenSigner } from '../auth/tokens.js';
+import { CLOUD_CAPABILITIES, capabilityDeclarationForPorts, declares } from '../capabilities.js';
+import { createWebCrypto } from '../crypto/web-crypto.js';
+import type { CloudCrypto } from '../crypto/port.js';
+import { createByokCloud, type ByokCloud, type ByokCloudOptions } from '../cloud.js';
+import { createInMemoryCloudStores, createInMemoryBlobBytes } from '../stores/in-memory/index.js';
+import type { MailboxWake } from '../mailbox-wake.js';
+import type { ProofReceiptRetentionOptions } from '../maintenance.js';
+import { createInProcessMailboxWake } from '../stores/in-memory/mailbox-wake.js';
+import type { BlobContentProxy, CloudStores } from '../stores/ports.js';
+import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract.js';
 import type {
   AgentMemoryProjectionAuthorizer,
   AgentMemoryProjectionStore,
-} from '../agent-memory-projection';
+} from '../agent-memory-projection.js';
 
 const TOKEN_SECRET_BYTES = 32;
 

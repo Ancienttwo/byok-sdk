@@ -71,7 +71,8 @@ describe('custom harness protocol authority', () => {
   it('requires the advertised inventory before reserving an offer, and takes a hello inventory with no flag', async () => {
     const { h, stores, deviceId } = await setup();
     await grantAgentHome(h, TENANT_A, deviceId);
-    await expect(h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness' } })).rejects.toThrow('not advertised by this device');
+    await expect(h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness' } })).rejects.toMatchObject({
+      code: 'agent_capability_missing', message: 'requested custom harness is not advertised by this device' });
     await stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY], harnesses: inventory });
     await expect(h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'other' } })).rejects.toThrow();
     await expect(h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness', runtime: 'pi' } })).rejects.toThrow();

@@ -1,16 +1,16 @@
-import { acquireDaemonOwner, DaemonOwnerActiveError } from '../../util/daemon-owner';
-import { DaemonHaltError } from '../daemon-lifecycle';
-import { AuthRequestAbortedError } from '../auth-manager';
-import { DeviceCredentialCommandAbortedError } from '../device-credential-store';
+import { acquireDaemonOwner, DaemonOwnerActiveError } from '../../util/daemon-owner.js';
+import { DaemonHaltError } from '../daemon-lifecycle.js';
+import { AuthRequestAbortedError } from '../auth-manager.js';
+import { DeviceCredentialCommandAbortedError } from '../device-credential-store.js';
 import path from 'node:path';
-import { TaskRunner } from '../task-runner';
-import type { DaemonScope } from './scope';
-import { openStartRun } from './start-run';
-import { composeStartLanes } from './start-lanes';
-import { composeStartTerminals } from './start-terminals';
-import { composeStartRunnerDeps } from './start-runner';
-import { composeStartEnvelopes } from './start-envelopes';
-import { createStartConnection } from './start-connection';
+import { TaskRunner } from '../task-runner.js';
+import type { DaemonScope } from './scope.js';
+import { openStartRun } from './start-run.js';
+import { composeStartLanes } from './start-lanes.js';
+import { composeStartTerminals } from './start-terminals.js';
+import { composeStartRunnerDeps } from './start-runner.js';
+import { composeStartEnvelopes } from './start-envelopes.js';
+import { createStartConnection } from './start-connection.js';
 
 /** One daemon start under the owner lease (#926). */
 

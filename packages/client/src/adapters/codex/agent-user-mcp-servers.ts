@@ -1,9 +1,9 @@
-import { RuntimeExecutionFailure } from '../../runtime-failure';
-import type { CodexOpenStepRequest } from '../../runtime/codex-session-runtime';
+import { RuntimeExecutionFailure } from '../../runtime-failure.js';
+import type { CodexOpenStepRequest } from '../../runtime/codex-session-runtime.js';
 
 type JsonRecord = Record<string, unknown>;
 
-const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
+const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
 const PREFIX = 'codex Agent user MCP server exclusion refused';
 const UNREADABLE_STATUS = `${PREFIX}: mcpServerStatus/list returned a reply it cannot read`;
 const record = (value: unknown): JsonRecord | undefined =>

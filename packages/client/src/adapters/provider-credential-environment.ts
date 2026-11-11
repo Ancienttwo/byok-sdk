@@ -1,4 +1,4 @@
-import { PI_PROVIDER_ENV_KEY_NAMES } from './pi/pi-provider-env.generated';
+import { PI_PROVIDER_ENV_KEY_NAMES } from './pi/pi-provider-env.generated.js';
 
 /**
  * The env name `@byok-sdk/keys` delivers the resolved key under, to the

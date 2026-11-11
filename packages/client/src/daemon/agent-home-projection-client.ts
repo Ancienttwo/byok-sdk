@@ -5,9 +5,9 @@ import {
   type AgentHomeProjectionCompletionRequest,
   type AgentHomeProjectionReadback,
 } from '@byok-sdk/protocol';
-import type { AuthManager } from './auth-manager';
-import { authedFetch } from './http-client';
-import { toHttpBase } from './url';
+import type { AuthManager } from './auth-manager.js';
+import { authedFetch } from './http-client.js';
+import { toHttpBase } from './url.js';
 
 export class AgentHomeProjectionCompletionError extends Error {
   constructor(message: string, options?: ErrorOptions) {

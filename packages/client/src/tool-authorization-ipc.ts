@@ -2,15 +2,15 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import { isAbsolute } from 'node:path';
-import type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationVerdict, ToolCall } from './tool-authorization';
-import type { FileScopeGrant } from './file-scope-guard';
-import { parseSerializedFileScopeGrant, type SerializedFileScopeGrant } from './file-scope-serialization';
+import type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationVerdict, ToolCall } from './tool-authorization.js';
+import type { FileScopeGrant } from './file-scope-guard.js';
+import { parseSerializedFileScopeGrant, type SerializedFileScopeGrant } from './file-scope-serialization.js';
 import {
   FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS, SCOPED_FILE_TOOL_NAMES,
   type FileScopeGuardCode, type FileScopeGuardReason,
-} from './file-scope-types';
-import type { ScopedFileDenial } from './file-scope-tools';
-import { fileScopeGateBinding } from './file-scope-gate-binding';
+} from './file-scope-types.js';
+import type { ScopedFileDenial } from './file-scope-tools.js';
+import { fileScopeGateBinding } from './file-scope-gate-binding.js';
 
 /**
  * Private loopback address of one runtime's `auto` gate. SDK-owned child sessions

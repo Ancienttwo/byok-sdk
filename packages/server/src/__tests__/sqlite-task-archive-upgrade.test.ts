@@ -9,6 +9,8 @@ import { isSqliteAvailable } from '../sqlite-support';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 import { rewindToV6 } from './test-support';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const TENANT = tenantId('sqlite-task-archive');
 
@@ -36,9 +38,9 @@ describeSqlite('SQLite terminal-task archive columns (#1120)', () => {
     const open = () => createSqliteEmbeddedStores({ path }, { clock, crypto: createWebCrypto() });
 
     const first = open();
-    await first.cloud.tasks.open(TENANT, { taskId: 'done', deviceId: 'device-1' });
-    await first.cloud.tasks.recordStatus(TENANT, { taskId: 'done', status: 'complete' });
-    await first.cloud.tasks.open(TENANT, { taskId: 'running', deviceId: 'device-1' });
+    await first.cloud.tasks.reserveAgentOffer(TENANT, { taskId: 'done', deviceId: 'device-1', agentRef: AGENT_REF });
+    await first.cloud.tasks.recordStatus(TENANT, { taskId: 'done', status: 'complete', agentRef: AGENT_REF });
+    await first.cloud.tasks.reserveAgentOffer(TENANT, { taskId: 'running', deviceId: 'device-1', agentRef: AGENT_REF });
     await first.close();
     // The file as the v6 release wrote it: no archive columns, and a
     // terminal task whose terminal instant was never recorded.

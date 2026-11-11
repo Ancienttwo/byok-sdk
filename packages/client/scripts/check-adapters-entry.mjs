@@ -111,7 +111,6 @@ assert.deepEqual(Object.keys(testing).sort(), ['fakeRuntimeAdapter']);
 assert.deepEqual(testing.fakeRuntimeAdapter('claude').descriptor, new adapters.ClaudeAdapter().descriptor);
 const crossEntryFailure = new adapters.RuntimeExecutionFailure({
   phase: 'start',
-  category: 'infrastructure',
   retry: 'retryable',
   reason: 'adapter-entry-smoke',
 });

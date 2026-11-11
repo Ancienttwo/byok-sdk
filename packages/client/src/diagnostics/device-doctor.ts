@@ -1,15 +1,15 @@
 import { isTenantId } from '@byok-sdk/core';
-import type { DaemonConfig } from '../daemon/create-daemon';
-import type { RuntimeAdapter } from '../types';
-import { DeviceStore } from '../daemon/store';
-import { createDeviceCredentialStore } from '../daemon/device-credential-provider';
-import { acquireDaemonOwner, DaemonOwnerActiveError } from '../util/daemon-owner';
-import { connectControlClient } from '../daemon/control-client';
-import { CursorStore } from '../daemon/cursor-store';
-import { collectDiagnostics } from './diagnostics';
-import type { DiagnosticsSnapshot } from './types';
+import type { DaemonConfig } from '../daemon/create-daemon.js';
+import type { RuntimeAdapter } from '../types.js';
+import { DeviceStore } from '../daemon/store.js';
+import { createDeviceCredentialStore } from '../daemon/device-credential-provider.js';
+import { acquireDaemonOwner, DaemonOwnerActiveError } from '../util/daemon-owner.js';
+import { connectControlClient } from '../daemon/control-client.js';
+import { CursorStore } from '../daemon/cursor-store.js';
+import { collectDiagnostics } from './diagnostics.js';
+import type { DiagnosticsSnapshot } from './types.js';
 
-export type { DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus } from './types';
+export type { DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus } from './types.js';
 
 export interface DiagnoseDeviceOptions {
   /** The same adapters used by an embedded host; omitted uses bundled adapters. */

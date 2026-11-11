@@ -13,7 +13,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { DEVICE_PROOF_HEADER, TENANT_ID_MAX_LENGTH } from '@byok-sdk/core';
-import type { MemberChainEntryV1, MemberKeyBundleV1, ScopeKeyPackageV2 } from '@byok-sdk/core/sealed-payload';
+import type { MemberChainEntryV1, MemberKeyBundleV1, ScopeKeyPackage } from '@byok-sdk/core/sealed-payload';
 import {
   BYOK_E2EE_CHAIN_PATH,
   BYOK_E2EE_KEY_PACKAGES_PATH,
@@ -27,10 +27,10 @@ import {
   E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX,
   E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION,
 } from '@byok-sdk/protocol';
-import type { AuthManager } from './auth-manager';
-import type { DeviceProofSigner } from './device-proof-signer';
-import { authedFetch } from './http-client';
-import { toHttpBase } from './url';
+import type { AuthManager } from './auth-manager.js';
+import type { DeviceProofSigner } from './device-proof-signer.js';
+import { authedFetch } from './http-client.js';
+import { toHttpBase } from './url.js';
 
 /**
  * The longest member chain this device reads, 64 full pages. A Host that
@@ -158,7 +158,7 @@ export class E2eeMemberClient {
    * and one that holds a newer KEM epoch of a recipient 409
    * `e2ee_scope_key_package_stale`.
    */
-  async putKeyPackages(packages: readonly ScopeKeyPackageV2[], signal?: AbortSignal): Promise<void> {
+  async putKeyPackages(packages: readonly ScopeKeyPackage[], signal?: AbortSignal): Promise<void> {
     const response = await this.#proofPost(BYOK_E2EE_KEY_PACKAGES_PATH, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, { packages }, 'key package put', signal);
     // The device does not use the result; a 2xx is the Host's acknowledgement, so the body is not read.
     await response.body?.cancel();

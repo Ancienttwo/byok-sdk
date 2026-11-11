@@ -1,11 +1,11 @@
 export const EXPIRING_CLASS_IDS = [
   'exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation',
   'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger',
-  'terminal-evidence', 'pi-session-dir', 'agy-session-store',
+  'terminal-evidence', 'pi-session-dir', 'agy-session-store', 'codex-session-store',
 ] as const;
 export const PROTECTED_CLASS_IDS = [
   'journal', 'quarantine', 'owned-processes', 'durable-replica-live',
-  'agent-content', 'byok-authority', 'agent-runtime-sessions', 'agent-home-lease',
+  'agent-content', 'byok-authority', 'agent-home-lease',
   'skill-pack-current', 'store-authority', 'runtime-session-external',
 ] as const;
 export type ExpiringClassId = typeof EXPIRING_CLASS_IDS[number];
@@ -57,7 +57,6 @@ export const PROTECTED_CLASS_BOUNDS: Readonly<Record<ProtectedClassId, Protected
   'durable-replica-live': { kind: 'exempt', cleanedBy: 'sdk', reason: 'One replica per non-terminal durable Pi task; a terminal task\'s replica becomes durable-replica and expires.', api: "storage.retention.ttlMs['durable-replica']" },
   'agent-content': { kind: 'exempt', cleanedBy: 'host', reason: 'Host-owned Agent files and memory: their content and lifetime are product data.', api: 'the Host deletes Agent files or the whole Agent home' },
   'byok-authority': { kind: 'exempt', cleanedBy: 'host', reason: 'A fixed set of SDK records per Agent home whose logs keep bounded tails; it grows with Agent count, not task count.', api: 'removed with the Agent home' },
-  'agent-runtime-sessions': { kind: 'exempt', cleanedBy: 'host', reason: 'A runtime\'s own transcripts of an Agent\'s threads, kept in the Agent home so a later task can resume them (Codex rollouts under agentUserContext: \'excluded\'). They are unbounded: they grow with every task and accumulate until the Host removes the Agent home.', api: 'removed with the Agent home' },
   'agent-home-lease': { kind: 'count', maxEntries: 1, per: 'agent-home' },
   'skill-pack-current': { kind: 'count', maxEntries: 1, per: 'skill-pack' },
   'store-authority': { kind: 'exempt', cleanedBy: 'sdk', reason: 'Fixed device records (identity, owner, locks, sockets) and self-bounded logs such as audit.jsonl, which rewrites itself past 10 MiB; none grows with task count.', api: 'removed with the store directory' },

@@ -7,6 +7,8 @@ import { createInMemoryBlobBytes, createInMemoryCloudStores } from '../stores/in
 import { createInProcessMailboxWake } from '../stores/in-memory/mailbox-wake';
 import { TENANT_A, TENANT_B, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 function observeReads(harness: CloudHarness) {
   let reads = 0;
   let observed!: () => void;
@@ -229,7 +231,7 @@ describe('in-memory task events wake (#1113 A4)', () => {
       await task.next(60_000);
       expect(performance.now() - started).toBeLessThan(100);
     };
-    await woken(() => stores.tasks.open(TENANT_A, { taskId: 'task', deviceId: 'device' }));
+    await woken(() => stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task', deviceId: 'device', agentRef: AGENT_REF }));
     await woken(() => stores.tasks.claim(TENANT_A, { taskId: 'task', deviceId: 'device' }));
     await woken(() => stores.activity.append(TENANT_A, {
       taskId: 'task', sourceEnvelopeId: 'progress', batchSeq: 1, events: [{ type: 'progress', text: 'one' }], dropped: 0, ttlMs: 600_000,
@@ -237,7 +239,7 @@ describe('in-memory task events wake (#1113 A4)', () => {
     await woken(() => stores.approvals.append(TENANT_A, {
       taskId: 'task', sourceEnvelopeId: 'request', event: { type: 'approval_requested', summary: 'Allow', approvalId: 'approval' },
     }));
-    await woken(() => stores.tasks.recordStatus(TENANT_A, { taskId: 'task', status: 'complete' }));
+    await woken(() => stores.tasks.recordStatus(TENANT_A, { taskId: 'task', status: 'complete', agentRef: AGENT_REF }));
     const started = performance.now();
     await otherTenant.next(50);
     expect(performance.now() - started).toBeGreaterThanOrEqual(45);

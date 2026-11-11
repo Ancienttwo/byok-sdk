@@ -1,4 +1,4 @@
-import type { AgentMessageDraftStore } from './agent-message-draft';
+import type { AgentMessageDraftStore } from './agent-message-draft.js';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
  * Layer 2 of the six-layer isolation model (§12.6.2) — the tenant-closed
@@ -55,13 +55,13 @@ import {
   type TenantId,
 } from '@byok-sdk/core';
 import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
-import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
-import { DeviceRetiredError } from './errors';
-import type { ActivityAppendInput, ActivityTail, ActivityReadOptions } from './activity';
+import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake.js';
+import { DeviceRetiredError } from './errors.js';
+import type { ActivityAppendInput, ActivityTail, ActivityReadOptions } from './activity.js';
 import type {
   ApprovalTimelineAppendInput,
   ApprovalTimelineTail,
-} from './approval-timeline';
+} from './approval-timeline.js';
 import type {
   BlobObservation,
   CloudStores,
@@ -75,7 +75,7 @@ import type {
   TaskCancellationRequest,
   TaskAttempt,
   TaskAttemptStatus,
-} from './stores/ports';
+} from './stores/ports.js';
 
 export interface TenantBoundMailbox {
   /** Subscribe before reading; hints never replace durable mailbox reads. */
@@ -124,15 +124,10 @@ export interface TenantBoundDevices {
 }
 
 export interface TenantBoundTaskAttempts {
-  open(input: {
-    readonly taskId: string;
-    readonly deviceId: string;
-    readonly agentRef?: TaskAttempt['agentRef'];
-  }): Promise<TaskAttempt>;
   reserveAgentOffer(input: {
     readonly taskId: string;
     readonly deviceId: string;
-    readonly agentRef: NonNullable<TaskAttempt['agentRef']>;
+    readonly agentRef: TaskAttempt['agentRef'];
   }): Promise<{ readonly attempt: TaskAttempt; readonly created: boolean }>;
   reserveAgentMessage(input: {
     readonly taskId: string;
@@ -141,26 +136,26 @@ export interface TenantBoundTaskAttempts {
     readonly payloadBody: string;
   }): Promise<'reserved' | 'pending' | 'rejected'>;
   recordFirstOutput(input: { readonly taskId: string; readonly deviceId: string }): Promise<TaskAttempt | undefined>;
-  readTaskAgentMessage(input: { readonly taskId: string; readonly deviceId: string }): Promise<import('./stores/ports').AgentMessageAdmission | undefined>;
+  readTaskAgentMessage(input: { readonly taskId: string; readonly deviceId: string }): Promise<import('./stores/ports.js').AgentMessageAdmission | undefined>;
   readAgentMessage(input: {
     readonly taskId: string;
     readonly deviceId: string;
     readonly messageId: string;
     readonly payloadBody: string;
-  }): Promise<import('./stores/ports').AgentMessageAdmission | undefined>;
+  }): Promise<import('./stores/ports.js').AgentMessageAdmission | undefined>;
   finalizeAgentMessage(input: {
     readonly taskId: string;
     readonly deviceId: string;
     readonly messageId: string;
     readonly payloadBody: string;
     readonly terminalBody: string;
-  }): Promise<import('./stores/ports').AgentMessageAdmission | undefined>;
+  }): Promise<import('./stores/ports.js').AgentMessageAdmission | undefined>;
   get(taskId: string): Promise<TaskAttempt | undefined>;
   getMany(taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
-  countByStatus(): Promise<import('./stores/ports').TaskAttemptCounts>;
+  countByStatus(): Promise<import('./stores/ports.js').TaskAttemptCounts>;
   list(
-    query: import('./stores/ports').TaskAttemptListQuery,
-  ): Promise<import('./stores/ports').TaskAttemptPage>;
+    query: import('./stores/ports.js').TaskAttemptListQuery,
+  ): Promise<import('./stores/ports.js').TaskAttemptPage>;
   claim(input: {
     readonly taskId: string;
     readonly deviceId: string;
@@ -171,7 +166,7 @@ export interface TenantBoundTaskAttempts {
   recordStatus(input: {
     readonly taskId: string;
     readonly status: TaskAttemptStatus;
-    readonly agentRef?: TaskAttempt['agentRef'];
+    readonly agentRef: TaskAttempt['agentRef'];
     readonly terminalCause?: TaskAttempt['terminalCause'];
   }): Promise<TaskAttempt | undefined>;
 }
@@ -326,7 +321,6 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
       readiness: () => cloud.devices.readiness(tenant, core.presence),
     },
     tasks: {
-      open: (input) => cloud.tasks.open(tenant, input),
       reserveAgentOffer: (input) => cloud.tasks.reserveAgentOffer(tenant, input),
       reserveAgentMessage: (input) => cloud.tasks.reserveAgentMessage(tenant, input),
       recordFirstOutput: (input) => cloud.tasks.recordFirstOutput(tenant, input),

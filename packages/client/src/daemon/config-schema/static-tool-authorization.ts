@@ -1,8 +1,8 @@
-import { toolAuthorizationMode } from '../../tool-authorization';
-import type { RuntimeAdapter } from '../../types';
-import type { DaemonConfig } from '../create-daemon';
-import type { DaemonEffectiveRuntime } from './effective';
-import type { DaemonConfigIssue } from './validate';
+import { toolAuthorizationMode } from '../../tool-authorization.js';
+import type { RuntimeAdapter } from '../../types.js';
+import type { DaemonConfig } from '../create-daemon.js';
+import type { DaemonEffectiveRuntime } from './effective.js';
+import type { DaemonConfigIssue } from './validate.js';
 
 /**
  * The construction checks of a `DaemonConfig.toolAuthorization` policy

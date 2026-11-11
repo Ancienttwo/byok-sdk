@@ -14,9 +14,9 @@ import {
   readDeclineCode,
   readTaskFailure,
 } from '@byok-sdk/protocol';
-import { ByokCloudError } from './errors';
-import { assertTaskContentPresent } from './task-redaction';
-import type { RequestReceipt } from './stores/ports';
+import { ByokCloudError } from './errors.js';
+import { assertTaskContentPresent } from './task-redaction.js';
+import type { RequestReceipt } from './stores/ports.js';
 
 const DEVICE_TERMINAL_TYPES = [
   'task.complete',

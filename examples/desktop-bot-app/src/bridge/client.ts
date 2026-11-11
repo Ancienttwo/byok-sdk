@@ -1,0 +1,83 @@
+import type { ChildProcessByStdio } from 'node:child_process';
+import type { Readable, Writable } from 'node:stream';
+import { createInterface } from 'node:readline';
+import type { MethodTable } from './domain.ts';
+import { BRIDGE_VERSION, BridgeError, decodeHostMessage, encodeMessage, type BridgeMethods, type CoreMethods, type HostState } from './protocol.ts';
+
+/** A Host child spawned with piped stdin and stdout; stderr is the Host's diagnostics. */
+export type HostChild = ChildProcessByStdio<Writable, Readable, null>;
+
+interface Pending { resolve(value: unknown): void; reject(error: Error): void }
+
+/** Main's end of the bridge to one Host child. */
+export class BridgeClient<M extends MethodTable<M> & CoreMethods = BridgeMethods> {
+  readonly #child: HostChild;
+  readonly #pending = new Map<number, Pending>();
+  readonly exited: Promise<number | null>;
+  #nextId = 1;
+  #closed: BridgeError | undefined;
+  readonly #onState: (state: HostState) => void;
+
+  private constructor(child: HostChild, onState: (state: HostState) => void) {
+    this.#child = child;
+    this.#onState = onState;
+    this.exited = new Promise(resolve => child.once('exit', code => resolve(code)));
+    void this.exited.then(code => this.#fail(new BridgeError('host_exited', `Host exited with code ${code}`)));
+    // A Host that cannot spawn (no `node`) never exits, and a dead Host's stdin raises EPIPE: both close the bridge.
+    const broken = (error: Error) => this.#fail(new BridgeError('host_exited', `Host pipe failed: ${error.message}`));
+    child.on('error', broken);
+    child.stdin.on('error', broken);
+    createInterface({ input: child.stdout }).on('line', line => {
+      try {
+        const message = decodeHostMessage(line);
+        if (!('id' in message)) { this.#onState(message.state); return; }
+        const pending = this.#pending.get(message.id);
+        if (!pending) throw new BridgeError('invalid_message', `Bridge reply ${message.id} has no request`);
+        this.#pending.delete(message.id);
+        const error = message.error as { code: BridgeError['code']; message: string } | undefined;
+        if (error) pending.reject(new BridgeError(error.code, error.message));
+        else pending.resolve(message.result);
+      } catch (error) {
+        this.#fail(error as BridgeError);
+        child.kill();
+      }
+    });
+  }
+
+  /**
+   * Says hello before any other call. A Host on another bridge version is
+   * killed and the connect rejects. `onState` receives every Host state push.
+   */
+  static async connect<M extends MethodTable<M> & CoreMethods = BridgeMethods>(child: HostChild, onState: (state: HostState) => void = () => {}): Promise<BridgeClient<M>> {
+    const client = new BridgeClient<M>(child, onState);
+    try {
+      const { bridgeVersion } = await client.call('hello', { bridgeVersion: BRIDGE_VERSION });
+      if (bridgeVersion !== BRIDGE_VERSION) {
+        throw new BridgeError('bridge_version_mismatch', `Host bridge version ${bridgeVersion} differs from shell version ${BRIDGE_VERSION}`);
+      }
+    } catch (error) {
+      child.kill();
+      throw error;
+    }
+    return client;
+  }
+
+  call<K extends keyof M & string>(method: K, params: M[K]['params']): Promise<M[K]['result']> {
+    if (this.#closed) return Promise.reject(this.#closed);
+    const id = this.#nextId++;
+    return new Promise((resolve, reject) => {
+      this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+      this.#child.stdin.write(encodeMessage({ id, method, params }));
+    });
+  }
+
+  kill(): void {
+    this.#child.kill();
+  }
+
+  #fail(error: BridgeError): void {
+    this.#closed ??= error;
+    for (const pending of this.#pending.values()) pending.reject(this.#closed);
+    this.#pending.clear();
+  }
+}

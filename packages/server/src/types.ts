@@ -26,8 +26,8 @@ import type {
 } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
-import type { WakeConsumer } from './wakes/types';
-import type { RateLimiterOptions } from './rate-limiter';
+import type { WakeConsumer } from './wakes/types.js';
+import type { RateLimiterOptions } from './rate-limiter.js';
 
 /** Mutually-exclusive storage authority for the embedded reference server. */
 export type ByokServerStorage =
@@ -138,8 +138,8 @@ interface DispatchInputBase {
   taskId?: string;
   instruction: string;
   /**
-   * Authoritative web-selected target. When present, `runtime` is derived
-   * from `runtimeId`; supplying a different `runtime` is rejected.
+   * Authoritative web-selected target. The device selects the adapter from
+   * `runtimeId`; a `runtime` that differs is refused.
    */
   dispatchSelection?: DispatchSelection;
   runtime?: RuntimeId;
@@ -400,8 +400,8 @@ export interface TaskSnapshot {
   state: TaskState;
   deviceId?: string;
   sessionRef?: string;
-  /** Exact Agent identity for an Agent-bound task; absent for legacy tasks. */
-  agentRef?: AgentRef;
+  /** Exact Agent identity the task was reserved for. */
+  agentRef: AgentRef;
   /**
    * Creation time from the immutable offer receipt, preserved after terminal
    * transitions and SQLite restart. Independent of mailbox delivery time.

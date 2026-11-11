@@ -16,6 +16,7 @@ import {
   type ServiceOwnerFs,
 } from '../lifecycle/service-unit';
 import { acquireDaemonOwner, type DaemonOwnerLease } from '../util/daemon-owner';
+import { acquirePathMutationGate } from '../util/path-mutation-gate';
 import { DRIFTED_MARKED_UNIT, memoryServiceFs, UNMARKED_UNIT, type MemoryServiceFs } from './support/service-fs';
 import { useProductionGateRootForFile } from './support/production-gate-root';
 
@@ -388,6 +389,68 @@ describe('lifecycle (#1097) service-lifecycle gate and the daemon store gate', (
     } finally {
       await nodeFs.rm(storeDir, { recursive: true, force: true });
     }
+  });
+});
+
+/** #1732: `gateRoot` moves only the darwin lock files; the default root is unchanged when it is omitted. */
+describe.runIf(process.platform === 'darwin')('lifecycle (#1732) gateRoot', () => {
+  async function withRoots(count: number, body: (roots: string[]) => Promise<void>): Promise<void> {
+    const roots = await Promise.all(Array.from({ length: count }, () => nodeFs.mkdtemp(path.join(os.tmpdir(), 'byok-gate-root-'))));
+    try {
+      await body(roots);
+    } finally {
+      await Promise.all(roots.map((root) => nodeFs.rm(root, { recursive: true, force: true })));
+    }
+  }
+
+  it('lifecycles on two gate roots install concurrently while a third holder keeps the default root', async () => {
+    await withRoots(2, async (roots) => {
+      const held = await acquirePathMutationGate({ scope: 'service-lifecycle' });
+      try {
+        const pauses = roots.map(() => barrier());
+        const installs = roots.map((gateRoot, index) => {
+          let paused = false;
+          const run = vi.fn<Runner>(async (...call) => {
+            if (!paused) { paused = true; await pauses[index]!.wait(); }
+            return okRunner()(...call);
+          });
+          return createServiceLifecycle(def(), { platform: 'darwin', gateRoot, deps: { run, fs: memoryServiceFs(), homedir: () => '/h', getuid: () => 501 } }).install();
+        });
+        // Both are inside their gate at once.
+        await Promise.all(pauses.map((pause) => pause.hit));
+        expect(await codeOf(lifecycleFor('darwin', memoryServiceFs(), okRunner()).install())).toBe('lifecycle_owner_busy');
+        pauses.forEach((pause) => pause.open());
+        await Promise.all(installs);
+        for (const root of roots) expect(await nodeFs.readdir(root)).toEqual([`${held.identity}.lock`]);
+      } finally {
+        await held.release();
+      }
+    });
+  });
+
+  it('refuses a relative, symlink or foreign-owned root and sets an existing root to 0700', async () => {
+    await withRoots(2, async ([target, parent]) => {
+      const install = (gateRoot: string) => createServiceLifecycle(def(), { platform: 'darwin', gateRoot, deps: { run: okRunner(), fs: memoryServiceFs(), homedir: () => '/h', getuid: () => 501 } }).install();
+      await expect(install('relative-root')).rejects.toThrow('path mutation gate root must be absolute');
+      const link = path.join(parent!, 'link');
+      await nodeFs.symlink(target!, link);
+      await expect(install(link)).rejects.toMatchObject({ code: 'private_dir_symlink' });
+
+      const realLstat = nodeFs.lstat;
+      const spy = vi.spyOn(nodeFs, 'lstat').mockImplementation(async (name, ...rest) => {
+        const stat = await realLstat(name, ...(rest as []));
+        return name === target ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 }) : stat;
+      });
+      try {
+        await expect(install(target!)).rejects.toMatchObject({ code: 'private_dir_foreign_owner' });
+      } finally {
+        spy.mockRestore();
+      }
+
+      await nodeFs.chmod(target!, 0o755);
+      await install(target!);
+      expect((await nodeFs.stat(target!)).mode & 0o777).toBe(0o700);
+    });
   });
 });
 

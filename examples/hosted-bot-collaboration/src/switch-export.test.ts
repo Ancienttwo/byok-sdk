@@ -21,7 +21,8 @@ import { HostedReconciler, type HostedTaskPort, type TaskEvidence } from './reco
 import { HostedRoutineScheduler } from './scheduler';
 import { HostedOutboxSender } from './sender';
 import { TEST_HOST } from './memory-subject.test-support';
-import { HostedCollaborationStore, homeRowKey, inSchema, lockScope, type InboundIdentity } from './store';
+import { HostedCollaborationStore, homeRowKey, type InboundIdentity } from './store';
+import { inSchema, lockScope } from './transaction';
 
 // #975 slice 5: H as the old owner exports a drained scope, writes nothing to it from then on, and commits away on the new
 // owner's receipt.

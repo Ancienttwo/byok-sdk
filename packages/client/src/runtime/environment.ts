@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { loginShellSnapshot, type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
-import { PI_PROVIDER_ENV_KEY_NAMES } from '../adapters/pi/pi-provider-env.generated';
+import { loginShellSnapshot, type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
+import { PI_PROVIDER_ENV_KEY_NAMES } from '../adapters/pi/pi-provider-env.generated.js';
 
 /**
  * The environment of every child process of a task: the runtime CLI and the
@@ -256,6 +256,27 @@ export type RuntimeEnvironmentRemovalRule = 'deny' | 'conflict';
 export interface RuntimeEnvironmentReport {
   readonly names: readonly { readonly name: string; readonly source: RuntimeEnvironmentSource }[];
   readonly removed: readonly { readonly name: string; readonly rule: RuntimeEnvironmentRemovalRule }[];
+  /** Launch lanes that give the runtime less than `names`; absent when the adapter has none. */
+  readonly lanes?: readonly RuntimeEnvironmentLaneReport[];
+}
+
+/**
+ * A launch lane that narrows the runtime environment. An `sdk` lane lists the
+ * names it removes; the keys launcher's fixed list lives in `@byok-sdk/keys`,
+ * so its lane is reported by name only.
+ */
+export type RuntimeEnvironmentLaneReport =
+  | { readonly lane: 'pi-prepared' | 'hermes-custody'; readonly narrowedBy: 'sdk'; readonly removed: readonly string[] }
+  | { readonly lane: 'pi-keys-profile'; readonly narrowedBy: 'keys-launcher' };
+
+/** The `sdk` lane that launches with `buildAllowlistedEnv({ ambient: env, allow })`: `removed` is every name of `env` it drops, sorted. */
+export function sdkLaneReport(
+  lane: 'pi-prepared' | 'hermes-custody',
+  env: Readonly<Record<string, string>>,
+  allow: readonly string[],
+): RuntimeEnvironmentLaneReport {
+  const kept = buildAllowlistedEnv({ ambient: env, allow });
+  return { lane, narrowedBy: 'sdk', removed: Object.keys(env).filter((name) => !Object.hasOwn(kept, name)).sort() };
 }
 
 /** One build: the environment and its {@link RuntimeEnvironmentReport}. `env` is a fresh object. */
@@ -465,7 +486,7 @@ export async function readWindowsRegistryKey(key: string): Promise<ReadonlyMap<s
   if (systemRoot === undefined || !path.win32.isAbsolute(systemRoot) || /[\u0000\r\n]/u.test(systemRoot)) throw new Error('SystemRoot is not an absolute path');
   const reg = path.win32.join(systemRoot, 'System32', 'reg.exe');
   // Loaded on the first read, so only a win32 build pulls it into this module's graph.
-  const { createPrivateSystemTempDir } = await import('../util/secure-dir');
+  const { createPrivateSystemTempDir } = await import('../util/secure-dir.js');
   const directory = await createPrivateSystemTempDir('byok-reg-');
   try {
     const file = path.join(directory, 'key.reg');

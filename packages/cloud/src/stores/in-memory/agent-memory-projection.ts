@@ -17,9 +17,9 @@ import type {
   AgentMemoryProjectionCommitInput,
   AgentMemoryProjectionSealing,
   AgentMemoryProjectionStore,
-} from '../../agent-memory-projection';
-import type { CloudCrypto } from '../../crypto/port';
-import { ByokCloudError } from '../../errors';
+} from '../../agent-memory-projection.js';
+import type { CloudCrypto } from '../../crypto/port.js';
+import { ByokCloudError } from '../../errors.js';
 
 function agentKey(tenantId: TenantId, agentId: string): string {
   return `${tenantId}\u0000${agentId}`;

@@ -7,19 +7,19 @@ import type {
 } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
-import type { ByokPool } from '../pool';
+import type { ByokPool } from '../pool.js';
 import {
   OUTBOX_COLUMNS,
   type OutboxRow,
   toMailboxMessage,
-} from './core/mailbox';
-import { BEGIN_OUTBOX_WRITE, insertOutboxRow } from './core/outbox-writer';
+} from './core/mailbox.js';
+import { BEGIN_OUTBOX_WRITE, insertOutboxRow } from './core/outbox-writer.js';
 import {
   TASK_SELECT_COLUMNS,
   type TaskRow,
   taskRowToAttempt,
-} from './task-attempts';
-import { abandonTask } from './task-retirement';
+} from './task-attempts.js';
+import { abandonTask } from './task-retirement.js';
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['complete', 'failed', 'cancelled']);
 

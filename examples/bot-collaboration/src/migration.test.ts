@@ -333,7 +333,6 @@ describe('switch export format (#975)', () => {
   it('moves an unsent pending Agent home write and refuses one that may have reached a device', () => {
     expect(() => sealSwitchExport(content(state => { state.team.homeOperations.push(home(1), home(2, { status: 'applied', sent: true })); }))).not.toThrow();
     refused(() => sealSwitchExport(content(state => { state.team.homeOperations.push(home(1, { sent: true })); })), 'home_sent');
-    refused(() => sealSwitchExport(content(state => { state.team.homeOperations.push(home(1, { retryAt: 10 })); })), 'home_sent');
   });
 
   it('refuses a pending projection, which H receivers deduplicate under the source scope', () => {
@@ -380,6 +379,8 @@ describe('switch export format (#975)', () => {
       value => { (value.collaboration.team as { homeOperations: unknown }).homeOperations = {}; },
       value => { (value.collaboration.team.bots.b1 as { execution: unknown }).execution = null; },
       value => { value.collaboration.turns.t1 = null as unknown as CollaborationState['turns'][string]; },
+      // A would-do row from before #1756 has no Turn: the source migrates first.
+      value => { value.collaboration.wouldDo = { w: { id: 'w', botId: 'b1', taskId: 't', action: 'delegate', index: 0, at: 0, detail: null } } as never; },
     ]);
   });
 

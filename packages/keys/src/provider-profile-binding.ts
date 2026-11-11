@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 
-import { ByokKeysError } from './errors';
+import { ByokKeysError } from './errors.js';
 import {
   parseModelProviderProfile,
   type ModelProviderProfile,
   type ProviderModelCapability,
   type ProviderProfileRef,
-} from './provider-profile';
+} from './provider-profile.js';
 
 export interface ExactProviderProfileBinding {
   profileRef: ProviderProfileRef;

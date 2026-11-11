@@ -1,11 +1,11 @@
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner';
-import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
-import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log';
-import { sanitizeServiceName, type ServiceDefinition } from './service-types';
-import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath } from './service-unit';
+import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner.js';
+import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
+import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log.js';
+import { sanitizeServiceName, type ServiceDefinition } from './service-types.js';
+import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath } from './service-unit.js';
 
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface SystemdDeps {
@@ -198,7 +198,7 @@ WantedBy=default.target
  * systemd user session at all will fail every `systemctl --user` call here
  * with a clear error surfaced from `runOrThrow`, not a silent no-op.
  */
-export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps = {}): ManagedServiceLifecycle {
+export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps = {}, gateRoot?: string): ManagedServiceLifecycle {
   const run = deps.run ?? defaultRunner;
   const fs = deps.fs ?? fsp;
   const homedir = deps.homedir ?? (() => os.homedir());
@@ -253,5 +253,5 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
       const determinate = running || !SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
       return { running, determinate, detail };
     },
-  }, fs);
+  }, fs, gateRoot);
 }

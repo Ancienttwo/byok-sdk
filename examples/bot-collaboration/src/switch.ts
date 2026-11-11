@@ -1,34 +1,16 @@
 import { agentKey, canonical, frozenInput, hash, isOccurrenceIntentKey, occurrenceIntentKey, parseRoutineWakeKey, routineWakeKey, taskId,
   type HostLedger, type Intent, type Json, type LedgerDump, type LedgerState, type Occurrence, type Routine } from '@byok-sdk/server/execution-core';
 import { stateOf, type CollaborationState } from './model';
-import { sealSwitchExport, switchAttempts, SwitchExportError, verifySwitchExport, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type OutboxRecord,
-  type RoutineRecord, type SwitchContent, type SwitchDevice, type SwitchExport, type SwitchExportRefusal } from './migration';
+import { exportMarkOf, sealSwitchExport, switchAttempts, SwitchExportedError, SwitchExportError, SwitchImportedError, verifySwitchExport, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type OutboxRecord,
+  type RoutineRecord, type SwitchContent, type SwitchDevice, type SwitchExport, type SwitchExportRefusal, type SwitchHeader, type SwitchReceipt } from './migration';
 
 // The L side of the #975 state move. `switchContent` reads an L ledger into the neutral form, both for the old owner's export
 // and for the new owner's read-back, so one function states what an L ledger holds. `switchDump` writes the neutral form
 // into a K4 dump for one tenant. Each value either moves, is derived from values that move (the checks below), or is a
 // named scheduler value of a concluded row or of the SDK's wakes, which a target writes for itself.
 
-/** The header fields of a document: the source's, also on the target's read-back. */
-export type SwitchHeader = Pick<SwitchContent, 'source' | 'domain' | 'devices' | 'exportedAt'>;
 /** The import record of a new L owner: from the load until the commit toward L. */
 export interface SwitchImport { digest: string; devices: string[]; discarding?: true }
-/** What a new owner returns after its read-back: the digest the old owner commits away on. */
-export interface SwitchReceipt { digest: string; devices: string[] }
-/**
- * The export record of an old L owner: from the export on, also after the commit, so the ledger keeps the exported state.
- * `devices` and `exportedAt` are the document's header, which the commit seals the ledger under again.
- */
-export interface SwitchExportMark { digest: string; exportedAt: number; devices: SwitchDevice[] }
-
-/** The domain was exported for a switch, so this L Host writes nothing to its ledger. Abort the switch to resume it. */
-export class SwitchExportedError extends Error {
-  readonly code = 'switch_exported' as const;
-  constructor(readonly digest: string) {
-    super(`This Host exported its domain for a switch (${digest}); it writes nothing until the switch is aborted`);
-    this.name = 'SwitchExportedError';
-  }
-}
 /** Throws while the domain has an export mark. Each L write calls it after its own refusals, so those come first. */
 export function refuseExported(state: CollaborationState): void {
   if (state.switchExport) throw new SwitchExportedError(state.switchExport.digest);
@@ -38,7 +20,7 @@ export function refuseExported(state: CollaborationState): void {
  * steps `commitImport` and `discardImport` write it themselves.
  */
 export function refuseImported(state: CollaborationState): void {
-  if (state.switchImport) throw new Error(`This ledger holds the switch import ${state.switchImport.digest}; commit it toward L or discard it first`);
+  if (state.switchImport) throw new SwitchImportedError(state.switchImport.digest);
 }
 /**
  * A restart reads the switch records before any write. A ledger with an import is not committed toward L yet, so no
@@ -46,13 +28,7 @@ export function refuseImported(state: CollaborationState): void {
  */
 export function checkSwitchRecords(state: CollaborationState): void {
   refuseImported(state);
-  const mark = state.switchExport;
-  if (mark === undefined) return;
-  const valid = !!mark && Object.keys(mark).sort().join(',') === 'devices,digest,exportedAt' && typeof mark.digest === 'string'
-    && Number.isSafeInteger(mark.exportedAt) && Array.isArray(mark.devices) && mark.devices.length > 0
-    && mark.devices.every(device => !!device && Object.keys(device).sort().join(',') === 'deviceId,frozenRevision'
-      && typeof device.deviceId === 'string' && Number.isSafeInteger(device.frozenRevision) && device.frozenRevision > 0);
-  if (!valid) throw new Error('Invalid switch export record');
+  if (state.switchExport !== undefined) exportMarkOf(state.switchExport);
 }
 
 

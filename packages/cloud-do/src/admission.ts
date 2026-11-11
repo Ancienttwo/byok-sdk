@@ -1,5 +1,5 @@
-import { CloudDoError } from './errors';
-import { platformProfile, type PlatformProfileId } from './platform-credentials';
+import { CloudDoError } from './errors.js';
+import { platformProfile, type PlatformProfileId } from './platform-credentials.js';
 
 export interface CloudSubmission { readonly instruction: string; readonly profile: PlatformProfileId }
 const credentialFields = new Set(['credential', 'credentials', 'apikey', 'api_key', 'secret', 'authorization', 'x-api-key', 'api-key', 'x-goog-api-key', 'proxy-authorization', 'cf-aig-authorization', 'headers']);

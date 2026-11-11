@@ -1,9 +1,9 @@
-import type { DaemonConfig } from '../../daemon/create-daemon';
-import type { ControlStatusResult } from '../../daemon/control-protocol';
-import type { McpToolsetReloadReceipt } from '../../types';
-import { connectControlClient } from '../../daemon/control-client';
-import { resolveStoreDir } from '../config';
-import { formatToolsetsReloadReceiptLines } from '../../diagnostics/format';
+import type { DaemonConfig } from '../../daemon/create-daemon.js';
+import type { ControlStatusResult } from '../../daemon/control-protocol.js';
+import type { McpToolsetReloadReceipt } from '../../types.js';
+import { connectControlClient } from '../../daemon/control-client.js';
+import { resolveStoreDir } from '../config.js';
+import { formatToolsetsReloadReceiptLines } from '../../diagnostics/format.js';
 
 export interface ToolsetsReloadDeps {
   log?: (line: string) => void;

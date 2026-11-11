@@ -9,10 +9,7 @@ import {
 import { ROW_FIXTURES, makeEvent, makeSnapshot } from './fixtures/task-runner-reducer';
 
 const EVENT_TYPES: readonly ReducerEventType[] = [
-  'offer.sealed_opening',
   'offer.received',
-  'offer.sealed_opened',
-  'offer.sealed_declined',
   'admission.begin',
   'admission.stage',
   'admission.declined',

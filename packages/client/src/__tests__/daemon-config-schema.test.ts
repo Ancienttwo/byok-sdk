@@ -183,7 +183,7 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     const report = checkDaemonConfig(cliInput(config), { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE });
     expect(report.ok).toBe(true);
     expect(report.effective?.runtimes).toEqual([
-      { id: 'codex', source: 'sdk-built', toolAuthorizationAuto: false, isolation: { agentUserMcpServers: 'inherit', agentUserContext: 'inherit', sandbox: 'danger-full-access' }, versionPolicy },
+      { id: 'codex', source: 'sdk-built', toolAuthorizationAuto: false, isolation: { agentUserMcpServers: 'inherit', agentUserContext: 'inherit', sandbox: 'danger-full-access' }, versionPolicy, runtimeEnvironment: { base: 'login-shell' } },
     ]);
     const daemon = createDaemon(config);
     expect(daemon.status().config.runtimes[0]).toMatchObject({ id: 'codex', versionPolicy });

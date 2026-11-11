@@ -1,6 +1,6 @@
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { inspectServiceLogs } from './service-log';
+import { inspectServiceLogs } from './service-log.js';
 import {
   assertServiceOwner,
   claimHeldServiceLifecycleOwner,
@@ -11,8 +11,8 @@ import {
   withServiceOwnerGate,
   type ServiceUnitFile,
   type ServiceUnitInspection,
-} from './service-unit';
-import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceStatusResult } from './service-types';
+} from './service-unit.js';
+import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceStatusResult } from './service-types.js';
 
 export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readFile' | 'rm' | 'rename' | 'chmod'>;
 
@@ -62,9 +62,10 @@ export interface ManagedServiceLifecycle extends ServiceLifecycle {
  * repair and uninstall run whole inside the store's owner gate, so the owner
  * they checked is still the owner when they write, deactivate or release.
  */
-export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs: ManagedLifecycleFs = fsp): ManagedServiceLifecycle {
+export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs: ManagedLifecycleFs = fsp, gateRoot?: string): ManagedServiceLifecycle {
   assertServiceOwner(def.owner);
   const owner = def.owner;
+  const gated = <T>(operation: () => Promise<T>): Promise<T> => withServiceOwnerGate(operation, gateRoot);
 
   async function inspect(): Promise<ServiceUnitInspection> {
     const [files, record] = await Promise.all([classifyServiceUnit(fs, unit.files()), readServiceLifecycleOwner(def.storeDir, fs)]);
@@ -106,14 +107,14 @@ export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUni
   }
 
   function owned<T>(operation: (held: HeldServiceLifecycle) => Promise<T>): Promise<T> {
-    return withServiceOwnerGate(async () => {
+    return gated(async () => {
       await requireOwner();
       return operation({ install: heldInstall, uninstall: heldUninstall });
     });
   }
 
   function repair() {
-    return withServiceOwnerGate(async () => {
+    return gated(async () => {
       const { state } = await inspect();
       if (state === 'foreign') throw new ServiceUnitError('service_unit_unmarked');
       if (state === 'exact' || state === 'absent') return { status: 'not-needed', state } as const;
@@ -145,9 +146,9 @@ export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUni
   }
 
   return {
-    install: (opts) => withServiceOwnerGate(() => heldInstall(opts)),
+    install: (opts) => gated(() => heldInstall(opts)),
     repair,
-    uninstall: () => withServiceOwnerGate(heldUninstall),
+    uninstall: () => gated(heldUninstall),
     start,
     stop,
     status,

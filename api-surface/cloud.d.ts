@@ -593,7 +593,7 @@ export type SealedAgentExecutionInput = z.infer<typeof SealedAgentExecutionInput
  */
 import { type AgentHomeProjectionPayload, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionReadback } from '@byok-sdk/protocol';
 import type { TenantId } from '@byok-sdk/core';
-import type { TenantBoundReceipts } from './tenant-stores';
+import type { TenantBoundReceipts } from './tenant-stores.js';
 export interface AgentHomeProjectionReceiptInput {
     readonly requestId: string;
     readonly agentRef: AgentHomeProjectionPayload['agentRef'];
@@ -738,7 +738,7 @@ export declare function sameAgentRef(expected: AgentRef, actual: AgentRef | unde
 // ==== @byok-sdk/cloud dist/agent-message-draft.d.ts ====
 import type { TenantId } from '@byok-sdk/core';
 import { type AgentRef } from '@byok-sdk/protocol';
-import type { TenantStores } from './tenant-stores';
+import type { TenantStores } from './tenant-stores.js';
 export interface AgentMessageDraftCursor {
     readonly revision: number;
     readonly offset: number;
@@ -815,7 +815,7 @@ export declare function readTaskAgentMessageDraft(stores: TenantStores, deviceId
  * and the callers fail closed on it. A dropped-then-expired approval is not
  * silently approved.
  */
-import type { ApprovalTimelineTail } from './approval-timeline';
+import type { ApprovalTimelineTail } from './approval-timeline.js';
 /**
  * M5 (approval targeting): thrown by `ByokCloud.approveTask`/`rejectTask` when
  * the caller supplied an `approvalId` that does NOT match the approval this
@@ -1089,8 +1089,8 @@ export declare function retainApprovalObservations(entries: readonly ApprovalObs
  * `tenantStoresFor` (`../tenant-stores.ts`).
  */
 import { type DevicePrincipal } from '@byok-sdk/core';
-import type { DeviceDirectory } from '../stores/ports';
-import type { TokenSigner } from './tokens';
+import type { DeviceDirectory } from '../stores/ports.js';
+import type { TokenSigner } from './tokens.js';
 export interface BearerAuthDeps {
     readonly tokenSigner: TokenSigner;
     readonly devices: DeviceDirectory;
@@ -1116,8 +1116,8 @@ export declare function extractBearerToken(header: string | undefined): string |
 export declare function authenticateBearer(header: string | undefined, deps: BearerAuthDeps): Promise<DevicePrincipal | undefined>;
 // ==== @byok-sdk/cloud dist/auth/device-assertion.d.ts ====
 import { type AuthenticatedDeviceAssertion, type AuthenticatedTaskAssertion, type Clock, type DeviceAssertionExpectedBinding, type DeviceAssertionReplayAuthority } from '@byok-sdk/core';
-import type { CloudCrypto } from '../crypto/port';
-import type { DeviceDirectory } from '../stores/ports';
+import type { CloudCrypto } from '../crypto/port.js';
+import type { DeviceDirectory } from '../stores/ports.js';
 export interface HostedDeviceAssertionAuthDeps {
     readonly devices: DeviceDirectory;
     readonly crypto: CloudCrypto;
@@ -1175,8 +1175,8 @@ export type HostedTaskAssertionAuthDeps = HostedDeviceAssertionAuthDeps;
 export declare function authenticateHostedTaskAssertion(input: unknown, deps: HostedTaskAssertionAuthDeps): Promise<AuthenticatedTaskAssertion | undefined>;
 // ==== @byok-sdk/cloud dist/auth/device-proof.d.ts ====
 import { type Clock, type DevicePrincipal } from '@byok-sdk/core';
-import type { CloudCrypto } from '../crypto/port';
-import type { DeviceDirectory } from '../stores/ports';
+import type { CloudCrypto } from '../crypto/port.js';
+import type { DeviceDirectory } from '../stores/ports.js';
 export declare const DEFAULT_DEVICE_PROOF_CLOCK_SKEW_MS = 60000;
 export declare const MAX_DEVICE_PROOF_CLOCK_SKEW_MS: number;
 export declare const DEFAULT_DEVICE_PROOF_MAX_LIFETIME_MS: number;
@@ -1232,9 +1232,9 @@ export declare function authenticateDeviceProof(input: unknown, request: DeviceP
  *   tenant they act on is the row's, by construction.
  */
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { CloudCrypto } from '../crypto/port';
-import type { CloudStores, DeviceRecord, PairingCodeInfo } from '../stores/ports';
-import { type TokenSigner } from './tokens';
+import type { CloudCrypto } from '../crypto/port.js';
+import type { CloudStores, DeviceRecord, PairingCodeInfo } from '../stores/ports.js';
+import { type TokenSigner } from './tokens.js';
 /** ~10min, matching the reference server's pairing-code lifetime. */
 export declare const PAIRING_CODE_TTL_MS: number;
 /** The paired identity key is the first and only proof key in S6. */
@@ -1321,7 +1321,7 @@ export interface TokenSigner {
  */
 export declare function createHmacTokenSigner(secret: Uint8Array, clock: Clock): TokenSigner;
 // ==== @byok-sdk/cloud dist/auth/verify.d.ts ====
-import type { CloudCrypto } from '../crypto/port';
+import type { CloudCrypto } from '../crypto/port.js';
 export { NONCE_SIGNING_DOMAIN } from '@byok-sdk/core';
 export declare function verifyNonceSignature(crypto: CloudCrypto, devicePublicKey: string, nonce: string, signature: string): Promise<boolean>;
 // ==== @byok-sdk/cloud dist/capabilities.d.ts ====
@@ -1343,7 +1343,7 @@ export declare function verifyNonceSignature(crypto: CloudCrypto, devicePublicKe
  * routes, so the declaration and the surface cannot disagree.
  */
 import { type CapabilityDeclaration } from '@byok-sdk/core';
-import type { ByokCloudOptions } from './cloud';
+import type { ByokCloudOptions } from './cloud.js';
 /** The hosted capability vocabulary this package knows how to serve. */
 export declare const CLOUD_CAPABILITIES: {
     /** `GET /byok/events` long-poll receive (§8). */
@@ -1508,11 +1508,11 @@ export declare function declares(declaration: CapabilityDeclaration, capability:
 // ==== @byok-sdk/cloud dist/cloud.d.ts ====
 import type { HostOfferPlainPayload, HostOfferSealedPayload } from '@byok-sdk/protocol';
 import { z } from 'zod';
-import { type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './agent-message-draft';
-import { type MaintenanceInput, type MaintenanceReport, type ProofReceiptRetentionOptions } from './maintenance';
+import { type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './agent-message-draft.js';
+import { type MaintenanceInput, type MaintenanceReport, type ProofReceiptRetentionOptions } from './maintenance.js';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
-import { type TaskAgentMessage } from './task-agent-message';
-import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agent-execution';
+import { type TaskAgentMessage } from './task-agent-message.js';
+import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agent-execution.js';
 /**
  * `createByokCloud` — the hosted device surface, assembled.
  *
@@ -1530,23 +1530,23 @@ import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agen
  * `src/__tests__/constraints.test.ts`.
  */
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
-import type { ActivityTail, ActivityReadOptions } from './activity';
-import type { ApprovalTimelineTail } from './approval-timeline';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type AgentEgressPolicy, type InputPreparationOfferBinding, type SessionSelection, type TaskOfferPayload, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskSteerSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageV2Schema } from '@byok-sdk/protocol';
-import type { TokenSigner } from './auth/tokens';
-import type { CloudCrypto } from './crypto/port';
-import { type RouteDescriptor } from './router/registry';
-import { type ByokCloudObserver } from './inbound';
-import type { AgentMessageConsumers } from './agent-message-disposition';
-import { type AgentHomeProjectionReceiptInput } from './agent-home-projections';
-import { type InputPreparationReceiptInput } from './input-preparations';
-import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from './agent-memory-projection';
-import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, TaskAbandonCause, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports';
-import { type DeviceTerminal, type TerminalResult } from './terminal-result';
-import type { MailboxWake } from './mailbox-wake';
-import { type TaskRedactionResult, type TaskRedactionStore } from './task-redaction';
-import type { E2eeMemberStore } from './e2ee-member';
-import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
+import type { ActivityTail, ActivityReadOptions } from './activity.js';
+import type { ApprovalTimelineTail } from './approval-timeline.js';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type AgentEgressPolicy, type InputPreparationOfferBinding, type SessionSelection, type TaskOfferPayload, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskSteerSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageSchema } from '@byok-sdk/protocol';
+import type { TokenSigner } from './auth/tokens.js';
+import type { CloudCrypto } from './crypto/port.js';
+import { type RouteDescriptor } from './router/registry.js';
+import { type ByokCloudObserver } from './inbound.js';
+import type { AgentMessageConsumers } from './agent-message-disposition.js';
+import { type AgentHomeProjectionReceiptInput } from './agent-home-projections.js';
+import { type InputPreparationReceiptInput } from './input-preparations.js';
+import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from './agent-memory-projection.js';
+import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, TaskAbandonCause, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports.js';
+import { type DeviceTerminal, type TerminalResult } from './terminal-result.js';
+import type { MailboxWake } from './mailbox-wake.js';
+import { type TaskRedactionResult, type TaskRedactionStore } from './task-redaction.js';
+import type { E2eeMemberStore } from './e2ee-member.js';
+import type { TruthCommitter, TruthObjectDownloads } from './truth/contract.js';
 /** Matches the reference server's ceiling (§7). */
 export declare const DEFAULT_MAX_BLOB_SIZE_BYTES: number;
 /** Matches the reference server's hold (§8). */
@@ -2007,7 +2007,7 @@ export interface ByokCloud {
      * listed in `skippedDeviceIds`; its packages are stored all the same.
      */
     putScopeKeyPackages(tenant: TenantId, input: {
-        readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageV2Schema>[];
+        readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageSchema>[];
     }): Promise<{
         readonly stored: number;
         readonly skippedDeviceIds: readonly string[];
@@ -2134,7 +2134,7 @@ export interface ByokCloud {
      */
     listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
     /** Store-aggregated task counts, with host cancellation separated from coarse status. */
-    countTaskAttempts(tenant: TenantId): Promise<import('./stores/ports').TaskAttemptCounts>;
+    countTaskAttempts(tenant: TenantId): Promise<import('./stores/ports.js').TaskAttemptCounts>;
     /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). Throws `task_content_redacted` after {@link ByokCloud.redactTasks}. */
     readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
     /** Actual device terminal only; cancellation intent never creates this observation. */
@@ -2194,14 +2194,14 @@ export {};
  * database to prove it.
  */
 import { type CapabilityDeclaration, type Clock, type CoreStores, type SkillPackStore } from '@byok-sdk/core';
-import { type TokenSigner } from '../auth/tokens';
-import type { CloudCrypto } from '../crypto/port';
-import { type ByokCloud, type ByokCloudOptions } from '../cloud';
-import type { MailboxWake } from '../mailbox-wake';
-import type { ProofReceiptRetentionOptions } from '../maintenance';
-import type { BlobContentProxy, CloudStores } from '../stores/ports';
-import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract';
-import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from '../agent-memory-projection';
+import { type TokenSigner } from '../auth/tokens.js';
+import type { CloudCrypto } from '../crypto/port.js';
+import { type ByokCloud, type ByokCloudOptions } from '../cloud.js';
+import type { MailboxWake } from '../mailbox-wake.js';
+import type { ProofReceiptRetentionOptions } from '../maintenance.js';
+import type { BlobContentProxy, CloudStores } from '../stores/ports.js';
+import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract.js';
+import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from '../agent-memory-projection.js';
 export interface InMemoryByokCloudOptions {
     readonly clock?: Clock;
     readonly crypto?: CloudCrypto;
@@ -2350,11 +2350,11 @@ export declare class BoardFeedClient {
 export {};
 // ==== @byok-sdk/cloud dist/coordination.d.ts ====
 import type { AgentEventOrUnknown } from '@byok-sdk/protocol';
-import { type ActivityAppendInput, type ActivityTail } from './activity';
-import type { TenantBoundActivity } from './tenant-stores';
+import { type ActivityAppendInput, type ActivityTail } from './activity.js';
+import type { TenantBoundActivity } from './tenant-stores.js';
 export declare const DEFAULT_BOARD_CHANNEL_MAX_BYTES = 128;
 export declare const DEFAULT_BOARD_TITLE_MAX_BYTES = 512;
-export { DEFAULT_ACTIVITY_CAPACITY } from './activity';
+export { DEFAULT_ACTIVITY_CAPACITY } from './activity.js';
 export declare const DEFAULT_ACTIVITY_TTL_MS: number;
 export declare const DEFAULT_PRESENCE_TTL_MS = 90000;
 export declare const DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS = 5000;
@@ -2445,7 +2445,7 @@ export interface CloudCrypto {
  * composition stays runtime-neutral, and an adapter that reached for a Node
  * built-in here would make that claim false for the default composition.
  */
-import type { CloudCrypto } from './port';
+import type { CloudCrypto } from './port.js';
 export declare function base64UrlEncode(bytes: Uint8Array): string;
 /**
  * Decode base64url. Returns `undefined` rather than throwing for input that
@@ -2485,9 +2485,9 @@ export declare function createWebCrypto(): CloudCrypto;
  * bytes the writer sent.
  */
 import { type TenantId } from '@byok-sdk/core';
-import { E2eeScopeKeyPackageV2Schema, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
+import { E2eeScopeKeyPackageSchema, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
 import { z } from 'zod';
-import type { DeviceDirectory } from './stores/ports';
+import type { DeviceDirectory } from './stores/ports.js';
 /** One stored chain entry: its seq and its canonical JSON. */
 export interface E2eeMemberChainRow {
     readonly seq: number;
@@ -2753,7 +2753,7 @@ export declare function readMemberChain(ctx: E2eeMemberContext, input?: {
     readonly entries: readonly E2eeMemberChainEntry[];
 }>;
 export declare function putScopeKeyPackages(ctx: E2eeMemberContext, input: {
-    readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageV2Schema>[];
+    readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageSchema>[];
 }, writer: E2eeMemberWriter): Promise<{
     readonly stored: number;
     readonly skippedDeviceIds: readonly string[];
@@ -2909,6 +2909,12 @@ export declare const CLOUD_ERROR_CODES: {
     /** A strict Agent task id already names a durable attempt and cannot be re-enqueued. */
     readonly agent_task_already_exists: 'agent_task_already_exists';
     /**
+     * A stored task attempt has no Agent identity: the Postgres store has not run
+     * `retireAgentlessTasks` and migration 0039. The read fails closed; the
+     * operator runs them (docs/releases/host-upgrade-next-minor.md).
+     */
+    readonly task_attempt_agent_ref_missing: 'task_attempt_agent_ref_missing';
+    /**
      * A task attempt was opened but the mailbox refused its offer append, so the
      * device never saw it. Raised as {@link TaskOfferAppendRefusedError}, which
      * names the task so the Host can retry with that `taskId` (the retry
@@ -3000,7 +3006,7 @@ export declare class DeviceRetiredError extends ByokCloudError {
 export declare function isCloudError(value: unknown, code?: CloudErrorCode): value is ByokCloudError;
 // ==== @byok-sdk/cloud dist/handlers/board.d.ts ====
 import type { Context } from 'hono';
-import { type DeviceRouteDeps } from './shared';
+import { type DeviceRouteDeps } from './shared.js';
 export declare const DEFAULT_BOARD_PAGE_LIMIT = 50;
 export declare const DEFAULT_BOARD_STREAM_QUERY_INTERVAL_MS = 5000;
 export declare const DEFAULT_BOARD_STREAM_HEARTBEAT_INTERVAL_MS = 15000;
@@ -3022,7 +3028,7 @@ export declare function boardStatusHandler(deps: DeviceRouteDeps): (c: Context) 
 export declare function boardStreamHandler(deps: BoardStreamRouteDeps): (c: Context) => Promise<Response>;
 // ==== @byok-sdk/cloud dist/handlers/device-proof-request.d.ts ====
 import type { Context } from 'hono';
-import { type AuthenticatedDeviceProof, type DeviceProofAuthDeps } from '../auth/device-proof';
+import { type AuthenticatedDeviceProof, type DeviceProofAuthDeps } from '../auth/device-proof.js';
 export declare const MAX_DEVICE_PROOF_HEADER_BYTES: number;
 /** The raw request body, `'too_large'` over `maximum`, or `undefined` for an unreadable body. */
 export declare function readProofRequestBody(c: Context, maximum: number): Promise<Uint8Array | 'too_large' | undefined>;
@@ -3043,8 +3049,8 @@ export declare function authenticateProofRequest(c: Context, deps: DeviceProofAu
  */
 import type { Context } from 'hono';
 import type { DevicePrincipal } from '@byok-sdk/core';
-import { type BearerAuthDeps } from '../auth/bearer';
-import { type CloudRootStores, type TenantStores } from '../tenant-stores';
+import { type BearerAuthDeps } from '../auth/bearer.js';
+import { type CloudRootStores, type TenantStores } from '../tenant-stores.js';
 export interface BoundedJsonBodyResult {
     readonly body: unknown;
     readonly tooLarge: boolean;
@@ -3123,7 +3129,7 @@ export declare function authenticateDevice(c: Context, deps: DeviceRouteDeps): P
  */
 import { type SkillPackStore } from '@byok-sdk/core';
 import type { Context } from 'hono';
-import { type DeviceRouteDeps } from './shared';
+import { type DeviceRouteDeps } from './shared.js';
 /** Rows per `GET /byok/skill-packs` response. A tenant's pack catalogue is small by design. */
 export declare const DEFAULT_SKILL_PACK_PAGE_LIMIT = 50;
 export interface SkillPackRouteDeps extends DeviceRouteDeps {
@@ -3135,10 +3141,10 @@ export declare function skillPackFileHandler(deps: SkillPackRouteDeps): (c: Cont
 // ==== @byok-sdk/cloud dist/handlers/truth.d.ts ====
 import { DEVICE_PROOF_HEADER } from '@byok-sdk/core';
 import type { Context } from 'hono';
-import type { DeviceProofAuthDeps } from '../auth/device-proof';
-import { type TruthCommitter, type TruthObjectDownloads } from '../truth/contract';
+import type { DeviceProofAuthDeps } from '../auth/device-proof.js';
+import { type TruthCommitter, type TruthObjectDownloads } from '../truth/contract.js';
 export { DEVICE_PROOF_HEADER };
-export { MAX_DEVICE_PROOF_HEADER_BYTES } from './device-proof-request';
+export { MAX_DEVICE_PROOF_HEADER_BYTES } from './device-proof-request.js';
 export declare const DEFAULT_MAX_TRUTH_REQUEST_BYTES: number;
 export interface TruthRouteDeps {
     readonly proof: DeviceProofAuthDeps;
@@ -3150,7 +3156,7 @@ export declare function truthManifestHandler(deps: TruthRouteDeps): (c: Context)
 export declare function truthGetHandler(deps: TruthRouteDeps): (c: Context) => Promise<Response>;
 export declare function truthPutHandler(deps: TruthRouteDeps): (c: Context) => Promise<Response>;
 // ==== @byok-sdk/cloud dist/inbound.d.ts ====
-import { type AgentMessageConsumers } from './agent-message-disposition';
+import { type AgentMessageConsumers } from './agent-message-disposition.js';
 /**
  * The single inbound choke point for every daemon -> cloud envelope.
  *
@@ -3190,8 +3196,8 @@ import { type AgentMessageConsumers } from './agent-message-disposition';
  */
 import { type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type Envelope, type MessageType } from '@byok-sdk/protocol';
 import type { TenantId } from '@byok-sdk/core';
-import { type ActivityBounds } from './coordination';
-import type { TenantStores } from './tenant-stores';
+import { type ActivityBounds } from './coordination.js';
+import type { TenantStores } from './tenant-stores.js';
 export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected';
 /**
  * Why the gate answered `rejected`. Closed on purpose: every rejection path in
@@ -3246,7 +3252,7 @@ export interface InboundCommitted {
 export interface ByokCloudObserver {
     /** Post-commit wake hint, including exact replays; durable receipts remain authoritative. */
     onAgentHomeProjectionCompleted?(readback: import('@byok-sdk/protocol').AgentHomeProjectionReadback): void;
-    onMaintenance?(report: import('./maintenance').MaintenanceReport): void;
+    onMaintenance?(report: import('./maintenance.js').MaintenanceReport): void;
     onInboundCommitted(input: InboundCommitted): void;
     /**
      * One envelope the gate refused, with the reason. Same rules as
@@ -3292,85 +3298,86 @@ export {};
  */
 export { isTenantId, tenantId } from '@byok-sdk/core';
 export type { TenantId } from '@byok-sdk/core';
-export { createByokCloud } from './cloud';
-export type { TaskAgentMessage } from './task-agent-message';
-export type { AgentMessageConsumers, AgentMessageConsumeInput, AgentMessageDecision } from './agent-message-disposition';
-export type { ByokCloud, ByokCloudOptions, LimitedPublicRoute, PublicRouteLimiter, AgentDispatchInput, AgentEgressDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, ProviderProvisioningNoticeInput, AgentMemoryIntentNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, SealedAgentDispatchInput, SealedAgentEgressDispatchInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud';
-export { agentHomeProjectionCompletionKey, agentHomeProjectionRequestKey, readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion, } from './agent-home-projections';
-export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
-export { inputPreparationCompletionKey, inputPreparationRequestKey, readInputPreparationStatus, recordInputPreparationCompletion, sameInputPreparationRequest, } from './input-preparations';
-export type { InputPreparationReceiptInput } from './input-preparations';
-export { AGENT_HOME_CONTRACT_CAPABILITY, DEFAULT_EVENTS_PAGE_LIMIT, DEFAULT_LONG_POLL_HOLD_MS, DEFAULT_MAX_BLOB_SIZE_BYTES, } from './cloud';
-export { DEFAULT_BOARD_PAGE_LIMIT, DEFAULT_BOARD_STREAM_HEARTBEAT_INTERVAL_MS, DEFAULT_BOARD_STREAM_QUERY_INTERVAL_MS, DEFAULT_BOARD_STREAM_RECONCILIATION_INTERVAL_MS, } from './handlers/board';
-export { DEFAULT_SKILL_PACK_PAGE_LIMIT } from './handlers/skill-packs';
-export { createInMemoryByokCloud } from './composition/in-memory';
-export type { InMemoryByokCloud, InMemoryByokCloudOptions } from './composition/in-memory';
-export { ByokCloudError, CLOUD_ERROR_CODES, DeviceRetiredError, TaskOfferAppendRefusedError, isCloudError } from './errors';
-export type { CloudErrorCode } from './errors';
-export { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore, } from './stores/in-memory/agent-memory-projection';
-export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionSealing, AgentMemoryProjectionStore, } from './agent-memory-projection';
-export type { TaskArchiveCounts, TaskArchiveListInput, TaskArchiveStepCounts, TaskArchiveStore, TaskArchiveStoreInput, TaskArchiveStoreResult, TaskArchiveWork, } from './task-archive';
-export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
-export type { TaskRedactionCodec, TaskRedactionCounts, TaskRedactionRefusal, TaskRedactionResult, TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult, } from './task-redaction';
-export { parseRecordedWriteResult } from './e2ee-member';
-export type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeProofRequest, E2eeProvenWrite, E2eeScopeKeyPackagePutInput, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow, E2eeScopeShred, } from './e2ee-member';
-export { CLOUD_CAPABILITIES, CapabilitiesResponseSchema, capabilityDeclarationForPorts, declares, fullCapabilityDeclaration, } from './capabilities';
-export type { CapabilitiesResponse, CapabilityPorts, CloudCapability, FullCapabilityDeclarationOptions, } from './capabilities';
-export { CloudRouteRegistry, ROUTE_CLASSES, ROUTE_METHODS, routeKey } from './router/registry';
-export type { CloudRouteHandler, RouteClass, RouteDescriptor, RouteMethod } from './router/registry';
-export { ACCESS_TOKEN_TTL_SECONDS, createHmacTokenSigner } from './auth/tokens';
-export type { AccessTokenClaims, TokenSigner } from './auth/tokens';
-export { NONCE_SIGNING_DOMAIN, verifyNonceSignature } from './auth/verify';
-export { authenticateBearer, extractBearerToken } from './auth/bearer';
-export type { BearerAuthDeps } from './auth/bearer';
-export { DEFAULT_DEVICE_PROOF_CLOCK_SKEW_MS, DEFAULT_DEVICE_PROOF_MAX_LIFETIME_MS, MAX_DEVICE_PROOF_CLOCK_SKEW_MS, MAX_DEVICE_PROOF_MAX_LIFETIME_MS, authenticateDeviceProof, } from './auth/device-proof';
-export type { AuthenticatedDeviceProof, DeviceProofAuthDeps, DeviceProofRequestBinding, } from './auth/device-proof';
-export { authenticateHostedDeviceAssertion, authenticateHostedTaskAssertion } from './auth/device-assertion';
-export type { HostedDeviceAssertionAuthDeps, HostedTaskAssertionAuthDeps } from './auth/device-assertion';
-export { DEVICE_IDENTITY_PROOF_KEY_EPOCH, DEVICE_IDENTITY_PROOF_KEY_ID, PAIRING_CODE_TTL_MS, createAuthPlane, } from './auth/plane';
-export type { AuthPlane, AuthPlaneDeps, MintedAccessToken, PairInput } from './auth/plane';
-export { createWebCrypto } from './crypto/web-crypto';
-export type { CloudCrypto } from './crypto/port';
-export { INBOUND_REFUSAL_REASONS, handleInboundEnvelope, terminalReceiptKey } from './inbound';
-export type { ByokCloudObserver, InboundCommitted, InboundOutcome, InboundRefusalReason, InboundResult, InboundRefused, } from './inbound';
-export { projectTerminalResult } from './terminal-result';
-export type { TerminalResult } from './terminal-result';
-export { tenantStoresFor } from './tenant-stores';
-export type { TenantBoundActivity, TenantBoundApprovalTimeline, TenantBoundBoard, CloudRootStores, TenantBoundBlobs, TenantBoundDedup, TenantBoundDevices, TenantBoundMailbox, TenantBoundObjects, TenantBoundPresence, TenantBoundQuota, TenantBoundRateLimiter, TenantBoundReceipts, TenantBoundTaskAttempts, TenantStores, } from './tenant-stores';
-export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, MAX_APPROVAL_EVENT_BYTES, MAX_APPROVAL_TIMELINE_BYTES, approvalTimelineCursor, parseApprovalObservations, pendingApprovalObservation, retainApprovalObservations, sameApprovalTimelineEvent, validateApprovalTimelineAppend, validateApprovalTimelineResolve, } from './approval-timeline';
-export type { ApprovalObservation, ApprovalTimelineAppendInput, ApprovalTimelineEvent, ApprovalTimelineResolvePendingInput, ApprovalTimelineResolvePendingResult, ApprovalTimelineStore, ApprovalTimelineTail, } from './approval-timeline';
-export { StaleApprovalError, pendingApproval } from './approval-control';
-export type { PendingApproval } from './approval-control';
-export { SteerRejectedError } from './steer-control';
-export type { SteerRejectionCode } from './steer-control';
-export { assertTaskAttemptListLimit, DEFAULT_ACTIVITY_BOUNDS, DEFAULT_ACTIVITY_CAPACITY, DEFAULT_ACTIVITY_TTL_MS, DEFAULT_BOARD_CHANNEL_MAX_BYTES, DEFAULT_BOARD_TITLE_MAX_BYTES, DEFAULT_PRESENCE_DETAIL_MAX_BYTES, DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS, DEFAULT_PRESENCE_TTL_MS, } from './coordination';
-export type { ActivityBounds } from './coordination';
-export { TimelineEventSchema, ActivityAppendRequestSchema, projectTimelineEvents, validateActivityAppend, MAX_ACTIVITY_BYTES, ACTIVITY_TERMINAL_TTL_MS, activityEntryBytes, createActivityEntry, activitySourceHash, } from './activity';
-export type { ActivityAppendInput, ActivityCursor, ActivityReadOptions, ActivityStore, ActivityTail, ActivityTailEntry, TimelineEvent, } from './activity';
-export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client';
-export type { BoardFeedClientOptions, BoardFeedItem, BoardFeedMode, BoardFeedPage, BoardFeedRead, } from './coordination-client';
-export { TRUTH_BATCH_MAX_RECORDS, TRUTH_INLINE_CONTENT_TYPE, TRUTH_LABEL_MAX_LENGTH, TRUTH_MANIFEST_MAX_LIMIT, TRUTH_RECORD_CAPABILITY, TRUTH_RECORD_KEY_MAX_LENGTH, TRUTH_REQUEST_ID_MAX_LENGTH, TruthBodyInputSchema, TruthCommitResponseSchema, TruthRecordKeySchema, TruthRecordMetadataSchema, TruthWriteRequestSchema, truthManifestMetadata, truthRecordMetadata, } from './truth/contract';
-export { DEFAULT_MAX_TRUTH_REQUEST_BYTES, DEVICE_PROOF_HEADER, MAX_DEVICE_PROOF_HEADER_BYTES, } from './handlers/truth';
-export type { PreparedTruthWrite, TruthBodyInput, TruthCommitInput, TruthCommitResponse, TruthCommitResult, TruthCommitter, TruthObjectDownloads, TruthRecordMetadata, TruthWriteRequest, } from './truth/contract';
-export { TruthCommitError, isTruthCommitError } from './truth/errors';
-export type { TruthCommitErrorCode } from './truth/errors';
-export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ABANDON_CAUSES, TASK_ATTEMPT_STATUSES, TASK_ATTEMPT_ACTIVE_STATUSES, TASK_ATTEMPT_UNFINISHED_STATUSES, } from './stores/ports';
-export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract';
-export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskAbandonCause, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports';
-export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryE2eeMemberStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index';
-export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index';
-export type { DeviceTerminal } from './terminal-result';
-export { AgentExecutionInputSchema, SealedAgentExecutionInputSchema, type AgentExecutionInput, type SealedAgentExecutionInput, } from './agent-execution';
-export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy, DEFAULT_PROOF_RECEIPT_RETENTION_MS, PROOF_RECEIPT_RETENTION_FLOOR_MS, } from './maintenance';
-export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport, ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofReceiptRetentionOptions, } from './maintenance';
-export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
-export type { ReceiptRetentionClass } from './receipt-retention';
-export type { ReceiptCollectExpiredInput } from './stores/ports';
-export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
-export type { TaskEventsWake, TaskEventsWakeSubscription } from './task-events-wake';
-export { createInProcessMailboxWake, createInProcessTaskEventsWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS, DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS, } from './stores/in-memory/mailbox-wake';
-export type { InProcessMailboxWakeOptions, InProcessTaskEventsWakeOptions } from './stores/in-memory/mailbox-wake';
-export type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftCursor, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult, AgentMessageDraftReadback } from './agent-message-draft';
+export { createByokCloud } from './cloud.js';
+export type { TaskAgentMessage } from './task-agent-message.js';
+export type { AgentMessageConsumers, AgentMessageConsumeInput, AgentMessageDecision } from './agent-message-disposition.js';
+export type { ByokCloud, ByokCloudOptions, LimitedPublicRoute, PublicRouteLimiter, AgentDispatchInput, AgentEgressDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, ProviderProvisioningNoticeInput, AgentMemoryIntentNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, SealedAgentDispatchInput, SealedAgentEgressDispatchInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud.js';
+export { agentHomeProjectionCompletionKey, agentHomeProjectionRequestKey, readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion, } from './agent-home-projections.js';
+export type { AgentHomeProjectionReceiptInput } from './agent-home-projections.js';
+export { inputPreparationCompletionKey, inputPreparationRequestKey, readInputPreparationStatus, recordInputPreparationCompletion, sameInputPreparationRequest, } from './input-preparations.js';
+export type { InputPreparationReceiptInput } from './input-preparations.js';
+export { AGENT_HOME_CONTRACT_CAPABILITY, DEFAULT_EVENTS_PAGE_LIMIT, DEFAULT_LONG_POLL_HOLD_MS, DEFAULT_MAX_BLOB_SIZE_BYTES, } from './cloud.js';
+export { DEFAULT_BOARD_PAGE_LIMIT, DEFAULT_BOARD_STREAM_HEARTBEAT_INTERVAL_MS, DEFAULT_BOARD_STREAM_QUERY_INTERVAL_MS, DEFAULT_BOARD_STREAM_RECONCILIATION_INTERVAL_MS, } from './handlers/board.js';
+export { DEFAULT_SKILL_PACK_PAGE_LIMIT } from './handlers/skill-packs.js';
+export { createInMemoryByokCloud } from './composition/in-memory.js';
+export type { InMemoryByokCloud, InMemoryByokCloudOptions } from './composition/in-memory.js';
+export { ByokCloudError, CLOUD_ERROR_CODES, DeviceRetiredError, TaskOfferAppendRefusedError, isCloudError } from './errors.js';
+export type { CloudErrorCode } from './errors.js';
+export { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore, } from './stores/in-memory/agent-memory-projection.js';
+export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionSealing, AgentMemoryProjectionStore, } from './agent-memory-projection.js';
+export type { TaskArchiveCounts, TaskArchiveListInput, TaskArchiveStepCounts, TaskArchiveStore, TaskArchiveStoreInput, TaskArchiveStoreResult, TaskArchiveWork, } from './task-archive.js';
+export { taskArchiveInput } from './task-archive.js';
+export { TASK_REDACTION_MAX_TASKS } from './task-redaction.js';
+export type { TaskRedactionCodec, TaskRedactionCounts, TaskRedactionRefusal, TaskRedactionResult, TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult, } from './task-redaction.js';
+export { parseRecordedWriteResult } from './e2ee-member.js';
+export type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeProofRequest, E2eeProvenWrite, E2eeScopeKeyPackagePutInput, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow, E2eeScopeShred, } from './e2ee-member.js';
+export { CLOUD_CAPABILITIES, CapabilitiesResponseSchema, capabilityDeclarationForPorts, declares, fullCapabilityDeclaration, } from './capabilities.js';
+export type { CapabilitiesResponse, CapabilityPorts, CloudCapability, FullCapabilityDeclarationOptions, } from './capabilities.js';
+export { CloudRouteRegistry, ROUTE_CLASSES, ROUTE_METHODS, routeKey } from './router/registry.js';
+export type { CloudRouteHandler, RouteClass, RouteDescriptor, RouteMethod } from './router/registry.js';
+export { ACCESS_TOKEN_TTL_SECONDS, createHmacTokenSigner } from './auth/tokens.js';
+export type { AccessTokenClaims, TokenSigner } from './auth/tokens.js';
+export { NONCE_SIGNING_DOMAIN, verifyNonceSignature } from './auth/verify.js';
+export { authenticateBearer, extractBearerToken } from './auth/bearer.js';
+export type { BearerAuthDeps } from './auth/bearer.js';
+export { DEFAULT_DEVICE_PROOF_CLOCK_SKEW_MS, DEFAULT_DEVICE_PROOF_MAX_LIFETIME_MS, MAX_DEVICE_PROOF_CLOCK_SKEW_MS, MAX_DEVICE_PROOF_MAX_LIFETIME_MS, authenticateDeviceProof, } from './auth/device-proof.js';
+export type { AuthenticatedDeviceProof, DeviceProofAuthDeps, DeviceProofRequestBinding, } from './auth/device-proof.js';
+export { authenticateHostedDeviceAssertion, authenticateHostedTaskAssertion } from './auth/device-assertion.js';
+export type { HostedDeviceAssertionAuthDeps, HostedTaskAssertionAuthDeps } from './auth/device-assertion.js';
+export { DEVICE_IDENTITY_PROOF_KEY_EPOCH, DEVICE_IDENTITY_PROOF_KEY_ID, PAIRING_CODE_TTL_MS, createAuthPlane, } from './auth/plane.js';
+export type { AuthPlane, AuthPlaneDeps, MintedAccessToken, PairInput } from './auth/plane.js';
+export { createWebCrypto } from './crypto/web-crypto.js';
+export type { CloudCrypto } from './crypto/port.js';
+export { INBOUND_REFUSAL_REASONS, handleInboundEnvelope, terminalReceiptKey } from './inbound.js';
+export type { ByokCloudObserver, InboundCommitted, InboundOutcome, InboundRefusalReason, InboundResult, InboundRefused, } from './inbound.js';
+export { projectTerminalResult } from './terminal-result.js';
+export type { TerminalResult } from './terminal-result.js';
+export { tenantStoresFor } from './tenant-stores.js';
+export type { TenantBoundActivity, TenantBoundApprovalTimeline, TenantBoundBoard, CloudRootStores, TenantBoundBlobs, TenantBoundDedup, TenantBoundDevices, TenantBoundMailbox, TenantBoundObjects, TenantBoundPresence, TenantBoundQuota, TenantBoundRateLimiter, TenantBoundReceipts, TenantBoundTaskAttempts, TenantStores, } from './tenant-stores.js';
+export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, MAX_APPROVAL_EVENT_BYTES, MAX_APPROVAL_TIMELINE_BYTES, approvalTimelineCursor, parseApprovalObservations, pendingApprovalObservation, retainApprovalObservations, sameApprovalTimelineEvent, validateApprovalTimelineAppend, validateApprovalTimelineResolve, } from './approval-timeline.js';
+export type { ApprovalObservation, ApprovalTimelineAppendInput, ApprovalTimelineEvent, ApprovalTimelineResolvePendingInput, ApprovalTimelineResolvePendingResult, ApprovalTimelineStore, ApprovalTimelineTail, } from './approval-timeline.js';
+export { StaleApprovalError, pendingApproval } from './approval-control.js';
+export type { PendingApproval } from './approval-control.js';
+export { SteerRejectedError } from './steer-control.js';
+export type { SteerRejectionCode } from './steer-control.js';
+export { assertTaskAttemptListLimit, DEFAULT_ACTIVITY_BOUNDS, DEFAULT_ACTIVITY_CAPACITY, DEFAULT_ACTIVITY_TTL_MS, DEFAULT_BOARD_CHANNEL_MAX_BYTES, DEFAULT_BOARD_TITLE_MAX_BYTES, DEFAULT_PRESENCE_DETAIL_MAX_BYTES, DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS, DEFAULT_PRESENCE_TTL_MS, } from './coordination.js';
+export type { ActivityBounds } from './coordination.js';
+export { TimelineEventSchema, ActivityAppendRequestSchema, projectTimelineEvents, validateActivityAppend, MAX_ACTIVITY_BYTES, ACTIVITY_TERMINAL_TTL_MS, activityEntryBytes, createActivityEntry, activitySourceHash, } from './activity.js';
+export type { ActivityAppendInput, ActivityCursor, ActivityReadOptions, ActivityStore, ActivityTail, ActivityTailEntry, TimelineEvent, } from './activity.js';
+export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client.js';
+export type { BoardFeedClientOptions, BoardFeedItem, BoardFeedMode, BoardFeedPage, BoardFeedRead, } from './coordination-client.js';
+export { TRUTH_BATCH_MAX_RECORDS, TRUTH_INLINE_CONTENT_TYPE, TRUTH_LABEL_MAX_LENGTH, TRUTH_MANIFEST_MAX_LIMIT, TRUTH_RECORD_CAPABILITY, TRUTH_RECORD_KEY_MAX_LENGTH, TRUTH_REQUEST_ID_MAX_LENGTH, TruthBodyInputSchema, TruthCommitResponseSchema, TruthRecordKeySchema, TruthRecordMetadataSchema, TruthWriteRequestSchema, truthManifestMetadata, truthRecordMetadata, } from './truth/contract.js';
+export { DEFAULT_MAX_TRUTH_REQUEST_BYTES, DEVICE_PROOF_HEADER, MAX_DEVICE_PROOF_HEADER_BYTES, } from './handlers/truth.js';
+export type { PreparedTruthWrite, TruthBodyInput, TruthCommitInput, TruthCommitResponse, TruthCommitResult, TruthCommitter, TruthObjectDownloads, TruthRecordMetadata, TruthWriteRequest, } from './truth/contract.js';
+export { TruthCommitError, isTruthCommitError } from './truth/errors.js';
+export type { TruthCommitErrorCode } from './truth/errors.js';
+export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ABANDON_CAUSES, TASK_ATTEMPT_STATUSES, TASK_ATTEMPT_ACTIVE_STATUSES, TASK_ATTEMPT_UNFINISHED_STATUSES, } from './stores/ports.js';
+export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract.js';
+export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskAbandonCause, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports.js';
+export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryE2eeMemberStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index.js';
+export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index.js';
+export type { DeviceTerminal } from './terminal-result.js';
+export { AgentExecutionInputSchema, SealedAgentExecutionInputSchema, type AgentExecutionInput, type SealedAgentExecutionInput, } from './agent-execution.js';
+export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy, DEFAULT_PROOF_RECEIPT_RETENTION_MS, PROOF_RECEIPT_RETENTION_FLOOR_MS, } from './maintenance.js';
+export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport, ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofReceiptRetentionOptions, } from './maintenance.js';
+export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention.js';
+export type { ReceiptRetentionClass } from './receipt-retention.js';
+export type { ReceiptCollectExpiredInput } from './stores/ports.js';
+export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake.js';
+export type { TaskEventsWake, TaskEventsWakeSubscription } from './task-events-wake.js';
+export { createInProcessMailboxWake, createInProcessTaskEventsWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS, DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS, } from './stores/in-memory/mailbox-wake.js';
+export type { InProcessMailboxWakeOptions, InProcessTaskEventsWakeOptions } from './stores/in-memory/mailbox-wake.js';
+export type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftCursor, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult, AgentMessageDraftReadback } from './agent-message-draft.js';
 // ==== @byok-sdk/cloud dist/input-preparations.d.ts ====
 /**
  * Durable remote input-preparation facts.
@@ -3390,7 +3397,7 @@ export type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftCur
  */
 import { type AgentInputPreparationPayload, type InputPreparationCompletionRequest, type InputPreparationReadback } from '@byok-sdk/protocol';
 import type { TenantId } from '@byok-sdk/core';
-import type { TenantBoundReceipts } from './tenant-stores';
+import type { TenantBoundReceipts } from './tenant-stores.js';
 /** Exact request identity a host must echo to read back durable preparation status. */
 export interface InputPreparationReceiptInput {
     readonly requestId: string;
@@ -3430,9 +3437,9 @@ export interface MailboxWakeSubscription {
 }
 // ==== @byok-sdk/cloud dist/maintenance.d.ts ====
 import { type CollectExpiredCounts, type CollectExpiredInput, type CollectExpiredResult, type CoreStores, type DeviceAssertionReplayAuthority, type Clock, type TenantId } from '@byok-sdk/core';
-import type { CloudCrypto } from './crypto/port';
-import type { CloudStores } from './stores/ports';
-import { type TaskArchiveStepCounts } from './task-archive';
+import type { CloudCrypto } from './crypto/port.js';
+import type { CloudStores } from './stores/ports.js';
+import { type TaskArchiveStepCounts } from './task-archive.js';
 export interface RetentionPolicy {
     readonly mailboxAckedRetentionMs: bigint;
     readonly mailboxUnackedRetentionMs: bigint;
@@ -3634,7 +3641,7 @@ export declare class CloudRouteRegistry {
  * `packages/server/src/__tests__/steer-runtime-capability-gate.test.ts`.
  */
 import type { RuntimeId } from '@byok-sdk/protocol';
-import type { TaskAttemptStatus } from './stores/ports';
+import type { TaskAttemptStatus } from './stores/ports.js';
 /**
  * Stable strings a caller switches on (an operator UI, an HTTP surface mapping
  * this to a status code) rather than matching error text. Byte-identical to the
@@ -3680,8 +3687,8 @@ export declare class SteerRejectedError extends Error {
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/activity.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult, type Clock, type TenantId } from '@byok-sdk/core';
-import { type ActivityAppendInput, type ActivityReadOptions, type ActivityStore, type ActivityTail } from '../../activity';
-import { type TaskChanged } from './task-change-map';
+import { type ActivityAppendInput, type ActivityReadOptions, type ActivityStore, type ActivityTail } from '../../activity.js';
+import { type TaskChanged } from './task-change-map.js';
 /** Remove content, retaining a fence against resurrection and a cursor gap. */
 export declare function deleteActivityTail(store: InMemoryActivityStore, tenant: TenantId, taskId: string): number;
 /**
@@ -3700,7 +3707,7 @@ export declare class InMemoryActivityStore implements ActivityStore {
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/agent-egress.d.ts ====
 import { type Clock, type TenantId } from '@byok-sdk/core';
-import type { AgentEgressRecord, AgentEgressStore } from '../ports';
+import type { AgentEgressRecord, AgentEgressStore } from '../ports.js';
 /** Reference egress fact store. Duplicate event ids return, never overwrite, the first receipt. */
 export declare class InMemoryAgentEgressStore implements AgentEgressStore {
     #private;
@@ -3715,8 +3722,8 @@ export declare class InMemoryAgentEgressStore implements AgentEgressStore {
 /** In-memory conformance implementation for the one-way hosted memory projection ports. */
 import type { Clock, TenantId } from '@byok-sdk/core';
 import { type AgentMemoryProjectionEraseResult, type AgentMemoryProjectionReceipt } from '@byok-sdk/protocol';
-import type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionSealing, AgentMemoryProjectionStore } from '../../agent-memory-projection';
-import type { CloudCrypto } from '../../crypto/port';
+import type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionSealing, AgentMemoryProjectionStore } from '../../agent-memory-projection.js';
+import type { CloudCrypto } from '../../crypto/port.js';
 /**
  * Reference transaction semantics: current snapshot bytes and immutable
  * metering receipt advance in the same serialized mutation. Receipts retain
@@ -3746,7 +3753,7 @@ export declare class InMemoryAgentMemoryProjectionAuthorizer implements AgentMem
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/agent-message-draft.d.ts ====
 import { type Clock, type TenantId } from '@byok-sdk/core';
-import type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult } from '../../agent-message-draft';
+import type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult } from '../../agent-message-draft.js';
 /** Deletes the task's draft for the Host task archive (#1120); returns the rows removed. */
 export declare function deleteAgentMessageDraft(store: InMemoryAgentMessageDraftStore, tenant: TenantId, taskId: string): number;
 export declare class InMemoryAgentMessageDraftStore implements AgentMessageDraftStore {
@@ -3761,8 +3768,8 @@ export declare class InMemoryAgentMessageDraftStore implements AgentMessageDraft
 // ==== @byok-sdk/cloud dist/stores/in-memory/approval-timeline.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import { type ApprovalTimelineAppendInput, type ApprovalTimelineResolvePendingInput, type ApprovalTimelineResolvePendingResult, type ApprovalTimelineStore, type ApprovalTimelineTail } from '../../approval-timeline';
-import { type TaskChanged } from './task-change-map';
+import { type ApprovalTimelineAppendInput, type ApprovalTimelineResolvePendingInput, type ApprovalTimelineResolvePendingResult, type ApprovalTimelineStore, type ApprovalTimelineTail } from '../../approval-timeline.js';
+import { type TaskChanged } from './task-change-map.js';
 /**
  * Removes the task's observations for the Host task archive (#1120) and keeps
  * the closed tail as a fence, so no later observation recreates it. Returns
@@ -3814,8 +3821,8 @@ export declare class InMemoryApprovalTimelineStore implements ApprovalTimelineSt
  * (same posture as the reference server, §7).
  */
 import { type Clock, type ContentHash, type ObjectStore, type StorageReservation, type TenantId } from '@byok-sdk/core';
-import type { CloudCrypto } from '../../crypto/port';
-import type { BlobContentProxy, BlobObservation, BlobReadResult, BlobWriteResult, CloudBlobStore } from '../ports';
+import type { CloudCrypto } from '../../crypto/port.js';
+import type { BlobContentProxy, BlobObservation, BlobReadResult, BlobWriteResult, CloudBlobStore } from '../ports.js';
 /** How long a presigned upload/download URL stays valid. */
 export declare const BLOB_URL_TTL_MS: number;
 interface BlobRecord {
@@ -3902,7 +3909,7 @@ export {};
  */
 import { type TenantId } from '@byok-sdk/core';
 import type { AgentRef } from '@byok-sdk/protocol';
-import type { InboundDedupStore } from '../ports';
+import type { InboundDedupStore } from '../ports.js';
 /** Ids retained per physical or Agent-bound key. Same depth as the reference server's ring. */
 export declare const DEDUP_RING_CAPACITY = 1024;
 export declare class InMemoryInboundDedupStore implements InboundDedupStore {
@@ -3939,8 +3946,8 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  * the SQL stores' one transaction (#1119).
  */
 import { type MailboxStore, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
-import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '../ports';
-import type { InMemoryTaskAttemptState } from './task-attempts';
+import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '../ports.js';
+import type { InMemoryTaskAttemptState } from './task-attempts.js';
 export declare class InMemoryDeviceDirectory implements DeviceDirectory {
     #private;
     constructor(tasks: InMemoryTaskAttemptState, mailbox: MailboxStore);
@@ -3962,8 +3969,8 @@ export declare class InMemoryDeviceDirectory implements DeviceDirectory {
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/e2ee-member.d.ts ====
 import type { TenantId } from '@byok-sdk/core';
-import type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeScopeKeyPackagePutInput, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow } from '../../e2ee-member';
-import type { RequestReceiptStore } from '../ports';
+import type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeScopeKeyPackagePutInput, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow } from '../../e2ee-member.js';
+import type { RequestReceiptStore } from '../ports.js';
 /**
  * Reference E2EE member store. Each method checks and writes in one
  * synchronous step, so no other call interleaves with it. A shred receipt
@@ -4010,8 +4017,8 @@ export declare class InMemoryE2eeMemberStore implements E2eeMemberStore {
     }): Promise<string | undefined>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/index.d.ts ====
-export { InMemoryAgentMessageDraftStore } from './agent-message-draft';
-export { InMemoryE2eeMemberStore } from './e2ee-member';
+export { InMemoryAgentMessageDraftStore } from './agent-message-draft.js';
+export { InMemoryE2eeMemberStore } from './e2ee-member.js';
 /**
  * The in-memory reference implementation of every cloud-local port.
  *
@@ -4021,26 +4028,26 @@ export { InMemoryE2eeMemberStore } from './e2ee-member';
  * when a durable composition (S3b's journal, S4A's schema) runs them later.
  */
 import type { Clock, MailboxStore, ObjectStore, TenantId } from '@byok-sdk/core';
-import type { CloudCrypto } from '../../crypto/port';
-import type { ProofReceiptRetentionAuthority } from '../../maintenance';
-import type { TaskArchiveStore } from '../../task-archive';
-import type { BlobContentProxy, CloudStores } from '../ports';
-import { type InMemoryBlobBytes } from './blobs';
-import type { TaskEventsWake } from '../../task-events-wake';
-export { AllowAllRateLimiter } from './rate-limiter';
-export { BLOB_URL_TTL_MS, InMemoryBlobContentProxy, InMemoryCloudBlobStore, createInMemoryBlobs, createInMemoryBlobBytes, InMemoryBlobBytes, } from './blobs';
-export type { InMemoryBlobs, InMemoryBlobStoreOptions } from './blobs';
-export { DEDUP_RING_CAPACITY, InMemoryInboundDedupStore } from './dedup';
-export { InMemoryDeviceDirectory } from './device-directory';
-export { InMemoryNonceStore, NONCE_TTL_MS } from './nonces';
-export { InMemoryPairingCodeStore } from './pairing-codes';
-export { InMemoryRequestReceiptStore } from './receipts';
-export { InMemoryProofRequestReceiptStore } from './proof-receipts';
-export { InMemoryTaskAttemptStore } from './task-attempts';
-export { InMemoryTaskCancellationStore } from './task-cancellations';
-export { InMemoryActivityStore } from './activity';
-export { InMemoryApprovalTimelineStore } from './approval-timeline';
-export { InMemoryAgentEgressStore } from './agent-egress';
+import type { CloudCrypto } from '../../crypto/port.js';
+import type { ProofReceiptRetentionAuthority } from '../../maintenance.js';
+import type { TaskArchiveStore } from '../../task-archive.js';
+import type { BlobContentProxy, CloudStores } from '../ports.js';
+import { type InMemoryBlobBytes } from './blobs.js';
+import type { TaskEventsWake } from '../../task-events-wake.js';
+export { AllowAllRateLimiter } from './rate-limiter.js';
+export { BLOB_URL_TTL_MS, InMemoryBlobContentProxy, InMemoryCloudBlobStore, createInMemoryBlobs, createInMemoryBlobBytes, InMemoryBlobBytes, } from './blobs.js';
+export type { InMemoryBlobs, InMemoryBlobStoreOptions } from './blobs.js';
+export { DEDUP_RING_CAPACITY, InMemoryInboundDedupStore } from './dedup.js';
+export { InMemoryDeviceDirectory } from './device-directory.js';
+export { InMemoryNonceStore, NONCE_TTL_MS } from './nonces.js';
+export { InMemoryPairingCodeStore } from './pairing-codes.js';
+export { InMemoryRequestReceiptStore } from './receipts.js';
+export { InMemoryProofRequestReceiptStore } from './proof-receipts.js';
+export { InMemoryTaskAttemptStore } from './task-attempts.js';
+export { InMemoryTaskCancellationStore } from './task-cancellations.js';
+export { InMemoryActivityStore } from './activity.js';
+export { InMemoryApprovalTimelineStore } from './approval-timeline.js';
+export { InMemoryAgentEgressStore } from './agent-egress.js';
 /**
  * The port bundle plus the byte proxy, in the shape `createInMemoryCoreStores`
  * already uses: the composition is an object with a `stores` field, not the
@@ -4074,8 +4081,8 @@ export declare function createInMemoryCloudStores(clock: Clock, crypto: CloudCry
  */
 taskArchive?: InMemoryTaskArchiveFactory): InMemoryCloudComposition;
 // ==== @byok-sdk/cloud dist/stores/in-memory/mailbox-wake.d.ts ====
-import type { MailboxWake } from '../../mailbox-wake';
-import type { TaskEventsWake } from '../../task-events-wake';
+import type { MailboxWake } from '../../mailbox-wake.js';
+import type { TaskEventsWake } from '../../task-events-wake.js';
 export declare const DEFAULT_MAILBOX_WAKE_FALLBACK_MS = 5000;
 /** How long a task event reader no hint reached waits before it re-reads (#1113 A4). */
 export declare const DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS = 5000;
@@ -4106,8 +4113,8 @@ import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/c
  * value leaks.
  */
 import { type Clock, type TenantId } from '@byok-sdk/core';
-import type { CloudCrypto } from '../../crypto/port';
-import type { NonceStore } from '../ports';
+import type { CloudCrypto } from '../../crypto/port.js';
+import type { NonceStore } from '../ports.js';
 /** ~5min, matching the reference server (docs/protocol.md §6.2). */
 export declare const NONCE_TTL_MS: number;
 export declare class InMemoryNonceStore implements NonceStore {
@@ -4135,7 +4142,7 @@ export declare class InMemoryNonceStore implements NonceStore {
  * `used` only after its shared device directory has accepted the row.
  */
 import { type CollectExpiredInput, type CollectExpiredResult, type Clock, type TenantId } from '@byok-sdk/core';
-import type { DeviceDirectory, DeviceRecord, PairingEnrollment, PairingEnrollmentInput, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore } from '../ports';
+import type { DeviceDirectory, DeviceRecord, PairingEnrollment, PairingEnrollmentInput, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore } from '../ports.js';
 export declare class InMemoryPairingCodeStore implements PairingCodeStore, PairingEnrollment {
     #private;
     constructor(clock: Clock, devices: DeviceDirectory);
@@ -4145,8 +4152,8 @@ export declare class InMemoryPairingCodeStore implements PairingCodeStore, Pairi
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/proof-receipts.d.ts ====
 import { type Clock, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
-import type { ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore } from '../ports';
-import type { ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority } from '../../maintenance';
+import type { ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore } from '../ports.js';
+import type { ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority } from '../../maintenance.js';
 export declare class InMemoryProofRequestReceiptStore implements ProofRequestReceiptStore {
     #private;
     constructor(clock: Clock);
@@ -4172,13 +4179,13 @@ export declare class InMemoryProofReceiptRetentionAuthority implements ProofRece
  * not move.
  */
 import type { TenantId } from '@byok-sdk/core';
-import type { InboundRateLimiter, RateLimitDecision, RateLimitUnit } from '../ports';
+import type { InboundRateLimiter, RateLimitDecision, RateLimitUnit } from '../ports.js';
 export declare class AllowAllRateLimiter implements InboundRateLimiter {
     consume(_tenant: TenantId, _deviceId: string, _unit: RateLimitUnit, _count: number): Promise<RateLimitDecision>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/receipts.d.ts ====
 import { type CollectExpiredResult } from '@byok-sdk/core';
-import type { ReceiptCollectExpiredInput } from '../ports';
+import type { ReceiptCollectExpiredInput } from '../ports.js';
 /**
  * In-memory {@link RequestReceiptStore}: first write wins.
  *
@@ -4187,7 +4194,7 @@ import type { ReceiptCollectExpiredInput } from '../ports';
  * false` is how the caller learns it was a replay rather than a new fact.
  */
 import { type Clock, type TenantId } from '@byok-sdk/core';
-import type { RequestReceipt, RequestReceiptStore } from '../ports';
+import type { RequestReceipt, RequestReceiptStore } from '../ports.js';
 /**
  * The stored body, read for the Host task archive (#1120). A module function
  * over a private registry, so the port class gains no method.
@@ -4228,19 +4235,14 @@ export declare class InMemoryRequestReceiptStore implements RequestReceiptStore 
  */
 import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
-import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptCounts, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '../ports';
-import { type TaskChanged } from './task-change-map';
+import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptCounts, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '../ports.js';
+import { type TaskChanged } from './task-change-map.js';
 interface StoredAgentMessageAdmission extends AgentMessageAdmission {
     readonly deviceId: string;
 }
 export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
     #private;
     constructor(clock: Clock, state?: InMemoryTaskAttemptState);
-    open(tenant: TenantId, input: {
-        readonly taskId: string;
-        readonly deviceId: string;
-        readonly agentRef?: AgentRef;
-    }): Promise<TaskAttempt>;
     reserveAgentOffer(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;
@@ -4290,7 +4292,7 @@ export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
     recordStatus(tenant: TenantId, input: {
         readonly taskId: string;
         readonly status: TaskAttemptStatus;
-        readonly agentRef?: AgentRef;
+        readonly agentRef: AgentRef;
         readonly terminalCause?: string;
     }): Promise<TaskAttempt | undefined>;
 }
@@ -4325,8 +4327,8 @@ export declare class InMemoryTaskAttemptState {
 export {};
 // ==== @byok-sdk/cloud dist/stores/in-memory/task-cancellations.d.ts ====
 import { type MailboxStore, type TenantId } from '@byok-sdk/core';
-import type { DeviceDirectory, TaskAbandonRequest, TaskAttempt, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore } from '../ports';
-import { InMemoryTaskAttemptState } from './task-attempts';
+import type { DeviceDirectory, TaskAbandonRequest, TaskAttempt, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore } from '../ports.js';
+import { InMemoryTaskAttemptState } from './task-attempts.js';
 /** Failure-free reference composition of the atomic cancellation port. */
 export declare class InMemoryTaskCancellationStore implements TaskCancellationStore {
     #private;
@@ -4367,13 +4369,13 @@ export declare class TaskChangeMap<V> extends Map<string, V> {
  * Adding a port method means editing this table, which is the point: a port
  * grows by contract, not by whichever composition needed something.
  */
-import type { CloudStoreName } from './ports';
+import type { CloudStoreName } from './ports.js';
 export declare const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string[]>>;
 /** The interface each port name is declared as, for a source-side scan. */
 export declare const CLOUD_PORT_INTERFACES: Readonly<Record<CloudStoreName, string>>;
 // ==== @byok-sdk/cloud dist/stores/ports.d.ts ====
-import type { AgentMessageDraftStore } from '../agent-message-draft';
-import type { TaskArchiveStore } from '../task-archive';
+import type { AgentMessageDraftStore } from '../agent-message-draft.js';
+import type { TaskArchiveStore } from '../task-archive.js';
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
@@ -4413,8 +4415,8 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
 import type { MailboxBody, MailboxMessage, PresenceStore, StorageReservation, TenantId, TenantReadiness } from '@byok-sdk/core';
 import type { AgentEgressReliablePayload, AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 export type { AgentEgressReliablePayload, AgentRef } from '@byok-sdk/protocol';
-import type { ActivityStore } from '../activity';
-import type { ApprovalTimelineStore } from '../approval-timeline';
+import type { ActivityStore } from '../activity.js';
+import type { ApprovalTimelineStore } from '../approval-timeline.js';
 export interface DeviceRecord {
     readonly tenantId: TenantId;
     readonly productId: string;
@@ -4636,9 +4638,9 @@ export interface TaskAttempt {
     readonly taskId: string;
     /** The device the offer was addressed to. */
     readonly deviceId: string;
-    /** Exact Agent identity sealed when the strict Agent offer was opened. */
-    readonly agentRef?: AgentRef;
-    /** Set by `task.claim`, and only by the first one. Legacy attempts remain claimable by any tenant device until then; strict Agent attempts are target-device bound before this field is consulted. */
+    /** Exact Agent identity sealed when the strict Agent offer was reserved. */
+    readonly agentRef: AgentRef;
+    /** Set by `task.claim`, and only by the first one. Attempts are target-device bound before this field is consulted. */
     readonly ownerDeviceId?: string;
     readonly status: TaskAttemptStatus;
     /**
@@ -4752,12 +4754,6 @@ export interface TaskAttemptPage {
     readonly nextCursor?: string;
 }
 export interface TaskAttemptStore {
-    /** Called when an offer is enqueued: records the pending attempt with no owner yet. */
-    open(tenant: TenantId, input: {
-        readonly taskId: string;
-        readonly deviceId: string;
-        readonly agentRef?: AgentRef;
-    }): Promise<TaskAttempt>;
     /**
      * Atomically reserve one strict Agent offer. `created: false` means the task
      * id already had durable authority and no caller may append another offer.
@@ -4853,7 +4849,7 @@ export interface TaskAttemptStore {
     recordStatus(tenant: TenantId, input: {
         readonly taskId: string;
         readonly status: TaskAttemptStatus;
-        readonly agentRef?: AgentRef;
+        readonly agentRef: AgentRef;
         readonly terminalCause?: string;
     }): Promise<TaskAttempt | undefined>;
 }
@@ -5134,7 +5130,7 @@ export interface ReceiptCollectExpiredInput extends CollectExpiredInput {
 }
 // ==== @byok-sdk/cloud dist/task-agent-message.d.ts ====
 import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
-import type { TenantStores } from './tenant-stores';
+import type { TenantStores } from './tenant-stores.js';
 /**
  * SDK transmission evidence; payload remains untrusted and never authors a Host
  * product message. A task whose `sealing` names `agent-message` (#1045) holds
@@ -5150,7 +5146,7 @@ export interface TaskAgentMessage {
 export declare function readTaskAgentMessage(stores: TenantStores, deviceId: string, taskId: string, expectedRef: AgentRef): Promise<TaskAgentMessage | undefined>;
 /** One frozen identity check shared by message and draft readers. */
 export declare function readTaskAgentMessageBinding(stores: TenantStores, deviceId: string, taskId: string, agentRef: AgentRef): Promise<{
-    attempt: import(".").TaskAttempt;
+    attempt: import("./index.js").TaskAttempt;
     frozen: {
         agentRef: {
             agentId: string;
@@ -5188,14 +5184,14 @@ export declare function readTaskAgentMessageBinding(stores: TenantStores, device
  */
 import type { Clock, CoreStores, TenantId } from '@byok-sdk/core';
 import type { AgentRef } from '@byok-sdk/protocol';
-import type { CloudCrypto } from './crypto/port';
-import { type TaskRedactionCodec } from './task-redaction';
-import type { CloudStores } from './stores/ports';
+import type { CloudCrypto } from './crypto/port.js';
+import { type TaskRedactionCodec } from './task-redaction.js';
+import type { CloudStores } from './stores/ports.js';
 /** One unit of archive work, listed by {@link TaskArchiveStore.listWork}. */
 export interface TaskArchiveWork {
     readonly taskId: string;
     readonly deviceId: string;
-    readonly agentRef?: AgentRef;
+    readonly agentRef: AgentRef;
     /** `archive`: not archived yet. `settle`: archived, and its board item may remain. */
     readonly phase: 'archive' | 'settle';
 }
@@ -5267,6 +5263,17 @@ export interface TaskArchiveStepCounts {
     readonly refused: number;
     readonly more: boolean;
 }
+/**
+ * The archive input for one task: every receipt key holding its content and its
+ * sealed object reference. `agentRef` is absent only for a task stored without an
+ * Agent identity, which `retireAgentlessTasks` (cloud-dataplane, #1780) archives
+ * once; builds up to v0.30.2 keyed its offer without one.
+ */
+export declare function taskArchiveInput(crypto: Pick<CloudCrypto, 'sha256'>, tenant: TenantId, unit: {
+    readonly taskId: string;
+    readonly deviceId: string;
+    readonly agentRef?: AgentRef;
+}, archivedAt: string): Promise<TaskArchiveStoreInput>;
 export declare function archiveTerminalTasks(ports: {
     readonly core: CoreStores;
     readonly cloud: CloudStores;
@@ -5309,7 +5316,7 @@ export interface TaskEventsWakeSubscription {
  * tombstones only through the {@link TaskRedactionCodec} that cloud passes in.
  */
 import { type ContentHash, type TenantId } from '@byok-sdk/core';
-import type { CloudCrypto } from './crypto/port';
+import type { CloudCrypto } from './crypto/port.js';
 /** The largest number of task ids that one `redactTasks` call accepts. */
 export declare const TASK_REDACTION_MAX_TASKS = 100;
 export interface TaskRedactionCounts {
@@ -5403,7 +5410,7 @@ export declare function parseTaskRedactionInput(input: {
 }): readonly string[];
 export declare function taskRedactionCodec(crypto: Pick<CloudCrypto, 'sha256'>): TaskRedactionCodec;
 // ==== @byok-sdk/cloud dist/tenant-stores.d.ts ====
-import type { AgentMessageDraftStore } from './agent-message-draft';
+import type { AgentMessageDraftStore } from './agent-message-draft.js';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
  * Layer 2 of the six-layer isolation model (§12.6.2) — the tenant-closed
@@ -5430,10 +5437,10 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  */
 import { type BoardClaimInput, type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type BoardStatusUpdateInput, type BoardUnclaimInput, type ContentHash, type CoreStores, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type ObjectManifestEntry, type ObjectReferenceInput, type Principal, type PresenceHint, type PresenceHintInput, type TenantReadiness, type StorageFinalizeInput, type StorageFinalizeResult, type StorageReservation, type StorageReservationInput, type TenantId } from '@byok-sdk/core';
 import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
-import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
-import type { ActivityAppendInput, ActivityTail, ActivityReadOptions } from './activity';
-import type { ApprovalTimelineAppendInput, ApprovalTimelineTail } from './approval-timeline';
-import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, RateLimitDecision, RateLimitUnit, RequestReceipt, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports';
+import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake.js';
+import type { ActivityAppendInput, ActivityTail, ActivityReadOptions } from './activity.js';
+import type { ApprovalTimelineAppendInput, ApprovalTimelineTail } from './approval-timeline.js';
+import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, RateLimitDecision, RateLimitUnit, RequestReceipt, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports.js';
 export interface TenantBoundMailbox {
     /** Subscribe before reading; hints never replace durable mailbox reads. */
     watch(deviceId: string, signal: AbortSignal): MailboxWakeSubscription;
@@ -5478,15 +5485,10 @@ export interface TenantBoundDevices {
     readiness(): Promise<TenantReadiness>;
 }
 export interface TenantBoundTaskAttempts {
-    open(input: {
-        readonly taskId: string;
-        readonly deviceId: string;
-        readonly agentRef?: TaskAttempt['agentRef'];
-    }): Promise<TaskAttempt>;
     reserveAgentOffer(input: {
         readonly taskId: string;
         readonly deviceId: string;
-        readonly agentRef: NonNullable<TaskAttempt['agentRef']>;
+        readonly agentRef: TaskAttempt['agentRef'];
     }): Promise<{
         readonly attempt: TaskAttempt;
         readonly created: boolean;
@@ -5504,24 +5506,24 @@ export interface TenantBoundTaskAttempts {
     readTaskAgentMessage(input: {
         readonly taskId: string;
         readonly deviceId: string;
-    }): Promise<import('./stores/ports').AgentMessageAdmission | undefined>;
+    }): Promise<import('./stores/ports.js').AgentMessageAdmission | undefined>;
     readAgentMessage(input: {
         readonly taskId: string;
         readonly deviceId: string;
         readonly messageId: string;
         readonly payloadBody: string;
-    }): Promise<import('./stores/ports').AgentMessageAdmission | undefined>;
+    }): Promise<import('./stores/ports.js').AgentMessageAdmission | undefined>;
     finalizeAgentMessage(input: {
         readonly taskId: string;
         readonly deviceId: string;
         readonly messageId: string;
         readonly payloadBody: string;
         readonly terminalBody: string;
-    }): Promise<import('./stores/ports').AgentMessageAdmission | undefined>;
+    }): Promise<import('./stores/ports.js').AgentMessageAdmission | undefined>;
     get(taskId: string): Promise<TaskAttempt | undefined>;
     getMany(taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
-    countByStatus(): Promise<import('./stores/ports').TaskAttemptCounts>;
-    list(query: import('./stores/ports').TaskAttemptListQuery): Promise<import('./stores/ports').TaskAttemptPage>;
+    countByStatus(): Promise<import('./stores/ports.js').TaskAttemptCounts>;
+    list(query: import('./stores/ports.js').TaskAttemptListQuery): Promise<import('./stores/ports.js').TaskAttemptPage>;
     claim(input: {
         readonly taskId: string;
         readonly deviceId: string;
@@ -5532,7 +5534,7 @@ export interface TenantBoundTaskAttempts {
     recordStatus(input: {
         readonly taskId: string;
         readonly status: TaskAttemptStatus;
-        readonly agentRef?: TaskAttempt['agentRef'];
+        readonly agentRef: TaskAttempt['agentRef'];
         readonly terminalCause?: TaskAttempt['terminalCause'];
     }): Promise<TaskAttempt | undefined>;
 }
@@ -5619,7 +5621,7 @@ export interface CloudRootStores {
 export declare function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores;
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
 import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TaskFailPayload, type TaskFailureReading, type TaskDeclineCodeReading } from '@byok-sdk/protocol';
-import type { RequestReceipt } from './stores/ports';
+import type { RequestReceipt } from './stores/ports.js';
 declare const DEVICE_TERMINAL_TYPES: readonly ['task.complete', 'task.fail', 'task.decline', 'task.cancelled'];
 /**
  * Canonical device evidence, independent of the Host cancellation projection.

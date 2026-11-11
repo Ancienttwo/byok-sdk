@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { atomicWriteFile } from '../util/atomic-write';
+import { atomicWriteFile } from '../util/atomic-write.js';
 
 /**
  * Persists the highest processed server->daemon envelope `seq` per

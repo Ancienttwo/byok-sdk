@@ -10,6 +10,7 @@ import {
   PI_AUTH_NONE_API_KEY,
   PI_PROJECTED_KEY_ENV,
   buildPiProviderProjection,
+  piProjectionProviderId,
 } from '../../../keys/src/pi-provider-projection';
 import { parseModelProviderProfile, type ModelProviderProfileInput } from '../../../keys/src/provider-profile';
 import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
@@ -47,10 +48,10 @@ function sse(res: ServerResponse, events: Array<[string | undefined, unknown]>):
   res.end(events.map(([event, data]) => `${event ? `event: ${event}\n` : ''}data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`).join(''));
 }
 
-function openAiReply(res: ServerResponse): void {
+function openAiReply(res: ServerResponse, reasoning = false): void {
   const base = { id: 'cmpl-test', object: 'chat.completion.chunk', created: 0, model: 'local-model' };
   sse(res, [
-    [undefined, { ...base, choices: [{ index: 0, delta: { role: 'assistant', content: 'pong' }, finish_reason: null }] }],
+    [undefined, { ...base, choices: [{ index: 0, delta: { role: 'assistant', content: 'pong', ...(reasoning ? { reasoning: 'THINK' } : {}) }, finish_reason: null }] }],
     [undefined, { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }],
     [undefined, '[DONE]'],
   ]);
@@ -112,13 +113,15 @@ async function completeThroughPi(input: Partial<ModelProviderProfileInput>, runt
   const runtime = await ModelRuntime.create({
     authPath: path.join(dir, 'auth.json'), modelsPath, allowModelNetwork: false, refreshOnCreate: false,
   });
+  const providerId = piProjectionProviderId(profile);
   if (runtimeKey !== undefined) {
-    await runtime.setRuntimeApiKey('byok-sdk-probe', runtimeKey);
-    expect(runtime.getProviderAuthStatus('byok-sdk-probe').source).toBe('runtime');
+    await runtime.setRuntimeApiKey(providerId, runtimeKey);
+    expect(runtime.getProviderAuthStatus(providerId).source).toBe('runtime');
   }
-  const model = runtime.getModel('byok-sdk-probe', profile.model);
+  expect(runtime.getError()).toBeUndefined();
+  const model = runtime.getModel(providerId, profile.model);
   if (model === undefined) throw new Error('projected model was not loaded by Pi');
-  return { model, reply: await runtime.complete(model, { messages: [{ role: 'user', content: 'ping', timestamp: 0 }] }, cacheRetention && { cacheRetention }) };
+  return { runtime, model, reply: await runtime.complete(model, { messages: [{ role: 'user', content: 'ping', timestamp: 0 }] }, cacheRetention && { cacheRetention }) };
 }
 
 /** Method and path only: Pi's Anthropic client adds a `beta=true` query. */
@@ -169,6 +172,25 @@ describe('keys Pi projection through the pinned Pi model runtime', () => {
     expect(model.inputLimits).toEqual(inputLimits);
     // Pi defaults supportsLongCacheRetention to true; the declared false must reach the body.
     expect(JSON.parse(server.seen[0]!.body).prompt_cache_retention).not.toBe('24h');
+  });
+
+  it('replays OpenCode Go reasoning as reasoning_content through the declared provider id', async () => {
+    const server = await provider(res => openAiReply(res, true));
+    const { runtime, model, reply } = await completeThroughPi({
+      adapter: 'openai_compatible', auth_mode: 'bearer', base_url: `http://127.0.0.1:${server.port}/v1`, model: 'local-model',
+      pi_model: { ...PI_MODEL_FIXTURE, api: 'openai-completions', providerId: 'opencode-go',
+        compat: { requiresReasoningContentOnAssistantMessages: true } },
+    }, SECRET);
+    expect(reply.stopReason, reply.errorMessage).toBe('stop');
+    const next = await runtime.complete(model, { messages: [
+      { role: 'user', content: 'ping', timestamp: 0 }, reply, { role: 'user', content: 'again', timestamp: 1 },
+    ] }, { sessionId: 'opencode-replay-session' });
+    expect(next.stopReason, next.errorMessage).toBe('stop');
+    const assistant = JSON.parse(server.seen[1]!.body).messages.find((message: { role: string }) => message.role === 'assistant');
+    expect(assistant).toMatchObject({ reasoning_content: 'THINK' });
+    expect(assistant).not.toHaveProperty('reasoning');
+    expect(server.seen[1]!.headers['x-opencode-session']).toBe('opencode-replay-session');
+    expect(server.seen.map(request => request.headers.authorization)).toEqual([`Bearer ${SECRET}`, `Bearer ${SECRET}`]);
   });
 
   it('runs a keyless (auth_mode none) profile with the fixed non-secret placeholder', async () => {

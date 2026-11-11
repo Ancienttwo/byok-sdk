@@ -27,7 +27,7 @@ async function refusal(work: () => unknown): Promise<string> {
   } catch (error) {
     expect(isRuntimeExecutionFailure(error)).toBe(true);
     if (!isRuntimeExecutionFailure(error)) throw error;
-    expect([error.phase, error.category, error.retry, error.failure.class]).toEqual(['start', 'authority', 'non-retryable', 'unknown']);
+    expect([error.phase, error.retry, error.failure.class]).toEqual(['start', 'non-retryable', 'unknown']);
     return error.message;
   }
   throw new Error('expected a refusal');

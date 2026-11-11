@@ -1,9 +1,9 @@
 import path from 'node:path';
-import type { DaemonConfig } from '../daemon/create-daemon';
-import { serviceLogDir } from '../daemon/host-layout';
-import { DeviceStore } from '../daemon/store';
-import type { ServiceInstallationOptions } from './service-installation';
-import { nodeAgentProgram, type ServiceDefinition } from './service-types';
+import type { DaemonConfig } from '../daemon/create-daemon.js';
+import { serviceLogDir } from '../daemon/host-layout.js';
+import { DeviceStore } from '../daemon/store.js';
+import type { ServiceInstallationOptions } from './service-installation.js';
+import { nodeAgentProgram, type ServiceDefinition } from './service-types.js';
 
 export interface AgentServiceDefinitionInput {
   config: Pick<DaemonConfig, 'productId' | 'productName' | 'storeDir' | 'branding'>;

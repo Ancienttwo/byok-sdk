@@ -1,5 +1,5 @@
 export const DURABLE_MAX_RESPAWNS = 2;
-import type { DurableLifecycle } from '../../types';
+import type { DurableLifecycle } from '../../types.js';
 /** Parent authority: replica claims can never grant recovery or clear unsafe work. */
 export class DurableRecovery {
   private readonly inflight = new Set<string>();

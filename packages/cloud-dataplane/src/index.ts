@@ -28,7 +28,7 @@
  */
 
 // The online surface — pool, stores, truth — owned by `./runtime`.
-export * from './runtime';
+export * from './runtime.js';
 
 // The forward-only migration runner, and the migration files it applies. The
 // SQL is authored in the repository's `deploy/sql/` and copied into this
@@ -41,14 +41,14 @@ export {
   migrate,
   readMigrationFiles,
   verifyMigrations,
-} from './migrate';
+} from './migrate.js';
 export type {
   MigrationFile,
   MigrationResult,
   MigrationStateIssue,
   MigrationVerificationRow,
-} from './migrate';
-export { migrationsDir } from './migrations-dir';
+} from './migrate.js';
+export { migrationsDir } from './migrations-dir.js';
 
 // Host-owned retention/dead-letter/R2 GC and reconciliation. This is separate
 // from CoreStores because it coordinates one concrete SQL authority with one
@@ -56,7 +56,7 @@ export { migrationsDir } from './migrations-dir';
 export {
   PostgresCloudCleanup,
   createPostgresCloudMaintenance,
-} from './cleanup';
+} from './cleanup.js';
 
 export type {
   ObjectStorageReconcileResult,
@@ -67,7 +67,7 @@ export type {
   ObjectUsageRebuildResult,
   PostgresCloudCleanupOptions,
   PostgresCloudMaintenanceOptions,
-} from './cleanup';
+} from './cleanup.js';
 
 // Package-owned destructive maintenance. This is intentionally Node-only: an
 // operator passes a direct-DSN pool, while the Worker `./runtime` surface never
@@ -78,7 +78,7 @@ export {
   PostgresTenantErasure,
   TenantErasureError,
   createPostgresTenantErasure,
-} from './tenant-erasure';
+} from './tenant-erasure.js';
 export type {
   PostgresTenantErasureCompositionOptions,
   PostgresTenantErasureOptions,
@@ -87,11 +87,13 @@ export type {
   TenantErasureReadback,
   TenantErasureResult,
   TenantErasureStatus,
-} from './tenant-erasure';
+} from './tenant-erasure.js';
+export { retireAgentlessTasks } from './retire-agentless-tasks.js';
+export type { RetireAgentlessTasksOptions, RetireAgentlessTasksResult } from './retire-agentless-tasks.js';
 
 // Resident Node session listener; deliberately excluded from ./runtime.
-export { createPostgresMailboxWake, MailboxWakeProbeMissedError } from './mailbox-wake';
-export type { PostgresMailboxWake, PostgresMailboxWakeOptions } from './mailbox-wake';
-export { createPostgresTaskEventsWake, TaskEventsWakeProbeMissedError } from './task-events-wake';
-export type { PostgresTaskEventsWake, PostgresTaskEventsWakeOptions } from './task-events-wake';
-export type { PostgresWakeOptions } from './postgres-wake';
+export { createPostgresMailboxWake, MailboxWakeProbeMissedError } from './mailbox-wake.js';
+export type { PostgresMailboxWake, PostgresMailboxWakeOptions } from './mailbox-wake.js';
+export { createPostgresTaskEventsWake, TaskEventsWakeProbeMissedError } from './task-events-wake.js';
+export type { PostgresTaskEventsWake, PostgresTaskEventsWakeOptions } from './task-events-wake.js';
+export type { PostgresWakeOptions } from './postgres-wake.js';

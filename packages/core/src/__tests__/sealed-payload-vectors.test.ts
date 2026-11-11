@@ -42,7 +42,6 @@ import {
   deriveSealedMacKey,
   sealScopeKeyPackage,
   type ScopeKeyPackage,
-  type ScopeKeyPackageV1,
 } from '../sealed-payload/scope-key';
 import {
   encodeSealedFrame,
@@ -104,9 +103,9 @@ async function vectorMember(name: string): Promise<VectorMember> {
 const TENANT = 'tenant-1';
 const SCOPE = { id: 'scope-1', epoch: 1 } as const;
 const SEALING = { scopeId: SCOPE.id, epoch: SCOPE.epoch } as const;
-/** Key package signing prefix and HPKE info, by package version (#654 E5b-2 adds version 2). */
-const PACKAGE_DOMAIN = { 1: 'byok-scope-key-package-v1\n', 2: 'byok-scope-key-package-v2\n' } as const;
-const PACKAGE_INFO = { 1: 'byok-sdk.scope-key.v1', 2: 'byok-sdk.scope-key.v2' } as const;
+/** Key package signing prefix and HPKE info (#654 E5b-2). */
+const PACKAGE_DOMAIN = 'byok-scope-key-package-v2\n';
+const PACKAGE_INFO = 'byok-sdk.scope-key.v2';
 
 /**
  * RFC 8785 Appendix B, Table 1, row by row: IEEE 754 bits and the canonical
@@ -426,8 +425,8 @@ function rawPoint(pair: VectorKeyPair): Uint8Array {
   return Buffer.concat([Buffer.from([4]), Buffer.from(pair.x, 'base64url'), Buffer.from(pair.y, 'base64url')]);
 }
 
-function signedPackage(unsigned: Omit<ScopeKeyPackageV1, 'sig'>, signer: VectorMember): ScopeKeyPackageV1 {
-  const input = Buffer.concat([Buffer.from(PACKAGE_DOMAIN[1]), canonicalizeJsonBytes({ ...unsigned })]);
+function signedPackage(unsigned: Omit<ScopeKeyPackage, 'sig'>, signer: VectorMember): ScopeKeyPackage {
+  const input = Buffer.concat([Buffer.from(PACKAGE_DOMAIN), canonicalizeJsonBytes({ ...unsigned })]);
   const key = { key: { kty: 'EC', crv: 'P-256', ...signer.signing }, format: 'jwk', dsaEncoding: 'ieee-p1363' } as const;
   return { ...unsigned, sig: sign('sha256', input, key).toString('base64url') };
 }
@@ -440,12 +439,14 @@ async function keyPackageVectors(
 ): Promise<KeyPackageVector[]> {
   const expected = { tenantId: TENANT, scopeId: SCOPE.id, epoch: SCOPE.epoch };
 
-  // Version 1 packages, as members sealed them before version 2: core now seals only version 2.
-  const sealV1 = async (kem: VectorKeyPair, keyId: string): Promise<ScopeKeyPackageV1> => {
-    const identity = { v: 1 as const, tenantId: TENANT, scopeId: SCOPE.id, epoch: SCOPE.epoch, keyId, recipient: device.memberId, sender: client.memberId };
+  // Packages core's seal cannot make: wrapped to another key, or naming another key's id, each for the device's KEM epoch 1.
+  const sealCrafted = async (kem: VectorKeyPair, keyId: string): Promise<ScopeKeyPackage> => {
+    const identity = {
+      v: 2 as const, tenantId: TENANT, scopeId: SCOPE.id, epoch: SCOPE.epoch, keyId, recipient: device.memberId, sender: client.memberId, recipientKemEpoch: 1,
+    };
     const hpke = await hpkeSealBase({
       recipientPublicKey: rawPoint(kem),
-      info: new TextEncoder().encode(PACKAGE_INFO[1]),
+      info: new TextEncoder().encode(PACKAGE_INFO),
       aad: canonicalizeJsonBytes(identity),
       plaintext: scopeKey,
     });
@@ -455,13 +456,12 @@ async function keyPackageVectors(
     );
   };
   const keyId = await deriveScopeKeyId(scopeKey);
-  const valid = await sealV1(device.kem, keyId);
-  const wrongKem = await sealV1(stranger.kem, keyId);
+  const wrongKem = await sealCrafted(stranger.kem, keyId);
   // A package signed by its sender whose key id names another key.
-  const keyIdMismatch = await sealV1(device.kem, await deriveScopeKeyId(labelBytes('other-scope-key')));
+  const keyIdMismatch = await sealCrafted(device.kem, await deriveScopeKeyId(labelBytes('other-scope-key')));
 
-  // A version 2 package wrapped to the device's KEM key of epoch 1.
-  const validV2 = await sealScopeKeyPackage({
+  // A package wrapped to the device's KEM key of epoch 1.
+  const valid = await sealScopeKeyPackage({
     scopeKey,
     tenantId: TENANT,
     scopeId: SCOPE.id,
@@ -483,9 +483,8 @@ async function keyPackageVectors(
     vector('unexpected-epoch', valid, 'key_package_invalid', { expected: { ...expected, epoch: 2 } }),
     vector('sender-key-of-another-member', valid, 'key_package_invalid', { sender: device.name }),
     vector('opened-by-another-member', valid, 'key_package_invalid', { recipient: stranger.name }),
-    vector('v2-client-to-device', validV2, 'ok'),
-    vector('v2-opened-with-another-kem-epoch', validV2, 'key_package_invalid', { recipientKemEpoch: 2 }),
-    vector('v2-kem-epoch-changed', { ...validV2, recipientKemEpoch: 2 }, 'key_package_signature_invalid', { recipientKemEpoch: 2 }),
+    vector('opened-with-another-kem-epoch', valid, 'key_package_invalid', { recipientKemEpoch: 2 }),
+    vector('kem-epoch-changed', { ...valid, recipientKemEpoch: 2 }, 'key_package_signature_invalid', { recipientKemEpoch: 2 }),
   ];
 }
 
@@ -682,7 +681,7 @@ async function hpkeOpenWith(pair: VectorKeyPair, pkg: ScopeKeyPackage): Promise<
     // @hpke/core derives the recipient public key from the private key, so this import is extractable.
     recipientKey: await crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', ...pair }, { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']),
     enc: arrayBuffer(Buffer.from(enc, 'base64url')),
-    info: arrayBuffer(Buffer.from(PACKAGE_INFO[pkg.v])),
+    info: arrayBuffer(Buffer.from(PACKAGE_INFO)),
   });
   return Buffer.from(await context.open(arrayBuffer(Buffer.from(ciphertext, 'base64url')), arrayBuffer(Buffer.from(oracleCanonical(identity)))));
 }
@@ -728,7 +727,7 @@ describe('sealed-payload v1 vectors', () => {
     expect(new Set(golden.keyPackages.map((vector) => vector.expect))).toEqual(
       new Set(['ok', 'key_package_open_failed', 'key_package_signature_invalid', 'key_package_invalid']),
     );
-    expect(new Set(golden.keyPackages.map((vector) => vector.package.v))).toEqual(new Set([1, 2]));
+    expect(new Set(golden.keyPackages.map((vector) => vector.package.v))).toEqual(new Set([2]));
   });
 });
 
@@ -899,12 +898,12 @@ describe('sealed-payload v1 vectors against an independent oracle', () => {
     };
     const signatureVerifies = (pkg: ScopeKeyPackage) => {
       const { sig, ...unsigned } = pkg;
-      const input = Buffer.concat([Buffer.from(PACKAGE_DOMAIN[pkg.v]), Buffer.from(oracleCanonical(unsigned), 'utf8')]);
+      const input = Buffer.concat([Buffer.from(PACKAGE_DOMAIN), Buffer.from(oracleCanonical(unsigned), 'utf8')]);
       return oracleVerify(memberById(pkg.sender).signing, input, sig);
     };
     for (const vector of golden.keyPackages) {
-      expect(vector.package.v).toBe(vector.name.startsWith('v2-') ? 2 : 1);
-      expect(signatureVerifies(vector.package)).toBe(vector.name !== 'signature-flipped' && vector.name !== 'v2-kem-epoch-changed');
+      expect(vector.package.v).toBe(2);
+      expect(signatureVerifies(vector.package)).toBe(vector.name !== 'signature-flipped' && vector.name !== 'kem-epoch-changed');
       switch (vector.name) {
         case 'sealed-to-another-kem-key':
           await expect(hpkeOpenWith(device.kem, vector.package)).rejects.toThrow();
@@ -916,17 +915,15 @@ describe('sealed-payload v1 vectors against an independent oracle', () => {
           expect(oracleKeyId(opened)).not.toBe(vector.package.keyId);
           break;
         }
-        case 'v2-opened-with-another-kem-epoch': {
+        case 'opened-with-another-kem-epoch': {
           const pkg = vector.package;
-          if (pkg.v !== 2) throw new Error(`${vector.name} is not a version 2 package`);
           expect(pkg.recipientKemEpoch).toBe(1);
           expect(vector.recipientKemEpoch).toBe(2);
           await expectOpensToScopeKey(pkg);
           break;
         }
-        case 'v2-kem-epoch-changed': {
+        case 'kem-epoch-changed': {
           const pkg = vector.package;
-          if (pkg.v !== 2) throw new Error(`${vector.name} is not a version 2 package`);
           // The epoch is in the HPKE AAD and under the signature; restoring it is the only fix the package needs.
           expect(pkg.recipientKemEpoch).toBe(vector.recipientKemEpoch);
           await expect(hpkeOpenWith(device.kem, pkg)).rejects.toThrow();

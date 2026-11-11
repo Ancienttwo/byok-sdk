@@ -1,4 +1,4 @@
-import type { CollectExpiredInput, CollectExpiredResult } from './retention';
+import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
 /**
  * Hosted mailbox contract (§12.7.3).
  *
@@ -14,9 +14,9 @@ import type { CollectExpiredInput, CollectExpiredResult } from './retention';
  * message because core is protocol-free: the frozen v1 shape lives in
  * `@byok-sdk/protocol`, and core must not grow an edge to it (§12.1 invariant).
  */
-import type { ContentHash } from './blob';
-import { ByokCoreError } from './errors';
-import type { TenantId } from './tenant';
+import type { ContentHash } from './blob.js';
+import { ByokCoreError } from './errors.js';
+import type { TenantId } from './tenant.js';
 
 /**
  * Row lifecycle. `pending` and `acked` are derived from the device cursor;

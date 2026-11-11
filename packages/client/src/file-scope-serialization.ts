@@ -1,6 +1,6 @@
 import path from 'node:path';
-import type { ToolFileAccess } from './tool-authorization';
-import type { FileScopeGrant, FileScopeIdentity, FileScopeRootGrant } from './file-scope-guard';
+import type { ToolFileAccess } from './tool-authorization.js';
+import type { FileScopeGrant, FileScopeIdentity, FileScopeRootGrant } from './file-scope-guard.js';
 
 /**
  * The JSON-safe form of a FileScopeGrant that travels in the digest-bound Pi

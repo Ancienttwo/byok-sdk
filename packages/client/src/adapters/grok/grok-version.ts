@@ -1,4 +1,4 @@
-import type { RuntimeVersionPolicy } from '../../types';
+import type { RuntimeVersionPolicy } from '../../types.js';
 
 /**
  * Grok version policy, as for Codex: the version is read, never gated by

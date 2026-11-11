@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { KOFFI } from './sdk-native-assets-pin';
+import { KOFFI } from './sdk-native-assets-pin.js';
 function absoluteRoot(root: string): string {
   if (typeof root !== 'string' || !path.isAbsolute(root) || /[\0\r\n]/u.test(root)) throw new Error('SDK native asset root must be an absolute directory');
   return root;

@@ -86,7 +86,7 @@ for (const mode of ['fresh', 'resume'] as const) {
         FAKE_CODEX_STATUS_EXTRA: JSON.stringify([{ name: 'leak', pluginId: 'example@market', runtimeStatus: 'connected' }]),
       });
       await expect(startPreparedOperation(adapter, offer, resources)).rejects.toMatchObject({
-        phase: 'start', category: 'authority', retry: 'non-retryable',
+        phase: 'start', retry: 'non-retryable',
         message: expect.stringContaining('thread still runs MCP servers outside the task'),
       });
       expect(launches[0]).toContain('features.plugins=false');

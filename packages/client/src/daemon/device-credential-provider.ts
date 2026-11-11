@@ -1,6 +1,6 @@
-import { DeviceCredentialStore, DeviceCredentialStoreError, type DeviceCredentialConfig } from './device-credential-store';
-import { OsDeviceMemberCustody, type DeviceMemberCustodyBackend } from './device-member-custody';
-import { pickPlainDataProperties } from '../util/plain-data';
+import { DeviceCredentialStore, DeviceCredentialStoreError, type DeviceCredentialConfig } from './device-credential-store.js';
+import { OsDeviceMemberCustody, type DeviceMemberCustodyBackend } from './device-member-custody.js';
+import { pickPlainDataProperties } from '../util/plain-data.js';
 
 interface CredentialProviderOptions {
   productId: string;

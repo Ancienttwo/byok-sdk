@@ -25,7 +25,6 @@ import {
   E2eeMemberChainEntrySchema,
   E2eeMemberKeyBundleSchema,
   E2eeScopeKeyPackageSchema,
-  E2eeScopeKeyPackageV2Schema,
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 
@@ -181,7 +180,7 @@ describe('protocol E2EE member shapes match core', () => {
       { label: 'original', value: pkg },
       { label: 'other keyId', value: { ...pkg, keyId: 'A'.repeat(22) } },
       { label: 'other sig', value: { ...pkg, sig: `${'A'.repeat(85)}Q` } },
-      // A stored version 1 package: core checks its signature, not its shape.
+      // A version 1 package: refused by core and by the read and put shapes (#1789).
       { label: 'version 1', value: v1 },
       ...variants(pkg, {
         v: [1, 3],
@@ -206,8 +205,6 @@ describe('protocol E2EE member shapes match core', () => {
       });
       const core = verdict.ok || verdict.reason !== 'key_package_invalid';
       expect(E2eeScopeKeyPackageSchema.safeParse(json(value)).success, label).toBe(core);
-      // A put takes version 2 only.
-      expect(E2eeScopeKeyPackageV2Schema.safeParse(json(value)).success, label).toBe(core && value.v === 2);
     }
   });
 });

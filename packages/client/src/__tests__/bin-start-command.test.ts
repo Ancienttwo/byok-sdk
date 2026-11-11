@@ -229,7 +229,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
       expect(adapter.sessions).toHaveLength(3);
       void adapter.sessions[2]!.requestApproval(SENTINEL);
       await vi.waitFor(async () => expect((await readAuditRecords(storeDir)).some((r) => r.kind === 'awaiting-approval')).toBe(true));
-      adapter.sessions[2]!.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: SENTINEL }));
+      adapter.sessions[2]!.fail(new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason: SENTINEL }));
       await server.waitFor((e) => e.type === 'task.fail' && e.task_id === 'task-3');
       await vi.waitFor(async () => expect((await readAuditRecords(storeDir)).filter((r) => r.kind === 'failed')).toHaveLength(2));
 

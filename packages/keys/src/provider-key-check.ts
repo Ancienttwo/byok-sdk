@@ -1,9 +1,10 @@
-import { AnthropicMessagesClient } from './anthropic-client';
-import type { ProviderKeyCheckOutcome } from './custody';
-import { ByokKeysError } from './errors';
-import type { ProviderFetch } from './http';
-import { OpenAiCompatibleChatClient } from './openai-client';
-import type { ModelProviderProfile } from './provider-profile';
+import packageManifest from '../package.json' with { type: 'json' };
+import { AnthropicMessagesClient } from './anthropic-client.js';
+import type { ProviderKeyCheckOutcome } from './custody.js';
+import { ByokKeysError } from './errors.js';
+import type { ProviderFetch } from './http.js';
+import { OpenAiCompatibleChatClient } from './openai-client.js';
+import type { ModelProviderProfile } from './provider-profile.js';
 
 /** Default bound on one key check, below the transport's own 15 s ceiling. */
 export const PROVIDER_KEY_CHECK_TIMEOUT_MS = 10_000;
@@ -35,9 +36,17 @@ export async function checkProviderKey(
   secret: string,
   options: ProviderKeyCheckOptions = {},
 ): Promise<Exclude<ProviderKeyCheckOutcome, 'not_run'>> {
+  const sessionId = profile.provider_kind === 'opencode-go' ? crypto.randomUUID() : undefined;
+  const fetchImpl: ProviderFetch | undefined = sessionId === undefined ? options.fetchImpl : (input, init) => {
+    const headers = new Headers(init?.headers);
+    // Pi's withOpenCodeSessionHeader sends the session id for OpenCode Go routing.
+    headers.set('x-opencode-session', sessionId);
+    headers.set('user-agent', `@byok-sdk/keys/${packageManifest.version}`);
+    return (options.fetchImpl ?? fetch)(input, { ...init, headers });
+  };
   const client = profile.adapter === 'anthropic'
-    ? new AnthropicMessagesClient({ fetchImpl: options.fetchImpl, profile, secret })
-    : new OpenAiCompatibleChatClient({ fetchImpl: options.fetchImpl, profile, secret });
+    ? new AnthropicMessagesClient({ fetchImpl, profile, secret })
+    : new OpenAiCompatibleChatClient({ fetchImpl, profile, secret });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort('provider_key_check_timeout'), options.timeoutMs ?? PROVIDER_KEY_CHECK_TIMEOUT_MS);
   try {

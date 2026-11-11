@@ -1,20 +1,20 @@
 // `TaskRunner.handleOffer`: one offer from redelivery guard to active task
 // (see ./support.ts for how a member module runs).
-import type { ExecutionScratch } from '../retention/scratch';
-import type { PreparedAgentMemoryMode, TaskDeclinePayload } from '@byok-sdk/protocol';
-import { type AgentHomeExecutionBinding, type AgentRef } from '../../agent-home';
-import type { OfferPhaseContext } from './support';
-import { settleAgentMemoryCommitCopy } from './agent-memory';
-import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable';
-import { hostDeclineSender, offeredPreparation, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage, outboundErrorMessage } from './support';
-import type { TaskRunner } from '../task-runner';
-import type { AcceptedOfferPayload } from './support';
-import { offerAlreadyHandled } from './offer-admission';
-import { bindOfferWorkspace } from './offer-workspace';
-import { sealOfferManifest, claimOffer, startOfferRuntime } from './offer-launch';
-import type { OfferAdmissionTiming } from './offer-admission-timing';
-import { hostFor, type HostOfferContext } from './host';
-import type { OfferFactsV1 } from './state';
+import type { ExecutionScratch } from '../retention/scratch.js';
+import { offerSelectionViolation, type PreparedAgentMemoryMode, type TaskDeclinePayload } from '@byok-sdk/protocol';
+import { type AgentHomeExecutionBinding, type AgentRef } from '../../agent-home.js';
+import type { OfferPhaseContext } from './support.js';
+import { settleAgentMemoryCommitCopy } from './agent-memory.js';
+import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable.js';
+import { hostDeclineSender, offeredPreparation, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage, outboundErrorMessage } from './support.js';
+import type { TaskRunner } from '../task-runner.js';
+import type { AcceptedOfferPayload } from './support.js';
+import { offerAlreadyHandled } from './offer-admission.js';
+import { bindOfferWorkspace } from './offer-workspace.js';
+import { sealOfferManifest, claimOffer, startOfferRuntime } from './offer-launch.js';
+import type { OfferAdmissionTiming } from './offer-admission-timing.js';
+import { hostFor, type HostOfferContext } from './host.js';
+import type { OfferFactsV1 } from './state.js';
 
 /** What the offer's `finally` releases. The stage that acquires a lease records it here at once, so a throw still releases it. */
 export interface OfferHeld {
@@ -400,23 +400,9 @@ function readOfferRequest(
   const agentRef: AgentRef = offeredRef;
   hostFor(this).setAgentRef(taskId, agentRef);
   const homeAccess = offeredHomeAccess(payload);
-  if (homeAccess === 'memory-reader' && (payload.agentMemory === 'read-write' || payload.agentMemory === 'read-write-if-admitted')) {
-    decline('agent_memory_selection_invalid: a memory-reader Attempt reads memory only', false);
-    return;
-  }
-  if (
-    payload.dispatchSelection !== undefined &&
-    payload.runtime !== undefined &&
-    payload.runtime !== payload.dispatchSelection.runtimeId
-  ) {
-    decline(
-      `offer runtime ${payload.runtime} does not match dispatchSelection.runtimeId ${payload.dispatchSelection.runtimeId}`,
-      false,
-    );
-    return;
-  }
-  if (payload.harnessId !== undefined && (payload.runtime !== undefined || payload.dispatchSelection !== undefined)) {
-    decline('harnessId cannot be combined with a built-in runtime selection', false);
+  const violation = offerSelectionViolation(payload);
+  if (violation !== undefined) {
+    decline(`${violation.rule}: ${violation.message}`, false, violation.rule);
     return;
   }
   if (this['deps'].agentHome === undefined || this['deps'].agentSessionHandoffs === undefined) {

@@ -7,6 +7,8 @@ import { PostgresPairingCodeStore } from '../stores/pairing-codes';
 import { PostgresTaskAttemptStore } from '../stores/task-attempts';
 import { createDataplaneScope, SKIP_DATAPLANE, SKIP_REASON } from './support/dataplane';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const TENANT = tenantId('tenant-issues-112-120');
 
@@ -56,7 +58,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Issues #112/#120 Postgres regressions — ${SKI
       await migrate(scope.pool, DEPLOY_SQL);
       const clock = createMutableClock();
       const tasks = new PostgresTaskAttemptStore(scope.pool, clock);
-      await tasks.open(TENANT, { taskId: 'issue-message-live', deviceId: 'device-issue' });
+      await tasks.reserveAgentOffer(TENANT, { taskId: 'issue-message-live', deviceId: 'device-issue', agentRef: AGENT_REF });
 
       const reservations = await Promise.all(Array.from({ length: 16 }, () =>
         tasks.reserveAgentMessage(TENANT, {
@@ -69,7 +71,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Issues #112/#120 Postgres regressions — ${SKI
       expect(reservations.filter((result) => result === 'reserved')).toHaveLength(1);
       expect(reservations.filter((result) => result === 'pending')).toHaveLength(15);
 
-      await tasks.open(TENANT, { taskId: 'issue-message-cancelled', deviceId: 'device-issue' });
+      await tasks.reserveAgentOffer(TENANT, { taskId: 'issue-message-cancelled', deviceId: 'device-issue', agentRef: AGENT_REF });
       await scope.pool.query(
         `UPDATE task SET status = 'cancel_requested', cancel_requested_at = $3 WHERE tenant_id = $1 AND task_id = $2`,
         [TENANT, 'issue-message-cancelled', clock.now().toISOString()],
@@ -98,7 +100,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Issues #112/#120 Postgres regressions — ${SKI
         messageId: '10000000-0000-4000-8000-000000001121',
         payloadBody: '{"message":"exact"}',
       };
-      await tasks.open(TENANT, { taskId, deviceId: input.deviceId });
+      await tasks.reserveAgentOffer(TENANT, { taskId, deviceId: input.deviceId, agentRef: AGENT_REF });
       expect(await tasks.reserveAgentMessage(TENANT, input)).toBe('reserved');
       clock.advance(60_000);
       expect(await tasks.reserveAgentMessage(TENANT, input)).toBe('pending');

@@ -30,6 +30,8 @@ import { describe, expect, it } from 'vitest';
 import { registration, TENANT_A, TENANT_B } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 export function runCloudTenantIsolationConformance(factory: CloudCompositionFactory): void {
   describe('tenant isolation', () => {
     it('does not leak activity tails', async () => {
@@ -202,14 +204,14 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
 
     it('does not leak task attempts or let a guess touch another tenant row', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
-        await stores.tasks.open(TENANT_A, { taskId: 'task-1', deviceId: 'device-1' });
+        await stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-1', deviceId: 'device-1', agentRef: AGENT_REF });
 
         expect(await stores.tasks.get(TENANT_B, 'task-1')).toBeUndefined();
         expect(
           await stores.tasks.claim(TENANT_B, { taskId: 'task-1', deviceId: 'device-9' }),
         ).toBeUndefined();
         expect(
-          await stores.tasks.recordStatus(TENANT_B, { taskId: 'task-1', status: 'failed' }),
+          await stores.tasks.recordStatus(TENANT_B, { taskId: 'task-1', status: 'failed', agentRef: AGENT_REF }),
         ).toBeUndefined();
 
         // Tenant A's row is untouched, and tenant B conjured nothing.

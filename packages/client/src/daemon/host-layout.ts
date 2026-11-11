@@ -1,8 +1,8 @@
 import os from 'node:os';
 import path from 'node:path';
-import { AGENT_HOME_DIRECTORY } from '../agent-home';
-import { HostLayoutInputError } from './daemon-errors';
-import { scratchRootSocketBudget, shortScratchRoot } from './retention/scratch';
+import { AGENT_HOME_DIRECTORY } from '../agent-home.js';
+import { HostLayoutInputError } from './daemon-errors.js';
+import { scratchRootSocketBudget, shortScratchRoot } from './retention/scratch.js';
 
 /** Platforms `resolveHostLayout` has a layout for. */
 export type HostLayoutPlatform = 'darwin' | 'linux' | 'win32';

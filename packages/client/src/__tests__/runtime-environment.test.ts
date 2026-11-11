@@ -151,6 +151,36 @@ describe('runtimes.pi.packageDir', () => {
   });
 });
 
+// #1759: runtimes.<id>.runtimeEnvironment replaces the top-level policy for that runtime alone.
+describe('runtimes.<id>.runtimeEnvironment', () => {
+  const envOf = async (adapters: RuntimeAdapter[]) => Object.fromEntries(await Promise.all(adapters.map(async (adapter) => [adapter.descriptor.id, (await adapter.runtimeEnvironment()).env] as const)));
+
+  it('replaces the top-level policy wholesale: a top-level pass name does not reach that runtime', async () => {
+    useSnapshot(captured);
+    const env = await envOf(createRuntimeAdapters({
+      runtimeAllowlist: ['claude', 'codex'], runtimeEnvironment: { pass: ['HOST_PASSED_SENTINEL'] },
+      runtimes: { claude: { runtimeEnvironment: { pass: ['HOST_ONLY_SENTINEL'] } } },
+    }));
+    expect(env.claude).toMatchObject({ HOST_ONLY_SENTINEL: 'not-a-secret' });
+    expect(env.claude).not.toHaveProperty('HOST_PASSED_SENTINEL');
+    expect(env.codex).toMatchObject({ HOST_PASSED_SENTINEL: 'passed' });
+    expect(env.codex).not.toHaveProperty('HOST_ONLY_SENTINEL');
+  });
+
+  it.skipIf(process.platform === 'win32')('a name passed only on runtimes.dsh reaches dsh and no other runtime', async () => {
+    useSnapshot(captured);
+    process.env.TEST_DSH_PROVIDER_KEY = 'fake-dsh-key';
+    try {
+      const dsh = { home: await tmpDir('byok-env-dsh-'), model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' }, runtimeEnvironment: { pass: ['TEST_DSH_PROVIDER_KEY'] } };
+      const env = await envOf(createRuntimeAdapters({ runtimeAllowlist: ['pi', 'claude', 'codex', 'grok', 'dsh'], runtimes: { dsh } }));
+      expect(Object.keys(env)).toEqual(['pi', 'claude', 'codex', 'grok', 'dsh']);
+      for (const [id, childEnv] of Object.entries(env)) expect(childEnv.TEST_DSH_PROVIDER_KEY, id).toBe(id === 'dsh' ? 'fake-dsh-key' : undefined);
+    } finally {
+      delete process.env.TEST_DSH_PROVIDER_KEY;
+    }
+  });
+});
+
 describe('daemon wiring', () => {
   let server: TestServer;
   let daemon: Daemon | undefined;
@@ -175,7 +205,10 @@ describe('daemon wiring', () => {
     expect((await adapter!.runtimeEnvironment()).env.HOST_PASSED_SENTINEL).toBe('passed');
     expect(() => createDaemonWithAdapters({ ...base, runtimeEnvironment: {} }, [new StubRuntimeAdapter()]))
       .toThrow('DaemonConfig.runtimeEnvironment is only supported by createDaemon');
-    expect(() => createDaemon({ ...base, runtimeEnvironment: { base: 'inherit' } as never })).toThrow('DaemonConfig.runtimeEnvironment.base must be login-shell or allowlist');
+    expect(() => createDaemon({ ...base, runtimeEnvironment: { base: 'inherit' } as never })).toThrow(new TypeError('DaemonConfig.runtimeEnvironment.base must be login-shell or allowlist'));
+    expect(() => createDaemon({ ...base, runtimeEnvironment: { base: 'inherit' } as never })).toThrow(TypeError);
+    expect(() => createRuntimeAdapters({ runtimes: { codex: { runtimeEnvironment: { pass: ['BYOK_X'] } } } }))
+      .toThrow(new TypeError('DaemonConfig.runtimes.codex.runtimeEnvironment.pass must not name CLAUDECODE or BYOK_*'));
   });
 
   it('a task child gets the adapter environment; a failed capture declines the offer and reports the refusal', async () => {

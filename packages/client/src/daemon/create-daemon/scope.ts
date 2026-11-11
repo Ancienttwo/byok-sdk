@@ -1,22 +1,22 @@
 import type { Envelope } from '@byok-sdk/protocol';
-import type { RuntimeAdapter } from '../../types';
-import type { AgentReliableEgressRecord } from '../agent-egress-spool';
-import type { ApprovalRegistry } from '../approvals';
-import type { AuthManager } from '../auth-manager';
-import type { ControlMethods } from '../control-server';
-import type { AssertionIssueProbe, DaemonConfig, DaemonOverrides } from '../create-daemon';
-import type { DeviceMemberStatus } from '../e2ee-key-package-notice';
-import type { DaemonObserver } from '../observer';
-import type { OutboundStatus } from '../outbound-settlement';
-import type { RetentionRegistry } from '../retention/registry';
-import type { RetentionSweeper } from '../retention/sweeper';
-import type { TerminalCommitQueue } from '../terminal-commit-queue';
-import type { DaemonConfigScope } from './config';
-import type { DaemonFunctions } from './functions';
-import type { DaemonState } from './state';
-import type { DaemonStoreScope } from './stores';
-import type { DaemonWorkspaceScope } from './workspaces';
-import type { DaemonEffectiveConfig } from '../config-schema/effective';
+import type { RuntimeAdapter } from '../../types.js';
+import type { AgentReliableEgressRecord } from '../agent-egress-spool.js';
+import type { ApprovalRegistry } from '../approvals.js';
+import type { AuthManager } from '../auth-manager.js';
+import type { ControlMethods } from '../control-server.js';
+import type { AssertionIssueProbe, DaemonConfig, DaemonOverrides } from '../create-daemon.js';
+import type { DeviceMemberStatus } from '../e2ee-key-package-notice.js';
+import type { DaemonObserver } from '../observer.js';
+import type { OutboundStatus } from '../outbound-settlement.js';
+import type { RetentionRegistry } from '../retention/registry.js';
+import type { RetentionSweeper } from '../retention/sweeper.js';
+import type { TerminalCommitQueue } from '../terminal-commit-queue.js';
+import type { DaemonConfigScope } from './config.js';
+import type { DaemonFunctions } from './functions.js';
+import type { DaemonState } from './state.js';
+import type { DaemonStoreScope } from './stores.js';
+import type { DaemonWorkspaceScope } from './workspaces.js';
+import type { DaemonEffectiveConfig } from '../config-schema/effective.js';
 
 /** `buildDaemonWithAdapters`' own parameters, as its stages receive them (#926). */
 export interface DaemonInputs {

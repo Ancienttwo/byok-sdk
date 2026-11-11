@@ -30,8 +30,8 @@ import {
   isCoreError,
   type StorageErrorCode,
 } from '@byok-sdk/core';
-import type { BlobContentProxy, BlobReadErrorCode } from '../stores/ports';
-import { admitDeviceRequest, cancelBody, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
+import type { BlobContentProxy, BlobReadErrorCode } from '../stores/ports.js';
+import { admitDeviceRequest, cancelBody, readBoundedJsonBody, type DeviceRouteDeps } from './shared.js';
 
 /** The three bearer-authed routes: everything they touch goes through the tenant facade. */
 export interface BlobRouteDeps extends DeviceRouteDeps {

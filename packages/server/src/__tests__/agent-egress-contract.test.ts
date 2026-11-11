@@ -286,7 +286,7 @@ describe('reference-server Agent egress contract', () => {
       instruction: 'must not reinterpret resume as fresh',
       agentRef: AGENT_REF,
       egressPolicy: POLICY,
-    })).rejects.toThrow(/executions.submit/);
+    })).rejects.toMatchObject({ name: 'ByokCloudError', code: 'coordination_input_invalid' });
     expect((await instance.tasks.list()).tasks).toHaveLength(0);
 
     const offered = await instance.executions.submit({

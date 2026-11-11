@@ -1,10 +1,10 @@
-import type { McpEventIdentities } from '../../mcp/event-identity';
-import { parseClaudeContextWindow } from './control-channel';
+import type { McpEventIdentities } from '../../mcp/event-identity.js';
+import { parseClaudeContextWindow } from './control-channel.js';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { MessageDraftDelta } from '../../types';
-import { RuntimeExecutionFailure } from '../../runtime-failure';
+import type { MessageDraftDelta } from '../../types.js';
+import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 
 /**
  * A raw parsed line from `claude --output-format stream-json`. Shapes vary
@@ -75,7 +75,6 @@ export interface MapClaudeMessageResult {
 function missingToolCallIdFailure(frame: 'tool_use' | 'tool_result'): RuntimeExecutionFailure {
   return new RuntimeExecutionFailure({
     phase: 'run',
-    category: 'authority',
     retry: 'non-retryable',
     reason: `claude ${frame} frame had no authoritative tool call id`,
   });
@@ -417,7 +416,6 @@ function mapResult(msg: ClaudeStreamMessage): MapClaudeMessageResult {
     events,
     terminalFailure: new RuntimeExecutionFailure({
       phase: 'run',
-      category: msg.is_error === true ? 'semantic' : 'authority',
       retry: 'non-retryable',
       reason: msg.is_error === true ? 'claude reported terminal task failure' : 'claude emitted a malformed terminal result frame',
     }),

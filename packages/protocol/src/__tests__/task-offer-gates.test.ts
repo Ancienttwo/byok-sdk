@@ -13,6 +13,7 @@ import * as v5Release from 'byok-protocol-previous';
 
 import {
   AgentMemorySelectionSchema,
+  readDeclineCode,
   HostOfferPlainPayloadSchema,
   HostOfferSealedPayloadSchema,
   MESSAGE_PAYLOAD_SCHEMAS,
@@ -124,27 +125,43 @@ describe('Host offer selection admission (#1671)', () => {
   const plain = { agentRef: { agentId: 'agent', profileRevision: 'revision' }, runtime: 'codex',
     instruction: 'resume', session: { mode: 'resume', sessionRef: 'session' } };
   const selection = { lane: 'subscription', runtimeId: 'claude', providerId: null, modelId: 'model' };
+  const fresh = v6Offers.find(p => p.agentMemoryCommit !== undefined && p.sealing === undefined)!;
+  const native = { session: fresh.session, egressPolicy: fresh.egressPolicy, agentMemory: 'none', nativeSessions: { fromMs: 1, toMs: 2 } };
+  const nativeRule = 'native_sessions_selection_invalid';
   const rules = [
-    ['agentMemory', { homeAccess: 'memory-reader', agentMemory: 'read-write' }, 'agentMemory read-write requires a writer; a memory-reader Attempt reads memory only'],
-    ['agentMemory', { homeAccess: 'memory-reader', agentMemory: 'read-write-if-admitted' }, 'agentMemory read-write-if-admitted requires a writer; a memory-reader Attempt reads memory only'],
-    ['runtime', { dispatchSelection: selection }, 'runtime codex does not match dispatchSelection.runtimeId claude'],
-    ['harnessId', { harnessId: 'custom' }, 'harnessId conflicts with built-in runtime selection'],
-    ['harnessId', { runtime: undefined, harnessId: 'custom', dispatchSelection: selection }, 'harnessId conflicts with built-in runtime selection'],
+    ['agentMemory', { homeAccess: 'memory-reader', agentMemory: 'read-write' }, 'agentMemory read-write requires a writer; a memory-reader Attempt reads memory only', 'agent_memory_selection_invalid'],
+    ['agentMemory', { homeAccess: 'memory-reader', agentMemory: 'read-write-if-admitted' }, 'agentMemory read-write-if-admitted requires a writer; a memory-reader Attempt reads memory only', 'agent_memory_selection_invalid'],
+    ['runtime', { dispatchSelection: selection }, 'runtime codex does not match dispatchSelection.runtimeId claude', 'runtime_selection_mismatch'],
+    ['agentMemoryCommit', { homeAccess: 'memory-reader', agentMemoryCommit: 'on-success' }, 'agentMemoryCommit needs a writer; a memory-reader Attempt reads the live files', 'agent_memory_selection_invalid'],
+    ['session', { ...native, session: { mode: 'resume', sessionRef: 's' } }, 'nativeSessions needs a fresh session', nativeRule],
+    ['agentMemory', { ...native, agentMemory: 'read' }, 'nativeSessions needs agentMemory none', nativeRule],
+    ['agentMemory', { ...native, agentMemory: undefined }, 'nativeSessions needs agentMemory none', nativeRule],
+    ['terminalProjection', { ...native, terminalProjection: v6Offers.find(p => (p.terminalProjection as Json)?.mode === 'result-document')!.terminalProjection }, 'nativeSessions forbids terminal projection', nativeRule],
+    ...(['agentMemoryCommit', 'homeAccess', 'requiredToolsets', 'messageEgress', 'harnessId'] as const).map(field =>
+      [field, { ...native, [field]: v6Offers.find(p => p[field] !== undefined)![field] }, `nativeSessions forbids ${field}`, nativeRule] as const),
+    ['harnessId', { harnessId: 'custom' }, 'harnessId conflicts with built-in runtime selection', 'harness_selection_conflict'],
+    ['harnessId', { runtime: undefined, harnessId: 'custom', dispatchSelection: selection }, 'harnessId conflicts with built-in runtime selection', 'harness_selection_conflict'],
+    // Every rule fails at once: only the first, in the docs/protocol.md §3.2 order, is reported.
+    ['agentMemory', { homeAccess: 'memory-reader', agentMemory: 'read-write', dispatchSelection: selection, harnessId: 'custom' }, 'agentMemory read-write requires a writer; a memory-reader Attempt reads memory only', 'agent_memory_selection_invalid'],
+    ['agentMemoryCommit', { ...native, homeAccess: 'memory-reader', agentMemoryCommit: 'on-success', dispatchSelection: selection }, 'agentMemoryCommit needs a writer; a memory-reader Attempt reads the live files', 'agent_memory_selection_invalid'],
+    ['session', { ...native, session: { mode: 'resume', sessionRef: 's' }, agentMemory: 'read', dispatchSelection: selection }, 'nativeSessions needs a fresh session', nativeRule],
+    ['runtime', { dispatchSelection: selection, harnessId: 'custom' }, 'runtime codex does not match dispatchSelection.runtimeId claude', 'runtime_selection_mismatch'],
   ] as const;
   it.each([
     ...([
       ['plain', HostOfferPlainPayloadSchema, TaskOfferPlainPayloadSchema, plain],
       ['sealed', HostOfferSealedPayloadSchema, TaskOfferSealedPayloadSchema, v6Offers.find(p => p.sealing !== undefined)!],
-    ] as const).flatMap(([name, host, wire, base]) => rules.map(([path, patch, message]) =>
-      [name, host, wire, { ...base, runtime: 'codex', ...patch }, path, message] as const)),
+    ] as const).flatMap(([name, host, wire, base]) => rules.map(([path, patch, message, rule]) =>
+      [name, host, wire, { ...base, runtime: 'codex', ...patch }, path, message, rule] as const)),
     ['prepared', HostOfferPlainPayloadSchema, TaskOfferPlainPayloadSchema,
       { ...v6Offers.find(p => p.preparation !== undefined)!, homeAccess: 'memory-reader', agentMemory: 'read-write' },
-      'agentMemory', rules[0][2]],
-  ] as const)('refuses invalid selection on %s without tightening the wire', (_name, host, wire, payload, path, message) => {
+      'agentMemory', rules[0][2], rules[0][3]],
+  ] as const)('refuses invalid selection on %s without tightening the wire', (_name, host, wire, payload, path, message, rule) => {
     expect(wire.safeParse(payload).success).toBe(true);
     const parsed = host.safeParse(payload);
     expect(parsed.error).toBeInstanceOf(z.ZodError);
-    expect(parsed.error!.issues).toEqual([{ code: 'custom', path: [path], message }]);
+    expect(parsed.error!.issues).toEqual([{ code: 'custom', path: [path], message, params: { rule } }]);
+    expect(readDeclineCode(rule)).toEqual({ code: rule });
   });
 });
 
@@ -157,14 +174,9 @@ describe('native session offer admission (#1526)', () => {
     expect(requiredReceiverCapabilities('task.offer', native)).toContain('native-sessions');
     expect(HostOfferPlainPayloadSchema.parse({ ...native, nativeSessions: { fromMs: 1, toMs: 2, ifAdvertised: true } }).nativeSessions).toEqual({ fromMs: 1, toMs: 2, ifAdvertised: true });
   });
-  it.each([
-    ['session', { mode: 'resume', sessionRef: 's' }], ['agentMemory', 'read'], ['agentMemory', undefined],
-    ['terminalProjection', v6Offers.find(p => (p.terminalProjection as Json)?.mode === 'result-document')!.terminalProjection],
-    ...['agentMemoryCommit', 'homeAccess', 'preparation', 'requiredToolsets', 'messageEgress', 'harnessId'].map(field =>
-      [field, v6Offers.find(p => p[field] !== undefined)![field]]),
-  ])('refuses nativeSessions with %s=%j', (field, value) => {
-    const result = TaskOfferPlainPayloadSchema.safeParse({ ...native, [field as string]: value });
-    expect(result.success).toBe(false);
-    expect(result.error!.issues.some(issue => issue.path[0] === field)).toBe(true);
+  // The other nativeSessions combinations are offer selection rules (#1671 table above); a prepared shape stays structural.
+  it('refuses nativeSessions with preparation in the wire decoder', () => {
+    const result = TaskOfferPlainPayloadSchema.safeParse({ ...native, preparation: v6Offers.find(p => p.preparation !== undefined)!.preparation });
+    expect(result.error!.issues.some(issue => issue.path[0] === 'instruction')).toBe(true);
   });
 });

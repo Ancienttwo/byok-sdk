@@ -1,18 +1,17 @@
-import { ProjectionWaiters } from './projection-waiters';
-export { listenLoopback } from './loopback';
-export type { LoopbackPortStore, LoopbackHandler, LoopbackListenerOptions, LoopbackListener } from './loopback';
-import type { AgentMessageDraftEvent } from './types';
-export type { AgentMessageDraftEvent } from './types';
-import { WakeScheduler } from './wakes/scheduler';
-import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/types';
-export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError, WAKE_MAX_FUTURE_MS } from './wakes/types';
-export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types';
-import { MaintenanceScheduler, assertMaintenanceInterval, DEFAULT_MAINTENANCE_INTERVAL_MS } from './maintenance-scheduler';
+import { ProjectionWaiters } from './projection-waiters.js';
+export { listenLoopback } from './loopback.js';
+export type { LoopbackPortStore, LoopbackHandler, LoopbackListenerOptions, LoopbackListener } from './loopback.js';
+import type { AgentMessageDraftEvent } from './types.js';
+export type { AgentMessageDraftEvent } from './types.js';
+import { WakeScheduler } from './wakes/scheduler.js';
+import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/types.js';
+export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError, WAKE_MAX_FUTURE_MS } from './wakes/types.js';
+export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types.js';
+import { MaintenanceScheduler, assertMaintenanceInterval, DEFAULT_MAINTENANCE_INTERVAL_MS } from './maintenance-scheduler.js';
 import { resolveRetentionPolicy, DEFAULT_MAINTENANCE_LIMIT, ByokCloudError, type MaintenanceReport } from '@byok-sdk/cloud';
 export type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
 import {
-  AgentExecutionInputSchema,
   agentHomeProjectionRequestKey,
   capabilityDeclarationForPorts,
   createByokCloud,
@@ -38,30 +37,20 @@ import {
 } from '@byok-sdk/cloud';
 import {
   AgentContentReadPayloadSchema,
-  AgentEgressPolicySchema,
   AgentHomeProjectionPayloadSchema,
-  AgentMessageEgressRequirementSchema,
-  AgentMessageServerContextSchema,
   AgentRefSchema,
-  DispatchSelectionSchema,
-  RequiredToolsetsSchema,
   TASK_STATES,
-  TerminalProjectionSelectionSchema,
-  AgentHomeAccessSchema,
-  AgentMemorySelectionSchema,
   type AgentHomeProjectionPayload,
-  type AgentHomeAccess,
-  type AgentMemorySelection,
   type AgentRef,
   type AgentMessagePublishPayload,
   type AgentMessageDispositionPayload,
   type TaskState,
 } from '@byok-sdk/protocol';
-import { TaskEventRelay } from './relay';
-import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot';
-import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores';
-import { approvePendingApproval, createTaskHandle, noteAbandoned, rejectPendingApproval } from './task-handle';
-import { readTaskEvents, type TaskEventDeps, type TaskEventFacts, type TaskEventSources } from './task-events';
+import { TaskEventRelay } from './relay.js';
+import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot.js';
+import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores.js';
+import { approvePendingApproval, createTaskHandle, noteAbandoned, rejectPendingApproval } from './task-handle.js';
+import { readTaskEvents, type TaskEventDeps, type TaskEventFacts, type TaskEventSources } from './task-events.js';
 import type {
   ByokServerEvent,
   AgentContentReadRequest,
@@ -79,7 +68,7 @@ import type {
   TaskHandle,
   TaskResult,
   TaskSnapshot,
-} from './types';
+} from './types.js';
 
 export type {
   ByokServerEvent,
@@ -98,8 +87,8 @@ export type {
   TaskHandle,
   TaskResult,
   TaskSnapshot,
-} from './types';
-export { TaskEventsUnavailableError } from './types';
+} from './types.js';
+export { TaskEventsUnavailableError } from './types.js';
 export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
@@ -120,7 +109,7 @@ export { StaleApprovalError } from '@byok-sdk/cloud';
  * `task-handle.ts` for the full reasoning and for why `SteerRejectionCode` and
  * {@link StaleApprovalError} stay kernel re-exports.
  */
-export { SteerRejectedError } from './task-handle';
+export { SteerRejectedError } from './task-handle.js';
 export type { SteerRejectionCode } from '@byok-sdk/cloud';
 /**
  * Auth v2 types an embedder needs to talk about devices and tokens. All owned
@@ -129,10 +118,10 @@ export type { SteerRejectionCode } from '@byok-sdk/cloud';
  */
 export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenSigner } from '@byok-sdk/cloud';
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
-export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
-export type { SqliteSchemaErrorCode } from './sqlite-support';
-export { inspectSqliteStore } from './store-compatibility';
-export type { RateLimiterOptions } from './rate-limiter';
+export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support.js';
+export type { SqliteSchemaErrorCode } from './sqlite-support.js';
+export { inspectSqliteStore } from './store-compatibility.js';
+export type { RateLimiterOptions } from './rate-limiter.js';
 
 /** `GET /byok/events` hold duration (§8): ~50s unless overridden (e.g. for tests). */
 const DEFAULT_LONG_POLL_HOLD_MS = 50_000;
@@ -353,13 +342,6 @@ export interface ByokServer {
   stats(): Promise<HubStats>;
 }
 
-// A memory-reader Attempt reads memory only, so it cannot select a writing mode.
-function refuseReaderMemoryWrite(agentMemory: AgentMemorySelection | undefined, homeAccess: AgentHomeAccess | undefined): void {
-  if ((agentMemory === 'read-write' || agentMemory === 'read-write-if-admitted') && homeAccess === 'memory-reader') {
-    throw new Error(`agentMemory ${agentMemory} requires a writer; a memory-reader Attempt reads memory only`);
-  }
-}
-
 /**
  * Embedded reference coordinator: a thin façade over `@byok-sdk/cloud`'s
  * kernel, composed against the explicitly selected embedded stores.
@@ -514,10 +496,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     return { state: snapshot.state, at: snapshot.updatedAt, approval: { revision: pending.revision, ...(request === undefined ? {} : { request }) } };
   }
 
-  async function deviceCapabilities(deviceId: string): Promise<readonly string[] | undefined> {
-    return (await composition.cloud.devices.get(tenant, deviceId))?.capabilities;
-  }
-
   // An in-flight exclusion only; persisted task and receipt stores own identity.
   const dispatching = new Set<string>();
   /**
@@ -536,8 +514,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     const submission = { ...input };
     const taskId = submission.taskId;
     if (taskId === undefined) return dispatchInternal(submission);
-    if (typeof taskId !== 'string' || taskId.length === 0) throw new Error('taskId must be a non-empty string');
-    if (dispatching.has(taskId)) throw new Error('dispatch for this taskId is already in progress; retain the original binding');
+    if (typeof taskId !== 'string' || taskId.length === 0) throw new ByokCloudError('coordination_input_invalid', 'taskId must be a non-empty string');
+    if (dispatching.has(taskId)) throw new ByokCloudError('coordination_input_invalid', 'dispatch for this taskId is already in progress; retain the original binding');
     dispatching.add(taskId);
     try { return await dispatchInternal(submission); }
     finally { dispatching.delete(taskId); }
@@ -546,79 +524,25 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   async function dispatchInternal(
     input: DispatchInput,
   ): Promise<TaskHandle> {
-    const sessionRef = input.sessionRef;
-    // v4 has no runtime-only offer: every dispatch names its Agent.
-    const agentRef = AgentRefSchema.parse(input.agentRef);
-    const egressPolicy =
-      input.egressPolicy === undefined ? undefined : AgentEgressPolicySchema.parse(input.egressPolicy);
-    const messageEgress =
-      input.messageEgress === undefined ? undefined : AgentMessageEgressRequirementSchema.parse(input.messageEgress);
-    const terminalProjection =
-      input.terminalProjection === undefined
-        ? undefined
-        : TerminalProjectionSelectionSchema.parse(input.terminalProjection);
-    if (messageEgress === undefined && input.agentMessageContext !== undefined) {
-      throw new Error('agentMessageContext requires messageEgress');
+    const { sessionRef, agentRef, egressPolicy, messageEgress, terminalProjection,
+      homeAccess, agentMemory, agentMessageContext, dispatchSelection, requiredToolsets } = input;
+    if (messageEgress === undefined && agentMessageContext !== undefined) {
+      throw new ByokCloudError('coordination_input_invalid', 'agentMessageContext requires messageEgress');
     }
-    const homeAccess = input.homeAccess === undefined ? undefined : AgentHomeAccessSchema.parse(input.homeAccess);
-    const agentMemory = input.agentMemory === undefined ? undefined : AgentMemorySelectionSchema.parse(input.agentMemory);
-    refuseReaderMemoryWrite(agentMemory, homeAccess);
-    const agentMessageContext =
-      messageEgress === undefined ? undefined : AgentMessageServerContextSchema.parse(input.agentMessageContext);
-    const dispatchSelection =
-      input.dispatchSelection === undefined ? undefined : DispatchSelectionSchema.parse(input.dispatchSelection);
-    const requiredToolsets =
-      input.requiredToolsets === undefined ? undefined : RequiredToolsetsSchema.parse(input.requiredToolsets);
 
     if (messageEgress !== undefined && egressPolicy === undefined) {
-      throw new Error('Agent message egress requires the typed Agent egress offer path');
+      throw new ByokCloudError('coordination_input_invalid', 'Agent message egress requires the typed Agent egress offer path');
     }
 
     const deviceId = input.deviceId;
     if (typeof deviceId !== 'string' || deviceId.length === 0) {
-      throw new Error('dispatch requires an explicit deviceId (non-empty string)');
+      throw new ByokCloudError('coordination_input_invalid', 'dispatch requires an explicit deviceId (non-empty string)');
     }
 
-    // Agent dispatch is resume-only (#484): a fresh Agent execution has the
-    // single authority executions.submit. Refused before any capability read,
-    // so the caller gets this error whatever the target device advertises.
-    if (egressPolicy === undefined && (sessionRef === undefined || sessionRef.length === 0)) {
-      throw new Error(
-        'Agent resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
-      );
-    }
-
-    // The gates the kernel does not run, in the pre-fold order. Everything
-    // below the kernel DOES run (agent-home-contract, the
-    // egress/message/terminal-projection capabilities) is left to it rather
-    // than duplicated here, so there is one place each admission is decided.
-    const capabilities = await deviceCapabilities(deviceId);
-    if (dispatchSelection !== undefined && !(capabilities?.includes('dispatch-selection') ?? false)) {
-      throw new Error(
-        `device ${deviceId} did not advertise dispatch-selection capability; refusing authoritative provider/model dispatch`,
-      );
-    }
-    if (requiredToolsets !== undefined) {
-      if (!(capabilities?.includes('toolset-selection') ?? false)) {
-        throw new Error(
-          `device ${deviceId} did not advertise toolset-selection capability; refusing a task whose semantics require local MCP tools`,
-        );
-      }
-    }
-    if (
-      dispatchSelection !== undefined &&
-      input.runtime !== undefined &&
-      input.runtime !== dispatchSelection.runtimeId
-    ) {
-      throw new Error(
-        `dispatch runtime ${input.runtime} does not match dispatchSelection.runtimeId ${dispatchSelection.runtimeId}`,
-      );
-    }
-    const runtime = dispatchSelection?.runtimeId ?? input.runtime;
     const common = {
       ...(input.harnessId === undefined ? {} : { harnessId: input.harnessId }),
       instruction: input.instruction,
-      ...(runtime === undefined ? {} : { runtime }),
+      ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
       ...(dispatchSelection === undefined ? {} : { dispatchSelection }),
     };
 
@@ -630,11 +554,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     let enqueued: EnqueuedOffer;
     try {
       enqueued = await (async () => {
-        if (sessionRef === undefined) {
-          throw new Error(
-            'Agent egress resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
-          );
-        }
         if (egressPolicy !== undefined) {
           return cloud.enqueueAgentEgressOffer(tenant, deviceId, {
             taskId,
@@ -799,15 +718,13 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
     executions: {
       async submit(input) {
-        refuseSealedFields((input as { payload?: unknown } | undefined)?.payload);
-        const submission = AgentExecutionInputSchema.parse(input);
-        refuseReaderMemoryWrite(submission.payload.agentMemory, submission.payload.homeAccess);
-        const { taskId } = submission;
-        if (dispatching.has(taskId)) throw new Error('submission for this taskId is already in progress; retain the original binding');
+        if (input === null || input === undefined) return cloud.submitAgentExecution(tenant, input);
+        const { taskId } = input;
+        if (dispatching.has(taskId)) throw new ByokCloudError('coordination_input_invalid', 'submission for this taskId is already in progress; retain the original binding');
         dispatching.add(taskId);
         try {
           relay.provision(taskId);
-          const enqueued = await cloud.submitAgentExecution(tenant, submission);
+          const enqueued = await cloud.submitAgentExecution(tenant, input);
           relay.noteDispatched(taskId, enqueued.envelope.ts);
           return enqueued;
         } catch (error) {

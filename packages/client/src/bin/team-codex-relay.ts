@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
 import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
-import { isQualifiedCodexVersion, QUALIFIED_CODEX_VERSION } from '../adapters/codex/codex-version';
-import { decodeTeamMemberContext, type TeamMemberLease } from '../daemon/team-workspace';
+import { isQualifiedCodexVersion, QUALIFIED_CODEX_VERSION } from '../adapters/codex/codex-version.js';
+import { decodeTeamMemberContext, type TeamMemberLease } from '../daemon/team-workspace.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const record = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);

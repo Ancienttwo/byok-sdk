@@ -1,8 +1,8 @@
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
-import { loadSqliteModule } from '../sqlite-support';
-import type { MemoryIntentRow } from './memory';
-import { hash, isOccurrenceIntentKey, occurrenceIntentKey, taskId, time, type Json, type LedgerState, type Occurrence } from './model';
-import { agentKey } from './transitions';
+import { loadSqliteModule } from '../sqlite-support.js';
+import type { MemoryIntentRow } from './memory.js';
+import { hash, isOccurrenceIntentKey, occurrenceIntentKey, taskId, time, type Json, type LedgerState, type Occurrence } from './model.js';
+import { agentKey } from './transitions.js';
 
 export interface ProjectionOutboxLimits { maxCount?: number; maxBytes?: number }
 /**

@@ -1,7 +1,7 @@
-import { EXPIRING_CLASS_IDS, type ExpiringClassId } from './registry';
-import { defaultScratchRoot, validateScratchRoot } from './scratch';
+import { EXPIRING_CLASS_IDS, type ExpiringClassId } from './registry.js';
+import { defaultScratchRoot, validateScratchRoot } from './scratch.js';
 import path from 'node:path';
-import { foldNameAliases } from '../../util/fold-name-aliases';
+import { foldNameAliases } from '../../util/fold-name-aliases.js';
 
 export class LocalStorageConfigError extends Error {
   constructor(field: string, reason?: string) { super(`DaemonConfig.storage.${field} ${reason ?? 'is invalid'}`); this.name = 'LocalStorageConfigError'; }
@@ -49,7 +49,7 @@ export const DEFAULT_RETENTION_TTL_MS: Readonly<Record<ExpiringClassId, number>>
   'input-preparation': 0, 'confirmed-journal': 30 * 86_400_000, 'reader-run': 7 * 86_400_000,
   'agent-result': 7 * 86_400_000, 'home-temp': 3_600_000, 'skill-pack-old': 86_400_000,
   'session-ledger': 30 * 86_400_000, 'terminal-evidence': 30 * 86_400_000, 'pi-session-dir': 31 * 86_400_000,
-  'agy-session-store': 31 * 86_400_000,
+  'agy-session-store': 31 * 86_400_000, 'codex-session-store': 31 * 86_400_000,
 });
 function integer(value: number, field: string, minimum = 1): number {
   if (!Number.isSafeInteger(value) || value < minimum) throw new LocalStorageConfigError(field);
@@ -85,6 +85,10 @@ export function resolveStorageConfig(storeDir: string, input: StorageConfig = {}
   if (ttlMs['confirmed-journal'] <= 7 * 86_400_000) throw new LocalStorageConfigError('retention.ttlMs.confirmed-journal');
   // A live session ledger may name a Pi session to resume; that session file must outlive it by a day.
   if (ttlMs['pi-session-dir'] < ttlMs['session-ledger'] + 86_400_000) throw new LocalStorageConfigError('retention.ttlMs.pi-session-dir', "must be at least retention.ttlMs['session-ledger'] plus one day");
+  // The same holds for the Codex rollouts under an Agent home: a live ledger may name a thread to resume.
+  // An omitted TTL follows a longer ledger TTL, so a config that predates the class still resolves.
+  if (retention.ttlMs?.['codex-session-store'] === undefined) ttlMs['codex-session-store'] = Math.max(ttlMs['codex-session-store'], ttlMs['session-ledger'] + 86_400_000);
+  if (ttlMs['codex-session-store'] < ttlMs['session-ledger'] + 86_400_000) throw new LocalStorageConfigError('retention.ttlMs.codex-session-store', "must be at least retention.ttlMs['session-ledger'] plus one day");
   // A public entry: fold the store once here; both defaults derive from it.
   const store = foldNameAliases(storeDir);
   const configuredRoots = input.skillPackDataDirs;

@@ -1,9 +1,9 @@
 import {
   RESULT_OUTCOME_MAX_BYTES, RESULT_SCHEMA_MAX_BYTES, checkResultSchema, type ResultSchema,
   resultOutcomeMaxBytes,
-} from './result-schema';
-import { BOT_TURN_OUTCOME_CONTRACT } from './bot-turn-outcome-contract';
-import { ROUTINE_DAYS_OF_WEEK, type RoutineDayOfWeek } from './routine-schedule';
+} from './result-schema.js';
+import { BOT_TURN_OUTCOME_CONTRACT } from './bot-turn-outcome-contract.js';
+import { ROUTINE_DAYS_OF_WEEK, type RoutineDayOfWeek } from './routine-schedule.js';
 
 export { BOT_TURN_OUTCOME_CONTRACT };
 

@@ -1,10 +1,10 @@
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner';
-import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
-import { SERVICE_REDIRECT_LIMITS } from './service-log';
-import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types';
-import { SERVICE_UNIT_MARKER } from './service-unit';
+import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner.js';
+import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
+import { SERVICE_REDIRECT_LIMITS } from './service-log.js';
+import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types.js';
+import { SERVICE_UNIT_MARKER } from './service-unit.js';
 
 /**
  * Genuine-failure text that must NEVER be reclassified as "service already
@@ -199,7 +199,7 @@ ${argXml}${cwdXml}
  * `status()` queries `sc.exe` (the real Windows SCM query tool, always
  * present) rather than parsing WinSW's own `status` subcommand text.
  */
-export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {}): ManagedServiceLifecycle {
+export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {}, gateRoot?: string): ManagedServiceLifecycle {
   const run = deps.run ?? defaultRunner;
   const fs = deps.fs ?? fsp;
 
@@ -315,5 +315,5 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
       const determinate = running || !WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
       return { running, determinate, detail };
     },
-  }, fs);
+  }, fs, gateRoot);
 }

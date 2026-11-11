@@ -1,11 +1,11 @@
-import { AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp';
+import { AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp.js';
 import {
   McpServerToolError,
   serveMcpOverStdio,
   type McpServerToolCall,
   type McpServerToolDefinition,
-} from '../mcp-server';
-import type { AgentResultDescribeResult, AgentResultSubmitResult } from '../daemon/control-protocol';
+} from '../mcp-server/index.js';
+import type { AgentResultDescribeResult, AgentResultSubmitResult } from '../daemon/control-protocol.js';
 
 /**
  * The daemon side of the result helper. Both calls go over the authenticated

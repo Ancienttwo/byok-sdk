@@ -2,8 +2,8 @@ import { z } from 'zod';
 
 import { PROVIDER_PROVISIONING_OPERATIONS, type ProviderProvisioningOperation } from '@byok-sdk/core';
 
-import { ByokKeysError } from './errors';
-import type { ModelProviderProfile, ProviderProfileRef } from './provider-profile';
+import { ByokKeysError } from './errors.js';
+import type { ModelProviderProfile, ProviderProfileRef } from './provider-profile.js';
 
 /**
  * Credential custody coordination (plan web-sealed-provisioning D5, A3, A4, A8, A9).

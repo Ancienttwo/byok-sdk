@@ -1,15 +1,15 @@
-import { createPiInputPreparationCompiler, resolvePinnedPiRuntimeIdentity } from '../../adapters/pi/input-preparation';
-import { createInputPreparationService, type InputPreparationService, InputPreparationRequestError } from '../input-preparation-service';
-import type { InputPreparationResult } from '../control-protocol';
-import { ControlError } from '../control-protocol';
-import type { LocalTaskJournal } from '../journal/journal';
-import { SqliteLocalTaskJournal, JournalHandleCleanupError } from '../journal/sqlite-journal';
-import { type AgentMemoryIntentBackend, NATIVE_AGENT_MEMORY_INTENT_BACKEND, helperAgentMemoryIntentBackend } from '../agent-memory-intent';
-import { isAgentMemorySecureFilesystemAvailable, probeAgentMemoryStrictDirectorySync } from '../agent-memory';
+import { createPiInputPreparationCompiler, resolvePinnedPiRuntimeIdentity } from '../../adapters/pi/input-preparation.js';
+import { createInputPreparationService, type InputPreparationService, InputPreparationRequestError } from '../input-preparation-service.js';
+import type { InputPreparationResult } from '../control-protocol.js';
+import { ControlError } from '../control-protocol.js';
+import type { LocalTaskJournal } from '../journal/journal.js';
+import { SqliteLocalTaskJournal, JournalHandleCleanupError } from '../journal/sqlite-journal.js';
+import { type AgentMemoryIntentBackend, NATIVE_AGENT_MEMORY_INTENT_BACKEND, helperAgentMemoryIntentBackend } from '../agent-memory-intent.js';
+import { isAgentMemorySecureFilesystemAvailable, probeAgentMemoryStrictDirectorySync } from '../agent-memory.js';
 import { promises as fs } from 'node:fs';
-import { createAgentMemoryCommitStore, type AgentMemoryCommitStore } from '../agent-memory-commit';
-import { openAgentMemoryFilesystemHelper } from '../agent-memory-fs-helper';
-import type { DaemonScope } from './scope';
+import { createAgentMemoryCommitStore, type AgentMemoryCommitStore } from '../agent-memory-commit.js';
+import { openAgentMemoryFilesystemHelper } from '../agent-memory-fs-helper.js';
+import type { DaemonScope } from './scope.js';
 
 /** The daemon's lazily initialized local services: input preparation, the owned hosted journal and the Agent memory intent backend (#926). */
 
@@ -94,7 +94,7 @@ export async function provenAgentMemoryBackend(daemonScope: DaemonScope): Promis
     if (!isAgentMemorySecureFilesystemAvailable(helperBin !== undefined)) return undefined;
     backend = helperBin === undefined
       ? NATIVE_AGENT_MEMORY_INTENT_BACKEND
-      : helperAgentMemoryIntentBackend(helperBin, config.agentMemoryHelperAssetRoot);
+      : helperAgentMemoryIntentBackend(helperBin, await fs.realpath(agentHomeManager.layout.hostRootInput()), config.agentMemoryHelperAssetRoot);
   } catch (error) {
     // Intents need this helper. Commit on success is asked of every Agent-home
     // daemon, and only its capability depends on the proof.
@@ -109,7 +109,7 @@ export async function provenAgentMemoryBackend(daemonScope: DaemonScope): Promis
     try {
       const canonicalHome = await fs.realpath(config.agentHome.hostStorageRoot);
       const stat = await fs.stat(canonicalHome, { bigint: true });
-      const probe = await openAgentMemoryFilesystemHelper({ helperBin, assetRoot: config.agentMemoryHelperAssetRoot, canonicalHome, homeIdentity: { dev: stat.dev, ino: stat.ino } });
+      const probe = await openAgentMemoryFilesystemHelper({ helperBin, assetRoot: config.agentMemoryHelperAssetRoot, ancestorRoot: canonicalHome, canonicalHome, homeIdentity: { dev: stat.dev, ino: stat.ino } });
       await probe.close();
     } catch (error) {
       console.error(`[byok/client] agent memory intents and commit on success are off: the memory helper failed its volume probe: ${error instanceof Error ? error.message : String(error)}`);

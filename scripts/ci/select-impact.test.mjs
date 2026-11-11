@@ -121,7 +121,8 @@ test('shared device credential fixtures select client consumers and native smoke
   }
   assert.deepEqual(impact.families, ['adapter-lifecycle-smoke', 'dataplane', 'packageability-smoke']);
   for (const path of ['scripts/testing/sdk-koffi-asset-root.mjs', 'scripts/testing/sdk-koffi-asset-root.d.mts']) {
-    assert.deepEqual(['execution-recovery-native', 'service-upgrade-smoke'].filter(id => selectImpact([path]).families.includes(id)), ['execution-recovery-native', 'service-upgrade-smoke']);
+    const families = ['execution-recovery-native', 'service-upgrade-smoke', 'windows-client'];
+    assert.deepEqual(families.filter(id => selectImpact([path]).families.includes(id)), families);
   }
   assert.throws(() => selectImpact(['scripts/testing/unreviewed-backend.mjs']), /Reviewed CI mapping required/);
 });
@@ -284,6 +285,7 @@ test('a platform family is selected only by a path it owns', () => {
     'windows-service-smoke': 'packages/client/src/lifecycle/winsw.ts',
     'linux-systemd-smoke': 'templates/service/systemd/smoke-test.mjs',
     'service-upgrade-smoke': 'examples/service-upgrade/upgrade-smoke.mjs',
+    desktop: 'examples/desktop-bot-app/src/main/index.ts',
     'ipc-smoke': 'packages/client/src/daemon/control-server.ts',
     'credential-isolation-audit': 'packages/keys/src/index.ts',
     'hermes-real-windows': 'packages/client/src/__tests__/hermes-real.test.ts',
@@ -299,6 +301,11 @@ test('a platform family is selected only by a path it owns', () => {
     for (const owner of owners) assert.ok([...tracked].some(path => owner.test(path)), `${family} owner ${owner} matches no tracked file`);
   }
   for (const [family, path] of Object.entries(owned)) assert.ok(selectImpact([path]).families.includes(family), `${family}: ${path}`);
+  // #1805: renderer stylesheets select the desktop example; other renderer assets stay unmapped.
+  assert.ok(selectImpact(['examples/desktop-bot-app/src/renderer/styles/theme.css']).families.includes('desktop'));
+  assert.throws(() => selectImpact(['examples/desktop-bot-app/src/renderer/theme.scss']), /mapping/i);
+  // #1811: the packaging scripts select the desktop example.
+  assert.ok(selectImpact(['examples/desktop-bot-app/scripts/package/bundle-host.mjs']).families.includes('desktop'));
   for (const path of ['packages/client/src/bin/sdk-reserved-helper-runners.ts', 'packages/client/src/bin/byok-agent-result-mcp.ts', 'packages/client/src/lifecycle/sdk-reserved-helper-command.ts']) {
     for (const family of ['runtime-contract', 'credential-isolation-audit', 'npm-release-pack']) assert.ok(selectImpact([path]).families.includes(family), `${family}: ${path}`);
   }
@@ -422,6 +429,10 @@ const registeredJobInputs = {
     'packages/client/dist/native/agent-memory-fs/win32-x64.exe': 'build output that the Windows junction smoke runs',
   },
   'hermes-real-windows': { $installer: 'the verified vendored Hermes installer' },
+  desktop: {
+    'packages/keys/dist/index.js': 'keys build output that the #1803 D0 Secret Service probe imports',
+    'examples/desktop-bot-app/dist/host/host.cjs': 'the build:host output that the #1811 Host bundle smoke starts',
+  },
   'packageability-smoke': {
     'packages/client/scripts/build-agent-memory-helper.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
     'packages/client/scripts/check-agent-memory-helper-build.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
@@ -562,12 +573,14 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     'scripts/api-surface/check-version-authority.mjs', 'scripts/api-surface/check-version-authority.test.mjs',
     'scripts/architecture/dependency-baseline.json', 'scripts/architecture/dependency-graph.mjs', 'scripts/architecture/dependency-graph.test.mjs',
     'scripts/ci/with-secret-service.sh',
+    'scripts/codemod/relative-js-specifiers.mjs',
     'scripts/docs/device-setup.mjs', 'scripts/docs/device-setup.test.mjs',
     'scripts/release/beta-release.test.mjs', 'scripts/release/check-package-graph.mjs', 'scripts/release/check-retired-identities.mjs',
     'scripts/release/check-upgrade-manifest.mjs', 'scripts/release/check-upgrade-manifest.test.mjs',
     'scripts/release/cloud-do-consumer-smoke.mjs',
     'scripts/release/cloud-do-consumer-worker.mjs',
     'scripts/release/execution-submit-smoke.mjs',
+    'scripts/release/node-next-consumer-probe.mjs',
     'scripts/release/pack-and-smoke.mjs',
     'scripts/release/pack-and-smoke.test.mjs',
     'scripts/release/packaging-plugin-smoke.mjs',
@@ -601,6 +614,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
   assert.deepEqual(selectImpact(['scripts/release/pack-and-smoke.mjs']).families, sorted(runners));
   assert.deepEqual(selectImpact(['scripts/release/cloud-do-consumer-smoke.mjs']).families, sorted(runners));
   assert.deepEqual(selectImpact(['scripts/release/cloud-do-consumer-worker.mjs']).families, sorted(runners));
+  assert.deepEqual(selectImpact(['scripts/release/node-next-consumer-probe.mjs']).families, sorted(runners));
   assert.ok(runners.includes('npm-release-pack'));
   // Its store-path guard runs inside those same jobs.
   assert.deepEqual(selectImpact(['scripts/release/published-store-paths.mjs']).families, sorted(runners));
@@ -647,7 +661,7 @@ test('selection is deterministic, deduplicated, and uses only known family IDs',
   const selection = selectImpact(paths);
   assert.deepEqual(selection, selectImpact([...paths].reverse().concat(paths)));
   assert.ok(selection.families.every(id => knownFamilies.includes(id)));
-  assert.equal(knownFamilies.length, 22);
+  assert.equal(knownFamilies.length, 23);
 });
 
 test('CLI accepts JSON stdin and fails closed without an output selection on bad JSON', () => {

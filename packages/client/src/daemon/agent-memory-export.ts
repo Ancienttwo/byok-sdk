@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 
-import type { AgentHomeManager, AgentRef } from '../agent-home';
-import { captureAgentMemoryHomeSnapshot } from './agent-memory';
-import { openAgentMemoryFilesystemHelper } from './agent-memory-fs-helper';
-import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
+import type { AgentHomeManager, AgentRef } from '../agent-home.js';
+import { captureAgentMemoryHomeSnapshot } from './agent-memory.js';
+import { openAgentMemoryFilesystemHelper } from './agent-memory-fs-helper.js';
+import type { AgentMemoryFilesystem } from './agent-memory-filesystem.js';
 import { AgentMemoryValidationError, type AgentMemoryExport } from '@byok-sdk/protocol/agent-memory';
 
 export interface AgentMemoryExportOptions { readonly signal?: AbortSignal; }
@@ -27,7 +27,7 @@ export async function exportAgentMemoryHome(
     await homes.initializeTaskFree(binding);
     options.signal?.throwIfAborted();
     if (helper !== undefined) filesystem = await openAgentMemoryFilesystemHelper({
-      helperBin: helper.bin, assetRoot: helper.assetRoot,
+      helperBin: helper.bin, assetRoot: helper.assetRoot, ancestorRoot: binding.resolution.hostStorageRoot,
       canonicalHome: binding.lease.canonicalHome, homeIdentity: binding.lease.homeIdentity,
     });
     const snapshot = await captureAgentMemoryHomeSnapshot({

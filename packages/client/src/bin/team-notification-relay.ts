@@ -1,5 +1,5 @@
-import type { TeamMemberLease } from '../daemon/team-workspace';
-import type { TeamNotificationSnapshot } from './team-codex-relay';
+import type { TeamMemberLease } from '../daemon/team-workspace.js';
+import type { TeamNotificationSnapshot } from './team-codex-relay.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const record = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 const exact = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));

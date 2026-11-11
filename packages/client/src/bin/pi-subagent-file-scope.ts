@@ -7,8 +7,8 @@
  * the SDK scoped file tools. Any failure leaves the six file tools blocked;
  * the gate extension refuses the native fallback.
  */
-import { createPiSubagentFileScopeExtension } from '../adapters/pi/subagent-file-scope';
-import { readToolAuthorizationGateEnv } from '../tool-authorization-ipc';
+import { createPiSubagentFileScopeExtension } from '../adapters/pi/subagent-file-scope.js';
+import { readToolAuthorizationGateEnv } from '../tool-authorization-ipc.js';
 
 const gate = readToolAuthorizationGateEnv();
 if (gate === undefined) throw new Error('file_scope_unavailable: a Pi subagent child has no tool authorization gate');

@@ -1,4 +1,4 @@
-import { ByokKeysError } from './errors';
+import { ByokKeysError } from './errors.js';
 
 /**
  * Normalize a provider base URL, fail-closed.

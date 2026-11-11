@@ -2,8 +2,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
-import { acquirePiSessionDiscovery, acquirePiSessionRebinding, acquirePiSessionWriter, type PiSessionRetentionLease } from '../util/pi-session-retention';
-import { resolvePathWithoutCreate, type PathMutationGate } from '../util/path-mutation-gate';
+import { acquirePiSessionDiscovery, acquirePiSessionRebinding, acquirePiSessionWriter, type PiSessionRetentionLease } from '../util/pi-session-retention.js';
+import { resolvePathWithoutCreate, type PathMutationGate } from '../util/path-mutation-gate.js';
 import {
   createAgentSession, createAgentSessionRuntime, createAgentSessionServices, createCodingTools,
   getAgentDir, ModelRuntime, resolveCliModel, runRpcMode, SessionManager, SettingsManager,
@@ -75,12 +75,15 @@ export interface PiToolLoadoutSession {
 /** One native session/services assembly for strict daemon RPC and operator CLI. */
 export async function runPiSessionRuntime(options: {
   cwd: string; session?: string; sessionDir?: string;
+  credentialSource: 'keys-profile' | 'pi-auth-store';
   provider?: string; model?: string;
   thinking?: CreateAgentSessionOptions['thinkingLevel'];
   tools?: string[]; excludeTools?: string[]; noTools?: 'all' | 'builtin';
   customTools?: CreateAgentSessionOptions['customTools'];
   /** Fixed, fresh memory-only lane; it cannot resume or replace a transcript. */
-  memoryLane?: ReturnType<typeof import('./pi-memory-lane').createPiMemoryLane>;
+  memoryLane?: ReturnType<typeof import('./pi-memory-lane.js').createPiMemoryLane>;
+  /** Apply host boundaries to every initial or replacement session. */
+  configureSession?: (session: CreateAgentSessionResult['session']) => void;
   /** Called once after creation/assertion, before the RPC loop can accept a prompt. */
   onSessionReady?: (session: PiToolLoadoutSession & { readonly sessionId: string }) => void;
   /** Pre-prompt registry assertion for a scoped session; throwing disposes and refuses to run. */
@@ -197,6 +200,9 @@ export async function runPiSessionRuntime(options: {
         : SettingsManager.create(options.cwd, agentDir, { projectTrusted: true }),
       resourceLoaderOptions: options.resourceLoaderOptions,
     });
+    if (options.credentialSource === 'keys-profile' && services.modelRuntime.getError() !== undefined) {
+      options.reject('keys_profile_model_composition_failed: launcher provider projection could not be composed');
+    }
     const extensions = services.resourceLoader.getExtensions();
     const errors = [
       ...services.diagnostics.filter(diagnostic => diagnostic.type === 'error').map(diagnostic => diagnostic.message),
@@ -229,6 +235,7 @@ export async function runPiSessionRuntime(options: {
       model: resolved?.model, thinkingLevel: options.thinking ?? resolved?.thinkingLevel,
       tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools, customTools: options.customTools,
     });
+    options.configureSession?.(created.session);
     if (options.tools === undefined && options.noTools === undefined) resetResumedPiTools(created.session, services.settingsManager, options.cwd);
     // A replacement is visible to RPC while session_start is awaiting. Keep
     // the ordinary scoped boundary established before it can become current.

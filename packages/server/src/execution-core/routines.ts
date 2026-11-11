@@ -1,8 +1,8 @@
-import { WAKE_MAX_FUTURE_MS, type DueWake, type WakeScheduleInput } from '../wakes/types';
+import { WAKE_MAX_FUTURE_MS, type DueWake, type WakeScheduleInput } from '../wakes/types.js';
 import { canonical, hash, isSealed, occurrenceIntentKey, time, validateInput, validateJson, validateRetry, type Conclusion, type HostOccurrenceRun, type IntentExecution,
-  type IgnoredWakeAudit, type Intent, type LedgerState, type Occurrence, type Routine, type RoutineDefinition } from './model';
-import { admit, cancelWake, settle } from './transitions';
-import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
+  type IgnoredWakeAudit, type Intent, type LedgerState, type Occurrence, type Routine, type RoutineDefinition } from './model.js';
+import { admit, cancelWake, settle } from './transitions.js';
+import { nextIntervalOccurrence, type NextOccurrence } from './schedule.js';
 
 // Use the public SDK admission limit for every Host horizon precheck.
 export const WAKE_HORIZON_MS = WAKE_MAX_FUTURE_MS;

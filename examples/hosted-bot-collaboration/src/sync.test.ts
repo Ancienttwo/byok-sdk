@@ -12,7 +12,8 @@ import { freezeIntent, type IntentFreeze } from './intents';
 import { storedKey } from './layout';
 import { VECTOR_ROUTINES, vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { HostedCollaborationStore, inSchema, lockScope, type OutcomeRoutinePorts } from './store';
+import { HostedCollaborationStore } from './store';
+import { inSchema, lockScope } from './transaction';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -260,7 +261,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
       expect((await h.state()).delegations.d1).toMatchObject({ verdict: 'abandoned', cancel: { targetTurnId: 'q1', delivered: true } });
     });
 
-    it('reads the committed intents of an outcome from the store, and ignores them in the caller ports', async () => {
+    it('reads the committed intents of an outcome from the store', async () => {
       const h = await hosted();
       await inSchema(opened!.pool, store().schema, async client => {
         await lockScope(client, storedKey(h.scope));
@@ -272,10 +273,9 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
         chain('running')(state);
         seedCollaboration(state);
       });
-      const stubbed = { ...VECTOR_ROUTINES, committed: { intent: () => undefined } } as OutcomeRoutinePorts;
       await store().commitIn(h.scope, { scope: h.scope, commandId: 'task-t1', command: { kind: 'outcome', turnId: 't1', taskId: 'task-t1',
-        document: { cancel_delegation: [{ delegationId: 'd1' }] } } }, vectorClock, stubbed);
-      // With the stub, K8 would end the chain Turn itself and resolve the delegation while its intent kept running.
+        document: { cancel_delegation: [{ delegationId: 'd1' }] } } }, vectorClock, VECTOR_ROUTINES);
+      // Without the committed intent, K8 would end the chain Turn itself while its intent kept running.
       const state = await h.state();
       expect(state.delegations.d1).toMatchObject({ status: 'running', cancel: { targetTurnId: 'q1', delivered: false, reason: 'main_bot_cancelled' } });
       expect(state.delegations.d1!.verdict).toBeUndefined();

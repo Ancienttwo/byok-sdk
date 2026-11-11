@@ -9,7 +9,7 @@ import {
   type ApprovalProjectionMetadata,
   type ApprovalProjectionState,
   type TaskApprovalSnapshot,
-} from './approval-types';
+} from './approval-types.js';
 
 const DEFAULT_METADATA: ApprovalProjectionMetadata = Object.freeze({ dropped: 0 });
 

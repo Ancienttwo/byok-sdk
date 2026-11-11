@@ -1,4 +1,4 @@
-import type { ResolvedBin } from '../codex/resolve-bin';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
 
 /**
  * Resolve the Hermes Agent CLI. Hermes is a user install (git or package

@@ -27,9 +27,8 @@ import { CLOUD_CAPABILITIES, createByokCloud, createHmacTokenSigner, createInPro
 import { createByokPool, createPostgresCloudStores, createPostgresCoreStores, PostgresProofReceiptRetentionAuthority } from '@byok-sdk/cloud-dataplane/runtime';
 import { COALESCE_DEFAULTS } from '@byok-sdk/example-bot-collaboration/coalesce';
 import type { FrozenSubmitPort } from '@byok-sdk/server/execution-core';
-import { EntryRefusedError, HostedCollaborationStore, HostedCommandEntry, HostedDeviceObserver, HostedDueScheduler, HostedOutboxSender, HostedReconciler,
-  HostedReplyChecker, HostedRoutineScheduler, HostedSubmitter, hostedMessageConsumer, UnauthenticatedError, type HostedSyncOptions,
-  type HostedTaskPort, type SendFailure } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
+import { EntryRefusedError, HostedCollaborationStore, HostedCommandEntry, HostedPasses, hostedMessageConsumer, UnauthenticatedError,
+  type HostedSyncOptions, type HostedTaskPort, type PassReport } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
 import { releaseAfterBody } from './body-lifetime';
 import { hostProjections, readHostScope, readHostScopeByToken, sha256Hex, type HostScope } from './host-scopes';
 
@@ -199,89 +198,32 @@ async function compose(env: Env, notify: () => void): Promise<Host> {
         cancel: async (id, reason) => cloud.cancelTask(await known(), id, reason),
       };
     };
-    const checker = new HostedReplyChecker(store, { port: scope => ({
-      agentMessage: (taskId, deviceId, agentRef) => cloud.readTaskAgentMessage(tenantOf(scope), deviceId, taskId, agentRef) }) });
-    const devices = new HostedDeviceObserver(store, { port: scope => ({ readiness: () => cloud.readTenantReadiness(tenantOf(scope)) }) });
-    // The composed sync of the H README (Reply checks): each step commits in its own transaction.
-    const syncScope = async (scope: string, now: number) => {
-      await checker.check(scope, now);
-      await devices.observe(scope);
-      return store.sync(scope, { ...SYNC, now });
-    };
-    const passes = async (): Promise<PassReport> => {
-      const changed = new Set<string>(), concluded = new Set<string>(), sentChanged = new Set<string>();
-      const sender = new HostedOutboxSender(hostPool, store, { projections: hostProjections(hostPool, env.HOST_SCHEMA), changed: scope => { sentChanged.add(scope); },
-        homes: scope => {
-          const tenant = tenantOf(scope);
-          return {
-            read: request => cloud.getAgentHomeProjectionStatus(tenant, request.deviceId, { requestId: request.payload.requestId,
-              agentRef: request.payload.agentRef, projectionHash: request.payload.projectionHash }),
-            enqueue: request => cloud.enqueueAgentHomeProjection(tenant, request.deviceId, request.payload),
-          };
-        } });
-      // The clock times these passes, so the scheduler checks the clock's interval against the K8 late bound.
-      const routines = new HostedRoutineScheduler(hostPool, store, { intervalMs: clockMs(env), changed: scope => { changed.add(scope); } });
-      const submitter = new HostedSubmitter(hostPool, env.H_SCHEMA, { port: taskPort, changed: scope => { concluded.add(scope); },
-        ...optional('leaseMs', milliseconds(env.H_SUBMIT_LEASE_MS, 'H_SUBMIT_LEASE_MS')) });
-      const reconciler = new HostedReconciler(hostPool, env.H_SCHEMA, store, { port: taskPort, changed: scope => { changed.add(scope); },
-        ...optional('pollMs', milliseconds(env.H_RECONCILE_POLL_MS, 'H_RECONCILE_POLL_MS')) });
-      const due = new HostedDueScheduler(hostPool, store, { sync: syncScope });
-      // `start()` is K4 `recover`: it reads the routine rows, so it is safe on every pass, and a Worker has no process start.
-      const routineStart = failures(await routines.start());
-      const routinePass = await routines.run();
-      const reconcile = await reconciler.run();
-      const syncAll = async (scopes: Iterable<string>) => {
-        const synced: Synced[] = [];
-        for (const scope of scopes) {
-          try { await syncScope(scope, Date.now()); synced.push({ scope }); } catch (error) { synced.push({ scope, error: text(error) }); }
-        }
-        return synced;
-      };
-      const synced = await syncAll(changed);
-      const duePass = await due.run();
-      // Last, so a Turn that this pass froze is offered in the same pass. An intent that the submitter concluded with no SDK
-      // call (the queued expiry, or a sealed row with no sealed lane) has its scope synced here, so its Turn settles too.
-      const submit = await submitter.run();
-      const submitSynced = await syncAll(concluded);
-      // After the submitter: a Bot's home step makes it ready, and its next Turn freezes in the sync that follows. The Worker
-      // has no channel and no connector, so a delivery or card row fails here (the sender's own message), not silently.
-      const sent = await sender.run();
-      const sendSynced = await syncAll(sentChanged);
-      return { routineStart, routines: { fired: routinePass.fired, fenced: failures(routinePass.fenced), failed: failures(routinePass.failed) },
-        reconcile: { concluded: reconcile.concluded, failed: failures(reconcile.failed) }, synced,
-        due: { synced: duePass.synced, stalled: duePass.stalled, failed: failures(duePass.failed) },
-        submit: { tried: submit.tried, failed: failures(submit.failed), synced: submitSynced },
-        send: { steps: sent.steps, failed: sendFailures(sent.failed), synced: sendSynced } };
-    };
-    return { cloud, store, scope, scopeByToken, passes, syncScope, close };
+    const submitLeaseMs = milliseconds(env.H_SUBMIT_LEASE_MS, 'H_SUBMIT_LEASE_MS'), reconcilePollMs = milliseconds(env.H_RECONCILE_POLL_MS, 'H_RECONCILE_POLL_MS');
+    // The clock times these passes, so the scheduler checks the clock's interval against the K8 late bound. The Worker has no
+    // channel and no connector, so a delivery or card row fails in the sender (its own message), not silently.
+    const hostPasses = new HostedPasses(hostPool, store, { task: taskPort, intervalMs: clockMs(env), sync: SYNC,
+      replies: scope => ({
+        agentMessage: (taskId, deviceId, agentRef) => cloud.readTaskAgentMessage(tenantOf(scope), deviceId, taskId, agentRef) }),
+      devices: scope => ({ readiness: () => cloud.readTenantReadiness(tenantOf(scope)) }),
+      projections: hostProjections(hostPool, env.HOST_SCHEMA),
+      homes: scope => {
+        const tenant = tenantOf(scope);
+        return {
+          read: request => cloud.getAgentHomeProjectionStatus(tenant, request.deviceId, { requestId: request.payload.requestId,
+            agentRef: request.payload.agentRef, projectionHash: request.payload.projectionHash }),
+          enqueue: request => cloud.enqueueAgentHomeProjection(tenant, request.deviceId, request.payload),
+        };
+      },
+      timings: { ...(submitLeaseMs === undefined ? {} : { submitter: { leaseMs: submitLeaseMs } }),
+        ...(reconcilePollMs === undefined ? {} : { reconciler: { pollMs: reconcilePollMs } }) } });
+    return { cloud, store, scope, scopeByToken, passes: () => hostPasses.run(), syncScope: hostPasses.syncScope, close };
   } catch (error) {
     await close();
     throw error;
   }
 }
 
-export interface PassReport {
-  routineStart: Failure[];
-  routines: { fired: number; fenced: Failure[]; failed: Failure[] };
-  reconcile: { concluded: number; failed: Failure[] };
-  synced: Synced[];
-  due: { synced: number; stalled: string[]; failed: Failure[] };
-  /** `synced`: the scopes of the intents that the submitter concluded with no SDK call, synced after it. */
-  submit: { tried: number; failed: Failure[]; synced: Synced[] };
-  /** The outbox sender: `failed` lists the rows it could not send, a card or delivery row (no port) among them; `synced`: the scopes it changed. */
-  send: { steps: number; failed: Failure[]; synced: Synced[] };
-}
-interface Synced { scope: string; error?: string }
-interface Failure { scope: string; id?: string; error: string }
 const text = (error: unknown): string => error instanceof Error ? error.message : String(error);
-function failures(list: readonly { scope: string; error: unknown; routineId?: string; turnId?: string }[]): Failure[] {
-  return list.map(item => ({ scope: item.scope, ...(item.routineId || item.turnId ? { id: item.routineId || item.turnId } : {}), error: text(item.error) }));
-}
-const sendFailures = (list: readonly SendFailure[]): Failure[] =>
-  list.map(item => ({ scope: item.scope, id: typeof item.id === 'string' ? item.id : JSON.stringify(item.id), error: text(item.error) }));
-function optional<K extends string>(key: K, value: number | undefined): Partial<Record<K, number>> {
-  return value === undefined ? {} : { [key]: value } as Record<K, number>;
-}
 
 /**
  * One notification: one more pass in its own composition, after the current invocation. `drop-notify` loses it and

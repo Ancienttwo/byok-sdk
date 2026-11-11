@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { SdkReservedHelperKind } from './sdk-reserved-helper-host';
+import type { SdkReservedHelperKind } from './sdk-reserved-helper-host.js';
 
 /**
  * What a task-scoped MCP server gets from its private context file, the one

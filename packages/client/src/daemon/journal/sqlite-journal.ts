@@ -54,14 +54,14 @@ import {
   type ReceivedEnvelopeRecord,
   type WithheldOfferRecord,
   type WithheldOfferTask,
-} from './journal';
+} from './journal.js';
 import {
   isSqliteAvailable,
   JournalHandleCleanupError,
   openJournalDatabase,
   secureJournalFilePermissions,
   type JournalOpenFaultSeam,
-} from '../../util/sqlite-support';
+} from '../../util/sqlite-support.js';
 
 export { JournalHandleCleanupError };
 

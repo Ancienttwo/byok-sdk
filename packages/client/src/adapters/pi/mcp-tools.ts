@@ -1,5 +1,5 @@
 import type { CallToolResult } from '@modelcontextprotocol/client';
-import { qualifiedMcpToolName, type McpToolProjection } from '../../mcp/projection';
+import { qualifiedMcpToolName, type McpToolProjection } from '../../mcp/projection.js';
 
 /**
  * Turn the runtime-agnostic MCP projection into Pi tool definitions.

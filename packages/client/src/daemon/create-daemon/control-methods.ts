@@ -1,22 +1,22 @@
-import type { ControlMethods } from '../control-server';
-import { ControlError, parseEnrollmentPairParams, ENROLLMENT_PAIRING_CODE_MAX_BYTES, parseToolsetsReloadParams, parseApprovalsResolveParams, parseApprovalsRequestParams, parseTeamWorkspaceCreateParams, parseTeamWorkspaceJoinParams, parseTeamContextParams, parseTeamMessagePostParams, parseTeamMessageReadParams, parseTeamMessageAckParams, parseTeamNotificationSnapshotParams, parseTeamMessageInspectParams, parseAgentMessagePublishParams, parseAgentResultDescribeParams, parseAgentResultSubmitParams, parseAgentMemoryRecallParams, parseAgentMemorySaveParams, type AssertionIssueResult, parseAssertionIssueParams, type TaskAssertionIssueResult, parseTaskAssertionIssueParams, TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES, parseShutdownParams } from '../control-protocol';
-import { checkVerificationSecret } from '../device-member';
-import { type DeviceRecord, DeviceRecordRePairRequiredError } from '../store';
-import { PairedWithoutMemberError } from './support';
-import { AuthRequestAbortedError } from '../auth-manager';
-import { cancelAuthOperations, runAuthOperation } from './lifecycle';
-import { INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationRequestParams, INPUT_PREPARATION_LOOKUP_METHOD, parseInputPreparationLookupParams, INPUT_PREPARATION_CANCEL_METHOD, parseInputPreparationCancelParams } from '../control-protocol';
-import { McpToolsetRevisionConflictError } from '../toolset-registry';
-import { ApprovalNotFoundError, ApprovalRequiresHostError } from '../approvals';
-import { encodeTeamMemberContext, decodeTeamMemberContext } from '../team-workspace';
+import type { ControlMethods } from '../control-server.js';
+import { ControlError, parseEnrollmentPairParams, ENROLLMENT_PAIRING_CODE_MAX_BYTES, parseToolsetsReloadParams, parseApprovalsResolveParams, parseApprovalsRequestParams, parseTeamWorkspaceCreateParams, parseTeamWorkspaceJoinParams, parseTeamContextParams, parseTeamMessagePostParams, parseTeamMessageReadParams, parseTeamMessageAckParams, parseTeamNotificationSnapshotParams, parseTeamMessageInspectParams, parseAgentMessagePublishParams, parseAgentResultDescribeParams, parseAgentResultSubmitParams, parseAgentMemoryRecallParams, parseAgentMemorySaveParams, type AssertionIssueResult, parseAssertionIssueParams, type TaskAssertionIssueResult, parseTaskAssertionIssueParams, TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES, parseShutdownParams } from '../control-protocol.js';
+import { checkVerificationSecret } from '../device-member.js';
+import { type DeviceRecord, DeviceRecordRePairRequiredError } from '../store.js';
+import { PairedWithoutMemberError } from './support.js';
+import { AuthRequestAbortedError } from '../auth-manager.js';
+import { cancelAuthOperations, runAuthOperation } from './lifecycle.js';
+import { INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationRequestParams, INPUT_PREPARATION_LOOKUP_METHOD, parseInputPreparationLookupParams, INPUT_PREPARATION_CANCEL_METHOD, parseInputPreparationCancelParams } from '../control-protocol.js';
+import { McpToolsetRevisionConflictError } from '../toolset-registry.js';
+import { ApprovalNotFoundError, ApprovalRequiresHostError } from '../approvals.js';
+import { encodeTeamMemberContext, decodeTeamMemberContext } from '../team-workspace.js';
 import { DEVICE_ASSERTION_AUDIENCE_MAX_BYTES } from '@byok-sdk/core';
-import { mintDeviceAssertion, mintTaskAssertion } from '../device-assertion-signer';
-import { toHttpBase } from '../url';
+import { mintDeviceAssertion, mintTaskAssertion } from '../device-assertion-signer.js';
+import { toHttpBase } from '../url.js';
 import { HOST_MCP_TASK_CONTEXT_CAPABILITY } from '@byok-sdk/protocol';
-import type { DaemonScope } from './scope';
-import { RUNTIMES_ENVIRONMENT_METHOD, type ControlRuntimeEnvironment, type ControlRuntimesEnvironmentResult } from '../control-protocol';
-import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment';
-import type { RuntimeAdapter } from '../../types';
+import type { DaemonScope } from './scope.js';
+import { RUNTIMES_ENVIRONMENT_METHOD, type ControlRuntimeEnvironment, type ControlRuntimesEnvironmentResult } from '../control-protocol.js';
+import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment.js';
+import type { RuntimeAdapter } from '../../types.js';
 
 /** The control-socket methods of one daemon (#926). */
 
@@ -94,6 +94,11 @@ async function describeRuntimeEnvironments(adapters: readonly RuntimeAdapter[]):
         status: 'built',
         names: report.names.map(({ name, source }) => ({ name, source })),
         removed: report.removed.map(({ name, rule }) => ({ name, rule })),
+        ...(report.lanes === undefined ? {} : {
+          lanes: report.lanes.map((lane) => lane.narrowedBy === 'sdk'
+            ? { lane: lane.lane, narrowedBy: lane.narrowedBy, removed: [...lane.removed] }
+            : { lane: lane.lane, narrowedBy: lane.narrowedBy }),
+        }),
       };
     } catch (error) {
       if (error instanceof RuntimeEnvironmentUnavailableError) return { runtimeId, status: 'unavailable', code: error.reason };

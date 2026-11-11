@@ -1,10 +1,10 @@
 import path from 'node:path';
-import type { DaemonConfig } from '../../daemon/create-daemon';
-import { AGENT_TEAM_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
-import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host';
-import { connectControlClient, type ControlClient } from '../../daemon/control-client';
-import { openTeamTmuxView } from '../../util/team-tmux-view';
-import { resolveStoreDir } from '../config';
+import type { DaemonConfig } from '../../daemon/create-daemon.js';
+import { AGENT_TEAM_MCP_SERVER_NAME } from '../../sdk-reserved-mcp.js';
+import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host.js';
+import { connectControlClient, type ControlClient } from '../../daemon/control-client.js';
+import { openTeamTmuxView } from '../../util/team-tmux-view.js';
+import { resolveStoreDir } from '../config.js';
 
 async function connect(config: DaemonConfig): Promise<ControlClient> {
   const result = await connectControlClient({ storeDir: resolveStoreDir(config), productId: config.productId });

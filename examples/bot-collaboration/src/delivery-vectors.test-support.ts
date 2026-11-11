@@ -11,7 +11,7 @@ import type { CollaborationState } from './model';
  * The subject's Bot `main` takes owner messages on channel `fake` in its direct conversation, and the configured self bot of
  * that channel is `own-bot`. Its business send deadline outlasts the steps of a case, so a held send is still in flight while
  * later verbs run, and a send that never settles times out within the case.
- * `drain`, `advance`, `publish`, `end`, `echo`, `resend`, `enablePush` and `revokePush` each end by running the Host, with
+ * `drain`, `advance`, `publish`, `echo`, `resend`, `enablePush` and `revokePush` each end by running the Host, with
  * one sender pass: a due row is sent inside the verb.
  */
 export interface DeliverySubject {
@@ -23,12 +23,10 @@ export interface DeliverySubject {
   advance(ms: number): Promise<void>;
   /**
    * The owner message `key` (`platformMessageId = key`) reaches Bot `main`. Its reply route is valid for `replyMs` and holds
-   * the token `replyToken(key)`; `replyMs: null` sends no route. Its Turn runs, and its final Agent message `FINAL_BODY` is
-   * accepted, which queues the delivery. Then the Host runs.
+   * the token `replyToken(key)`; `replyMs: null` sends no route. Its Turn runs, its final Agent message `FINAL_BODY` is
+   * accepted, which stages the delivery, and the Turn concludes `succeeded`, which promotes it (#1762). Then the Host runs.
    */
   publish(key: string, options?: { replyMs?: number | null }): Promise<void>;
-  /** The owner cancels the Turn of owner message `key` (`cancel_turn`). The Host runs until the Turn has its conclusion. */
-  end(key: string): Promise<void>;
   /**
    * Holds the next send call: its claim commits and the send starts, but the call does not return until `release`. The verb
    * that makes the claim returns once the send has started. While the send is held, the Host that holds it is busy, and each
@@ -214,7 +212,8 @@ export function deliveryVectors(name: string, open: (port: ChannelPort) => Promi
     }, 60_000);
 
     it('12. drops the stored reply token once its route expires', async () => {
-      const port = scripted(accepted('p1')), subject = await open(port);
+      // The pending retry keeps the token after its Turn concluded, until the route expires.
+      const port = scripted({ result: 'rejected', code: '503', retryable: true, retryAfterMs: 20_000 }), subject = await open(port);
       await subject.publish('in1', { replyMs: 10_000 });
       expect(await subject.stored()).toContain(replyToken('in1'));
       await subject.advance(10_000);
@@ -228,10 +227,9 @@ export function deliveryVectors(name: string, open: (port: ChannelPort) => Promi
       const port = scripted(new Error('receipt lost'), accepted('again')), read: string[] = [];
       const subject = await open({ send: port.send, readback: async id => { read.push(id); return 'absent'; } });
       await subject.publish('in1');
+      await subject.drain();
       await subject.advance(1_000);
       expect(port.calls).toHaveLength(2);
-      // The Turn ends, so the Host publishes its projection.
-      await subject.end('in1');
       for (const call of port.calls) {
         expect(call.route).toMatchObject({ kind: 'reply', token: replyToken('in1') });
         expect(JSON.stringify({ ...call, route: undefined })).not.toContain(replyToken('in1'));
@@ -271,12 +269,14 @@ export function deliveryVectors(name: string, open: (port: ChannelPort) => Promi
       expect(port.calls).toHaveLength(1);
     }, 60_000);
 
-    it('16. drops the stored reply token once its root closes', async () => {
+    it('16. drops the stored reply token once the delivery of its closed root settles', async () => {
       const port = scripted(accepted('p1')), subject = await open(port);
+      const held = subject.holdNextSend();
       await subject.publish('in1');
-      expect(await subject.deliveries()).toMatchObject([{ state: 'accepted' }]);
+      expect(await subject.deliveries()).toMatchObject([{ state: 'sending' }]);
       expect(await subject.stored()).toContain(replyToken('in1'));
-      await subject.end('in1');
+      await held.release();
+      expect(await subject.deliveries()).toMatchObject([{ state: 'accepted' }]);
       const inbound = Object.values((await subject.state()).channel!.inbounds)[0]!;
       expect(inbound.reply).toMatchObject({ inboundId: 'in1' });
       expect(inbound.reply!.token).toBeUndefined();

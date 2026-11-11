@@ -6,7 +6,7 @@ import {
 } from '@byok-sdk/core';
 import { BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH } from '@byok-sdk/protocol';
 import { z } from 'zod';
-import { CLOUD_CAPABILITIES } from './capabilities';
+import { CLOUD_CAPABILITIES } from './capabilities.js';
 
 const BoardFeedItemSchema = z.object({
   tenantId: z.string(),

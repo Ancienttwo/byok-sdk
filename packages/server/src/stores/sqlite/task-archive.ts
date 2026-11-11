@@ -8,7 +8,7 @@ import type {
   TaskArchiveWork,
 } from '@byok-sdk/cloud';
 import type { DatabaseSync } from 'node:sqlite';
-import { removeActivityContent } from './activity';
+import { removeActivityContent } from './activity.js';
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['complete', 'failed', 'cancelled']);
 const TERMINAL_SQL = "('complete', 'failed', 'cancelled')";
@@ -51,11 +51,11 @@ export class SqliteTaskArchiveStore implements TaskArchiveStore {
 
   listWork(tenant: TenantId, input: TaskArchiveListInput): Promise<readonly TaskArchiveWork[]> {
     return this.coordinator.run((db) => {
-      type Row = { task_id: string; device_id: string; agent_ref_json: string | null };
+      type Row = { task_id: string; device_id: string; agent_ref_json: string };
       const work = (row: Row, phase: TaskArchiveWork['phase']): TaskArchiveWork => ({
         taskId: row.task_id,
         deviceId: row.device_id,
-        ...(row.agent_ref_json === null ? {} : { agentRef: JSON.parse(row.agent_ref_json) as AgentRef }),
+        agentRef: JSON.parse(row.agent_ref_json) as AgentRef,
         phase,
       });
       const settle = db.prepare(

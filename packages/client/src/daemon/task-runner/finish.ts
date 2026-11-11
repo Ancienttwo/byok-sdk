@@ -6,15 +6,15 @@
 // the IO adapter: it keeps the exact envelope bytes, evidence writes, close /
 // commit receipts and lease cleanup where they were, and every terminal entry
 // point registers its plan here before the selecting event is reduced.
-import { terminalIdentity } from '../terminal-identity';
+import { terminalIdentity } from '../terminal-identity.js';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
-import type { AgentHomeAccessMode } from '../../agent-home-readers';
-import { DAEMON_TASK_FAILURE } from '../task-failure';
-import type { ActiveTask, ClaimedAgentFailureContext } from './support';
-import { executionTerminalOf, errorMessage } from './support';
-import type { TaskRunner } from '../task-runner';
-import { hostFor, type TaskRunnerHost } from './host';
-import type { TerminalCause, TerminalKind } from './state';
+import type { AgentHomeAccessMode } from '../../agent-home-readers.js';
+import { DAEMON_TASK_FAILURE } from '../task-failure.js';
+import type { ActiveTask, ClaimedAgentFailureContext } from './support.js';
+import { executionTerminalOf, errorMessage } from './support.js';
+import type { TaskRunner } from '../task-runner.js';
+import { hostFor, type TaskRunnerHost } from './host.js';
+import type { TerminalCause, TerminalKind } from './state.js';
 
 /** The IO half of one terminal decision; the reducer owns the other half. */
 export interface TerminalPlan {

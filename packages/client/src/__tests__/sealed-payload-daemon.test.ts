@@ -648,7 +648,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(await sealedOffer(member, 'huge-classed', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
-      phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: 'auth' },
+      phase: 'run', retry: 'non-retryable', failure: { class: 'auth' },
       reason: 'r'.repeat(SEALED_PAYLOAD_MAX_CONTENT_LENGTH + 1024),
     }));
     const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'huge-classed');
@@ -664,7 +664,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(await sealedOffer(member, 'sealed-scope', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
-      phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'weekly limit',
+      phase: 'run', retry: 'non-retryable', reason: 'weekly limit',
       failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' },
     }));
     const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'sealed-scope');

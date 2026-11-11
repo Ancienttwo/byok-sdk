@@ -7,7 +7,8 @@ import { CommitConflict } from './commit';
 import { roomFields, updateBot } from './team';
 import { deliverRoutine, routineOf, seedRoutine } from './routines.test-support';
 import { botCompactVeto } from './compaction';
-import { DeviceModeError, DeviceSwitchingError } from './topology';
+import { DeviceSwitchingError } from './migration';
+import { DeviceModeError } from './topology';
 
 // #957 (§4.1): L as the old owner of a device switch. The freeze, the refusals, the hold, the drain, commit and abort.
 let fixture: TestHost | undefined;
@@ -163,11 +164,6 @@ it('sends no Agent home write for a Bot on the frozen device, and sends it after
   expect([enqueue.mock.calls.length, read.mock.calls.length]).toEqual([0, 0]);
   // A write that was never sent is not open work: it moves with the exported state.
   expect((await bot!.drainForSwitch(device())).homeOperations).toEqual([]);
-  // A ledger written before the `sent` mark has only the retry time that a send sets.
-  const [op] = bot!.snapshot().team.homeOperations.filter(row => row.status === 'pending');
-  fixture!.ledger.transaction(s => { stateOf(s.application).team.homeOperations.find(row => row.sequence === op!.sequence)!.retryAt = now(); });
-  expect((await bot!.drainForSwitch(device())).homeOperations).toEqual([op!.sequence]);
-  fixture!.ledger.transaction(s => { delete stateOf(s.application).team.homeOperations.find(row => row.sequence === op!.sequence)!.retryAt; });
   await bot!.abortSwitch(device(), 1);
   expect(enqueue).toHaveBeenCalledTimes(1);
 });

@@ -1,5 +1,5 @@
-import type { PiModelApi, PiOpenAICompatibleApi } from './pi-model-config';
-import type { ModelProviderAdapter } from './provider-profile';
+import type { PiModelApi, PiOpenAICompatibleApi } from './pi-model-config.js';
+import type { ModelProviderAdapter } from './provider-profile.js';
 
 /**
  * The Pi wire API a profile projects, the one derivation the route, profile

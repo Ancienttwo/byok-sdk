@@ -9,7 +9,7 @@ import { abandonDelegation, arbitrateCancel, type IntentFacts, type Publish } fr
 import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcome';
 import { acceptMessage, type MessageDisposition, type MessageFields } from './message';
 import { expireCard } from './cards';
-import { autonomyGate, type Autonomy } from './autonomy';
+import type { Autonomy } from './autonomy';
 import { commit, revisionOf, type CommandRecord, type CommitRequest, type CommitResult, type CommitState, type Disposition, type OutboxIntent } from './commit';
 
 // The collaboration commands and their decisions as pure rules (#739 D1). `commitCommand` runs one command
@@ -110,35 +110,60 @@ export interface CommandPorts {
   /** The Host clock. A command reads it when it needs a time. */
   now(): number;
   /**
-   * The Host's admission of a new command (#957). It runs after the replay lookup, so an exact replay still returns its
-   * first result. It throws to refuse, and the commit writes nothing. Absent: every command is admitted.
+   * Policy: the Host's admission of a new command (#957). It runs after the replay lookup, so an exact replay still returns
+   * its first result. It throws to refuse, and the commit writes nothing. A Host that implements the owner switch must
+   * pass it. Absent: every command is accepted.
    */
   admit?(command: Command): void;
   publish: Publish;
-  /** Input admission with the Host coalescing policy. Returns the id of the Turn that answers the input. */
+  /**
+   * Capability: input admission with the Host coalescing policy. Returns the id of the Turn that answers the input.
+   * Absent: an owner input is refused with `MissingPortError`.
+   */
   admitInput?(fields: InputFields): string;
-  /** Saves the inbound route of a received message. Absent: the Host has no channel. */
+  /** Capability: saves the inbound route of a received message. Absent: skipped, the Host has no channel. */
   remember?(root: string): void;
-  /** Queues one channel message and returns the delivery id. Absent: the Host has no channel. */
-  deliver?(turn: Turn, key: string, text: string): string | undefined;
-  /** Decides the Agent message of a Host intent whose handler has a message handler (#1356). Absent: `binding_mismatch`. */
+  /**
+   * Capability: queues one channel message and returns the delivery id. A `staged` one waits for `promote` (#1762).
+   * Absent: skipped, the Host has no channel.
+   */
+  deliver?(turn: Turn, key: string, text: string, staged: boolean): string | undefined;
+  /** Capability: promotes the staged deliveries of a task and returns their ids. Absent: skipped, the Host has no channel. */
+  promote?(taskId: string): readonly string[];
+  /**
+   * Capability: decides the Agent message of a Host intent whose handler has a message handler (#1356).
+   * Absent: the message is refused as `binding_mismatch`.
+   */
   hostMessage?(): MessageDisposition;
+  /** Capability: the Host stores of a Turn outcome. Absent: an outcome is refused with `MissingPortError`. */
   outcome?: Omit<OutcomePorts, 'now' | 'publish' | 'deliver'>;
-  /** Writes the routine Turn of the occurrence. */
+  /** Capability: writes the routine Turn of the occurrence. Absent: an occurrence is refused with `MissingPortError`. */
   occurrence?(): void;
-  /** The K4 intent rows by Turn id, read in the commit transaction. */
+  /** Capability: the K4 intent rows by Turn id, read in the commit transaction. Absent: refused with `MissingPortError`. */
   intents?: Pick<IntentFacts, 'intent'>;
-  /** Advances the desired persona revision of a Bot with the Host models and toolset policy. */
+  /**
+   * Capability: advances the desired persona revision of a Bot with the Host models and toolset policy.
+   * Absent: refused with `MissingPortError`.
+   */
   updatePersona?(botId: string, persona: string): void;
-  /** Writes one snapshot Bot's profile with the Host template, and queues its persona projection when the profile changed. */
+  /**
+   * Capability: writes one snapshot Bot's profile with the Host template, and queues its persona projection when the
+   * profile changed. Absent: a team snapshot is refused with `MissingPortError`.
+   */
   teamBot?(bot: TeamSnapshotBot): void;
-  /** The channel route rows. Each function returns the id of the row that it wrote. */
+  /**
+   * Capability: the channel route rows. Each function returns the id of the row that it wrote.
+   * Absent: a route command is refused with `MissingPortError`.
+   */
   routes?: {
     enable(conversation: Conversation, channel: string, target: string, owner: string): string;
     revoke(routeId: string): void;
     resend(deliveryId: string): string;
   };
-  /** The K4 routine rows. `end` completes one open Bot routine, as K4 `setLifecycle('completed')`. */
+  /**
+   * Capability: the K4 routine rows. `end` completes one open Bot routine, as K4 `setLifecycle('completed')`.
+   * Absent: `end_routine` is refused with `MissingPortError`.
+   */
   routines?: { end(routineId: string): void };
 }
 /**
@@ -176,10 +201,13 @@ export function retiredIdentity(namespace: RetiredNamespace, id: string, isRetir
 }
 export interface CommandStore {
   scope: string; recordCallbacks: boolean;
-  /** A command record that retention moved out of the state (#798). The replay check reads it after the state. */
-  archived?: (commandId: string) => CommandRecord | undefined;
+  /**
+   * A command record that retention moved out of the state (#798). The replay check reads it after the state. A commit
+   * that has no command record (a keyless command, or a callback that the caller deduplicates durably) does not read it.
+   */
+  archived: (commandId: string) => CommandRecord | undefined;
   /** Receives the ids that `decide` added. Not called for a replay. The store passes them to `refuseRetired`. */
-  admitted?: (ids: AdmittedIds) => void;
+  admitted: (ids: AdmittedIds) => void;
 }
 
 const CALLBACKS = new Set<Command['kind']>(['outcome', 'message', 'occurrence']);
@@ -225,8 +253,13 @@ function conflictMessage(state: CommandState, command: KeyedCommand): string {
     case 'create_room': return 'Room identity conflict';
   }
 }
+/** A command needs a capability port that the Host did not pass. The commit writes nothing. */
+export class MissingPortError extends Error {
+  readonly code = 'missing_port' as const;
+  constructor(readonly kind: string) { super(`The Host has no port for ${kind}`); this.name = 'MissingPortError'; }
+}
 function need<T>(port: T | undefined, kind: string): T {
-  if (port === undefined) throw new Error(`The Host has no port for ${kind}`);
+  if (port === undefined) throw new MissingPortError(kind);
   return port;
 }
 const accepted = (value?: Json): Disposition => value === undefined ? { outcome: 'accepted' } : { outcome: 'accepted', value };
@@ -234,9 +267,11 @@ const accepted = (value?: Json): Disposition => value === undefined ? { outcome:
 export function decideCommand(state: CommandState, command: Command, ports: CommandPorts, out: (intent: OutboxIntent) => void): Disposition {
   const publish: Publish = (id, value) => { ports.publish(id, value); out({ kind: 'projection', id }); };
   const deliver = ports.deliver && ((turn: Turn, key: string, text: string) => {
-    const id = ports.deliver!(turn, key, text);
+    const id = ports.deliver!(turn, key, text, false);
     if (id !== undefined) out({ kind: 'delivery', id });
   });
+  // An accepted reply is visible only once its Turn outcome commits (#1762): the outcome below promotes it.
+  const stage = ports.deliver && ((turn: Turn, key: string, text: string) => { ports.deliver!(turn, key, text, true); });
   switch (command.kind) {
     case 'input': {
       activeBot(state.team, command.botId);
@@ -288,9 +323,10 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
     }
     case 'outcome':
       applyTurnOutcome(state, command.turnId, command.taskId, command.document, { ...need(ports.outcome, command.kind),
-        now: ports.now, publish, autonomy: autonomyGate(state, command.turnId, command.taskId, ports.now, publish), ...(deliver ? { deliver } : {}) });
+        now: ports.now, publish, ...(deliver ? { deliver } : {}) });
+      for (const id of ports.promote?.(command.taskId) ?? []) out({ kind: 'delivery', id });
       return accepted();
-    case 'message': return acceptMessage(state, command.turnId, command.message, ports.now, deliver, ports.hostMessage);
+    case 'message': return acceptMessage(state, command.turnId, command.message, ports.now, stage, ports.hostMessage);
     case 'occurrence':
       need(ports.occurrence, command.kind)();
       return accepted();
@@ -457,15 +493,14 @@ export function commitCommand(state: CommandState, request: CommitRequest<Comman
     const added = (namespace: RetiredNamespace, rows: Record<string, unknown>) => Object.keys(rows).filter(id => !before[namespace].has(id));
     const turns = added('turn', state.turns), rounds = added('round', state.team.rounds);
     // Admission (#798): the store checks these ids before its commit, so a retired identity never comes back as new work.
-    store.admitted?.({ turn: turns, input: added('input', state.inputs ?? {}), round: rounds });
+    store.admitted({ turn: turns, input: added('input', state.inputs ?? {}), round: rounds });
     root = commandRoot(state, command, disposition, turns, rounds);
     return disposition;
   };
-  const archived = store.archived;
   if (isKeyless(command)) return commit(state, request, { scope: store.scope }, decide);
   const deduplicated = !store.recordCallbacks && CALLBACKS.has(command.kind);
   // K4 writes a message receipt only for an acceptance, so a refused message keeps its record here.
   const record = !deduplicated || command.kind === 'message' ? { evidence: commandEvidence(command), conflict: () => conflictMessage(state, command),
     root: () => root, ...(deduplicated ? { keep: (disposition: Disposition) => disposition.outcome === 'refused' } : {}) } : undefined;
-  return commit(state, request, { scope: store.scope, ...(record ? { record } : {}), ...(archived ? { archived } : {}) }, decide);
+  return commit(state, request, { scope: store.scope, ...(record ? { record } : {}), archived: store.archived }, decide);
 }

@@ -18,16 +18,13 @@ import type {
   TaskArchiveWork,
 } from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
-import type { ByokPool } from '../pool';
-import { assertByokPool } from '../pool-brand';
-import { BEGIN_OUTBOX_WRITE } from './core/outbox-writer';
-import { readTask, refusalFor, rewriteTaskBodies, type Querier } from './task-redaction';
+import type { ByokPool } from '../pool.js';
+import { assertByokPool } from '../pool-brand.js';
+import { BEGIN_OUTBOX_WRITE } from './core/outbox-writer.js';
+import { readTask, refusalFor, rewriteTaskBodies, type Querier } from './task-redaction.js';
+import { TASK_SELECT_COLUMNS, taskRowToAttempt, type TaskRow } from './task-attempts.js';
 
-interface WorkRow {
-  readonly task_id: string;
-  readonly device_id: string;
-  readonly agent_id: string | null;
-  readonly agent_profile_revision: string | null;
+interface WorkRow extends TaskRow {
   readonly phase: 'archive' | 'settle';
 }
 
@@ -41,11 +38,11 @@ export class PostgresTaskArchiveStore implements TaskArchiveStore {
 
   async listWork(tenant: TenantId, input: TaskArchiveListInput): Promise<readonly TaskArchiveWork[]> {
     const result = await this.#pool.query<WorkRow>(
-      `(SELECT task_id, device_id, agent_id, agent_profile_revision, 'settle' AS phase FROM task
+      `(SELECT ${TASK_SELECT_COLUMNS}, 'settle' AS phase FROM task
          WHERE tenant_id = $1 AND archived_at IS NOT NULL AND archive_settled_at IS NULL
          ORDER BY task_id LIMIT $3)
        UNION ALL
-       (SELECT task_id, device_id, agent_id, agent_profile_revision, 'archive' AS phase FROM task
+       (SELECT ${TASK_SELECT_COLUMNS}, 'archive' AS phase FROM task
          WHERE tenant_id = $1 AND archived_at IS NULL AND archive_after IS NOT NULL AND archive_after < $2
            AND status IN ('complete', 'failed', 'cancelled')
          ORDER BY archive_after, task_id LIMIT $3)`,
@@ -55,9 +52,7 @@ export class PostgresTaskArchiveStore implements TaskArchiveStore {
     return result.rows.slice(0, input.limit).map((row) => ({
       taskId: row.task_id,
       deviceId: row.device_id,
-      ...(row.agent_id === null || row.agent_profile_revision === null
-        ? {}
-        : { agentRef: { agentId: row.agent_id, profileRevision: row.agent_profile_revision } }),
+      agentRef: taskRowToAttempt(row).agentRef,
       phase: row.phase,
     }));
   }

@@ -1,10 +1,10 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { AgentHomeResolutionError, ensureDirectoryNoSymlink } from '../../agent-home';
-import { RuntimeExecutionFailure } from '../../runtime-failure';
+import { AgentHomeResolutionError, ensureDirectoryNoSymlink } from '../../agent-home.js';
+import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 
 const PREFIX = 'codex Agent user context exclusion refused';
-const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason: `${PREFIX}: ${reason}` });
+const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason: `${PREFIX}: ${reason}` });
 
 /**
  * The user `CODEX_HOME` entries an SDK-owned home links (#1565): the login and

@@ -15,7 +15,7 @@ import {
   type TimelineOrderKey,
   type TimelineState,
   type ToolTimelineItem,
-} from './types';
+} from './types.js';
 
 type ToolUseEvent = Extract<AgentEvent, { type: 'tool_use' }>;
 type ToolResultEvent = Extract<AgentEvent, { type: 'tool_result' }>;

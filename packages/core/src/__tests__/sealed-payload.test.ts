@@ -17,14 +17,12 @@ import {
 } from '../sealed-payload/member-chain';
 import { concat, ecdsaSign, encodeBase64Url, p256PublicKeyBytes, utf8, type P256PublicJwk } from '../sealed-payload/primitives';
 import {
-  SCOPE_KEY_HPKE_INFO,
-  SCOPE_KEY_PACKAGE_DOMAIN_PREFIX,
   deriveScopeKeyId,
   deriveSealedContentKey,
   generateScopeKey,
   openScopeKeyPackage,
   sealScopeKeyPackage,
-  type ScopeKeyPackageV1,
+  type ScopeKeyPackage,
 } from '../sealed-payload/scope-key';
 import {
   decodeSealedFrame,
@@ -305,8 +303,8 @@ async function packageParties(kemEpoch: number) {
   return { senderSigning, recipientKem, recipientId, scopeKey, pkg, open };
 }
 
-/** A version 1 package as members sealed it before #654 E5b-2: v1 info, v1 AAD and the v1 signing prefix. */
-async function sealV1Package({ senderSigning, recipientKem, recipientId, scopeKey }: Awaited<ReturnType<typeof packageParties>>): Promise<ScopeKeyPackageV1> {
+/** A version 1 package as members sealed it before #654 E5b-2: v1 info, v1 AAD and the v1 signing prefix, and no KEM epoch. */
+async function sealV1Package({ senderSigning, recipientKem, recipientId, scopeKey }: Awaited<ReturnType<typeof packageParties>>): Promise<Omit<ScopeKeyPackage, 'v' | 'recipientKemEpoch'> & { v: 1 }> {
   const identity = {
     v: 1 as const,
     tenantId: 'tenant-1',
@@ -318,12 +316,12 @@ async function sealV1Package({ senderSigning, recipientKem, recipientId, scopeKe
   };
   const { enc, ciphertext } = await hpkeSealBase({
     recipientPublicKey: await p256PublicKeyBytes(recipientKem.publicJwk),
-    info: utf8(SCOPE_KEY_HPKE_INFO),
+    info: utf8('byok-sdk.scope-key.v1'),
     aad: canonicalizeJsonBytes(identity),
     plaintext: scopeKey,
   });
   const unsigned = { ...identity, enc: encodeBase64Url(enc), ciphertext: encodeBase64Url(ciphertext) };
-  const signingInput = concat(utf8(SCOPE_KEY_PACKAGE_DOMAIN_PREFIX), canonicalizeJsonBytes(unsigned));
+  const signingInput = concat(utf8('byok-scope-key-package-v1\n'), canonicalizeJsonBytes(unsigned));
   return { ...unsigned, sig: await ecdsaSign(senderSigning.publicJwk, senderSigning.privateKey, signingInput) };
 }
 
@@ -366,14 +364,11 @@ describe('scope key packages', () => {
     expect(await open({ ...pkg, recipientKemEpoch: 2 }, 2)).toEqual({ ok: false, reason: 'key_package_signature_invalid' });
   });
 
-  it('still opens a version 1 package, which names no KEM epoch', async () => {
+  it('refuses a signed version 1 package, which names no KEM epoch (#1789)', async () => {
     const parties = await packageParties(1);
     const v1 = await sealV1Package(parties);
     expect(v1.v).toBe(1);
-    for (const kemEpoch of [1, 2]) {
-      const opened = await parties.open(v1, kemEpoch);
-      expect(opened.ok && Array.from(opened.scopeKey)).toEqual(Array.from(parties.scopeKey));
-    }
+    for (const kemEpoch of [1, 2]) expect(await parties.open(v1, kemEpoch)).toEqual({ ok: false, reason: 'key_package_invalid' });
   });
 
   it('refuses a package whose KEM epoch field does not match its version', async () => {

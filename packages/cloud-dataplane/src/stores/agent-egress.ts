@@ -4,7 +4,7 @@ import {
 } from '@byok-sdk/protocol';
 import type { AgentEgressRecord, AgentEgressStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { ByokPool } from '../pool';
+import type { ByokPool } from '../pool.js';
 
 interface AgentEgressRow {
   readonly tenant_id: string;

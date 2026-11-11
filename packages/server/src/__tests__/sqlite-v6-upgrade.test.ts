@@ -13,15 +13,19 @@ import { ACTIVITY_LOG_SCHEMA } from '../stores/sqlite/activity';
 import { APPROVAL_TIMELINE_V7_REBUILD } from '../stores/sqlite/approval-timeline';
 import { rewindToV7 } from './test-support';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 /**
  * The in-place SQLite upgrades: schema 6 to 7 (#1160) over the store the
  * 0.31.0 release wrote, with rows added through SQL in that file's own v6
- * schema, then 7 to 8 (#1113), which adds the durable activity log empty.
+ * schema, then 7 to 8 (#1113), which adds the durable activity log empty, and 8 to 9
+ * (#1780), which refuses a task attempt without an Agent identity.
  */
 
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const V6_FIXTURE = fileURLToPath(new URL('../../../../scripts/release/fixtures/stores/0.31.0/server-sqlite.db', import.meta.url));
 const V7_FIXTURE = fileURLToPath(new URL('../../../../scripts/release/fixtures/stores/0.32.0/server-sqlite.db', import.meta.url));
+const V8_FIXTURE = fileURLToPath(new URL('../../../../scripts/release/fixtures/stores/0.41.0/server-sqlite.db', import.meta.url));
 const TENANT = tenantId('tenant-v6-upgrade');
 const NOW = '2026-10-01T00:00:00.000Z';
 
@@ -75,10 +79,10 @@ async function seededV7Store(): Promise<string> {
   const stores = open(file);
   try {
     for (const taskId of ['kept-task', 'done-task', 'cancel-task', 'legacy-task']) {
-      await stores.cloud.tasks.open(TENANT, { taskId, deviceId: 'kept' });
+      await stores.cloud.tasks.reserveAgentOffer(TENANT, { taskId, deviceId: 'kept', agentRef: AGENT_REF });
     }
     for (const taskId of ['kept-task', 'done-task', 'legacy-task']) await stores.cloud.approvals.append(TENANT, approval(taskId));
-    await stores.cloud.tasks.recordStatus(TENANT, { taskId: 'done-task', status: 'complete' });
+    await stores.cloud.tasks.recordStatus(TENANT, { taskId: 'done-task', status: 'complete', agentRef: AGENT_REF });
   } finally {
     await stores.close();
   }
@@ -143,7 +147,7 @@ describeSqlite('SQLite in-place schema upgrades', () => {
 
     const db = new DatabaseSync(file);
     try {
-      expect(db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '8' });
+      expect(db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '9' });
       expect(db.prepare('SELECT count(*) AS heads FROM activity_log_head').get()).toEqual({ heads: 0 });
       expect(db.prepare('SELECT device_id, closed_cause FROM mailbox_cursor ORDER BY device_id').all())
         .toEqual([{ device_id: 'gone', closed_cause: 'device_revoked' }, { device_id: 'kept', closed_cause: null }]);
@@ -151,7 +155,7 @@ describeSqlite('SQLite in-place schema upgrades', () => {
       db.close();
     }
 
-    // A v8 file opens as it is: the upgrade ran once, and its activity log is usable.
+    // A v9 file opens as it is: the upgrade ran once, and its activity log is usable.
     const reopened = open(file);
     try {
       await expect(reopened.cloud.activity.append(TENANT, progress)).resolves.toMatchObject({ cursor: { revision: 1 } });
@@ -161,7 +165,7 @@ describeSqlite('SQLite in-place schema upgrades', () => {
     expect(activityTables(file)).toEqual(['activity_log_entry', 'activity_log_head']);
   });
 
-  it('upgrades a v7 store in place to 8, adding the activity log empty and keeping its tasks', async () => {
+  it('upgrades a v7 store in place to 9, adding the activity log empty and keeping its tasks', async () => {
     const file = await seededV7Store();
     expect(activityTables(file)).toEqual([]);
     const stores = open(file);
@@ -174,7 +178,7 @@ describeSqlite('SQLite in-place schema upgrades', () => {
     }
     const db = new DatabaseSync(file, { readOnly: true });
     try {
-      expect(db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '8' });
+      expect(db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '9' });
     } finally {
       db.close();
     }
@@ -250,12 +254,32 @@ describeSqlite('SQLite in-place schema upgrades', () => {
       const file = join(directory, `${version}.db`);
       copyFileSync(fixture, file);
       const db = new DatabaseSync(file);
-      db.prepare(`INSERT INTO task_attempt (tenant_id, task_id, device_id, status, terminal_at, updated_at) VALUES
-        (?1, 'a', 'kept', 'complete', '2026-09-01T00:00:00.000Z', '2026-09-02T00:00:00.000Z'),
-        (?1, 'b', 'kept', 'failed', NULL, '2026-09-03T00:00:00.000Z'), (?1, 'c', 'kept', 'offered', NULL, '2026-09-04T00:00:00.000Z')`).run(TENANT);
+      db.prepare(`INSERT INTO task_attempt (tenant_id, task_id, device_id, agent_ref_json, status, terminal_at, updated_at) VALUES
+        (?1, 'a', 'kept', ?2, 'complete', '2026-09-01T00:00:00.000Z', '2026-09-02T00:00:00.000Z'),
+        (?1, 'b', 'kept', ?2, 'failed', NULL, '2026-09-03T00:00:00.000Z'), (?1, 'c', 'kept', ?2, 'offered', NULL, '2026-09-04T00:00:00.000Z')`).run(TENANT, JSON.stringify(AGENT_REF));
       db.close();
       await open(file).close();
       expect(columns(file), version).toEqual({ info: columns(join(directory, 'fresh.db')).info, archiveAfter });
+    }
+  });
+
+  it('upgrades a v8 file to 9 only when every task attempt carries its Agent identity', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'byok-sqlite-v8-'));
+    scratch.push(directory);
+    for (const agentRef of [null, JSON.stringify(AGENT_REF)]) {
+      const file = join(directory, `${agentRef === null ? 'missing' : 'present'}.db`);
+      copyFileSync(V8_FIXTURE, file);
+      const db = new DatabaseSync(file);
+      db.prepare("INSERT INTO task_attempt (tenant_id, task_id, device_id, agent_ref_json, status, updated_at) VALUES (?, 'task', 'kept', ?, 'offered', ?)").run(TENANT, agentRef, NOW);
+      db.close();
+      if (agentRef === null) {
+        expect(() => open(file)).toThrow(expect.objectContaining({ name: 'SqliteSchemaError', code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '8' }));
+      } else {
+        await open(file).close();
+      }
+      const check = new DatabaseSync(file, { readOnly: true });
+      expect(check.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: agentRef === null ? '8' : '9' });
+      check.close();
     }
   });
 
@@ -265,7 +289,7 @@ describeSqlite('SQLite in-place schema upgrades', () => {
     db.prepare("UPDATE byok_sqlite_meta SET value = '5' WHERE key = 'schema_version'").run();
     db.close();
     expect(() => open(file)).toThrow(SqliteSchemaError);
-    expect(() => open(file)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '5', requiredVersion: '8' }));
-    expect(() => open(file)).toThrow('upgrades only 6 and 7 in place');
+    expect(() => open(file)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '5', requiredVersion: '9' }));
+    expect(() => open(file)).toThrow('upgrades only 6, 7 and 8 in place');
   });
 });

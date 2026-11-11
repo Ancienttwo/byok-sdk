@@ -1,11 +1,11 @@
 import { execFile, spawn } from 'node:child_process';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { defaultRunner, type Runner } from '../util/exec-runner';
+import { defaultRunner, type Runner } from '../util/exec-runner.js';
 import { resolveSystemTool } from '@byok-sdk/core/system-tool';
-import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
-import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types';
-import { cmdQuote, generateWindowsUserLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath, serviceStateDir, ServiceUnitError } from './service-unit';
+import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
+import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types.js';
+import { cmdQuote, generateWindowsUserLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath, serviceStateDir, ServiceUnitError } from './service-unit.js';
 
 /** DI seams for tests; the real ones start Windows processes. */
 export interface WindowsUserDeps {
@@ -92,7 +92,7 @@ function launcherQuery(launcherPath: string): string {
  *   waits for the launcher to exit (`service_unload_timeout`).
  * - `status()` reports the launcher process, found by its command line.
  */
-export function createWindowsUserLifecycle(def: ServiceDefinition, deps: WindowsUserDeps = {}): ManagedServiceLifecycle {
+export function createWindowsUserLifecycle(def: ServiceDefinition, deps: WindowsUserDeps = {}, gateRoot?: string): ManagedServiceLifecycle {
   const windows = def.windows;
   if (windows?.scope !== 'user') throw new Error("Windows user-scope lifecycle requires `ServiceDefinition.windows.scope: 'user'`");
   const hostStop = windows.stop;
@@ -172,5 +172,5 @@ export function createWindowsUserLifecycle(def: ServiceDefinition, deps: Windows
       const running = result.pids.length > 0;
       return { running, determinate: true, detail: running ? `launcher running (pid ${result.pids.join(', ')})` : 'launcher not running' };
     },
-  }, fs);
+  }, fs, gateRoot);
 }

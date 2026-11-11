@@ -1,5 +1,5 @@
-import { AGENT_MEMORY_RECALL_TOOL_NAME as RECALL_TOOL, AGENT_MEMORY_SAVE_TOOL_NAME as SAVE_TOOL } from '../sdk-reserved-mcp';
-import type { McpServerToolDefinition } from '../mcp-server';
+import { AGENT_MEMORY_RECALL_TOOL_NAME as RECALL_TOOL, AGENT_MEMORY_SAVE_TOOL_NAME as SAVE_TOOL } from '../sdk-reserved-mcp.js';
+import type { McpServerToolDefinition } from '../mcp-server/index.js';
 
 export const AGENT_MEMORY_RECALL_TOOL_NAME = RECALL_TOOL;
 export const AGENT_MEMORY_SAVE_TOOL_NAME = SAVE_TOOL;

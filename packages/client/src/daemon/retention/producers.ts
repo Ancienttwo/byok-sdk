@@ -1,26 +1,26 @@
 import { promises as fs, type Dir, type Dirent, type Stats } from 'node:fs';
 import path from 'node:path';
-import type { AgentHomeManager } from '../../agent-home';
-import { AGENT_HOME_READER_RUN_MAX_RETAINED } from '../../agent-home-readers';
-import { acquireReplicaLock, resetReplica } from '../../adapters/pi-durable/replica';
-import { atomicWriteFile } from '../../util/atomic-write';
-import { AGENT_RESULT_DIRECTORY, AGENT_RESULT_MAX_RETAINED, AGENT_RESULT_RECORD_NAME, AGENT_RESULT_TEMP_NAME, pruneAgentResults } from '../agent-result-store';
-import type { AgentSessionHandoffStore } from '../agent-session-handoff-store';
-import type { InputPreparationService } from '../input-preparation-service';
-import type { JournalIdentity, LocalTaskJournal } from '../journal/journal';
-import { acquirePathMutationGate, PathMutationGateBusyError } from '../../util/path-mutation-gate';
-import { readInstalledSkillPack, skillPacksRoot } from '../skill-pack-installer';
-import type { ResolvedStorageConfig } from './config';
-import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_BOUNDS, PROTECTED_CLASS_IDS, RetentionRegistry, type ClassAuthority, type ProtectedClassId, type ClassUsage, type ExpiringClassId, type RetentionClassId, type SweepBudget } from './registry';
-import type { ScratchRoot } from './scratch';
-import { authorityBudget, classBudget } from './runtime-accounting';
-import { TreeCleanup } from './tree-cleanup';
-import { selectReaderRuns } from '../../agent-home-reader-retention';
-import { RuntimeCleanup } from './runtime-cleanup';
-import { agentSessionFileTtlMs, isAgentSessionLedgerName, isAgentTaskTerminalName, isPiSessionFileName, piSessionRefFromFileName, pruneByLastWrite } from './session-ledgers';
-import { existingDirectory, measureTree, removeOwnedPath } from './usage';
-import { acquireAgySessionRetention, agySessionPaths, isAgyConversationFileName } from '../../util/agy-session-retention';
-import { acquirePiSessionDiscovery, acquirePiSessionRetention, acquirePiSessionWriter, acquirePiSessionRebinding } from '../../util/pi-session-retention';
+import type { AgentHomeManager } from '../../agent-home.js';
+import { AGENT_HOME_READER_RUN_MAX_RETAINED } from '../../agent-home-readers.js';
+import { acquireReplicaLock, resetReplica } from '../../adapters/pi-durable/replica.js';
+import { atomicWriteFile } from '../../util/atomic-write.js';
+import { AGENT_RESULT_DIRECTORY, AGENT_RESULT_MAX_RETAINED, AGENT_RESULT_RECORD_NAME, AGENT_RESULT_TEMP_NAME, pruneAgentResults } from '../agent-result-store.js';
+import { sessionFileName, type AgentSessionHandoffStore } from '../agent-session-handoff-store.js';
+import type { InputPreparationService } from '../input-preparation-service.js';
+import type { JournalIdentity, LocalTaskJournal } from '../journal/journal.js';
+import { acquirePathMutationGate, PathMutationGateBusyError } from '../../util/path-mutation-gate.js';
+import { readInstalledSkillPack, skillPacksRoot } from '../skill-pack-installer.js';
+import type { ResolvedStorageConfig } from './config.js';
+import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_BOUNDS, PROTECTED_CLASS_IDS, RetentionRegistry, type ClassAuthority, type ProtectedClassId, type ClassUsage, type ExpiringClassId, type RetentionClassId, type SweepBudget } from './registry.js';
+import type { ScratchRoot } from './scratch.js';
+import { authorityBudget, classBudget } from './runtime-accounting.js';
+import { TreeCleanup } from './tree-cleanup.js';
+import { selectReaderRuns } from '../../agent-home-reader-retention.js';
+import { RuntimeCleanup } from './runtime-cleanup.js';
+import { agentSessionFileTtlMs, isAgentSessionLedgerName, isAgentTaskTerminalName, codexThreadIdFromRolloutName, isCodexRolloutFileName, isPiSessionFileName, piSessionRefFromFileName, pruneByLastWrite } from './session-ledgers.js';
+import { existingDirectory, measureTree, removeOwnedPath } from './usage.js';
+import { acquireAgySessionRetention, agySessionPaths, isAgyConversationFileName } from '../../util/agy-session-retention.js';
+import { acquirePiSessionDiscovery, acquirePiSessionRetention, acquirePiSessionWriter, acquirePiSessionRebinding } from '../../util/pi-session-retention.js';
 
 interface ProducerOptions {
   readonly storeDir: string;
@@ -52,6 +52,12 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
   const replicas = path.join(storeDir, 'durable-replicas');
   // Open cursors resume between passes: a large prefix of unexpired items cannot starve old tails.
   const cursors = new Map<string, Dir>();
+  const codexWalks = new Map<string, { pending: string[]; current?: string }>();
+  /** Drops a home's walk and closes the cursors it left open. */
+  async function dropCodexWalk(home: string): Promise<void> {
+    codexWalks.delete(home);
+    for (const [key, directory] of [...cursors]) if (key.startsWith(`codex-session-store\0${home}${path.sep}`)) { cursors.delete(key); await directory.close().catch(() => undefined); }
+  }
   async function* entries(id: ExpiringClassId, root: string, budget: SweepBudget): AsyncGenerator<Dirent> {
     if (!await existingDirectory(root)) return;
     if (id === 'exec-sdk' && budget.trigger === 'startup') {
@@ -224,10 +230,12 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     const result = await service.collectExpired(budget.now.getTime(), budget.remaining());
     for (let index = 0; index < result.artifactsRemoved + result.recordsRemoved; index++) budget.removed(index === 0 ? result.bytesReclaimed : 0);
   }
-  async function sweepHome(id: 'reader-run' | 'agent-result' | 'home-temp' | 'session-ledger' | 'terminal-evidence', budget: SweepBudget): Promise<void> {
+  async function sweepHome(id: 'reader-run' | 'agent-result' | 'home-temp' | 'session-ledger' | 'terminal-evidence' | 'codex-session-store', budget: SweepBudget): Promise<void> {
     const manager = options.home;
     if (manager === undefined) return;
     const root = path.join(manager.layout.hostRootInput(), 'agents');
+    // A removed Agent home drops its walk.
+    if (id === 'codex-session-store') for (const home of [...codexWalks.keys()]) if (!await existingDirectory(home)) await dropCodexWalk(home);
     for await (const entry of entries(id, root, budget)) {
       if (!entry.isDirectory()) continue;
       await manager.withIdleHomeLease(entry.name, async home => {
@@ -259,6 +267,42 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
             nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs['agent-result'],
             remove: async file => { if (!homeBudget.available()) return false; await remove(home, file, budget); return true; },
           });
+        } else if (id === 'codex-session-store') {
+          // An execution holds its home lease from admission to the end of the session, so the idle-home
+          // lease rules out a running or resuming task, and each age is read under it.
+          const ledgers = path.join(home, '.byok', 'runtime-sessions');
+          const ledgerTtlMs = config.ttlMs['session-ledger'];
+          // A ledger entry may be written after the rollout's last write (a terminal record after close), and
+          // it must not name a thread that is gone. The ledger file name is derived from the thread id.
+          async function ledgerHolds(name: string): Promise<boolean> {
+            const stat = await fs.lstat(path.join(ledgers, sessionFileName('codex', codexThreadIdFromRolloutName(name)!))).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+            return stat !== undefined && budget.now.getTime() - stat.mtimeMs < ledgerTtlMs;
+          }
+          // The walk visits only the Codex date folders (YYYY/MM/DD under each store root), so what an Agent
+          // creates elsewhere is never read. A pass resumes the home's stack of folders and the retained cursor
+          // of the folder it stopped in; entries() refuses a folder or ancestor that is not canonical. The state
+          // is dropped when the walk ends or a folder's identity fails, and a restart starts over.
+          const codex = path.join(home, '.byok', 'codex');
+          let walk = codexWalks.get(home);
+          if (walk === undefined) { walk = { pending: ['archived_sessions', 'sessions'].map(name => path.join(codex, name)) }; codexWalks.set(home, walk); }
+          try {
+            while (homeBudget.available()) {
+              const directory = walk.current ?? walk.pending.pop();
+              if (directory === undefined) { await dropCodexWalk(home); break; }
+              walk.current = directory;
+              const depth = path.relative(codex, directory).split(path.sep).length - 1;
+              // entries() checks the budget before it reads each entry, so an entry it yields is always finished here.
+              for await (const child of entries(id, directory, homeBudget)) {
+                if (child.isDirectory()) { if (depth < 3 && (depth === 0 ? /^\d{4}$/u : /^\d{2}$/u).test(child.name)) walk.pending.push(path.join(directory, child.name)); continue; }
+                if (depth !== 3 || !child.isFile() || !isCodexRolloutFileName(child.name)) continue;
+                const file = path.join(directory, child.name);
+                const stat = await fs.lstat(file).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+                if (stat?.isFile() === true && budget.now.getTime() - stat.mtimeMs >= config.ttlMs['codex-session-store'] && !await ledgerHolds(child.name)) await remove(home, file, budget);
+              }
+              if (cursors.has(`${id}\0${directory}`)) break;
+              walk.current = undefined;
+            }
+          } catch (error) { await dropCodexWalk(home); throw error; }
         } else if (id === 'session-ledger' || id === 'terminal-evidence') {
           // Every ledger and terminal append holds an execution lease, so the idle-home lease rules out a concurrent writer.
           const ledgers = path.join(home, '.byok', 'runtime-sessions');
@@ -394,7 +438,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     'reader-run': budget => sweepHome('reader-run', budget), 'agent-result': budget => sweepHome('agent-result', budget),
     'home-temp': budget => sweepHome('home-temp', budget), 'session-ledger': budget => sweepHome('session-ledger', budget),
     'terminal-evidence': budget => sweepHome('terminal-evidence', budget), 'pi-session-dir': sweepPiSessions,
-    'agy-session-store': sweepAgySessions,
+    'agy-session-store': sweepAgySessions, 'codex-session-store': budget => sweepHome('codex-session-store', budget),
   };
 
   let measurement: Promise<Map<RetentionClassId, ClassUsage>> | undefined;
@@ -459,7 +503,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
         if (stat.isFile() && relative === `.byok/runtime-sessions/${name}` && isAgentSessionLedgerName(name)) return 'session-ledger';
         if (stat.isFile() && relative === `.byok/runtime-sessions/${name}` && isAgentTaskTerminalName(name)) return 'terminal-evidence';
         if (HOME_TEMP.test(path.basename(file)) && !relative.startsWith('.byok/runtime-sessions/')) return 'home-temp';
-        if (relative.startsWith('.byok/codex/')) return 'agent-runtime-sessions';
+        if (relative.startsWith('.byok/codex/')) return 'codex-session-store';
         return relative.startsWith('.byok/') ? 'byok-authority' : 'agent-content';
       }
       return 'store-authority';
@@ -492,7 +536,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
       const unreached = truncated && related.every(root => unfinished.get(root) === false);
       // Empty SDK-owned classes were measured too; external unconfigured scopes and unreached roots stay explicit.
       const previous = result.get(id)!;
-      result.set(id, { ...previous, truncated, measured: !unreached && (previous.measured || !['agent-content', 'byok-authority', 'agent-runtime-sessions', 'agent-home-lease', 'runtime-session-external', 'confirmed-journal'].includes(id)) });
+      result.set(id, { ...previous, truncated, measured: !unreached && (previous.measured || !['agent-content', 'byok-authority', 'agent-home-lease', 'runtime-session-external', 'confirmed-journal'].includes(id)) });
     }
     const journal = options.journal();
     if (journal !== undefined) { const usage = await journal.measureUsage();
@@ -505,7 +549,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
   const measure = async (id: RetentionClassId): Promise<ClassUsage> => (await (measurement ??= collectUsage())).get(id)!;
   function authority(id: RetentionClassId): ClassAuthority {
     const expiring = EXPIRING_CLASS_IDS.includes(id as ExpiringClassId);
-    const homeScoped = ['reader-run','agent-result','home-temp','session-ledger','agent-content','byok-authority','agent-runtime-sessions','agent-home-lease','terminal-evidence'].includes(id);
+    const homeScoped = ['reader-run','agent-result','home-temp','session-ledger','agent-content','byok-authority','agent-home-lease','terminal-evidence','codex-session-store'].includes(id);
     const ttlMs = expiring ? config.ttlMs[id as ExpiringClassId] : undefined;
     const replicaScoped = id === 'durable-replica' || id === 'durable-replica-live';
     const skillScoped = id === 'skill-pack-old' || id === 'skill-pack-current';

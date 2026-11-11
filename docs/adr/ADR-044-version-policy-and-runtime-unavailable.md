@@ -132,38 +132,25 @@ interface RuntimeAdapterDescriptor {
 三个入口必须全部经过下面这一个函数；除此之外任何模块都不得读取 `descriptor.versionPolicy` 再自行覆盖，也不得写第二套 merge/fallback：
 
 ```ts
-// 草案，非实现。该函数是内部模块（例如 runtime-version-policy.ts）的单一
-// 导出，不是新的公开 API。
-interface RuntimeVersionPolicyCandidates {
-  /** SDK/descriptor 的缺省策略；缺失表示自定义 adapter 没有默认策略。block 必须为空。 */
-  readonly descriptor?: RuntimeVersionPolicy;
-  /** 直接构造 adapter 的 Host 提供的策略。 */
-  readonly adapterOption?: RuntimeVersionPolicy;
-  /** createDaemon 从 DaemonConfig.runtimes.<id>.versionPolicy 取的策略。 */
-  readonly daemonConfig?: RuntimeVersionPolicy;
-}
-
-interface RuntimeVersionPolicyResolution {
-  /** 被选中候选的冻结副本；绝不与其他候选合并。全部候选缺失时为 undefined。 */
-  readonly policy?: RuntimeVersionPolicy;
-  readonly source: 'descriptor' | 'adapter-option' | 'daemon-config' | 'none';
-  /** 存在但未被使用的候选，仅用于诊断。 */
-  readonly overridden: readonly ('descriptor' | 'adapter-option')[];
-}
-
+// 该函数是内部模块 runtime-version-policy.ts 的单一导出，不是公开 API。
 function resolveRuntimeVersionPolicy(
-  candidates: RuntimeVersionPolicyCandidates,
-): RuntimeVersionPolicyResolution;
+  /** SDK/descriptor 的缺省策略；缺失表示自定义 adapter 没有默认策略。block 必须为空。 */
+  descriptor: RuntimeVersionPolicy | undefined,
+  /** Host 策略：adapter 构造参数 `versionPolicy`；createDaemon 把 DaemonConfig.runtimes.<id>.versionPolicy 作为这个参数传入。 */
+  hostPolicy: RuntimeVersionPolicy | undefined,
+): RuntimeVersionPolicy | undefined;
 ```
+
+#1682 删除了 `daemonConfig` 候选、`source` 与 `overridden`：一次构造只会有一个 Host 层，两种来源的校验相同，三候选优先级从未生效。
 
 规则：
 
-1. **输入**：三个候选各自是完整策略；每个都独立校验（§2.3 的 `invalid_version_policy`）。缺失的可选列表按空处理，但 `qualifiedVersion` 与 `unqualified` 必填。自定义 adapter 可以三个候选都缺失：此时不产生 verdict、不 block，保持今天的行为。
-2. **输出**：`policy` 是唯一胜出者的深冻结副本（全缺失时为 `undefined`），`source` 说明来源，`overridden` 记录被替换的候选。
-3. **优先级**：`daemonConfig` > `adapterOption` > `descriptor`。这是防御性顺序；正常组合下同一个 adapter 最多只有一个 Host 层（`createDaemon` 用 `daemonConfig`，直接构造用 `adapterOption`）。
+1. **输入**：两个候选各自是完整策略；每个都独立校验（§2.3 的 `invalid_version_policy`；descriptor 路径 `descriptor.versionPolicy`，Host 路径 `adapterOption.versionPolicy`）。缺失的可选列表按空处理，但 `qualifiedVersion` 与 `unqualified` 必填。自定义 adapter 可以两个候选都缺失：此时不产生 verdict、不 block，保持今天的行为。
+2. **输出**：唯一胜出者的深冻结副本；两者都缺失时为 `undefined`。
+3. **优先级**：`adapterOption` > `descriptor`。
 4. **禁止合并**：不得 `{...descriptor, ...host}`，不得逐字段回退，不得在 `createDaemon`、adapter 构造器或测试 helper 里另写一份选择逻辑。
-5. **block 只能来自 Host 层**：若最终胜出的是 `descriptor`，其 `block` 必须为空且 `unqualified !== 'block'`；否则抛 `invalid_version_policy`（reason `block_requires_host`）。若胜出的是任一 Host 层，block 允许。descriptor 缺失时只能由 Host 提供完整策略。
-6. **调用点唯一**：每个 adapter 构造器调用一次。构造参数 `versionPolicy` 是 Host 层，内部 `versionPolicySource` 标签说明它来自 `adapter-option`（直接构造，默认）还是 `daemon-config`（`createDaemon` 设置）。`createDaemon` 只设置标签，不自行解析；`createDaemonWithAdapters` 的 Host 直接构造，标签默认 `adapter-option`。
+5. **block 只能来自 Host 层**：descriptor 的 `block` 必须为空且 `unqualified !== 'block'`；否则抛 `invalid_version_policy`（reason `block_requires_host`）。Host 层允许 block。descriptor 缺失时只能由 Host 提供完整策略。
+6. **调用点唯一**：每个 adapter 构造器调用一次 `resolveRuntimeVersionPolicy(<默认策略>, options.versionPolicy)`。`createDaemon` 把 `DaemonConfig.runtimes.<id>.versionPolicy` 原样作为 `versionPolicy` 构造参数传入，不自行解析。
 7. **快照**：返回的 `policy` 放入冻结 descriptor；之后 `detect()`、准入、`status`、`hello` 都读这一份，不再回读配置。
 
 ### 2.2 匹配语义
@@ -527,7 +514,7 @@ AiphaBee 现在自己做的五件事，分别由 SDK 承接：
 | U1 | 单元：策略求值 | 新 `runtime-version-policy.test.ts` | exact/prefix、prefix 组件边界（`0.16.` 不匹配 `0.160.0`）、prefix 结尾校验、限定版本优先、block>allow>warn、重复 spec 拒绝、descriptor 层 block 拒绝 |
 | U2 | 单元：缺省不回退 | 五个 adapter 的 detect 单测（现有 `*-adapter.test.ts`） | Claude/Pi 无 advisory；Codex/Grok/Hermes 未限定仍 advisory；`versionVerdict` 与 advisory 一致 |
 | U3 | 单元：decline 投影 | `runtime-detection-routing.test.ts` 扩展 | 每个 cause 的 code/cause/retryable；旧 `retryable: true` 断言不变；block 的新断言是 `retryable: false`（O2 已批准） |
-| U4 | 单元/检查：唯一 resolver | `runtime-version-policy.test.ts` + 源码检查 | 三个入口的任意组合只经 `resolveRuntimeVersionPolicy`；两项 Host 层同时出现时 `daemonConfig` 胜出、`overridden` 记录，绝不字段合并；`descriptor.versionPolicy` 只被该 resolver 读取（无第二处 `{...}`/fallback） |
+| U4 | 单元/检查：唯一 resolver | `runtime-version-policy.test.ts` + 源码检查 | 三个入口只经 `resolveRuntimeVersionPolicy`；Host 策略存在时整体替换 descriptor 默认，绝不字段合并（#1682 删除了 `daemonConfig` 候选与 `overridden`）；`descriptor.versionPolicy` 只被该 resolver 读取（无第二处 `{...}`/fallback） |
 | C1 | 契约套件 | `packages/client`：`BYOK_RUNTIME_CONTRACT=qualified BYOK_CONTRACT_<RUNTIME>_BIN=… bun run test:runtime-contract -- src/__tests__/runtime-contract/<id>.contract.ts` | 版本用例断言 state；限定版本 = allow；缺用例 = 类型错误 |
 | C2 | 合成 block fixture | 同套件的 fixture adapter | block → decline、无 start；fixture 不能被 skip |
 | C3 | nightly | `.github/workflows/runtime-contract-nightly.yml`（`workflow_dispatch` 一次） | latest 的 verdict 被记录；block 不被误报为回归；跟踪 issue 带策略状态 |
@@ -591,7 +578,7 @@ AiphaBee 现在自己做的五件事，分别由 SDK 承接：
 | O2 | `version_blocked` 的 retryable | `false` | 已批准 |
 | O3 | block spec 的形状 | 移除 `range`；只支持 `exact` 与 `prefix`；prefix 必须以 `.` 结尾；SDK 缺省 block 为空，block 只能由 Host 配置 | 已决定（替换原推荐） |
 | O4 | `authPresent === false` 是否在准入 decline | 不 decline；只提示；运行期认证失败仍走 `failure.class: 'auth'` | 已批准 |
-| O5 | 策略覆盖入口 | descriptor 默认、adapter 构造参数、`DaemonConfig.runtimes.<id>.versionPolicy` 全部经过唯一 `resolveRuntimeVersionPolicy`；`daemonConfig > adapterOption > descriptor`；整体替换、不合并、无第二套 merge 路径 | 已决定（本文件 §2.1.1） |
+| O5 | 策略覆盖入口 | descriptor 默认、adapter 构造参数、`DaemonConfig.runtimes.<id>.versionPolicy` 全部经过唯一 `resolveRuntimeVersionPolicy`；`adapterOption > descriptor`（`createDaemon` 把 daemon 配置作为 adapter 构造参数传入；#1682 删除了 `daemonConfig` 候选、`source`、`overridden`）；整体替换、不合并、无第二套 merge 路径 | 已决定（本文件 §2.1.1） |
 | O6 | 重启版本变化是否上 wire | 本轮只本地（`status`/`doctor`/stderr），不扩 wire | 已批准 |
 | O7 | retryable 的粒度 | 保持布尔 + cause；Host 自己记忆停机，不加设备级 `permanent` 字段 | 已批准 |
 | O8 | 是否上报非 available 的 cause | 加顶层 `runtimeUnavailable` + `runtime-unavailable-cause` capability flag | 已批准 |

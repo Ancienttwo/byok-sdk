@@ -1,27 +1,31 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { canonical, concludeOccurrence, hash, occurrenceIntentKey, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type HostJobHandler,
-  type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine } from '@byok-sdk/server/execution-core';
+  type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine, type RoutineCommands } from '@byok-sdk/server/execution-core';
 import { BOT_DREAM, botRoutines, endable, owned, resealDefinition, routineTurn, sealedDefinition, sealedTemplate, updateDefinition, type BotRoutineInput,
   type SealedRoutineAction } from '@byok-sdk/example-bot-collaboration/routines';
 import { admitBotToolsets, applyHomeTerminal, applyManagement, applyModels, failHomeFlush, homeEnqueued, homeHead, inactive, planHomeRetry, requireMain, updateBot,
   writeSnapshotBot, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
-import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
+import { admitUserInput, coalescePolicy, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { addTurn, stateOf, type Card, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { checkDreamInstruction, dreamPolicy, recordDream, reconcileDreamRoutines, type DreamingOptions, type DreamSync } from '@byok-sdk/example-bot-collaboration/dream';
-import { advanceRoomSeats, cardCallDue, checkReply, CONNECTOR_OUTCOME_UNKNOWN, collaborationDue, commitCommand, expireCards, observeDevices, replyCheckDue, reportCardDecisions,
+import { advanceRoomSeats, cardCallDue, checkReply, CONNECTOR_OUTCOME_UNKNOWN, collaborationDue, observeDevices, replyCheckDue, reportCardDecisions,
   commandBots, seatTurn, settleCardCall, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { botOutcomePorts, syncHead, syncTail, type IntentOutcomeError } from '@byok-sdk/example-bot-collaboration/adapter-steps';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, beginSwitch, refusesHomeWrites, requireBound, switchRefusal, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
-import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
-import { cancelIntent, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
+import { DDL, STORE_VERSION } from './ddl';
+import { delegationCancelAnswer, hostIntentCancelAnswer, turnCancelAnswer, type DelegationCancelResult, type IntentCancelResult,
+  type TurnCancelResult } from '@byok-sdk/example-bot-collaboration/rules/delegation';
+import { cancelIntent, commandIntentFacts, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { syncDreamSlice } from './dreams';
+import { HostedStoreVersionError, inSchema, lockScope, SCHEMA } from './transaction';
 import { decideMessage, messageCommandId, type AgentMessageInput, type HostedIntentMessageHandler, type MessageDecision } from './messages';
-import { decideFinish, type HostedIntentHandler, type IntentOutcomeError, type TaskEvidence } from './reconcile';
-import { archivedRow, commitStored, decideRetention } from './retention';
+import { decideFinish, type HostedIntentHandler, type TaskEvidence } from './reconcile';
+import { archivedRow, commitInStore, commitStored, decideRetention } from './retention';
 import { dueRoutine, hostedRoutineCommands, hostJobCommands, hostJobRowKey, loadSlice, planSlice, recordDue, switchDueVersions,
   writeSlice } from './routines';
 import type { RetentionInput, RetentionLimits, RetentionResult } from '@byok-sdk/example-bot-collaboration/retention';
@@ -32,16 +36,13 @@ import { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, refuseRout
   revokePush } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import { assemble, entryGroup, idOf, split, storedKey, type EntityKind, type EntryKind, type Split } from './layout';
 import { sealSwitchExport, SwitchExportError, verifySwitchExport, type SwitchExport } from '@byok-sdk/example-bot-collaboration/migration';
-import { exportMarkOf, hostedSwitchContent, importMarkOf, SwitchExportedError, SwitchImportedError, writeSwitchRows, type SwitchExportMark,
-  type SwitchImportMark, type SwitchReceipt } from './switch';
+import { exportMarkOf, SwitchExportedError, SwitchImportedError, type SwitchExportMark, type SwitchReceipt } from '@byok-sdk/example-bot-collaboration/migration';
+import { hostedSwitchContent, importMarkOf, writeSwitchRows, type SwitchImportMark } from './switch';
 
-/** A stored scope row of a store version that this code does not support. Nothing was written. */
-export class HostedStoreVersionError extends Error {
-  constructor(readonly version: number) { super(`Unsupported hosted collaboration store version ${version}`); this.name = 'HostedStoreVersionError'; }
-}
 export type Publish = (id: string, value: Json) => void;
 /** `now` is the clock of the writer. A transaction that settles a delivery must give it, for the outbox index. */
 export type Decision<T> = { value: T; outbox: OutboxIntent[]; now?: number };
+type CommitExtra = (state: CollaborationState, ports: StorePorts) => { remember?: CommandPorts['remember']; outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> };
 type Decide<T> = (state: CollaborationState, publish: Publish, client: PoolClient) => Decision<T> | Promise<Decision<T>>;
 type TurnHistory = NonNullable<SyncOptions<never>['history']>;
 /**
@@ -56,18 +57,16 @@ export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines' 
 /** `dueAt`: the scope's due time after the sync, the value that it wrote to `scope.due_at` (#793 S4). */
 export interface SyncResult { dueAt: number | null }
 /**
- * The Host config of one scope, as L's `BotOptions.models` and `readOnlyToolsets` (#793 S9). A model template carries the
+ * The Host config of one scope (#793 S9). A model template carries the
  * device that a new Bot runs on, so each scope has its own: the user's own devices.
  */
 export interface HostConfig {
   models: Record<string, ExecutionTemplate>; readOnlyToolsets?: readonly string[];
-  /** As L: absent means daily dreaming on; false disables it for this scope. */
+  /** Absent means daily dreaming on; false disables it for this scope. */
   dreaming?: DreamingOptions | false;
 }
-/** The outcome ports of the routine actions of a callback command. The store builds the committed intents and `manage`. */
-export type OutcomeRoutinePorts = Omit<NonNullable<CommandPorts['outcome']>, 'committed' | 'manage'>;
 /**
- * The command ports that the store builds on the state of the open transaction, as L `commitOwner` builds them (K8 host.ts),
+ * The command ports that the store builds on the state of the open transaction,
  * from the scope's Host config. `manage` is the outcome team management of one task. No caller supplies a port (#793 S9).
  */
 export type StorePorts = Omit<CommandPorts, 'intents' | 'deliver' | 'outcome' | 'occurrence' | 'remember' | 'admitInput' | 'routines'>
@@ -89,10 +88,12 @@ export class InboundCommandError extends Error {
   }
 }
 /**
- * Who the Host is on its channels, as L's options give it: the owner principal, and the Host's own bot ids by channel.
+ * Who the Host is on its channels: the owner principal, and the Host's own bot ids by channel.
  * It is Host configuration from verified identity, never a field of the message.
  */
 export interface InboundIdentity { owner: string; self?: Record<string, readonly string[]> }
+/** The one-shot row migrations of `migrate()` (#1756). */
+export interface MigrateResult { wouldDoBackfilled: number; wouldDoArchived: number }
 export interface HostedStoreOptions {
   /**
    * The Host config of a scope: its model templates and read-only toolsets (#793 S9). Every port and sync reads it. A store
@@ -100,31 +101,31 @@ export interface HostedStoreOptions {
    * asked, from the store's own pool too.
    */
   host: (scope: string) => Promise<HostConfig>;
-  /** The Host has a channel: a K4 callback queues its channel deliveries, as L does with `channel` set. */
+  /** The Host has a channel: a K4 callback queues its channel deliveries. */
   channel?: boolean;
   /**
-   * The delegation timers of the K8 settlement and of the scope's due time, as L's (#793 D2f-5, S4). Without them the rule's
+   * The delegation timers of the K8 settlement and of the scope's due time (#793 D2f-5, S4). Without them the rule's
    * defaults apply.
    */
   timers?: DelegationTimers;
   /**
-   * Input coalescing, as L's `coalesce` option: the policy that K8 `coalescePolicy` returns for the ContextPack budget that
+   * Input coalescing: the policy that K8 `coalescePolicy` returns for the ContextPack budget that
    * the Host gives each sync in `limits`. Each sync checks it against that budget. Without it, each input keeps its own Turn.
    */
   coalesce?: CoalescePolicy;
   /**
-   * The handlers of the Host's own Host job routines (#793 S14), by type, as L's `hostJobs`. The store checks a Host job
+   * The handlers of the Host's own Host job routines (#793 S14), by type. The store checks a Host job
    * routine against them, and the outbox sender runs them. A Host job may return only a summary: a result with `execution`
    * concludes its occurrence `failed` (owner Q4 A).
    */
   hostJobs?: Readonly<Record<string, HostJobHandler>>;
   /**
-   * The handlers of the Host's own intents (#955), by name, as L's `hostIntents`. `enqueueHostIntent` stores the name on the
+   * The handlers of the Host's own intents (#955), by name. `enqueueHostIntent` stores the name on the
    * intent row, and the terminal transaction of a `task.complete` result runs that handler.
    */
   hostIntents?: Readonly<Record<string, HostedIntentHandler>>;
   /**
-   * The Agent message handlers of Host intents (#1362), by the `hostIntents` name, as L's `hostIntentMessages`. The consume
+   * The Agent message handlers of Host intents (#1362), by the `hostIntents` name. The consume
    * transaction runs the handler synchronously and returns its disposition. An accepted message is recorded without its
    * body and not delivered. A Host intent whose execution has `messageEgress` needs one.
    */
@@ -196,7 +197,6 @@ export type HostJobOutcome = { summary: Json; unsupported: boolean } | { error: 
 /** The stored text of a failed outbox step: the error message, cut to 1024 characters. */
 export const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error)).slice(0, 1024);
 
-const SCHEMA = /^[a-z_][a-z0-9_]{0,62}$/;
 /**
  * Snapshots the Turn and room seat ids of `state` and the input count of each input batch. The returned function gives the
  * device of each Bot of a row that adds work since: a new Turn that is not concluded (a cancel concludes the Turn that it
@@ -262,42 +262,28 @@ export class HostedCollaborationStore {
     // The ContextPack budget comes with each sync, so the construction checks every bound except that one.
     if (options.coalesce) this.coalesce = coalescePolicy(options.coalesce, Number.MAX_SAFE_INTEGER);
     if (!SCHEMA.test(schema)) throw new Error('Invalid hosted collaboration schema name');
-    // As L checks its timers (K8 host.ts constructor).
     const timers = options.timers;
     if (timers && (time(timers.cancelGraceMs) < 1 || time(timers.uncertainAfterMs) < 1)) throw new Error('Invalid delegation timers');
     this.timers = timers && { cancelGraceMs: timers.cancelGraceMs, uncertainAfterMs: timers.uncertainAfterMs };
   }
 
-  /** Creates the schema and its tables when they are absent. */
-  async migrate(): Promise<void> {
-    await this.transaction(async client => {
+  /**
+   * Creates the schema and its tables when they are absent, and runs the one-shot row migrations. `wouldDoArchived` counts
+   * the would-do rows that no live Turn owns any more (#1756): they move to the archived rows instead of getting a `turnId`.
+   */
+  async migrate(): Promise<MigrateResult> {
+    return await this.transaction(async client => {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`hosted-collaboration:${this.schema}`]);
       await client.query(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`);
       await client.query(DDL);
-      // Older H frames (including L imports) can contain dreams. Move them once, under the same scope locks as writes.
-      // Keep JSON key order: jsonb replacement would change the byte-preserving snapshot/export contract.
-      const legacy = await client.query<{ scope: string; state_version: number; frame: string; has_row: boolean }>(
-        `SELECT s.scope, s.state_version, s.frame::text, d.scope IS NOT NULL AS has_row FROM scope s
-         LEFT JOIN dream_state d ON d.scope = s.scope WHERE s.frame::jsonb ? 'dreams' ORDER BY s.scope FOR UPDATE OF s`);
       const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
-      for (const row of legacy.rows) {
-        if (!SUPPORTED_STORE_VERSIONS.has(row.state_version)) throw new HostedStoreVersionError(row.state_version);
-        const frame = JSON.parse(row.frame) as Record<string, unknown>, dreams = frame.dreams;
-        if (row.has_row && object(dreams) && Object.keys(dreams).length === 0) continue;
-        if (row.has_row || !object(dreams) || Object.keys(dreams).length !== 2 || !object(dreams.bots) || !object(dreams.open)) {
-          throw new Error(`Cannot migrate dreams for ${row.scope}: conflicting row or invalid frame`);
-        }
-        await client.query('INSERT INTO dream_state (scope, body) VALUES ($1, $2::json)', [row.scope, JSON.stringify(dreams)]);
-        frame.dreams = {};
-        await client.query('UPDATE scope SET frame = $2::json WHERE scope = $1', [row.scope, JSON.stringify(frame)]);
-      }
       // An L import on older code kept `wouldDo` in the frame. It is a mapped entity kind now, so a write would empty the
       // frame map and lose the rows. Move each one into an entity row, once, under the same scope locks.
       const held = await client.query<{ scope: string; state_version: number; frame: string }>(
         `SELECT scope, state_version, frame::text FROM scope WHERE frame::jsonb -> 'wouldDo' IS NOT NULL AND frame::jsonb -> 'wouldDo' <> '{}'::jsonb
          ORDER BY scope FOR UPDATE`);
       for (const row of held.rows) {
-        if (!SUPPORTED_STORE_VERSIONS.has(row.state_version)) throw new HostedStoreVersionError(row.state_version);
+        if (row.state_version !== STORE_VERSION) throw new HostedStoreVersionError(row.state_version);
         const frame = JSON.parse(row.frame) as Record<string, unknown>, wouldDo = frame.wouldDo;
         if (!object(wouldDo)) throw new Error(`Cannot migrate would-do rows for ${row.scope}: invalid frame`);
         let ordinal = 0;
@@ -307,6 +293,32 @@ export class HostedCollaborationStore {
         frame.wouldDo = {};
         await client.query('UPDATE scope SET frame = $2::json WHERE scope = $1', [row.scope, JSON.stringify(frame)]);
       }
+      // A would-do row written before #1756 has no `turnId`. The K4 task id names it exactly: the CHECKs pin each intent and
+      // earlier-generation task_id to taskId(key, generation), and a Turn's intent key is the Turn id. A row whose intent
+      // was compacted, or whose Turn left the state, has no live owner: it is archived, as retention would move it.
+      const rows = await client.query<{ scope: string; state_version: number; key: string; body: string; turn: string | null }>(
+        `SELECT e.scope, s.state_version, e.key, e.body::text, owner.key AS turn FROM entity e JOIN scope s ON s.scope = e.scope
+         LEFT JOIN LATERAL (SELECT task.key FROM (SELECT key, task_id FROM intent WHERE scope = e.scope
+           UNION ALL SELECT key, task_id FROM intent_execution WHERE scope = e.scope) task
+           JOIN entity turn ON turn.scope = e.scope AND turn.kind = 'turn' AND turn.key = task.key
+           WHERE task.task_id = e.body ->> 'taskId') owner ON true
+         WHERE e.kind = 'would_do' AND e.body::jsonb ->> 'turnId' IS NULL ORDER BY e.scope, e.key FOR UPDATE OF s, e`);
+      const result: MigrateResult = { wouldDoBackfilled: 0, wouldDoArchived: 0 };
+      for (const row of rows.rows) {
+        if (row.state_version !== STORE_VERSION) throw new HostedStoreVersionError(row.state_version);
+        const body = JSON.parse(row.body) as Record<string, unknown>;
+        if (row.turn === null) {
+          await client.query(`INSERT INTO archived_row (scope, namespace, id, body, expires_at) VALUES ($1, 'wouldDo', $2, $3::json, NULL)
+            ON CONFLICT (scope, namespace, id) DO UPDATE SET body = excluded.body`, [row.scope, row.key, row.body]);
+          await client.query(`DELETE FROM entity WHERE scope = $1 AND kind = 'would_do' AND key = $2`, [row.scope, row.key]);
+          result.wouldDoArchived++;
+        } else {
+          await client.query(`UPDATE entity SET body = $3::json WHERE scope = $1 AND kind = 'would_do' AND key = $2`,
+            [row.scope, row.key, JSON.stringify({ ...body, turnId: idOf(row.turn) })]);
+          result.wouldDoBackfilled++;
+        }
+      }
+      return result;
     }, false);
   }
 
@@ -321,9 +333,9 @@ export class HostedCollaborationStore {
    * A new `cancel_turn` of a Turn with a frozen intent runs the K4 cancel in the same transaction, in L's order (K8
    * host.ts `cancelTurn`): the commit, the cancel of the intent, then the version switch check (#793 D2f-4). A new commit
    * that leaves a delegation cancel fact to deliver (`cancel_turn` of an open chain, `cancel_delegation`,
-   * `abandon_delegation`) delivers it in the same transaction, as L `settleChain` does after its commit.
+   * `abandon_delegation`) delivers it in the same transaction.
    *
-   * `end_routine` (§55c) runs on the routine slice of the scope, as L `endRoutine` runs K4 `setLifecycle` in its commit: the store
+   * `end_routine` (§55c) runs on the routine slice of the scope: the store
    * gives the K8 rule its `routines` port, and a new acceptance writes the slice back.
    *
    * The store builds every command port from the scope's Host config (#793 S9). `clock` is the Host clock.
@@ -345,15 +357,36 @@ export class HostedCollaborationStore {
   }
 
   /**
-   * The inbound channel entry (#793 D2b-out-3), as L `receive()` (K8 host.ts). K8 `classifyInbound` sorts the message:
+   * The owner cancel of a Turn: the answer of K8 `turnCancelAnswer` and the keyless commit
+   * run in one transaction under the scope lock. An answer other than `cancelled` writes nothing and cancels no intent.
+   */
+  async cancelTurn(scope: string, turnId: string, clock: () => number): Promise<TurnCancelResult> {
+    let answer: Omit<TurnCancelResult, 'turnId'> | undefined;
+    const committed = await this.commitWith(scope, { scope, commandId: randomUUID(), command: { kind: 'cancel_turn', turnId } }, clock, undefined, 'binding', undefined,
+      async (state, client) => {
+        answer = turnCancelAnswer(state, await commandIntentFacts(client, scope, Object.keys(state.turns)), turnId);
+        return answer !== undefined;
+      });
+    return { turnId, ...(committed ? { result: 'cancelled' } : answer!) };
+  }
+  /** The owner cancel of a delegation: see `cancelTurn`. */
+  async cancelDelegation(scope: string, delegationId: string, clock: () => number): Promise<DelegationCancelResult> {
+    let answer: Omit<DelegationCancelResult, 'delegationId'> | undefined;
+    const committed = await this.commitWith(scope, { scope, commandId: randomUUID(), command: { kind: 'cancel_delegation', delegationId } }, clock, undefined, 'binding', undefined,
+      async state => (answer = delegationCancelAnswer(state, delegationId)) !== undefined);
+    return { delegationId, ...(committed ? { result: 'cancelled' } : answer!) };
+  }
+
+  /**
+   * The inbound channel entry (#793 D2b-out-3). K8 `classifyInbound` sorts the message:
    * - `echo`: in one transaction under the scope lock, K8 `echoCandidates` and `acceptDeliveryEcho` settle the one delivery
    *   that the echo names, or an `unmatched_echo` audit line is written; then the reply tokens are cleaned. The delivery index
    *   follows the entity. An echo never creates input.
    * - `owner_input` and `room_input`: the K8 `receive` command, under the command id `hash(['receive', inboundKey])`, so a
    *   redelivered event replays. With a channel, the store's `remember` port (K8 `rememberInbound`) keeps the inbound and its
    *   reply route.
-   * - `bot_background`: the K8 `room_input` command of a bot, with no mention, as L `roomInput`.
-   * - every other kind: an audit line only, one for each delivery, as L.
+   * - `bot_background`: the K8 `room_input` command of a bot, with no mention.
+   * - every other kind: an audit line only, one for each delivery.
    * Returns the kind, and the Turn id of an input. The authenticated command entry calls it with the scope of its owner,
    * and with `identity` from the Host's configuration, never from the message.
    */
@@ -377,7 +410,7 @@ export class HostedCollaborationStore {
       const command: Command = kind === 'owner_input'
         ? { kind: 'receive', inbound: kind, key, botId: conversation.id, request: message.text, sender: from }
         : { kind: 'receive', inbound: kind, key, roomId: conversation.id, text: message.text, mentions: message.mentions, from };
-      // Input that reaches a device that is switching, or was switched to L, is refused as L refuses it (#957, #975). Input
+      // Input that reaches a device that is switching, or was switched to L, is refused (#957, #975). Input
       // for an unbound or revoked device is still taken and held by the sync (#956): the channel entry is not the command entry.
       const result = await this.commitWith(scope, { scope, commandId: hash(['receive', key]), command }, clock,
         state => ({ remember: this.channel ? (root: string) => rememberInbound(state, message, root) : undefined }), 'owner');
@@ -400,26 +433,33 @@ export class HostedCollaborationStore {
 
   /**
    * The commit body, which takes the callback commands too, with the given routine ports of an outcome. Host code only: the
-   * shared K8 vectors reach it through a test subclass, as L's vector subject commits through `commitInLedger`.
+   * shared K8 vectors reach it through a test subclass.
    */
-  protected commitIn(scope: string, request: CommitRequest<Command>, clock: () => number, outcome?: OutcomeRoutinePorts): Promise<CommitResult> {
+  protected commitIn(scope: string, request: CommitRequest<Command>, clock: () => number, routines?: RoutineCommands): Promise<CommitResult> {
     const command = request.command;
-    return this.commitWith(scope, request, clock, (_state, ports) => outcome && command.kind === 'outcome'
-      ? { outcome: { ...outcome, manage: ports.manage(command.taskId) } } : {});
+    return this.commitWith(scope, request, clock, (_state, ports) => routines && command.kind === 'outcome'
+      ? { outcome: botOutcomePorts({ taskId: command.taskId, routines, manage: ports.manage(command.taskId), roomPosts: false }) } : {});
   }
 
   /**
    * One commit with the store's ports and `extra`, the ports that only the store's own entries add. `owner`: an owner
-   * command, admitted as L admits it (see `commit`). `binding`: an owner command of the command entry, which also needs an
-   * active H binding for the work it added. Neither: a callback, which L commits with no admission either.
+   * command, admitted (see `commit`). `binding`: an owner command of the command entry, which also needs an
+   * active H binding for the work it added. Neither: a callback, committed with no admission.
    */
-  private async commitWith(scope: string, request: CommitRequest<Command>, clock: () => number,
-    extra?: (state: CollaborationState, ports: StorePorts) => { remember?: CommandPorts['remember']; outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> },
-    entry?: 'owner' | 'binding', guard?: (client: PoolClient) => Promise<void>): Promise<CommitResult> {
+  private commitWith(scope: string, request: CommitRequest<Command>, clock: () => number, extra?: CommitExtra,
+    entry?: 'owner' | 'binding', guard?: (client: PoolClient) => Promise<void>): Promise<CommitResult>;
+  /** With `settled`, the commit is skipped and `undefined` returned when the step answers, after the guard and under the scope lock. */
+  private commitWith(scope: string, request: CommitRequest<Command>, clock: () => number, extra: CommitExtra | undefined,
+    entry: 'owner' | 'binding' | undefined, guard: ((client: PoolClient) => Promise<void>) | undefined,
+    settled: (state: CollaborationState, client: PoolClient) => Promise<boolean>): Promise<CommitResult | undefined>;
+  private async commitWith(scope: string, request: CommitRequest<Command>, clock: () => number, extra?: CommitExtra,
+    entry?: 'owner' | 'binding', guard?: (client: PoolClient) => Promise<void>,
+    settled?: (state: CollaborationState, client: PoolClient) => Promise<boolean>): Promise<CommitResult | undefined> {
     const key = storedKey(scope), config = await this.host(scope);
-    return this.change(scope, request.commandId, async (state, publish, client) => {
+    return this.change<CommitResult | undefined>(scope, request.commandId, async (state, publish, client) => {
       await guard?.(client);
-      // The store admits each input with its own policy, as L does (K8 host.ts `commitOwner`), so the admission and the sync's
+      if (await settled?.(state, client)) return { value: undefined, outbox: [] };
+      // The store admits each input with its own policy, so the admission and the sync's
       // seal use one policy.
       const { manage, ...own } = this.ports(config, state, publish, clock), head = revisionOf(state);
       const slice = request.command.kind === 'end_routine' ? await loadSlice(client, key) : undefined;
@@ -450,8 +490,8 @@ export class HostedCollaborationStore {
   }
 
   /**
-   * The command ports of one transaction on `state`, from the scope's Host config, as L `commitOwner` and `applyOutcome` build
-   * them (K8 host.ts). The route ports exist only with a channel.
+   * The command ports of one transaction on `state`, from the scope's Host config.
+   * The route ports exist only with a channel.
    */
   private ports(config: HostConfig, state: CollaborationState, publish: Publish, now: () => number): StorePorts {
     const { models, readOnlyToolsets = [] } = config;
@@ -467,7 +507,7 @@ export class HostedCollaborationStore {
   }
 
   /**
-   * Appends one audit line to the scope's state, in its own transaction, as L's `audit` (K8 host.ts). The command entry writes
+   * Appends one audit line to the scope's state, in its own transaction. The command entry writes
    * an R2 refusal with it before it throws (#793 S10). Adapter data can be unverified, so a line is cut to 1024 characters.
    */
   async audit(scope: string, line: string, clock: () => number): Promise<void> {
@@ -526,23 +566,22 @@ export class HostedCollaborationStore {
    * command record and keeps the revision. A throw writes nothing.
    *
    * Each round then runs the K8 delegation settlement at L's position, after the Turn steps (K8 host.ts sync), on the intent
-   * facts read again after those steps wrote. Then it delivers each new delegation cancel fact in the same transaction, as
-   * the L pass does after its sync (#793 D2f-5). The K8 card steps run at L's positions too (#793 S5): `expireCards` before
+   * facts read again after those steps wrote. Then it delivers each new delegation cancel fact in the same transaction
+   * (#793 D2f-5). The K8 card steps run at L's positions too (#793 S5): `expireCards` before
    * the Turn steps, and `reportCardDecisions` after the settlement. A decided card's `action_result` Turn starts a new round.
    *
-   * It runs to a fixed point, as the L pass drains again after a step that changed K4 (K8 host.ts pass): while a round
+   * It runs to a fixed point: while a round
    * froze, promoted or concluded an intent or an occurrence, delivered a cancel fact, added a Turn (the `bot_reply` of a
    * batch join, or an `action_result`), or released a seat (a blocked or retired seat Turn), it reads the facts again and
    * runs the Turns again. Each such step happens once per intent, occurrence, fact, join or seat, so the rounds end.
    */
   async sync(scope: string, options: HostedSyncOptions): Promise<SyncResult> {
-    // As L checks its coalesce policy against its ContextPack budget (K8 host.ts constructor).
     if (this.coalesce) coalescePolicy(this.coalesce, options.limits.contextMaxBytes);
     const key = storedKey(scope), config = await this.host(scope), models = Object.keys(config.models), readOnlyToolsets = config.readOnlyToolsets ?? [];
     const dreaming = dreamPolicy(config.dreaming);
     if (dreaming) checkDreamInstruction(options.limits.instructionMaxBytes);
     return this.change(scope, undefined, async (state, publish, client) => {
-      // As L re-projects the Host's templates (#1357), so a freeze in this sync uses the scope config's current templates (#1358).
+      // Re-project the Host's templates (#1357), so a freeze in this sync uses the scope config's current templates (#1358).
       applyModels(state, config.models, readOnlyToolsets);
       const published = new Set<string>();
       const slice = await loadSlice(client, key, Object.keys(state.dreams?.open ?? {}));
@@ -552,10 +591,7 @@ export class HostedCollaborationStore {
       const emit: Publish = (id, body) => { publish(id, body); published.add(id); };
       let more = true;
       while (more) {
-        // As L's sync, a batch sealed here gets its Turn's step in this round, before later Turns of its Bot.
-        sealDueBatches(state, this.coalesce, options.now);
-        // As L's sync, card expiry runs before the Turn steps, so a ContextPack frozen in this round shows it.
-        expireCards(state, options.now);
+        syncHead(state, this.coalesce, options.now);
         // As L's sync, the room step runs before the Turn steps, so a seat Turn that it adds freezes in this round. The K4
         // cancel of a seat's admitted work is H's `cancelIntent`, as for a delegation cancel.
         const seats = await seatFacts(client, scope, Object.keys(state.team.seats));
@@ -583,17 +619,13 @@ export class HostedCollaborationStore {
       }
       await writeSlice(client, key, slice);
       await switchDueVersions(client, key, options.now);
-      // As L's sync (K8 host.ts `sync`), H's sync drops expired and unreserved reply tokens. L's call in each flush pass is a
-      // call in each delivery settle here (`finishDelivery`).
-      if (state.channel) cleanReplyTokens(await intentConclusions(client, scope), state, options.now);
-      // Last, as in L's sync: it sees every seal of this sync and of earlier transactions.
-      projectInputBatches(state, emit);
+      syncTail(state, state.channel ? await intentConclusions(client, scope) : undefined, options.now, emit);
       return { value: { dueAt: await this.dueAt(client, key, state) }, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now: options.now };
     });
   }
 
   /**
-   * Owner API for the Main Bot's own routines (#793 D2f), as L `updateRoutine` (K8 host.ts:462-467): stages the next version of
+   * Owner API for the Main Bot's own routines (#793 D2f): stages the next version of
    * routine `action.routineId` of Bot `botId`. The authenticated command entry calls it. A refusal writes nothing.
    */
   updateRoutine(scope: string, botId: string, action: UpdateRoutineAction, now: number): Promise<void> {
@@ -616,7 +648,7 @@ export class HostedCollaborationStore {
   resealRoutine(scope: string, botId: string, action: SealedRoutineAction, now: number): Promise<void> {
     return this.routineCommand(scope, botId, now, (commands, execution) => commands.update(resealDefinition(commands.list(), botId, action, execution)));
   }
-  /** Owner API, as L `setRoutineLifecycle` (K8 host.ts:456-461): pauses, resumes or completes a routine of the Main Bot `botId`. */
+  /** Owner API: pauses, resumes or completes a routine of the Main Bot `botId`. */
   setRoutineLifecycle(scope: string, botId: string, id: string, lifecycle: Routine['lifecycle'], now: number): Promise<void> {
     return this.routineCommand(scope, botId, now, commands => commands.lifecycle(owned(commands.list(), botId, id).definition.id, lifecycle));
   }
@@ -637,17 +669,17 @@ export class HostedCollaborationStore {
   }
 
   /**
-   * Host API, as L's `core.addRoutine` for a Host job (#793 S14): adds a Host job routine to `scope`, checked by K4 against
+   * Host API (#793 S14): adds a Host job routine to `scope`, checked by K4 against
    * the store's handlers. Host code calls it; no Bot command or entry reaches it. A refusal writes nothing.
    */
   addHostJobRoutine(scope: string, definition: HostJobRoutineDefinition, now: number): Promise<void> {
     return this.hostJobCommand(scope, now, commands => commands.create(definition));
   }
-  /** Host API, as L's `core.updateRoutine` for a Host job: stages the next version, which switches once no old work is open. */
+  /** Host API for a Host job: stages the next version, which switches once no old work is open. */
   updateHostJobRoutine(scope: string, definition: HostJobRoutineDefinition, now: number): Promise<void> {
     return this.hostJobCommand(scope, now, commands => commands.update(definition));
   }
-  /** Host API, as L's `core.lifecycle` for a Host job: pauses, resumes or completes it. A Bot routine id is refused. */
+  /** Host API for a Host job: pauses, resumes or completes it. A Bot routine id is refused. */
   setHostJobLifecycle(scope: string, id: string, lifecycle: Routine['lifecycle'], now: number): Promise<void> {
     return this.hostJobCommand(scope, now, commands => commands.lifecycle(id, lifecycle));
   }
@@ -663,22 +695,22 @@ export class HostedCollaborationStore {
   }
 
   /**
-   * Fires the due slot of routine `id` (#793 D2f-3, scheduler note §2.2), as K4 `consume` records an occurrence and runs its
-   * hook in one transaction: the occurrence row, the routine's next slot, the supersede of its earlier untried intents and
-   * the K8 routine Turn commit together, under the scope lock. The K8 `occurrence` command gets no record, as in L: the slot
+   * Fires the due slot of routine `id` (#793 D2f-3, scheduler note §2.2), in one
+   * transaction: the occurrence row, the routine's next slot, the supersede of its earlier untried intents and
+   * the K8 routine Turn commit together, under the scope lock. The K8 `occurrence` command gets no record: the slot
    * is the replay guard. A routine that is not active, or whose slot is not due, is `skipped` with nothing written: another
    * pass fired it, or a command changed it.
    *
    * The fire can create execution, so the owner Bot's device must have an active H binding (#793 D2e), read from the state of
    * this transaction, as the sync builds the routine offer from it. Otherwise it throws `DeviceBindingError` and writes
    * nothing, and the slot stays due. The promotion checks the binding again. An archived or suspended (#1319) owner Bot skips
-   * the fence: its routine Turn creates no execution, because the sync ends it before any freeze, as L does. A revoke and an archive are both
+   * the fence: its routine Turn creates no execution, because the sync ends it before any freeze. A revoke and an archive are both
    * final, so with the fence that slot could never fire.
    *
    * A `bot-dream` routine records its open dream in this transaction. The sync decides whether to skip or promote it,
    * using K8's rule and the device binding of that transaction.
    *
-   * A Host job routine (#793 S14) records its occurrence and its `host_job` outbox row, as K4 `recordOccurrence` does, with no
+   * A Host job routine (#793 S14) records its occurrence and its `host_job` outbox row, with no
    * K8 command and no fence: a Host job creates no execution. The outbox sender runs it.
    *
    * It runs no version switch: a fire leaves its new occurrence open, so K4 `versionSwitchDue` stays false for the routine.
@@ -704,8 +736,8 @@ export class HostedCollaborationStore {
       if (!inactive(bot)) await activeBinding(client, key, bot.execution.deviceId);
       const occurrence = recordDue(slice, scope, routine, now);
       const run = occurrenceRun(routine, occurrence);
-      const result = commitCommand(state, { scope, commandId: occurrence.key, command: { kind: 'occurrence', key: occurrence.key } },
-        { scope, recordCallbacks: false }, { now: () => now, publish, occurrence: () => routineTurn(state, run) });
+      const result = await commitInStore(client, scope, state, { scope, commandId: occurrence.key, command: { kind: 'occurrence', key: occurrence.key } },
+        false, { now: () => now, publish, occurrence: () => routineTurn(state, run) });
       await writeSlice(client, key, slice, occurrence.key);
       return { value: 'fired' as const, outbox: result.outbox };
     }), false);
@@ -713,8 +745,8 @@ export class HostedCollaborationStore {
 
   /**
    * The schedule upkeep of the scope's routines (#793 D2f-3, scheduler note §2.6), under the scope lock. `start` re-plans an
-   * active routine with no slot within the horizon, as K4 `recover`. Both phases set `ok` on a `schedule_retrying` routine
-   * whose slot is within the horizon, as K4 `scheduleNext`. Then a staged version switches when it is due.
+   * active routine with no slot within the horizon. Both phases set `ok` on a `schedule_retrying` routine
+   * whose slot is within the horizon. Then a staged version switches when it is due.
    */
   planRoutines(scope: string, now: number, phase: 'start' | 'pass'): Promise<void> {
     const key = storedKey(scope);
@@ -728,7 +760,7 @@ export class HostedCollaborationStore {
   }
 
   /**
-   * The SDK `agentMessage.consume` decision for one Agent message of `scope` (#793 D2c), as K4 `consumeMessage` decides it.
+   * The SDK `agentMessage.consume` decision for one Agent message of `scope` (#793 D2c).
    * One transaction under the scope lock checks the frozen binding and the task's accepted reply, and commits the `message`
    * command. A scope with no row has no task, so it is refused with nothing written. A throw writes nothing and leaves the
    * SDK admission pending.
@@ -749,7 +781,7 @@ export class HostedCollaborationStore {
   }
 
   /**
-   * The terminal transaction of one reconciled task of `scope` (#793 D2d), as K4 `finish`: the outcome command, the
+   * The terminal transaction of one reconciled task of `scope` (#793 D2d): the outcome command, the
    * projections and the intent's conclusion commit together, under the scope lock. Returns the conclusion that it wrote,
    * or nothing when the intent already had one. A throw writes nothing.
    */
@@ -761,7 +793,7 @@ export class HostedCollaborationStore {
   }
 
   /**
-   * Host API (#955), as L's `enqueueHostIntent` (K8 host.ts): the Host's own work in the scope's FIFOs, with Host authority.
+   * Host API (#955): the Host's own work in the scope's FIFOs, with Host authority.
    * One transaction under the scope lock saves the intent row with its handler name. Its outcome goes to that handler, never
    * to a Bot Turn. On a Bot's agentRef, it shares that Bot's FIFO. An exact replay returns the same intent, until compaction
    * removes the row. It refuses, with nothing written, a handler that the store does not have, connector toolsets that the
@@ -786,7 +818,7 @@ export class HostedCollaborationStore {
   }
 
   /**
-   * Records a terminal of `scope` that the reconciliation refused (#955), as L's `reportIntentFailures`: the reason goes to
+   * Records a terminal of `scope` that the reconciliation refused (#955): the reason goes to
    * the open intent's `last_error`, and a reason that differs from the stored one writes one audit line, so a stuck intent
    * adds one line and not one for each pass, in any number of processes.
    */
@@ -818,7 +850,7 @@ export class HostedCollaborationStore {
   }
 
   /**
-   * The due reply checks of `scope` at `now` (#793 S7), selected by K8 `replyCheckDue` as L's `flushReplies` selects them,
+   * The due reply checks of `scope` at `now` (#793 S7), selected by K8 `replyCheckDue`,
    * read in one snapshot with no lock. A scope with no row has none.
    */
   replyChecks(scope: string, now: number): Promise<DueReplyCheck[]> {
@@ -826,7 +858,7 @@ export class HostedCollaborationStore {
       const checks: DueReplyCheck[] = [];
       for (const d of Object.values((await this.snapshot(client, storedKey(scope))).delegations)) {
         if (!replyCheckDue(d, now)) continue;
-        // The chain end's current task, as L reads `core.intent(key).taskId`: an imported intent may be of a later generation (#975).
+        // The chain end's current task: an imported intent may be of a later generation (#975).
         const frozen = await currentIntent(client, scope, d.chainTurnIds.at(-1)!);
         checks.push({ delegationId: d.id, fence: { ...(d.checks === undefined ? {} : { checks: d.checks }), nextCheckAt: d.nextCheckAt! },
           ...(frozen ? { task: { taskId: frozen.input.taskId, deviceId: frozen.input.deviceId, agentRef: frozen.input.payload.agentRef } } : {}) });
@@ -837,8 +869,8 @@ export class HostedCollaborationStore {
 
   /**
    * Applies one reply check (#793 S7), the K8 `checkReply` decision with the store's timers, in one transaction under the
-   * scope lock. The SDK read ran before, outside any transaction. The clock is read after the lock is taken, as L reads it
-   * again in its ledger transaction. When the delegation is gone, is no longer due at that time (a verdict, or a later
+   * scope lock. The SDK read ran before, outside any transaction. The clock is read after the lock is taken.
+   * When the delegation is gone, is no longer due at that time (a verdict, or a later
    * check time), or no longer matches `fence` (another check applied first), it writes nothing and returns false. A throw
    * writes nothing.
    */
@@ -853,8 +885,8 @@ export class HostedCollaborationStore {
   }
 
   /**
-   * Whether `scope` has a delegation that a device observation can change (#793 S11), as L's `refreshDevices` checks before
-   * its discovery read: no verdict, no cancel, and `queued` or `waiting_device`. Read in one snapshot with no lock.
+   * Whether `scope` has a delegation that a device observation can change (#793 S11):
+   * no verdict, no cancel, and `queued` or `waiting_device`. Read in one snapshot with no lock.
    */
   async awaitsDevice(scope: string): Promise<boolean> {
     const state = await this.transaction(client => this.snapshot(client, storedKey(scope)), true);
@@ -863,7 +895,7 @@ export class HostedCollaborationStore {
 
   /**
    * Applies one device observation (#793 S11), the K8 `observeDevices` rule on the intent facts, in one transaction under the
-   * scope lock, as L's `refreshDevices` runs it in one ledger transaction. `devices` maps a device id to its `connected` fact;
+   * scope lock. `devices` maps a device id to its `connected` fact;
    * a device that it lacks gives no fact. The rule only switches a delegation between `queued` and `waiting_device`, and
    * publishes it. Returns how many delegations changed. A throw writes nothing.
    */
@@ -922,8 +954,8 @@ export class HostedCollaborationStore {
 
   /**
    * Claims the Host job of occurrence `occurrenceKey` (#793 S14), in one transaction under the scope lock, at the clock read
-   * after the lock, as K4 `runHostJobs` raises `attempts` before the handler runs: the row takes a try and a lease. A claim
-   * whose lease passed runs the job again, as K4 retries pending work, so a handler runs at least once. A row whose
+   * after the lock: the row takes a try and a lease before the handler runs. A claim
+   * whose lease passed runs the job again, so a handler runs at least once. A row whose
    * occurrence is no longer open settles with no run.
    */
   claimHostJob(scope: string, occurrenceKey: string, clock: () => number, leaseMs: number): Promise<HostJobClaim> {
@@ -950,10 +982,10 @@ export class HostedCollaborationStore {
   /**
    * Writes the outcome of one Host job run (#793 S14), in one transaction under the scope lock, fenced by the claim's `tries`:
    * a settle after another claim took the row writes nothing and returns false. A summary is stored and concludes the
-   * occurrence `succeeded`, as K4 does; a result with `execution` stores its summary and concludes it `failed`, with
+   * occurrence `succeeded`; a result with `execution` stores its summary and concludes it `failed`, with
    * `host_job_execution_unsupported` as the row's error, and nothing is promoted, superseded or not (owner Q4 A). Either
    * settles the row, then a staged version switches when it is due. An error keeps the occurrence pending and the row waits
-   * `backoffMs`, as K4 keeps the row for its next pass.
+   * `backoffMs`.
    */
   settleHostJob(scope: string, occurrenceKey: string, tries: number, outcome: HostJobOutcome, clock: () => number, backoffMs: number): Promise<boolean> {
     const key = storedKey(scope), row = hostJobRowKey(occurrenceKey);
@@ -978,12 +1010,12 @@ export class HostedCollaborationStore {
 
   /**
    * Claims the Agent home operation `sequence` (#793 S13), in one transaction under the scope lock, at the clock read after the
-   * lock. K8 `homeHead` decides, as L's `flushHomes`: the operation must be its Bot's oldest pending one, and the Bot must have
+   * lock. K8 `homeHead` decides: the operation must be its Bot's oldest pending one, and the Bot must have
    * no intent row with no conclusion. A pending operation that is not a head waits `backoffMs` (never earlier). A head takes
    * a lease (`next_at = now + leaseMs`); the entity is the fence, so `tries` stays 0. A row whose operation is gone or
    * settled settles with no call. While the operation's device refuses new home writes (#957: its switch away from H is
    * open), an operation that was never sent waits `backoffMs` too, and a sent one is read back with no new enqueue
-   * (`settleHome`), as L's `flushHomes` does.
+   * (`settleHome`).
    */
   claimHome(scope: string, sequence: number, clock: () => number, leaseMs: number, backoffMs: number): Promise<HomeClaim> {
     const key = storedKey(scope), row = homeRowKey(sequence);
@@ -1069,7 +1101,7 @@ export class HostedCollaborationStore {
    * One K8 retention call on `scope` (#793 D2g, #798), in one transaction under the scope lock: the acknowledged roots move
    * into `archived_row`, their ids are retired in `retired_identity`, and the moved command records answer replays until
    * they expire. A refusal or a throw writes nothing. A scope with no row has no rows to retain, so the rule runs on the
-   * empty state, as L runs it on an empty ledger.
+   * empty state.
    */
   retain(scope: string, input: RetentionInput, limits: RetentionLimits): Promise<RetentionResult> {
     const key = storedKey(scope);
@@ -1080,7 +1112,7 @@ export class HostedCollaborationStore {
   }
 
   /**
-   * Operator compaction of settled intent rows on `scope` (#793 S8), as K4 `compact`: never automatic. In one transaction
+   * Operator compaction of settled intent rows on `scope` (#793 S8): never automatic. In one transaction
    * under the scope lock, the K8 veto `compactVeto` checks each acknowledged Turn, and each settled intent row leaves with a
    * permanent intent tombstone (kind `intent`, `hash(turnId)`) in `retired_identity`. A Turn id with no row counts as
    * already compacted when its intent tombstone exists. A routine intent is refused. A refusal or a throw writes nothing.
@@ -1346,7 +1378,7 @@ export class HostedCollaborationStore {
 
   /**
    * D1 and D3 of one delivery outbox row (#793 D2b-out-2), in one transaction under the scope lock, with the K8 rules:
-   * - a `sending` entity whose lease (`next_at`) has passed becomes `unknown` (`interrupted`), as L recovers a claim at startup;
+   * - a `sending` entity whose lease (`next_at`) has passed becomes `unknown` (`interrupted`);
    * - an `unknown` entity asks for a readback when the channel has one;
    * - a due `pending` entity takes its route, or is refused (`refuseRoute`, whose push fallback the index picks up), or is
    *   claimed (`startDelivery`) with a lease. The claim commits before the send, and the route stays in memory.
@@ -1505,7 +1537,7 @@ export class HostedCollaborationStore {
   /** The stored state of a scope in the caller's transaction. A scope row of an unknown store version is refused. */
   private async snapshot(client: PoolClient, key: string): Promise<CollaborationState> {
     const head = await client.query<{ state_version: number; frame: string }>('SELECT state_version, frame::text AS frame FROM scope WHERE scope = $1', [key]);
-    if (head.rows[0] && !SUPPORTED_STORE_VERSIONS.has(head.rows[0].state_version)) throw new HostedStoreVersionError(head.rows[0].state_version);
+    if (head.rows[0] && head.rows[0].state_version !== STORE_VERSION) throw new HostedStoreVersionError(head.rows[0].state_version);
     const rows = await this.load(client, key, head.rows[0]?.frame ?? EMPTY_FRAME, undefined);
     return stateOf({ collaboration: assemble(rows) as unknown as Json });
   }
@@ -1605,7 +1637,8 @@ export class HostedCollaborationStore {
    * this transaction, it inserts the row, sets `settled_at` once the entity is `accepted` or `rejected`, and sets `next_at`
    * for a `pending` entity. It does not touch `next_at` of a `sending` or `unknown` entity: the sender owns that value.
    * So every queued, refused, revoked, resent, echoed or sent delivery gets its row, also the push fallback that
-   * `refuseRoute` inserts with no outbox intent.
+   * `refuseRoute` inserts with no outbox intent. A `staged` entity gets its row only when its outcome promotes it, and a
+   * staged entity that K8 withholds never gets one (#1762).
    */
   private async indexDeliveries(client: PoolClient, scopeKey: string, before: Split, after: Split, now: number | undefined): Promise<void> {
     const old = before.entities.get('delivery'), next = after.entities.get('delivery');
@@ -1613,7 +1646,9 @@ export class HostedCollaborationStore {
       const prior = old?.get(key);
       if (prior === body) continue;
       const row = JSON.parse(body) as Delivery, was = prior === undefined ? undefined : JSON.parse(prior) as Delivery;
-      if (!was) {
+      const promoted = was?.state === 'staged';
+      if (row.state === 'staged' || promoted && row.state === 'rejected') continue;
+      if (!was || promoted) {
         await client.query(`INSERT INTO outbox (scope, key, ordinal, kind) SELECT $1, $2, coalesce(max(ordinal) + 1, 0), 'delivery'
           FROM outbox WHERE scope = $1`, [scopeKey, key]);
       } else if (was.state === row.state && was.nextAttemptAt === row.nextAttemptAt) continue;
@@ -1680,7 +1715,7 @@ export class HostedCollaborationStore {
 
   /**
    * Saves each outbox intent of the commit. An existing projection with the same id must hold the same value;
-   * otherwise the commit throws and rolls back, as the K4 projection does in L.
+   * otherwise the commit throws and rolls back.
    */
   private async writeOutbox(client: PoolClient, scopeKey: string, outbox: OutboxIntent[], published: Map<string, Json>): Promise<void> {
     for (const intent of outbox) {
@@ -1706,51 +1741,33 @@ export class HostedCollaborationStore {
   private transaction<T>(work: (client: PoolClient) => Promise<T>, readOnly: boolean): Promise<T> {
     return inSchema(this.pool, this.schema, work, readOnly);
   }
+
+  /**
+   * Host API (#1320): cancels a Host intent with L's `cancelHostIntent` answers (K8 `hostIntentCancelAnswer`), in one
+   * transaction under the scope lock. A settled intent returns `already_settled` and writes nothing. An untried intent
+   * concludes `cancelled` (`cancelIntent`): no handler runs, and its FIFO moves on. A tried intent keeps the cancel reason
+   * and returns `cancel_pending`: the reconciler sends the SDK cancel and settles it at its terminal. Refuses with
+   * `HostIntentError`: `not_host_intent` for a Bot Turn key, `unknown_intent` for a key with no Host intent row.
+   */
+  cancelHostIntent(scope: string, key: string, clock: () => number): Promise<IntentCancelResult<Conclusion>> {
+    const scopeKey = storedKey(scope), stored = storedKey(key);
+    return this.change(scope, undefined, async (state, _publish, client) => {
+      const read = async () => (await client.query<{ handler: string | null; conclusion: Conclusion | null }>(
+        'SELECT handler, conclusion FROM intent WHERE scope = $1 AND key = $2', [scopeKey, stored])).rows[0];
+      const row = await read(), now = clock();
+      const settled = hostIntentCancelAnswer(key, Object.hasOwn(state.turns, key),
+        row && row.handler !== null ? (row.conclusion ? { conclusion: row.conclusion } : {}) : undefined);
+      if (settled) return { value: { key, ...settled }, outbox: [], now };
+      if (!await cancelIntent(client, scope, key, now)) return { value: { key, result: 'cancel_pending' }, outbox: [], now };
+      await switchDueVersions(client, scopeKey, now);
+      return { value: { key, result: 'cancelled', conclusion: (await read())!.conclusion! }, outbox: [], now };
+    });
+  }
 }
 
 /** Moves the `next_at` of an unsettled home row: the home index, a flush that keeps its lease, and the end of that lease. */
 async function setHomeDue(client: PoolClient, scopeKey: string, row: string, at: number): Promise<void> {
   await client.query(`UPDATE outbox SET next_at = $3 WHERE scope = $1 AND key = $2 AND kind = 'home' AND settled_at IS NULL`, [scopeKey, row, at]);
-}
-
-/** Runs `work` in one transaction with `search_path` set to `schema`. A throw rolls back every row. */
-export async function inSchema<T>(pool: Pool, schema: string, work: (client: PoolClient) => Promise<T>, readOnly = false): Promise<T> {
-  if (!SCHEMA.test(schema)) throw new Error('Invalid hosted collaboration schema name');
-  const client = await pool.connect();
-  let broken: Error | undefined;
-  try {
-    await client.query(readOnly ? 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY' : 'BEGIN');
-    await client.query(`SET LOCAL search_path TO "${schema}"`);
-    if (!readOnly) locks.set(client, { scopes: new Set(), switchStep: false });
-    const value = await work(client);
-    if (!readOnly) await refuseSwitched(client, locks.get(client)!);
-    await client.query('COMMIT');
-    return value;
-  } catch (error) {
-    // A client whose rollback failed is broken: release it with the error, so the pool drops it.
-    broken = await client.query('ROLLBACK').then(() => undefined, (failure: unknown) => failure instanceof Error ? failure : new Error(String(failure)));
-    throw error;
-  } finally {
-    locks.delete(client);
-    client.release(broken);
-  }
-}
-
-/** The scopes that each open write transaction of `inSchema` locked, and whether it is a switch step (#975). */
-const locks = new WeakMap<PoolClient, { scopes: Set<string>; switchStep: boolean }>();
-/**
- * The switch fence (#975): a transaction that locked an exported scope, or one with an uncommitted import, does not
- * commit, so H writes nothing to it. It runs right before the commit, so the work's own refusals come first, as each L
- * write refuses after its own (K8 `writeLedger`). Only the switch steps (`lockScope` with `'switch'`) pass: the export,
- * the commit away and the abort, and the import, its commit and its discard.
- */
-async function refuseSwitched(client: PoolClient, lock: { scopes: Set<string>; switchStep: boolean }): Promise<void> {
-  if (!lock.scopes.size || lock.switchStep) return;
-  const found = await client.query<{ exported: unknown; imported: unknown }>(`SELECT switch_export AS exported, switch_import AS imported FROM scope
-    WHERE scope = ANY($1::text[]) AND (switch_export IS NOT NULL OR switch_import IS NOT NULL) LIMIT 1`, [[...lock.scopes]]);
-  const row = found.rows[0];
-  if (row?.exported != null) throw new SwitchExportedError(exportMarkOf(row.exported).digest);
-  if (row?.imported != null) throw new SwitchImportedError(importMarkOf(row.imported).digest);
 }
 
 /** Takes the scope lock as a switch step (#975) and reads the scope's export mark and import record. */
@@ -1762,19 +1779,3 @@ async function switchRecords(client: PoolClient, key: string): Promise<{ exporte
     ...(row.imported == null ? {} : { imported: importMarkOf(row.imported) }) };
 }
 
-/**
- * Locks an existing scope row for the rest of the transaction and returns its frame. Every writer of a scope
- * takes this lock first. A scope row of an unknown store version is refused before any write. The lock joins the switch
- * fence of the transaction, so it runs only in a write transaction of `inSchema`; `step` marks a switch step.
- */
-export async function lockScope(client: PoolClient, scopeKey: string, step?: 'switch'): Promise<string> {
-  const lock = locks.get(client);
-  if (!lock) throw new Error('A scope lock needs a write transaction of inSchema');
-  lock.scopes.add(scopeKey);
-  if (step) lock.switchStep = true;
-  const head = await client.query<{ state_version: number; frame: string }>(
-    'SELECT state_version, frame::text AS frame FROM scope WHERE scope = $1 FOR UPDATE', [scopeKey]);
-  if (!head.rows[0]) throw new Error('Unknown hosted collaboration scope');
-  if (!SUPPORTED_STORE_VERSIONS.has(head.rows[0].state_version)) throw new HostedStoreVersionError(head.rows[0].state_version);
-  return head.rows[0].frame;
-}

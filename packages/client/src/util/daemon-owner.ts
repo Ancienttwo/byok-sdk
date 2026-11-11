@@ -2,14 +2,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
 import path from 'node:path';
-import { sameContent } from './file-state';
-import { ensureSecureStoreRoot } from './secure-dir';
-import { listenPrivateUnixSocket, privateSocketEndpoint, PrivateSocketInUseError, reclaimPrivateSocketFallbackDirectory } from './private-unix-socket';
+import { sameContent } from './file-state.js';
+import { ensureSecureStoreRoot } from './secure-dir.js';
+import { listenPrivateUnixSocket, privateSocketEndpoint, PrivateSocketInUseError, reclaimPrivateSocketFallbackDirectory } from './private-unix-socket.js';
 import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
   type PathMutationGate,
-} from '../util/path-mutation-gate';
+} from '../util/path-mutation-gate.js';
 
 export const DAEMON_OWNER_FILENAME = 'daemon-owner.json';
 const RECLAIM_FILENAME = `${DAEMON_OWNER_FILENAME}.reclaim`;

@@ -1,13 +1,13 @@
 import type { ExtensionFactory } from '@earendil-works/pi-coding-agent';
 import { fileURLToPath } from 'node:url';
-import { FileScopeGuardError } from '../../file-scope-guard';
-import { verifySerializedFileScopeGrant } from '../../file-scope-launch';
+import { FileScopeGuardError } from '../../file-scope-guard.js';
+import { verifySerializedFileScopeGrant } from '../../file-scope-launch.js';
 import {
   isScopedFileToolName, SCOPED_FILE_TOOL_NAMES, type FileScopeGuardCode, type FileScopeGuardReason,
-} from '../../file-scope-types';
-import { reportFileScopeDenial, type ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc';
-import { createPiFileScopeExtension } from './file-scope-extension';
-import { setPiSubagentScopedToolSource } from './subagent-scope-registry';
+} from '../../file-scope-types.js';
+import { reportFileScopeDenial, type ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc.js';
+import { createPiFileScopeExtension } from './file-scope-extension.js';
+import { setPiSubagentScopedToolSource } from './subagent-scope-registry.js';
 
 export interface PiSubagentFileScopeExtensionOptions {
   /** Test seam only; production uses the exact path of this loaded module. */

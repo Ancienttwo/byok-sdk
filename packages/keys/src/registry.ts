@@ -1,10 +1,10 @@
-import { AnthropicMessagesClient } from './anthropic-client';
-import { configurationPendingError, withConfigurationLock } from './custody';
-import { ByokKeysError } from './errors';
-import type { ProviderFetch } from './http';
-import { OpenAiCompatibleChatClient } from './openai-client';
-import { type ProviderProfileStore, providerNotConfigured } from './profile-store';
-import type { PiModelConfig } from './pi-model-config';
+import { AnthropicMessagesClient } from './anthropic-client.js';
+import { configurationPendingError, withConfigurationLock } from './custody.js';
+import { ByokKeysError } from './errors.js';
+import type { ProviderFetch } from './http.js';
+import { OpenAiCompatibleChatClient } from './openai-client.js';
+import { type ProviderProfileStore, providerNotConfigured } from './profile-store.js';
+import type { PiModelConfig } from './pi-model-config.js';
 import {
   type ModelProviderAdapter,
   type ModelProviderKind,
@@ -13,13 +13,13 @@ import {
   type ProviderModelCapability,
   type ProviderProfileRef,
   parseModelProviderProfile,
-} from './provider-profile';
-import { exactProviderProfileBinding } from './provider-profile-binding';
+} from './provider-profile.js';
+import { exactProviderProfileBinding } from './provider-profile-binding.js';
 import {
   type ModelProviderSecretName,
   type SecretStore,
   modelProviderSecretName,
-} from './secret-store';
+} from './secret-store.js';
 
 /** A transport client for whichever dialect the resolved profile declares. */
 export type ModelProviderClient =

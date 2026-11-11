@@ -490,7 +490,7 @@ describe('koffi stays unreachable off win32', () => {
   it('control: the same recorder does see them when the win32 branch is taken', async () => {
     const { specifiers } = await resolvedSpecifiers('win32', '1');
 
-    expect(specifiers).toContain('./win32-job-object');
+    expect(specifiers).toContain('./win32-job-object.js');
     expect(specifiers).toContain('koffi');
   });
 });

@@ -1,6 +1,7 @@
-import { BYOK_SDK_HELPER_SUBCOMMAND, sdkReservedHelperKinds, type SdkReservedHelperKind } from '../sdk-reserved-helper-host';
-import { sdkReservedHelperArgumentCount } from '../sdk-reserved-helper-context';
-import { runSdkReservedHelper } from '../bin/sdk-reserved-helper-runners';
+import { BYOK_SDK_HELPER_SUBCOMMAND, sdkReservedHelperKinds, type SdkReservedHelperKind } from '../sdk-reserved-helper-host.js';
+import { sdkReservedHelperArgumentCount } from '../sdk-reserved-helper-context.js';
+import { runSdkReservedHelper } from '../bin/sdk-reserved-helper-runners.js';
+import { runBundledSubagentCommand } from '../adapters/pi/bundled-subagent-runtime.js';
 
 const RESERVED_HELPER_KIND_SET: ReadonlySet<string> = new Set(sdkReservedHelperKinds);
 
@@ -49,7 +50,10 @@ function isHelperKind(value: string | undefined): value is SdkReservedHelperKind
 export async function runSdkReservedHelperCommand(
   argv: readonly string[] = process.argv.slice(2),
 ): Promise<boolean> {
-  if (argv[0] !== BYOK_SDK_HELPER_SUBCOMMAND) return false;
+  if (argv[0] !== BYOK_SDK_HELPER_SUBCOMMAND) {
+    if (argv[0] !== '--import' && argv[0] !== '--permission' && argv[0] !== '--no-extensions') return false;
+    return await runBundledSubagentCommand(argv);
+  }
   declareBundledPiRuntime();
   if (!isHelperKind(argv[1])) throw new Error('invalid SDK-reserved helper command');
   const argumentCount = sdkReservedHelperArgumentCount(argv[1]);

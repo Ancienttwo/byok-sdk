@@ -14,6 +14,8 @@ import {
   SKIP_REASON,
 } from './support/dataplane';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const INVARIANTS_SQL = readFileSync(
   new URL('../../../../tests/sql/control_plane_invariants.sql', import.meta.url),
@@ -51,7 +53,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres task cancellation — ${SKIP_REASON}`,
     try {
       await migrate(scope.pool, DEPLOY_SQL);
       const tasks = new PostgresTaskAttemptStore(scope.pool, createMutableClock());
-      await tasks.open(TENANT, { taskId: 'task-target-fence', deviceId: 'device-target' });
+      await tasks.reserveAgentOffer(TENANT, { taskId: 'task-target-fence', deviceId: 'device-target', agentRef: AGENT_REF });
 
       await expect(tasks.claim(TENANT, {
         taskId: 'task-target-fence',
@@ -76,7 +78,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres task cancellation — ${SKIP_REASON}`,
       const clock = createMutableClock();
       const tasks = new PostgresTaskAttemptStore(scope.pool, clock);
       const cancellations = new PostgresTaskCancellationStore(scope.pool, clock);
-      await tasks.open(TENANT, { taskId: 'task-atomic', deviceId: 'device-atomic' });
+      await tasks.reserveAgentOffer(TENANT, { taskId: 'task-atomic', deviceId: 'device-atomic', agentRef: AGENT_REF });
 
       await expect(
         cancellations.request(TENANT, {
@@ -114,7 +116,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres task cancellation — ${SKIP_REASON}`,
       const clock = createMutableClock();
       const tasks = new PostgresTaskAttemptStore(scope.pool, clock);
       const cancellations = new PostgresTaskCancellationStore(scope.pool, clock);
-      await tasks.open(TENANT, { taskId: 'task-update-fails', deviceId: 'device-update-fails' });
+      await tasks.reserveAgentOffer(TENANT, { taskId: 'task-update-fails', deviceId: 'device-update-fails', agentRef: AGENT_REF });
       await scope.pool.query(`
         CREATE FUNCTION reject_cancellation_update() RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
@@ -160,7 +162,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres task cancellation — ${SKIP_REASON}`,
       const clock = createMutableClock();
       const tasks = new PostgresTaskAttemptStore(scope.pool, clock);
       const cancellations = new PostgresTaskCancellationStore(scope.pool, clock);
-      await tasks.open(TENANT, { taskId: 'task-once', deviceId: 'device-once' });
+      await tasks.reserveAgentOffer(TENANT, { taskId: 'task-once', deviceId: 'device-once', agentRef: AGENT_REF });
       const request = {
         taskId: 'task-once',
         proposedMessageId: randomUUID(),
@@ -199,7 +201,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres task cancellation — ${SKIP_REASON}`,
       const clock = createMutableClock();
       const tasks = new PostgresTaskAttemptStore(scope.pool, clock);
       const cancellations = new PostgresTaskCancellationStore(scope.pool, clock);
-      await tasks.open(TENANT, { taskId: 'task-retained', deviceId: 'device-retained' });
+      await tasks.reserveAgentOffer(TENANT, { taskId: 'task-retained', deviceId: 'device-retained', agentRef: AGENT_REF });
       const first = await cancellations.request(TENANT, {
         taskId: 'task-retained',
         proposedMessageId: randomUUID(),
@@ -237,10 +239,10 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres task cancellation — ${SKIP_REASON}`,
       const clock = createMutableClock();
       const tasks = new PostgresTaskAttemptStore(scope.pool, clock);
       const cancellations = new PostgresTaskCancellationStore(scope.pool, clock);
-      await tasks.open(TENANT, { taskId: 'task-succeeded', deviceId: 'device-succeeded' });
+      await tasks.reserveAgentOffer(TENANT, { taskId: 'task-succeeded', deviceId: 'device-succeeded', agentRef: AGENT_REF });
       await tasks.claim(TENANT, { taskId: 'task-succeeded', deviceId: 'device-succeeded' });
-      await tasks.recordStatus(TENANT, { taskId: 'task-succeeded', status: 'running' });
-      await tasks.recordStatus(TENANT, { taskId: 'task-succeeded', status: 'complete' });
+      await tasks.recordStatus(TENANT, { taskId: 'task-succeeded', status: 'running', agentRef: AGENT_REF });
+      await tasks.recordStatus(TENANT, { taskId: 'task-succeeded', status: 'complete', agentRef: AGENT_REF });
 
       let materializations = 0;
       const mutation = await cancellations.request(TENANT, {
@@ -273,7 +275,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres task cancellation — ${SKIP_REASON}`,
       const clock = createMutableClock();
       const tasks = new PostgresTaskAttemptStore(scope.pool, clock);
       const cancellations = new PostgresTaskCancellationStore(scope.pool, clock);
-      await tasks.open(TENANT, { taskId: 'task-concurrent', deviceId: 'device-concurrent' });
+      await tasks.reserveAgentOffer(TENANT, { taskId: 'task-concurrent', deviceId: 'device-concurrent', agentRef: AGENT_REF });
 
       let materializations = 0;
       const mutations = await Promise.all(
@@ -315,7 +317,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres task cancellation — ${SKIP_REASON}`,
       const clock = createMutableClock();
       const tasks = new PostgresTaskAttemptStore(scope.pool, clock);
       const cancellations = new PostgresTaskCancellationStore(scope.pool, clock);
-      await tasks.open(TENANT, { taskId: 'task-tenant-closed', deviceId: 'device-tenant-closed' });
+      await tasks.reserveAgentOffer(TENANT, { taskId: 'task-tenant-closed', deviceId: 'device-tenant-closed', agentRef: AGENT_REF });
 
       await expect(cancellations.request(OTHER_TENANT, {
         taskId: 'task-tenant-closed',

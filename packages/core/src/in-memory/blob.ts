@@ -1,6 +1,6 @@
-import { InMemoryStorageLedger } from './storage-ledger';
-import { assertCollectExpiredInput, CollectExpiredFailure, type CollectExpiredResult } from '../retention';
-import type { ObjectCollectExpiredInput } from '../blob';
+import { InMemoryStorageLedger } from './storage-ledger.js';
+import { assertCollectExpiredInput, CollectExpiredFailure, type CollectExpiredResult } from '../retention.js';
+import type { ObjectCollectExpiredInput } from '../blob.js';
 /**
  * In-memory {@link ObjectStore} reference (§12.7.4, §12.7.8).
  *
@@ -20,12 +20,12 @@ import {
   type ObjectReference,
   type ObjectReferenceInput,
   type ObjectStore,
-} from '../blob';
-import { ByokCoreError } from '../errors';
-import type { Clock } from '../stores';
-import { tenantKey, type TenantId } from '../tenant';
-import { assertCanonicalTimestamp } from '../time';
-import { registerArchiveAccess } from './archive-access';
+} from '../blob.js';
+import { ByokCoreError } from '../errors.js';
+import type { Clock } from '../stores.js';
+import { tenantKey, type TenantId } from '../tenant.js';
+import { assertCanonicalTimestamp } from '../time.js';
+import { registerArchiveAccess } from './archive-access.js';
 
 const DEFAULT_LIST_LIMIT = 100;
 

@@ -1,6 +1,6 @@
-import type { DaemonEventListener, Unsubscribe, DaemonTaskInfo } from '../observer';
-import type { McpToolsetConfig, McpToolsetReloadReceipt, McpToolsetObservation } from '../../types';
-import type { DaemonScope } from './scope';
+import type { DaemonEventListener, Unsubscribe, DaemonTaskInfo } from '../observer.js';
+import type { McpToolsetConfig, McpToolsetReloadReceipt, McpToolsetObservation } from '../../types.js';
+import type { DaemonScope } from './scope.js';
 
 /** The daemon's local operations: approvals, observation and MCP toolset reloads (#926). */
 

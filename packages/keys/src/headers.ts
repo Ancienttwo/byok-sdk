@@ -1,5 +1,5 @@
-import { ByokKeysError } from './errors';
-import type { ProviderAuthMode } from './provider-profile';
+import { ByokKeysError } from './errors.js';
+import type { ProviderAuthMode } from './provider-profile.js';
 
 /** The subset of a profile the header builder reads. */
 export interface ProviderAuthProfile {

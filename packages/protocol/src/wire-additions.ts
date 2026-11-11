@@ -39,9 +39,9 @@
  * another. This module imports no runtime code except the plain-data split
  * table, so it stays free of zod.
  */
-import type { MessageType } from './messages';
-import { SEALED_CATEGORY_CAPABILITY, SEALED_SPLIT_TABLE, type SealableMessageType, type SealedSplitEntry } from './sealed-split-table';
-import type { CapabilityFlag } from './version';
+import type { MessageType } from './messages.js';
+import { SEALED_CATEGORY_CAPABILITY, SEALED_SPLIT_TABLE, type SealableMessageType, type SealedSplitEntry } from './sealed-split-table.js';
+import type { CapabilityFlag } from './version.js';
 
 export interface WireAddition {
   readonly kind: 'envelope';

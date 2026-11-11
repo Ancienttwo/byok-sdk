@@ -1,6 +1,6 @@
-import type { McpStdioServerConfig } from '../types';
-import { AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_MESSAGE_TOOL_NAME } from '../sdk-reserved-mcp';
-import { probeMcpServerTools } from './mcp-tools-probe';
+import type { McpStdioServerConfig } from '../types.js';
+import { AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_MESSAGE_TOOL_NAME } from '../sdk-reserved-mcp.js';
+import { probeMcpServerTools } from './mcp-tools-probe.js';
 
 export const AGENT_MESSAGE_MCP_PREFLIGHT_TIMEOUT_MS = 10_000;
 

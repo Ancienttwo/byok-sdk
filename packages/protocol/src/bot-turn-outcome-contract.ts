@@ -4,8 +4,8 @@
  * projection names this contract. Only type imports from result-schema, so
  * result-schema can dispatch here without an import cycle.
  */
-import type { ResultIssue } from './result-schema';
-import { checkRoutineSchedule, type RoutineSchedule } from './routine-schedule';
+import type { ResultIssue } from './result-schema.js';
+import { checkRoutineSchedule, type RoutineSchedule } from './routine-schedule.js';
 
 export const BOT_TURN_OUTCOME_CONTRACT = 'bot-turn-outcome.v1';
 

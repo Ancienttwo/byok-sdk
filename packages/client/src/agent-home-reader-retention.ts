@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { AGENT_HOME_READER_RUN_MAX_RETAINED, AGENT_HOME_READER_RUN_MAX_AGE_MS, isReaderRunName } from './agent-home-readers';
+import { AGENT_HOME_READER_RUN_MAX_RETAINED, AGENT_HOME_READER_RUN_MAX_AGE_MS, isReaderRunName } from './agent-home-readers.js';
 /**
  * The reader-run retention policy. Inputs are canonical absolute paths.
  *

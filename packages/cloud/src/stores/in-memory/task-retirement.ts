@@ -13,8 +13,8 @@ import {
   TASK_ATTEMPT_UNFINISHED_STATUSES,
   type TaskAbandonCause,
   type TaskAttempt,
-} from '../ports';
-import type { InMemoryTaskAttemptState } from './task-attempts';
+} from '../ports.js';
+import type { InMemoryTaskAttemptState } from './task-attempts.js';
 
 type Retirement = Pick<MailboxStore, 'expirePending' | 'readAfter'>;
 

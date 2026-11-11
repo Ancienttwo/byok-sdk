@@ -1,5 +1,5 @@
 import { HostOfferPlainPayloadSchema, HostOfferSealedPayloadSchema } from '@byok-sdk/protocol';
-import type { ByokCloud, EnqueuedOffer } from '../cloud';
+import type { ByokCloud, EnqueuedOffer } from '../cloud.js';
 import { z } from 'zod';
 import { type TenantId } from '@byok-sdk/core';
 import {
@@ -9,8 +9,8 @@ import {
   createEnvelope,
   type AgentMessageServerContext,
 } from '@byok-sdk/protocol';
-import { ByokCloudError } from '../errors';
-import { refuseSealedFields, type EnqueuePaths } from './enqueue';
+import { ByokCloudError } from '../errors.js';
+import { refuseSealedFields, type EnqueuePaths } from './enqueue.js';
 
 const RESUME_SESSION = SessionSelectionSchema.options[0];
 const NO_EGRESS = { egressPolicy: z.never().optional(), messageEgress: z.never().optional() };

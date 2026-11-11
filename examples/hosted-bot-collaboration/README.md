@@ -177,10 +177,12 @@ reconciler `changed` callbacks to the deployment's scope sync, as for Bot Turns.
 and a terminal committed through the store also project an immediately due scope.
 
 User Turns use the shared K8 `userFirst` rule and autonomous set: they overtake unsubmitted routine,
-bot_request and dream intents in their Agent FIFO. Submitted work keeps its order. H does not
-yet apply L's `admitDeviceSlot` reservation. Dream records live in one `dream_state` row per scope,
-read and written in the same transaction as its intents. `store.migrate()` creates the table and
-atomically moves existing frame dreams into it once, refusing a conflicting row or invalid frame.
+bot_request and dream intents in their Agent FIFO. Submitted work keeps its order. The submitter applies the shared K8
+`admitDeviceSlot` rule as L does: with `deviceConcurrency` (default 8, in the submitter options) slots per device and
+scope, a row that is not user-source leaves one slot free, and a row with no slot waits as a FIFO head with no backoff. A
+row holds a slot once it is tried and has delivery or attempt evidence. Dream records live in one `dream_state` row per scope,
+read and written in the same transaction as its intents. `store.migrate()` creates the table; it no longer
+moves frame dreams into it, so a store with frame dreams runs v0.41.0 `migrate()` first (#1669).
 Dream state does not count toward the 4096-byte frame limit. Discarding an uncommitted import
 also removes its dream row.
 
@@ -416,6 +418,12 @@ L lets the Host run its own work on the K4 core (`enqueueHostIntent`, #882). H d
   unknown key, a settled row (also one that this reconciliation concluded), and a row with no refused terminal; another
   error of the reconciliation is thrown as it is. The entry's `failStuckIntent` checks the owner, calls it, then syncs,
   so a Bot Turn ends `failed`.
+- `HostedCollaborationStore.cancelHostIntent(scope, key, clock)` is L's owner `cancelHostIntent` (#1320), with the same
+  answers from K8 `hostIntentCancelAnswer`, in one transaction under the scope lock. A settled row returns
+  `already_settled` with its conclusion and writes nothing. An untried row concludes `cancelled` and returns `cancelled`:
+  no handler runs, and its FIFO moves on. A tried row keeps the cancel reason and returns `cancel_pending`; the reconciler
+  sends the SDK cancel and settles it at its terminal. It refuses with `HostIntentError`: `not_host_intent` for a Bot Turn
+  key, `unknown_intent` for a key with no Host intent row. It is a Host call: the Host checks the owner, then syncs.
 
 ## Device binding
 
@@ -738,7 +746,7 @@ a `schedule_retrying` routine once its slot is within the K4 horizon, as K4 `sch
 `start()` runs once when the scheduler starts, as K4 `recover`: an active routine with no slot within the horizon is
 planned again, and a staged version that is due switches.
 
-H has no timer. The deployment reads `scheduler.intervalMs` and runs `run()` at that interval. The default is 5 s, and
+H has no timer. The deployment runs `HostedPasses.run()` at `HostedPassPorts.intervalMs`, which the scheduler checks. The default is 5 s, and
 the constructor refuses an interval at or above the K8 late bound (`ROUTINE_LATE_AFTER_MS`, 60 s): with a longer
 interval every slot would fire as `catch_up`, and its occurrence key would differ from L's.
 
@@ -949,53 +957,54 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   least seven days (see Retention). The SDK side has its own `retentionPolicyId` in the tenant's entitlement.
 - **Intent compaction.** The operator calls `compactIntents(scope, { acknowledgedTurnIds })` for settled Turns; routine
   intents stay (see Intent compaction).
-- **Workers.** The Host runs, each on its own interval: `HostedSubmitter.run()`, `HostedReconciler.run()`,
-  `store.sync(scope, …)` for each scope that changed (the `changed` option of `HostedReconciler`, for a conclusion or
-  a first claim, of `HostedSubmitter`, for an intent that it concluded with no SDK call, and of `HostedRoutineScheduler`,
-  for a fire, and the scope of each commit and consume),
-  `HostedDueScheduler.run()` for the due scopes, `HostedOutboxSender.run()` with the projection receiver, the channel, the
-  connector and the home port (and `store.sync(scope, …)` for each scope of its `changed` option),
-  and `HostedRoutineScheduler.run()` every `intervalMs` after one `start()`. A Host with a channel opens its store with
-  `{ channel: true }`, a Host that coalesces inputs with `{ coalesce }`, and a Host with its own delegation timers with
-  `{ timers }`. Every store over one schema must be built with the same `timers`, because each writes `due_at` with its
-  own.
-- **Reply checks.** The due scheduler's `sync` runs the reply checker first. `tenantOf` is the deployment's map from a
-  scope to its SDK tenant (see Host auth):
+- **Workers.** The Host builds one `HostedPasses(pool, store, ports)` and calls `run()` every `HostedPassPorts.intervalMs`. Each
+  pass builds new instances and runs, in this order: the routine scheduler (`start()`, then `run()`), the reconciler,
+  `syncScope` for each scope that either changed, the due scheduler, the submitter, `syncScope` for each scope where the
+  submitter concluded an intent with no SDK call, the outbox sender, and `syncScope` for each scope that the sender
+  changed. A scope whose sync fails goes into the `PassReport`; the pass goes on. `HostedPassPorts` has seven required
+  members: `task`, `replies`, `devices`, `projections`, `homes`, `sync` (the sync options of every scope) and `intervalMs`.
+  The optional `channel` and `connector` are the sender's; without them a delivery or card row fails. `timings` holds the
+  other options of each pass (`routines`, `submitter`, `reconciler`, `due`, `replies`, `devices`, `sender`). A Host with a
+  channel opens its store with `{ channel: true }`, a Host that coalesces inputs with `{ coalesce }`, and a Host with its
+  own delegation timers with `{ timers }`. Every store over one schema must be built with the same `timers`, because each
+  writes `due_at` with its own.
+- **Reply checks.** `passes.syncScope` is the composed sync of one scope: the reply checker, the device observer, then
+  `store.sync(scope, { ...ports.sync, now })`, each committing on its own. Give it to the command entry's `sync`. `tenantOf`
+  is the deployment's map from a scope to its SDK tenant (see Host auth):
   ```ts
-  const checker = new HostedReplyChecker(store, { port: scope => ({
-    agentMessage: (taskId, deviceId, agentRef) => cloud.readTaskAgentMessage(tenantOf(scope), deviceId, taskId, agentRef) }) });
-  const devices = new HostedDeviceObserver(store, { port: scope => ({ readiness: () => cloud.readTenantReadiness(tenantOf(scope)) }) });
-  const due = new HostedDueScheduler(pool, store, { sync: async (scope, now) => {
-    await checker.check(scope, now);
-    await devices.observe(scope);
-    return store.sync(scope, { ...syncOptions, now });
-  } });
+  const passes = new HostedPasses(pool, store, { intervalMs: 5_000, sync: syncOptions,
+    task: scope => taskPort(tenantOf(scope)),
+    replies: scope => ({
+      agentMessage: (taskId, deviceId, agentRef) => cloud.readTaskAgentMessage(tenantOf(scope), deviceId, taskId, agentRef) }),
+    devices: scope => ({ readiness: () => cloud.readTenantReadiness(tenantOf(scope)) }),
+    projections, homes, channel, connector });
+  setInterval(() => { void passes.run(); }, 5_000);
+  const entry = new HostedCommandEntry(store, { authenticate, owner, sync: passes.syncScope });
   ```
   `hostedMessageConsumer(store, …)` is the `agentMessage` option of `createByokCloud`.
   The checker reads one due check at a time, each with a `timeoutMs` limit (default 10 s), and the due scheduler syncs
   scopes one at a time. During an SDK outage one pass can take up to the number of due checks in its batch times the
   timeout, which delays the due steps of other scopes. A timed-out read is not cancelled. A failed read backs off, so
   there is no hot loop.
-- **Outbox sender ports.** The card connector is the Host's own (as L's `connector`). The home port binds the tenant's SDK
+- **Outbox sender ports.** The card connector is the Host's own (as L's `connector`). The `homes` port binds the tenant's SDK
   Agent home calls for the request's device:
   ```ts
-  const sender = new HostedOutboxSender(pool, store, { projections, channel, connector,
-    homes: scope => ({
-      read: request => cloud.getAgentHomeProjectionStatus(tenantOf(scope), request.deviceId, { requestId: request.payload.requestId,
-        agentRef: request.payload.agentRef, projectionHash: request.payload.projectionHash }),
-      enqueue: request => cloud.enqueueAgentHomeProjection(tenantOf(scope), request.deviceId, request.payload),
-    }),
-    changed: scope => { void syncScope(scope); } });
+  const homes = (scope: string): HostedHomePort => ({
+    read: request => cloud.getAgentHomeProjectionStatus(tenantOf(scope), request.deviceId, { requestId: request.payload.requestId,
+      agentRef: request.payload.agentRef, projectionHash: request.payload.projectionHash }),
+    enqueue: request => cloud.enqueueAgentHomeProjection(tenantOf(scope), request.deviceId, request.payload),
+  });
   ```
-  The device must install the Host's persona hook as its Agent home projection consumer, or it does not advertise
-  `agent-home-projection` and the SDK refuses the enqueue (the operation keeps the error).
+  The sender's `changed` scopes are synced by `run()`. The device must install the Host's persona hook as its Agent home
+  projection consumer, or it does not advertise `agent-home-projection` and the SDK refuses the enqueue (the operation
+  keeps the error).
 - **Host jobs.** The store takes the Host job handlers (`{ host, hostJobs: { watchlist } }`), and the sender takes their
   deadline (`hostJobTimeoutMs`). Host code adds each routine once with `addHostJobRoutine`. Every store over one schema
   that a sender or the scheduler uses must have the same handlers.
 - **Host intents.** The store takes the Host intent handlers (`{ host, hostIntents: { research } }`), and the message
   handlers of those that message (`hostIntentMessages`). Every store that a consumer uses must have the same message
   handlers. Every store that a reconciler uses must have the same Host intent handlers; a missing one keeps the row open
-  as `handler_failed`. The command entry takes `failStuckIntent: (scope, key) => reconciler.failStuckIntent(scope, key)`.
+  as `handler_failed`. The command entry takes `failStuckIntent: (scope, key) => passes.failStuckIntent(scope, key)`, which syncs the scope afterwards.
 
 ## Tests
 

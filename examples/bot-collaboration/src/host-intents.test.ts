@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, type AgentMessageInput, type ExecutionServer, type IntentInput } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { BotCollaboration, IntentOutcomeError, type BotOptions, type HostIntentHandler } from './host';
+import { BotCollaboration, IntentOutcomeError, type BotOptions, type HostIntentHandler } from './index';
 import { botCompactVeto } from './compaction';
 import type { HostIntentMessageHandler, MessageDisposition } from './index';
 import { sealLedger } from './switch';

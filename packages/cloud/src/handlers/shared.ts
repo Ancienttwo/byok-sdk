@@ -8,8 +8,8 @@
  */
 import type { Context } from 'hono';
 import type { DevicePrincipal } from '@byok-sdk/core';
-import { authenticateBearer, type BearerAuthDeps } from '../auth/bearer';
-import { tenantStoresFor, type CloudRootStores, type TenantStores } from '../tenant-stores';
+import { authenticateBearer, type BearerAuthDeps } from '../auth/bearer.js';
+import { tenantStoresFor, type CloudRootStores, type TenantStores } from '../tenant-stores.js';
 
 export interface BoundedJsonBodyResult {
   readonly body: unknown;

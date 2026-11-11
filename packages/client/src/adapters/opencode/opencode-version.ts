@@ -1,4 +1,4 @@
-import type { RuntimeVersionPolicy } from '../../types';
+import type { RuntimeVersionPolicy } from '../../types.js';
 
 /** Compatibility floors are independent of OS/line canary qualification. */
 export function opencodeVersionToken(output: string): string | undefined {

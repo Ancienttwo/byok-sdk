@@ -28,8 +28,8 @@ import (
 )
 
 const (
-	protocolVersion = 3
-	helperVersion   = "3"
+	protocolVersion = 4
+	helperVersion   = "4"
 
 	maxFileBytes      = 256 * 1024
 	maxLocalLogBytes  = 1 * 1024 * 1024
@@ -62,6 +62,7 @@ type openRequest struct {
 	Protocol         int          `json:"protocol"`
 	Op               string       `json:"op"`
 	Root             string       `json:"root"`
+	AncestorRoot     string       `json:"ancestorRoot"`
 	ExpectedIdentity rootIdentity `json:"expectedIdentity"`
 }
 
@@ -211,7 +212,12 @@ func main() {
 	if err := runCLI(os.Args[1:], os.Stdin, os.Stdout); err != nil {
 		// Do not print Go/OS error strings: they can contain the absolute root or
 		// a requested pathname. Protocol callers receive a bounded typed failure.
-		fmt.Fprintln(os.Stderr, "agent-memory-fs failed")
+		code := "agent-memory-fs failed"
+		var barrierFailure *protocolError
+		if len(os.Args) == 2 && os.Args[1] == "root-barrier" && errors.As(err, &barrierFailure) {
+			code = barrierFailure.code
+		}
+		fmt.Fprintln(os.Stderr, code)
 		os.Exit(1)
 	}
 }
@@ -221,10 +227,64 @@ func runCLI(args []string, input io.Reader, output io.Writer) error {
 		_, err := fmt.Fprintln(output, helperVersion)
 		return err
 	}
+	if len(args) == 1 && args[0] == "root-barrier" {
+		return runRootBarrier(input)
+	}
 	if len(args) != 1 || args[0] != "serve" {
 		return errors.New("invalid command")
 	}
 	return serve(input, output)
+}
+
+// This initialization command is separate from the signed protocol-4 session.
+// It accepts only a bounded canonical root on stdin and grants no file authority.
+func runRootBarrier(input io.Reader) (err error) {
+	cause := "root_barrier_invalid_input"
+	defer func() {
+		if err != nil {
+			err = failure(cause, "root barrier failed")
+		}
+	}()
+	const maxInputBytes = 32 * 1024
+	data, err := io.ReadAll(io.LimitReader(input, maxInputBytes+1))
+	if err != nil || len(data) > maxInputBytes {
+		return errors.New("invalid root barrier input")
+	}
+	var req struct {
+		Root string `json:"root"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		return err
+	}
+	if decoder.Decode(new(any)) != io.EOF || len(req.Root) == 0 || len(req.Root) > 4096 ||
+		!filepath.IsAbs(req.Root) || filepath.Clean(req.Root) != req.Root || strings.ContainsAny(req.Root, "\x00\r\n") {
+		return errors.New("invalid root barrier root")
+	}
+	cause = "root_barrier_noncanonical"
+	canonical, err := filepath.EvalSymlinks(req.Root)
+	if err != nil || canonical != req.Root {
+		return errors.New("root is not canonical")
+	}
+	if runtime.GOOS == "windows" {
+		cause = "root_barrier_unsupported"
+		return errors.New("Windows has no strict root barrier contract")
+	}
+	cause = "root_barrier_open_failed"
+	root, err := os.OpenRoot(req.Root)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := root.Close(); closeErr != nil && err == nil {
+			cause, err = "root_barrier_close_failed", closeErr
+		}
+	}()
+	// Reuse protocol 4's pinned chain and its child-before-parent re-flush
+	// after the final relationship checks. Keep one chain-barrier semantics.
+	cause = "root_barrier_sync_failed"
+	return syncHomeChain([]string{req.Root}, root)
 }
 
 func serve(input io.Reader, output io.Writer) error {
@@ -341,6 +401,9 @@ func openSession(req openRequest) (*session, *protocolError) {
 	if len(req.Root) == 0 || len(req.Root) > 4096 || strings.IndexByte(req.Root, 0) >= 0 || !filepath.IsAbs(req.Root) {
 		return nil, failure("invalid_root", "root is invalid")
 	}
+	if len(req.AncestorRoot) == 0 || len(req.AncestorRoot) > 4096 || strings.IndexByte(req.AncestorRoot, 0) >= 0 || !filepath.IsAbs(req.AncestorRoot) {
+		return nil, failure("invalid_root", "ancestor root is invalid")
+	}
 
 	before, err := os.Lstat(req.Root)
 	if err != nil || !before.IsDir() || before.Mode()&os.ModeSymlink != 0 {
@@ -375,15 +438,28 @@ func openSession(req openRequest) (*session, *protocolError) {
 	if actual != req.ExpectedIdentity {
 		return nil, failure("root_identity_mismatch", "root identity does not match")
 	}
-	// Windows has no home-chain barrier while its intent backend keeps B false.
-	// It promises single-file atomicity under a process crash and the strict
-	// flushes of each write, not durability after an OS crash or power loss.
-	// The Windows chain rule waits for the B decision (W2 in
-	// docs/plans/2026-10-22-605-windows-memory.md).
-	if runtime.GOOS != "windows" {
-		if err := syncHomeChain(req.Root, root); err != nil {
-			return nil, failure("io_failure", "home directory barrier failed")
+	chain, err := selectedHomeChain(req.Root, req.AncestorRoot, root)
+	if err != nil {
+		var resolutionFailure *protocolError
+		if errors.As(err, &resolutionFailure) {
+			return nil, resolutionFailure
 		}
+		return nil, failure("invalid_root", "ancestor root is invalid")
+	}
+	if runtime.GOOS == "windows" {
+		err = syncPinnedHomeChain(chain, root)
+	} else {
+		err = syncHomeChain(chain, root)
+	}
+	if err != nil {
+		var barrierFailure *protocolError
+		if errors.As(err, &barrierFailure) {
+			return nil, barrierFailure
+		}
+		return nil, failure("io_failure", "home directory barrier failed")
+	}
+	if err := syncInitializedDirectories(root); err != nil {
+		return nil, err
 	}
 	// Recheck the name after the chain barrier and before publishing authority.
 	post, err = os.Lstat(req.Root)
@@ -1095,7 +1171,7 @@ func decodeRequest(line []byte) (request, *protocolError) {
 	switch base.Op {
 	case "open":
 		var typed openRequest
-		if err := strictJSON(line, &typed); err != nil || !hasRequiredJSONFields(line, "id", "protocol", "op", "root", "expectedIdentity") {
+		if err := strictJSON(line, &typed); err != nil || !hasRequiredJSONFields(line, "id", "protocol", "op", "root", "ancestorRoot", "expectedIdentity") {
 			return requestValue, failure("malformed_request", "request is malformed")
 		}
 		requestValue.open = &typed

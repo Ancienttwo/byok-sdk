@@ -7,16 +7,16 @@ import { promisify } from 'node:util';
 import {
   win32FileScopePath,
   type ToolAuthorizationHomeAccess, type ToolAuthorizationLane, type ToolFileAccess, type ToolFileScope,
-} from './tool-authorization';
+} from './tool-authorization.js';
 import {
   FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS,
   type FileScopeGuardCode, type FileScopeGuardReason,
   type MemoryFileScope,
-} from './file-scope-types';
+} from './file-scope-types.js';
 export {
   FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS,
   type FileScopeGuardCode, type FileScopeGuardReason,
-} from './file-scope-types';
+} from './file-scope-types.js';
 
 /**
  * The internal path guard of the explicit file-scope policy (#1061 slice 2,

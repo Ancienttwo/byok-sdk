@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { RuntimeExecutableSource } from '../types';
+import type { RuntimeExecutableSource } from '../types.js';
 
 /** The bin an adapter's resolution chose, and who chose it. */
 export interface ResolvedRuntimeCommand<B extends { readonly command: string } = { readonly command: string }> {

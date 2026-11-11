@@ -15,7 +15,7 @@ export {
   SealedContentHeaderV1Schema,
   openSealedContent,
   sealContent,
-} from './sealed-content';
+} from './sealed-content.js';
 export type {
   OpenSealedContentInput,
   SealContentInput,
@@ -27,40 +27,38 @@ export type {
   SealedContentOpenResult,
   SealedDirection,
   SealedScopePolicy,
-} from './sealed-content';
-export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from './scope-key';
+} from './sealed-content.js';
+export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from './scope-key.js';
 export type {
   OpenScopeKeyPackageInput,
   ScopeKeyPackage,
   ScopeKeyPackageOpenResult,
-  ScopeKeyPackageV1,
-  ScopeKeyPackageV2,
   SealScopeKeyPackageInput,
-} from './scope-key';
+} from './scope-key.js';
 export {
   MEMBER_CHAIN_OPS,
   deriveMemberId,
   memberChainEntryHash,
   signMemberChainEntry,
   verifyMemberChainEntry,
-} from './member-chain';
+} from './member-chain.js';
 export type {
   MemberChainEntryV1,
   MemberChainEntryVerifyResult,
   MemberChainOp,
   UnsignedMemberChainEntryV1,
-} from './member-chain';
-export { MEMBER_KEY_BUNDLE_VERSION, createMemberKeyBundle, parseMemberKeyBundle, verifyMemberKem } from './member-bundle';
-export type { CreateMemberKeyBundleInput, MemberKeyBundleV1 } from './member-bundle';
+} from './member-chain.js';
+export { MEMBER_KEY_BUNDLE_VERSION, createMemberKeyBundle, parseMemberKeyBundle, verifyMemberKem } from './member-bundle.js';
+export type { CreateMemberKeyBundleInput, MemberKeyBundleV1 } from './member-bundle.js';
 export {
   beginMemberKemRotation,
   finishMemberKemRotation,
   generateMemberKeyRecord,
   openMemberKeyRecord,
-} from './member-key-record';
-export type { MemberKemKey, MemberKeyBinding, MemberKeyStore, MemberKeys } from './member-key-record';
-export { MEMBER_FINGERPRINT_DOMAIN, memberApprovalCode, memberFingerprint } from './member-fingerprint';
-export type { MemberFingerprintInput } from './member-fingerprint';
+} from './member-key-record.js';
+export type { MemberKemKey, MemberKeyBinding, MemberKeyStore, MemberKeys } from './member-key-record.js';
+export { MEMBER_FINGERPRINT_DOMAIN, memberApprovalCode, memberFingerprint } from './member-fingerprint.js';
+export type { MemberFingerprintInput } from './member-fingerprint.js';
 export {
   CLIENT_PAIRING_MAC_DOMAIN,
   DEVICE_PAIRING_MAC_DOMAIN,
@@ -74,9 +72,9 @@ export {
   parsePairingInput,
   verifyClientPairingMac,
   verifyDevicePairingMac,
-} from './pairing-verification';
-export type { ClientPairingMacInput, DevicePairingMacInput, PairingInput } from './pairing-verification';
-export { applyMemberChainEntries, emptyMemberChainState, memberChainScopeRecipients, verifyMemberChainFromAnchor } from './member-chain-walk';
+} from './pairing-verification.js';
+export type { ClientPairingMacInput, DevicePairingMacInput, PairingInput } from './pairing-verification.js';
+export { applyMemberChainEntries, emptyMemberChainState, memberChainScopeRecipients, verifyMemberChainFromAnchor } from './member-chain-walk.js';
 export type {
   MemberChainAnchorFailure,
   MemberChainAnchorResult,
@@ -86,4 +84,4 @@ export type {
   MemberChainWalkFailure,
   MemberChainWalkResult,
   VerifyMemberChainFromAnchorInput,
-} from './member-chain-walk';
+} from './member-chain-walk.js';

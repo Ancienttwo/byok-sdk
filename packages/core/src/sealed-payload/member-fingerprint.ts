@@ -21,10 +21,10 @@
  */
 import { z } from 'zod';
 
-import { canonicalizeJsonBytes } from '../attestation';
-import { safeParseTotal } from '../total-parse';
-import { deriveMemberId } from './member-chain';
-import { P256PublicJwkSchema, concat, invalidInput, sha256, utf8, type P256PublicJwk } from './primitives';
+import { canonicalizeJsonBytes } from '../attestation.js';
+import { safeParseTotal } from '../total-parse.js';
+import { deriveMemberId } from './member-chain.js';
+import { P256PublicJwkSchema, concat, invalidInput, sha256, utf8, type P256PublicJwk } from './primitives.js';
 
 export const MEMBER_FINGERPRINT_DOMAIN = 'byok-member-fingerprint-v1\n';
 

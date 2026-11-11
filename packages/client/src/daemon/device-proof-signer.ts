@@ -8,10 +8,10 @@ import {
   type DeviceProofEnvelopeV1,
   type DeviceProofProtectedClaims,
 } from '@byok-sdk/core';
-import { snapshotPlainData } from '../util/plain-data';
-import { importPrivateKeyPem } from './device-keys';
-import type { AuthManager } from './auth-manager';
-import { enrollmentIdentityOf, readEnrollmentAuthority, type DeviceEnrollmentIdentity } from './store';
+import { snapshotPlainData } from '../util/plain-data.js';
+import { importPrivateKeyPem } from './device-keys.js';
+import type { AuthManager } from './auth-manager.js';
+import { enrollmentIdentityOf, readEnrollmentAuthority, type DeviceEnrollmentIdentity } from './store.js';
 
 export interface DeviceProofRequest {
   readonly method: string;
@@ -157,7 +157,7 @@ export class DeviceProofSignerError extends Error {
 export interface CreateStoredDeviceProofSignerOptions {
   readonly productId: string;
   /** Same OS keychain selection as the daemon and enrollment identity read. */
-  readonly deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
+  readonly deviceCredentials?: import('./device-credential-store.js').DeviceCredentialConfig;
   /** Same store directory the daemon uses; omitted resolves the product default. */
   readonly storeDir?: string;
   /** `DaemonConfig.nativeAssetRoot` of a packaged Windows Host, which has no installed koffi. */
@@ -278,7 +278,7 @@ const DATE_TO_ISO_STRING = Date.prototype.toISOString as (this: unknown) => stri
 
 interface SignerConfig {
   readonly productId: string;
-  readonly deviceCredentials: import('./device-credential-store').DeviceCredentialConfig | undefined;
+  readonly deviceCredentials: import('./device-credential-store.js').DeviceCredentialConfig | undefined;
   readonly storeDir: string | undefined;
   readonly nativeAssetRoot: string | undefined;
   readonly expected: Readonly<{ tenantId: string; deviceId: string; proofKeyId: string; proofKeyEpoch: number }>;

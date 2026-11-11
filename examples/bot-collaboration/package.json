@@ -5,8 +5,11 @@
   "type": "module",
   "description": "Single Bot actions on the K4 Host execution core",
   "exports": {
+    ".": "./src/index.ts",
+    "./adapter-steps": "./src/adapter-steps.ts",
     "./dream": "./src/dream.ts",
     "./rules/priority": "./src/rules/priority.ts",
+    "./rules/delegation": "./src/rules/delegation.ts",
     "./rules/commands": "./src/rules/commands.ts",
     "./rules/commit": "./src/rules/commit.ts",
     "./rules/message": "./src/rules/message.ts",

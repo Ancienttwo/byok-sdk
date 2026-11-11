@@ -1,16 +1,16 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { ByokServer } from '../index';
-import type { ByokServerEvent, CreateByokServerOptions } from '../types';
-import type { DueWake } from '../wakes/types';
-import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory';
-import { HostLedger, OutboxFullError, type ApplicationRows } from './ledger';
+import type { ByokServer } from '../index.js';
+import type { ByokServerEvent, CreateByokServerOptions } from '../types.js';
+import type { DueWake } from '../wakes/types.js';
+import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory.js';
+import { HostLedger, OutboxFullError, type ApplicationRows } from './ledger.js';
 import { canonical, frozenInput, hash, isSealed, project, taskId, time, validateJson, type HostJobHandler, type HostOccurrenceRun, type Attempt,
-  type Intent, type IntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type SealedAgentExecutionInput, type Terminal } from './model';
-import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
+  type Intent, type IntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type SealedAgentExecutionInput, type Terminal } from './model.js';
+import { nextIntervalOccurrence, type NextOccurrence } from './schedule.js';
 import { applyPlan, auditCalendarError, auditIgnoredWake, deferSchedule, nextWake, occurrenceRun, promote, recordOccurrence, routineCommands, scheduleNext,
-  switchVersion, versionSwitchDue, WAKE_HORIZON_MS, type RoutineCommands } from './routines';
-import { cancelWake, enqueue, fifoHeads, queuedExpiry, settle } from './transitions';
-import { frozenDelivered, SealedDispatchUnavailableError, submitFrozen, type FrozenSubmitPort } from './submit';
+  switchVersion, versionSwitchDue, WAKE_HORIZON_MS, type RoutineCommands } from './routines.js';
+import { cancelWake, enqueue, fifoHeads, queuedExpiry, settle } from './transitions.js';
+import { frozenDelivered, SealedDispatchUnavailableError, submitFrozen, type FrozenSubmitPort } from './submit.js';
 
 export type ExecutionServer = {
   /** `submitSealed` is the sealed lane (#654). Without it, the core fails a sealed intent before any submit. */
@@ -34,12 +34,16 @@ export interface OutcomeTransaction {
   readonly terminal: Terminal;
   /** Business state participates in the same SQLite commit. Do not do external I/O here. */
   application: Record<string, Json>;
+  /** The application rows of the same commit. The port closes when the transaction ends. */
+  rows: ApplicationRows;
   publish(id: string, value: Json): void;
   routines: RoutineCommands;
 }
 export interface OccurrenceTransaction {
   /** Business state participates in the occurrence commit. No external I/O and no core or ledger calls. */
   application: Record<string, Json>;
+  /** The application rows of the same commit. The port closes when the transaction ends. */
+  rows: ApplicationRows;
   publish(id: string, value: Json): void;
 }
 /** Runs synchronously in the commit of a new `hostOccurrence` occurrence. A throw or a thenable rolls the occurrence back. */
@@ -247,13 +251,13 @@ export class HostExecutionCore {
   }
   readonly consume = async (wake: DueWake, signal: AbortSignal): Promise<void> => {
     this.assertOpen(); signal.throwIfAborted();
-    const replay = this.ledger.transaction(state => {
+    const replay = this.ledger.transaction((state, rows) => {
       if (this.ledger.hasTombstone('slot', wake.dedupKey, this.now())) return true;
       if (state.scanWake?.dedupKey === wake.dedupKey) state.scanWake = null;
       else if (wake.dedupKey.startsWith('host-scan:')) auditIgnoredWake(state, wake, this.now(), 'stale_scan');
       else {
         const occurrence = recordOccurrence(state, this.ledger.tenant, wake, this.now(), this.nextTime);
-        if (occurrence?.hook) this.runOccurrenceHook(state, occurrence);
+        if (occurrence?.hook) this.runOccurrenceHook(state, rows, occurrence);
       }
       return false;
     });
@@ -263,14 +267,14 @@ export class HostExecutionCore {
     await this.drain();
   };
   /** The hook shares the occurrence commit: both persist, or neither does. */
-  private runOccurrenceHook(state: LedgerState, occurrence: Occurrence): void {
+  private runOccurrenceHook(state: LedgerState, rows: ApplicationRows, occurrence: Occurrence): void {
     const run = occurrenceRun(state.routines[hash(occurrence.routineId)]!, occurrence);
     const hook = this.occurrenceHooks.get(run.type);
     if (typeof hook !== 'function') throw new Error('Occurrence hook not registered');
     let open = true;
     try {
       const result: unknown = hook(run, {
-        application: state.application,
+        application: state.application, rows,
         publish: (id, value) => {
           if (!open) throw new Error('Occurrence transaction is closed');
           project(state, id, value);
@@ -779,7 +783,7 @@ export class HostExecutionCore {
     return false;
   }
   private finish(intent: Intent, terminal: Terminal, attempt: Attempt): void {
-    this.ledger.transaction(state => {
+    this.ledger.transaction((state, rows) => {
       const row = state.intents[intent.id]!;
       if (row.conclusion) return;
       const execution = state.executions[row.taskId]!;
@@ -789,7 +793,7 @@ export class HostExecutionCore {
       if (envelope.type === 'task.complete' && envelope.payload.sealed === undefined) {
         if (!state.applied[row.taskId]) {
           const result = this.options.applyOutcome?.(envelope.payload.document, {
-            intent: structuredClone(row), terminal: structuredClone(terminal), application: state.application,
+            intent: structuredClone(row), terminal: structuredClone(terminal), application: state.application, rows,
             publish: (id, value) => project(state, id, value), routines: this.routineCommands(state),
           });
           if (result && typeof (result as { then?: unknown }).then === 'function') throw new Error('Outcome handler must be synchronous');

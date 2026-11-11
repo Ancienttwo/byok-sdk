@@ -1,5 +1,5 @@
 import type { HostOfferPlainPayload, HostOfferSealedPayload } from '@byok-sdk/protocol';
-import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl, EnqueuedOffer } from '../cloud';
+import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl, EnqueuedOffer } from '../cloud.js';
 import { contentHash, type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import {
   AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY,
@@ -21,13 +21,13 @@ import {
   type SessionSelection,
   type TaskOfferPayload,
 } from '@byok-sdk/protocol';
-import { ByokCloudError, DeviceRetiredError, TaskOfferAppendRefusedError } from '../errors';
-import { taskOfferMessageId, uuidFromSha256 } from '../offer-identity';
-import { firstSealedPayload } from '../sealed-comparison';
-import { retainSealedCiphertext, sealedCiphertextCommitted, sealedCiphertextRef } from '../sealed-ciphertext';
-import type { AgentEgressRecord, TaskAttemptStatus } from '../stores/ports';
-import { sameTaskBody } from '../task-redaction';
-import { tenantStoresFor, type CloudRootStores, type TenantStores } from '../tenant-stores';
+import { ByokCloudError, DeviceRetiredError, TaskOfferAppendRefusedError } from '../errors.js';
+import { taskOfferMessageId, uuidFromSha256 } from '../offer-identity.js';
+import { firstSealedPayload } from '../sealed-comparison.js';
+import { retainSealedCiphertext, sealedCiphertextCommitted, sealedCiphertextRef } from '../sealed-ciphertext.js';
+import type { AgentEgressRecord, TaskAttemptStatus } from '../stores/ports.js';
+import { sameTaskBody } from '../task-redaction.js';
+import { tenantStoresFor, type CloudRootStores, type TenantStores } from '../tenant-stores.js';
 
 /**
  * Attempt statuses past which there is nothing left to approve or refuse. A
@@ -111,7 +111,7 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
       await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', resolved));
       if (resolved.harnessId !== undefined) {
         const target = await options.cloud.devices.get(tenant, deviceId);
-        if (!target?.harnesses?.some(harness => harness.id === resolved.harnessId)) throw new ByokCloudError('coordination_input_invalid', 'requested custom harness is not advertised by this device');
+        if (!target?.harnesses?.some(harness => harness.id === resolved.harnessId)) throw new ByokCloudError('agent_capability_missing', 'requested custom harness is not advertised by this device');
       }
     }
     return resolved;
@@ -136,7 +136,7 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
     const messageId = await taskOfferMessageId(tenant, taskId, deviceId, agentRef, bytes => options.crypto.sha256(bytes));
     const proposed = buildEnvelope(taskId, 0, messageId);
     await assertSealedCiphertext(tenant, proposed.payload);
-    // An attempt is the task authority, so reserve/open it BEFORE the offer is
+    // An attempt is the task authority, so reserve it BEFORE the offer is
     // observable in a mailbox.  The stable message identity then makes an
     // append failure retry converge on the one offer rather than allocating a
     // second executable body.
@@ -144,7 +144,6 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
     const openedBeforeAppend = reservation.attempt;
     if (
       openedBeforeAppend.deviceId !== deviceId ||
-      openedBeforeAppend.agentRef === undefined ||
       !sameAgentRef(agentRef, openedBeforeAppend.agentRef)
     ) {
       throw new ByokCloudError('agent_ref_mismatch', `Task ${taskId} already has a different durable target or Agent identity.`);

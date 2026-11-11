@@ -45,6 +45,15 @@ export const workspaceGraph = {
       "@byok-sdk/client"
     ]
   },
+  "examples/desktop-bot-app": {
+    "name": "@byok-sdk/example-desktop-bot-app",
+    "dependencies": [
+      "@byok-sdk/client",
+      "@byok-sdk/example-bot-collaboration",
+      "@byok-sdk/keys",
+      "@byok-sdk/server"
+    ]
+  },
   "examples/host-execution-core": {
     "name": "@byok-sdk/example-host-execution-core",
     "dependencies": [
@@ -189,7 +198,7 @@ export const knownFamilies = Object.freeze([
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-client', 'packageability-smoke', 'packaging-consistency', 'npm-release-pack',
   'release-pack-migrate', 'service-upgrade-smoke', 'linux-systemd-smoke', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
-  'hermes-real-windows', 'agy-real-windows', 'opencode-real-windows', 'runtime-contract',
+  'hermes-real-windows', 'agy-real-windows', 'opencode-real-windows', 'runtime-contract', 'desktop',
 ]);
 // A routine PR selects a platform family only when it changes a path that the
 // family owns: its tests, smoke scripts and the source they qualify. Package
@@ -243,7 +252,7 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/(?:adapters\/(?:runtime-invocation\.ts|antigravity\/resolve-bin\.ts|opencode\/resolve-bin\.ts)|__tests__\/runtime-executable-detection\.test\.ts)$/,
     /^packages\/client\/src\/daemon\/(?:auth-manager|daemon-lifecycle|daemon-record)\.ts$/,
     /^packages\/client\/src\/(?:util\/(?:secure-dir|atomic-write|fold-name-aliases|daemon-owner)\.ts|diagnostics\/|bin\/commands\/)/,
-    /^packages\/client\/src\/__tests__\/(?:secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity|service-enrollment-handover)[^/]*$/,
+    /^packages\/client\/src\/__tests__\/(?:secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity|service-enrollment-handover|local-state-relocation|agent-home-contract)[^/]*$/,
     // #1165: service enrollment's handover on a named-pipe control endpoint.
     /^packages\/client\/src\/daemon\/(?:control-server|create-daemon\/(?:control-methods|lifecycle|start-run|start))\.ts$/,
     // #738: the Agent-home file write crash test, its child process and the code it qualifies.
@@ -259,6 +268,9 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/(?:runtime\/environment\.ts|__tests__\/environment\.test\.ts)$/,
     // The reserved MCP context file on win32: the writer, the scratch ACL it relies on and the suite.
     /^packages\/client\/src\/(?:daemon\/task-runner\/mcp-contexts\.ts|daemon\/retention\/scratch\.ts|__tests__\/task-assertion-broker\.test\.ts)$/,
+    // #1710: the Pi host payload forms and the projection ACL on win32, with the code they qualify.
+    /^packages\/client\/src\/__tests__\/(?:pi-host-payload|pi-runtime-launch)\.test\.ts$/,
+    /^packages\/client\/src\/(?:adapters\/pi\/runtime-launch|adapters\/win32-job-object|sdk-native-assets-runtime)\.ts$/,
   ],
   // #608: the real Hermes run on Windows, its fake model endpoint and the code it qualifies.
   'hermes-real-windows': [
@@ -307,6 +319,8 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/adapters\/pi\/(?:runtime-assets|todo-locale-assets|client-manifest)\.ts$/,
     /^packages\/keys\/src\/pi-provider-launcher-core\.ts$/,
   ],
+  // #1804: the private desktop example; its lane builds it and runs the Electron fuse and bridge checks.
+  desktop: [/^examples\/desktop-bot-app\//],
   'service-upgrade-smoke': [
     /^examples\/service-upgrade\//,
     /^templates\/service\//,
@@ -416,6 +430,13 @@ export const reviewedScripts = Object.freeze({
     tests: ['scripts/release/install-matrix.test.mjs', 'scripts/release/pack-and-smoke.test.mjs'],
     families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
   },
+  // #1828: each of the same families runs pack-and-smoke.mjs, which runs this NodeNext probe on the installed tarballs.
+  'scripts/release/node-next-consumer-probe.mjs': {
+    tests: [], families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
+  },
+  // #1828: the one-time relative-specifier codemod. Open branches rerun it by hand; the release pack's
+  // NodeNext consumer probe proves the specifiers it writes.
+  'scripts/codemod/relative-js-specifiers.mjs': { tests: [], families: ['npm-release-pack'] },
   // #1378: the shared Secret Service wrapper that these family jobs run their
   // suites under. build-test also runs it, but plan-ci never lets a routine
   // path select build-test (the same rule as .node-version).
@@ -626,10 +647,10 @@ export function selectImpact(paths, context = {}) {
       families.add('adapter-lifecycle-smoke'); families.add('packageability-smoke');
       continue;
     }
-    // #1445: the asset root of the two test Hosts that bundle the SDK on Windows.
+    // #1445, #1710: the asset root of the test Hosts that bundle the SDK on Windows.
     if (path === 'scripts/testing/sdk-koffi-asset-root.mjs' || path === 'scripts/testing/sdk-koffi-asset-root.d.mts') {
       dirs.add('packages/client');
-      families.add('execution-recovery-native'); families.add('service-upgrade-smoke');
+      families.add('execution-recovery-native'); families.add('service-upgrade-smoke'); families.add('windows-client');
       continue;
     }
     if (path === 'api-surface/entries.json') {
@@ -827,6 +848,7 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     if (/^examples\/service-upgrade\/(?:app-installer(?:\.test)?\.ts|upgrade-smoke\.mjs)$/.test(path)) { dirs.add(dir); continue; }
+    if (/^examples\/desktop-bot-app\/(?:brand\.config\.ts|src\/renderer\/index\.html|src\/renderer\/(?:[^/]+\/)*[^/]+\.css|scripts\/package\/[a-z0-9-]+\.mjs)$/.test(path)) { dirs.add(dir); continue; }
     if (path === 'packages/client/src/__tests__/fixtures/native-sessions/pi-1.5.0.jsonl') {
       dirs.add('packages/client'); continue;
     }

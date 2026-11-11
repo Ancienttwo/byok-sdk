@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"unsafe"
 )
 
 var (
+	procGetFinalPathNameByHandleW     = syscall.NewLazyDLL("kernel32.dll").NewProc("GetFinalPathNameByHandleW")
 	procGetVolumeInformationByHandleW = syscall.NewLazyDLL("kernel32.dll").NewProc("GetVolumeInformationByHandleW")
 	procNtQueryVolumeInformationFile  = syscall.NewLazyDLL("ntdll.dll").NewProc("NtQueryVolumeInformationFile")
 )
@@ -21,6 +24,65 @@ var (
 	rootFileSystem = volumeFileSystemName
 	rootRemote     = volumeIsRemote
 )
+
+// Windows EvalSymlinks fails on some junction ancestors that native handle
+// opens admit. Resolve both names with the same handle API and DOS flags;
+// never switch to a pathname resolver after a failure.
+func platformHomeChainPaths(home, ancestor string, expected *os.Root) (string, string, error) {
+	requested, err := os.Stat(home)
+	if err != nil {
+		return "", "", err
+	}
+	pinned, err := expected.Stat(".")
+	if err != nil || !os.SameFile(requested, pinned) {
+		return "", "", errors.New("pinned home name changed")
+	}
+	canonicalHome, err := pinnedFinalDirectoryName(expected)
+	if err != nil {
+		return "", "", err
+	}
+	ancestorRoot, err := os.OpenRoot(ancestor)
+	if err != nil {
+		return "", "", err
+	}
+	defer ancestorRoot.Close()
+	canonicalAncestor, err := pinnedFinalDirectoryName(ancestorRoot)
+	return canonicalHome, canonicalAncestor, err
+}
+
+func pinnedFinalDirectoryName(root *os.Root) (string, error) {
+	file, err := root.Open(".")
+	if err != nil {
+		return "", failure("root_resolution_failed", "directory name handle is unavailable")
+	}
+	defer file.Close()
+	// FILE_NAME_NORMALIZED | VOLUME_NAME_DOS are both zero. Use this exact
+	// selection for home and ancestor so extended drive and UNC names agree.
+	needed, _, _ := procGetFinalPathNameByHandleW.Call(file.Fd(), 0, 0, 0)
+	if needed == 0 {
+		return "", failure("root_resolution_failed", "GetFinalPathNameByHandleW failed")
+	}
+	buffer := make([]uint16, needed)
+	written, _, _ := procGetFinalPathNameByHandleW.Call(file.Fd(), uintptr(unsafe.Pointer(&buffer[0])), uintptr(len(buffer)), 0)
+	if written == 0 || written >= uintptr(len(buffer)) {
+		return "", failure("root_resolution_failed", "GetFinalPathNameByHandleW failed or directory name changed")
+	}
+	return normalizeFinalDirectoryName(syscall.UTF16ToString(buffer[:written]))
+}
+
+func normalizeFinalDirectoryName(name string) (string, error) {
+	if strings.HasPrefix(name, `\\?\UNC\`) {
+		name = `\\` + strings.TrimPrefix(name, `\\?\UNC\`)
+	} else if strings.HasPrefix(name, `\\?\`) {
+		name = strings.TrimPrefix(name, `\\?\`)
+	} else {
+		return "", failure("root_resolution_failed", "GetFinalPathNameByHandleW returned a non-DOS path")
+	}
+	if !filepath.IsAbs(name) {
+		return "", failure("root_resolution_failed", "GetFinalPathNameByHandleW returned a non-absolute path")
+	}
+	return filepath.Clean(name), nil
+}
 
 // identityForRoot intentionally obtains the Windows identity from the pinned
 // handle rather than a path Stat result, and uses the same tagged identity

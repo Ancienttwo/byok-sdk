@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { BlobRefSchema } from './blob';
-import { TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH } from './constants';
+import { BlobRefSchema } from './blob.js';
+import { TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH } from './constants.js';
 
 /**
  * Maximum UTF-16 length of {@link AgentEventSpillSchema}'s `unstoredReason`.

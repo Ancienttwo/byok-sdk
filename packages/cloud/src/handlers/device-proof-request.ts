@@ -9,8 +9,8 @@ import {
   authenticateDeviceProof,
   type AuthenticatedDeviceProof,
   type DeviceProofAuthDeps,
-} from '../auth/device-proof';
-import { cancelBody, readBoundedRawBody } from './shared';
+} from '../auth/device-proof.js';
+import { cancelBody, readBoundedRawBody } from './shared.js';
 
 export const MAX_DEVICE_PROOF_HEADER_BYTES = 16 * 1024;
 

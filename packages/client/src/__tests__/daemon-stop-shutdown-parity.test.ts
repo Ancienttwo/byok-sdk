@@ -569,13 +569,16 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     expect(DeviceStore.resolveDir('acme-short-name', short)).toBe(canonical);
   });
 
-  it.skipIf(process.platform !== 'win32')('never folds a store path through a junction', async () => {
+  it.skipIf(process.platform !== 'win32')('refuses a store path through a junction', async () => {
     const target = realpathSync.native(await tmpDir('byok-junction-target-'));
     const junction = path.join(path.dirname(target), `${path.basename(target)}-junction`);
     await fs.symlink(target, junction, 'junction');
     try {
-      expect(foldNameAliases(junction)).toBe(junction);
-      expect(foldNameAliases(path.join(junction, 'store'))).toBe(path.join(junction, 'store'));
+      const configured = path.join(junction, 'store');
+      expect(() => foldNameAliases(configured)).toThrow(expect.objectContaining({
+        code: 'configured_path_untrusted_link', configuredPath: configured, link: junction, reason: 'windows_link',
+      }));
+      expect(() => DeviceStore.resolveDir('acme-junction', junction)).toThrow(/windows_link/);
     } finally {
       await fs.rm(junction, { force: true });
     }

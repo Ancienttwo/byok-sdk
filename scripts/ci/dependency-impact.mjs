@@ -68,7 +68,7 @@ function packageName(row) {
  * all resolved versions of a package intentionally qualifies all its consumers.
  * It never treats an unowned changed row as evidence of no impact.
  */
-export function dependencyLockImpact(before, after, { cwd }) {
+export function dependencyLockImpact(before, after, { cwd, admitted = [] }) {
   if (![before, after].every(lock => plain(lock.workspaces) && plain(lock.packages))) fail('invalid Bun lock shape');
   if (!isDeepStrictEqual(Object.keys(before.workspaces).sort(), Object.keys(after.workspaces).sort())) fail('workspace topology changed');
   const versionChanged = !isDeepStrictEqual(before.lockfileVersion, after.lockfileVersion);
@@ -125,7 +125,8 @@ export function dependencyLockImpact(before, after, { cwd }) {
     reachable.add(name);
     for (const dep of edges.get(name) ?? []) visit(dep);
   };
-  for (const lock of [before, after]) for (const record of Object.values(lock.workspaces)) {
+  // A reviewed new workspace, already checked and removed from the lock, still declares its rows.
+  for (const record of [...Object.values(before.workspaces), ...Object.values(after.workspaces), ...admitted]) {
     for (const name of Object.keys(specs(record))) visit(name);
   }
   if ([...changedPackages].some(name => !reachable.has(name))) fail('changed resolved packages have no declaring workspace');

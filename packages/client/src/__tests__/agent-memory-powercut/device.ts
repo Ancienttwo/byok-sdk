@@ -26,9 +26,9 @@ import type { AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory
  * as the W4 smoke does, to measure whether the claim would hold. No
  * production gate or admission check reads this object.
  */
-export function powercutBackend(): AgentMemoryIntentBackend {
+export function powercutBackend(ancestorRoot: string): AgentMemoryIntentBackend {
   if (process.platform === 'linux') return NATIVE_AGENT_MEMORY_INTENT_BACKEND;
-  const helper = helperAgentMemoryIntentBackend(resolveAgentMemoryFilesystemHelper());
+  const helper = helperAgentMemoryIntentBackend(resolveAgentMemoryFilesystemHelper(), ancestorRoot);
   return process.platform === 'win32' ? { ...helper, strictLedgerBarrier: true } : helper;
 }
 

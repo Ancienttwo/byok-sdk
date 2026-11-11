@@ -14,7 +14,7 @@ import { assertCanonicalTimestamp } from '@byok-sdk/core';
 import type { RequestReceipt, RequestReceiptStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
-import type { ByokPool } from '../pool';
+import type { ByokPool } from '../pool.js';
 
 interface ReceiptRow {
   readonly tenant_id: string;

@@ -28,13 +28,13 @@
  */
 import { z } from 'zod';
 
-import { canonicalizeJson, canonicalizeJsonBytes, type JsonObject } from '../attestation';
-import { CONTENT_HASH_PATTERN } from '../blob';
-import { ByokCoreError } from '../errors';
-import { isCanonicalTimestamp } from '../time';
-import { safeParseTotal } from '../total-parse';
-import { webCryptoSubtle } from '../webcrypto';
-import { MEMBER_ID_PATTERN } from './member-chain';
+import { canonicalizeJson, canonicalizeJsonBytes, type JsonObject } from '../attestation.js';
+import { CONTENT_HASH_PATTERN } from '../blob.js';
+import { ByokCoreError } from '../errors.js';
+import { isCanonicalTimestamp } from '../time.js';
+import { safeParseTotal } from '../total-parse.js';
+import { webCryptoSubtle } from '../webcrypto.js';
+import { MEMBER_ID_PATTERN } from './member-chain.js';
 import {
   base64UrlBytes,
   copy,
@@ -46,15 +46,15 @@ import {
   randomBytes,
   utf8,
   type Bytes,
-} from './primitives';
+} from './primitives.js';
 import {
   SCOPE_KEY_ID_PATTERN,
   SEALED_SALT_BYTES,
   deriveScopeKeyId,
   deriveSealedContentKey,
   deriveSealedMacKey,
-} from './scope-key';
-import { canonicalizeSealedJson } from './sealed-json';
+} from './scope-key.js';
+import { canonicalizeSealedJson } from './sealed-json.js';
 
 export const SEALED_CONTENT_VERSION = 1;
 

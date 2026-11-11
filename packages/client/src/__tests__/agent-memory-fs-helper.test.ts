@@ -34,7 +34,7 @@ describe('Agent memory external filesystem helper', () => {
     const binding = await new AgentHomeManager({ hostStorageRoot }).prepare({ agentId: 'helper-agent', profileRevision: 'p1' });
     const filesystem = await openAgentMemoryFilesystemHelper({
       helperBin: helperBin!,
-      canonicalHome: binding.resolution.canonicalHome,
+      canonicalHome: binding.resolution.canonicalHome, ancestorRoot: binding.resolution.hostStorageRoot,
       homeIdentity: binding.lease.homeIdentity,
     });
     const context: AgentMemoryTaskContext = {
@@ -112,7 +112,7 @@ describe('Agent memory external filesystem helper', () => {
     const hostStorageRoot = await temporaryRoot('byok-agent-memory-helper-names-');
     const outside = await temporaryRoot('byok-agent-memory-helper-names-outside-');
     const binding = await new AgentHomeManager({ hostStorageRoot }).prepare({ agentId: 'names-agent', profileRevision: 'p1' });
-    const filesystem = await openAgentMemoryFilesystemHelper({ helperBin: helperBin!, canonicalHome: binding.resolution.canonicalHome, homeIdentity: binding.lease.homeIdentity });
+    const filesystem = await openAgentMemoryFilesystemHelper({ helperBin: helperBin!, canonicalHome: binding.resolution.canonicalHome, ancestorRoot: binding.resolution.hostStorageRoot, homeIdentity: binding.lease.homeIdentity });
     try {
       await expectAgentMemoryNameRules({
         taskId: 'names-task', tenantId: 'names-tenant', deviceId: 'names-device', agentRef: binding.resolution.agentRef, sessionRef: 'names-session', runtimeId: 'codex',
@@ -131,7 +131,7 @@ describe('Agent memory external filesystem helper', () => {
     const hostStorageRoot = await temporaryRoot('byok-agent-memory-helper-raw-');
     const outside = await temporaryRoot('byok-agent-memory-helper-raw-outside-');
     const binding = await new AgentHomeManager({ hostStorageRoot }).prepare({ agentId: 'raw-agent', profileRevision: 'p1' });
-    const filesystem = await openAgentMemoryFilesystemHelper({ helperBin: helperBin!, canonicalHome: binding.resolution.canonicalHome, homeIdentity: binding.lease.homeIdentity });
+    const filesystem = await openAgentMemoryFilesystemHelper({ helperBin: helperBin!, canonicalHome: binding.resolution.canonicalHome, ancestorRoot: binding.resolution.hostStorageRoot, homeIdentity: binding.lease.homeIdentity });
     try {
       await expectation({
         taskId: 'raw-task', tenantId: 'raw-tenant', deviceId: 'raw-device', agentRef: binding.resolution.agentRef, sessionRef: 'raw-session', runtimeId: 'codex',
@@ -149,7 +149,7 @@ describe('Agent memory external filesystem helper', () => {
     try {
       await expect(openAgentMemoryFilesystemHelper({
         helperBin: helperBin!,
-        canonicalHome: binding.resolution.canonicalHome,
+        canonicalHome: binding.resolution.canonicalHome, ancestorRoot: binding.resolution.hostStorageRoot,
         homeIdentity: { dev: binding.lease.homeIdentity.dev, ino: binding.lease.homeIdentity.ino + 1n },
       })).rejects.toThrow('root_identity_mismatch');
     } finally {

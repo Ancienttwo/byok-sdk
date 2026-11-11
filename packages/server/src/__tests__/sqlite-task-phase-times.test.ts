@@ -9,6 +9,8 @@ import { isSqliteAvailable } from '../sqlite-support';
 import { rewindToV6 } from './test-support';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const TENANT = tenantId('sqlite-phase-times');
 const PHASE_COLUMNS = ['offered_at', 'claimed_at', 'first_output_at', 'terminal_at'];
@@ -27,7 +29,7 @@ describeSqlite('SQLite task attempt phase instants (#980)', () => {
     const open = () => createSqliteEmbeddedStores({ path }, { clock, crypto: createWebCrypto() });
 
     const first = open();
-    await first.cloud.tasks.open(TENANT, { taskId: 'old', deviceId: 'device-1' });
+    await first.cloud.tasks.reserveAgentOffer(TENANT, { taskId: 'old', deviceId: 'device-1', agentRef: AGENT_REF });
     await first.close();
     // Only an upgrade adds a missing column, so rewind this file to v6, the
     // oldest version upgraded in place.
@@ -49,7 +51,7 @@ describeSqlite('SQLite task attempt phase instants (#980)', () => {
       await reopened.close();
     }
     const check = new DatabaseSync(path);
-    expect(check.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '8' });
+    expect(check.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '9' });
     const columns = (check.prepare('PRAGMA table_info(task_attempt)').all() as { name: string }[]).map((column) => column.name);
     expect(columns).toEqual(expect.arrayContaining(PHASE_COLUMNS));
     check.close();

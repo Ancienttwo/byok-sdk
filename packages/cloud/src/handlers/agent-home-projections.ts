@@ -5,9 +5,9 @@ import {
   type AgentHomeProjectionCompletionRequest,
   type AgentHomeProjectionReadback,
 } from '@byok-sdk/protocol';
-import { isCloudError } from '../errors';
-import { admitDeviceRequest, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
-import type { TenantStores } from '../tenant-stores';
+import { isCloudError } from '../errors.js';
+import { admitDeviceRequest, readBoundedJsonBody, type DeviceRouteDeps } from './shared.js';
+import type { TenantStores } from '../tenant-stores.js';
 
 /** A completion receipt is ids, an Agent ref, a hash and an outcome. */
 export const AGENT_HOME_PROJECTION_COMPLETION_MAX_BODY_BYTES = 16 * 1024;

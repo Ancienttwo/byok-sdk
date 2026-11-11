@@ -44,7 +44,7 @@ describe('control-protocol: endpoint path derivation', () => {
     expect(path1).not.toContain(longStoreDir);
     expect(path1.startsWith('/')).toBe(true);
     expect(path.basename(path1)).toBe('sock');
-    expect(path.basename(path.dirname(path1))).toMatch(/^byok-[0-9a-f]{16}$/); // per-daemon private subdirectory, not a bare file in os.tmpdir()
+    expect(path.basename(path.dirname(path1))).toMatch(new RegExp(`^byok-${process.getuid?.() ?? 'unknown'}-[0-9a-f]{16}$`)); // per-daemon private subdirectory, not a bare file in os.tmpdir()
   });
 
   it('controlSocketPath fallback differs for different storeDirs', () => {

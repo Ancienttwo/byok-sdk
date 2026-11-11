@@ -2,6 +2,7 @@ import { buildHandoffPack, type HandoffPackBudgets } from '@byok-sdk/protocol';
 import { hash, MIN_TOMBSTONE_RETENTION_MS, time, type Json } from '@byok-sdk/server/execution-core';
 import { DEFAULT_CONTEXT_TURN_LIMIT, handoffFrameBytes, handoffTurn } from './rules/context';
 import type { CollaborationState, Turn } from './model';
+import { refuseUnmigratedWouldDo } from './rules/autonomy';
 
 /**
  * Explicit retention (#798). The Host acknowledges settled roots. One call moves every row of each root out of the
@@ -54,7 +55,7 @@ export class RetentionRefused extends Error {
     super(`Retention refused: ${reason}`); this.name = 'RetentionRefused';
   }
 }
-const OPEN_DELIVERY = new Set(['pending', 'sending', 'unknown']);
+const OPEN_DELIVERY = new Set(['staged', 'pending', 'sending', 'unknown']);
 const values = <T>(rows: Record<string, T> | undefined): T[] => Object.values(rows ?? {});
 const own = <T>(rows: Record<string, T> | undefined, id: string): T | undefined => rows && Object.hasOwn(rows, id) ? rows[id] : undefined;
 
@@ -88,7 +89,7 @@ function contextWindow(state: CollaborationState, limit: number, handoff: Handof
 }
 interface Members {
   turns: Turn[]; roots: Set<string>; delegations: string[]; batches: string[]; units: string[]; replies: string[];
-  cards: string[]; questions: string[]; inputs: string[]; batch?: string; rounds: string[]; seats: string[]; inbounds: string[]; deliveries: string[];
+  cards: string[]; questions: string[]; inputs: string[]; batch?: string; rounds: string[]; seats: string[]; inbounds: string[]; deliveries: string[]; wouldDo: string[];
 }
 /** Every row of root `root`. A round's seat Turns have their own root, so they join the round's root. */
 function members(state: CollaborationState, root: string): Members {
@@ -108,6 +109,7 @@ function members(state: CollaborationState, root: string): Members {
     // A filtered inbound has no root (#1229), so a root acknowledgement does not move it; it stays with its audit row.
     inbounds: values(state.channel?.inbounds).filter(row => row.root !== undefined && roots.has(row.root)).map(row => row.id),
     deliveries: values(state.channel?.deliveries).filter(row => ids.has(row.turnId)).map(row => row.id),
+    wouldDo: values(state.wouldDo).filter(row => ids.has(row.turnId)).map(row => row.id),
   };
 }
 /** The first reason that the root is still in use, or `undefined`. */
@@ -159,6 +161,7 @@ export function retainRoots(state: CollaborationState, input: RetentionInput, li
   const roots = [...new Set(input.acknowledgedRoots)];
   if (roots.some(root => typeof root !== 'string' || !root)) throw new Error('Invalid acknowledged root');
   if (!Number.isSafeInteger(limits.contextTurnLimit) || limits.contextTurnLimit < 1) throw new Error('Invalid ContextPack limits');
+  refuseUnmigratedWouldDo(state);
   const result: RetentionResult = { archivedRoots: 0, alreadyArchivedRoots: 0, archivedRows: 0, archivedCommands: 0,
     expiredCommands: store.expire('commands', now), beforeBytes: bytes(state), afterBytes: 0 };
   // Decide every root on the state before this call, then move. A refusal throws before any move.
@@ -188,7 +191,8 @@ export function retainRoots(state: CollaborationState, input: RetentionInput, li
       + move(store, 'inputs', state.inputs, m.inputs) + move(store, 'inputBatches', state.inputBatches, m.batch === undefined ? [] : [m.batch])
       + move(store, 'rounds', state.team.rounds, m.rounds) + move(store, 'seats', state.team.seats, m.seats)
       + move(store, 'roots', state.team.roots, [...m.roots].filter(id => own(state.team.roots, id)))
-      + move(store, 'inbounds', state.channel?.inbounds, m.inbounds) + move(store, 'deliveries', state.channel?.deliveries, m.deliveries);
+      + move(store, 'inbounds', state.channel?.inbounds, m.inbounds) + move(store, 'deliveries', state.channel?.deliveries, m.deliveries)
+      + move(store, 'wouldDo', state.wouldDo, m.wouldDo);
     // A rejection has no id. Its hash is its id; equal rows are equal evidence.
     const rejected = state.rejected.filter(row => row.consumedBy !== undefined && consumed.has(row.consumedBy));
     for (const row of rejected) store.put('rejected', hash(['rejected', row]), row as unknown as Json);

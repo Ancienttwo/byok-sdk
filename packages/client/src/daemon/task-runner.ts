@@ -1,8 +1,8 @@
-import { type ResultReplyFailure } from './result-reply-failure';
-import type { RuntimeTaskInput } from '../types';
+import { type ResultReplyFailure } from './result-reply-failure.js';
+import type { RuntimeTaskInput } from '../types.js';
 import type { ActivityIngress } from '@byok-sdk/protocol';
-import type { ExecutionScratch, ScratchRoot } from './retention/scratch';
-import { StartupOwnership } from './startup-ownership';
+import type { ExecutionScratch, ScratchRoot } from './retention/scratch.js';
+import { StartupOwnership } from './startup-ownership.js';
 import {
   createEnvelope,
   type AgentMessageContentType,
@@ -25,79 +25,79 @@ import {
   type McpStdioServerConfig,
   type McpToolsetConfig,
   type RuntimeAdapter,
-} from '../types';
-import type { InputPreparationStore } from './input-preparation-store';
+} from '../types.js';
+import type { InputPreparationStore } from './input-preparation-store.js';
 import {
   type InputPreparationRuntimeIdentityV1,
   type InputPreparationBindingV1,
-} from '../input-preparation';
+} from '../input-preparation.js';
 import {
   AgentHomeManager,
   type AgentRef,
-} from '../agent-home';
+} from '../agent-home.js';
 import {
   type AgentHomeAccessMode,
-} from '../agent-home-readers';
+} from '../agent-home-readers.js';
 import {
   AgentSessionHandoffStore,
   type AgentTerminalCause,
-} from './agent-session-handoff-store';
+} from './agent-session-handoff-store.js';
 import {
   type RuntimeDisposalStage,
-} from '../runtime-failure';
-import { type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
-import type { BlobResolver } from './blob-client';
-import type { SealedTasks } from './sealed-task';
+} from '../runtime-failure.js';
+import { type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals.js';
+import type { BlobResolver } from './blob-client.js';
+import type { SealedTasks } from './sealed-task.js';
 import type {
   AgentResultDescribeParams,
   AgentResultDescribeResult,
   AgentResultSubmitParams,
   AgentResultSubmitResult,
   TaskQueueWatermark,
-} from './control-protocol';
-import { DEFAULT_MAX_INLINE_EVENT_BYTES } from './event-spill';
-import { type ExecutionRecord } from './execution-record';
-import type { LocalAgentReleaseIdentity } from '../release-identity';
+} from './control-protocol.js';
+import { DEFAULT_MAX_INLINE_EVENT_BYTES } from './event-spill.js';
+import { type ExecutionRecord } from './execution-record.js';
+import type { LocalAgentReleaseIdentity } from '../release-identity.js';
 import {
   type ProgressBatcherOptions,
-} from './progress-batcher';
-import type { AgentEgressController } from './agent-egress-controller';
-import { AgentMessageOutbox, type AgentMessageOutboxRecord } from './agent-message-outbox';
-import { AgentResultStore } from './agent-result-store';
+} from './progress-batcher.js';
+import type { AgentEgressController } from './agent-egress-controller.js';
+import { AgentMessageOutbox, type AgentMessageOutboxRecord } from './agent-message-outbox.js';
+import { AgentResultStore } from './agent-result-store.js';
 import {
   type McpToolsProbeOptions,
-} from './mcp-tools-probe';
+} from './mcp-tools-probe.js';
 import {
   type McpServerObservation,
-} from '../mcp/observation';
-import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
-import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
+} from '../mcp/observation.js';
+import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin.js';
+import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin.js';
 import {
   AgentMemoryService,
   isAgentMemorySecureFilesystemAvailable,
   type AgentMemoryAuditWarning,
   type AgentMemoryHostedProjection,
   type AgentMemoryTaskContext,
-} from './agent-memory';
-import type { AgentMemoryCommitStore } from './agent-memory-commit';
-import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
-import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry, RuntimeRequirements } from './task-runner/support';
-import { offerSettlements, trackOffer, taskTearingDown } from './task-runner/support';
-import { publishAgentMessage, describeAgentResult, submitAgentResult, recoverAgentMessageOutboxes, agentMessageOutbox, cancelRecoveredAgentMessage, activateAgentMessage, sendAgentMessageRecord, handleAgentMessageDisposition, agentResultStore } from './task-runner/agent-message';
-import { withAgentMessageMcp, withAgentResultMcp, withAgentMemoryMcp, withHostToolsetContext, resolveMcpServers } from './task-runner/mcp-contexts';
-import { activeMemoryContext, runMemoryOperation, quiesceAndSnapshotAgentMemory, bindAgentMemoryFilesystem } from './task-runner/agent-memory';
-import { stopAcceptingOffers, closeActiveSession, awaitActiveSessionClose, interruptBounded, teardownActiveTask, shutdownTask, armMaxDurationTimer, handleCancel, handleSteer } from './task-runner/lifecycle';
-import { reserveOfferHome, admitOfferLimits, handleSealedOffer, declineSealedOffer, declineOfferMissingCapabilities } from './task-runner/offer-admission';
-import { prepareOfferRuntime, pickAdapter } from './task-runner/offer-runtime';
-import { requestApproval, handleApprove, handleReject } from './task-runner/approvals';
-import { terminalInferenceUsagePayload, preparedObservationPayload, agentTerminalPayload, resolveStagedResult, persistAgentTerminalEvidence, measureReaderMemoryChange, retryAgentTerminalEvidence, reportAgentTerminalEvidenceFailure } from './task-runner/terminal-evidence';
-import { fail, failClaimedAgent, homeFinalizations, finishOnce, publishExecutionRecord, settleSemanticTerminal, releasePreparationPin, retryTerminalFinalization, type TerminalPlan } from './task-runner/finish';
-import { pump, publishSuccessfulCompletion, sendArtifact, reportArtifactError } from './task-runner/event-pump';
-import { handleOffer } from './task-runner/offer';
-import { hostFor } from './task-runner/host';
-import { OfferAdmissionTiming } from './task-runner/offer-admission-timing';
-import type { ToolAuthorizationDecision, ToolAuthorizationResolver, ToolReminder } from '../tool-authorization';
-import type { FileScopeAudit } from '../file-scope-guard';
+} from './agent-memory.js';
+import type { AgentMemoryCommitStore } from './agent-memory-commit.js';
+import type { AgentMemoryFilesystem } from './agent-memory-filesystem.js';
+import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry, RuntimeRequirements } from './task-runner/support.js';
+import { offerSettlements, trackOffer, taskTearingDown } from './task-runner/support.js';
+import { publishAgentMessage, describeAgentResult, submitAgentResult, recoverAgentMessageOutboxes, agentMessageOutbox, cancelRecoveredAgentMessage, activateAgentMessage, sendAgentMessageRecord, handleAgentMessageDisposition, agentResultStore } from './task-runner/agent-message.js';
+import { withAgentMessageMcp, withAgentResultMcp, withAgentMemoryMcp, withHostToolsetContext, resolveMcpServers } from './task-runner/mcp-contexts.js';
+import { activeMemoryContext, runMemoryOperation, quiesceAndSnapshotAgentMemory, bindAgentMemoryFilesystem } from './task-runner/agent-memory.js';
+import { stopAcceptingOffers, closeActiveSession, awaitActiveSessionClose, interruptBounded, teardownActiveTask, shutdownTask, armMaxDurationTimer, handleCancel, handleSteer } from './task-runner/lifecycle.js';
+import { reserveOfferHome, admitOfferLimits, handleSealedOffer, declineSealedOffer, declineOfferMissingCapabilities } from './task-runner/offer-admission.js';
+import { prepareOfferRuntime, pickAdapter } from './task-runner/offer-runtime.js';
+import { requestApproval, handleApprove, handleReject } from './task-runner/approvals.js';
+import { terminalInferenceUsagePayload, preparedObservationPayload, agentTerminalPayload, resolveStagedResult, persistAgentTerminalEvidence, measureReaderMemoryChange, retryAgentTerminalEvidence, reportAgentTerminalEvidenceFailure } from './task-runner/terminal-evidence.js';
+import { fail, failClaimedAgent, homeFinalizations, finishOnce, publishExecutionRecord, settleSemanticTerminal, releasePreparationPin, retryTerminalFinalization, type TerminalPlan } from './task-runner/finish.js';
+import { pump, publishSuccessfulCompletion, sendArtifact, reportArtifactError } from './task-runner/event-pump.js';
+import { handleOffer } from './task-runner/offer.js';
+import { hostFor } from './task-runner/host.js';
+import { OfferAdmissionTiming } from './task-runner/offer-admission-timing.js';
+import type { ToolAuthorizationDecision, ToolAuthorizationResolver, ToolReminder } from '../tool-authorization.js';
+import type { FileScopeAudit } from '../file-scope-guard.js';
 
 /**
  * M5 batch-3 (workstream 2): default cap (64 MiB) on accumulated

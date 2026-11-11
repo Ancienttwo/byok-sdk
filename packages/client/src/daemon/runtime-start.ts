@@ -1,6 +1,6 @@
-import type { RuntimeAdapterDescriptor, RuntimeOperationStartInput, Session } from '../types';
-import { isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
-import { bindDeclaredSessionMembers, type DeclaredSessionMembers } from './session-contract';
+import type { RuntimeAdapterDescriptor, RuntimeOperationStartInput, Session } from '../types.js';
+import { isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RuntimeStartupDisposalFailure } from '../runtime-failure.js';
+import { bindDeclaredSessionMembers, type DeclaredSessionMembers } from './session-contract.js';
 
 /**
  * After an abort, the adapter's start() still owns what it spawned. Codex and

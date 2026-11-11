@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"syscall"
 	"testing"
@@ -45,7 +46,7 @@ func TestDarwinOpenRefusesNonLocalVolume(t *testing.T) {
 				stat.Flags = volume.flags
 				return volume.err
 			}
-			opened, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identityForTest(t, home)})
+			opened, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, AncestorRoot: filepath.Dir(home), ExpectedIdentity: identityForTest(t, home)})
 			if opened != nil || failure == nil || failure.code != "unsafe_root" {
 				t.Fatalf("volume %q (error %v) admitted: session=%v error=%v", volume.name, volume.err, opened, failure)
 			}
@@ -78,7 +79,7 @@ func TestDarwinOpenRefusesRealNonLocalMount(t *testing.T) {
 	if err := checkRootVolume(root); err == nil || err.Error() != "root volume is not local" {
 		t.Fatalf("%s volume check: %v", autofsMount, err)
 	}
-	opened, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: autofsMount, ExpectedIdentity: identityForTest(t, autofsMount)})
+	opened, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: autofsMount, AncestorRoot: filepath.Dir(autofsMount), ExpectedIdentity: identityForTest(t, autofsMount)})
 	if opened != nil || failure == nil || failure.code != "unsafe_root" {
 		t.Fatalf("non-local mount admitted: session=%v error=%v", opened, failure)
 	}

@@ -20,12 +20,12 @@ import {
   E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION,
 } from '@byok-sdk/protocol';
 import type { Context } from 'hono';
-import type { DeviceProofAuthDeps } from '../auth/device-proof';
-import * as e2eeMember from '../e2ee-member';
-import { ByokCloudError, isCloudError, type CloudErrorCode } from '../errors';
-import { TRUTH_REQUEST_ID_MAX_LENGTH } from '../truth/contract';
-import { authenticateProofRequest, readProofRequestBody } from './device-proof-request';
-import { admitDeviceRequest, type DeviceRouteDeps } from './shared';
+import type { DeviceProofAuthDeps } from '../auth/device-proof.js';
+import * as e2eeMember from '../e2ee-member.js';
+import { ByokCloudError, isCloudError, type CloudErrorCode } from '../errors.js';
+import { TRUTH_REQUEST_ID_MAX_LENGTH } from '../truth/contract.js';
+import { authenticateProofRequest, readProofRequestBody } from './device-proof-request.js';
+import { admitDeviceRequest, type DeviceRouteDeps } from './shared.js';
 
 /** Room for one full chain append, 64 entries of 64 KiB, plus its JSON wrapper. */
 export const DEFAULT_MAX_E2EE_REQUEST_BYTES = E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES * E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES + 64 * 1024;

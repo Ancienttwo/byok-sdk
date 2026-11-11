@@ -38,7 +38,7 @@ describe('Claude rejected startup process-tree receipt', () => {
         instruction: 'hello', sessionRef: 'requested-session',
       }, { workspaceDir, env: process.env }).catch(error => error);
       expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-      expect(failure).toMatchObject({ phase: 'start', category: 'authority' });
+      expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable' });
       const receipt = JSON.parse(await fs.readFile(receiptFile, 'utf8')) as { rootPid: number; descendantPid: number; grandchildPid: number };
       for (const pid of Object.values(receipt)) expect(exists(pid)).toBe(false);
     } finally {

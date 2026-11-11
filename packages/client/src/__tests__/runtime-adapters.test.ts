@@ -113,8 +113,8 @@ describe('createRuntimeAdapters', () => {
     expect(factory.map(({ id }) => id)).toEqual(['pi', 'claude', 'codex', 'grok', 'dsh', 'agy']);
     expect(constructed).toEqual(factory);
     expect(adapters.map((adapter) => adapter.descriptor.versionPolicy)).toEqual([versionPolicy, versionPolicy, versionPolicy, versionPolicy, versionPolicy, versionPolicy]);
-    expect(factory.at(-2)?.options).toMatchObject({ ...DSH, sandbox: 'read-only', versionPolicy, versionPolicySource: 'daemon-config' });
-    expect(factory.at(-1)?.options).toMatchObject({ ...AGY, model: 'gemini-3.8-flash', versionPolicy, versionPolicySource: 'daemon-config' });
+    expect(factory.at(-2)?.options).toMatchObject({ ...DSH, sandbox: 'read-only', versionPolicy });
+    expect(factory.at(-1)?.options).toMatchObject({ ...AGY, model: 'gemini-3.8-flash', versionPolicy });
   });
 
   it('builds dsh only when listed, and needs runtimes.dsh when it is', () => {
@@ -175,34 +175,31 @@ const OPTION_SOURCES = {
     nativeAssetRoot: 'nativeAssetRoot', runtimeEnvironment: 'runtimeEnvironment', packageDir: 'runtimes.pi.packageDir',
     durableLane: 'runtimes.pi.durableLane', resolveBin: 'embedded-only', spawnFn: 'embedded-only', byokLauncher: 'piByokLauncher',
     sdkHelperHost: 'sdkHelperHost', validateProviderProfileBinding: 'embedded-only', versionPolicy: 'runtimes.pi.versionPolicy',
-    versionPolicySource: 'runtimes.pi.versionPolicy',
   } satisfies Record<keyof PiAdapterOptions, OptionSource>,
   claude: {
     nativeAssetRoot: 'nativeAssetRoot', runtimeEnvironment: 'runtimeEnvironment', resolveBin: 'embedded-only', spawnFn: 'embedded-only',
     interruptTimeoutMs: 'embedded-only', nativeInteractions: 'embedded-only', agentUserContext: 'runtimes.claude.agentUserContext',
     agentSessionPersistence: 'runtimes.claude.agentSessionPersistence', versionPolicy: 'runtimes.claude.versionPolicy',
-    versionPolicySource: 'runtimes.claude.versionPolicy',
   } satisfies Record<keyof ClaudeAdapterOptions, OptionSource>,
   codex: {
     nativeAssetRoot: 'nativeAssetRoot', runtimeEnvironment: 'runtimeEnvironment', sandbox: 'codexSandbox', resolveBin: 'embedded-only',
     spawnFn: 'embedded-only', maxRetainedBytes: 'embedded-only', interruptTimeoutMs: 'embedded-only', operationTimeoutMs: 'embedded-only',
     nativeInteractions: 'embedded-only', agentUserMcpServers: 'runtimes.codex.agentUserMcpServers', agentUserContext: 'runtimes.codex.agentUserContext', versionPolicy: 'runtimes.codex.versionPolicy',
-    versionPolicySource: 'runtimes.codex.versionPolicy',
   } satisfies Record<keyof CodexAdapterOptions, OptionSource>,
   grok: {
     nativeAssetRoot: 'nativeAssetRoot', runtimeEnvironment: 'runtimeEnvironment', model: 'embedded-only',
     compatInstructions: 'runtimes.grok.compatInstructions', agentUserMcpServers: 'runtimes.grok.agentUserMcpServers',
-    versionPolicy: 'runtimes.grok.versionPolicy', versionPolicySource: 'runtimes.grok.versionPolicy', resolveBin: 'embedded-only',
+    versionPolicy: 'runtimes.grok.versionPolicy', resolveBin: 'embedded-only',
     spawnFn: 'embedded-only', maxRetainedBytes: 'embedded-only', interruptTimeoutMs: 'embedded-only',
   } satisfies Record<keyof GrokAdapterOptions, OptionSource>,
   agy: {
     home: 'runtimes.agy.home', model: 'runtimes.agy.model', nativeAssetRoot: 'nativeAssetRoot',
-    runtimeEnvironment: 'runtimeEnvironment', versionPolicy: 'runtimes.agy.versionPolicy', versionPolicySource: 'runtimes.agy.versionPolicy',
+    runtimeEnvironment: 'runtimeEnvironment', versionPolicy: 'runtimes.agy.versionPolicy',
     resolveBin: 'embedded-only', spawnFn: 'embedded-only', maxRetainedBytes: 'embedded-only', interruptTimeoutMs: 'embedded-only',
   } satisfies Record<keyof AgyAdapterOptions, OptionSource>,
   dsh: {
     home: 'runtimes.dsh.home', model: 'runtimes.dsh.model', sandbox: 'runtimes.dsh.sandbox', nativeAssetRoot: 'nativeAssetRoot',
-    runtimeEnvironment: 'runtimeEnvironment', versionPolicy: 'runtimes.dsh.versionPolicy', versionPolicySource: 'runtimes.dsh.versionPolicy',
+    runtimeEnvironment: 'runtimeEnvironment', versionPolicy: 'runtimes.dsh.versionPolicy',
     resolveBin: 'embedded-only', spawnFn: 'embedded-only', maxRetainedBytes: 'embedded-only', interruptTimeoutMs: 'embedded-only',
   } satisfies Record<keyof DshAdapterOptions, OptionSource>,
 };

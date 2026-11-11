@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { closeSync, constants, openSync, promises as fs } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import path from 'node:path';
-import { resolveExistingAncestor } from './existing-ancestor';
-import { ensureOwnedPrivateDirectory } from './private-unix-socket';
+import { resolveExistingAncestor } from './existing-ancestor.js';
+import { ensureOwnedPrivateDirectory } from './private-unix-socket.js';
 
 export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'service-lifecycle' | 'pi-session-discovery' | `agy-session:${string}` | `pi-session-admission:${string}` | `pi-session-writer:${string}`;
 
@@ -32,6 +32,13 @@ function isPathless(input: PathMutationGateInput): input is Extract<PathMutation
 export interface PathMutationGateAcquireOptions {
   /** Bounded wait for another conforming short-lived writer; relocation uses zero. */
   readonly waitMs?: number;
+  /**
+   * darwin only: the directory that holds the lock files instead of
+   * {@link POSIX_GATE_ROOT}. It is checked like the default root. Holders
+   * exclude each other only when they lock in the same root. Linux and
+   * Windows ignore it: their gate has no filesystem root.
+   */
+  readonly gateRoot?: string;
 }
 
 export interface PathMutationGate {
@@ -105,8 +112,9 @@ function gateIdentity(scope: PathMutationGateScope, canonicalTarget: string): st
   return createHash('sha256').update(`${scope}\0${canonicalTarget}`).digest('hex');
 }
 
-async function assertPrivateGateRoot(): Promise<void> {
-  await ensureOwnedPrivateDirectory(posixGateRoot);
+async function assertPrivateGateRoot(root: string): Promise<void> {
+  if (!path.isAbsolute(root)) throw new Error('path mutation gate root must be absolute');
+  await ensureOwnedPrivateDirectory(root);
 }
 
 function resolveGateTarget(input: PathMutationGateInput): Promise<string> {
@@ -115,13 +123,14 @@ function resolveGateTarget(input: PathMutationGateInput): Promise<string> {
 }
 
 /** Takes the OS lock for `identity`; resolves to the function that drops it, or `undefined` when another handle holds it. */
-async function lockIdentity(identity: string): Promise<(() => Promise<void>) | undefined> {
+async function lockIdentity(identity: string, gateRoot: string | undefined): Promise<(() => Promise<void>) | undefined> {
   if (process.platform === 'darwin') {
-    await assertPrivateGateRoot();
+    const root = gateRoot ?? posixGateRoot;
+    await assertPrivateGateRoot(root);
     let fd: number;
     try {
       fd = openSync(
-        path.join(posixGateRoot, `${identity}.lock`),
+        path.join(root, `${identity}.lock`),
         constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW | DARWIN_O_EXLOCK | constants.O_NONBLOCK,
         0o600,
       );
@@ -153,10 +162,10 @@ async function lockIdentity(identity: string): Promise<(() => Promise<void>) | u
   return () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 }
 
-async function acquireOne(input: PathMutationGateInput): Promise<PathMutationGate> {
+async function acquireOne(input: PathMutationGateInput, gateRoot: string | undefined): Promise<PathMutationGate> {
   const canonicalTarget = await resolveGateTarget(input);
   const identity = gateIdentity(input.scope, canonicalTarget);
-  const unlock = await lockIdentity(identity);
+  const unlock = await lockIdentity(identity, gateRoot);
   if (unlock === undefined) throw new PathMutationGateBusyError(input.scope, canonicalTarget);
 
   try {
@@ -207,7 +216,7 @@ export async function acquirePathMutationGates(
     .sort((left, right) => left.identity.localeCompare(right.identity));
   const acquired: PathMutationGate[] = [];
   try {
-    for (const item of unique) acquired.push(await acquireBefore(item.input, deadline));
+    for (const item of unique) acquired.push(await acquireBefore(item.input, deadline, options.gateRoot));
     return Object.freeze(acquired.slice());
   } catch (error) {
     await Promise.allSettled(acquired.reverse().map((gate) => gate.release()));
@@ -219,7 +228,7 @@ export async function acquirePathMutationGate(
   input: PathMutationGateInput,
   options: PathMutationGateAcquireOptions = {},
 ): Promise<PathMutationGate> {
-  return acquireBefore(input, waitDeadline(options));
+  return acquireBefore(input, waitDeadline(options), options.gateRoot);
 }
 
 function waitDeadline(options: PathMutationGateAcquireOptions): number {
@@ -230,10 +239,10 @@ function waitDeadline(options: PathMutationGateAcquireOptions): number {
   return Date.now() + waitMs;
 }
 
-async function acquireBefore(input: PathMutationGateInput, deadline: number): Promise<PathMutationGate> {
+async function acquireBefore(input: PathMutationGateInput, deadline: number, gateRoot: string | undefined): Promise<PathMutationGate> {
   for (;;) {
     try {
-      return await acquireOne(input);
+      return await acquireOne(input, gateRoot);
     } catch (error) {
       if (!(error instanceof PathMutationGateBusyError) || Date.now() >= deadline) throw error;
       await new Promise<void>((resolve) => {

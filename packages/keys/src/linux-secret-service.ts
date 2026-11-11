@@ -1,15 +1,15 @@
 import { resolveSystemTool } from '@byok-sdk/core/system-tool';
 
-import { type CommandResult, type CommandRunner, runCommand } from './command-runner';
-import { ByokKeysError } from './errors';
-import { DEFAULT_KEYCHAIN_SECRET_STORAGE_PREFIX } from './macos-keychain';
-import { assertSecretName, assertSecretNamespace } from './secret-name';
+import { type CommandResult, type CommandRunner, runCommand } from './command-runner.js';
+import { ByokKeysError } from './errors.js';
+import { DEFAULT_KEYCHAIN_SECRET_STORAGE_PREFIX } from './macos-keychain.js';
+import { assertSecretName, assertSecretNamespace } from './secret-name.js';
 import {
   assertSharedSecretValue,
   DEFAULT_SECRET_SERVICE_PREFIX,
   decodeStrictBase64Utf8,
   type SecretStore,
-} from './secret-store';
+} from './secret-store.js';
 
 export interface LinuxSecretServiceSecretStoreOptions {
   account?: string;

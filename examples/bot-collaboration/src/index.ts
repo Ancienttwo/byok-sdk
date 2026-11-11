@@ -1,10 +1,12 @@
-export { BotCollaboration, DelegationError, HostIntentError, IntentOutcomeError } from './host';
+export { BotCollaboration } from './host';
+export { DelegationError, HostIntentError } from './rules/delegation';
+export { IntentOutcomeError } from './adapter-steps';
 export { botCompactVeto } from './compaction';
 export { RetentionRefused, retainRoots } from './retention';
 export type { RetentionFacts, RetentionInput, RetentionRefusedCode, RetentionLimits, RetentionResult, RetentionStore } from './retention';
 export { refuseRetired, retiredIdentity, RetiredIdentityError, type AdmittedIds, type RetiredNamespace } from './rules/commands';
-export type { AgentMessageInput, BotOptions, DelegationCancelResult, HostIntentCancelResult, HostIntentHandler, HostIntentMessageHandler, MessageServer,
-  TurnCancelResult } from './host';
+export type { AgentMessageInput, BotOptions, HostIntentCancelResult, HostIntentHandler, HostIntentMessageHandler, MessageServer } from './host';
+export type { DelegationCancelResult, TurnCancelResult } from './rules/delegation';
 export type { MessageDisposition } from './rules/message';
 export { contextTurns, historyRowFromTurn, type ContextTurn } from './rules/context';
 export { classifyInbound, inboundKey } from './channel';
@@ -15,8 +17,8 @@ export type { CheckedOffer, ConfirmableSpec, MainAction, OutcomeOffer, TurnActio
 export type { Card, CollaborationState, Delegation, InputBatch, ReplyEntry, SealReason, Turn, UserInput } from './model';
 export { BOT_DREAM, BOT_ROUTINE, botRoutines } from './routines';
 export { DEFAULT_DREAM_MAX_DURATION_MS, DREAM_WAIT_MS, type DreamBot, type DreamingOptions, type DreamRecord, type DreamSkip, type DreamState, type OpenDream } from './dream';
-export { CommitConflict, commitInLedger, retainInLedger, revisionOf } from './commit';
-export type { Command, CommandPorts, CommitRequest, CommitResult, Disposition, OutboxIntent } from './commit';
+export { CommitConflict, commitInLedger, migrateWouldDo, retainInLedger, revisionOf } from './commit';
+export type { Command, CommandPorts, CommitRequest, CommitResult, Disposition, OutboxIntent, WouldDoMigration } from './commit';
 export type { BotRoutine, BotRoutineInput } from './routines';
 export type { BotProfile, Room, Round, Seat, TeamState } from './team-model';
 export { DEFAULT_MEMBER_MENTIONS, ROOM_GRACE_MS, ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES, memberMentions, type MemberMentions, type RoomMessage } from './rooms';
@@ -24,10 +26,11 @@ export { TEAM_NOTE_LIMIT } from './team';
 export { DEFAULT_AUTONOMY, autonomyOf, wouldDoRows, type Autonomy, type WouldDo, type WouldDoAction } from './rules/autonomy';
 export { inboundDisposition, inboundDispositions, type InboundDisposition, type InboundRow, type InboundState } from './rules/inbound';
 export { DEVICE_CONCURRENCY } from './rules/priority';
-export { TEAM_ROOM_LIMIT, TeamModeError, type TeamModeCode, type TeamSnapshot, type TeamSnapshotBot, type TeamSnapshotRoom } from './rules/team';
+export { TEAM_ROOM_LIMIT, TeamModeError, teamSnapshot, type TeamModeCode, type TeamSnapshot, type TeamSnapshotBot, type TeamSnapshotRoom } from './rules/team';
 export { createBotPersonaProjection } from './persona';
-export { DeviceModeError, DeviceSwitchingError, type DeviceTopology, type SwitchWork } from './topology';
+export { DeviceModeError, type DeviceTopology, type SwitchWork } from './topology';
 export { SWITCH_EXPORT_VERSION, SWITCH_SECTIONS, SwitchExportError, sealSwitchExport, switchAttempts, verifySwitchExport, type ArchivedRecord, type ExecutionRecord, type IntentRecord, type MessageReceipt,
   type OccurrenceRecord, type OutboxRecord, type RoutineRecord, type SwitchContent, type SwitchDevice, type SwitchExport, type SwitchExportRefusal,
   type SwitchManifest, type SwitchSection, type TombstoneRecord } from './migration';
-export { commitImport, discardImport, importForSwitch, SwitchExportedError, type SwitchReceipt } from './switch';
+export { commitImport, discardImport, importForSwitch } from './switch';
+export { DeviceSwitchingError, SwitchExportedError, SwitchImportedError, type SwitchReceipt } from './migration';

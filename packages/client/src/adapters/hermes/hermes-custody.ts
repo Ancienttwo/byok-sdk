@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
-import { buildAllowlistedEnv } from '../../runtime/environment';
-import type { RuntimeAdapterPrepareInput } from '../../types';
-import type { HermesModelSelection } from './hermes-adapter';
-import { assertHermesModelSelection } from './hermes-home';
+import { buildAllowlistedEnv } from '../../runtime/environment.js';
+import type { RuntimeAdapterPrepareInput } from '../../types.js';
+import type { HermesModelSelection } from './hermes-adapter.js';
+import { assertHermesModelSelection } from './hermes-home.js';
 
 type SelectedProfile = Omit<ProviderProfileBinding, 'requiredCapabilities'> & { readonly requiredCapabilities: readonly ProviderProfileBinding['requiredCapabilities'][number][] };
 

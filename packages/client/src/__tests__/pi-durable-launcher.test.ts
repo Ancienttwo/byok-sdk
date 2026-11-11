@@ -12,7 +12,7 @@ import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { sealRuntimeOperationManifest, type RuntimeOperationStartInput, type Session, type MessageDraftDelta } from '../types';
 import { parseModelProviderProfile } from '../../../keys/src/provider-profile';
 import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
-import { buildPiPreparedArgs, buildPiProviderProjection } from '../../../keys/src/pi-provider-projection';
+import { buildPiPreparedArgs, buildPiProviderProjection, piProjectionProviderId } from '../../../keys/src/pi-provider-projection';
 import { parsePiProviderLauncherOptions, buildPiProviderChildEnvironment } from '../../../keys/src/pi-provider-launcher-core';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { testRuntimeEnv } from './fixtures/runtime-env';
@@ -46,7 +46,7 @@ function tool(res: import('node:http').ServerResponse, command: string, name = '
     { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } },
   ].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
 }
-async function fixture(respond: (res: import('node:http').ServerResponse, ordinal: number, body: string, paths: {home:string;store:string}) => void, lifecycle?: {ownsLease?():boolean; record?(kind:string,n:number):Promise<void>}, gateFor?: (home: string) => Promise<ToolAuthorizationGate>, mcp?: Pick<RuntimeOperationStartInput, 'mcpServers' | 'mcpToolsetTools'>) {
+async function fixture(respond: (res: import('node:http').ServerResponse, ordinal: number, body: string, paths: {home:string;store:string}) => void, lifecycle?: {ownsLease?():boolean; record?(kind:string,n:number):Promise<void>}, gateFor?: (home: string) => Promise<ToolAuthorizationGate>, mcp?: Pick<RuntimeOperationStartInput, 'mcpServers' | 'mcpToolsetTools'>, providerId?: 'opencode-go', receipt: { profileRef?: string; providerId?: string } = {}) {
 const __executionScratch = await testExecutionScratch();
 
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'byok-durable-launch-'))); roots.push(root);
@@ -55,7 +55,7 @@ const __executionScratch = await testExecutionScratch();
   const server = createServer((req,res) => { let body = ''; req.on('data', chunk => { body += chunk; }); req.on('end', () => { bodies.push(body); authorizations.push(req.headers.authorization); respond(res, ++calls, body,{home,store}); }); });
   servers.push(server); await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('no provider port');
-  const profile = parseModelProviderProfile({ adapter: 'openai_compatible', auth_mode: 'bearer', base_url: `http://127.0.0.1:${address.port}/v1`, capabilities: [], created_at: '2026-09-10T00:00:00.000Z', updated_at: '2026-09-10T00:00:00.000Z', display_name: 'Synthetic', enabled: true, kind: 'model', model: 'test', profile_ref: 'probe', provider_kind: 'custom', pi_model: { ...PI_MODEL_FIXTURE, contextWindow: 4096, maxTokens: 64, reasoning: false, thinkingLevel: 'off' } });
+  const profile = parseModelProviderProfile({ adapter: 'openai_compatible', auth_mode: 'bearer', base_url: `http://127.0.0.1:${address.port}/v1`, capabilities: [], created_at: '2026-09-10T00:00:00.000Z', updated_at: '2026-09-10T00:00:00.000Z', display_name: 'Synthetic', enabled: true, kind: 'model', model: 'test', profile_ref: 'probe', provider_kind: 'custom', pi_model: { ...PI_MODEL_FIXTURE, contextWindow: 4096, maxTokens: 64, reasoning: false, thinkingLevel: 'off', ...(providerId === undefined ? {} : { api: 'openai-completions', providerId }) } });
   const children: ChildProcess[] = [];
   const adapter = new PiAdapter({ durableLane: true, byokLauncher: { command: 'synthetic-custody-launcher', profileDbPath: path.join(root,'profiles'), sessionDir: path.join(root,'sessions') },
     spawnFn: ((_cmd, args, options) => {
@@ -68,7 +68,7 @@ const __executionScratch = await testExecutionScratch();
       expect(JSON.stringify(env)).not.toContain('DURABLE_PROVIDER_SENTINEL');
       child.once('message', value => {
         expect(value).toEqual({ type: 'byok.pi.durable.credential-request', configDigest: parsed.piConfigDigest });
-        child.send({ type: 'byok.pi.durable.credential', configDigest: parsed.piConfigDigest, secret: 'DURABLE_PROVIDER_SENTINEL' });
+        child.send({ type: 'byok.pi.durable.credential', configDigest: parsed.piConfigDigest, secret: 'DURABLE_PROVIDER_SENTINEL', profileRef: profile.profile_ref, providerId: piProjectionProviderId(profile), ...receipt });
       });
       children.push(child); return child;
     }) as typeof nativeSpawn,
@@ -77,7 +77,12 @@ const __executionScratch = await testExecutionScratch();
   const offer = { instruction: 'Host authority input\nHost context second line', dispatchSelection: selection };
   const prepared = await adapter.prepare({ offer, ...mcp } as never);
   if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
-  const env = testRuntimeEnv();
+  const ambientAgent = path.join(root, '.pi', 'agent'); await mkdir(ambientAgent, { recursive: true });
+  await writeFile(path.join(ambientAgent, 'models.json'), JSON.stringify({ providers: { 'opencode-go': {
+    baseUrl: 'http://127.0.0.1:9/v1', apiKey: 'AMBIENT_MODEL_KEY', models: [{ id: 'test' }],
+  } } }));
+  await writeFile(path.join(ambientAgent, 'auth.json'), JSON.stringify({ 'opencode-go': { type: 'api_key', key: 'AMBIENT_AUTH_KEY' } }));
+  const env = { ...testRuntimeEnv(), HOME: root, PI_CODING_AGENT_DIR: ambientAgent };
   const launch = await prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,  kind: 'instruction', cwd: home, env,  });
   const manifest = sealRuntimeOperationManifest({ taskId: 'task', runtimeId: 'pi', descriptor: adapter.descriptor, dispatchSelection: selection, requiredToolsetIds: [], cwd: home, workspace: { workspaceDir: home }, agentRef: { agentId: 'agent', profileRevision: 'revision' }, lease: { leaseId: 'lease', canonicalHome: home }, forwardedEnvironmentNames: Object.keys(env) });
   const journal: string[] = [];
@@ -110,6 +115,21 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     expect(f.bodies[0]).toContain('Host authority input'); expect(JSON.parse(f.bodies[0]!).messages.some((message: {content:unknown}) => typeof message.content === 'string' && message.content.includes('Host context second line'))).toBe(true); expect(f.authorizations).toEqual(['Bearer DURABLE_PROVIDER_SENTINEL']);
     expect(f.bodies.join('')).not.toContain('DURABLE_PROVIDER_SENTINEL'); expect(f.calls()).toBe(1);
   });
+  it('declared OpenCode Go uses only its launcher projection and credential, ignoring ambient user model/auth entries', async () => {
+    const f = await fixture(res => finish(res, 'isolated'), undefined, undefined, undefined, 'opencode-go');
+    const events: Array<AgentEvent | MessageDraftDelta> = []; for await (const event of f.session.events) events.push(event);
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(events.at(-1)).toEqual({ type: 'turn_end' });
+    expect(f.calls()).toBe(1); expect(f.authorizations).toEqual(['Bearer DURABLE_PROVIDER_SENTINEL']);
+    expect(f.bodies.join('')).not.toMatch(/AMBIENT_(MODEL|AUTH)_KEY/);
+  });
+
+  it.each([{ profileRef: 'another-profile' }, { providerId: 'another-provider' }])('refuses a durable launcher binding that differs from the sealed profile or projection: %j', async receipt => {
+    const respond = vi.fn((res: import('node:http').ServerResponse) => finish(res, 'must not request'));
+    await expect(fixture(respond, undefined, undefined, undefined, 'opencode-go', receipt)).rejects.toThrow(/durable runtime start failed/);
+    expect(respond).not.toHaveBeenCalled();
+  });
+
   it('real bash cannot inherit launcher credentials; durable tool ids and committed receipts agree', async () => {
     vi.stubEnv('BYOK_TEST_ENV_MARKER', '1');
     expect(process.env.BYOK_TEST_ENV_MARKER).toBe('1');
@@ -170,7 +190,8 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     const f = await fixture((res,n) => { if (n === 1) tool(res, 'echo $$ > tool-pid; printf once >> marker; sleep 60'); else finish(res, 'should never happen'); });
     const until = Date.now() + 4000;
     while (Date.now() < until) {
-      try { if ((await readFile(path.join(f.home, 'marker'), 'utf8')) === 'once') break; } catch { /* The worker has not written the marker yet; retry until the deadline. */ }
+      try { if ((await readFile(path.join(f.home, 'marker'), 'utf8')) === 'once') break; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; /* The worker has not written the marker yet; retry until the deadline. */ }
       await new Promise(resolve => setTimeout(resolve, 10));
     }
     expect(await readFile(path.join(f.home, 'marker'), 'utf8')).toBe('once');

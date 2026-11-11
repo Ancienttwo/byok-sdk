@@ -6,10 +6,10 @@ import { startPreparedOperation } from '../fixtures/prepared-operation';
 import { OpenCodeAdapter } from '../../adapters/opencode/opencode-adapter';
 import { QUALIFIED_OPENCODE_VERSION } from '../../adapters/opencode/opencode-version';
 import {
-  baseEnv, check, contractTarget, createSandbox, defineRuntimeCases, detectWith, egressCheck, expectDetectedVersion,
-  fileEgress, notAdvertised, once, runTurn, skip, type ContractPlan, type ContractRuntime, type DeclaredHost,
+  baseEnv, check, contractTarget, createSandbox, detectWith, egressCheck, expectDetectedVersion,
+  fileEgress, notAdvertised, once, readReceipt, runTurn, skip, writeSubmitResultServer, type ContractPlan, type ContractRuntime, type DeclaredHost,
 } from './contract';
-import { CONTRACT_REPLY_CHUNKS, startLoopbackProvider, type ProviderScript } from './loopback';
+import { CONTRACT_REPLY_CHUNKS, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
 
 const MODEL = 'fake';
 /** The shell tool is `bash` on the 1.x line and `shell` on 2.x. */
@@ -57,6 +57,53 @@ export function openCodeContract(
     }
   });
 
+  const mcp = once(async () => {
+    const recorder = await fileEgress();
+    const marker = 'runtime contract result accepted';
+    const provider = await startLoopbackProvider('openai-chat', request => {
+      const tool = request.toolResults === 0 ? mcpTool('host', 'submit_result')(request.tools) : undefined;
+      const execute = (request.toolResults === 0 || (request.toolResults === 1 && request.text.includes('PROBE_RESUME_ACCESS'))) && request.text.includes('tools.host.submit_result(')
+        ? request.tools.find(tool => tool.name === 'execute') : undefined;
+      return tool ? { kind: 'tool', tool, args: { summary: 'contract' } }
+        : execute ? { kind: 'tool', tool: execute, args: { code: 'return await tools.host.submit_result({summary: "contract"})' } }
+        : { kind: 'text', chunks: [request.text.includes(marker) ? marker : 'no host tool'] };
+    }, MODEL);
+    try {
+      const { box, env } = await openCodeEnv(`${runtime}-mcp`, provider.baseUrl);
+      const config = path.join(box.home, '.config', 'opencode', 'opencode.json');
+      const before = await fs.readFile(config, 'utf8');
+      const receipt = path.join(box.root, 'host-receipt');
+      const server = await writeSubmitResultServer(box.root, receipt);
+      const resources = { workspaceDir: box.workspace, env: { ...env, ...recorder.env } };
+      const first = await startPreparedOperation(adapter(), { instruction: 'Call the Host tool and return its result.' }, { ...resources, mcpServers: { host: server } });
+      const events = [];
+      try { for await (const event of first.events) events.push(event); } finally { await first.close(); }
+      expect(events, JSON.stringify(provider.requests.filter(request => request.model).map(request => ({ tools: request.tools, toolResults: request.toolResults })))).toContainEqual({ type: 'progress', text: marker });
+      expect(await readReceipt(receipt)).toMatchObject([{ name: 'submit_result', arguments: { summary: 'contract' } }]);
+      const firstEnd = provider.requests.length;
+      await runTurn(adapter(), 'Say hello without tools.', resources);
+      const secondEnd = provider.requests.length;
+      const resumed = await startPreparedOperation(adapter(), { instruction: 'PROBE_RESUME_ACCESS', sessionRef: first.sessionRef }, resources);
+      try { for await (const _event of resumed.events) { /* drain the turn */ } } finally { await resumed.close(); }
+      expect(await readReceipt(receipt), 'resumed tool call receipt').toHaveLength(1);
+      for (const request of provider.requests.slice(firstEnd, secondEnd).filter(item => item.model)) {
+        expect(mcpTool('host', 'submit_result')(request.tools)).toBeUndefined();
+        const messages = JSON.parse(request.text).messages as Array<{ role: string; content: unknown }>;
+        expect(JSON.stringify(messages.filter(message => message.role === 'system')).includes('tools.host.submit_result(')).toBe(false);
+      }
+      const resumeRequests = provider.requests.slice(secondEnd).filter(item => item.model);
+      for (const request of resumeRequests) expect(mcpTool('host', 'submit_result')(request.tools)).toBeUndefined();
+      if (runtime === 'opencode2') {
+        expect(resumeRequests.some(request => request.text.includes('tools are no longer available') && request.text.includes('tools.host.submit_result'))).toBe(true);
+        expect(resumeRequests.some(request => request.text.includes("Unknown tool 'host.submit_result'"))).toBe(true);
+      }
+      expect(provider.requests.slice(firstEnd, secondEnd).some(item => item.model)).toBe(true);
+      expect(provider.requests.slice(secondEnd).some(item => item.model)).toBe(true);
+      expect(await readReceipt(receipt)).toHaveLength(1);
+      expect(await fs.readFile(config, 'utf8')).toBe(before);
+    } finally { await provider.close(); }
+  });
+
   const descriptor = adapter().descriptor;
   const plan: ContractPlan = {
     'detect.version': check(async () => {
@@ -66,7 +113,7 @@ export function openCodeContract(
     'detect.auth.absent': skip('the OpenCode adapter does not report authPresent; credentials live in OpenCode\'s own store, which the SDK never reads'),
     'detect.auth.apiKey': skip('the OpenCode adapter does not report authPresent; credentials live in OpenCode\'s own store, which the SDK never reads'),
     'detect.auth.login': skip('the OpenCode adapter does not report authPresent; credentials live in OpenCode\'s own store, which the SDK never reads'),
-    'mcp.submitResult': notAdvertised(descriptor, 'mcpToolsets'),
+    'mcp.submitResult': check(mcp),
     'instructions.project': check(async () => {
       expect((await turn()).provider.saw(PROJECT_MARKER)).toBe(true);
     }),
@@ -268,7 +315,7 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
         expect(resumedRef).toBe(sessionRef);
         expect(events.at(-1)).toBe('turn_end');
         expect(history).toBe(true);
-        expect(refusal, 'resume from another workspace must fail').toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', message: expect.stringContaining('resumes it only there') });
+        expect(refusal, 'resume from another workspace must fail').toMatchObject({ phase: 'start', retry: 'non-retryable', message: expect.stringContaining('resumes it only there') });
       }, 240_000)],
       'opencode.permission': ['a permission request is refused: the shell command does not run and the turn still ends', check(async () => {
         const { events, written, issued, requests, replies } = await refused();

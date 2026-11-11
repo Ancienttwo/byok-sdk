@@ -65,7 +65,7 @@ describe.skipIf(!supported)('native task-free raw memory export (synthetic homes
     const saved = new Map<string, string | undefined>();
     try {
       await homes.initializeTaskFree(binding);
-      if (helperBin !== undefined) filesystem = await openAgentMemoryFilesystemHelper({ helperBin, canonicalHome: binding.lease.canonicalHome, homeIdentity: binding.lease.homeIdentity });
+      if (helperBin !== undefined) filesystem = await openAgentMemoryFilesystemHelper({ helperBin, canonicalHome: binding.lease.canonicalHome, ancestorRoot: binding.resolution.hostStorageRoot, homeIdentity: binding.lease.homeIdentity });
       const service = new AgentMemoryService({ taskId: 'synthetic-task', tenantId: 'synthetic-tenant', deviceId: 'synthetic-device',
         agentRef: AGENT, sessionRef: 'synthetic-session', runtimeId: 'pi', leaseId: binding.lease.leaseId,
         canonicalHome: binding.lease.canonicalHome, homeIdentity: binding.lease.homeIdentity, ...(filesystem === undefined ? {} : { filesystem }) });
@@ -124,7 +124,7 @@ describe.skipIf(!supported)('native task-free raw memory export (synthetic homes
     let filesystem;
     try {
       await homes.initializeTaskFree(binding);
-      if (helperBin !== undefined) filesystem = await openAgentMemoryFilesystemHelper({ helperBin, canonicalHome: binding.lease.canonicalHome, homeIdentity: binding.lease.homeIdentity });
+      if (helperBin !== undefined) filesystem = await openAgentMemoryFilesystemHelper({ helperBin, canonicalHome: binding.lease.canonicalHome, ancestorRoot: binding.resolution.hostStorageRoot, homeIdentity: binding.lease.homeIdentity });
       const service = new AgentMemoryService({ taskId: 'synthetic-task', tenantId: 'synthetic-tenant', deviceId: 'synthetic-device',
         agentRef: AGENT, sessionRef: 'synthetic-session', runtimeId: 'pi', leaseId: binding.lease.leaseId,
         canonicalHome: binding.lease.canonicalHome, homeIdentity: binding.lease.homeIdentity, ...(filesystem === undefined ? {} : { filesystem }) });

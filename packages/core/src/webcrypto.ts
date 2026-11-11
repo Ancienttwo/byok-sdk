@@ -4,7 +4,7 @@
  * from `globalThis.crypto.subtle` so the browser, Node, and Bun share one
  * code path. No `node:crypto`.
  */
-import { ByokCoreError } from './errors';
+import { ByokCoreError } from './errors.js';
 
 /**
  * A WebCrypto `CryptoKey`, declared structurally so core's published types

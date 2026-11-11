@@ -601,6 +601,13 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     roundTrip(type, line!);
   });
 
+  it('sealed task.decline with an offer selection code', () => {
+    const line = goldenLines.find((envelope) => envelope.type === 'task.decline' && isSealedPayload('task.decline', envelope.payload)
+      && (envelope.payload as { code?: string }).code === 'runtime_selection_mismatch');
+    expect(line).toBeDefined();
+    roundTrip('task.decline', createEnvelope('task.decline', line!.payload as never, { id: line!.id, ts: line!.ts, taskId: line!.task_id! }));
+  });
+
   it('covers every declared message type', () => {
     expect([...new Set(testedTypes)].sort()).toEqual([...MESSAGE_TYPES].sort());
   });

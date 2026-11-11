@@ -1,15 +1,15 @@
 // `TaskRunner` members for offer admission before any runtime work, and for
 // sealed offers (see ./support.ts for how a member module runs).
 import { requiredReceiverCapabilities, type Envelope, type SealedDeclineCode, type TaskDeclinePayload } from '@byok-sdk/protocol';
-import { AgentHomeBusyError, AgentHomeResolutionError, type AgentRef } from '../../agent-home';
-import { isReaderRunName, type AgentHomeAccessMode } from '../../agent-home-readers';
-import type { OfferPhaseContext } from './support';
-import { hostDeclineSender, settledOrWithdrawn, outboundErrorMessage } from './support';
-import type { TaskRunner } from '../task-runner';
-import type { AcceptedOfferPayload } from './support';
-import type { OfferAdmissionTiming } from './offer-admission-timing';
-import { hostFor } from './host';
-import { createOfferFacts } from './state';
+import { AgentHomeBusyError, AgentHomeResolutionError, type AgentRef } from '../../agent-home.js';
+import { isReaderRunName, type AgentHomeAccessMode } from '../../agent-home-readers.js';
+import type { OfferPhaseContext } from './support.js';
+import { hostDeclineSender, settledOrWithdrawn, outboundErrorMessage } from './support.js';
+import type { TaskRunner } from '../task-runner.js';
+import type { AcceptedOfferPayload } from './support.js';
+import type { OfferAdmissionTiming } from './offer-admission-timing.js';
+import { hostFor } from './host.js';
+import { createOfferFacts } from './state.js';
 
 /**
  * Suppress redelivered offers for owned tasks and recently finished tasks.

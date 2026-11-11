@@ -1,19 +1,19 @@
-import type { LocalAgentReleaseIdentity } from '../../release-identity';
-import { DaemonConfigInvalidError } from '../../daemon-config-invalid-error';
-import type { RuntimeAdapter } from '../../types';
-import { AgentEgressPolicyError, resolveAgentEgressPolicy } from '../agent-egress-policy';
-import { resolveDaemonConfig } from '../create-daemon/config';
-import { resolveDaemonOperationalConfig } from '../create-daemon/operational-config';
-import { assertAgySessionStoreTtl, injectedAdapterConfigConflicts } from '../create-daemon/support';
-import { buildRuntimeAdapters } from '../../adapters/runtime-adapters';
-import type { DaemonConfig } from '../create-daemon';
-import { resolveStorageConfig } from '../retention/config';
-import { ScratchRootPathError } from '../retention/scratch';
-import { DeviceStore } from '../store';
-import { describeEffectiveDaemonConfig, type DaemonEffectiveConfig } from './effective';
-import { toolAuthorizationIssues } from './static-tool-authorization';
-import { validateDaemonConfig, type DaemonConfigIssue, type DaemonConfigSource } from './validate';
-import { versionPolicyConfigIssues } from '../../daemon-config-version-policy';
+import type { LocalAgentReleaseIdentity } from '../../release-identity.js';
+import { DaemonConfigInvalidError } from '../../daemon-config-invalid-error.js';
+import type { RuntimeAdapter } from '../../types.js';
+import { AgentEgressPolicyError, resolveAgentEgressPolicy } from '../agent-egress-policy.js';
+import { resolveDaemonConfig } from '../create-daemon/config.js';
+import { resolveDaemonOperationalConfig } from '../create-daemon/operational-config.js';
+import { assertAgySessionStoreTtl, injectedAdapterConfigConflicts } from '../create-daemon/support.js';
+import { buildRuntimeAdapters, runtimeEnvironmentPolicyIssues } from '../../adapters/runtime-adapters.js';
+import type { DaemonConfig } from '../create-daemon.js';
+import { resolveStorageConfig } from '../retention/config.js';
+import { ScratchRootPathError } from '../retention/scratch.js';
+import { DeviceStore } from '../store.js';
+import { describeEffectiveDaemonConfig, type DaemonEffectiveConfig } from './effective.js';
+import { toolAuthorizationIssues } from './static-tool-authorization.js';
+import { validateDaemonConfig, type DaemonConfigIssue, type DaemonConfigSource } from './validate.js';
+import { versionPolicyConfigIssues } from '../../daemon-config-version-policy.js';
 
 export interface DaemonConfigCheckOptions {
   readonly source: DaemonConfigSource;
@@ -61,6 +61,8 @@ export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOpti
     resolveDaemonOperationalConfig(config);
     const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
     const storage = resolveStorageConfig(storeDir, config.storage);
+    const environmentIssues = runtimeEnvironmentPolicyIssues(config);
+    if (environmentIssues.length > 0) return { ok: false, issues: [...issues, ...environmentIssues] };
     const adapters = options.adapters ?? buildRuntimeAdapters(config, scope.piByokLauncher);
     assertAgySessionStoreTtl(storage.ttlMs, adapters);
     const runtimeSource = options.adapters === undefined ? 'sdk-built' : 'injected';

@@ -1,5 +1,5 @@
-import { isReservedMcpServerName, SDK_RESERVED_MCP_TOOL_NAMES } from '../../sdk-reserved-mcp';
-import { RuntimeExecutionFailure } from '../../runtime-failure';
+import { isReservedMcpServerName, SDK_RESERVED_MCP_TOOL_NAMES } from '../../sdk-reserved-mcp.js';
+import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -14,7 +14,7 @@ export function withCodexMcpToolGrants(
   for (const [name] of hosts) {
     if (isReservedMcpServerName(name) || !taskServers.includes(name)) {
       throw new RuntimeExecutionFailure({
-        phase: 'start', category: 'authority', retry: 'non-retryable',
+        phase: 'start', retry: 'non-retryable',
         reason: `codex Host MCP approval must name an injected non-reserved server: ${name}`,
       });
     }
@@ -28,7 +28,7 @@ export function withCodexMcpToolGrants(
     const server = servers[name];
     if (server === undefined) {
       throw new RuntimeExecutionFailure({
-        phase: 'start', category: 'authority', retry: 'non-retryable',
+        phase: 'start', retry: 'non-retryable',
         reason: `codex thread config omitted injected MCP server: ${name}`,
       });
     }

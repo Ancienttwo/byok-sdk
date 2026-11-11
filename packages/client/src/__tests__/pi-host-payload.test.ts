@@ -2,6 +2,7 @@ import { testScratchRoot } from './fixtures/execution-scratch';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { createServer, type ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,9 +13,13 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import exportLayout from '../adapters/pi/pi-export-asset-layout.json';
 import todoLayout from '../adapters/pi/todo-locale-layout.json';
 import { REQUIRE_BUN_ENV, resolveBunBin } from './support/test-bun-bin';
+import { writeKoffiAssetRoot } from '../../../../scripts/testing/sdk-koffi-asset-root.mjs';
+import { startLoopbackProvider } from './runtime-contract/loopback';
 
 const execFileAsync = promisify(execFile);
 const BUN_BIN = resolveBunBin();
+const NODE_BIN = process.env.SEA_NODE ?? process.execPath;
+const require = createRequire(import.meta.url);
 const CLIENT_DIST = fileURLToPath(new URL('../../dist/index.js', import.meta.url));
 type ClientDist = typeof import('../index');
 const loadClient = async (): Promise<ClientDist> => await import(CLIENT_DIST) as ClientDist;
@@ -60,6 +65,26 @@ describe('copyPiRuntimeAssets', () => {
     expect([pinned.name, pinned.version]).toEqual([sdk.PI_PACKAGE_NAME, '1.5.0']);
   });
 
+  it('pins the published 0.87.0 bootstrap paths and both runner argv shapes', async () => {
+    const sdk = await loadClient();
+    const root = path.join(await tempRoot('byok-pi-runner-pin-'), 'pi');
+    await sdk.copyPiRuntimeAssets({ outDir: root, form: 'interpreter+bundle' });
+    const pkg = path.join(root, 'pi-subagents');
+    expect(JSON.parse(await fs.readFile(path.join(pkg, 'package.json'), 'utf8')).version).toBe('0.87.0');
+    for (const file of ['src/runs/background/subagent-runner-bootstrap.js', 'src/runs/background/binary-bootstrap.js',
+      'runner-peer-preload.mjs', 'workflow-script-process.cjs', 'workflow-script-worker.cjs']) {
+      expect((await fs.stat(path.join(pkg, file))).isFile()).toBe(true);
+    }
+    const spawn = await fs.readFile(path.join(pkg, 'src/runs/background/async-execution.js'), 'utf8');
+    expect(spawn).toContain('resolveRuntimeModulePath(asyncRunnerModuleDir, "subagent-runner-bootstrap")');
+    expect(spawn).toContain('["--import", new URL("../../../runner-peer-preload.mjs", import.meta.url).href]');
+    expect(spawn).toContain('? [...preload, runner, cfgPath]');
+    expect(spawn).toContain('["--no-extensions", "--no-skills", "--no-prompt-templates", "--no-session", "--mode", "rpc", "--extension", bootstrap]');
+    const supervisor = await fs.readFile(path.join(pkg, 'src/workflows/workflow-script-worker.js'), 'utf8');
+    expect(supervisor).toContain('fork(WORKFLOW_PROCESS_URL, [acorn]');
+    expect(supervisor).toMatch(/"--permission",\s*"--allow-worker"/u);
+  });
+
   it('refuses a non-empty asset root and leaves it unchanged', async () => {
     const sdk = await loadClient();
     const outDir = await tempRoot('byok-pi-assets-stale-');
@@ -76,7 +101,10 @@ describe('copyPiRuntimeAssets', () => {
  */
 const HOST_ENTRY_SOURCE = `
 import fs from 'node:fs/promises';
+import util from 'node:util';
 import * as sdk from ${JSON.stringify(CLIENT_DIST)};
+async function main() {
+if (process.env.PAYLOAD_TEST_CHILD_START && process.argv[2] === '--no-extensions') await fs.appendFile(process.env.PAYLOAD_TEST_CHILD_START, 'runner started\\n');
 if (process.argv[2] !== 'task') {
   if (!await sdk.runSdkReservedHelperCommand(process.argv.slice(2))) {
     if (process.env.PAYLOAD_TEST_PRODUCT_REEXEC) await fs.appendFile(process.env.PAYLOAD_TEST_PRODUCT_REEXEC, JSON.stringify(process.argv.slice(2)) + '\\n');
@@ -89,8 +117,9 @@ if (process.argv[2] !== 'task') {
     try { report.lookup = (await import(input.piSpecifier)).FOREIGN === true ? 'foreign' : 'resolved'; } catch (error) { report.lookup = String(error); }
     report.defaultDetect = await new sdk.PiAdapter().detect();
     // The Host sets PI_CODING_AGENT_DIR itself, so the runtime gets it only through pass (#1095); the asset root is packageDir (#1315).
-    const adapter = new sdk.PiAdapter({ runtimeEnvironment: { pass: ['PI_CODING_AGENT_DIR', 'PAYLOAD_TEST_PRODUCT_REEXEC'] }, sdkHelperHost: { mode: 'self-executable', executable: process.execPath,
-      ...(input.bundleEntry ? { entry: process.argv[1] } : {}) }, ...(input.piPackageDir === undefined ? {} : { packageDir: input.piPackageDir }) });
+    const adapter = new sdk.PiAdapter({ runtimeEnvironment: { pass: ['PI_CODING_AGENT_DIR', 'PAYLOAD_TEST_PRODUCT_REEXEC', 'PAYLOAD_TEST_CHILD_START'] }, sdkHelperHost: { mode: 'self-executable', executable: process.execPath,
+      ...(input.bundleEntry ? { entry: process.argv[1] } : {}) }, ...(input.piPackageDir === undefined ? {} : { packageDir: input.piPackageDir }),
+      ...(input.nativeAssetRoot === undefined ? {} : { nativeAssetRoot: input.nativeAssetRoot }) });
     report.stage = 'detect'; report.detect = await adapter.detect();
     report.stage = 'prepare';
     const prepared = await adapter.prepare({ offer: { instruction: input.instruction }, descriptor: adapter.descriptor,
@@ -100,6 +129,9 @@ if (process.argv[2] !== 'task') {
     report.stage = 'resolve';
     const runtime = await prepared.operation.resolveRuntimeLaunch({ kind: 'instruction', cwd: input.cwd, env: input.env, scratch });
     report.launch = { command: runtime.command, entry: runtime.entry, fixedArgs: runtime.fixedArgs };
+    report.pathPreserved = runtime.env.PATH === input.env.PATH;
+    const actual = await fs.stat(runtime.command); const original = await fs.stat(process.execPath);
+    report.sameExecutable = actual.dev === original.dev && actual.ino === original.ino;
     report.stage = 'start'; report.gateCalls = [];
     // The auto gate's IPC reaches every native Pi subagent child through its required gate extension.
     const toolAuthorization = { timeoutMs: 10000, authorize: async call => { report.gateCalls.push({ toolName: call.toolName, nativeAgentId: call.nativeAgentId }); return { decision: 'allow' }; } };
@@ -113,11 +145,26 @@ if (process.argv[2] !== 'task') {
       report.events.push(event); await fs.writeFile(input.report, JSON.stringify(report));
       if (event.type === 'turn_end') break;
     }
+    if (input.statusProbe) {
+      await session.followUp({ instruction: 'STATUS_PROBE_1642' });
+      for await (const event of session.events) {
+        report.events.push(event);
+        if (event.type === 'turn_end') break;
+      }
+    }
+    report.sdkDir = (await fs.readdir(scratch.sdkDir)).sort();
+    report.privateSubagentRuntime = report.sdkDir.includes('pi-subagent-runtime');
+    report.runnerStatuses = await Promise.all((await fs.readdir(scratch.runtimeDir, { recursive: true })).filter(file => file.endsWith('/status.json') || file.endsWith('\\status.json'))
+      .map(async file => JSON.parse(await fs.readFile(scratch.runtimeDir + '/' + file, 'utf8'))));
+    report.runnerErrors = await Promise.all((await fs.readdir(scratch.runtimeDir, { recursive: true })).filter(file => file.endsWith('runner.stderr.log'))
+      .map(file => fs.readFile(scratch.runtimeDir + '/' + file, 'utf8')));
     report.stage = 'close'; await session.close();
     report.stage = 'done';
-  } catch (error) { report.error = String(error); }
+  } catch (error) { report.error = String(error); report.errorDetail = util.inspect(error, { depth: 8 }); }
   await fs.writeFile(input.report, JSON.stringify(report));
 }
+}
+void main().catch(error => { console.error(error); process.exitCode = 1; });
 `;
 
 /**
@@ -136,16 +183,17 @@ export default function userExtension(pi: ExtensionAPI): void {
 }
 
 interface HostReport {
-  stage: string; error?: string; lookup?: string;
+  stage: string; error?: string; errorDetail?: string; lookup?: string;
   defaultDetect?: { kind: string }; detect?: unknown;
   launch?: { command: string; entry?: string; fixedArgs: string[] };
-  events?: AgentEvent[];
+  pathPreserved?: boolean; sameExecutable?: boolean; privateSubagentRuntime?: boolean; sdkDir?: string[];
+  events?: AgentEvent[]; runnerErrors?: string[]; runnerStatuses?: { state?: string; steps?: { error?: string }[] }[];
   gateCalls?: { toolName: string; nativeAgentId?: string }[];
 }
 
-function completion(res: ServerResponse, content: string, tool?: { name: string; arguments: string }): void {
+function completion(res: ServerResponse, content: string, tool?: { name: string; arguments: string }, assistantText?: string): void {
   const base = { id: 'cmpl-host-payload', object: 'chat.completion.chunk', created: 0, model: 'host-payload-model' };
-  const delta = tool === undefined ? { role: 'assistant', content } : { role: 'assistant', tool_calls: [{ index: 0, id: `call-${content}`, type: 'function', function: tool }] };
+  const delta = tool === undefined ? { role: 'assistant', content } : { role: 'assistant', ...(assistantText === undefined ? {} : { content: assistantText }), tool_calls: [{ index: 0, id: `call-${content}`, type: 'function', function: tool }] };
   res.writeHead(200, { 'content-type': 'text/event-stream' });
   res.end([
     { ...base, choices: [{ index: 0, delta, finish_reason: null }] },
@@ -167,6 +215,8 @@ interface HostLayout {
   readonly entry?: string;
   /** `PiAdapterOptions.packageDir`, when the asset root is not beside the executable. */
   readonly piPackageDir?: string;
+  /** `PiAdapterOptions.nativeAssetRoot`: a bundled Windows product loads koffi from the SDK native assets, not from a package. */
+  readonly nativeAssetRoot?: string;
   readonly files: readonly string[];
 }
 
@@ -174,7 +224,7 @@ interface HostLayout {
  * A host form and, for `interpreter+bundle`, the interpreter that runs the
  * bundle: Bun, or Node as in issue #341.
  */
-type HostCase = 'interpreter+bundle (bun)' | 'interpreter+bundle (node)' | 'compiled-executable';
+type HostCase = 'interpreter+bundle (bun)' | 'interpreter+bundle (node)' | 'compiled-executable' | 'compiled-executable (configured assets)' | 'node-sea';
 
 /**
  * Why a copied interpreter does not run from the release directory, or
@@ -199,13 +249,20 @@ async function relocationFailure(interpreter: string): Promise<string | undefine
  * asset root. A Node that cannot be relocated skips the case through `skip`.
  */
 async function buildHost(host: HostCase, release: string, buildDir: string, skip: (note: string) => never): Promise<HostLayout> {
+  const layout = await buildHostPayload(host, release, buildDir, skip);
+  if (process.platform !== 'win32') return layout;
+  const sdk = await loadClient();
+  return { ...layout, nativeAssetRoot: await writeKoffiAssetRoot(path.join(buildDir, 'native'), sdk.sdkNativeAssetTargets['win32-x64']) };
+}
+
+async function buildHostPayload(host: HostCase, release: string, buildDir: string, skip: (note: string) => never): Promise<HostLayout> {
   const sdk = await loadClient();
   await fs.writeFile(path.join(buildDir, 'host-entry.ts'), HOST_ENTRY_SOURCE);
-  if (host !== 'compiled-executable') {
+  if (host === 'interpreter+bundle (bun)' || host === 'interpreter+bundle (node)') {
     const form = 'interpreter+bundle';
     const node = host === 'interpreter+bundle (node)';
-    const interpreter = path.join(release, node ? 'node' : 'bun');
-    await fs.copyFile(node ? process.execPath : BUN_BIN!, interpreter); await fs.chmod(interpreter, 0o555);
+    const interpreter = path.join(release, (node ? 'node' : 'bun') + (process.platform === 'win32' ? '.exe' : ''));
+    await fs.copyFile(node ? NODE_BIN : BUN_BIN!, interpreter); await fs.chmod(interpreter, 0o555);
     const failure = node ? await relocationFailure(interpreter) : undefined;
     if (failure !== undefined) {
       // The formal gate runs every host form; only a local run may skip one.
@@ -219,16 +276,110 @@ async function buildHost(host: HostCase, release: string, buildDir: string, skip
     return { command: interpreter, prefix: node ? [bundle] : ['--no-install', bundle], entry: bundle, piPackageDir: assetRoot,
       files: [path.basename(interpreter), 'host.js', 'pi-assets'].sort() };
   }
+  const executable = path.join(release, process.platform === 'win32' ? 'host.exe' : 'host');
+  if (host === 'node-sea') {
+    const fuse = 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2';
+    if (!(await fs.readFile(NODE_BIN)).includes(Buffer.from(fuse))) {
+      if (process.env[REQUIRE_BUN_ENV] === '1') throw new Error('Node SEA needs an official Node binary with the SEA fuse');
+      skip('set SEA_NODE to an official relocatable Node binary');
+    }
+    const assets = await sdk.copyPiRuntimeAssets({ outDir: release, form: 'interpreter+bundle' });
+    const { build } = require('esbuild') as typeof import('esbuild');
+    const { byokSdkPackaging } = await import('../../dist/adapters/packaging.js');
+    const bundle = path.join(buildDir, 'host.cjs');
+    await build({ entryPoints: [path.join(buildDir, 'host-entry.ts')], bundle: true, platform: 'node', format: 'cjs', target: 'node24',
+      // The SDK root can evaluate Pi before helper dispatch: declare bundled peers at build time (#341).
+      define: { PI_BUNDLED_NODE: 'true' }, outfile: bundle, plugins: [byokSdkPackaging({ format: 'sea' })], logLevel: 'silent' });
+    const blob = path.join(buildDir, 'sea.blob');
+    const config = path.join(buildDir, 'sea-config.json');
+    await fs.writeFile(config, JSON.stringify({ main: bundle, output: blob, disableExperimentalSEAWarning: true }));
+    await execFileAsync(NODE_BIN, ['--experimental-sea-config', config]);
+    await fs.copyFile(NODE_BIN, executable); await fs.chmod(executable, 0o755);
+    if (process.platform === 'darwin') await execFileAsync('codesign', ['--remove-signature', executable]);
+    const postject = createRequire(new URL('../../../../examples/packaging/package.json', import.meta.url))('postject') as {
+      inject(file: string, name: string, data: Buffer, options: Record<string, string>): Promise<void>;
+    };
+    await postject.inject(executable, 'NODE_SEA_BLOB', await fs.readFile(blob), { sentinelFuse: fuse,
+      ...(process.platform === 'darwin' ? { machoSegmentName: 'NODE_SEA' } : {}) });
+    if (process.platform === 'darwin') await execFileAsync('codesign', ['--sign', '-', executable]);
+    return { command: executable, prefix: [], files: [...new Set([path.basename(executable), ...assets.map(file => file.split('/')[0]!)])].sort() };
+  }
   const form = 'compiled-executable';
-  // The asset root is the executable directory: write the assets before the executable.
-  const assets = await sdk.copyPiRuntimeAssets({ outDir: release, form });
-  const executable = path.join(release, 'host');
+  const configured = host === 'compiled-executable (configured assets)';
+  const assetRoot = configured ? path.join(release, 'pi-assets') : release;
+  const assets = await sdk.copyPiRuntimeAssets({ outDir: assetRoot, form });
   await execFileAsync(BUN_BIN!, ['build', 'host-entry.ts', '--compile', '--outfile', executable], { cwd: buildDir });
-  return { command: executable, prefix: [], files: [...new Set(['host', ...assets.map(file => file.split('/')[0]!)])].sort() };
+  return { command: executable, prefix: [], ...(configured ? { piPackageDir: assetRoot } : {}),
+    files: configured ? [path.basename(executable), 'pi-assets'].sort()
+      : [...new Set([path.basename(executable), ...assets.map(file => file.split('/')[0]!)])].sort() };
 }
 
 describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', () => {
-  it.skipIf(BUN_BIN === undefined).for(['interpreter+bundle (bun)', 'interpreter+bundle (node)', 'compiled-executable'] as const)('runs a Pi task from the %s host form with no package lookup', { timeout: 180_000 }, async (form, { skip }) => {
+  it.skipIf(BUN_BIN === undefined)('keeps Host slash commands out of child launch while model and tool text stays literal in a compiled product (#1642)', { timeout: 180_000 }, async () => {
+    const root = await tempRoot('byok-host-command-'), release = path.join(root, 'release'), build = path.join(root, 'build');
+    await fs.mkdir(release); await fs.mkdir(build);
+    const host = await buildHost('compiled-executable', release, build, note => { throw new Error(note); });
+    for (const name of ['host-exact', 'host-bg', 'watchdog-on', 'watchdog-session', 'host-mid', 'model-text', 'tool-result', 'workflow-control']) {
+      const run = path.join(root, name), agent = path.join(run, 'agent'), cwd = path.join(run, 'workspace'), home = path.join(run, 'home');
+      await fs.mkdir(path.join(agent, 'agents'), { recursive: true }); await fs.mkdir(cwd); await fs.mkdir(home);
+      const marker = `PROOF_1642_${name}`, slash = `/run payload-child ${marker}`;
+      let sent = false, waited = false, status = false;
+      const childRequests: string[] = [];
+      const provider = await startLoopbackProvider('openai-chat', request => {
+        if (!request.tools.some(tool => tool.name === 'subagent')) {
+          childRequests.push(request.text); return { kind: 'text', chunks: [`CHILD_${marker}`] };
+        }
+        const latest = [...JSON.parse(request.text).messages].reverse().find(message => message.role === 'user');
+        if (JSON.stringify(latest?.content).includes('STATUS_PROBE_1642')) {
+          if (!status) { status = true; return { kind: 'tool', tool: { name: 'subagent' }, args: { action: 'status' } }; }
+          return { kind: 'text', chunks: ['STATUS_DONE'] };
+        }
+        if (!sent) {
+          sent = true;
+          if (name === 'model-text') return { kind: 'text', chunks: [slash] };
+          if (name === 'tool-result') return { kind: 'tool', tool: { name: 'read' }, args: { path: 'slash-result.txt' } };
+          if (name === 'workflow-control') return { kind: 'tool', tool: { name: 'subagent' }, args: { workflow: './proof.js', async: true } };
+        }
+        if (name === 'workflow-control' && !waited) { waited = true; return { kind: 'tool', tool: { name: 'bg_wait' }, args: { all: true, timeoutMs: 30_000 } }; }
+        return { kind: 'text', chunks: [`PARENT_${marker}`] };
+      });
+      try {
+        await fs.writeFile(path.join(agent, 'models.json'), JSON.stringify({ providers: { 'host-stub': { api: 'openai-completions', baseUrl: provider.baseUrl,
+          apiKey: 'synthetic', models: [{ id: 'contract-model', name: 'Loopback proof', input: ['text'], reasoning: false, contextWindow: 8192, maxTokens: 256 }] } } }));
+        await fs.writeFile(path.join(agent, 'settings.json'), JSON.stringify({ defaultProvider: 'host-stub', defaultModel: 'contract-model' }));
+        await fs.writeFile(path.join(agent, 'agents/payload-child.md'), '---\nname: payload-child\ndescription: Loopback proof child\nmodel: host-stub/contract-model\ntools: read\n---\nReply to the task.');
+        await fs.writeFile(path.join(cwd, 'slash-result.txt'), slash);
+        await fs.writeFile(path.join(cwd, 'proof.js'), `return runs.run("proof", {agent:"payload-child",task:${JSON.stringify(marker)}});`);
+        const childStart = path.join(run, 'runner-started');
+        const env = { PATH: process.env.PATH ?? '', HOME: home, USER: os.userInfo().username, TMPDIR: run, PI_CODING_AGENT_DIR: agent,
+          PAYLOAD_TEST_CHILD_START: childStart, npm_config_registry: 'http://127.0.0.1:9', BUN_CONFIG_DEFAULT_REGISTRY: 'http://127.0.0.1:9' };
+        const watchdog = name === 'watchdog-on' || name === 'watchdog-session';
+        const refused = name === 'host-exact' || name === 'host-bg' || watchdog, reportPath = path.join(run, 'report.json'), input = path.join(run, 'input.json');
+        await fs.writeFile(input, JSON.stringify({ piSpecifier: PI_SPECIFIER, instruction: watchdog ? `/subagents-watchdog ${name === 'watchdog-on' ? 'on' : 'session on'}`
+          : name === 'host-exact' ? slash : name === 'host-bg' ? `${slash} --bg` : name === 'host-mid' ? `Literal text: ${slash}` : marker,
+          cwd, env, scratchRoot: testScratchRoot(), report: reportPath, statusProbe: !refused, nativeAssetRoot: host.nativeAssetRoot }));
+        await execFileAsync(host.command, ['task', input], { cwd: run, env, timeout: 60_000 });
+        const report = JSON.parse(await fs.readFile(reportPath, 'utf8')) as HostReport;
+        const launches = report.gateCalls!.filter(call => call.toolName === 'subagent_launch');
+        if (refused) {
+          expect(report.error).toContain(`pi_host_command_denied: /${watchdog ? 'subagents-watchdog' : 'run'}`);
+          expect(report.stage).toBe('start'); expect(report.gateCalls).toEqual([]); expect(provider.requests).toEqual([]);
+        } else {
+          expect(report.error).toBeUndefined(); expect(report.stage).toBe('done');
+          const bodies = provider.requests.map(request => request.text).join('\n');
+          expect(bodies, JSON.stringify(report.runnerStatuses)).toContain(name === 'workflow-control' ? `CHILD_${marker}` : slash);
+          expect(report.events?.some(event => event.type === 'tool_result' && JSON.stringify(event).includes('Status target:'))).toBe(true);
+          if (name === 'model-text') expect(report.events?.filter(event => event.type === 'progress').map(event => event.text).join('')).toContain(slash);
+          if (name === 'tool-result') expect(report.events?.some(event => event.type === 'tool_result' && JSON.stringify(event).includes(slash))).toBe(true);
+        }
+        expect(childRequests).toHaveLength(name === 'workflow-control' ? 1 : 0);
+        expect(launches).toHaveLength(name === 'workflow-control' ? 1 : 0);
+        expect(existsSync(childStart)).toBe(name === 'workflow-control');
+        expect(report.runnerStatuses ?? []).toHaveLength(name === 'workflow-control' ? 2 : 0);
+      } finally { await provider.close(); }
+    }
+  });
+  it.skipIf(BUN_BIN === undefined).for(['interpreter+bundle (bun)', 'interpreter+bundle (node)', 'compiled-executable', 'compiled-executable (configured assets)', 'node-sea'] as const)('runs a Pi task from the %s host form with no package lookup', { timeout: 180_000 }, async (form, { skip }) => {
     // #1589: a foreign Pi installed above the product; pi-subagents must never load it.
     const outer = await tempRoot('byok-host-payload-release-');
     const release = path.join(outer, 'release'); await fs.mkdir(release);
@@ -241,6 +392,9 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
     const runDir = await tempRoot('byok-host-payload-run-');
     const bodies: string[] = [];
     const childBodies: string[] = [];
+    const configuredMarker = path.join(runDir, 'configured-bootstrap-executed');
+    const background = form === 'compiled-executable';
+    const workflowText = '```js workflow\nreturn runs.run("main", { agent: "payload-child", task: "Read child-input.txt and reply.", model: "host-stub/host-payload-model" });\n```';
     const provider = createServer((request, response) => {
       let body = '';
       request.on('data', chunk => { body += String(chunk); });
@@ -249,18 +403,33 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
         if (!tools.some(tool => tool.function.name === 'subagent')) {
           // The child reads one file, which its gate extension must authorize, then answers.
           childBodies.push(body);
-          if (childBodies.length === 1) completion(response, 'child-read', { name: 'read', arguments: JSON.stringify({ path: 'child-input.txt' }) });
+          const messages = (JSON.parse(body) as { messages: { role: string }[] }).messages;
+          if (!messages.some(message => message.role === 'tool')) completion(response, 'child-read', { name: 'read', arguments: JSON.stringify({ path: 'child-input.txt' }) });
           else completion(response, 'CHILD_OK');
           return;
         }
         bodies.push(body);
         if (bodies.length < 3) completion(response, String(bodies.length), subagentCall(bodies.length === 2));
+        else if (background && [3, 5, 6].includes(bodies.length)) completion(response, `wait-${bodies.length}`, { name: 'bg_wait', arguments: JSON.stringify({ timeoutMs: 30_000 }) });
+        else if ((background && bodies.length === 4) || (!background && bodies.length === 3)) completion(response, 'workflow',
+          { name: 'subagent', arguments: JSON.stringify({ workflow: true, ...(background ? { async: true } : {}) }) }, workflowText);
+        else if (!background && bodies.length === 4) {
+          const call = subagentCall(true), args = JSON.parse(call.arguments); delete args.async;
+          completion(response, 'default-background', { ...call, arguments: JSON.stringify(args) });
+        }
+        else if (!background && bodies.length === 5) completion(response, 'foreground-workflow',
+          { name: 'subagent', arguments: JSON.stringify({ workflow: true, async: false }) }, workflowText);
+        else if (form === 'compiled-executable (configured assets)' && bodies.length === 6) completion(response, 'wait-missing-assets',
+          { name: 'bg_wait', arguments: JSON.stringify({ timeoutMs: 15_000 }) });
         else completion(response, 'HOST_PAYLOAD_OK');
       });
     });
     await new Promise<void>(resolve => provider.listen(0, '127.0.0.1', resolve));
     try {
       const host = await buildHost(form, release, buildDir, skip);
+      if (form === 'compiled-executable (configured assets)') await fs.writeFile(
+        path.join(host.piPackageDir!, 'pi-subagents/src/runs/background/binary-bootstrap.js'),
+        `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(configuredMarker)}, 'executed'); export default function bootstrap() {}`);
       // The download holds only the product and its Pi asset root. No node_modules.
       expect((await fs.readdir(release)).sort()).toEqual(host.files);
 
@@ -295,45 +464,99 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
         npm_config_registry: deadRegistry, BUN_CONFIG_DEFAULT_REGISTRY: deadRegistry, PAYLOAD_TEST_PRODUCT_REEXEC: reexecMarker };
       const reportPath = path.join(runDir, 'report.json'); const inputPath = path.join(runDir, 'input.json');
       await fs.writeFile(inputPath, JSON.stringify({ piSpecifier: PI_SPECIFIER, instruction: 'Reply with the host payload marker.',
-        bundleEntry: host.entry !== undefined, piPackageDir: host.piPackageDir, cwd, env, scratchRoot: testScratchRoot(), report: reportPath }));
+        bundleEntry: host.entry !== undefined, piPackageDir: host.piPackageDir, nativeAssetRoot: host.nativeAssetRoot, cwd, env, scratchRoot: testScratchRoot(), report: reportPath }));
 
       await execFileAsync(host.command, [...host.prefix, 'task', inputPath], { cwd: runDir, env, timeout: 60_000 }).catch(async (error: unknown) => {
         throw new Error(`host task failed: ${String(error)}\nreport: ${await fs.readFile(reportPath, 'utf8').catch(() => 'none')}`);
       });
       const report = JSON.parse(await fs.readFile(reportPath, 'utf8')) as HostReport;
-      expect(report.error, `failed at ${report.stage}`).toBeUndefined();
+      expect(report.error, `failed at ${report.stage}: ${report.errorDetail}`).toBeUndefined();
       expect(report.stage).toBe('done');
       // Package lookup is denied, and the default adapter reproduces the reported probe failure.
       // The only Pi package a lookup can find is the foreign one above the release.
-      expect(report.lookup).toMatch(/^foreign$|Cannot find (package|module)/u);
+      // A Node 25.7+ SEA main script's import() loads built-in modules only (#1741).
+      expect(report.lookup).toMatch(form === 'node-sea' ? /^foreign$|Cannot find (package|module)|No such built-in module/u
+        : /^foreign$|Cannot find (package|module)/u);
       expect(report.defaultDetect).toEqual({ kind: 'probe-failed' });
       // The default provider's models.json apiKey is pi's login (#345).
       expect(report.detect).toEqual({
         kind: 'available', version: '1.5.0', authPresent: true,
         versionVerdict: { state: 'allow', qualifiedVersion: '1.5.0' },
       });
+      expect(report.pathPreserved).toBe(true);
+      if (!background) {
+        expect(report.privateSubagentRuntime).toBe(false);
+        // #1741: a SEA takes the interpreter branch, never the Bun-only prepareBundledSubagents import().
+        if (form === 'node-sea') expect(report.sdkDir).toContain('pi-subagents-host-sdk');
+        expect(report.sameExecutable).toBe(true);
+        expect((await fs.readdir(release)).sort()).toEqual(host.files);
+      }
       expect(report.launch).toEqual({ command: host.command, ...(host.entry === undefined ? {} : { entry: host.entry }),
         fixedArgs: ['__byok_sdk_helper', 'pi-rpc'] });
       const events = report.events!;
       expect(events.filter(event => event.type === 'error')).toEqual([]);
-      expect(events.filter(event => event.type === 'progress').map(event => event.text).join('')).toBe('HOST_PAYLOAD_OK');
+      expect(events.filter(event => event.type === 'progress').map(event => event.text).join(''))
+        .toBe(workflowText.repeat(background ? 1 : 2) + 'HOST_PAYLOAD_OK');
       expect(events.at(-1)).toEqual({ type: 'turn_end' });
-      expect(bodies).toHaveLength(3);
+      expect(bodies.length).toBeGreaterThanOrEqual(background ? 7 : 3);
       expect(bodies[0]).toContain('Reply with the host payload marker.');
-      // #1589: the foreground child ran in the product's Pi from the asset root. The
-      // background run is refused with a tool error, never re-executes the product,
-      // and no child of it reaches the provider.
-      expect(childBodies).toHaveLength(2);
-      expect(report.gateCalls).toContainEqual({ toolName: 'read', nativeAgentId: expect.stringMatching(/^pi-subagent:/u) });
-      const results = (JSON.parse(bodies[2]!) as { messages: { role: string; content: unknown }[] }).messages
+      expect(childBodies, JSON.stringify(report.runnerErrors)).toHaveLength(background ? 6 : 2);
+      const childIds = new Set(report.gateCalls!.filter(call => call.toolName === 'read').map(call => call.nativeAgentId));
+      expect(childIds.size).toBe(background ? 3 : 1);
+      for (const id of childIds) expect(id).toMatch(/^pi-subagent:/u);
+      const results = (JSON.parse(bodies.at(-1)!) as { messages: { role: string; content: unknown }[] }).messages
         .filter(message => message.role === 'tool').map(message => JSON.stringify(message.content));
-      expect(results).toHaveLength(2);
       expect(results[0]).toContain('CHILD_OK');
-      // The compiled form's Pi executable override is the launch-private directory, which cannot be spawned.
-      expect(results[1]).toMatch(form === 'compiled-executable'
-        ? /Failed to start async run .*async runner did not produce a pid/u
-        : /Failed to start async run .*Background children require the host npm package \(@earendil-works\/pi-coding-agent\) with its dependencies/u);
+      if (background) {
+        expect(report.gateCalls).toContainEqual({ toolName: 'subagent_launch' });
+        expect(results.join('\n')).not.toContain('pi_background_unavailable');
+        expect(results.join('\n')).toContain('No active async runs');
+      } else {
+        const missing = form === 'compiled-executable (configured assets)';
+        expect(results).toHaveLength(missing ? 6 : 5);
+        if (missing) {
+          expect(results[3]).toContain('Async: payload-child');
+          expect(results[3]).not.toContain('pi_background_unavailable');
+          expect(results[5]).toMatch(/failed/iu);
+          expect(results[5]).toContain('No runs remain in flight');
+          expect(report.runnerStatuses!.some(status => status.state === 'failed' && status.steps?.some(step =>
+            step.error?.includes('pi_background_unavailable: background Pi subagents and workflows require the shipped pi-subagents and pi-subagent-extensions assets beside the real executable.'))),
+            JSON.stringify(report.runnerStatuses)).toBe(true);
+        }
+        for (const [index, result] of results.entries()) {
+          if (index === 0 || (missing && (index === 3 || index === 5))) continue;
+          expect(result).toContain('pi_background_unavailable');
+          expect(result).toContain('Foreground non-workflow subagents work');
+          if (form === 'node-sea') for (const text of ['Node SEA', '0.87.0', 'resolveNodeExecutable',
+            'fork on process.execPath', 'cannot stand in for Node', 'Bun-compiled product']) expect(result).toContain(text);
+          else if (form === 'compiled-executable (configured assets)') {
+            expect(result).toContain('assets beside the real executable');
+            expect(result).toContain('configured Pi assets');
+          } else expect(result).toContain('the background runner cannot re-enter a bundle run by an interpreter');
+        }
+        expect(report.gateCalls!.some(call => call.toolName === 'subagent_launch')).toBe(false);
+      }
       expect(existsSync(reexecMarker)).toBe(false);
+      expect(existsSync(configuredMarker)).toBe(false);
+      if (form === 'compiled-executable') {
+        const foreignRoot = await tempRoot('byok-hostile-bun-root-');
+        const foreignBootstrap = path.join(foreignRoot, 'assets/pi-subagents/src/runs/background/binary-bootstrap.js');
+        const marker = path.join(foreignRoot, 'executed');
+        await fs.mkdir(path.dirname(foreignBootstrap), { recursive: true });
+        await fs.writeFile(foreignBootstrap, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'foreign'); export default function foreign() {}`);
+        const fixed = ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-session', '--mode', 'rpc', '--extension'];
+        const runnerEnv = { ...env, BYOK_PI_SUBAGENT_RUNTIME_DIR: foreignRoot, PI_SUBAGENT_RUNNER_CONFIG: path.join(runDir, 'foreign-config.json') };
+        await expect(execFileAsync(host.command, [...fixed, foreignBootstrap], { env: runnerEnv, timeout: 10_000 }))
+          .rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('invalid SDK Pi runner re-entry') });
+        const installed = path.join(release, 'pi-subagents/src/runs/background/binary-bootstrap.js');
+        await fs.rename(installed, installed + '.saved');
+        try {
+          await fs.symlink(foreignBootstrap, installed, 'file');
+          await expect(execFileAsync(host.command, [...fixed, installed], { env: runnerEnv, timeout: 10_000 }))
+            .rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('untrusted bundled subagent asset') });
+        } finally { await fs.rm(installed, { force: true }); await fs.rename(installed + '.saved', installed); }
+        expect(existsSync(marker)).toBe(false);
+      }
       // The user's extension loaded against the Pi runtime in the bundle.
       expect(JSON.parse(await fs.readFile(extensionMarker, 'utf8'))).toEqual({ version: '1.5.0', schema: 'object', api: 'function' });
     } finally {

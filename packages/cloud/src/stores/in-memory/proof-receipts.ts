@@ -10,8 +10,8 @@ import type {
   ProofRequestReceipt,
   ProofRequestReceiptInput,
   ProofRequestReceiptStore,
-} from '../ports';
-import type { ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority } from '../../maintenance';
+} from '../ports.js';
+import type { ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority } from '../../maintenance.js';
 
 const RECEIPTS = new WeakMap<InMemoryProofRequestReceiptStore, Map<string, ProofRequestReceipt>>();
 

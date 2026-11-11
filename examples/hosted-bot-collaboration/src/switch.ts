@@ -3,7 +3,7 @@ import { agentKey, occurrenceIntentKey, taskId, type FrozenExecutionInput, type 
   type RoutineDefinition } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { SwitchExportError, type ArchivedRecord, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type OutboxRecord, type RoutineRecord,
-  type SwitchContent, type SwitchDevice, type SwitchExportRefusal, type TombstoneRecord } from '@byok-sdk/example-bot-collaboration/migration';
+  type SwitchContent, type SwitchExportRefusal, type SwitchHeader, type TombstoneRecord } from '@byok-sdk/example-bot-collaboration/migration';
 import { storedKey } from './layout';
 import { hostJobRowKey } from './routines';
 
@@ -11,37 +11,8 @@ import { hostJobRowKey } from './routines';
 // and the new owner's read-back, so one function states what an H scope holds. `writeSwitchRows` writes the rows of an
 // import other than the K8 state, which the store writes as every state transaction does.
 
-/** The header fields of a document, which a read-back copies as they are. */
-export type SwitchHeader = Pick<SwitchContent, 'source' | 'domain' | 'devices' | 'exportedAt'>;
-/** The export record of an old H owner (`scope.switch_export`): from the export on, also after the commit away. */
-export interface SwitchExportMark { digest: string; exportedAt: number; devices: SwitchDevice[] }
-
-/** The scope was exported for a switch, so H writes nothing to it. Abort the switch to resume it. Nothing was written. */
-export class SwitchExportedError extends Error {
-  readonly code = 'switch_exported' as const;
-  constructor(readonly digest: string) {
-    super(`This scope was exported for a switch (${digest}); it writes nothing until the switch is aborted`);
-    this.name = 'SwitchExportedError';
-  }
-}
-
 /** The import record of a new H owner (`scope.switch_import`): from the import until `commitImport`. */
 export interface SwitchImportMark { digest: string; devices: string[] }
-/** What a new owner returns after its read-back: the digest the old owner commits away on. */
-export interface SwitchReceipt { digest: string; devices: string[] }
-
-/**
- * The scope holds a switch import that is not committed yet, so no work runs on it (#975). Commit it toward H or discard
- * it first. Nothing was written.
- */
-export class SwitchImportedError extends Error {
-  readonly code = 'switch_imported' as const;
-  constructor(readonly digest: string) {
-    super(`This scope holds the switch import ${digest}; commit it toward H or discard it first`);
-    this.name = 'SwitchImportedError';
-  }
-}
-
 /** A stored import record, checked field by field: a malformed one fails closed. */
 export function importMarkOf(value: unknown): SwitchImportMark {
   const mark = value as SwitchImportMark;
@@ -49,17 +20,6 @@ export function importMarkOf(value: unknown): SwitchImportMark {
     && typeof mark.digest === 'string' && Array.isArray(mark.devices) && mark.devices.length > 0
     && mark.devices.every(device => typeof device === 'string' && device.length > 0);
   if (!valid) throw new Error('Invalid switch import record');
-  return mark;
-}
-
-/** A stored export mark, checked field by field: a malformed one fails closed. */
-export function exportMarkOf(value: unknown): SwitchExportMark {
-  const mark = value as SwitchExportMark;
-  const valid = typeof value === 'object' && value !== null && Object.keys(value).sort().join(',') === 'devices,digest,exportedAt'
-    && typeof mark.digest === 'string' && Number.isSafeInteger(mark.exportedAt) && Array.isArray(mark.devices) && mark.devices.length > 0
-    && mark.devices.every(device => !!device && Object.keys(device).sort().join(',') === 'deviceId,frozenRevision'
-      && typeof device.deviceId === 'string' && Number.isSafeInteger(device.frozenRevision) && device.frozenRevision > 0);
-  if (!valid) throw new Error('Invalid switch export record');
   return mark;
 }
 

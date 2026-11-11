@@ -1,12 +1,12 @@
 import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { RuntimeOperationManifest } from '../types';
-import { RuntimeExecutionFailure } from '../runtime-failure';
-import { sameContent, sameFile } from '../util/file-state';
+import type { RuntimeOperationManifest } from '../types.js';
+import { RuntimeExecutionFailure } from '../runtime-failure.js';
+import { sameContent, sameFile } from '../util/file-state.js';
 
 // Session-local instructions have their own read budget, independent of model context size.
 const MAX_PERSONA_BYTES = 64 * 1024;
-const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
+const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
 
 /**
  * Read only the admitted Agent home's persona; never grant runtime folder

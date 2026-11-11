@@ -21,7 +21,7 @@
  */
 import { CapabilityDeclarationSchema, hasCapability, type CapabilityDeclaration } from '@byok-sdk/core';
 import { BYOK_CAPABILITIES_PATH } from '@byok-sdk/protocol';
-import { toHttpBase } from './url';
+import { toHttpBase } from './url.js';
 
 /**
  * The hosted capability the presence producer gates on. A plain string, not an

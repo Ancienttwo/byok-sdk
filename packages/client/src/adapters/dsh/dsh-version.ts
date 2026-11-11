@@ -1,4 +1,4 @@
-import type { RuntimeVersionPolicy } from '../../types';
+import type { RuntimeVersionPolicy } from '../../types.js';
 
 /**
  * DeepSeek Harness version policy (#1258 O5). dsh is a developer preview that

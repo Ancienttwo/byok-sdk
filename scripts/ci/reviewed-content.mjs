@@ -40,9 +40,10 @@ const HOSTED_WORKER = Object.freeze({ dir: 'examples/hosted-bot-collaboration-wo
 const PRIVATE_HOSTED = Object.freeze([HOSTED, HOSTED_WORKER]);
 const HOSTED_FIELDS = new Set(['name', 'version', 'private', 'type', 'description', 'scripts', 'dependencies', 'devDependencies']);
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies'];
-// #793 D2a-0: the K8 entries that the hosted example imports. There is no root
-// entry, so H never loads the K8 host (src/host.ts). The K8 rules still import
-// the K4 root, which loads HostLedger and node:sqlite.
+// #793 D2a-0: the K8 entries that the hosted example imports. H and HW must not
+// import the K8 root entry, which loads the K8 host (src/host.ts); since the
+// desktop app added that entry (#1806), only review enforces this. The K8 rules
+// still import the K4 root, which loads HostLedger and node:sqlite.
 const K8_HOSTED_EXPORTS = Object.freeze({
   './rules/commands': './src/rules/commands.ts',
   './rules/commit': './src/rules/commit.ts',
@@ -156,17 +157,37 @@ function admitHostedLock(before, after, cwd, example) {
   delete after.packages[example.name];
 }
 
+// #1804: the desktop example's reviewed additions to the checked shape, exact:
+// its Electron build and dev scripts and the two Electron devDependencies.
+// #1830: the build bundles the React renderer with esbuild (the base 0.28.1
+// spec), and React with its types joins the devDependencies (#1499 D9).
+const REGISTERED_PRIVATE_ADDITIONS = Object.freeze({
+  'examples/desktop-bot-app': Object.freeze({
+    scripts: Object.freeze({
+      build: "tsc -p tsconfig.build.json && esbuild src/renderer/index.tsx --bundle --format=esm --platform=browser --target=es2022 --minify --log-level=warning --outdir=dist/src/renderer && node -e \"require('node:fs').cpSync('src/renderer/index.html', 'dist/src/renderer/index.html')\"",
+      // #1811: the one Host bundle (CommonJS under Node in dev, a SEA when packaged); dev runs it.
+      'build:host': 'node scripts/package/bundle-host.mjs --format cjs',
+      dev: 'bun run build && bun run build:host && electron dist/src/main/index.js',
+    }),
+    devDependencies: Object.freeze({
+      electron: '45.3.0', '@electron/fuses': '2.1.3',
+      react: '19.3.1', 'react-dom': '19.3.1', '@types/react': '19.3.0', '@types/react-dom': '19.3.0',
+    }),
+  }),
+});
+
 /** A new private workspace is admitted only by the reviewed graph, with
  * executable checks and dependencies already declared by a base workspace.
  */
 function verifyRegisteredPrivateManifest(manifest, dir, { base, cwd, workspaceGraph }) {
   const registration = workspaceGraph?.[dir];
+  const additions = REGISTERED_PRIVATE_ADDITIONS[dir];
   const allowed = new Set([...HOSTED_FIELDS, 'license', 'engines']);
   if (!dir.startsWith('examples/') || !registration || !plain(manifest)
     || Object.keys(manifest).some(key => !allowed.has(key))
     || manifest.name !== registration.name || manifest.private !== true
     || manifest.type !== 'module' || !version(manifest.version)
-    || !isDeepStrictEqual(manifest.scripts, { typecheck: 'tsc --noEmit', test: 'vitest run' })) {
+    || !isDeepStrictEqual(manifest.scripts, { typecheck: 'tsc --noEmit', test: 'vitest run', ...additions?.scripts })) {
     throw new Error('Reviewed CI mapping required: new private workspace must be graph-registered with checked manifest shape');
   }
   const localEdges = [...new Set(DEPENDENCY_FIELDS.flatMap(field => Object.keys(manifest[field] ?? {}).filter(name => name.startsWith('@byok-sdk/'))))].sort();
@@ -179,15 +200,43 @@ function verifyRegisteredPrivateManifest(manifest, dir, { base, cwd, workspaceGr
     for (const [name, spec] of Object.entries(manifest[field] ?? {})) {
       const valid = name.startsWith('@byok-sdk/')
         ? spec === 'workspace:*' && declarations.some(other => other.name === name)
-        : declarations.some(other => DEPENDENCY_FIELDS.some(key => other[key]?.[name] === spec));
+        : declarations.some(other => DEPENDENCY_FIELDS.some(key => other[key]?.[name] === spec)) || additions?.[field]?.[name] === spec;
       if (!valid) throw new Error(`New workspace must reuse a base dependency spec (${name})`);
     }
   }
   return manifest;
 }
 
+/**
+ * #1805: an existing graph-registered private example may change its scripts
+ * and dependencies, and nothing else, when the whole new manifest passes the
+ * registered-workspace check: edges equal the reviewed graph, and every script
+ * and external spec is a base declaration or an exact registered addition.
+ * The final comparison still refuses any other field.
+ */
+function admitRegisteredPrivateManifest(before, after, path, context) {
+  const dir = path.slice(0, -'/package.json'.length);
+  if (!/^examples\/[^/]+\/package\.json$/.test(path) || !context.workspaceGraph?.[dir]
+    || PRIVATE_HOSTED.some(example => example.dir === dir) || before.private !== true) return [];
+  const fields = ['scripts', ...DEPENDENCY_FIELDS];
+  if (fields.every(field => isDeepStrictEqual(before[field], after[field]))) return [];
+  const rest = manifest => Object.fromEntries(Object.entries(manifest).filter(([key]) => !fields.includes(key)));
+  if (!isDeepStrictEqual(rest(before), rest(after))) return [];
+  try {
+    verifyRegisteredPrivateManifest(JSON.parse(readFileSync(resolve(context.cwd, path), 'utf8')), dir, context);
+  } catch (error) {
+    throw new Error(`Reviewed CI mapping required: ${path} changes more than the reviewed fields (${error.message})`);
+  }
+  for (const field of fields) {
+    if (before[field] === undefined) delete after[field];
+    else after[field] = before[field];
+  }
+  return [dir];
+}
+
+/** Returns the admitted workspace records too: their dependencies declare the lock rows they add. */
 function admitRegisteredPrivateLock(before, after, context) {
-  const added = [];
+  const added = [], records = [];
   for (const dir of Object.keys(after.workspaces ?? {})) {
     if (Object.hasOwn(before.workspaces ?? {}, dir)) continue;
     const manifest = verifyRegisteredPrivateManifest(JSON.parse(readFileSync(resolve(context.cwd, dir, 'package.json'), 'utf8')), dir, context);
@@ -196,10 +245,11 @@ function admitRegisteredPrivateLock(before, after, context) {
     if (!isDeepStrictEqual(after.workspaces[dir], expected)
       || !isDeepStrictEqual(after.packages?.[manifest.name], [`${manifest.name}@workspace:${dir}`])
       || before.packages?.[manifest.name] !== undefined) throw new Error('New workspace lock rows differ from its manifest');
+    records.push(after.workspaces[dir]);
     delete after.workspaces[dir]; delete after.packages[manifest.name];
     added.push(dir);
   }
-  return added;
+  return { added, records };
 }
 
 /** Returns qualifying workspaces and any verified lock-format full-matrix reason. */
@@ -273,8 +323,8 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     for (const example of PRIVATE_HOSTED) {
       if (!before.workspaces?.[example.dir] && after.workspaces?.[example.dir]) admitHostedLock(before, after, cwd, example);
     }
-    const added = admitRegisteredPrivateLock(before, after, { base, cwd, workspaceGraph });
-    const impact = dependencyLockImpact(before, after, { cwd });
+    const { added, records } = admitRegisteredPrivateLock(before, after, { base, cwd, workspaceGraph });
+    const impact = dependencyLockImpact(before, after, { cwd, admitted: records });
     return { ...impact, dirs: [...new Set([...added, ...impact.dirs])] };
   } else if (path === `${HOSTED_WORKER.dir}/package.json`) {
     // #654 W4: the browser member page imports core's sealed-payload entry directly.
@@ -338,6 +388,16 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
       && isDeepStrictEqual(after.exports?.[key], K8_DREAM_EXPORTS[key]))) {
       for (const key of Object.keys(K8_DREAM_EXPORTS)) delete after.exports[key];
     }
+    // #1664: both adapters import this exact shared assembly entry.
+    if (before.exports?.['./adapter-steps'] === undefined && after.exports?.['./adapter-steps'] === './src/adapter-steps.ts') {
+      delete after.exports['./adapter-steps'];
+    }
+    // #1666: H cancel results import the shared delegation rules entry.
+    if (before.exports?.['./rules/delegation'] === undefined && after.exports?.['./rules/delegation'] === './src/rules/delegation.ts') {
+      delete after.exports['./rules/delegation'];
+    }
+    // #1806: the desktop app imports BotCollaboration from the root entry.
+    if (before.exports?.['.'] === undefined && after.exports?.['.'] === './src/index.ts') delete after.exports['.'];
   } else if (path === 'examples/byok-mcp-server/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The MCP server example must stay private');
     // #1375: the routine calendar moved to protocol, so the core edge goes.
@@ -506,6 +566,8 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     }
     delete before.version; delete after.version;
   }
+  // After every dedicated admission, so an edge a branch above already reviewed is not taken here.
+  qualify.push(...admitRegisteredPrivateManifest(before, after, path, { base, cwd, workspaceGraph }));
   if (!isDeepStrictEqual(before, after)) throw new Error(`Reviewed CI mapping required: ${path} changes more than the reviewed fields`);
   return { dirs: qualify };
 }

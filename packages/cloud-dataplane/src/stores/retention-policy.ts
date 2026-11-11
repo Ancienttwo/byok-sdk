@@ -1,8 +1,8 @@
 import type { RetentionPolicy } from '@byok-sdk/cloud';
 import { tenantId, type Clock, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
-import type { ByokPool } from '../pool';
-import { CloudCleanupError } from '../maintenance-errors';
+import type { ByokPool } from '../pool.js';
+import { CloudCleanupError } from '../maintenance-errors.js';
 
 export interface TenantRetentionPolicyInput extends RetentionPolicy {
   readonly policyId: string;

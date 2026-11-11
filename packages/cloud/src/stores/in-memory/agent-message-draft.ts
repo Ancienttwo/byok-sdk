@@ -1,6 +1,6 @@
 import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
-import type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult } from '../../agent-message-draft';
-import { DEFAULT_ACTIVITY_TTL_MS } from '../../coordination';
+import type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult } from '../../agent-message-draft.js';
+import { DEFAULT_ACTIVITY_TTL_MS } from '../../coordination.js';
 
 const ROWS = new WeakMap<InMemoryAgentMessageDraftStore, Map<string, AgentMessageDraftRow>>();
 

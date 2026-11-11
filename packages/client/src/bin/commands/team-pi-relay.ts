@@ -1,17 +1,17 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { createInterface } from 'node:readline';
-import type { DaemonConfig } from '../../daemon/create-daemon';
-import { decodeTeamMemberContext } from '../../daemon/team-workspace';
-import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host';
-import { connectControlClient } from '../../daemon/control-client';
-import { resolveStoreDir } from '../config';
-import { loadPrivateTeamDocument, parseCodexTeamBinding, preflightCodexRelay, queueCodexTeamNotification, type CodexTeamBinding } from '../team-codex-relay';
-import { TeamNotificationRelay, type TeamRelayBinding } from '../team-notification-relay';
-import type { PiTeamOperatorInvocation } from '../team-pi-operator-entry';
-import { PiTeamSession, type PiInteractionResponse } from '../team-pi-session';
-import { acquireTeamRelayLock } from './team-relay';
-import { AGENT_TEAM_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
+import type { DaemonConfig } from '../../daemon/create-daemon.js';
+import { decodeTeamMemberContext } from '../../daemon/team-workspace.js';
+import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host.js';
+import { connectControlClient } from '../../daemon/control-client.js';
+import { resolveStoreDir } from '../config.js';
+import { loadPrivateTeamDocument, parseCodexTeamBinding, preflightCodexRelay, queueCodexTeamNotification, type CodexTeamBinding } from '../team-codex-relay.js';
+import { TeamNotificationRelay, type TeamRelayBinding } from '../team-notification-relay.js';
+import type { PiTeamOperatorInvocation } from '../team-pi-operator-entry.js';
+import { PiTeamSession, type PiInteractionResponse } from '../team-pi-session.js';
+import { acquireTeamRelayLock } from './team-relay.js';
+import { AGENT_TEAM_MCP_SERVER_NAME } from '../../sdk-reserved-mcp.js';
 
 const record = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 const exact = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));

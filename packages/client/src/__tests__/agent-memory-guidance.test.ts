@@ -428,7 +428,7 @@ describe('per-task Agent memory selection', () => {
     const { adapter, offer, declineOf } = await createMemoryRunner('auto');
     await offer('reader-read-write', { reader: true, agentMemory: 'read-write' });
     expect(declineOf('reader-read-write')?.payload).toMatchObject({
-      retryable: false, reason: expect.stringContaining('agent_memory_selection_invalid'),
+      retryable: false, code: 'agent_memory_selection_invalid', reason: expect.stringContaining('agent_memory_selection_invalid: '),
     });
     expect(adapter.startCalls).toHaveLength(0);
   });
@@ -544,7 +544,7 @@ describe('agentMemory read-write-if-admitted', () => {
     const { adapter, offer, declineOf } = await createMemoryRunner(agentMemoryMcp);
     await offer('reader-rw-if', { reader: true, agentMemory: 'read-write-if-admitted' });
     expect(declineOf('reader-rw-if')?.payload).toMatchObject({
-      retryable: false, reason: expect.stringContaining('agent_memory_selection_invalid'),
+      retryable: false, code: 'agent_memory_selection_invalid', reason: expect.stringContaining('agent_memory_selection_invalid: '),
     });
     expect(adapter.startCalls).toHaveLength(0);
   });

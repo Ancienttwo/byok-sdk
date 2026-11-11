@@ -55,6 +55,15 @@ const expectRejected = (
 };
 
 describe('ModelProviderProfileSchema', () => {
+  it('admits the explicit opencode-go provider kind', () => {
+    expect(parseModelProviderProfile({ ...openAiProfile(), provider_kind: 'opencode-go' }).provider_kind).toBe('opencode-go');
+  });
+  it('rejects an unauthenticated OpenCode Go profile', () => {
+    const error = expectRejected(openAiProfile({
+      provider_kind: 'opencode-go', auth_mode: 'none',
+    }));
+    expect(error.message).toBe('OpenCode Go requires bearer authentication');
+  });
   it('accepts a bearer OpenAI-compatible profile', () => {
     expect(parseModelProviderProfile(openAiProfile())).toEqual({
       adapter: 'openai_compatible',

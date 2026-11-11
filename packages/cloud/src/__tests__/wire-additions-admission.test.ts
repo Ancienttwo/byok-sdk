@@ -143,10 +143,13 @@ const submitExpressible = (entry: (typeof gatedLines)[number]): boolean => {
   return true;
 };
 
-async function deviceWith(capabilities: readonly string[]): Promise<{ harness: CloudHarness; deviceId: string }> {
+/** `harnessId` also advertises that custom harness: an unadvertised one is a missing capability. */
+async function deviceWith(capabilities: readonly string[], harnessId?: unknown): Promise<{ harness: CloudHarness; deviceId: string }> {
   const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
   const device = await harness.pairDevice(TENANT_A);
-  await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [...capabilities] });
+  const harnesses = typeof harnessId === 'string'
+    ? [{ id: harnessId, version: '1.0.0', capabilities: { steer: true, resume: true, approvalInteractive: false } }] : undefined;
+  await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [...capabilities], ...(harnesses === undefined ? {} : { harnesses }) });
   return { harness, deviceId: device.deviceId };
 }
 
@@ -206,9 +209,9 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
       const error = await ENQUEUE[entry.type]!(harness, deviceId, entry.payload as never)
         .then(() => undefined, (caught: unknown) => caught);
       expect(error).toBeInstanceOf(ZodError);
+      // Line 69 also fails the reader rule, which is checked first and alone reported.
       expect((error as ZodError).issues.map(({ code, path }) => ({ code, path }))).toEqual([
-        ...(line === 69 ? [{ code: 'custom', path: ['agentMemory'] }] : []),
-        { code: 'custom', path: ['runtime'] },
+        line === 69 ? { code: 'custom', path: ['agentMemory'] } : { code: 'custom', path: ['runtime'] },
       ]);
       expect(reads).not.toHaveBeenCalled();
       expect(await harness.cloud.readTaskAttempt(TENANT_A, 'gated')).toBeUndefined();
@@ -252,7 +255,7 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     'corpus line %i (%s) is not refused for a capability when the device advertises every flag the table requires',
     async (_line, _label, entry) => {
       const { type } = entry;
-      const { harness, deviceId } = await deviceWith(entry.flags);
+      const { harness, deviceId } = await deviceWith(entry.flags, entry.payload.harnessId);
       const host = hostCopy(entry);
       const run = ENQUEUE[type]!(harness, deviceId, host.payload as never);
       if (submitExpressible(host)) expect(await errorCode(run)).not.toBe('agent_capability_missing');

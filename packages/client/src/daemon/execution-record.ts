@@ -1,6 +1,6 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { RuntimeAdapterDescriptor } from '../types';
-import type { DeclaredSessionMembers } from './session-contract';
+import type { RuntimeAdapterDescriptor } from '../types.js';
+import type { DeclaredSessionMembers } from './session-contract.js';
 
 /**
  * Octop ③ (#553): a local, content-free diagnostic that says whether the SDK

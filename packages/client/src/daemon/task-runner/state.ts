@@ -83,25 +83,6 @@ export const ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX =
   'resource limit exceeded: activity ingress budget';
 
 /**
- * Wire v3 result channel: the stable reason PREFIX of the `task.fail` a
- * `terminalProjection.mode: 'result-document'` task gets when its runtime
- * ended the turn without a staged `submit_result` outcome. Same
- * stable-prefix contract as {@link MAX_DURATION_EXCEEDED_REASON_PREFIX};
- * `retryable: false`, because the same offer on the same runtime has no
- * reason to submit on a second attempt. The SDK never derives the outcome
- * from the runtime's text.
- */
-export const RESULT_NOT_SUBMITTED_REASON_PREFIX = 'result_not_submitted';
-
-/**
- * Stable reason PREFIX of the `task.fail` a result-document task gets when
- * its staged outcome cannot be read back at `turn_end` (an unreadable or
- * mismatched record in the Agent home). `retryable: false`; the record is
- * preserved for repair.
- */
-export const RESULT_UNREADABLE_REASON_PREFIX = 'result_unreadable';
-
-/**
  * Bounded admission: the stable reason PREFIX a prepared Execution's
  * `task.fail` carries when any one of its provider calls reported prompt
  * tokens AT OR ABOVE the context window of the model its frozen request D was
@@ -172,7 +153,6 @@ export type ApprovalOrigin =
 
 /** Every effect the host executor knows, in one vocabulary (§6.2). */
 export type EffectKind =
-  | 'open.sealed'
   | 'journal.admission'
   | 'open.preparation'
   | 'reserve.home'
@@ -181,7 +161,6 @@ export type EffectKind =
   | 'bind.workspace'
   | 'seal.manifest'
   | 'pin.preparation'
-  | 'clear.sealedOpening'
   | 'track.inflight'
   | 'consume.pendingCancelled'
   | 'send.decline'
@@ -195,7 +174,6 @@ export type EffectKind =
   | 'flush.batcher'
   | 'stop.batcher'
   | 'stop.draft'
-  | 'mark.finished'
   | 'abort.blob'
   | 'abort.inflightBlob'
   | 'abort.inflightBlobs'
@@ -346,7 +324,6 @@ export interface AdmissionStateV1 {
   readonly deviceSlot: boolean;
   readonly scratch: boolean;
   readonly lease: boolean;
-  readonly homeReservation?: string;
   readonly pin?: string;
   readonly decline?: AdmissionDeclineV1;
 }
@@ -471,8 +448,6 @@ export interface RunnerStateV1 {
   readonly pendingCancelled: readonly PendingCancelV1[];
   readonly finished: readonly string[];
   readonly strictDeclined: readonly string[];
-  readonly sealedOpening: readonly string[];
-  readonly homeReservations: Readonly<Record<string, number>>;
 }
 
 export interface ReducerSnapshot {
@@ -483,10 +458,7 @@ export interface ReducerSnapshot {
 /* -------------------------------- Events ------------------------------- */
 
 export type ReducerEventType =
-  | 'offer.sealed_opening'
   | 'offer.received'
-  | 'offer.sealed_opened'
-  | 'offer.sealed_declined'
   | 'admission.begin'
   | 'admission.stage'
   | 'admission.declined'
@@ -607,8 +579,6 @@ export function createRunnerState(): RunnerStateV1 {
     pendingCancelled: [] as readonly PendingCancelV1[],
     finished: [] as readonly string[],
     strictDeclined: [] as readonly string[],
-    sealedOpening: [] as readonly string[],
-    homeReservations: {} as Readonly<Record<string, number>>,
   });
 }
 
@@ -2887,7 +2857,7 @@ function fallbackRow(id: string, events: readonly ReducerEventType[]): Transitio
 }
 
 const FALLBACK_ROWS: readonly TransitionRow[] = [
-  /* @__PURE__ */ fallbackRow('F-OFFER', ['offer.sealed_opening', 'offer.received', 'offer.sealed_opened', 'offer.sealed_declined']),
+  /* @__PURE__ */ fallbackRow('F-OFFER', ['offer.received']),
   /* @__PURE__ */ fallbackRow('F-ADMISSION', ['admission.begin', 'admission.stage', 'admission.declined', 'admission.claimable']),
   /* @__PURE__ */ fallbackRow('F-CLAIM', ['claim.journaled', 'claim.journal_failed', 'claim.sent']),
   /* @__PURE__ */ fallbackRow('F-STARTUP', ['startup.registered', 'startup.transferred', 'startup.disposed']),

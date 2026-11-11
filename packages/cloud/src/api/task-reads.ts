@@ -1,15 +1,15 @@
-import type { ByokCloud, ByokCloudOptions } from '../cloud';
-import { readTaskAgentMessageDraft } from '../agent-message-draft';
-import { readTaskAgentMessage } from '../task-agent-message';
-import { taskOfferMessageId } from '../offer-identity';
+import type { ByokCloud, ByokCloudOptions } from '../cloud.js';
+import { readTaskAgentMessageDraft } from '../agent-message-draft.js';
+import { readTaskAgentMessage } from '../task-agent-message.js';
+import { taskOfferMessageId } from '../offer-identity.js';
 import { type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import { AgentMessagePublishPayloadSchema, TaskOfferPayloadSchema, type AgentRef } from '@byok-sdk/protocol';
-import { ByokCloudError } from '../errors';
-import { readAgentMessageDisposition, terminalReceiptKey } from '../inbound';
-import { projectTerminalResult, readDeviceTerminalReceipt } from '../terminal-result';
-import { assertTaskContentPresent } from '../task-redaction';
-import { isTaskAbandonCause } from '../stores/ports';
-import { tenantStoresFor, type CloudRootStores } from '../tenant-stores';
+import { ByokCloudError } from '../errors.js';
+import { readAgentMessageDisposition, terminalReceiptKey } from '../inbound.js';
+import { projectTerminalResult, readDeviceTerminalReceipt } from '../terminal-result.js';
+import { assertTaskContentPresent } from '../task-redaction.js';
+import { isTaskAbandonCause } from '../stores/ports.js';
+import { tenantStoresFor, type CloudRootStores } from '../tenant-stores.js';
 
 interface Dependencies {
   root: CloudRootStores;
@@ -49,7 +49,7 @@ export function createTaskReadsApi({ root, controlPlane, options, sameAgentRef }
           stored.type !== 'task.offer') throw invalid();
       const parsed = TaskOfferPayloadSchema.safeParse(stored.payload);
       if (!parsed.success || JSON.stringify(parsed.data) !== JSON.stringify(stored.payload)) throw invalid();
-      if (attempt.agentRef === undefined || !sameAgentRef(parsed.data.agentRef, attempt.agentRef)) throw invalid();
+      if (!sameAgentRef(parsed.data.agentRef, attempt.agentRef)) throw invalid();
       const delivered = await stores.receipts.get(`task-offer-delivered:${messageId}`);
       if (delivered !== undefined && delivered.body !== messageId) throw invalid();
       return { taskId, deviceId: attempt.deviceId, messageId, type: 'task.offer', payload: parsed.data,
@@ -108,7 +108,7 @@ export function createTaskReadsApi({ root, controlPlane, options, sameAgentRef }
         return {
           taskId,
           state: 'cancelled',
-          ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
+          agentRef: attempt.agentRef,
           ...(attempt.cancellation.reason === undefined
             ? {}
             : { reason: attempt.cancellation.reason }),
@@ -133,7 +133,7 @@ export function createTaskReadsApi({ root, controlPlane, options, sameAgentRef }
           taskId,
           state: 'cancelled',
           terminalCause: attempt.terminalCause,
-          ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
+          agentRef: attempt.agentRef,
           recordedAt: attempt.terminalAt,
         };
       }

@@ -1,9 +1,11 @@
 import type { Pool } from 'pg';
 import { WAKE_HORIZON_MS } from '@byok-sdk/server/execution-core';
 import { ROUTINE_LATE_AFTER_MS } from '@byok-sdk/example-bot-collaboration/routines';
-import { DeviceBindingError, DeviceSwitchingError } from './binding';
-import { SUPPORTED_STORE_VERSIONS } from './ddl';
-import { inSchema, type HostedCollaborationStore } from './store';
+import { DeviceSwitchingError } from '@byok-sdk/example-bot-collaboration/migration';
+import { DeviceBindingError } from './binding';
+import { STORE_VERSION } from './ddl';
+import { inSchema } from './transaction';
+import type { HostedCollaborationStore } from './store';
 
 export interface SchedulerOptions {
   now?: () => number;
@@ -55,11 +57,11 @@ export class HostedRoutineScheduler {
   }
 
   /**
-   * Run once when the scheduler starts, as K4 `recover`: each scope with an active routine that had no slot within the
+   * Run once when the scheduler starts: each scope with an active routine that had no slot within the
    * horizon re-plans it, and each scope with a staged version checks the switch. One transaction per scope.
    */
   async start(): Promise<RoutineFailure[]> {
-    const scopes = await this.scopes(`SELECT DISTINCT r.scope FROM routine r JOIN scope s ON s.scope = r.scope WHERE s.state_version = ANY($1::integer[]) AND s.switch_export IS NULL AND s.switch_import IS NULL
+    const scopes = await this.scopes(`SELECT DISTINCT r.scope FROM routine r JOIN scope s ON s.scope = r.scope WHERE s.state_version = $1 AND s.switch_export IS NULL AND s.switch_import IS NULL
       AND ((r.lifecycle = 'active' AND r.status = 'no_occurrence_within_horizon' AND r.pending IS NULL) OR r.pending IS NOT NULL) ORDER BY r.scope`, []);
     return this.plan(scopes, 'start');
   }
@@ -67,11 +69,11 @@ export class HostedRoutineScheduler {
   /**
    * One pass: the schedule upkeep of the scopes with a `schedule_retrying` slot now within the horizon, then the fire of each
    * due routine in slot order. The rows are read in keyset pages, so fenced rows and backed-off rows cannot fill the batch.
-   * Each fire reads the clock, as K4 does when it consumes a wake. The pass time only selects the due rows.
+   * Each fire reads the clock. The pass time only selects the due rows.
    */
   async run(): Promise<SchedulerPass> {
     const now = this.now(), pass: SchedulerPass = { fired: 0, fenced: [], failed: [] }, changed = new Set<string>();
-    const retrying = await this.scopes(`SELECT DISTINCT r.scope FROM routine r JOIN scope s ON s.scope = r.scope WHERE s.state_version = ANY($1::integer[]) AND s.switch_export IS NULL AND s.switch_import IS NULL
+    const retrying = await this.scopes(`SELECT DISTINCT r.scope FROM routine r JOIN scope s ON s.scope = r.scope WHERE s.state_version = $1 AND s.switch_export IS NULL AND s.switch_import IS NULL
       AND r.status = 'schedule_retrying' AND r.next_at <= $2 ORDER BY r.scope`, [now + WAKE_HORIZON_MS]);
     pass.failed.push(...await this.plan(retrying, 'pass'));
     const batch = this.options.batch ?? 100, backoffMs = this.options.backoffMs ?? 60_000;
@@ -79,10 +81,10 @@ export class HostedRoutineScheduler {
     while (pass.fired < batch) {
       const due = await inSchema(this.pool, this.store.schema, client => client.query<DueRow>(
         `SELECT r.scope, r.id, r.next_at::text, r.ordinal::text FROM routine r JOIN scope s ON s.scope = r.scope
-          WHERE s.state_version = ANY($3::integer[]) AND s.switch_export IS NULL AND s.switch_import IS NULL AND r.lifecycle = 'active' AND r.next_at <= $1
+          WHERE s.state_version = $3 AND s.switch_export IS NULL AND s.switch_import IS NULL AND r.lifecycle = 'active' AND r.next_at <= $1
           AND (r.retry_at IS NULL OR r.retry_at <= $1)
           AND (r.next_at, r.scope, r.ordinal) > ($4, $5, $6) ORDER BY r.next_at, r.scope, r.ordinal LIMIT $2`,
-        [now, batch, [...SUPPORTED_STORE_VERSIONS], ...cursor]), true);
+        [now, batch, STORE_VERSION, ...cursor]), true);
       for (const row of due.rows) {
         cursor = [Number(row.next_at), row.scope, Number(row.ordinal)];
         if (pass.fired >= batch) break;
@@ -119,7 +121,7 @@ export class HostedRoutineScheduler {
 
   private async scopes(text: string, values: unknown[]): Promise<string[]> {
     const found = await inSchema(this.pool, this.store.schema, client =>
-      client.query<{ scope: string }>(text, [[...SUPPORTED_STORE_VERSIONS], ...values]), true);
+      client.query<{ scope: string }>(text, [STORE_VERSION, ...values]), true);
     return found.rows.map(row => JSON.parse(row.scope) as string);
   }
   private async plan(scopes: string[], phase: 'start' | 'pass'): Promise<RoutineFailure[]> {

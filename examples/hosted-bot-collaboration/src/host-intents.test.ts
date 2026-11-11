@@ -9,9 +9,11 @@ import { freezeIntent, HostedSubmitter } from './intents';
 import { storedKey } from './layout';
 import { TEST_HOST } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { HostedReconciler, IntentOutcomeError, type HostedIntentHandler, type HostedTaskPort } from './reconcile';
-import type { AgentMessageInput, HostedIntentMessageHandler, MessageDisposition } from './index';
-import { HostedCollaborationStore, inSchema, lockScope } from './store';
+import { IntentOutcomeError as K8IntentOutcomeError } from '@byok-sdk/example-bot-collaboration/adapter-steps';
+import { HostedReconciler, type HostedIntentHandler, type HostedTaskPort } from './reconcile';
+import { IntentOutcomeError, type AgentMessageInput, type HostedIntentMessageHandler, type MessageDisposition } from './index';
+import { HostedCollaborationStore } from './store';
+import { inSchema, lockScope } from './transaction';
 
 /**
  * #955: the Host's own intents on H, the cases of L's host-intents.test.ts (#882) on Postgres. A fake SDK port: a
@@ -146,6 +148,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H Host intents on real Postgres (#9
       const result = await reconciler(store).run();
       expect(result).toMatchObject({ concluded: 0, failed: [{ scope, turnId: KEY, error: refused }] });
       expect(result.failed[0]!.error).toBeInstanceOf(IntentOutcomeError);
+      expect(result.failed[0]!.error).toBeInstanceOf(K8IntentOutcomeError);
     }
     expect(await row(scope)).toMatchObject({ conclusion: null, terminal: null, last_error: 'unknown_intent: No Bot Turn or Host intent has this key' });
     expect(await refusals(store, scope)).toEqual([`Intent outcome refused unknown_intent: ${KEY} No Bot Turn or Host intent has this key`]);
@@ -346,6 +349,43 @@ describe.skipIf(POSTGRES_URL === undefined)('H Host intents on real Postgres (#9
       expect((await row(scope))?.conclusion).toBeNull();
       expect(await ownerFailures(store, scope)).toEqual([]);
     });
+  });
+
+  it('#1320: cancels an untried Host intent at once, leaves a tried one to the reconciler, and refuses what is not a Host intent', async () => {
+    const store = hostStore({ research: () => {} }), scope = await scoped(store);
+    const cancel = (key: string) => store.cancelHostIntent(scope, key, Date.now);
+    await expect(cancel('missing')).rejects.toMatchObject({ name: 'HostIntentError', key: 'missing', code: 'unknown_intent' });
+    await direct(scope, { key: 'direct' });
+    await expect(cancel('direct')).rejects.toMatchObject({ code: 'unknown_intent' });
+    await expect(cancel('t1')).rejects.toMatchObject({ key: 't1', code: 'not_host_intent' });
+    await store.enqueueHostIntent(scope, input(), 'research', Date.now);
+    await expect(cancel(KEY)).resolves.toEqual({ key: KEY, result: 'cancelled', conclusion: 'cancelled' });
+    await expect(cancel(KEY)).resolves.toEqual({ key: KEY, result: 'already_settled', conclusion: 'cancelled' });
+    await store.enqueueHostIntent(scope, input({ key: 'tried' }), 'research', Date.now);
+    // The `direct` row heads the Main Bot FIFO; once it settles, the tried intent reaches the SDK.
+    await inSchema(opened!.pool, opened!.store.schema, client => client.query(`UPDATE intent SET conclusion = 'failed' WHERE key = $1`, [storedKey('direct')]));
+    expect(await submit()).toMatchObject({ tried: 1 });
+    await expect(cancel('tried')).resolves.toEqual({ key: 'tried', result: 'cancel_pending' });
+    expect(await row(scope, 'tried')).toMatchObject({ conclusion: null, submission: 'delivered' });
+  });
+
+  it('#1229: keeps the last device slot for user-source work, as L\'s admitDeviceSlot', async () => {
+    const store = hostStore({ research: () => {} }), scope = await scoped(store);
+    for (const [key, source] of [['bot-a', 'bot'], ['bot-b', 'bot'], ['user-c', 'user']] as const) {
+      await store.enqueueHostIntent(scope, input({ key, source, execution: template('device', key) }), 'research', Date.now);
+    }
+    const run = (batch?: number) => new HostedSubmitter(opened!.pool, opened!.store.schema, { port: () => port, deviceConcurrency: 2, batch }).run();
+    expect(await run()).toEqual({ tried: 2, failed: [] });
+    expect(await run()).toEqual({ tried: 0, failed: [] });
+    // A held head ahead of it in the scan does not fill a batch of 1: a row on another device still gets submitted.
+    await store.bindDevice(scope, 'other');
+    await store.enqueueHostIntent(scope, input({ key: 'bot-d', source: 'bot', execution: template('other', 'bot-d') }), 'research', Date.now);
+    expect(await run(1)).toEqual({ tried: 1, failed: [] });
+    expect((await rows(scope)).map(found => [found.key, found.submission]))
+      .toEqual([['bot-a', 'delivered'], ['bot-b', 'reserved'], ['user-c', 'delivered'], ['bot-d', 'delivered']]);
+    // A held row still expires at its wait while its device stays full.
+    await inSchema(opened!.pool, opened!.store.schema, client => client.query('UPDATE intent SET wait_until = 1 WHERE key = $1', [storedKey('bot-b')]));
+    expect([await run(1), (await row(scope, 'bot-b'))?.conclusion]).toEqual([{ tried: 1, failed: [] }, 'expired']);
   });
 
   it('compaction removes a settled Host intent with its handler, and its key can never freeze again', async () => {

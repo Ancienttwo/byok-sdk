@@ -207,9 +207,36 @@ protocol overrides.
 The configuration is validated, persisted and included in the exact profile
 hash. Missing or stale configuration rejects before credential access or Pi
 startup. Direct provider transports do not require Pi configuration. Vendor
-kind, endpoint and model name never infer it; Pi's built-in catalog does not
-override the namespaced local projection. Model limits do not constitute Host
-ContextPack budgets or measured available input tokens.
+kind, endpoint and model name never infer it. By default the Pi provider id
+is `byok-sdk-<profile_ref>`. A profile served by OpenCode Go may explicitly set
+`pi_model.providerId: 'opencode-go'` with `api: 'openai-completions'`; the
+schema refuses other ids and other APIs. Models not served by OpenCode Go
+must not set it. Pi then applies its own OpenCode Go reasoning replay
+(`reasoning` to `reasoning_content`) and session headers, including at a local
+gateway. The SDK never rewrites request or response payloads. The optional
+field is part of the persisted profile hash. The prepared lane refuses it.
+Every keys-profile RPC launch rejects a Pi model-runtime composition error
+before model resolution or session creation, so an invalid projection cannot
+silently fall back to a built-in provider. A launch projects exactly one
+profile and the profile store permits only one enabled profile. The launcher
+isolates user model/auth files with a fresh private Pi directory; durable
+workers receive the provider id bound to the sealed profile ref over private
+launcher IPC and verify their single projection. Ambient provider credentials,
+including `OPENCODE_API_KEY`, are excluded and refused by the child if present.
+Model limits do not constitute Host ContextPack budgets or measured available
+input tokens.
+
+Direct OpenCode Go profiles use the explicit `provider_kind: 'opencode-go'`.
+Each `checkProviderKey` call generates one random `x-opencode-session`, reused
+across its bounded reasoning-only retry, and sends a truthful
+`@byok-sdk/keys/<package version>` User-Agent. An endpoint or model name never
+selects this behavior. Authentication failures keep their closed outcome
+codes; a successful key check remains a UI hint. The added provider kind
+widens the profile store CHECK set: existing stores report
+`migration-required` and keep their data and credential-store key references
+through the Host's explicit `migrateProviderProfileStore` call. Pi execution
+separately requires the declared Pi identity above; provider kind does not
+infer it.
 
 `@byok-sdk/keys` can derive such a configuration from the pi-ai catalog that
 the client pins. The table is a checked-in generated file; a test fails until
@@ -247,7 +274,9 @@ and makes no network request.
   At that URL a representable entry equals the pinned pi-ai built-in model's
   configuration field by field. Run-time branches that pi-ai takes on its own
   provider id are outside that promise, because the projected provider id is
-  `byok-sdk-<profile_ref>`. In pi-ai 1.5.0 these are `cacheControlFormat` for
+  `byok-sdk-<profile_ref>` unless the profile explicitly declares `opencode-go`.
+  The declared identity enables Pi's OpenCode Go reasoning replay and session
+  headers. In pi-ai 1.5.0 the other branches are `cacheControlFormat` for
   openrouter `anthropic/*` models (`api/openai-completions.js:1257`), the
   xai `reasoning.encrypted_content` include, which differs only for grok-4.3
   at `off` (`api/openai-responses.js:302`), cerebras body-less overflow
@@ -1082,8 +1111,10 @@ source (`login-shell`, `windows-session`, `allowlist`, `pass`, or `sdk` for the
 admitted that the hard deny or the conflict rule then removed. It carries no
 value. Each SDK adapter
 builds it under its `runtimeEnvironment` constructor option; `createDaemon`
-passes `DaemonConfig.runtimeEnvironment` to the adapters it builds, and
-`createDaemonWithAdapters` rejects that field.
+gives each adapter it builds `DaemonConfig.runtimes.<id>.runtimeEnvironment`,
+else `DaemonConfig.runtimeEnvironment` (#1759). A per-runtime policy replaces
+the top-level one for that runtime; the two are never merged.
+`createDaemonWithAdapters` rejects both fields.
 
 - `login-shell` (default): the user's login-shell snapshot, captured once per
   process from a closed seed and a fixed `PATH`, never from the daemon's
@@ -1117,7 +1148,7 @@ reports `unknown`. Names an adapter adds to one task's environment when it
 starts that task are not listed. The diagnostics snapshot and the support
 bundle keep only counts per hashed runtime id, and `audit.jsonl` keeps no
 names. `byok-agent config check` starts no login shell, so it prints the
-file's `runtimeEnvironment` policy and no names; the same file's static
+file's `runtimeEnvironment` policy, each runtime's effective policy and no names; the same file's static
 `toolAuthorization` (including `fileScope`) and bundled `runtimes` isolation
 are validated and reported as effective values, so a CLI task selects its
 runtime and `auto`/`all` mode from that file without embedded adapters.
@@ -1809,19 +1840,19 @@ misconfiguration. A production counter is no longer on that list.
 
 After claim, every expected adapter failure crosses one of two boundaries as a
 `RuntimeExecutionFailure`: `start` before a `Session` is published, or `run`
-from the published Session's event iterator. The failure carries two
-independent closed axes: `category` is `semantic`, `infrastructure`, or
-`authority`; `retry` is explicitly `retryable` or `non-retryable` and is never
-derived from category or reason text.
+from the published Session's event iterator. Its `retry` is explicitly
+`retryable` or `non-retryable` and is never derived from reason text. It has
+no other classification axis: `retry` is the only retry authority and
+`failure` (below) the only failure class (#1758).
 
-OAR start error classification is owned by `packages/client/src/adapters/oar-start-failure.ts`. An archived resume target is an authority failure and non-retryable; a target in use is an infrastructure failure and retryable.
+OAR start error classification for Grok, agy, Codex, dsh and OpenCode is owned by `packages/client/src/adapters/runtime-start-failure.ts`. An archived resume target is non-retryable; a target in use is retryable.
 
-- Vendor-native terminal task failure is semantic and non-retryable unless the
-  provider supplies structured retry authority.
+- Vendor-native terminal task failure is non-retryable unless the provider
+  supplies structured retry authority.
 - Spawn, transport, or child-process disappearance before native terminal
-  evidence is infrastructure and retryable.
+  evidence is retryable.
 - Session identity mismatch, malformed authoritative frames, or sealed
-  operation-manifest drift is authority and non-retryable.
+  operation-manifest drift is non-retryable.
 - A bare throw, wrong-phase typed failure, or Session iterator that ends
   without `turn_end` or a typed failure is an adapter-contract violation. It
   produces one stable non-retryable failure; TaskRunner does not inspect the
@@ -1852,7 +1883,7 @@ makes itself `unknown`. It keeps `scope` only when the server also advertises
 | dsh | the native `LlmFailure` code, then its HTTP status, through the vendored OAR dsh table; no class comes from error text |
 | Pi, Hermes | no structured field: `unknown` |
 
-Claude, Codex, Grok, Pi (the rpc, prepared and durable lanes), Hermes, dsh and agy report a
+Claude, Codex, Grok, OpenCode, Pi (the rpc, prepared and durable lanes), Hermes, dsh and agy report a
 runtime process that ends on its own before its terminal, during start or a turn,
 as `runtime_exited`; an exit the SDK or the vendored session asked for is not one.
 Pi's durable lane recovers a worker that ends on its own during a run (within its
@@ -2043,8 +2074,14 @@ dependencies of the official packages, which pin them exactly in 1.5.0.
 The SDK reads their installed version and does not gate it. Fork aliases and dual runtimes are
 retired. `resolvePiRuntimeIdentity()` reads the static dependency projection;
 resolved name/version mismatch fails closed. There is no implicit global Pi fallback.
-Only public Pi APIs are used; private imports, patches, copied provider serializers
-or Session core, and global monkey-patches are forbidden.
+Pi integrations use public APIs except the reviewed ordinary-RPC ingress
+parser `AgentSession._throwIfExtensionCommand`
+([#1642 decision](https://github.com/Ancienttwo/byok-sdk/issues/1642#issuecomment-6762108942)).
+That private dependency is runtime-checked and pinned by upgrade tests; the
+host refuses startup if it is unavailable. It is called through a read-only
+registry façade, with no copied parser or session-state mutation. Private
+imports, upstream patches, copied provider serializers or Session core, and
+global monkey-patches remain forbidden.
 
 Upstream RAFT also embeds the Pi SDK and inherits the user's agent directory.
 It does not run the user's installed pi CLI (RAFT mirror commit
@@ -4032,17 +4069,39 @@ poll the cloud read API. With no draft producer, only a terminal marker appears.
 
 Pi subagents are the upstream `pi-subagents` package (exact client dependency,
 0.87.0), loaded by the ordinary RPC host when the credential source is
-`pi-auth-store` (see the `keys-profile` lane above), and never by the sealed
-host. The SDK vendors and patches none of it. pi-subagents reads its own
+`pi-auth-store` (see the `keys-profile` lane above). The SDK vendors and patches none of it. pi-subagents reads its own
 package files at run time, so a product bundler never inlines it. The installed
 host imports the installed package through opaque specifiers. A single-file
 product's bundled re-entry loads the copy in its Pi asset root (below) through
 Pi's own extension loader, which supplies the Pi modules of the product bundle.
 
+Host text submitted through RPC `prompt`, `steer` or `follow_up`, including
+queued input, cannot invoke pi-subagents commands that start a child or
+watchdog executors: `/run` (including `--bg` and `--fork`), `/prompt-workflow`,
+`/subagents-refine`, `/subagents-check-profile`, `/subagents-refresh-provider-models`,
+`/subagents-generate-profiles` and `/subagents-watchdog`. The three profile
+commands can start Pi model-probe processes. Enabling watchdog can start a
+workspace language server and a separate model reviewer with its own tool loop,
+which does not pass through the session tool-authorization hooks. The host
+refuses the command with a failed RPC response carrying
+`pi_host_command_denied`, before Pi can defer the prompt during `agent_settled`
+or run its command handler. The ingress check uses Pi 1.5.0's private
+`_throwIfExtensionCommand` parser with a read-only registry façade; there is no
+SDK copy of its parser. If that method is missing or not a function, the host
+refuses startup with `pi_host_command_boundary_unavailable`. The dependency
+must be rechecked on each Pi upgrade. The check uses the command Pi resolves,
+including disambiguated aliases, and its extension source; another
+extension's command with the same name keeps its own behavior. Host text is
+never rewritten. Skill commands (`/skill:`), file prompt templates and other
+extension commands keep their existing expansion. Model text and tool-result
+text containing a slash command stay content. Host-requested children start
+through the `subagent` tool; under `auto`, workflow children also require the
+nested `subagent_launch` admission described below (#1642).
+
 Foreground children are in-process Pi sessions inside the parent host. In the
 installed host, background runs use pi-subagents' detached Node runner from the
-installed package. Neither re-enters the SDK: there is no `pi-subagent-print` or
-`pi-subagent-runner` helper kind. pi-subagents keeps its own depth (`PI_SUBAGENT_MAX_DEPTH`), concurrency and
+installed package. Bun-compiled products re-enter their executable as described
+below; no `pi-subagent-print` or `pi-subagent-runner` helper kind is added. pi-subagents keeps its own depth (`PI_SUBAGENT_MAX_DEPTH`), concurrency and
 fan-out limits. The SDK adds no second limit and no money or token spend cap.
 
 Under the `auto` tool authorization gate, the parent session registers
@@ -4091,11 +4150,15 @@ the child `cwd` is outside the file scope's tools, so each workflow child asks.
 
 pi-subagents calls `subagent_launch` only for children started by a workflow
 from a `subagent` call. It skips the call for schedule ticks, auto-resume,
-`/prompt-workflow` and RPC starts. Those children still load the gate
-extension, so each of their tool calls is gated, but no launch check of their
-`cwd`, gate commands or output runs. This is the same as 0.83.1.
+`/prompt-workflow` and RPC starts outside that tool path. The ordinary SDK
+Host prompt boundary refuses the child-starting commands listed above. Other
+upstream starts still load the gate extension, so each of their tool calls is
+gated, but no launch check of their `cwd`, gate commands or output runs.
 
-A single-file product offers foreground subagents only. `copyPiRuntimeAssets`
+Bun-compiled executables with install-root assets offer foreground and
+background subagents, including workflows. Node SEA and interpreter + bundle
+products offer foreground non-workflow subagents; they refuse background
+launches and every workflow, including `async:false`. `copyPiRuntimeAssets`
 writes `pi-subagents/` into the Pi asset root: the client's exact pi-subagents
 package with the closure of its runtime dependencies in its own `node_modules`,
 about 22 MB. Beside it, `pi-subagent-extensions/` holds the SDK gate and
@@ -4106,39 +4169,83 @@ An asset root without the copy, or with another version, fails the launch with
 `pi_bundled_assets_unavailable`. The copy is SDK build output, so the check
 is its name and version, not a content digest.
 
-pi-subagents loads the Pi SDK of its foreground children, and decides whether
-a background run can start, from the Pi package root it finds. It reads
-`PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` before it searches the ancestors of
-the entry point and its own resolution, which could otherwise find a foreign
-Pi installed above the product. The bundled host sets that variable to a
-package it writes into its launch-private directory. The package carries Pi's
-name, version and `piConfig` and re-exports the product's own in-process Pi
-module, but holds none of Pi's peers. Foreground children therefore always run
-on the product's Pi, and pi-subagents refuses every background run in the
-interpreter + bundle form ("Background children require the host npm package
-… with its dependencies"). The Bun-compiled form re-executes `process.execPath`
-for a background run, which would start the product itself with Pi CLI
-arguments. So the bundled host also sets pi-subagents' Pi executable override,
-`PI_SUBAGENT_PI_BINARY`, to the same launch-private directory, which always
-exists and cannot be spawned. Only spawn paths read that override, never
-foreground children. A background launch then fails before any runner starts
-("async runner did not produce a pid"), and the tool call returns the error.
-The other users of the override fail the same way and never re-execute the
-product: Herdr project panes, Rex local placement and the live model probe of
-the profile check. Pi's bash tool passes the host environment to the commands
-it runs, and pi-subagents children build their own bash tools, so the SDK
-cannot strip both variables from them. A `pi` that a user starts inside the
-agent's bash therefore fails to load pi-subagents (the generated package loads
-only inside its host) and cannot spawn a background runner; it never loads a
-foreign Pi.
+The bundled host sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` to a
+launch-private package that carries Pi's name, version and `piConfig` and
+re-exports the product's own Pi. A foreign Pi installed above the product is
+never selected. Bun-compiled products also capture Pi's embedded peer namespaces
+through Pi's extension loader and expose them to the detached runner. The peer
+catalogue is loaded lazily from the installed upstream runner's
+`HOST_PEER_ALIASES`, so TypeBox remains outside the client dist. Bun executes
+unchanged installed code from the product-derived root described below.
 
-Background subagents in a single-file product need an upstream seam (#1589,
-item 2): a host runner command for background runs
-(nicobailon/pi-subagents#3105), and a way for the host to state that its Pi is
-the embedded one and that it hosts no background runs, instead of the package
-root setting above. Upstream closed #3105 as not planned; the pinned 0.87.0
-release still has no host runner command seam. Both capabilities remain
-blocked, and single-file products keep refusing background runs. See the
+Bun-compiled products set `PI_SUBAGENT_PI_BINARY` to the product and recognize
+only upstream's fixed Pi CLI arguments, the exact canonical installed
+`binary-bootstrap.js`, and an absolute `PI_SUBAGENT_RUNNER_CONFIG`. The code
+authority is `dirname(realpath(process.execPath))/pi-subagents`, with the SDK
+child extensions beside it. An environment-selected root or writable runtime
+manifest cannot choose code to load. The installed package and extensions
+reject symlinks. The install root has the same filesystem trust as the binary.
+Each process captures and rechecks its own device/inode, size and mtime pins
+to detect swaps within that process before loading. The runner does not
+authenticate against the host's earlier pins; no cross-process identity is
+passed, and replacing install files before a process starts is outside these
+swap checks. Launch data and generated peer bridges stay private. Other
+configured Pi data roots do not change this code authority. Pi's loader runs
+the unchanged upstream binary bootstrap, which owns startup and disposal.
+
+If either install-root asset directory is absent, the Bun host instead keeps
+foreground non-workflow subagents working from `bundledAssetRoot()` (including
+`runtimes.pi.packageDir`). This is a foreground-only branch, never another
+background code root. Explicit async calls and every workflow, including
+`async:false`, are refused at `tool_call`, explaining that background
+subagents and workflows need the shipped `pi-subagents` and
+`pi-subagent-extensions` assets beside the real executable. For an ordinary
+call left to async-by-default, upstream may return an async receipt. Its
+reserved runner then exits with the same missing-assets reason before loading
+any configured-root code. Upstream records the job as failed with that reason
+in the step error; `bg_wait` finishes rather than hanging. The receipt is not
+rewritten into an error. Present but symlinked, noncanonical or changed assets
+continue to fail closed, even when the other directory is absent.
+
+Node SEA starts its foreground host with the original executable and creates
+no `node` hardlink or executable alias, at startup or on demand. Link permissions
+and volume boundaries cannot prevent a foreground task from starting. SEA
+background requests return `pi_background_unavailable`: pi-subagents 0.87.0
+uses `resolveNodeExecutable` for its background runner and `fork` on
+`process.execPath` for its workflow supervisor, and a SEA binary cannot stand
+in for Node. The message names foreground subagents and a Bun-compiled product
+as working alternatives. Explicit background requests and every workflow,
+including `async:false`, are blocked at `tool_call`, before execution. When an ordinary
+child's `async` is omitted, upstream resolves its configured mode; its missing-peer
+preflight refuses a background launch before spawning, and the SDK gives the
+same explanation. Foreground children keep their existing mode resolution.
+
+SEA has no background asset preparation, private executable-root guard, runner
+preload/bootstrap dispatcher or workflow-supervisor dispatcher. Compiled
+runner-shaped argv that cannot match the supported Bun bootstrap is rejected
+before the product CLI. Ordinary product commands retain their dispatch, and
+PATH and general Node executable selection are unchanged.
+
+Bun workflows retain upstream's VM restrictions without Node's permission
+layer. G1 `subagent_launch` admission, native-child per-tool approval and required
+gate/file-scope child extensions still apply. Those hooks mediate Pi tool events;
+they do not police arbitrary JavaScript APIs after a VM escape. Installed-package
+Node workflows retain upstream's permission model. SEA background workflows
+are refused rather than run with a different permission boundary.
+
+Interpreter + bundle products retain a foreground-only private Pi bridge
+without detached peers. A background request is refused with
+`pi_background_unavailable`: the runner cannot re-enter a bundle run by an
+interpreter. The message names foreground subagents and a Bun-compiled product.
+No new public export, option or config key is required.
+
+The product dispatcher accepts only these pinned runner shapes. Other Pi CLI
+operations, including Herdr project panes, Rex local placement and profile
+model probes, do not gain a general Pi CLI re-entry. A separately invoked
+ambient Pi cannot use the product's process-local peer bridge or select a
+foreign SDK through it.
+The upstream host runner command seam proposed in nicobailon/pi-subagents#3105
+was closed as not planned, and pinned 0.87.0 still has no such seam. See the
 [upstream decision and package-source evidence](researches/2026-11-09-pi-background-runner-seam.md).
 
 ## Local native interaction contract
@@ -4361,7 +4468,7 @@ Startup fully enumerates the owned `exec-sdk` namespace before publishing capabi
 
 Standalone adapter Hosts must pass `scratch: await createExecutionScratch({ root })` to operation.start and Pi launch resolution. They must await release after child disposal. Scratch roots must be short, absolute, private, canonical and exclusive. On Unix, the root must belong to the current process user before any permission change. Unix socket validation reserves 16 bytes for the runtime socket name and one terminating NUL. The root limit is 61 UTF-8 bytes on macOS and 65 on Linux.
 
-Each configured filesystem path is folded into its on-disk spelling once, at the boundary that owns it, and every consumer uses the folded value (#1030). `DeviceStore.resolveDir` folds `storeDir` for the daemon and every CLI, so the control socket or pipe name, the control token, the Agent-home owner identity, helper `BYOK_STORE_DIR` and every retention root derive from one spelling. The daemon config resolution folds `piByokLauncher.sessionDir` for both the Pi launcher and retention, and storage config resolution folds an explicit `storage.scratchRoot` and each `storage.skillPackDataDirs` entry. Folding resolves Windows name aliases: 8.3 short names and letter case, and letter case on a case-insensitive macOS volume. On Windows it never follows a component that lstat reports as a link (a symbolic link, or a junction to a drive-letter path): such a path keeps its configured spelling and the link checks below reject it. On POSIX it follows a symbolic link only when the link is owned by root or the process user, and the directory holding it is owned by root or the process user and is not writable by group or others unless it has the sticky bit; any other link fails with `configured_path_untrusted_link`. The same rule folds `agentHome.hostStorageRoot` and the local-state relocation roots on POSIX. Volume mount points (junctions to `\??\Volume{GUID}\`), subst drives and mapped network drives look like plain directories or roots to lstat, so construction resolves them once to their final path. A missing tail keeps its spelling, and any other lookup error fails construction. Store-mutex, path-mutation-gate, Agent-home root and relocation identities stay physical: they use the real path. Retention mutates under a root only when the root's real path equals its spelling; otherwise the sweep fails closed with `retention_root_identity_invalid`.
+Each configured filesystem path is folded into its on-disk spelling once, at the boundary that owns it, and every consumer uses the folded value (#1030). `DeviceStore.resolveDir` folds `storeDir` for the daemon and every CLI, so the control socket or pipe name, the control token, the Agent-home owner identity, helper `BYOK_STORE_DIR` and every retention root derive from one spelling. The daemon config resolution folds `piByokLauncher.sessionDir` for both the Pi launcher and retention, and storage config resolution folds an explicit `storage.scratchRoot` and each `storage.skillPackDataDirs` entry. Folding resolves Windows name aliases: 8.3 short names and letter case, and letter case on a case-insensitive macOS volume. On Windows any existing component that lstat reports as a link (a symbolic link, or a junction to a drive-letter path) fails with `configured_path_untrusted_link`, reason `windows_link` (#1759). On POSIX it follows a symbolic link only when the link is owned by root or the process user, and the directory holding it is owned by root or the process user and is not writable by group or others unless it has the sticky bit; any other link fails with `configured_path_untrusted_link`. The same rule folds `agentHome.hostStorageRoot` and the local-state relocation roots on every platform. Volume mount points (junctions to `\??\Volume{GUID}\`), subst drives and mapped network drives look like plain directories or roots to lstat, so construction resolves them once to their final drive-letter or UNC path. A mount point to a volume that has no drive letter is expected to have no such final path, so its lookup error fails construction (not yet verified on a Windows host). Known limit: the walk lstats only the configured spelling, so a subst or mapped drive whose backing path contains a link is resolved through that link instead of refused. Only the user who defined the drive mapping, in their own logon session, can create such a spelling. A missing tail keeps its spelling, and any other lookup error fails construction. Store-mutex, path-mutation-gate, Agent-home root and relocation identities stay physical: they use the real path. Retention mutates under a root only when the root's real path equals its spelling; otherwise the sweep fails closed with `retention_root_identity_invalid`.
 
 Without `storage.scratchRoot`, derive the default from the canonical store identity (#493). Resolve the deepest existing ancestor of `storeDir` to its real path, then append any missing path components. If `<canonicalStoreDir>/tmp` exceeds the platform limit, use `/private/tmp/byok-scratch-<hash>` on macOS or `/tmp/byok-scratch-<hash>` on Linux. The hash is the first 16 lowercase hexadecimal characters of SHA-256 over the UTF-8 canonical store path. All aliases of that store select the same fixed root. Otherwise, keep the lexical `<storeDir>/tmp` of the folded store and validate it. If that alias exceeds the limit, construction fails. Windows keeps the lexical path without a Unix socket limit.
 

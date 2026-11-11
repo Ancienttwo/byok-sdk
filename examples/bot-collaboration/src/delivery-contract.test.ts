@@ -1,15 +1,14 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect } from 'vitest';
 import { freezeRuntimeAdapterDescriptor } from '@byok-sdk/client';
-import { tenantId } from '@byok-sdk/core';
 import { HostLedger } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { ChannelPort, InboundMessage } from './channel';
 import { botCompactVeto } from './compaction';
 import { FINAL_BODY, deliveryVectors, replyToken, type DeliverySubject } from './delivery-vectors.test-support';
-import { BotCollaboration, type AgentMessageInput, type BotOptions } from './host';
+import { BotCollaboration, type BotOptions } from './host';
 import { openLTestHost, ResultStubAdapter, type LTestHost } from './l-test-host.test-support';
 
 // #793 D2b-out-1: the delivery vectors on the K8 L Host, with a real SQLite HostLedger, embedded server and daemon.
@@ -60,7 +59,6 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
     await hold.gate;
     return result;
   };
-  const roots = new Map<string, string>();
   const adapter = new DraftAdapter();
   const fixture: LTestHost = await openLTestHost({ ledgerOptions: { compactVeto: botCompactVeto }, adapter,
     consume: (wake, signal) => bot.consume(wake, signal), agentMessage: { consume: input => bot.consumeMessage(input) } });
@@ -128,13 +126,6 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
       await settle();
     } };
   };
-  const agentMessage = (turnId: string): AgentMessageInput => {
-    const intent = bot.core.intent(turnId)!;
-    return { tenant: tenantId(ledger().tenant), taskId: intent.taskId, deviceId: fixture.deviceId,
-      context: intent.execution.agentMessageContext!, payload: { agentRef: intent.execution.payload.agentRef,
-        sessionRef: randomUUID(), contract: 'conversation-turn/v1', messageId: randomUUID(), cursor: 1, contentType: 'text/markdown',
-        body: FINAL_BODY, contentHash: `sha256:${createHash('sha256').update(FINAL_BODY).digest('hex')}`, byteCount: Buffer.byteLength(FINAL_BODY) } };
-  };
   return {
     now: () => now,
     drain: run,
@@ -143,30 +134,19 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
       const message: InboundMessage = { channel: 'fake', platformMessageId: key, conversation, sender: { id: 'owner', kind: 'human' }, text: 'Answer me',
         mentions: [], ...(replyMs === null ? {} : { replyRoute: { kind: 'reply', channel: 'fake', inboundId: key, token: replyToken(key), expiresAt: now + replyMs } }) };
       const root = (await bot.receive(message)).id!;
-      roots.set(key, root);
       await bot.drain();
-      await adapter.started(bot.core.intent(root)!.taskId);
-      expect(await bot.consumeMessage(agentMessage(root))).toEqual({ outcome: 'accepted' });
-      await run();
-    },
-    end: async key => {
-      const root = roots.get(key)!, taskId = bot.core.intent(root)!.taskId;
-      const events = fixture.server.events.subscribe()[Symbol.asyncIterator]();
-      try {
-        await bot.cancelTurn(root);
-        for (;;) {
-          const next = await events.next();
-          if (next.done) throw new Error('Server event stream ended before the task terminal');
-          if (next.value.kind === 'task.state' && next.value.taskId === taskId && ['Complete', 'Failed', 'Cancelled'].includes(next.value.state)) break;
-        }
-      } finally { await events.return?.(); }
-      // K4 takes the terminal through its own wake, so the Turn can conclude a pass after the server event.
-      for (let tries = 0; !bot.snapshot().turns[root]?.conclusion; tries++) {
+      const taskId = bot.core.intent(root)!.taskId;
+      await adapter.started(taskId);
+      // The runtime's final message is accepted mid-Turn; the Turn's outcome makes it sendable (#1762). K4 alone concludes
+      // the intent, so the one Host run below makes the first send, as a held send expects.
+      void adapter.sessions.get(taskId)!.finish({}, true, FINAL_BODY);
+      for (let tries = 0; !bot.core.intent(root)?.conclusion; tries++) {
         if (tries === 100) throw new Error('The Turn did not conclude');
-        await run();
-        if (!bot.snapshot().turns[root]?.conclusion) await new Promise(resolve => setTimeout(resolve, 20));
+        await bot.core.drain();
+        if (!bot.core.intent(root)?.conclusion) await new Promise(resolve => setTimeout(resolve, 20));
       }
-      expect(bot.snapshot().turns[root]).toMatchObject({ conclusion: 'cancelled' });
+      expect(bot.core.intent(root)!.conclusion).toBe('succeeded');
+      await run();
     },
     holdNextSend: () => holdNext('send'),
     holdNextReadback: () => holdNext('readback'),

@@ -1,6 +1,6 @@
-import { DAEMON_CONFIG_SCHEMA } from './schema.generated';
-import type { DaemonConfigJsonSchema } from './schema-types';
-import { REMOVED_DAEMON_CONFIG_FIELDS, type RemovedDaemonConfigField } from './removed-fields';
+import { DAEMON_CONFIG_SCHEMA } from './schema.generated.js';
+import type { DaemonConfigJsonSchema } from './schema-types.js';
+import { REMOVED_DAEMON_CONFIG_FIELDS, type RemovedDaemonConfigField } from './removed-fields.js';
 
 /**
  * Where a `DaemonConfig` comes from (#1094).

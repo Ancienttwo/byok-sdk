@@ -14,7 +14,8 @@ import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedRoutineScheduler } from './scheduler';
 import { HostedOutboxSender } from './sender';
 import { TEST_HOST } from './memory-subject.test-support';
-import { HostedCollaborationStore, homeRowKey, inSchema, lockScope, type InboundIdentity } from './store';
+import { HostedCollaborationStore, homeRowKey, type InboundIdentity } from './store';
+import { inSchema, lockScope } from './transaction';
 import { freezeIntent, HostedSubmitter } from './intents';
 import type { TaskEvidence } from './reconcile';
 
@@ -188,7 +189,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     expect(await submitter(sdk.port).run()).toEqual({ tried: 1, failed: [] });
     expect(sdk.submitted).toEqual([]);
     expect((await opened!.pool.query(`SELECT last_error FROM ${table('intent')} WHERE scope = $1`, [storedKey(scope)])).rows)
-      .toEqual([{ last_error: 'Device is switching to L: device' }]);
+      .toEqual([{ last_error: 'Device device is switching to L' }]);
     // The next pass does not claim it either.
     const pass = await submitter(sdk.port).run();
     expect([pass.tried, sdk.submitted]).toEqual([0, []]);

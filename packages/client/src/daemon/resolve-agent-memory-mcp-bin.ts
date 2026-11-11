@@ -1,5 +1,5 @@
-import { isAgentMemorySecureFilesystemAvailable } from './agent-memory';
-import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
+import { isAgentMemorySecureFilesystemAvailable } from './agent-memory.js';
+import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host.js';
 
 export interface ResolvedAgentMemoryMcpBin { readonly command: string; readonly args: readonly string[]; }
 /** Resolve the SDK-owned stdio Agent-memory MCP helper shipped beside the client bundle. */

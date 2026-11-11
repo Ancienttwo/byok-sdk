@@ -6,7 +6,7 @@
  * composition stays runtime-neutral, and an adapter that reached for a Node
  * built-in here would make that claim false for the default composition.
  */
-import type { CloudCrypto } from './port';
+import type { CloudCrypto } from './port.js';
 
 /** Short, human-typeable pairing code alphabet — no `0/O`, no `1/I` (mirrors the reference server's). */
 const PAIRING_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

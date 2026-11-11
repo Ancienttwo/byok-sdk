@@ -2,18 +2,18 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
 import { AgentRefSchema, type AgentRef } from '@byok-sdk/protocol';
-import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeBusyError, AgentHomeLeaseManager, AgentHomeManager, stableAgentHomeOwnerId } from '../agent-home';
-import { connectControlClient } from '../daemon/control-client';
-import { acquireDaemonOwner, DaemonOwnerActiveError } from '../util/daemon-owner';
-import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
-import { AgentMessageOutbox, AGENT_MESSAGE_DIRECTORY, AGENT_MESSAGE_OUTBOX_FILENAME } from '../daemon/agent-message-outbox';
-import { DeviceStore } from '../daemon/store';
-import { createDeviceCredentialStore } from '../daemon/device-credential-provider';
-import type { DaemonConfig } from '../daemon/create-daemon';
-import { quarantineCorruptOperationalHealth } from './diagnostics';
-import type { OperationalHealthFixResult } from './types';
-import type { DiagnoseDeviceOptions } from './device-doctor';
-import { createSupportBundle, isSupportBundleOutputInStore, writeSupportBundle } from './support-bundle';
+import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeBusyError, AgentHomeLeaseManager, AgentHomeManager, stableAgentHomeOwnerId } from '../agent-home.js';
+import { connectControlClient } from '../daemon/control-client.js';
+import { acquireDaemonOwner, DaemonOwnerActiveError } from '../util/daemon-owner.js';
+import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger.js';
+import { AgentMessageOutbox, AGENT_MESSAGE_DIRECTORY, AGENT_MESSAGE_OUTBOX_FILENAME } from '../daemon/agent-message-outbox.js';
+import { DeviceStore } from '../daemon/store.js';
+import { createDeviceCredentialStore } from '../daemon/device-credential-provider.js';
+import type { DaemonConfig } from '../daemon/create-daemon.js';
+import { quarantineCorruptOperationalHealth } from './diagnostics.js';
+import type { OperationalHealthFixResult } from './types.js';
+import type { DiagnoseDeviceOptions } from './device-doctor.js';
+import { createSupportBundle, isSupportBundleOutputInStore, writeSupportBundle } from './support-bundle.js';
 
 const MESSAGES = {
   'confirmation-required': 'Explicit confirmation is required for this local maintenance action.',

@@ -10,7 +10,8 @@ import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { hostedRoutineCommands, hostJobRowKey, loadSlice, writeSlice } from './routines';
 import { HostedRoutineScheduler } from './scheduler';
 import { HostedOutboxSender, type SenderOptions } from './sender';
-import { HOST_JOB_EXECUTION_UNSUPPORTED, HostedCollaborationStore, inSchema, lockScope } from './store';
+import { HOST_JOB_EXECUTION_UNSUPPORTED, HostedCollaborationStore } from './store';
+import { inSchema, lockScope } from './transaction';
 
 // #793 S14: summary-only Host job routines on H, the cases of K4 host-jobs.test.ts on Postgres.
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;

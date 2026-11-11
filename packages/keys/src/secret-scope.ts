@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 
-import { ByokKeysError } from './errors';
-import { assertSecretName, assertSecretNamespace } from './secret-name';
-import { type SecretStore, assertSharedSecretValue } from './secret-store';
+import { ByokKeysError } from './errors.js';
+import { assertSecretName, assertSecretNamespace } from './secret-name.js';
+import { type SecretStore, assertSharedSecretValue } from './secret-store.js';
 
 /**
  * Tenant identity a secret store is partitioned by. Ported from

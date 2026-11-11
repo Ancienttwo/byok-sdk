@@ -7,7 +7,8 @@ import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { Command } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import type { CommandRecord, CommitRequest } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { commitVectors, seedCollaboration, SYNC_OPTIONS, type CommitSubject, type SeedTeam } from '@byok-sdk/example-bot-collaboration/test-support';
-import { CallbackCommandError, HostedCollaborationStore, HostedStoreVersionError } from './store';
+import { CallbackCommandError, HostedCollaborationStore } from './store';
+import { HostedStoreVersionError } from './transaction';
 import { memorySubject, testHostConfig, VECTOR_ROUTINES, vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 
@@ -32,32 +33,6 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
   afterAll(async () => { await opened?.close(); });
 
   commitVectors('H HostedCollaborationStore on Postgres', hosted);
-
-  it('migrates frame dreams atomically, refuses conflicting rows, and is idempotent', async () => {
-    const legacy = await openStore(), schema = `"${legacy.store.schema}"`;
-    const scopes = ['legacy-a', 'legacy-b'], dreams = { bots: { main: { since: 1000, throughTurn: 't1' } }, open: {} };
-    try {
-      const expected = [];
-      for (const scope of scopes) {
-        await legacy.store.seed(scope, state => { seedCollaboration(state); state.dreams = structuredClone(dreams); });
-        expected.push(JSON.stringify(await legacy.store.read(scope)));
-        const { rows: [row] } = await legacy.pool.query<{ frame: string }>(`SELECT frame::text FROM ${schema}.scope WHERE scope = $1`, [JSON.stringify(scope)]);
-        const frame = JSON.parse(row!.frame);
-        frame.dreams = dreams;
-        await legacy.pool.query(`UPDATE ${schema}.scope SET frame = $2::json WHERE scope = $1`, [JSON.stringify(scope), JSON.stringify(frame)]);
-      }
-      await legacy.pool.query(`DELETE FROM ${schema}.dream_state WHERE scope = $1`, [JSON.stringify(scopes[0])]);
-      const before = await Promise.all(scopes.map(scope => legacy.store.dump(scope)));
-      await expect(legacy.store.migrate()).rejects.toThrow();
-      expect(await Promise.all(scopes.map(scope => legacy.store.dump(scope)))).toEqual(before);
-      await legacy.pool.query(`DELETE FROM ${schema}.dream_state WHERE scope = $1`, [JSON.stringify(scopes[1])]);
-      await legacy.store.migrate();
-      expect(await Promise.all(scopes.map(async scope => JSON.stringify(await legacy.store.read(scope))))).toEqual(expected);
-      const migrated = await Promise.all(scopes.map(scope => legacy.store.dump(scope)));
-      await legacy.store.migrate();
-      expect(await Promise.all(scopes.map(scope => legacy.store.dump(scope)))).toEqual(migrated);
-    } finally { await legacy.close(); }
-  });
 
   // #793 O2: only a byte compare sees drift in map order, key order or optional-field presence.
   it.each<[SeedTeam, Array<[string, Command]>]>([
@@ -219,7 +194,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
       await legacy.pool.query(`ALTER TABLE ${table} DROP CONSTRAINT entity_kind_check`);
       await legacy.pool.query(`ALTER TABLE ${table} ADD CONSTRAINT entity_kind_check CHECK (kind IN ('turn'))`);
       await legacy.store.migrate();
-      const wouldDo = { w1: { id: 'w1', botId: 'main', taskId: 'x', action: 'create_routine' as const, index: 0, at: 1, detail: null } };
+      const wouldDo = { w1: { id: 'w1', botId: 'main', turnId: 't1', taskId: 'x', action: 'create_routine' as const, index: 0, at: 1, detail: null } };
       await legacy.store.seed('would-do', state => { seedCollaboration(state); state.wouldDo = wouldDo; });
       expect((await legacy.store.read('would-do')).wouldDo).toEqual(wouldDo);
       // A frame that an L import on older code wrote holds the rows inline: migrate moves them into entity rows once.

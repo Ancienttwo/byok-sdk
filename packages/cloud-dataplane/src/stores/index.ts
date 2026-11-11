@@ -1,5 +1,5 @@
-import { PostgresAgentMessageDraftStore } from './agent-message-draft';
-export { PostgresAgentMessageDraftStore } from './agent-message-draft';
+import { PostgresAgentMessageDraftStore } from './agent-message-draft.js';
+export { PostgresAgentMessageDraftStore } from './agent-message-draft.js';
 /**
  * The Postgres composition of the cloud-local ports.
  *
@@ -24,50 +24,50 @@ export { PostgresAgentMessageDraftStore } from './agent-message-draft';
 import type { CloudStores } from '@byok-sdk/cloud';
 import type { CloudCrypto } from '@byok-sdk/cloud';
 import type { Clock } from '@byok-sdk/core';
-import type { ByokPool } from '../pool';
-import { assertByokPool } from '../pool-brand';
-import { PostgresObjectStore } from './core/objects';
-import { R2CloudBlobStore, R2ObjectMaintenanceStore, type R2BlobStoreOptions } from './r2-blobs';
-import { PostgresDeviceDirectory } from './devices';
-import { PostgresInboundDedupStore } from './dedup';
-import { PostgresNonceStore } from './nonces';
-import { PostgresPairingCodeStore } from './pairing-codes';
-import { PostgresRequestReceiptStore } from './receipts';
-import { PostgresTaskArchiveStore } from './task-archive';
-import { PostgresProofRequestReceiptStore } from './proof-receipts';
-import { PostgresTaskAttemptStore } from './task-attempts';
-import { PostgresTaskCancellationStore } from './task-cancellations';
-import { PostgresActivityStore } from './activity';
-import { PostgresApprovalTimelineStore } from './approval-timeline';
-import { PostgresAgentEgressStore } from './agent-egress';
-import { assertPendingMailboxProtocol } from './mailbox-protocol';
-import { TokenBucketRateLimiter, type PostgresRateLimitOptions } from './rate-limiter';
+import type { ByokPool } from '../pool.js';
+import { assertByokPool } from '../pool-brand.js';
+import { PostgresObjectStore } from './core/objects.js';
+import { R2CloudBlobStore, R2ObjectMaintenanceStore, type R2BlobStoreOptions } from './r2-blobs.js';
+import { PostgresDeviceDirectory } from './devices.js';
+import { PostgresInboundDedupStore } from './dedup.js';
+import { PostgresNonceStore } from './nonces.js';
+import { PostgresPairingCodeStore } from './pairing-codes.js';
+import { PostgresRequestReceiptStore } from './receipts.js';
+import { PostgresTaskArchiveStore } from './task-archive.js';
+import { PostgresProofRequestReceiptStore } from './proof-receipts.js';
+import { PostgresTaskAttemptStore } from './task-attempts.js';
+import { PostgresTaskCancellationStore } from './task-cancellations.js';
+import { PostgresActivityStore } from './activity.js';
+import { PostgresApprovalTimelineStore } from './approval-timeline.js';
+import { PostgresAgentEgressStore } from './agent-egress.js';
+import { assertPendingMailboxProtocol } from './mailbox-protocol.js';
+import { TokenBucketRateLimiter, type PostgresRateLimitOptions } from './rate-limiter.js';
 
-export { PostgresDeviceDirectory } from './devices';
-export { PostgresInboundDedupStore } from './dedup';
-export { PostgresNonceStore } from './nonces';
-export { PostgresPairingCodeStore } from './pairing-codes';
-export { PostgresRequestReceiptStore } from './receipts';
-export { PostgresProofReceiptRetentionAuthority, PostgresProofRequestReceiptStore } from './proof-receipts';
-export { PostgresTaskAttemptStore } from './task-attempts';
-export { PostgresTaskCancellationStore } from './task-cancellations';
-export { PostgresActivityStore } from './activity';
-export { PostgresApprovalTimelineStore } from './approval-timeline';
-export { PostgresAgentEgressStore } from './agent-egress';
-export type { PostgresRateLimitOptions } from './rate-limiter';
+export { PostgresDeviceDirectory } from './devices.js';
+export { PostgresInboundDedupStore } from './dedup.js';
+export { PostgresNonceStore } from './nonces.js';
+export { PostgresPairingCodeStore } from './pairing-codes.js';
+export { PostgresRequestReceiptStore } from './receipts.js';
+export { PostgresProofReceiptRetentionAuthority, PostgresProofRequestReceiptStore } from './proof-receipts.js';
+export { PostgresTaskAttemptStore } from './task-attempts.js';
+export { PostgresTaskCancellationStore } from './task-cancellations.js';
+export { PostgresActivityStore } from './activity.js';
+export { PostgresApprovalTimelineStore } from './approval-timeline.js';
+export { PostgresAgentEgressStore } from './agent-egress.js';
+export type { PostgresRateLimitOptions } from './rate-limiter.js';
 export {
   POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED,
   PostgresMailboxProtocolUnsupportedError,
-} from './mailbox-protocol';
+} from './mailbox-protocol.js';
 export {
   PostgresAgentMemoryProjectionStore,
   createPostgresAgentMemoryProjectionStore,
-} from './agent-memory-projection';
-export type { PostgresAgentMemoryProjectionStoreOptions } from './agent-memory-projection';
-export { PostgresTaskRedactionStore, createPostgresTaskRedactionStore } from './task-redaction';
-export { PostgresE2eeMemberStore } from './e2ee-member';
-export type { PostgresTaskRedactionStoreOptions } from './task-redaction';
-export { PostgresDeviceAssertionReplayAuthority } from './device-assertion-replay';
+} from './agent-memory-projection.js';
+export type { PostgresAgentMemoryProjectionStoreOptions } from './agent-memory-projection.js';
+export { PostgresTaskRedactionStore, createPostgresTaskRedactionStore } from './task-redaction.js';
+export { PostgresE2eeMemberStore } from './e2ee-member.js';
+export type { PostgresTaskRedactionStoreOptions } from './task-redaction.js';
+export { PostgresDeviceAssertionReplayAuthority } from './device-assertion-replay.js';
 export {
   DEFAULT_MAX_ATTEMPTS,
   DEFAULT_PRESIGN_TTL_SECONDS,
@@ -79,15 +79,15 @@ export {
   R2BlobStoreError,
   R2CloudBlobStore,
   R2ObjectMaintenanceStore,
-} from './r2-blobs';
-export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './r2-blobs';
+} from './r2-blobs.js';
+export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './r2-blobs.js';
 export type {
   R2DeleteResult,
   R2ListedObject,
   R2ObjectMaintenance,
   R2ObjectMaintenanceOptions,
   R2ObjectPage,
-} from './r2-blobs';
+} from './r2-blobs.js';
 
 /** Every cloud-local port. All twelve, or it is not a composition. */
 export type PostgresCloudStores = CloudStores;

@@ -44,8 +44,8 @@ function setup(version = '1.18.35', extra: Record<string, string> = {}) {
   for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
   const adapter = new OpenCodeAdapter({ models, resolveBin: () => ({ command: fake, source: 'env' }), runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_ACP_*'] } });
   const facts = (): Array<Record<string, any>> => readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
-  const start = async (instruction: string, sessionRef?: string) => {
-    const session = await startPreparedOperation(adapter, { instruction, ...(sessionRef === undefined ? {} : { sessionRef }) }, { workspaceDir: cwd, env });
+  const start = async (instruction: string, sessionRef?: string, mcpServers?: { host: { command: string } }) => {
+    const session = await startPreparedOperation(adapter, { instruction, ...(sessionRef === undefined ? {} : { sessionRef }) }, { workspaceDir: cwd, env, ...(mcpServers === undefined ? {} : { mcpServers }) });
     sessions.push(session);
     return session;
   };
@@ -78,7 +78,7 @@ for (const version of ['1.18.35', 'opencode v2.0.26']) {
       const wrong = path.join(box.cwd, 'elsewhere');
       box.env.FAKE_ACP_LISTED_CWD = wrong;
       await expect(box.start('hello', first.sessionRef)).rejects.toMatchObject({
-        name: 'RuntimeExecutionFailure', phase: 'start', category: 'authority', retry: 'non-retryable',
+        name: 'RuntimeExecutionFailure', phase: 'start', retry: 'non-retryable',
       });
       expect(box.facts().filter(fact => fact.kind === 'open' && fact.method === 'session/resume')).toHaveLength(1);
       expect(box.facts().filter(fact => fact.kind === 'prompt')).toHaveLength(2);
@@ -93,13 +93,16 @@ for (const version of ['1.18.35', 'opencode v2.0.26']) {
       const gate = path.join(box.cwd, 'release-rate-limit');
       box.env.FAKE_ACP_SESSION_STORE = path.join(box.cwd, 'native-session.json');
       box.env.FAKE_ACP_RATE_GATE = gate;
-      const session = await box.start('opencode-limit');
+      const session = await box.start('opencode-limit', undefined, { host: { command: 'fixture-mcp' } });
       const published = session.sessionRef;
       writeFileSync(gate, 'release');
       const events = await collect(session);
       expect(session.sessionRef).toBe(published);
       expect(box.facts().filter(fact => fact.kind === 'native-session').map(fact => fact.sessionId)).toEqual([published]);
       expect(box.facts().filter(fact => fact.kind === 'open' && fact.method === 'session/resume').map(fact => fact.params.sessionId)).toEqual([published]);
+      expect(box.facts().filter(fact => fact.kind === 'open').map(fact => fact.params.mcpServers)).toEqual([
+        [{ name: 'host', command: 'fixture-mcp', args: [], env: [] }], [{ name: 'host', command: 'fixture-mcp', args: [], env: [] }],
+      ]);
       const switchEvent = events.find(event => event.type === 'error');
       expect(switchEvent?.type === 'error' && JSON.parse(switchEvent.message)).toEqual({ event: 'model_switch', from: models[0], to: models[1], reason: 'rate_limited' });
       expect(events).toContainEqual({ type: 'progress', text: 'fallback reply' });
@@ -151,14 +154,50 @@ it('cleans a detached descendant before reporting success', async () => {
   expect(() => process.kill(pid, 0)).toThrow();
 });
 
-it('registers an opt-in adapter with truthful capabilities, and rejects unqualified Host toolsets', async () => {
+it('registers an opt-in adapter with truthful capabilities', async () => {
   const box = setup();
   const [adapter] = createRuntimeAdapters({ runtimeAllowlist: ['opencode'], runtimes: { opencode: { models, executable: fake } } });
   expect(adapter!.descriptor).toEqual(expect.objectContaining({ id: 'opencode', platforms: ['darwin', 'win32'], capabilities: OPENCODE_RUNTIME_CAPABILITIES, versionPolicy: { qualifiedVersion: '2.2.6', unqualified: 'warn' } }));
   expect(validateRuntimeDetectResult(await box.adapter.detect())).toMatchObject({ kind: 'available', version: '1.18.35', rawVersion: '1.18.35\n', executableSource: 'config' });
-  const detect = vi.spyOn(box.adapter, 'runtimeEnvironment');
-  expect(await box.adapter.prepare({ offer: { instruction: 'hello' }, descriptor: box.adapter.descriptor, requiredToolsetIds: [], mcpServers: { host: { command: 'unused' } } })).toMatchObject({ kind: 'reject' });
-  expect(detect).not.toHaveBeenCalled();
+  expect(OPENCODE_RUNTIME_CAPABILITIES.mcpToolsets).toBe(true);
+});
+
+it.each(['1.19.5', 'opencode v2.2.6'])('passes admitted MCP servers on new and resumed %s sessions', async version => {
+  const box = setup(version);
+  const server = { command: '/fixture/mcp', args: ['--stdio'], env: { TASK_SECRET: 'fixture-secret' } };
+  const resources = { workspaceDir: box.cwd, env: box.env, mcpServers: { host: server } };
+  const first = await startPreparedOperation(box.adapter, { instruction: 'hello' }, resources); sessions.push(first);
+  await collect(first); await first.close();
+  const second = await startPreparedOperation(box.adapter, { instruction: 'hello', sessionRef: first.sessionRef }, resources); sessions.push(second);
+  await collect(second);
+  const opens = box.facts().filter(fact => fact.kind === 'open');
+  expect(opens.map(fact => fact.method)).toEqual(['session/new', 'session/resume']);
+  for (const open of opens) expect(open.params.mcpServers).toEqual([{ name: 'host', command: server.command, args: server.args, env: [{ name: 'TASK_SECRET', value: 'fixture-secret' }] }]);
+});
+
+it.each(['1.19.5', 'opencode v2.2.6'])('uses MCP servers supplied at start on %s', async version => {
+  const box = setup(version);
+  const prepare = box.adapter.prepare.bind(box.adapter);
+  vi.spyOn(box.adapter, 'prepare').mockImplementation(async input => {
+    const prepared = await prepare(input);
+    if (prepared.kind === 'reject') return prepared;
+    const start = prepared.operation.start;
+    return { ...prepared, operation: { ...prepared.operation, start: input => start({ ...input,
+      mcpServers: { late: { command: 'late-mcp', env: { TOKEN: 'late-secret' } } },
+    }) } };
+  });
+  const session = await startPreparedOperation(box.adapter, { instruction: 'hello' }, {
+    workspaceDir: box.cwd, env: box.env, mcpServers: { admitted: { command: 'admitted-mcp' } },
+  });
+  sessions.push(session); await collect(session);
+  expect(box.facts().find(fact => fact.kind === 'open')?.params.mcpServers).toEqual([
+    { name: 'late', command: 'late-mcp', args: [], env: [{ name: 'TOKEN', value: 'late-secret' }] },
+  ]);
+});
+
+it.each([{ '': { command: 'server' } }, { host: { command: '' } }, { host: { command: 'server', env: { KEY: null } } }])('rejects malformed MCP authority during preparation', async mcpServers => {
+  const box = setup(); const result = await box.adapter.prepare({ offer: { instruction: 'hello' }, descriptor: box.adapter.descriptor, requiredToolsetIds: [], mcpServers: mcpServers as any });
+  expect(result).toMatchObject({ kind: 'reject', retryable: false }); expect(existsSync(box.log)).toBe(false);
 });
 
 it('resolves a PATH executable, then the installer location, without configuration reads', () => {
@@ -242,7 +281,7 @@ it.each([
   const session = await box.start('opencode-limit');
   const admitted = session.sessionRef;
   await expect((async () => { for await (const event of session.events) events.push(event as AgentEvent); })()).rejects.toMatchObject({
-    message: 'Rate limit exceeded', phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: 'rate_limited' },
+    message: 'Rate limit exceeded', phase: 'run', retry: 'non-retryable', failure: { class: 'rate_limited' },
   });
   expect(events).toEqual([]);
   expect(session.sessionRef).toBe(admitted);
@@ -260,22 +299,40 @@ it.each([
   const box = setup('1.18.35');
   const session = await box.start(prompt);
   await expect((async () => { for await (const _event of session.events); })()).rejects.toMatchObject({
-    message, phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: failureClass },
+    message, phase: 'run', retry: 'non-retryable', failure: { class: failureClass },
   });
   expect(box.facts().filter(fact => fact.kind === 'prompt')).toHaveLength(1);
   expect(box.facts().some(fact => fact.kind === 'open' && fact.method === 'session/resume')).toBe(false);
 });
 
 
+it('classifies OpenCode process exits during start and a turn', async () => {
+  const opening = setup('1.18.35', { FAKE_ACP_INITIALIZE: 'exit' });
+  await expect(opening.start('hello')).rejects.toMatchObject({
+    phase: 'start', retry: 'retryable', failure: { class: 'runtime_exited' },
+  });
+  vi.unstubAllEnvs();
+  const running = setup();
+  const session = await running.start('exit');
+  await expect(collect(session)).rejects.toMatchObject({
+    phase: 'run', retry: 'non-retryable', failure: { class: 'runtime_exited' },
+  });
+});
+
+it('validates the shared session limits', () => {
+  expect(() => new OpenCodeAdapter({ models, interruptTimeoutMs: 0.5 })).not.toThrow();
+  expect(() => new OpenCodeAdapter({ models, maxRetainedBytes: 0 })).toThrow('invalid opencode retention budget');
+});
+
 it('normalizes startup failures to start while retaining native classification', async () => {
-  for (const { env, category, failure } of [
-    { env: { FAKE_ACP_INITIALIZE: 'error' }, category: 'infrastructure', failure: 'unknown' },
-    { env: { FAKE_ACP_INITIALIZE: 'auth' }, category: 'authority', failure: 'auth' },
-    { env: { FAKE_ACP_MODEL_READBACK: 'fixture/wrong' }, category: 'authority', failure: 'unknown' },
+  for (const { env, failure } of [
+    { env: { FAKE_ACP_INITIALIZE: 'error' }, failure: 'unknown' },
+    { env: { FAKE_ACP_INITIALIZE: 'auth' }, failure: 'auth' },
+    { env: { FAKE_ACP_MODEL_READBACK: 'fixture/wrong' }, failure: 'unknown' },
   ]) {
     const box = setup('1.18.35', env as Record<string, string>);
     const error = await box.start('hello').then(() => undefined, error => error);
-    expect(error).toMatchObject({ phase: 'start', category, failure: { class: failure } });
+    expect(error).toMatchObject({ phase: 'start', failure: { class: failure } });
     expect(projectRuntimeBoundaryFailure(error, 'start')).toMatchObject({ contractViolation: false, failure: { class: failure } });
   }
 });
@@ -285,7 +342,7 @@ it('settles an opening budget kill before disposing the native session', async (
   const adapter = new OpenCodeAdapter({ models, maxRetainedBytes: 1, resolveBin: () => ({ command: fake, source: 'env' }) });
   const error = await startPreparedOperation(adapter, { instruction: 'hello' }, { workspaceDir: box.cwd, env: box.env })
     .then(() => undefined, error => error);
-  expect(error).toMatchObject({ name: 'RuntimeExecutionFailure', phase: 'start', category: 'infrastructure',
+  expect(error).toMatchObject({ name: 'RuntimeExecutionFailure', phase: 'start',
     message: 'opencode retained record byte budget exceeded' });
   expect(box.facts().some(fact => fact.kind === 'prompt' || fact.kind === 'close')).toBe(false);
   const started = box.facts().find(fact => fact.kind === 'start')!;

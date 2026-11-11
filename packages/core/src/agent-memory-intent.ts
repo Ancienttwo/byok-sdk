@@ -11,8 +11,8 @@
  * Canonicalization is the shared RFC 8785 canonicalizer ({@link canonicalizeJsonBytes});
  * hashing is WebCrypto SHA-256, as for every other core digest.
  */
-import { canonicalizeJsonBytes, type JsonObject } from './attestation';
-import { webCryptoSubtle } from './webcrypto';
+import { canonicalizeJsonBytes, type JsonObject } from './attestation.js';
+import { webCryptoSubtle } from './webcrypto.js';
 
 /** Domain tag inside every agent memory intent operation digest. */
 export const AGENT_MEMORY_INTENT_DIGEST_VERSION = 'byok-agent-memory-intent-v1' as const;

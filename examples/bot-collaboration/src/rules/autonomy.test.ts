@@ -3,14 +3,14 @@ import { addTurn } from './turn';
 import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcome';
 import { outcomeSchema, type ContextState } from './schema';
 import { applySpeech, advanceRooms, roomInput, type RoomsState } from './rooms';
-import { autonomyOf, recordWouldDo, wouldDoRows, type AutonomyGate, type AutonomyState } from './autonomy';
+import { autonomyOf, recordWouldDo, wouldDoRows, type Autonomy, type AutonomyGate, type AutonomyState } from './autonomy';
 /** These cases do not read the room projections. */
 const noPublish = (): void => {};
 
-/** A Turn of a Bot whose schema offers every ordinary action, and the ports that record an observed action. */
-function setup(taskId = 'task') {
+/** A Turn of a Bot whose schema offers every ordinary action. The rules build the gate from the Bot's autonomy. */
+function setup(autonomy?: Autonomy, taskId = 'task') {
   const main = { id: 'main', name: 'Main', role: 'Team owner', mainBot: true, archived: false, readyRevision: '1',
-    execution: { deviceId: 'device', payload: { agentRef: { agentId: 'main', profileRevision: '1' } } } };
+    execution: { deviceId: 'device', payload: { agentRef: { agentId: 'main', profileRevision: '1' } } }, ...(autonomy ? { autonomy } : {}) };
   const helper = { ...main, id: 'helper', name: 'Helper', mainBot: false };
   const state: OutcomeState & ContextState & AutonomyState = {
     team: { bots: { main, helper }, rooms: {}, rounds: {}, seats: {}, roots: {}, notes: [], homeOperations: [] },
@@ -19,33 +19,29 @@ function setup(taskId = 'task') {
   const turn = addTurn(state, { id: 't1', root: 't1', source: 'user', request: 'Work', botId: 'main', hop: 0, authority: 'owner' });
   state.schemas.t1 = outcomeSchema('main', state, turn);
   const calls = { createRoutine: 0, updateRoutine: 0 };
-  const ports = (autonomy?: AutonomyGate): OutcomePorts => ({
-    now: () => 1000, publish: () => {}, committed: { intent: () => undefined }, manage: () => {},
+  const published: string[] = [];
+  const ports: OutcomePorts = {
+    now: () => 1000, publish: key => { published.push(key); }, committed: { intent: () => undefined }, manage: () => {},
     createRoutine: () => { calls.createRoutine++; }, updateRoutine: () => { calls.updateRoutine++; }, cancelRoutine: () => {},
-    ...(autonomy ? { autonomy } : {}),
-  });
-  const records: string[] = [];
-  const observe = (): AutonomyGate => ({ autonomy: 'observe', record: (action, index, detail) => {
-    const row = recordWouldDo(state, { botId: 'main', taskId, action, index, at: 1000, detail });
-    if (row) records.push(row.id);
-  } });
-  return { state, turn, ports, calls, observe, records, taskId };
+  };
+  return { state, turn, ports, calls, published, taskId };
 }
 const routine = { localId: 'new_routine_1', schedule: { hour: 9, minute: 0, tz: 'UTC' }, prompt: 'Daily report' } as const;
 
 it('records a create_routine once for one outcome and creates no routine', () => {
-  const { state, ports, calls, observe, taskId } = setup();
-  applyTurnOutcome(state, 't1', taskId, { create_routine: [routine] }, ports(observe()));
-  applyTurnOutcome(state, 't1', taskId, { create_routine: [routine] }, ports(observe()));
+  const { state, ports, calls, published, taskId } = setup();
+  applyTurnOutcome(state, 't1', taskId, { create_routine: [routine] }, ports);
+  applyTurnOutcome(state, 't1', taskId, { create_routine: [routine] }, ports);
   expect(calls.createRoutine).toBe(0);
   expect(wouldDoRows(state)).toEqual([expect.objectContaining({ botId: 'main', taskId, action: 'create_routine', index: 0, detail: routine })]);
-  // The same outcome records one row, not one per application.
+  // The same outcome records one row and publishes it once, not once per application.
   expect(Object.keys(state.wouldDo ?? {})).toHaveLength(1);
+  expect(published).toEqual([`would-do:${wouldDoRows(state)[0]!.id}`]);
 });
 
 it('records a cross-Bot delegation but still applies a self continuation in observe', () => {
-  const { state, ports, observe } = setup();
-  applyTurnOutcome(state, 't1', 'task', { delegate: [{ to: 'helper', request: 'Check the totals' }, { to: 'main', request: 'Draft it' }] }, ports(observe()));
+  const { state, ports } = setup();
+  applyTurnOutcome(state, 't1', 'task', { delegate: [{ to: 'helper', request: 'Check the totals' }, { to: 'main', request: 'Draft it' }] }, ports);
   expect(Object.values(state.delegations)).toEqual([]);
   expect(state.batches).toEqual({});
   expect(Object.values(state.turns).filter(row => row.source === 'bot_request')).toEqual([]);
@@ -66,7 +62,7 @@ it('records a room_call in observe while the accepted speech stays, and creates 
   const state: AutonomyState = {};
   const rows: string[] = [];
   const gate: AutonomyGate = { autonomy: 'observe', record: (action, index, detail) => {
-    const row = recordWouldDo(state, { botId: 'a', taskId: 'task', action, index, at: 1000, detail });
+    const row = recordWouldDo(state, { botId: 'a', turnId: 'turn', taskId: 'task', action, index, at: 1000, detail });
     if (row) rows.push(row.id);
   } };
   const accepted: string[] = [];
@@ -79,18 +75,18 @@ it('records a room_call in observe while the accepted speech stays, and creates 
   expect(accepted).toEqual(['speech', 'room_call']);
   expect(wouldDoRows(state)).toEqual([expect.objectContaining({ action: 'room_call', detail: { members: ['b'] } })]);
   expect(rows).toHaveLength(1);
+  delete (state.wouldDo![rows[0]!] as { turnId?: string }).turnId;
+  expect(() => wouldDoRows(state)).toThrow('A would-do row has no turnId: run migrateWouldDo');
   // The same seat cannot speak twice, so a second application records nothing new either.
   applySpeech(team, seat, { speech: { kind: 'post', text: 'Ready' }, room_call: { members: ['b'] } }, 'task', 1, noPublish, accept, gate);
   expect(rows).toHaveLength(1);
 });
 
-it('applies the autonomous actions in auto, and an absent gate keeps the pre-#1229 behavior', () => {
-  for (const gate of [undefined, { autonomy: 'auto' as const, record: () => { throw new Error('auto records nothing'); } }]) {
-    const { state, ports, calls } = setup();
-    applyTurnOutcome(state, 't1', 'task', { create_routine: [routine] }, ports(gate));
-    expect(calls.createRoutine).toBe(1);
-    expect(state.wouldDo).toBeUndefined();
-  }
+it('applies the autonomous actions in auto', () => {
+  const { state, ports, calls } = setup('auto');
+  applyTurnOutcome(state, 't1', 'task', { create_routine: [routine] }, ports);
+  expect(calls.createRoutine).toBe(1);
+  expect(state.wouldDo).toBeUndefined();
 });
 
 it('reads an absent autonomy as observe, the default of a new Bot', () => {

@@ -36,7 +36,7 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | no | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | no | yes | no |
 | Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | no | yes | yes |
-| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | no | yes | yes |
+| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 | Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no | no | no |
 | Tool authorization `auto` | `toolAuthorizationAuto` | no | yes | no | no | no | no | no | yes | yes |
 | Prepared lane | `preparedLane` | no | no | no | no | no | no | no | yes | no |
@@ -49,6 +49,37 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 | Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | yes | no | no | no |
 | Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no | no |
 <!-- generated:capability-matrix:end -->
+
+## Pi background subagents in packaged products (#1589)
+
+Bun-compiled executables with shipped install-root assets support native
+background subagents and workflows through embedded Pi and pi-subagents 0.87.0.
+The real executable's directory is the code anchor and has the binary's
+filesystem trust. Symlinks are rejected; each process's dev/ino pins detect
+in-process swaps before loading. They do not authenticate the runner against
+host pins or detect replacement before process startup. G1 workflow-child
+admission and child authorization retain the ordinary `auto` contract.
+
+When install-root asset directories are absent, Bun still runs foreground
+non-workflow subagents from configured Pi assets. Explicit async and all
+workflow calls are refused up front. An ordinary default-async call may return
+its upstream receipt, then fail as an async job with the same missing-assets
+reason when reserved runner re-entry rejects it before loading code. Present
+but invalid assets remain fatal; no other background root is selected.
+
+Node SEA retains foreground subagents and explicitly refuses background
+subagents and workflows: pi-subagents 0.87.0 resolves its runner through Node
+and forks its supervisor on `process.execPath`; a SEA product cannot stand in
+for Node. No executable alias or hardlink is created, so EXDEV/EPERM cannot
+affect foreground startup. Node/Bun interpreter + bundle products also retain
+foreground non-workflow children and refuse background runs and all workflows,
+including `async:false`. The refusal names the working foreground mode and a
+Bun-compiled product with shipped install-root assets. PATH is unchanged.
+
+Bun workflows keep upstream's VM restrictions without Node's permission layer.
+G1 and required child extensions remain; those tool-event checks do not police
+arbitrary JavaScript APIs after a VM escape. Installed-package Node workflows
+retain upstream's permission model. See [Pi subagents](spec.md#pi-subagents).
 
 ## OpenCode implementation and qualification (#1538)
 
@@ -107,8 +138,10 @@ Steering and interactive permissions are unsupported on both lines. The ACP
 boundary cancels permission requests. V1 retains OAR's session-local appended
 persona overlay and cleanup; v2 refuses Agent-memory readers before execution
 because that appended instruction channel is unavailable. Task-scoped Host MCP
-toolsets are rejected before launch until both lines pass qualification. Native
-user MCP remains inherited. V2 `execute` calls remain opaque without a proven
+servers are passed through ACP on each open, including resume and model fallback.
+The loopback contract exercised a tool call and task isolation on OpenCode 1.19.5
+and 2.2.6 on macOS arm64 and Windows x64. Native user MCP remains inherited.
+V2 `execute` calls remain opaque without a proven
 native tool identity; the SDK never derives MCP names from code. Child call IDs
 carry the native child session id to avoid merging their calls with root calls.
 Child-session text is excluded from root answer progress. The SDK's flat event
@@ -421,10 +454,12 @@ Agent home (`lease.canonicalHome`):
   thread store is never linked: Codex cannot resume or list the user's
   threads. The adapter creates the store only through real directories inside
   the Agent home, and refuses the start when `.byok`, `.byok/codex` or the
-  store is a symbolic link. The store is the `agent-runtime-sessions` retention class
-  ([storage layout](host-local-storage-layout.md)). It is unbounded: each
-  Agent's rollouts accumulate until the Host removes the Agent home, as they
-  did in the user's `CODEX_HOME` before.
+  store is a symbolic link. The store is the `codex-session-store` retention class
+  ([storage layout](host-local-storage-layout.md)): a rollout expires 31 days
+  after its last write by default (`storage.retention.ttlMs['codex-session-store']`,
+  at least `session-ledger` plus one day) and is kept while the thread's session ledger lives. A thread that keeps chatting stays
+  resumable, and a thread a running task holds is never pruned. A resume of a
+  pruned thread fails closed through the missing-thread path below.
 
 A Bot that switches from `inherit` to `excluded` cannot resume the threads it
 made under `inherit`, because they are in the user's thread store. Such a

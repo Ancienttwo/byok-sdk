@@ -270,7 +270,7 @@ describe('required Agent message completion gate', () => {
         expect(ownedStart).toBeDefined();
         await ownedStart!.settled;
         await error.retryDisposal();
-        throw new RuntimeExecutionFailure({ phase: 'start', category: 'infrastructure', retry: 'non-retryable', reason: 'cancelled startup is quiescent' });
+        throw new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason: 'cancelled startup is quiescent' });
       }
     });
     const taskId = `revoke-failure-${mode}`;

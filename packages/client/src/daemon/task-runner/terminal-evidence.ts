@@ -1,20 +1,21 @@
 // `TaskRunner` members for terminal payloads, the staged result and Agent
 // terminal evidence (see ./support.ts for how a member
 // module runs).
-import type { ResultReplyFailure } from '../result-reply-failure';
-import { terminalIdentity } from '../terminal-identity';
+import type { ResultReplyFailure } from '../result-reply-failure.js';
+import { terminalIdentity } from '../terminal-identity.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { RESIDENT_MEMORY_MAX_BYTES, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit } from '@byok-sdk/protocol';
-import type { AgentRef } from '../../agent-home';
-import { compareAgentHomeMemory, digestAgentHomeMemory } from '../../agent-home-readers';
-import type { AgentTerminalCause } from '../agent-session-handoff-store';
-import { AGENT_RESULT_TOOL_NAME } from '../../sdk-reserved-mcp';
-import type { AgentResultRecord } from '../agent-result-store';
-import type { ActiveTask } from './support';
-import { AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS, isKnownRuntimeId, terminalUsageNumber, errorMessage, taskTearingDown, taskMessageSendAttempted } from './support';
-import type { TaskRunner } from '../task-runner';
-import { AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS, RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './state';
+import type { AgentRef } from '../../agent-home.js';
+import { compareAgentHomeMemory, digestAgentHomeMemory } from '../../agent-home-readers.js';
+import type { AgentTerminalCause } from '../agent-session-handoff-store.js';
+import { AGENT_RESULT_TOOL_NAME } from '../../sdk-reserved-mcp.js';
+import type { AgentResultRecord } from '../agent-result-store.js';
+import type { ActiveTask } from './support.js';
+import { AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS, isKnownRuntimeId, terminalUsageNumber, errorMessage, taskTearingDown, taskMessageSendAttempted } from './support.js';
+import type { TaskRunner } from '../task-runner.js';
+import { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './result-reason-prefixes.js';
+import { AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS } from './state.js';
 
 export function terminalInferenceUsagePayload(this: TaskRunner, active: ActiveTask): { usage?: TerminalInferenceUsage } {
   const release = this['deps'].localAgentRelease;

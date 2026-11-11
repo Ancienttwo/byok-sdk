@@ -111,7 +111,7 @@ describe.skipIf(!hasAgentMemoryHelperBuild())('SDK Agent memory helper release c
     const bin = resolveAgentMemoryFilesystemHelper();
     expect(verifyAgentMemoryFilesystemHelper(bin)).toBe(bin);
     expect(() => verifyAgentMemoryFilesystemHelper('/bin/sh')).toThrow('SDK release artifact');
-    const backend = helperAgentMemoryIntentBackend(bin);
+    const backend = helperAgentMemoryIntentBackend(bin, os.tmpdir());
     expect(backend.conflictProvesNoRename).toBe(true);
     expect(backend.strictLedgerBarrier).toBe(true);
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-helper-release-home-'));

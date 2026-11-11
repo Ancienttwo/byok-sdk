@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readClientPiRuntimePin } from './client-manifest';
+import { readClientPiRuntimePin } from './client-manifest.js';
 
 /**
  * The module specifier every Pi import and resolution in this package uses.

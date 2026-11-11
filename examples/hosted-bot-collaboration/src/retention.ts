@@ -6,7 +6,7 @@ import { retainRoots, RetentionRefused, type RetentionInput, type RetentionLimit
 import { commitCommand, refuseRetired, retiredIdentity, type AdmittedIds, type Command, type CommandPorts,
   type RetiredNamespace } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import type { CommandRecord, CommitRequest, CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { queueDelivery } from '@byok-sdk/example-bot-collaboration/delivery-routing';
+import { promoteStaged, queueDelivery } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import { commandIntentFacts, intentConclusions } from './intents';
 import { storedKey } from './layout';
 import { loadSlice } from './routines';
@@ -20,7 +20,7 @@ function checkRow(namespace: string, id?: string): void {
   if (id !== undefined && (typeof id !== 'string' || !id || id.length > ID_MAX)) throw new Error('Invalid application row id');
 }
 
-/** One archived row of a scope, as K4 `ApplicationRows.get` reads it: an expired row stays until a retention call removes it. */
+/** One archived row of a scope: an expired row stays until a retention call removes it. */
 export async function archivedRow(client: PoolClient, scopeKey: string, namespace: string, id: string): Promise<Json | undefined> {
   const found = await client.query<{ body: Json }>('SELECT body FROM archived_row WHERE scope = $1 AND namespace = $2 AND id = $3',
     [scopeKey, namespace, storedKey(id)]);
@@ -45,7 +45,7 @@ async function retiredHashes(client: PoolClient, scopeKey: string, kind: Tombsto
     'SELECT identity FROM retired_identity WHERE scope = $1 AND kind = $2 AND identity = ANY($3::text[])', [scopeKey, kind, hashes]);
   return new Set(found.rows.map(row => row.identity));
 }
-/** Loads the tombstones of `ids` and returns a lookup, as K4 `isRetired`. A query outside `ids` throws. */
+/** Loads the tombstones of `ids` and returns a lookup. A query outside `ids` throws. */
 async function tombstones(client: PoolClient, scopeKey: string, ids: Array<[RetiredNamespace | 'root', string]>) {
   const asked = new Set(ids.map(([namespace, id]) => hash([namespace, id])));
   const retired = await retiredHashes(client, scopeKey, 'row', [...asked]);
@@ -66,7 +66,7 @@ export async function retiredIntents(client: PoolClient, scopeKey: string, turnI
   const retired = await retiredHashes(client, scopeKey, 'intent', turnIds.map(intentIdentity));
   return new Set(turnIds.filter(id => retired.has(intentIdentity(id))));
 }
-/** Writes permanent tombstones of `kind`. A tombstone already there becomes permanent, as K4's row retire does. */
+/** Writes permanent tombstones of `kind`. A tombstone already there becomes permanent. */
 export async function retire(client: PoolClient, scopeKey: string, kind: TombstoneKind, identities: Iterable<string>): Promise<void> {
   for (const identity of identities) {
     await client.query(`INSERT INTO retired_identity (scope, kind, identity, expires_at) VALUES ($1, $2, $3, NULL)
@@ -74,36 +74,47 @@ export async function retire(client: PoolClient, scopeKey: string, kind: Tombsto
   }
 }
 
-/** The Turn ids among `turnIds` that retention retired (#798), as L reads them in its sync (K8 `commit.ts`). */
+/** The Turn ids among `turnIds` that retention retired (#798). */
 export async function retiredTurns(client: PoolClient, scopeKey: string, turnIds: readonly string[]): Promise<Set<string>> {
   const isRetired = await tombstones(client, scopeKey, turnIds.flatMap(id => identities('turn', id)));
   return new Set(turnIds.filter(id => retiredIdentity('turn', id, isRetired)));
 }
 
 /**
- * One command through the commit contract in the store's transaction, as L `commitInLedger` runs it (#798): a record that
+ * One command through the commit contract in the store's transaction (#798): a record that
  * retention moved still answers a replay, and an id that retention retired is refused at admission. A throw rolls back.
  */
 export async function commitStored(client: PoolClient, scope: string, state: CollaborationState, request: CommitRequest<Command>,
-  ports: Omit<CommandPorts, 'intents' | 'deliver' | 'outcome'> & { outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> },
+  ports: Omit<CommandPorts, 'intents' | 'deliver' | 'promote' | 'outcome'> & { outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> },
   channel: boolean): Promise<CommitResult> {
-  const scopeKey = storedKey(scope), command = request.command, { outcome, ...rest } = ports;
-  // The channel outbox port of a K4 callback, as L's (K8 host.ts `deliverPort`). The delivery rules read the intent
+  const command = request.command, { outcome, ...rest } = ports;
+  // The channel outbox port of a K4 callback (K8 host.ts `deliverPort`). The delivery rules read the intent
   // conclusions committed before this command, so the view is read here, before any write of this transaction (#793 D2b-out-2).
   const taskId = command.kind === 'message' ? command.message.taskId : command.kind === 'outcome' ? command.taskId : undefined;
   const conclusions = channel && taskId !== undefined ? await intentConclusions(client, scope) : undefined;
   const deliver = conclusions && taskId !== undefined
-    ? { deliver: (turn: Turn, key: string, text: string) => queueDelivery(conclusions, state, turn, taskId, key, text, ports.now())?.id } : {};
+    ? { deliver: (turn: Turn, key: string, text: string, staged: boolean) => queueDelivery(conclusions, state, turn, taskId, key, text, ports.now(), staged)?.id,
+      promote: (id: string) => promoteStaged(state, id) } : {};
   // The intent facts come from the intent rows in this transaction, never from the caller (#793 D2f-4). So do the committed
   // intents of an outcome, which a Main Bot cancel reads.
   const intents = await commandIntentFacts(client, scope, Object.keys(state.turns));
+  return commitInStore(client, scope, state, request, true,
+    { ...rest, ...deliver, intents, ...(outcome ? { outcome: { ...outcome, committed: intents } } : {}) });
+}
+/**
+ * H's command store for one command (#798): the moved record of the command id is loaded before the commit, and the
+ * tombstones of the ids that `decide` added are loaded after it, in the same transaction. A throw rolls back.
+ */
+export async function commitInStore(client: PoolClient, scope: string, state: CollaborationState, request: CommitRequest<Command>,
+  recordCallbacks: boolean, ports: CommandPorts): Promise<CommitResult> {
+  const scopeKey = storedKey(scope);
   const archived = typeof request.commandId === 'string' && request.commandId
     ? await archivedRow(client, scopeKey, 'commands', request.commandId) as CommandRecord | undefined : undefined;
   let admitted: AdmittedIds | undefined;
-  const result = commitCommand(state, request, { scope, recordCallbacks: true,
-    // As K4 `rows.get` in L: a keyed command that is not in the state checks its row id here, and an over-limit id throws.
+  const result = commitCommand(state, request, { scope, recordCallbacks,
+    // A keyed command that is not in the state checks its row id here, and an over-limit id throws.
     archived: (id: string) => { checkRow('commands', id); return id === request.commandId ? archived : undefined; },
-    admitted: ids => { admitted = ids; } }, { ...rest, ...deliver, intents, ...(outcome ? { outcome: { ...outcome, committed: intents } } : {}) });
+    admitted: ids => { admitted = ids; } }, ports);
   if (admitted) {
     const ids = admitted as AdmittedIds;
     const isRetired = await tombstones(client, scopeKey, (['turn', 'input', 'round'] as const).flatMap(namespace =>

@@ -1,6 +1,6 @@
 import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
-import { atomicWriteFile } from './atomic-write';
+import { atomicWriteFile } from './atomic-write.js';
 
 /** File mechanics only. The caller owns replay, identity and serialized mutations. */
 export class DurableJsonlFile {

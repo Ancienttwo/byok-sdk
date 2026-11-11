@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
-import { atomicWriteFile } from '../util/atomic-write';
-import { ensureSecureStoreRoot } from '../util/secure-dir';
-import { sameContent } from '../util/file-state';
+import { atomicWriteFile } from '../util/atomic-write.js';
+import { ensureSecureStoreRoot } from '../util/secure-dir.js';
+import { sameContent } from '../util/file-state.js';
 
 export type OperationalHealthState = 'healthy' | 'degraded' | 'recovering';
 export type OperationalFailureSource = 'reconnect' | 'upload' | 'maintenance' | 'lifecycle';
@@ -24,12 +24,26 @@ interface RunMarker {
   pid: number;
 }
 
+type ControlEndpointRefusal = NonNullable<Extract<OperationalHealthFileInspection, { status: 'valid' }>['controlEndpointRefusal']>;
+const CONTROL_ENDPOINT_REFUSAL_CODES = [
+  'private_dir_symlink', 'private_dir_not_directory', 'private_dir_foreign_owner', 'private_dir_mode', 'socket_path_not_socket', 'socket_mode',
+] as const satisfies readonly ControlEndpointRefusal['code'][];
+// Compile-time exhaustiveness: a code of the union missing from the list fails here.
+type NoMissingCode<Missing extends never> = Missing;
+type _AllRefusalCodesListed = NoMissingCode<Exclude<ControlEndpointRefusal['code'], (typeof CONTROL_ENDPOINT_REFUSAL_CODES)[number]>>;
+
+interface ControlEndpointRecord extends ControlEndpointRefusal {
+  status: 'refused';
+}
+
 interface HealthFileV1 {
   version: 1;
   state: OperationalHealthState;
   failures: FailureEvent[];
   crashes: OperationalCrashRecord[];
   currentRun?: RunMarker;
+  /** Present only while the control endpoint is refused; a successful bind deletes the key. */
+  controlEndpoint?: ControlEndpointRecord;
 }
 
 export const OPERATIONAL_HEALTH_FILENAME = 'operational-health.json';
@@ -96,6 +110,12 @@ export type OperationalHealthFileInspection =
       crashCount: number;
       currentRunStartedAt?: string;
       lastCrashAt?: string;
+      /** The typed codes of `PrivateDirectoryRefusedError`, `PrivateSocketPathError` and `PrivateSocketModeError`; lifecycle passes `err.code`, so the compiler holds them in step. */
+      controlEndpointRefusal?: {
+        code: 'private_dir_symlink' | 'private_dir_not_directory' | 'private_dir_foreign_owner' | 'private_dir_mode' | 'socket_path_not_socket' | 'socket_mode';
+        path: string;
+        at: string;
+      };
     }
   | { status: 'corrupt'; sizeBytes: number; reason: string }
   | { status: 'unavailable'; sizeBytes?: number; reason: string };
@@ -137,6 +157,7 @@ export class OperationalHealthTracker {
   #writeTail: Promise<void> = Promise.resolve();
   #started = false;
   #dirHardened = false;
+  #controlEndpoint: ControlEndpointRecord | undefined;
 
   constructor(storeDir: string, options: OperationalHealthOptions = {}) {
     this.#filePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
@@ -179,8 +200,28 @@ export class OperationalHealthTracker {
       loaded.crashes = loaded.crashes.slice(-this.#maxCrashes);
     }
     loaded.currentRun = { id: this.#runId(), startedAt: now.toISOString(), pid: this.#pid };
+    this.#applyControlEndpoint(loaded);
     await this.#persist();
     return this.snapshot();
+  }
+
+  /** Before `startRun` the refusal waits for the run marker write; afterwards a change is persisted at once. */
+  async noteControlEndpoint(
+    refusal: Omit<NonNullable<Extract<OperationalHealthFileInspection, { status: 'valid' }>['controlEndpointRefusal']>, 'at'> | undefined,
+  ): Promise<void> {
+    const previous = this.#controlEndpoint;
+    if (previous?.code === refusal?.code && previous?.path === refusal?.path) return;
+    this.#controlEndpoint = refusal
+      ? { status: 'refused', code: refusal.code, path: refusal.path, at: this.#clock().toISOString() }
+      : undefined;
+    if (!this.#state || this.#unavailableReason) return;
+    this.#applyControlEndpoint(this.#state);
+    await this.#persist();
+  }
+
+  #applyControlEndpoint(state: HealthFileV1): void {
+    if (this.#controlEndpoint) state.controlEndpoint = this.#controlEndpoint;
+    else delete state.controlEndpoint;
   }
 
   async recordFailure(source: OperationalFailureSource): Promise<void> {
@@ -334,6 +375,9 @@ async function inspectOperationalHealthHandle(
     ...(parsed.crashes.at(-1)
       ? { lastCrashAt: new Date(Date.parse(parsed.crashes.at(-1)!.detectedAt)).toISOString() }
       : {}),
+    ...(parsed.controlEndpoint
+      ? { controlEndpointRefusal: { code: parsed.controlEndpoint.code, path: parsed.controlEndpoint.path, at: parsed.controlEndpoint.at } }
+      : {}),
   };
 }
 
@@ -406,12 +450,26 @@ function isHealthFile(value: unknown): value is HealthFileV1 {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Partial<HealthFileV1>;
   const keys = Object.keys(candidate);
-  if (keys.some((key) => !['version', 'state', 'failures', 'crashes', 'currentRun'].includes(key))) return false;
+  if (keys.some((key) => !['version', 'state', 'failures', 'crashes', 'currentRun', 'controlEndpoint'].includes(key))) return false;
   if (candidate.version !== 1 || !['healthy', 'degraded', 'recovering'].includes(String(candidate.state))) return false;
   if (!Array.isArray(candidate.failures) || !candidate.failures.every(isFailureEvent)) return false;
   if (!Array.isArray(candidate.crashes) || !candidate.crashes.every(isCrashRecord)) return false;
   if (candidate.currentRun !== undefined && !isRunMarker(candidate.currentRun)) return false;
+  if (candidate.controlEndpoint !== undefined && !isControlEndpointRecord(candidate.controlEndpoint)) return false;
   return true;
+}
+
+function isControlEndpointRecord(value: unknown): value is ControlEndpointRecord {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Partial<ControlEndpointRecord>;
+  return (
+    Object.keys(record).every((key) => ['status', 'code', 'path', 'at'].includes(key)) &&
+    record.status === 'refused' &&
+    (CONTROL_ENDPOINT_REFUSAL_CODES as readonly unknown[]).includes(record.code) &&
+    typeof record.path === 'string' &&
+    typeof record.at === 'string' &&
+    Number.isFinite(Date.parse(record.at))
+  );
 }
 
 function isFailureEvent(value: unknown): value is FailureEvent {

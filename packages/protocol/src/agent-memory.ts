@@ -6,9 +6,9 @@
  * `@byok-sdk/client/agent-memory` entry stays schema-free, and it is its own entry
  * so the error classes have one runtime definition.
  */
-import type { AgentMemoryIntentCompletion, AgentMemoryIntentReservation } from './agent-memory-intent';
-import type { AgentMemoryProjectionMutation } from './agent-memory-projection';
-import type { AgentRef } from './messages';
+import type { AgentMemoryIntentCompletion, AgentMemoryIntentReservation } from './agent-memory-intent.js';
+import type { AgentMemoryProjectionMutation } from './agent-memory-projection.js';
+import type { AgentRef } from './messages.js';
 
 export class AgentMemoryError extends Error {
   constructor(message: string) { super(message); this.name = 'AgentMemoryError'; }

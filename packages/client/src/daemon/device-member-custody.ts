@@ -31,7 +31,7 @@ import {
   type MemberKeyStore,
   type MemberKeys,
 } from '@byok-sdk/core/sealed-payload';
-import { DeviceCredentialStoreError, OS_CREDENTIAL_ENTRY_MAX_BYTES, OsCredentialEntry, type OsCredentialEntryOptions } from './device-credential-store';
+import { DeviceCredentialStoreError, OS_CREDENTIAL_ENTRY_MAX_BYTES, OsCredentialEntry, type OsCredentialEntryOptions } from './device-credential-store.js';
 
 export type DeviceMemberEntry = 'member-keys' | 'pairing-verification' | 'member-state';
 

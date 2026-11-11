@@ -1,8 +1,8 @@
-import { accountLeaves } from './runtime-accounting';
+import { accountLeaves } from './runtime-accounting.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { SweepBudget } from './registry';
-import { existingDirectory, removeOwnedPath } from './usage';
+import type { SweepBudget } from './registry.js';
+import { existingDirectory, removeOwnedPath } from './usage.js';
 
 /** Resumable deletion; the owning producer rechecks eligibility before each directory batch. */
 export class TreeCleanup {

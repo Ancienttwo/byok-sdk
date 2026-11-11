@@ -1,10 +1,10 @@
 import { TerminalProjectionSelectionSchema, type TerminalProjectionSelection } from '@byok-sdk/protocol';
 // The level set is Pi's own; this reader restates only the value checks.
 import { MODEL_THINKING_LEVELS as THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
-import { AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp';
-import { PI_PROJECTED_KEY_ENV } from '../adapters/provider-credential-environment';
-import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
-import { applyPiHostNetworkDefaults } from './pi-host-network-defaults';
+import { AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp.js';
+import { PI_PROJECTED_KEY_ENV } from '../adapters/provider-credential-environment.js';
+import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding.js';
+import { applyPiHostNetworkDefaults } from './pi-host-network-defaults.js';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import process from 'node:process';
@@ -19,13 +19,13 @@ import {
   runRpcMode,
   type AgentSessionServices,
 } from '@earendil-works/pi-coding-agent';
-import { inputPreparationRuntimeIdentityString, type InputPreparationModelV1 } from '../input-preparation';
-import { resolvePinnedPiRuntimeIdentity, verifyPreparedPiInput, type PreparedPiInputV1 } from '../adapters/pi/input-preparation';
+import { inputPreparationRuntimeIdentityString, type InputPreparationModelV1 } from '../input-preparation.js';
+import { resolvePinnedPiRuntimeIdentity, verifyPreparedPiInput, type PreparedPiInputV1 } from '../adapters/pi/input-preparation.js';
 import {
   canonicalPreparedValue,
   PreparedSessionError,
   preparedSessionErrorCode,
-} from '../adapters/pi/prepared-request';
+} from '../adapters/pi/prepared-request.js';
 import {
   createPreparedGate,
   createPreparedPiSession,
@@ -33,34 +33,34 @@ import {
   registerPreparedProvider,
   type PreparedGateRefusal,
   type PreparedProviderCredential,
-} from '../adapters/pi/prepared-session';
+} from '../adapters/pi/prepared-session.js';
 import {
   parsePreparedPromptCommand,
   readFirstJsonlFrame,
   type PreparedPromptResponseV1,
   type PreparedRunRefusalFrame,
-} from '../adapters/pi/prepared-prompt-frame';
-import { RPC_MAX_FRAME_BYTES } from '../util/rpc-frame';
+} from '../adapters/pi/prepared-prompt-frame.js';
+import { RPC_MAX_FRAME_BYTES } from '../util/rpc-frame.js';
 import {
   McpServerPool,
   parseMcpServerSpec,
   parseTaskScopedMcpConfig,
   type TaskScopedMcpConfig,
-} from '../adapters/pi/mcp-server-pool';
+} from '../adapters/pi/mcp-server-pool.js';
 import {
   assemblePreparedPiToolSurface,
   type PreparedPiServerBinding,
-} from '../adapters/pi/prepared-tools';
-import { McpStdioClient, MCP_OBSERVATION_MAX_STDOUT_BYTES, type McpStdioServerSpec } from '../mcp/client';
-import { parseToolAuthorizationIpcConfig, type ToolAuthorizationIpcConfig } from '../tool-authorization-ipc';
+} from '../adapters/pi/prepared-tools.js';
+import { McpStdioClient, MCP_OBSERVATION_MAX_STDOUT_BYTES, type McpStdioServerSpec } from '../mcp/client.js';
+import { parseToolAuthorizationIpcConfig, type ToolAuthorizationIpcConfig } from '../tool-authorization-ipc.js';
 import {
   canonicalPreparedAgentMemoryJson,
   validatePreparedAgentMemoryObservation,
-} from '../agent-memory/prepared-capability';
+} from '../agent-memory/prepared-capability.js';
 import {
   parsePreparedMemoryState,
   type PreparedAgentMemoryState,
-} from '../agent-memory/prepared-agent-memory';
+} from '../agent-memory/prepared-agent-memory.js';
 
 /**
  * The SDK-owned prepared launch entry for the pi runtime, on official Pi.

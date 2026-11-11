@@ -1,4 +1,4 @@
-import type { ModelProviderAdapter, ProviderAuthMode } from './provider-profile';
+import type { ModelProviderAdapter, ProviderAuthMode } from './provider-profile.js';
 
 /**
  * One vendor the SDK can address without the consumer typing its endpoint.
@@ -75,6 +75,7 @@ export const MODEL_PROVIDER_VENDORS = {
   'moonshotai-cn': openAiCompatible('Moonshot AI CN', 'https://api.moonshot.cn/v1', 'MOONSHOT_API_KEY'),
   nvidia: openAiCompatible('NVIDIA', 'https://integrate.api.nvidia.com/v1', 'NVIDIA_API_KEY'),
   openai: openAiCompatible('OpenAI', 'https://api.openai.com/v1', 'OPENAI_API_KEY'),
+  'opencode-go': openAiCompatible('OpenCode Go', 'https://opencode.ai/inference/go/openai/v1', 'OPENCODE_API_KEY'),
   openrouter: openAiCompatible('OpenRouter', 'https://openrouter.ai/api/v1', 'OPENROUTER_API_KEY'),
   'qwen-token-plan': openAiCompatible(
     'Qwen Token Plan',

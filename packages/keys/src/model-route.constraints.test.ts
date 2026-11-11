@@ -19,7 +19,7 @@ function runtimeClosure(entry: string): { modules: string[]; bare: string[]; sou
     for (const match of text.matchAll(/^(?:import|export)\s+(type\s+)?[^;]*?from\s+['"]([^'"]+)['"]/gmu)) {
       const [, typeOnly, specifier] = match;
       if (typeOnly !== undefined) continue;
-      if (specifier!.startsWith('.')) visit(`${path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier!))}.ts`);
+      if (specifier!.startsWith('.')) visit(path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier!)).replace(/\.js$/u, '.ts'));
       else bare.add(specifier!);
     }
   };

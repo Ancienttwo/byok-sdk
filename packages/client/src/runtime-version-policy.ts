@@ -4,28 +4,7 @@ import type {
   RuntimeVersionPolicy,
   RuntimeVersionSpec,
   RuntimeVersionVerdict,
-} from './types';
-
-/** Which entry supplied the effective policy (#1103). */
-export type RuntimeVersionPolicySource = 'descriptor' | 'adapter-option' | 'daemon-config' | 'none';
-
-/** The three complete policy candidates; never merged, only replaced. */
-export interface RuntimeVersionPolicyCandidates {
-  /** The SDK/descriptor default. A descriptor default may not carry a block. */
-  readonly descriptor?: RuntimeVersionPolicy;
-  /** A Host constructing an adapter directly. */
-  readonly adapterOption?: RuntimeVersionPolicy;
-  /** `createDaemon` from `DaemonConfig.runtimes.<id>.versionPolicy`. */
-  readonly daemonConfig?: RuntimeVersionPolicy;
-}
-
-export interface RuntimeVersionPolicyResolution {
-  /** The winning candidate's frozen copy; absent when all three are absent. */
-  readonly policy?: RuntimeVersionPolicy;
-  readonly source: RuntimeVersionPolicySource;
-  /** Lower-priority candidates that were present and replaced. Diagnostic only. */
-  readonly overridden: readonly ('descriptor' | 'adapter-option')[];
-}
+} from './types.js';
 
 export type RuntimeVersionPolicyIssueReason =
   | 'invalid_policy'
@@ -174,41 +153,20 @@ export function freezeRuntimeVersionPolicy(policy: RuntimeVersionPolicy): Runtim
 
 /**
  * The ONLY precedence function for version policies (#1103 O5).
- * `daemonConfig > adapterOption > descriptor`, wholesale replacement, with
- * every present candidate validated. No caller may merge policies itself.
+ * `adapterOption > descriptor`, wholesale replacement, with every present
+ * candidate validated. No caller may merge policies itself.
  */
-export function resolveRuntimeVersionPolicy(candidates: RuntimeVersionPolicyCandidates): RuntimeVersionPolicyResolution {
-  const entries = [
-    ['descriptor', candidates.descriptor, false],
-    ['adapterOption', candidates.adapterOption, true],
-    ['daemonConfig', candidates.daemonConfig, true],
-  ] as const;
-  const issues: RuntimeVersionPolicyIssue[] = [];
-  for (const [name, policy, hostLayer] of entries) {
-    if (policy === undefined) continue;
-    issues.push(...runtimeVersionPolicyIssues(policy, { path: `${name}.versionPolicy`, hostLayer }));
-  }
+export function resolveRuntimeVersionPolicy(
+  descriptor: RuntimeVersionPolicy | undefined,
+  hostPolicy: RuntimeVersionPolicy | undefined,
+): RuntimeVersionPolicy | undefined {
+  const issues: RuntimeVersionPolicyIssue[] = [
+    ...(descriptor === undefined ? [] : runtimeVersionPolicyIssues(descriptor, { path: 'descriptor.versionPolicy', hostLayer: false })),
+    ...(hostPolicy === undefined ? [] : runtimeVersionPolicyIssues(hostPolicy, { path: 'adapterOption.versionPolicy', hostLayer: true })),
+  ];
   if (issues.length > 0) throw new InvalidRuntimeVersionPolicyError(issues);
-
-  const chosen = candidates.daemonConfig !== undefined
-    ? ['daemon-config', candidates.daemonConfig] as const
-    : candidates.adapterOption !== undefined
-      ? ['adapter-option', candidates.adapterOption] as const
-      : candidates.descriptor !== undefined
-        ? ['descriptor', candidates.descriptor] as const
-        : undefined;
-  const overridden: ('descriptor' | 'adapter-option')[] = [];
-  if (chosen?.[0] === 'daemon-config') {
-    if (candidates.descriptor !== undefined) overridden.push('descriptor');
-    if (candidates.adapterOption !== undefined) overridden.push('adapter-option');
-  } else if (chosen?.[0] === 'adapter-option' && candidates.descriptor !== undefined) {
-    overridden.push('descriptor');
-  }
-  return {
-    ...(chosen === undefined ? {} : { policy: freezeRuntimeVersionPolicy(chosen[1]) }),
-    source: chosen?.[0] ?? 'none',
-    overridden: Object.freeze(overridden),
-  };
+  const chosen = hostPolicy ?? descriptor;
+  return chosen === undefined ? undefined : freezeRuntimeVersionPolicy(chosen);
 }
 
 /**

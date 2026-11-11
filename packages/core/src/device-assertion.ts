@@ -1,4 +1,4 @@
-import type { CollectExpiredInput, CollectExpiredResult } from './retention';
+import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
 /**
  * Device assertion envelope, canonical signing bytes, and verifier
  * (plan `device-assertion-broker`, P3 ①-⑤).
@@ -44,10 +44,10 @@ import type { CollectExpiredInput, CollectExpiredResult } from './retention';
  * Workers and `node:crypto`/WebCrypto disagree about key handling.
  */
 import { z } from 'zod';
-import { canonicalizeJson, type JsonObject, type JsonValue } from './attestation';
-import { ByokCoreError } from './errors';
-import type { DevicePrincipal } from './principals';
-import { isTenantId, type TenantId } from './tenant';
+import { canonicalizeJson, type JsonObject, type JsonValue } from './attestation.js';
+import { ByokCoreError } from './errors.js';
+import type { DevicePrincipal } from './principals.js';
+import { isTenantId, type TenantId } from './tenant.js';
 
 /** Envelope schema id, self-consistent with the domain prefix below. */
 export const DEVICE_ASSERTION_SCHEMA_ID = 'byok-device-assertion-v1';

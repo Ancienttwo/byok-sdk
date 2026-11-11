@@ -1,4 +1,4 @@
-import { settleDeletedObject } from './stores/core/object-gc';
+import { settleDeletedObject } from './stores/core/object-gc.js';
 /**
  * Host-owned S4B-c maintenance for the Postgres + R2 composition.
  *
@@ -6,7 +6,7 @@ import { settleDeletedObject } from './stores/core/object-gc';
  * a durable `delete_pending` tombstone, and a missing object is an idempotent
  * DELETE replay — never evidence that a committed manifest was truthful.
  */
-import { CloudCleanupError } from './maintenance-errors';
+import { CloudCleanupError } from './maintenance-errors.js';
 import { createHash } from 'node:crypto';
 import {
   contentHash,
@@ -21,14 +21,14 @@ import {
 } from '@byok-sdk/core';
 import { decodeEnvelope, encodeEnvelope, EnvelopeSchema, isServerToDaemonType } from '@byok-sdk/protocol';
 import type { Pool, PoolClient } from 'pg';
-import type { ByokPool } from './pool';
-import { assertByokPool } from './pool-brand';
+import type { ByokPool } from './pool.js';
+import { assertByokPool } from './pool-brand.js';
 import {
   R2ObjectMaintenanceStore,
   type R2ObjectMaintenance,
   type R2ObjectMaintenanceOptions,
-} from './stores/r2-blobs';
-import { BEGIN_OUTBOX_WRITE, insertOutboxRow } from './stores/core/outbox-writer';
+} from './stores/r2-blobs.js';
+import { BEGIN_OUTBOX_WRITE, insertOutboxRow } from './stores/core/outbox-writer.js';
 
 const DEFAULT_BATCH_SIZE = 100;
 const MAX_BATCH_SIZE = 1000;

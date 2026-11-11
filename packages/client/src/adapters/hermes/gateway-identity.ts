@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { loadKoffi } from '../win32-job-object';
+import { loadKoffi } from '../win32-job-object.js';
 
 /** The fields of a Hermes gateway `identify` answer that the adapter checks. */
 export interface HermesGatewayIdentity {

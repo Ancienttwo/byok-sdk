@@ -1,11 +1,11 @@
 import type { AgentMessageContentType } from '@byok-sdk/protocol';
-import { AGENT_MESSAGE_TOOL_NAME } from '../sdk-reserved-mcp';
+import { AGENT_MESSAGE_TOOL_NAME } from '../sdk-reserved-mcp.js';
 import {
   McpServerToolError,
   serveMcpOverStdio,
   type McpServerToolCall,
   type McpServerToolDefinition,
-} from '../mcp-server';
+} from '../mcp-server/index.js';
 
 export interface AgentMessageMcpDeps {
   publish(input: { contentType: AgentMessageContentType; body: string }): Promise<{ messageId: string; state: string }>;

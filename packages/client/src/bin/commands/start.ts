@@ -1,12 +1,12 @@
-import { createDaemon, type Daemon, type DaemonConfig } from '../../index';
-import { DaemonHaltError, type DaemonHaltReason } from '../../daemon/daemon-lifecycle';
-import { createDaemonRecordProjector, type DaemonRecord } from '../../daemon/daemon-record';
-import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../../login-shell-environment';
-import { createAuditAppender } from '../../daemon/audit-log';
-import { ConfigError, resolveStoreDir } from '../config';
-import { DaemonOwnerActiveError } from '../../util/daemon-owner';
-import { isRuntimeDisposalFailure } from '../../runtime-failure';
-import { formatHaltRemedy, formatServiceEnvironment } from '../../diagnostics/format';
+import { createDaemon, type Daemon, type DaemonConfig } from '../../index.js';
+import { DaemonHaltError, type DaemonHaltReason } from '../../daemon/daemon-lifecycle.js';
+import { createDaemonRecordProjector, type DaemonRecord } from '../../daemon/daemon-record.js';
+import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../../login-shell-environment.js';
+import { createAuditAppender } from '../../daemon/audit-log.js';
+import { ConfigError, resolveStoreDir } from '../config.js';
+import { DaemonOwnerActiveError } from '../../util/daemon-owner.js';
+import { isRuntimeDisposalFailure } from '../../runtime-failure.js';
+import { formatHaltRemedy, formatServiceEnvironment } from '../../diagnostics/format.js';
 
 export interface StartDeps {
   log?: (line: string) => void;

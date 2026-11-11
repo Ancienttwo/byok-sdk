@@ -233,8 +233,8 @@ test('reviewed root-level basic fixtures select their workspace while unknown ro
 
 test('shared goal fixture selects its consumers without broadening unknown root support files', () => {
   const plan = selectImpact(['examples/basic/goal-btw.test-support.ts']);
-  assert.deepEqual(plan.dirs, ['examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/host-execution-core', 'examples/hosted-bot-collaboration',
-    'examples/hosted-bot-collaboration-worker']);
+  assert.deepEqual(plan.dirs, ['examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/desktop-bot-app', 'examples/host-execution-core',
+    'examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker']);
   assert.deepEqual(plan.families, ['adapter-lifecycle-smoke', 'dataplane']);
   assert.throws(() => selectImpact(['examples/basic/other.test-support.ts']));
 });
@@ -710,6 +710,35 @@ test('#975 slice 5: the K8 manifest admits the switch entry only on top of the e
   }
 });
 
+test('#1664: K8 adds only the shared adapter-steps export', t => {
+  const f = fixture(t), path = 'examples/bot-collaboration/package.json';
+  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1',
+    exports: { './model': './src/model.ts' } };
+  f.write(path, manifest);
+  rebase(f, 'K8 before shared adapter steps');
+  const exports = { ...manifest.exports, './adapter-steps': './src/adapter-steps.ts' };
+  f.write(path, { ...manifest, exports });
+  assert.ok(selectImpact([path], f).dirs.includes('examples/bot-collaboration'));
+  f.write(path, { ...manifest, exports: { ...exports, './other': './src/other.ts' } });
+  assert.throws(() => selectImpact([path], f), /more than/, 'an extra export');
+});
+
+test('#1666: K8 adds only the shared delegation rules export', t => {
+  const f = fixture(t), path = 'examples/bot-collaboration/package.json';
+  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1',
+    exports: { './model': './src/model.ts' } };
+  f.write(path, manifest);
+  rebase(f, 'K8 before delegation rules export');
+  const exports = { ...manifest.exports, './rules/delegation': './src/rules/delegation.ts' };
+  f.write(path, { ...manifest, exports });
+  assert.ok(selectImpact([path], f).dirs.includes('examples/bot-collaboration'));
+  f.write(path, { ...manifest, exports: { ...exports, './other': './src/other.ts' } });
+  assert.throws(() => selectImpact([path], f), /more than/, 'an extra export');
+  // #1806: the root entry for the desktop app.
+  f.write(path, { ...manifest, exports: { '.': './src/index.ts', ...manifest.exports } });
+  assert.ok(selectImpact([path], f).dirs.includes('examples/bot-collaboration'));
+});
+
 test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {
   const f = fixture(t);
   const path = 'examples/bot-collaboration/package.json';
@@ -1047,10 +1076,13 @@ test('root CI composition admits only the exact helper and prefix, retaining the
 
 test('new graph-registered private workspaces and matching lock rows are admitted; unregistered additions fail', t => {
   const f = fixture(t);
-  for (const id of ['protocol', 'server']) {
+  for (const id of ['protocol', 'server', 'keys']) {
     const manifest = { name: `@byok-sdk/${id}`, version: '0.28.0' };
     f.write(`packages/${id}/package.json`, manifest); f.lock.workspaces[`packages/${id}`] = manifest;
   }
+  // #1806: the desktop example's K8 edge needs K8 declared in the base.
+  const k8 = { name: '@byok-sdk/example-bot-collaboration', version: '0.0.1', private: true };
+  f.write('examples/bot-collaboration/package.json', k8); f.lock.workspaces['examples/bot-collaboration'] = k8;
   f.write('bun.lock', f.lock); rebase(f, 'base dependency declarations');
   const dir = 'examples/basic';
   const manifest = { name: '@byok-sdk/example-basic', version: '0.0.1', private: true, type: 'module',
@@ -1075,4 +1107,27 @@ test('new graph-registered private workspaces and matching lock rows are admitte
   f.lock.workspaces[unknown] = { name: manifest.name, version: manifest.version, dependencies: manifest.dependencies };
   f.lock.packages[manifest.name] = [`${manifest.name}@workspace:${unknown}`]; f.write('bun.lock', f.lock);
   assert.throws(() => selectImpact(['bun.lock'], f), /graph-registered/);
+  // #1804: the desktop example's exact additions, and the new lock rows they declare.
+  delete f.lock.workspaces[unknown]; delete f.lock.packages[manifest.name];
+  const desktop = 'examples/desktop-bot-app';
+  // The fixture base declares none of the shared tool specs, so only the two additions stay.
+  const { devDependencies: { electron, '@electron/fuses': fuses }, ...shape } = JSON.parse(readFileSync(new URL(`../../${desktop}/package.json`, import.meta.url), 'utf8'));
+  const app = { ...shape, devDependencies: { electron, '@electron/fuses': fuses } };
+  f.write(`${desktop}/package.json`, app);
+  f.lock.workspaces[desktop] = { name: app.name, version: app.version, dependencies: app.dependencies, devDependencies: app.devDependencies };
+  f.lock.packages[app.name] = [`${app.name}@workspace:${desktop}`];
+  f.lock.packages.electron = ['electron@45.3.0', '', {}, 'sha512-x'];
+  f.write('bun.lock', f.lock);
+  assert.ok(selectImpact([`${desktop}/package.json`, 'bun.lock'], f).dirs.includes(desktop));
+  f.write(`${desktop}/package.json`, { ...app, devDependencies: { ...app.devDependencies, electron: '45.3.1' } });
+  assert.throws(() => selectImpact([`${desktop}/package.json`], f), /reuse a base dependency spec \(electron\)/);
+  // #1805: the existing desktop example gains its reviewed edges and an exact registered addition, and nothing else.
+  const { dependencies: edges, devDependencies: { '@electron/fuses': _fuses, ...withoutFuses }, ...bare } = app;
+  f.write(`${desktop}/package.json`, { ...bare, devDependencies: withoutFuses }); rebase(f, 'desktop example without edges and fuses');
+  f.write(`${desktop}/package.json`, app);
+  assert.ok(selectImpact([`${desktop}/package.json`], f).dirs.includes(desktop));
+  f.write(`${desktop}/package.json`, { ...app, devDependencies: { ...app.devDependencies, '@electron/fuses': '2.1.4' } });
+  assert.throws(() => selectImpact([`${desktop}/package.json`], f), /reuse a base dependency spec \(@electron\/fuses\)/);
+  f.write(`${desktop}/package.json`, { ...app, dependencies: { ...edges, '@byok-sdk/protocol': 'workspace:*' } });
+  assert.throws(() => selectImpact([`${desktop}/package.json`], f), /edges differ from reviewed graph/);
 });

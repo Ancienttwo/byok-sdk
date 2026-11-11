@@ -7,7 +7,8 @@ import { json, type Budget, type Card, type Question, type Rejection, type Turn 
 import type { AcceptedReply, Batch, Delegation, Unit } from './rules/delegation';
 import type { CommandRecord } from './rules/commit';
 import type { DeviceTopology } from './topology';
-import type { SwitchExportMark, SwitchImport } from './switch';
+import type { SwitchExportMark } from './migration';
+import type { SwitchImport } from './switch';
 import type { AutonomyState, WouldDo } from './rules/autonomy';
 import type { DreamState } from './dream';
 

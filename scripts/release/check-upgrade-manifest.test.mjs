@@ -22,6 +22,17 @@ import { CONFIG_SCHEMA_PATH, INTERPROCESS_PROTOCOLS, PUBLIC_PACKAGES, STORES, VE
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DOC = 'docs/migration.md';
 
+test('keys store digest changes when the provider catalog gains a kind', (t) => {
+  const root = mkdtempSync(path.join(tmpdir(), 'byok-keys-digest-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  cpSync(path.join(repo, 'packages/keys/src'), path.join(root, 'packages/keys/src'), { recursive: true });
+  const store = STORES.find((entry) => entry.id === 'keys-profile-store');
+  const before = store.format(root, store.source);
+  const catalog = path.join(root, 'packages/keys/src/provider-catalog.ts');
+  writeFileSync(catalog, readFileSync(catalog, 'utf8').replace("  openai: openAiCompatible(", "  'fixture-vendor': openAiCompatible('Fixture', 'https://example.test', 'FIXTURE_KEY'),\n  openai: openAiCompatible("));
+  assert.notEqual(store.format(root, store.source), before);
+});
+
 function fixture(t) {
   const root = mkdtempSync(path.join(tmpdir(), 'byok-upgrade-manifest-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

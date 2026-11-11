@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/base64"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,7 +28,7 @@ func openedSession(t *testing.T, home string) *session {
 	if err != nil {
 		t.Fatal(err)
 	}
-	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identity})
+	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, AncestorRoot: filepath.Dir(home), ExpectedIdentity: identity})
 	if failure != nil {
 		t.Fatalf("open: %#v", failure)
 	}
@@ -133,6 +134,53 @@ func TestFinalCASConflictsDoNotRename(t *testing.T) {
 	}
 }
 
+func TestUnixOpenRefusesCrossVolumeAncestor(t *testing.T) {
+	for _, boundary := range []string{"ancestor", "intermediate"} {
+		t.Run(boundary, func(t *testing.T) {
+			ancestor, home, _ := explicitRootFixture(t)
+			mountedParent := ancestor
+			if boundary == "intermediate" {
+				mountedParent = filepath.Join(ancestor, "homes")
+			}
+			parentInfo, err := os.Stat(mountedParent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalVolume, originalSync := sameEntryVolume, strictSync
+			t.Cleanup(func() { sameEntryVolume = originalVolume; strictSync = originalSync })
+			comparedBoundary, flushes := false, 0
+			sameEntryVolume = func(home, entry fs.FileInfo) (bool, error) {
+				if os.SameFile(entry, parentInfo) {
+					comparedBoundary = true
+					return false, nil
+				}
+				return originalVolume(home, entry)
+			}
+			strictSync = func(file *os.File) error { flushes++; return originalSync(file) }
+			req := openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home,
+				AncestorRoot: ancestor, ExpectedIdentity: identityForTest(t, home)}
+			active, failure := openSession(req)
+			if active != nil {
+				_ = active.root.Close()
+			}
+			if !comparedBoundary || active != nil || failure == nil || failure.code != "ancestor_volume_mismatch" || flushes != 0 {
+				t.Fatalf("boundary checked=%v granted=%v failure=%#v flushes=%d", comparedBoundary, active != nil, failure, flushes)
+			}
+			if failure.message != "Put the agents directory on the same volume as hostStorageRoot." {
+				t.Fatalf("refusal has no actionable placement instruction: %q", failure.message)
+			}
+			// Refusal leaves no session held; the same request can open once the
+			// selected ancestor is again on the home's volume.
+			sameEntryVolume = originalVolume
+			active, failure = openSession(req)
+			if failure != nil {
+				t.Fatalf("retry open: %#v", failure)
+			}
+			_ = active.root.Close()
+		})
+	}
+}
+
 func TestHomeChainBarrierIsStrictBeforeOpen(t *testing.T) {
 	home := newMemoryHome(t)
 	root, err := os.OpenRoot(home)
@@ -148,17 +196,21 @@ func TestHomeChainBarrierIsStrictBeforeOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	selected, err := selectedHomeChain(home, filepath.Dir(home), root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	original := strictSync
 	originalCAS := beforeFinalCAS
 	t.Cleanup(func() { strictSync = original; beforeFinalCAS = originalCAS })
 	calls, casCalls := 0, 0
 	beforeFinalCAS = func() { casCalls++ }
 	strictSync = func(file *os.File) error { calls++; return syscall.EIO }
-	if err := syncHomeChain(home, root); !errors.Is(err, syscall.EIO) || calls != 1 {
+	if err := syncHomeChain(selected, root); !errors.Is(err, syscall.EIO) || calls != 1 {
 		t.Fatalf("err=%v calls=%d", err, calls)
 	}
 	calls = 0
-	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identity})
+	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, AncestorRoot: filepath.Dir(home), ExpectedIdentity: identity})
 	if active != nil || failure == nil || failure.code != "io_failure" || calls != 1 || casCalls != 0 {
 		t.Fatalf("session=%v failure=%#v calls=%d CAS=%d", active, failure, calls, casCalls)
 	}
@@ -253,7 +305,7 @@ func TestHomeChainRejectsSwapAndRestore(t *testing.T) {
 		}
 		return nil
 	}
-	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identity})
+	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, AncestorRoot: filepath.Dir(home), ExpectedIdentity: identity})
 	if active != nil {
 		_ = active.root.Close()
 	}

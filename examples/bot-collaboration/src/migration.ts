@@ -2,6 +2,7 @@ import { canonical, hash } from '@byok-sdk/server/execution-core/canonical';
 import { isOccurrenceIntentKey, occurrenceIntentKey, routineWakeKey, taskId as taskIdOf, validateJson, validateRetry, type Conclusion, type Intent, type Json, type Occurrence, type RetryPolicy, type Routine,
   type RoutineDefinition } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from './model';
+import { DEVICE_SWITCHING } from './rules/sync';
 
 /**
  * The state that an L/H owner switch moves (#975, design §8): one coordination domain, an L ledger tenant or an H scope,
@@ -443,7 +444,8 @@ function checkCollaboration(content: SwitchContent): void {
     throw new SwitchExportError('owner_record', 'Switch export carries an L switch record (switchExport or switchImport)');
   }
   ensure(keys(state, COLLABORATION_KEYS, COLLABORATION_OPTIONAL) && state.version === 3 && object(state.team) && object(state.team.bots)
-    && Array.isArray(state.team.homeOperations) && object(state.turns) && optional(state.inputBatches, object) && optional(state.cardCalls, object),
+    && Array.isArray(state.team.homeOperations) && object(state.turns) && optional(state.inputBatches, object) && optional(state.cardCalls, object)
+    && optional(state.wouldDo, object),
   'collaboration state');
   for (const bot of Object.values(state.team.bots)) ensure(object(bot) && object(bot.execution) && text(bot.execution.deviceId), 'bot');
   for (const turn of Object.values(state.turns)) {
@@ -452,6 +454,8 @@ function checkCollaboration(content: SwitchContent): void {
     if (turn.source === 'routine') ensure(typeof turn.id === 'string' && isOccurrenceIntentKey(turn.id), `routine Turn ${String(turn.id)} names no occurrence`);
   }
   for (const batch of Object.values(state.inputBatches ?? {})) ensure(object(batch), 'input batch');
+  // A row without its Turn is the shape before #1756: migrate the source first (`migrateWouldDo`, H `migrate()`).
+  for (const row of Object.values(state.wouldDo ?? {})) ensure(object(row) && text(row.turnId), 'would-do row without turnId');
   for (const op of state.team.homeOperations) ensure(object(op), 'home operation');
   const devices = new Set(content.devices.map(device => device.deviceId));
   for (const bot of Object.values(state.team.bots)) {
@@ -467,10 +471,55 @@ function checkCollaboration(content: SwitchContent): void {
   }
   for (const op of state.team.homeOperations) {
     // A write that may have reached a device is the old owner's to settle before the export (#957); only an unsent one moves.
-    // The `retryAt` branch reads a ledger written before the `sent` mark and goes with the one in `homeSent` (topology.ts).
-    if (op.status === 'pending' && (op.sent || op.retryAt !== undefined)) {
+    if (op.status === 'pending' && op.sent === true) {
       throw new SwitchExportError('home_sent', `Switch export has a pending Agent home write that may have been sent: ${op.sequence}`);
     }
   }
   if (Object.keys(state.cardCalls ?? {}).length) throw new SwitchExportError('card_call', 'Switch export has a card call in flight');
+}
+
+/** The header fields of a document: the source's, also on the target's read-back. */
+export type SwitchHeader = Pick<SwitchContent, 'source' | 'domain' | 'devices' | 'exportedAt'>;
+/** What a new owner returns after its read-back: the digest the old owner commits away on. */
+export interface SwitchReceipt { digest: string; devices: string[] }
+/**
+ * The export record of an old owner (an L ledger or `scope.switch_export` of H): from the export on, also after the
+ * commit, so the domain keeps the exported state. `devices` and `exportedAt` are the document's header.
+ */
+export interface SwitchExportMark { digest: string; exportedAt: number; devices: SwitchDevice[] }
+
+/** The domain was exported for a switch, so its owner writes nothing to it. Abort the switch to resume it. Nothing was written. */
+export class SwitchExportedError extends Error {
+  readonly code = 'switch_exported' as const;
+  constructor(readonly digest: string) {
+    super(`The domain was exported for a switch (${digest}); it writes nothing until the switch is aborted`);
+    this.name = 'SwitchExportedError';
+  }
+}
+/** The domain holds a switch import that is not committed yet, so no work runs on it. Nothing was written. */
+export class SwitchImportedError extends Error {
+  readonly code = 'switch_imported' as const;
+  constructor(readonly digest: string) {
+    super(`The domain holds the switch import ${digest}; commit it or discard it first`);
+    this.name = 'SwitchImportedError';
+  }
+}
+/** The device is frozen for an owner switch. A retry after the switch may succeed. */
+export class DeviceSwitchingError extends Error {
+  readonly code = DEVICE_SWITCHING;
+  constructor(readonly deviceId: string, readonly target: 'L' | 'H', readonly revision: number) {
+    super(`Device ${deviceId} is switching to ${target}`);
+    this.name = 'DeviceSwitchingError';
+  }
+}
+
+/** A stored export mark, checked field by field: a malformed one fails closed. */
+export function exportMarkOf(value: unknown): SwitchExportMark {
+  const mark = value as SwitchExportMark;
+  const valid = typeof value === 'object' && value !== null && Object.keys(value).sort().join(',') === 'devices,digest,exportedAt'
+    && typeof mark.digest === 'string' && Number.isSafeInteger(mark.exportedAt) && Array.isArray(mark.devices) && mark.devices.length > 0
+    && mark.devices.every(device => !!device && Object.keys(device).sort().join(',') === 'deviceId,frozenRevision'
+      && typeof device.deviceId === 'string' && Number.isSafeInteger(device.frozenRevision) && device.frozenRevision > 0);
+  if (!valid) throw new Error('Invalid switch export record');
+  return mark;
 }

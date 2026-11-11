@@ -3,12 +3,12 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { RESIDENT_MEMORY_MAX_BYTES } from '@byok-sdk/protocol/constants';
-import { appendAgentMemoryHomeAudit, compareAndSwapAgentMemoryHomeFile, isAgentMemorySecureFilesystemAvailable, observeAgentMemoryHomeFile, snapshotAndProjectAgentMemory, type AgentMemoryTaskContext } from '../agent-memory';
-import type { AgentMemoryCommitHome } from '../agent-memory-commit';
-import { openAgentMemoryFilesystemHelper } from '../agent-memory-fs-helper';
-import type { ActiveTask } from './support';
-import { errorMessage, outboundErrorMessage, taskFinalizing } from './support';
-import type { TaskRunner } from '../task-runner';
+import { appendAgentMemoryHomeAudit, compareAndSwapAgentMemoryHomeFile, isAgentMemorySecureFilesystemAvailable, observeAgentMemoryHomeFile, snapshotAndProjectAgentMemory, type AgentMemoryTaskContext } from '../agent-memory.js';
+import type { AgentMemoryCommitHome } from '../agent-memory-commit.js';
+import { openAgentMemoryFilesystemHelper } from '../agent-memory-fs-helper.js';
+import type { ActiveTask } from './support.js';
+import { errorMessage, outboundErrorMessage, taskFinalizing } from './support.js';
+import type { TaskRunner } from '../task-runner.js';
 import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
 
 export function activeMemoryContext(this: TaskRunner, contextToken: string): AgentMemoryTaskContext {
@@ -171,6 +171,7 @@ export async function bindAgentMemoryFilesystem(this: TaskRunner, context: Agent
     filesystem = openAgentMemoryFilesystemHelper({
       helperBin,
       assetRoot: this['deps'].agentMemoryHelperAssetRoot,
+      ancestorRoot: this['tasks'].get(context.taskId)!.agentBinding.resolution.hostStorageRoot,
       canonicalHome: context.canonicalHome,
       homeIdentity: context.homeIdentity,
     });

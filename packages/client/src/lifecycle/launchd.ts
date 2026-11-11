@@ -1,11 +1,11 @@
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner';
-import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
-import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log';
-import { sanitizeServiceName, type ServiceDefinition } from './service-types';
-import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath, ServiceUnitError } from './service-unit';
+import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner.js';
+import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
+import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log.js';
+import { sanitizeServiceName, type ServiceDefinition } from './service-types.js';
+import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath, ServiceUnitError } from './service-unit.js';
 
 /**
  * Genuine-failure text that must NEVER be reclassified as "job already
@@ -140,7 +140,7 @@ export function generateLaunchdPlist(def: { label: string; launcherPath: string;
  * from the still-on-disk plist) — not `kickstart`, which only force-restarts
  * an ALREADY-loaded job.
  */
-export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps = {}): ManagedServiceLifecycle {
+export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps = {}, gateRoot?: string): ManagedServiceLifecycle {
   const run = deps.run ?? defaultRunner;
   const fs = deps.fs ?? fsp;
   const homedir = deps.homedir ?? (() => os.homedir());
@@ -244,5 +244,5 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
       const determinate = running || !LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
       return { running, determinate, detail };
     },
-  }, fs);
+  }, fs, gateRoot);
 }

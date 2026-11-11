@@ -1,31 +1,32 @@
-import { parsePiAgentResources } from '../adapters/pi/agent-resources';
-import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
-import { applyPiHostNetworkDefaults } from './pi-host-network-defaults';
+import { parsePiAgentResources } from '../adapters/pi/agent-resources.js';
+import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding.js';
+import { applyPiHostNetworkDefaults } from './pi-host-network-defaults.js';
 import { readFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAgentDir, type CreateAgentSessionOptions, type InlineExtension } from '@earendil-works/pi-coding-agent';
 import { MODEL_THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
-import { PI_RPC_IPC_KEY_MARKER, receiveLauncherCredential } from '../adapters/pi/launcher-credential';
-import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
-import { runPiSessionRuntime } from './pi-session-runtime';
-export { openPiRpcSession } from './pi-session-runtime';
+import { PI_RPC_IPC_KEY_MARKER, receiveLauncherCredential } from '../adapters/pi/launcher-credential.js';
+import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment.js';
+import { runPiSessionRuntime } from './pi-session-runtime.js';
+export { openPiRpcSession } from './pi-session-runtime.js';
 import { webExtension } from './pi-extension-factories.js';
-import { loadPiSubagentsAsset, loadPiSubagentsExtensions, writePiSubagentsHostSdk } from '../adapters/pi/subagents';
-import { bundledAssetRoot, verifyTodoLocaleAssets } from '../adapters/pi/todo-locale-assets';
-import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
-import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
-import { parseToolAuthorizationIpcConfig, setToolAuthorizationGateEnv, type ToolAuthorizationIpcConfig } from '../tool-authorization-ipc';
-import { createPiToolAuthorizationHook } from '../adapters/pi/tool-authorization-hook';
-import { parseSerializedFileScopeGrant, verifySerializedFileScopeGrant, type SerializedFileScopeGrant } from '../file-scope-launch';
-import { createPiFileScopeExtension } from '../adapters/pi/file-scope-extension';
-import { assertPiFileScopeRegistry } from '../adapters/pi/file-scope-registry';
-import { createPiMemoryLane, assertPiMemoryToolLoadout } from './pi-memory-lane';
+import { loadPiSubagentsAsset, loadPiSubagentsExtensions, writePiSubagentsHostSdk, refusePiSubagentHostCommands, PI_SUBAGENT_HOST_EXTENSION } from '../adapters/pi/subagents.js';
+import { bundledAssetRoot, verifyTodoLocaleAssets } from '../adapters/pi/todo-locale-assets.js';
+import { BUNDLED_SUBAGENT_DIR, pinBunSubagentAssets, prepareBundledSubagents, refuseBundledBackground } from '../adapters/pi/bundled-subagent-runtime.js';
+import { createByokMcpExtension } from '../adapters/pi/mcp-extension.js';
+import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool.js';
+import { parseToolAuthorizationIpcConfig, setToolAuthorizationGateEnv, type ToolAuthorizationIpcConfig } from '../tool-authorization-ipc.js';
+import { createPiToolAuthorizationHook } from '../adapters/pi/tool-authorization-hook.js';
+import { parseSerializedFileScopeGrant, verifySerializedFileScopeGrant, type SerializedFileScopeGrant } from '../file-scope-launch.js';
+import { createPiFileScopeExtension } from '../adapters/pi/file-scope-extension.js';
+import { assertPiFileScopeRegistry } from '../adapters/pi/file-scope-registry.js';
+import { createPiMemoryLane, assertPiMemoryToolLoadout } from './pi-memory-lane.js';
 
 const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
 
-export { parsePiHostReadyEvent, type PiHostReadyEvent } from '../adapters/pi/host-ready';
-import type { PiHostReadyEvent } from '../adapters/pi/host-ready';
+export { parsePiHostReadyEvent, type PiHostReadyEvent } from '../adapters/pi/host-ready.js';
+import type { PiHostReadyEvent } from '../adapters/pi/host-ready.js';
 
 /** Readiness receipt consumed only by memory-lane admission. */
 export function createPiHostReady(session: { readonly sessionId: string }): PiHostReadyEvent {
@@ -246,7 +247,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     const resourceAgentDir = join(dirname(args.configPath), 'pi-agent-resources');
     mkdirSync(resourceAgentDir, { mode: 0o700 });
     await runPiSessionRuntime({
-      cwd: config.cwd, provider: args.provider, model: args.model, thinking: args.thinking,
+      cwd: config.cwd, credentialSource: config.credentialSource, provider: args.provider, model: args.model, thinking: args.thinking,
       resourceAgentDir, memoryLane, ...memoryLane.toolOptions,
       resourceLoaderOptions: memoryLane.resourceLoaderOptions,
       ...(providerApiKey === undefined ? {} : { providerApiKey }),
@@ -285,17 +286,18 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
       const fileScopeExtension = fileURLToPath(new URL('./pi-subagent-file-scope.js', import.meta.url));
       extensionFactories.push(...await loadPiSubagentsExtensions(config.toolAuthorization, gateExtension, fileScoped ? fileScopeExtension : undefined));
     } else {
-      // Background runs have no runner a bundled product can host (#1589): on
-      // a Bun-compiled product pi-subagents would re-execute the product
-      // itself with Pi CLI arguments. Its Pi executable override is read only
-      // on spawn paths, never by in-process foreground children. It names the
-      // launch-private directory, which holds this launch's config, so the
-      // spawn always fails and the tool call reports it.
-      process.env.PI_SUBAGENT_PI_BINARY = resolve(dirname(args.configPath));
-      // pi-subagents' own Pi root setting: foreground children get the product's Pi, and no foreign Pi above the product is used.
       const assetRoot = bundledAssetRoot();
-      process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = await writePiSubagentsHostSdk(join(resolve(dirname(args.configPath)), 'pi-subagents-host-sdk'), assetRoot);
-      const asset = await loadPiSubagentsAsset(assetRoot, config.toolAuthorization, fileScoped);
+      const bunExecutable = process.versions.bun !== undefined && /^(?:\/\$bunfs\/|B:[\\/]~BUN[\\/])/u.test(process.argv[1] ?? '');
+      let subagentAssets = assetRoot;
+      const trustedBun = bunExecutable ? pinBunSubagentAssets() : undefined;
+      if (trustedBun !== undefined) {
+        const root = join(resolve(dirname(args.configPath)), BUNDLED_SUBAGENT_DIR);
+        subagentAssets = await prepareBundledSubagents(root, assetRoot, trustedBun);
+      } else {
+        process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = await writePiSubagentsHostSdk(join(resolve(dirname(args.configPath)), 'pi-subagents-host-sdk'), assetRoot);
+        extensionFactories.push(refuseBundledBackground);
+      }
+      const asset = await loadPiSubagentsAsset(subagentAssets, config.toolAuthorization, fileScoped);
       subagentExtensionPaths.push(asset.extensionPath);
       extensionFactories.push(...asset.factories);
     }
@@ -323,8 +325,9 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     mkdirSync(resourceAgentDir, { mode: 0o700 });
   }
   await runPiSessionRuntime({
-    cwd: config.cwd, session: args.session, sessionDir,
+    cwd: config.cwd, credentialSource: config.credentialSource, session: args.session, sessionDir,
     onSessionReady: ready,
+    configureSession: session => refusePiSubagentHostCommands(session, [`<inline:${PI_SUBAGENT_HOST_EXTENSION}>`, ...subagentExtensionPaths]),
     provider: args.provider, model: args.model, thinking: args.thinking,
     ...(resourceAgentDir === undefined ? {} : { resourceAgentDir }),
     resourceLoaderOptions: {
@@ -342,7 +345,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     ...(fileScope === undefined ? {} : {
       // All six native file tools are shadowed by SDK-owned scoped tools above.
       // The assertion refuses to prompt if any of them is still the Pi built-in.
-      assertToolLoadout: (session: import('./pi-session-runtime').PiToolLoadoutSession) => assertPiFileScopeRegistry(session, {
+      assertToolLoadout: (session: import('./pi-session-runtime.js').PiToolLoadoutSession) => assertPiFileScopeRegistry(session, {
         required: ['read', 'write', 'edit', 'find', 'grep', 'ls'],
         forbidden: [],
       }),

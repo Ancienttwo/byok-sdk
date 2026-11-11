@@ -101,9 +101,7 @@ describe('agent-home-contract reference server', () => {
         instruction: 'fresh Agent work',
         agentRef,
       }),
-    ).rejects.toThrow(
-      'Agent resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
-    );
+    ).rejects.toMatchObject({ name: 'ByokCloudError', code: 'coordination_input_invalid' });
 
     expect(await started.byok.tasks.attempt('fresh-refused')).toBeUndefined();
     expect(await started.byok.tasks.get('fresh-refused')).toBeUndefined();
@@ -139,9 +137,7 @@ describe('agent-home-contract reference server', () => {
         agentRef,
         sessionRef: '',
       }),
-    ).rejects.toThrow(
-      'Agent resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
-    );
+    ).rejects.toMatchObject({ name: 'ByokCloudError', code: 'coordination_input_invalid' });
 
     expect(await started.byok.tasks.attempt('empty-session-refused')).toBeUndefined();
     expect(await started.byok.tasks.get('empty-session-refused')).toBeUndefined();
@@ -167,9 +163,7 @@ describe('agent-home-contract reference server', () => {
       await expect(
         // @ts-expect-error a JS caller may omit sessionRef on the Agent resume dispatch (#484)
         started.byok.dispatch({ deviceId, taskId, instruction: 'fresh Agent work', agentRef, requiredToolsets: ['salesko'], ...session }),
-      ).rejects.toThrow(
-        'Agent resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
-      );
+      ).rejects.toMatchObject({ name: 'ByokCloudError', code: 'coordination_input_invalid' });
       expect(await started.byok.tasks.attempt(taskId)).toBeUndefined();
     }
     expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
@@ -185,7 +179,7 @@ describe('agent-home-contract reference server', () => {
         sessionRef: SESSION_REF,
         requiredToolsets: ['salesko'],
       }),
-    ).rejects.toThrow(/did not advertise toolset-selection capability/);
+    ).rejects.toMatchObject({ name: 'ByokCloudError', code: 'agent_capability_missing' });
   });
 
   it('sends a resume task.offer and persists the exact AgentRef', async () => {

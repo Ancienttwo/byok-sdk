@@ -6,8 +6,8 @@
 // from the detection kinds (snake_case vs kebab-case), so a rename on one side
 // can never silently change the wire meaning.
 import type { RuntimeUnavailableCause } from '@byok-sdk/protocol/constants';
-import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment';
-import type { RuntimeDetectResult } from './types';
+import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
+import type { RuntimeDetectResult } from './types.js';
 
 /** One typed pre-claim admission cause, plus the optional environment capture code. */
 export interface RuntimeUnavailableAdmission {

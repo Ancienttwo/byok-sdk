@@ -120,8 +120,8 @@ describe('Salesko-shaped CLI config sets isolation and static auto from the file
     const effective = daemon.status().config;
     expect(effective.warnings).toEqual([]);
     expect(effective.runtimes).toEqual([
-      { id: 'pi', source: 'sdk-built', toolAuthorizationAuto: true, isolation: { agentUserContext: 'excluded' }, versionPolicy: { qualifiedVersion: '1.5.0', unqualified: 'allow' } },
-      { id: 'claude', source: 'sdk-built', toolAuthorizationAuto: true, isolation: { agentUserContext: 'excluded', agentSessionPersistence: 'disabled' }, versionPolicy: { qualifiedVersion: '2.1.312', unqualified: 'allow' } },
+      { id: 'pi', source: 'sdk-built', toolAuthorizationAuto: true, isolation: { agentUserContext: 'excluded' }, versionPolicy: { qualifiedVersion: '1.5.0', unqualified: 'allow' }, runtimeEnvironment: { base: 'login-shell' } },
+      { id: 'claude', source: 'sdk-built', toolAuthorizationAuto: true, isolation: { agentUserContext: 'excluded', agentSessionPersistence: 'disabled' }, versionPolicy: { qualifiedVersion: '2.1.312', unqualified: 'allow' }, runtimeEnvironment: { base: 'login-shell' } },
     ]);
     expect(effective.toolAuthorization).toEqual({
       mode: 'static',
@@ -182,12 +182,12 @@ describe('Salesko-shaped CLI config sets isolation and static auto from the file
     const effective = daemon.status().config;
     expect(effective.warnings).toEqual([]);
     expect(effective.runtimes).toEqual([{
-      id: 'grok', source: 'sdk-built', toolAuthorizationAuto: false,
+      id: 'grok', source: 'sdk-built', toolAuthorizationAuto: false, runtimeEnvironment: { base: 'login-shell' },
       isolation: { compatInstructions: 'disabled', agentUserMcpServers: 'excluded' }, versionPolicy,
     }]);
     expect(effective.toolAuthorization).toEqual({ mode: 'static', byRuntime: { grok: 'all' }, localToolApproval: 'host-only' });
     expect(constructed.grok).toEqual([expect.objectContaining({
-      compatInstructions: 'disabled', agentUserMcpServers: 'excluded', versionPolicy, versionPolicySource: 'daemon-config',
+      compatInstructions: 'disabled', agentUserMcpServers: 'excluded', versionPolicy,
     })]);
     expect([...constructed.pi, ...constructed.claude, ...constructed.codex]).toEqual([]);
 

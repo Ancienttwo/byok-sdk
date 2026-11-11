@@ -1,21 +1,21 @@
 import { promises as fs } from 'node:fs';
-import type { RuntimeTaskInput } from '../../types';
+import type { RuntimeTaskInput } from '../../types.js';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { Session, PolicyUnsupportedError, SteerUnsupportedError } from '../../types';
-import type { ExecutionScratch } from '../../daemon/retention/scratch';
-import type { RuntimeExecutionFailure, RuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
-import type { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
-import type { AcpConnection, AcpMethodNotFound, AcpRpcError } from './acp-connection';
-import type { identifyHermesGateway, servesHermesHome } from './gateway-identity';
-import type { ownsHermesGatewayPid } from './gateway-ownership';
-import type { removeHermesProfile } from './hermes-home';
-import { AsyncQueue } from '../../util/async-queue';
-import { HermesProjection } from './projection';
-import { raceDeadline, RetryableOnce } from '../session-kit';
+import type { Session, PolicyUnsupportedError, SteerUnsupportedError } from '../../types.js';
+import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
+import type { RuntimeExecutionFailure, RuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
+import type { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
+import type { AcpConnection, AcpMethodNotFound, AcpRpcError } from './acp-connection.js';
+import type { identifyHermesGateway, servesHermesHome } from './gateway-identity.js';
+import type { ownsHermesGatewayPid } from './gateway-ownership.js';
+import type { removeHermesProfile } from './hermes-home.js';
+import { AsyncQueue } from '../../util/async-queue.js';
+import { HermesProjection } from './projection.js';
+import { raceDeadline, RetryableOnce } from '../session-kit.js';
 
 /** Windows-only gateway helpers. They load with this entry, so the root entries do not carry them. */
-export { exchangeHermesPipe, windowsLower } from './gateway-pipe-win32';
-export { descendsOnWindows } from './windows-process-table';
+export { exchangeHermesPipe, windowsLower } from './gateway-pipe-win32.js';
+export { descendsOnWindows } from './windows-process-table.js';
 
 /** Runtime identities are owned by the calling entry, never copied into this lazy bundle. */
 export interface HermesSessionDependencies {
@@ -188,7 +188,7 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
           // close() rejects the pending prompt on purpose; that is not a turn failure.
           if (this.stopping) return;
           this.fail(error instanceof AcpRpcError && error.details === 'admitted_turn_failed'
-            ? new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'hermes turn failed' })
+            ? new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason: 'hermes turn failed' })
             : error);
         },
       ).finally(() => {
@@ -247,7 +247,7 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
     }
 
     private exited(which: string): void {
-      if (!this.stopping) this.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable',
+      if (!this.stopping) this.fail(new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable',
         reason: `hermes ${which} exited`, failure: { class: 'runtime_exited' } }));
     }
 

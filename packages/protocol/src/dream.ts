@@ -12,8 +12,8 @@
  * `MEMORY.md` over its limit. Its writes are never rolled back, so the text
  * orders every step to leave usable memory if the task stops there.
  */
-import { AGENT_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES, RESIDENT_MEMORY_MAX_BYTES } from './constants';
-import type { HandoffPack } from './handoff-pack';
+import { AGENT_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES, RESIDENT_MEMORY_MAX_BYTES } from './constants.js';
+import type { HandoffPack } from './handoff-pack.js';
 
 // A dream stops at three quarters of each snapshot limit, so the tasks after it have room.
 const DREAM_MAX_FILES = AGENT_MEMORY_MAX_SNAPSHOT_FILES / 4 * 3;

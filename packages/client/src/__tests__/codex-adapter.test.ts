@@ -231,7 +231,6 @@ describe('Codex persistent app-server adapter', () => {
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
     expect(failure).toMatchObject({
       phase: 'start',
-      category: 'authority',
       retry: 'non-retryable',
       message: expect.stringContaining('no rollout found'),
     });
@@ -248,7 +247,6 @@ describe('Codex persistent app-server adapter', () => {
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
     expect(failure).toMatchObject({
       phase: 'start',
-      category: 'infrastructure',
       retry: 'retryable',
       message: expect.stringContaining('no rollout found'),
     });
@@ -417,7 +415,6 @@ describe('Codex persistent app-server adapter', () => {
     );
     await expect(turn(s)).rejects.toMatchObject({
       phase: 'run',
-      category: 'authority',
       retry: 'non-retryable',
     });
   });
@@ -435,19 +432,19 @@ describe('Codex persistent app-server adapter', () => {
       (async () => {
         for await (const e of s.events) out.push(e);
       })(),
-    ).rejects.toMatchObject({ category: 'semantic', retry: 'non-retryable' });
+    ).rejects.toMatchObject({ retry: 'non-retryable' });
     expect(out.some((e) => e.type === 'error' && e.message === 'quota')).toBe(
       true,
     );
     expect(out.some((e) => e.type === 'turn_end')).toBe(false);
   });
-  it('unexpected process exit closes the stream with typed infrastructure failure', async () => {
+  it('unexpected process exit closes the stream with a typed non-retryable run failure', async () => {
     const s = await open(
       adapter(),
       task,
       await ctx({ FAKE_CODEX_EXIT_NO_TERMINAL: '1' }),
     );
-    await expect(turn(s)).rejects.toMatchObject({ category: 'infrastructure' });
+    await expect(turn(s)).rejects.toMatchObject({ phase: 'run', retry: 'non-retryable' });
   });
   it.each([
     ['usageLimitExceeded', '"usageLimitExceeded"', { class: 'quota' }],
@@ -484,7 +481,7 @@ describe('Codex persistent app-server adapter', () => {
   });
   it('marks an app-server exit before the terminal runtime_exited (#869)', async () => {
     const s = await open(adapter(), task, await ctx({ FAKE_CODEX_EXIT_NO_TERMINAL: '1' }));
-    await expect(turn(s)).rejects.toMatchObject({ category: 'infrastructure', failure: { class: 'runtime_exited' } });
+    await expect(turn(s)).rejects.toMatchObject({ failure: { class: 'runtime_exited' } });
   });
   it('file changes produce real workspace-relative artifacts', async () => {
     const resources = await ctx({
@@ -569,7 +566,7 @@ describe('Codex persistent app-server adapter', () => {
     const { pids, spawnFn } = tracked();
     const error = await open(adapter({ maxRetainedBytes: 1, spawnFn })).catch((caught) => caught);
     expect(error).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(error).toMatchObject({ category: 'infrastructure', message: 'codex retained record byte budget exceeded' });
+    expect(error).toMatchObject({ message: 'codex retained record byte budget exceeded' });
     expect(pids).toHaveLength(1);
     await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
   });
@@ -580,7 +577,7 @@ describe('Codex persistent app-server adapter', () => {
     // The fixture keeps writing the hanging turn; any later record reaches the failing consumer.
     await s.steer('next').catch(() => {});
     const failure = await turn(s).then(() => undefined, (error) => error);
-    expect(failure).toMatchObject({ category: 'infrastructure', message: 'projection failed' });
+    expect(failure).toMatchObject({ message: 'projection failed' });
     await s.close();
     await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
   });
@@ -590,7 +587,7 @@ describe('Codex persistent app-server adapter', () => {
     vi.spyOn(vendoredProjection, 'foldCodexNotification').mockImplementation(() => { throw new Error('projection failed'); });
     await s.steer('next').catch(() => {});
     const failure = await turn(s).then(() => undefined, (error) => error);
-    expect(failure).toMatchObject({ category: 'infrastructure', message: 'projection failed', failure: { class: 'unknown' } });
+    expect(failure).toMatchObject({ message: 'projection failed', failure: { class: 'unknown' } });
     await s.close();
     await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
   });
@@ -603,7 +600,7 @@ describe('Codex persistent app-server adapter', () => {
     });
     const s = await open(adapter(), task, await ctx({ FAKE_CODEX_EXIT_NO_TERMINAL: '1' }));
     await expect(turn(s)).rejects.toMatchObject({
-      category: 'infrastructure', message: 'projection failed on the exit record', failure: { class: 'runtime_exited' },
+      message: 'projection failed on the exit record', failure: { class: 'runtime_exited' },
     });
   });
   it('rejects an invalid operation timeout', () => {
@@ -620,7 +617,6 @@ describe('Codex persistent app-server adapter', () => {
     expect(error).toBeInstanceOf(RuntimeExecutionFailure);
     expect(error).toMatchObject({
       phase: 'start',
-      category: 'infrastructure',
       retry: operation === 'open' ? 'retryable' : 'non-retryable',
       message: `codex ${operation} timed out after ${operationTimeoutMs}ms`,
     });
@@ -644,13 +640,13 @@ describe('Codex persistent app-server adapter', () => {
       FAKE_CODEX_ERROR_INFO: '"usageLimitExceeded"',
     })).catch((caught) => caught);
     expect(error).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(error).toMatchObject({ phase: 'start', category: 'semantic', failure: { class: 'quota' } });
+    expect(error).toMatchObject({ phase: 'start', failure: { class: 'quota' } });
   });
   it('fails the session and kills the app-server when a steer gets no reply within the deadline', async () => {
     const { pids, spawnFn } = tracked();
     const s = await open(adapter({ operationTimeoutMs: 3000, spawnFn }), task, await ctx({ FAKE_CODEX_HANG: '1', FAKE_CODEX_HANG_STEER: '1' }));
     await expect(s.steer('redirect')).rejects.toThrow('codex steer timed out after 3000ms');
-    await expect(turn(s)).rejects.toMatchObject({ category: 'infrastructure', message: 'codex steer timed out after 3000ms' });
+    await expect(turn(s)).rejects.toMatchObject({ message: 'codex steer timed out after 3000ms' });
     await s.close();
     await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
   });
@@ -792,7 +788,7 @@ describe('CodexAdapter agentUserMcpServers (#935)', () => {
     const { resources, rpc } = await agentCtx({ FAKE_CODEX_USER_CONFIG: JSON.stringify({ mcp_servers: { host: { command: 'user-host', env: { NODE_OPTIONS: '--require /x' } } } }) });
     const error = await startPreparedOperation(adapter({ agentUserMcpServers: 'excluded' }), task, resources).catch(e => e);
     expect(error).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(error).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', failure: { class: 'unknown' },
+    expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'unknown' },
       message: 'codex Agent user MCP server exclusion refused: user MCP servers share a name with task servers: host' });
     expect((await rpc()).map(frame => frame.method)).toEqual(['initialize', 'config/read']);
   });
@@ -802,7 +798,7 @@ describe('CodexAdapter agentUserMcpServers (#935)', () => {
     const { resources } = await agentCtx({ FAKE_CODEX_STATUS_EXTRA: JSON.stringify(extra) });
     const error = await startPreparedOperation(adapter({ agentUserMcpServers: 'excluded' }), task, resources).catch(e => e);
     expect(error).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(error).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', failure: { class: 'unknown' },
+    expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'unknown' },
       message: 'codex Agent thread still runs MCP servers outside the task: codex_apps, gdrive (plugin drive@market)' });
   });
 
@@ -852,7 +848,7 @@ describe('CodexAdapter agentUserContext (#1565)', () => {
   it('refuses a credential store other than file before the thread opens', async () => {
     const resources = await ctx({ CODEX_HOME: await userHome(), FAKE_CODEX_USER_CONFIG: JSON.stringify({ cli_auth_credentials_store: 'keyring' }) });
     const error = await startPreparedOperation(adapter({ agentUserContext: 'excluded' }), task, { ...resources, agentHome: resources.workspaceDir }).catch(e => e);
-    expect(error).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable',
+    expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable',
       message: 'codex Agent user context exclusion refused: cli_auth_credentials_store is keyring; an SDK-owned CODEX_HOME supports file credentials only' });
   });
 
@@ -878,7 +874,7 @@ describe('CodexAdapter agentUserContext (#1565)', () => {
     const home = agentHome && path.join(dir, agentHome);
     if (home !== undefined) await fs.mkdir(home);
     await remove(user, home!);
-    await expect(createCodexAgentHome({ CODEX_HOME: user }, dir, home)).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable',
+    await expect(createCodexAgentHome({ CODEX_HOME: user }, dir, home)).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable',
       message: `codex Agent user context exclusion refused: ${reason}` });
   });
 
@@ -887,7 +883,7 @@ describe('CodexAdapter agentUserContext (#1565)', () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-sdk-'));
     dirs.push(dir);
     vi.spyOn(fs, 'symlink').mockRejectedValueOnce(Object.assign(new Error('operation not permitted'), { code: 'EPERM' }));
-    await expect(createCodexAgentHome({ CODEX_HOME: user }, dir, path.join(dir, 'agent-home'), 'win32')).rejects.toMatchObject({ category: 'authority',
+    await expect(createCodexAgentHome({ CODEX_HOME: user }, dir, path.join(dir, 'agent-home'), 'win32')).rejects.toMatchObject({
       message: 'codex Agent user context exclusion refused: Windows refused to create a symbolic link (EPERM); turn on Developer Mode or run the daemon as an administrator' });
   });
 });

@@ -1,13 +1,13 @@
-export { ByokKeysError, BYOK_KEYS_ERROR_CODES } from './errors';
-export type { ByokKeysErrorCode } from './errors';
+export { ByokKeysError, BYOK_KEYS_ERROR_CODES } from './errors.js';
+export type { ByokKeysErrorCode } from './errors.js';
 export {
   PiModelConfigSchema,
   PI_THINKING_LEVELS,
   PI_OPENAI_COMPATIBLE_APIS,
   PI_MODEL_APIS,
   PI_COMPAT_KEYS_BY_API,
-} from './pi-model-config';
-export type { PiCompatKey, PiModelApi, PiModelConfig, PiOpenAICompatibleApi, PiThinkingLevel } from './pi-model-config';
+} from './pi-model-config.js';
+export type { PiCompatKey, PiModelApi, PiModelConfig, PiOpenAICompatibleApi, PiThinkingLevel } from './pi-model-config.js';
 
 
 export {
@@ -19,7 +19,7 @@ export {
   ProviderModelCapabilitySchema,
   ProviderProfileRefSchema,
   parseModelProviderProfile,
-} from './provider-profile';
+} from './provider-profile.js';
 export type {
   ModelProviderAdapter,
   ModelProviderKind,
@@ -28,32 +28,32 @@ export type {
   ProviderAuthMode,
   ProviderModelCapability,
   ProviderProfileRef,
-} from './provider-profile';
+} from './provider-profile.js';
 export {
   exactProviderProfileBinding,
   assertExactProviderProfileBinding,
-} from './provider-profile-binding';
-export type { ExactProviderProfileBinding } from './provider-profile-binding';
+} from './provider-profile-binding.js';
+export type { ExactProviderProfileBinding } from './provider-profile-binding.js';
 
 export {
   MODEL_PROVIDER_VENDORS,
   MODEL_PROVIDER_VENDOR_IDS,
   modelProviderVendor,
-} from './provider-catalog';
+} from './provider-catalog.js';
 export type {
   ModelProviderVendor,
   ModelProviderVendorId,
-} from './provider-catalog';
+} from './provider-catalog.js';
 
-export { providerHeaders, requiredProviderSecret } from './headers';
-export type { ProviderAuthProfile } from './headers';
+export { providerHeaders, requiredProviderSecret } from './headers.js';
+export type { ProviderAuthProfile } from './headers.js';
 
 export {
   normalizeProviderUrl,
   isLoopbackHost,
   isLoopbackProviderUrl,
   isPrivateNetworkLiteral,
-} from './url';
+} from './url.js';
 
 export {
   assertLiveModelResponse,
@@ -66,31 +66,31 @@ export {
   PROVIDER_RESPONSE_MAX_BYTES,
   PROVIDER_TIMEOUT_MS,
   readModelProviderResponse,
-} from './http';
-export type { ProviderFetch } from './http';
+} from './http.js';
+export type { ProviderFetch } from './http.js';
 
-export { OpenAiCompatibleChatClient, chatCompletionText } from './openai-client';
+export { OpenAiCompatibleChatClient, chatCompletionText } from './openai-client.js';
 export type {
   ChatCompletionRequest,
   ChatMessage,
   ModelProviderClientOptions,
-} from './openai-client';
+} from './openai-client.js';
 
-export { AnthropicMessagesClient, anthropicMessageText } from './anthropic-client';
+export { AnthropicMessagesClient, anthropicMessageText } from './anthropic-client.js';
 export type {
   AnthropicMessage,
   AnthropicMessageRequest,
-} from './anthropic-client';
+} from './anthropic-client.js';
 
-export { runCommand } from './command-runner';
-export type { CommandResult, CommandRunner } from './command-runner';
+export { runCommand } from './command-runner.js';
+export type { CommandResult, CommandRunner } from './command-runner.js';
 
 export {
   SECRET_NAME_PATTERN,
   SECRET_NAMESPACE_PATTERN,
   assertSecretName,
   assertSecretNamespace,
-} from './secret-name';
+} from './secret-name.js';
 
 export {
   DEFAULT_SECRET_SERVICE_PREFIX,
@@ -98,49 +98,49 @@ export {
   assertSharedSecretValue,
   decodeStrictBase64Utf8,
   modelProviderSecretName,
-} from './secret-store';
-export { PROVIDER_PROVISIONING_SECRET_MAX_BYTES } from './secret-value';
-export type { ModelProviderSecretName, SecretStore } from './secret-store';
+} from './secret-store.js';
+export { PROVIDER_PROVISIONING_SECRET_MAX_BYTES } from './secret-value.js';
+export type { ModelProviderSecretName, SecretStore } from './secret-store.js';
 
 export {
   DEFAULT_KEYCHAIN_SECRET_STORAGE_PREFIX,
   MacOsKeychainSecretStore,
-} from './macos-keychain';
-export type { MacOsKeychainSecretStoreOptions } from './macos-keychain';
+} from './macos-keychain.js';
+export type { MacOsKeychainSecretStoreOptions } from './macos-keychain.js';
 
-export { LinuxSecretServiceSecretStore } from './linux-secret-service';
-export type { LinuxSecretServiceSecretStoreOptions } from './linux-secret-service';
+export { LinuxSecretServiceSecretStore } from './linux-secret-service.js';
+export type { LinuxSecretServiceSecretStoreOptions } from './linux-secret-service.js';
 
-export { WindowsCredentialManagerSecretStore } from './windows-credential-manager';
-export type { WindowsCredentialManagerSecretStoreOptions } from './windows-credential-manager';
+export { WindowsCredentialManagerSecretStore } from './windows-credential-manager.js';
+export type { WindowsCredentialManagerSecretStoreOptions } from './windows-credential-manager.js';
 
 export {
   DEFAULT_SECRET_ENVELOPE_PREFIX,
   EnvelopeScopedSecretStore,
   scopeSecretStore,
   secretScopeId,
-} from './secret-scope';
-export type { SecretScope } from './secret-scope';
+} from './secret-scope.js';
+export type { SecretScope } from './secret-scope.js';
 
-export { InMemoryProviderProfileStore } from './profile-store';
-export type { ProviderProfileStore } from './profile-store';
+export { InMemoryProviderProfileStore } from './profile-store.js';
+export type { ProviderProfileStore } from './profile-store.js';
 
 export {
   isSqliteAvailable,
   loadSqliteModule,
   openSqliteDatabase,
   secureSqliteFilePermissions,
-} from './sqlite-support';
+} from './sqlite-support.js';
 
-export { SqliteProviderProfileStore, migrateProviderProfileStore } from './sqlite-profile-store';
-export type { ProviderProfileStoreMigration, SqliteProviderProfileStoreOptions } from './sqlite-profile-store';
-export { inspectProviderProfileStore } from './store-compatibility';
+export { SqliteProviderProfileStore, migrateProviderProfileStore } from './sqlite-profile-store.js';
+export type { ProviderProfileStoreMigration, SqliteProviderProfileStoreOptions } from './sqlite-profile-store.js';
+export { inspectProviderProfileStore } from './store-compatibility.js';
 
 export {
   PROVIDER_PROFILE_TRUTH_RECORD_KEY,
   TruthStoreProviderProfileStore,
-} from './truth-profile-store';
-export type { TruthStoreProviderProfileStoreOptions } from './truth-profile-store';
+} from './truth-profile-store.js';
+export type { TruthStoreProviderProfileStoreOptions } from './truth-profile-store.js';
 
 export {
   PROVIDER_CONFIGURATION_LOCK_WAIT_MS,
@@ -148,7 +148,7 @@ export {
   PROVIDER_KEY_CHECK_OUTCOMES,
   PROVIDER_PROVISIONING_REJECTIONS,
   withConfigurationLock,
-} from './custody';
+} from './custody.js';
 export type {
   ProviderConfigurationLock,
   ProviderCustodyCommit,
@@ -159,54 +159,54 @@ export type {
   ProviderProvisioningBinding,
   ProviderProvisioningRejection,
   ProviderProvisioningResult,
-} from './custody';
+} from './custody.js';
 
-export { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key';
+export { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key.js';
 export type {
   DeviceSealingEnrollment,
   DeviceSealingKey,
   DeviceSealingSecretName,
-} from './device-sealing-key';
+} from './device-sealing-key.js';
 
 export {
   PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS,
   applySealedProviderProvisioning,
   readSealedProvisioningResult,
-} from './sealed-provisioning';
+} from './sealed-provisioning.js';
 export type {
   ApplySealedProviderProvisioningOptions,
   ProviderProvisioningIdentitySnapshot,
   SealedProvisioningReadback,
   ProviderProvisioningCutPoint,
   ProviderProvisioningFaultSeam,
-} from './sealed-provisioning';
+} from './sealed-provisioning.js';
 
-export { PROVIDER_KEY_CHECK_TIMEOUT_MS, checkProviderKey } from './provider-key-check';
-export type { ProviderKeyCheckOptions } from './provider-key-check';
+export { PROVIDER_KEY_CHECK_TIMEOUT_MS, checkProviderKey } from './provider-key-check.js';
+export type { ProviderKeyCheckOptions } from './provider-key-check.js';
 
-export { ProviderRegistry } from './registry';
+export { ProviderRegistry } from './registry.js';
 export type {
   ModelProviderClient,
   ProviderConfiguration,
   ProviderRegistryOptions,
   ProviderStatus,
-} from './registry';
+} from './registry.js';
 
 export {
   PI_AUTH_NONE_API_KEY,
   PI_PROJECTED_KEY_ENV,
   assertPiLaunchArgs,
   buildPiProviderProjection,
-} from './pi-provider-projection';
+} from './pi-provider-projection.js';
 
 export {
   parsePiProviderLauncherOptions,
   runPiProviderLauncher,
-} from './pi-provider-launcher-core';
+} from './pi-provider-launcher-core.js';
 export type {
   PiProviderLauncherHost,
   PiProviderLauncherOptions,
-} from './pi-provider-launcher-core';
+} from './pi-provider-launcher-core.js';
 
-export { HERMES_PROVIDER_KEY_ENV, hermesProviderModel, parseHermesProviderLauncherRequest, runHermesProviderLauncher } from './hermes-provider-launcher';
-export type { HermesProviderLauncherRequest } from './hermes-provider-launcher';
+export { HERMES_PROVIDER_KEY_ENV, hermesProviderModel, parseHermesProviderLauncherRequest, runHermesProviderLauncher } from './hermes-provider-launcher.js';
+export type { HermesProviderLauncherRequest } from './hermes-provider-launcher.js';

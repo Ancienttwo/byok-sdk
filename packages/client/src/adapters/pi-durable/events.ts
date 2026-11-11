@@ -1,7 +1,7 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { ConversationView, EntryRecord, LiveState, ToolSlot } from '@earendil-works/pi-durable';
-import type { McpEventIdentities } from '../../mcp/event-identity';
-import { servedModelName } from '../served-model';
+import type { McpEventIdentities } from '../../mcp/event-identity.js';
+import { servedModelName } from '../served-model.js';
 
 /** What the durable lane reports from one change of the conversation view. */
 export type DurableEvent =

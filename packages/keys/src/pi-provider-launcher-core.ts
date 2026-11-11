@@ -2,28 +2,28 @@ import os from 'node:os';
 import path from 'node:path';
 import { promises as fs, type Dirent } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { runCommand, type CommandRunner } from './command-runner';
-import { configurationPendingError, withConfigurationLock } from './custody';
-import { ByokKeysError } from './errors';
-import { PI_PREPARED_COMPAT_KEYS } from './pi-model-config';
-import { SqliteProviderProfileStore } from './sqlite-profile-store';
+import { runCommand, type CommandRunner } from './command-runner.js';
+import { configurationPendingError, withConfigurationLock } from './custody.js';
+import { ByokKeysError } from './errors.js';
+import { PI_PREPARED_COMPAT_KEYS } from './pi-model-config.js';
+import { SqliteProviderProfileStore } from './sqlite-profile-store.js';
 import {
   PI_LAUNCHER_RUNTIME_ENTRIES, PI_PROJECTED_KEY_ENV, assertPiLaunchArgs, buildPiPreparedArgs, buildPiProviderArgs,
-  buildPiProviderProjection, type PiLauncherRuntimeEntry,
-} from './pi-provider-projection';
-import type { ProviderProfileStore } from './profile-store';
+  buildPiProviderProjection, piProjectionProviderId, type PiLauncherRuntimeEntry,
+} from './pi-provider-projection.js';
+import type { ProviderProfileStore } from './profile-store.js';
 import {
   ProviderModelCapabilitySchema,
   ProviderProfileRefSchema,
   type ModelProviderProfile,
   type ProviderProfileRef,
-} from './provider-profile';
+} from './provider-profile.js';
 import {
   assertExactProviderProfileBinding,
   exactProviderProfileBinding,
   type ExactProviderProfileBinding,
-} from './provider-profile-binding';
-import { type SecretStore, modelProviderSecretName } from './secret-store';
+} from './provider-profile-binding.js';
+import { type SecretStore, modelProviderSecretName } from './secret-store.js';
 
 export interface PiProviderLauncherOptions {
   piBin: string;
@@ -238,7 +238,7 @@ export function parsePiProviderLauncherOptions(
  * projection refuses a keyless profile for this entry too.
  *
  * A declared `pi_model.api: 'openai-responses'` is refused for the same
- * reason. So are `pi_model.inputLimits` and any compat key outside
+ * reason. So are `pi_model.providerId`, `pi_model.inputLimits` and any compat key outside
  * {@link PI_PREPARED_COMPAT_KEYS}: the frozen prepared model wire does not
  * carry them, and the prepared host refuses a projected entry that declares one.
  *
@@ -259,6 +259,7 @@ export function assertPiPreparedProviderProfile(profile: ModelProviderProfile): 
     );
   }
   const uncarried = profile.pi_model === undefined ? [] : [
+    ...(profile.pi_model.providerId === undefined ? [] : ['providerId']),
     ...(profile.pi_model.inputLimits === undefined ? [] : ['inputLimits']),
     ...Object.keys(profile.pi_model.compat).filter(key => !PI_PREPARED_COMPAT_KEYS.includes(key)).map(key => `compat.${key}`),
   ];
@@ -672,7 +673,9 @@ export async function startPiProvider(
           || (message as {type?: unknown}).type !== `byok.pi.${ipcLane}.credential-request`
           || (message as {configDigest?: unknown}).configDigest !== configDigest
           || !child.send || !child.connected) { child.kill(); return; }
-        child.send({ type: `byok.pi.${ipcLane}.credential`, configDigest, secret: secret ?? null }, error => { if (error) child.kill(); });
+        child.send({ type: `byok.pi.${ipcLane}.credential`, configDigest, secret: secret ?? null,
+          ...(durable ? { profileRef: profile.profile_ref, providerId: piProjectionProviderId(profile) } : {}),
+        }, error => { if (error) child.kill(); });
       });
     }
     return { child, cleanup };

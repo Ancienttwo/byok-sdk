@@ -1,12 +1,12 @@
-import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits';
+import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import * as dshRuntime from '../../runtime/dsh-session-runtime';
-import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure';
+import * as dshRuntime from '../../runtime/dsh-session-runtime.js';
+import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
-import type { ExecutionScratch } from '../../daemon/retention/scratch';
+import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import {
   freezeRuntimeAdapterDescriptor,
   PolicyUnsupportedError,
@@ -17,22 +17,22 @@ import {
   type RuntimeOperationStartInput,
   type RuntimeVersionPolicy,
   type Session,
-} from '../../types';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
-import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import { dshMcpRows, dshSession, type DshRecord, type RawDshSession } from '../../runtime/dsh-session-runtime';
-import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
-import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
-import { AsyncQueue } from '../../util/async-queue';
-import { comparablePath } from '../../util/comparable-path';
-import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
-import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
-import type { ResolvedBin } from '../codex/resolve-bin';
-import { DSH_RUNTIME_CAPABILITIES } from './dsh-capabilities';
-import { assertDshModelSelection, assertDshSandboxMode, dshAgentsHome, dshEnvironment, dshPatch, dshRoute } from './dsh-profile';
-import { DSH_VERSION_POLICY, dshVersionToken } from './dsh-version';
-import { DshProjection, type DshTurnOutcome } from './projection';
-import { resolveDshBin } from './resolve-bin';
+} from '../../types.js';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import { dshMcpRows, dshSession, type DshRecord, type RawDshSession } from '../../runtime/dsh-session-runtime.js';
+import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
+import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
+import { AsyncQueue } from '../../util/async-queue.js';
+import { comparablePath } from '../../util/comparable-path.js';
+import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
+import { DSH_RUNTIME_CAPABILITIES } from './dsh-capabilities.js';
+import { assertDshModelSelection, assertDshSandboxMode, dshAgentsHome, dshEnvironment, dshPatch, dshRoute } from './dsh-profile.js';
+import { DSH_VERSION_POLICY, dshVersionToken } from './dsh-version.js';
+import { DshProjection, type DshTurnOutcome } from './projection.js';
+import { resolveDshBin } from './resolve-bin.js';
 
 /**
  * Provider and model for every dsh execution (#1258 O4). Credentials stay in
@@ -94,8 +94,6 @@ export interface DshAdapterOptions {
   runtimeEnvironment?: RuntimeEnvironmentPolicy;
   /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
   versionPolicy?: RuntimeVersionPolicy;
-  /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-  versionPolicySource?: 'adapter-option' | 'daemon-config';
   resolveBin?: () => ResolvedBin;
   spawnFn?: typeof nodeSpawn;
   maxRetainedBytes?: number;
@@ -104,9 +102,9 @@ export interface DshAdapterOptions {
 }
 
 const authority = (reason: string) =>
-  new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
+  new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
 const infrastructure = (reason: string, failure?: TaskFailure) =>
-  new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason, failure });
+  new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason, failure });
 
 /** `dsh --profile acp --help` exits 0 when the acp profile resolves; it also writes that profile into a new root. */
 function probeAcpProfile(command: string, root: string, env: Record<string, string>): Promise<boolean> {
@@ -166,12 +164,7 @@ export class DshAdapter implements RuntimeAdapter {
     this.maxRetainedBytes = resolveMaxRetainedBytes(options.maxRetainedBytes, 'dsh');
     this.interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'dsh');
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'DshAdapterOptions.runtimeEnvironment');
-    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
-      descriptor: DSH_VERSION_POLICY,
-      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
-        ? { daemonConfig: options.versionPolicy }
-        : { adapterOption: options.versionPolicy }),
-    }).policy;
+    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy(DSH_VERSION_POLICY, options.versionPolicy);
     this.root = root;
     this.sandbox = sandbox;
     this.options = { ...options, model: Object.freeze({ ...options.model }) };
@@ -364,7 +357,6 @@ class DshSession implements Session {
       if (turn.kind === 'failed') {
         this.fail(new RuntimeExecutionFailure({
           phase: 'run',
-          category: 'semantic',
           retry: turn.failure === 'rate_limited' ? 'retryable' : 'non-retryable',
           reason: turn.reason,
           failure: { class: turn.failure },

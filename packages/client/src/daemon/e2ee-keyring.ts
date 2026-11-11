@@ -63,16 +63,16 @@ import {
   type MemberKemKey,
   type MemberKeyBundleV1,
   type MemberKeys,
-  type ScopeKeyPackageV2,
+  type ScopeKeyPackage,
   type ScopeKeyPackageOpenResult,
   type SealedCategory,
   type SealedContentHeaderV1,
 } from '@byok-sdk/core/sealed-payload';
-import type { DeviceMemberRecords, MemberChainPoint } from './device-member-custody';
-import { MEMBER_REQUEST_TIMEOUT_MS, entryHashes, type DeviceMemberLog, type DeviceMemberSession } from './device-member';
+import type { DeviceMemberRecords, MemberChainPoint } from './device-member-custody.js';
+import { MEMBER_REQUEST_TIMEOUT_MS, entryHashes, type DeviceMemberLog, type DeviceMemberSession } from './device-member.js';
 import { E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX } from '@byok-sdk/protocol';
-import { E2eeMemberClientError, type E2eeMemberClient } from './e2ee-member-client';
-import type { SealedScopeKeyring, SealingKey } from './sealed-task';
+import { E2eeMemberClientError, type E2eeMemberClient } from './e2ee-member-client.js';
+import type { SealedScopeKeyring, SealingKey } from './sealed-task.js';
 
 /** How many rotations one seal waits for or starts before it fails closed. */
 const MAX_ROTATION_ROUNDS = 3;
@@ -593,7 +593,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       const found = await this.#readEpochs(scopeId);
       if (found === undefined) return 'scope_epochs_exceeded';
       const expected = new Map<number, string>();
-      const rewrapped: ScopeKeyPackageV2[] = [];
+      const rewrapped: ScopeKeyPackage[] = [];
       for (const [epoch, pkg] of found) {
         const current = await this.#openAccepted(view, scopeId, epoch, pkg, next);
         current?.scopeKey.fill(0);

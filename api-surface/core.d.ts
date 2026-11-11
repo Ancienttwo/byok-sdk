@@ -186,8 +186,8 @@ export interface DeviceProofVerifier {
     verify(input: DeviceProofVerifyInput): Promise<boolean>;
 }
 // ==== @byok-sdk/core dist/blob.d.ts ====
-import type { CollectExpiredInput, CollectExpiredResult } from './retention';
-import type { TenantId } from './tenant';
+import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
+import type { TenantId } from './tenant.js';
 /** `sha256:<64 lowercase hex>`. The only content-address form core accepts. */
 export declare const CONTENT_HASH_PATTERN: RegExp;
 /** A validated content address. Branded so an unvalidated digest cannot stand in for one. */
@@ -369,7 +369,7 @@ export interface ObjectCollectExpiredInput extends CollectExpiredInput {
  * - **conflicts return the snapshot they lost to**, so the caller re-decides
  *   against real state instead of retrying blind.
  */
-import type { TenantId } from './tenant';
+import type { TenantId } from './tenant.js';
 /** The five board statuses. `closed` means "terminated, unaccepted" (§12.3). */
 export declare const BOARD_STATUSES: readonly ['todo', 'in_progress', 'in_review', 'done', 'closed'];
 export type BoardStatus = (typeof BOARD_STATUSES)[number];
@@ -511,7 +511,7 @@ export declare function hasCapability(declaration: CapabilityDeclaration, capabi
  */
 export declare function assertCapability(declaration: CapabilityDeclaration, capability: string): void;
 // ==== @byok-sdk/core dist/device-assertion.d.ts ====
-import type { CollectExpiredInput, CollectExpiredResult } from './retention';
+import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
 /**
  * Device assertion envelope, canonical signing bytes, and verifier
  * (plan `device-assertion-broker`, P3 ①-⑤).
@@ -557,9 +557,9 @@ import type { CollectExpiredInput, CollectExpiredResult } from './retention';
  * Workers and `node:crypto`/WebCrypto disagree about key handling.
  */
 import { z } from 'zod';
-import { type JsonObject } from './attestation';
-import type { DevicePrincipal } from './principals';
-import { type TenantId } from './tenant';
+import { type JsonObject } from './attestation.js';
+import type { DevicePrincipal } from './principals.js';
+import { type TenantId } from './tenant.js';
 /** Envelope schema id, self-consistent with the domain prefix below. */
 export declare const DEVICE_ASSERTION_SCHEMA_ID = "byok-device-assertion-v1";
 /**
@@ -1128,9 +1128,9 @@ export declare function isCoreError(value: unknown, code?: CoreErrorCode): value
 /** Narrows an unknown thrown value to a conflict error carrying a snapshot. */
 export declare function isCoreConflictError<TCurrent>(value: unknown, code?: CoreErrorCode): value is CoreConflictError<TCurrent>;
 // ==== @byok-sdk/core dist/in-memory/blob.d.ts ====
-import { InMemoryStorageLedger } from './storage-ledger';
-import { type CollectExpiredResult } from '../retention';
-import type { ObjectCollectExpiredInput } from '../blob';
+import { InMemoryStorageLedger } from './storage-ledger.js';
+import { type CollectExpiredResult } from '../retention.js';
+import type { ObjectCollectExpiredInput } from '../blob.js';
 /**
  * In-memory {@link ObjectStore} reference (§12.7.4, §12.7.8).
  *
@@ -1140,9 +1140,9 @@ import type { ObjectCollectExpiredInput } from '../blob';
  * than incremented in place, so a double `addReference` for the same
  * `(refKind, refId)` cannot inflate it and strand an object forever.
  */
-import { type ContentHash, type ObjectCommitInput, type ObjectListQuery, type ObjectManifestEntry, type ObjectManifestInput, type ObjectReferenceInput, type ObjectStore } from '../blob';
-import type { Clock } from '../stores';
-import { type TenantId } from '../tenant';
+import { type ContentHash, type ObjectCommitInput, type ObjectListQuery, type ObjectManifestEntry, type ObjectManifestInput, type ObjectReferenceInput, type ObjectStore } from '../blob.js';
+import type { Clock } from '../stores.js';
+import { type TenantId } from '../tenant.js';
 export declare class InMemoryObjectStore implements ObjectStore {
     #private;
     private readonly maintenance;
@@ -1177,9 +1177,9 @@ export interface InMemoryObjectBytes {
  * `list({ afterSeq })` an incremental feed that cannot leak another tenant's
  * write rate.
  */
-import { type BoardClaimInput, type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type BoardStatusUpdateInput, type BoardStore, type BoardUnclaimInput } from '../board';
-import type { Clock } from '../stores';
-import { type TenantId } from '../tenant';
+import { type BoardClaimInput, type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type BoardStatusUpdateInput, type BoardStore, type BoardUnclaimInput } from '../board.js';
+import type { Clock } from '../stores.js';
+import { type TenantId } from '../tenant.js';
 export declare class InMemoryBoardStore implements BoardStore {
     #private;
     constructor(clock: Clock);
@@ -1200,14 +1200,14 @@ export declare class InMemoryBoardStore implements BoardStore {
  * or accepting flakes. A composition under test injects one of these and moves
  * time explicitly.
  */
-import type { MutableClock } from '../stores';
+import type { MutableClock } from '../stores.js';
 /** Fixed start instant, so golden-ish assertions in the suite read the same on every run. */
 export declare const IN_MEMORY_CLOCK_EPOCH = "2026-01-01T00:00:00.000Z";
 export declare function createMutableClock(start?: Date): MutableClock;
 // ==== @byok-sdk/core dist/in-memory/device-assertion-replay.d.ts ====
-import { type CollectExpiredInput, type CollectExpiredResult } from '../retention';
-import type { TenantId } from '../tenant';
-import type { DeviceAssertionReplayConsumeInput, DeviceAssertionReplayAuthority } from '../device-assertion';
+import { type CollectExpiredInput, type CollectExpiredResult } from '../retention.js';
+import type { TenantId } from '../tenant.js';
+import type { DeviceAssertionReplayConsumeInput, DeviceAssertionReplayAuthority } from '../device-assertion.js';
 /** Process-local reference authority. Production runtimes need durable atomic storage. */
 export declare class InMemoryDeviceAssertionReplayAuthority implements DeviceAssertionReplayAuthority {
     #private;
@@ -1215,17 +1215,17 @@ export declare class InMemoryDeviceAssertionReplayAuthority implements DeviceAss
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/core dist/in-memory/index.d.ts ====
-import type { InMemoryObjectBytes } from './blob';
-import type { Clock, CoreStores, MutableClock } from '../stores';
-export { createMutableClock, IN_MEMORY_CLOCK_EPOCH } from './clock';
-export { InMemoryMailboxStore } from './mailbox';
-export { InMemoryBoardStore } from './board';
-export { InMemoryTruthStore } from './truth';
-export { InMemoryPresenceStore } from './presence';
-export { InMemoryObjectStore } from './blob';
-export { InMemoryQuotaStore } from './quota';
-export { InMemorySkillPackStore } from './skill-pack';
-export { InMemoryDeviceAssertionReplayAuthority } from './device-assertion-replay';
+import type { InMemoryObjectBytes } from './blob.js';
+import type { Clock, CoreStores, MutableClock } from '../stores.js';
+export { createMutableClock, IN_MEMORY_CLOCK_EPOCH } from './clock.js';
+export { InMemoryMailboxStore } from './mailbox.js';
+export { InMemoryBoardStore } from './board.js';
+export { InMemoryTruthStore } from './truth.js';
+export { InMemoryPresenceStore } from './presence.js';
+export { InMemoryObjectStore } from './blob.js';
+export { InMemoryQuotaStore } from './quota.js';
+export { InMemorySkillPackStore } from './skill-pack.js';
+export { InMemoryDeviceAssertionReplayAuthority } from './device-assertion-replay.js';
 export interface InMemoryCoreOptions {
     readonly objectBytes: InMemoryObjectBytes;
     /** Defaults to a fresh {@link createMutableClock}, so TTL behavior is deterministic. */
@@ -1242,14 +1242,14 @@ export declare function createInMemoryCoreCompositionWithClock(objectBytes: InMe
     readonly stores: CoreStores;
     readonly clock: MutableClock;
 };
-export { InMemoryStorageLedger } from './storage-ledger';
-export type { InMemoryObjectBytes } from './blob';
+export { InMemoryStorageLedger } from './storage-ledger.js';
+export type { InMemoryObjectBytes } from './blob.js';
 // ==== @byok-sdk/core dist/in-memory/mailbox.d.ts ====
-import { type CollectExpiredResult } from '../retention';
-import type { MailboxAdvanceCursorInput, MailboxAppendInput, MailboxCloseStreamInput, MailboxCursorState, MailboxMessage, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxCollectExpiredInput, MailboxExpirePendingInput, MailboxReopenStreamInput, MailboxStore, MailboxUsage } from '../mailbox';
-import type { QuotaStore } from '../quota';
-import type { Clock } from '../stores';
-import { type TenantId } from '../tenant';
+import { type CollectExpiredResult } from '../retention.js';
+import type { MailboxAdvanceCursorInput, MailboxAppendInput, MailboxCloseStreamInput, MailboxCursorState, MailboxMessage, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxCollectExpiredInput, MailboxExpirePendingInput, MailboxReopenStreamInput, MailboxStore, MailboxUsage } from '../mailbox.js';
+import type { QuotaStore } from '../quota.js';
+import type { Clock } from '../stores.js';
+import { type TenantId } from '../tenant.js';
 export declare class InMemoryMailboxStore implements MailboxStore {
     #private;
     /** The mailbox reads its limit from quota; quota never reads the mailbox. */
@@ -1270,10 +1270,10 @@ export declare class InMemoryMailboxStore implements MailboxStore {
     reopenStream(tenant: TenantId, input: MailboxReopenStreamInput): Promise<void>;
 }
 // ==== @byok-sdk/core dist/in-memory/presence.d.ts ====
-import { type CollectExpiredInput, type CollectExpiredResult } from '../retention';
-import { type PresenceHint, type PresenceHintInput, type PresenceStore } from '../presence';
-import type { Clock } from '../stores';
-import { type TenantId } from '../tenant';
+import { type CollectExpiredInput, type CollectExpiredResult } from '../retention.js';
+import { type PresenceHint, type PresenceHintInput, type PresenceStore } from '../presence.js';
+import type { Clock } from '../stores.js';
+import { type TenantId } from '../tenant.js';
 export declare class InMemoryPresenceStore implements PresenceStore {
     #private;
     constructor(clock: Clock);
@@ -1283,13 +1283,13 @@ export declare class InMemoryPresenceStore implements PresenceStore {
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/core dist/in-memory/quota.d.ts ====
-import { InMemoryStorageLedger } from './storage-ledger';
-import { type CollectExpiredResult } from '../retention';
-import type { QuotaCollectExpiredInput } from '../quota';
-import type { ObjectStore } from '../blob';
-import type { StorageFinalizeInput, StorageFinalizeResult, StorageReservation, StorageReservationInput, StorageStatus, QuotaStore, TenantStorageEntitlement, TenantStorageEntitlementInput, TenantStorageUsage } from '../quota';
-import type { Clock } from '../stores';
-import { type TenantId } from '../tenant';
+import { InMemoryStorageLedger } from './storage-ledger.js';
+import { type CollectExpiredResult } from '../retention.js';
+import type { QuotaCollectExpiredInput } from '../quota.js';
+import type { ObjectStore } from '../blob.js';
+import type { StorageFinalizeInput, StorageFinalizeResult, StorageReservation, StorageReservationInput, StorageStatus, QuotaStore, TenantStorageEntitlement, TenantStorageEntitlementInput, TenantStorageUsage } from '../quota.js';
+import type { Clock } from '../stores.js';
+import { type TenantId } from '../tenant.js';
 export declare class InMemoryQuotaStore implements QuotaStore {
     #private;
     private readonly ledger;
@@ -1321,8 +1321,8 @@ export declare class InMemoryQuotaStore implements QuotaStore {
  * device would fetch, verify, reject, and have no way to tell a corrupt
  * publication from a tampered response.
  */
-import { type SkillPackFileContent, type SkillPackListQuery, type SkillPackManifest, type SkillPackPublishInput, type SkillPackStore } from '../skill-pack';
-import { type TenantId } from '../tenant';
+import { type SkillPackFileContent, type SkillPackListQuery, type SkillPackManifest, type SkillPackPublishInput, type SkillPackStore } from '../skill-pack.js';
+import { type TenantId } from '../tenant.js';
 export declare class InMemorySkillPackStore implements SkillPackStore {
     #private;
     publish(tenant: TenantId, input: SkillPackPublishInput): Promise<SkillPackManifest>;
@@ -1331,10 +1331,10 @@ export declare class InMemorySkillPackStore implements SkillPackStore {
     readFile(tenant: TenantId, name: string, path: string): Promise<SkillPackFileContent | undefined>;
 }
 // ==== @byok-sdk/core dist/in-memory/storage-ledger.d.ts ====
-import type { Clock } from '../stores';
-import type { ContentHash } from '../blob';
-import type { StorageReservation, TenantStorageUsage } from '../quota';
-import type { TenantId } from '../tenant';
+import type { Clock } from '../stores.js';
+import type { ContentHash } from '../blob.js';
+import type { StorageReservation, TenantStorageUsage } from '../quota.js';
+import type { TenantId } from '../tenant.js';
 export interface ReservationRecord {
     readonly reservation: StorageReservation;
     readonly deduplicated: boolean;
@@ -1361,9 +1361,9 @@ export declare class InMemoryStorageLedger {
     releaseCollectedObject(tenant: TenantId, hash: ContentHash, byteSize: bigint, now: string): bigint;
 }
 // ==== @byok-sdk/core dist/in-memory/truth.d.ts ====
-import type { Clock } from '../stores';
-import { type TenantId } from '../tenant';
-import type { SnapshotWriteInput, TerminalWriteInput, TruthManifestEntry, TruthManifestQuery, TruthRecord, TruthRecordSelector, TruthStore } from '../truth';
+import type { Clock } from '../stores.js';
+import { type TenantId } from '../tenant.js';
+import type { SnapshotWriteInput, TerminalWriteInput, TruthManifestEntry, TruthManifestQuery, TruthRecord, TruthRecordSelector, TruthStore } from '../truth.js';
 export declare class InMemoryTruthStore implements TruthStore {
     #private;
     constructor(clock: Clock);
@@ -1387,53 +1387,53 @@ export declare class InMemoryTruthStore implements TruthStore {
  * `src/__tests__/constraints.test.ts` asserts every one of those properties
  * against the source, including this export list.
  */
-export { tenantId, isTenantId, tenantKey, TENANT_ID_MAX_LENGTH, TENANT_KEY_SEPARATOR, } from './tenant';
-export type { TenantId } from './tenant';
-export { PRINCIPAL_KINDS, isDevicePrincipal, isControlPlanePrincipal, principalTenant, } from './principals';
-export type { ControlPlanePrincipal, DevicePrincipal, Principal, PrincipalKind, } from './principals';
-export { ByokCoreError, CoreConflictError, CORE_ERROR_CODES, isCoreError, isCoreConflictError } from './errors';
-export type { CoreErrorCode } from './errors';
-export { CANONICAL_TIMESTAMP_PATTERN, assertCanonicalTimestamp, isCanonicalTimestamp, } from './time';
-export { MAILBOX_MESSAGE_STATES, MAILBOX_STREAM_CLOSE_CAUSES, MailboxStreamClosedError } from './mailbox';
-export type { MailboxAdmission, MailboxAdvanceCursorInput, MailboxAppendInput, MailboxBody, MailboxCursorState, MailboxMessage, MailboxMessageState, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxCloseStreamInput, MailboxCollectExpiredInput, MailboxExpirePendingInput, MailboxReopenStreamInput, MailboxStreamCloseCause, MailboxStore, MailboxUsage, } from './mailbox';
-export { BOARD_STATUSES, BOARD_TRANSITIONS, isLegalBoardTransition } from './board';
-export type { BoardAssignee, BoardClaimInput, BoardItem, BoardItemInput, BoardListQuery, BoardPage, BoardStatus, BoardStatusUpdateInput, BoardStore, BoardUnclaimInput, } from './board';
-export { TRUTH_RECORD_KINDS } from './truth';
-export type { SnapshotWriteInput, TerminalWriteInput, TruthBodyRef, TruthManifestEntry, TruthManifestQuery, TruthRecord, TruthRecordKind, TruthRecordSelector, TruthStore, } from './truth';
-export { freezePresenceRuntimeFact, PRESENCE_LEVELS } from './presence';
-export type { PresenceHint, PresenceHintInput, PresenceLevel, PresenceRuntimeCapabilities, PresenceRuntimeFact, PresenceStore, TenantReadinessDevice, TenantReadinessPresence, TenantReadiness, } from './presence';
-export { CONTENT_HASH_PATTERN, OBJECT_KEY_PREFIX_PATTERN, OBJECT_STATES, OBJECT_STATE_TRANSITIONS, contentHash, isContentHash, isLegalObjectTransition, objectKeyPrefix, tenantObjectKey, } from './blob';
-export type { ContentHash, ObjectCommitInput, ObjectKeyPrefix, ObjectListQuery, ObjectManifestEntry, ObjectManifestInput, ObjectReference, ObjectReferenceInput, ObjectState, ObjectStore, } from './blob';
-export { STORAGE_ERROR_CODES, STORAGE_ERROR_HTTP_STATUS, STORAGE_RESERVATION_STATES, STORAGE_WRITE_KINDS, STORAGE_WRITE_POSTURES, } from './quota';
-export type { QuotaStore, StorageErrorCode, StorageFinalizeInput, StorageFinalizeResult, StorageReservation, StorageReservationInput, StorageReservationState, StorageStatus, StorageWriteKind, StorageWritePosture, TenantStorageEntitlement, TenantStorageEntitlementInput, TenantStorageUsage, } from './quota';
-export { CAPABILITY_DECLARATION_SCHEMA_ID, CAPABILITY_NAME_PATTERN, CapabilityDeclarationSchema, assertCapability, hasCapability, parseCapabilityDeclaration, } from './capabilities';
-export type { CapabilityDeclaration } from './capabilities';
-export { SKILL_FRONTMATTER_FIELDS, SKILL_PACK_DESCRIPTION_MAX_LENGTH, SKILL_PACK_ENTRY_PATH, SKILL_PACK_FILE_MAX_BYTES, SKILL_PACK_FILE_PATH_MAX_LENGTH, SKILL_PACK_FILE_PATH_PATTERN, SKILL_PACK_FORBIDDEN_FIELDS, SKILL_PACK_MANIFEST_SCHEMA_ID, SKILL_PACK_MAX_BYTES, SKILL_PACK_MAX_FILES, SKILL_PACK_NAME_MAX_LENGTH, SKILL_PACK_NAME_PATTERN, SKILL_PACK_REJECTIONS, SKILL_PACK_VERSION_PATTERN, SkillPackFileSchema, SkillPackManifestSchema, checkSkillPackEntry, checkSkillPackFileContent, checkSkillPackManifest, isSkillPackPathSafe, parseSkillFrontmatter, parseSkillPackManifest, skillPackContentHashInput, } from './skill-pack';
-export type { ObservedSkillPackFile, SkillFrontmatter, SkillPackCheck, SkillPackFile, SkillPackFileContent, SkillPackListQuery, SkillPackManifest, SkillPackPublishInput, SkillPackRejection, SkillPackStore, } from './skill-pack';
-export { CORE_STORE_NAMES } from './stores';
-export type { Clock, CoreStoreName, CoreStores, MutableClock } from './stores';
-export { CORE_NON_COMPOSITION_PORT_NAMES, CORE_PORT_INTERFACES, CORE_PORT_METHODS, } from './ports-contract';
-export { DEVICE_PROOF_ALGORITHMS, DEVICE_PROOF_DOMAIN_PREFIX, DEVICE_PROOF_HEADER, DEVICE_PROOF_SCHEMA_ID, DEVICE_PROOF_VERSION, DeviceProofEnvelopeV1Schema, DeviceProofProtectedClaimsSchema, canonicalizeJson, canonicalizeJsonBytes, deviceProofCanonicalClaims, deviceProofCanonicalJson, deviceProofSigningInput, parseDeviceProofEnvelope, } from './attestation';
-export type { DeviceProofAlgorithm, DeviceProofEnvelopeV1, DeviceProofProtectedClaims, DeviceProofVerifier, DeviceProofVerifyInput, JsonObject, JsonPrimitive, JsonValue, } from './attestation';
-export { authenticateDeviceAssertion, DEVICE_ASSERTION_ALGORITHMS, DEVICE_ASSERTION_AUDIENCE_MAX_BYTES, DEVICE_ASSERTION_DEFAULT_TTL_MS, DEVICE_ASSERTION_DOMAIN_PREFIX, DEVICE_ASSERTION_MAX_TTL_MS, DEVICE_ASSERTION_SCHEMA_ID, DEVICE_ASSERTION_VERSION, DeviceAssertionClaimsSchema, DeviceAssertionEnvelopeV1Schema, deviceAssertionCanonicalClaims, deviceAssertionCanonicalJson, deviceAssertionSigningInput, parseDeviceAssertionEnvelope, verifyDeviceAssertion, } from './device-assertion';
-export { authenticateTaskAssertion, TASK_ASSERTION_AGENT_REF_MAX_BYTES, TASK_ASSERTION_DOMAIN_PREFIX, TASK_ASSERTION_SCHEMA_ID, TASK_ASSERTION_TOOLSET_ID_MAX_LENGTH, TASK_ASSERTION_VERSION, TaskAssertionAgentRefSchema, TaskAssertionClaimsSchema, TaskAssertionEnvelopeV1Schema, parseTaskAssertionEnvelope, taskAssertionCanonicalClaims, taskAssertionCanonicalJson, taskAssertionSigningInput, verifyTaskAssertion, } from './device-assertion';
-export type { AuthenticateDeviceAssertionDeps, AuthenticatedAssertion, AuthenticatedDeviceAssertion, AuthenticatedTaskAssertion, DeviceAssertionAlgorithm, DeviceAssertionAuthorityRow, DeviceAssertionClaims, DeviceAssertionDeviceRow, DeviceAssertionEnvelopeV1, DeviceAssertionExpectedBinding, DeviceAssertionReplayConsumeInput, DeviceAssertionReplayAuthority, DeviceAssertionReplaySchemaId, DeviceAssertionVerifier, DeviceAssertionVerifyDeps, DeviceAssertionVerifyInput, TaskAssertionAgentRef, TaskAssertionClaims, TaskAssertionEnvelopeV1, } from './device-assertion';
-export { PROVIDER_PROVISIONING_MAX_TTL_MS, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_REQUEST_VERSION, PROVIDER_PROVISIONING_SECRET_OPERATIONS, PROVIDER_SECRET_HPKE_INFO, PROVIDER_SECRET_HPKE_SUITE, PROVIDER_SECRET_MAX_BYTES, PROVIDER_SECRET_MAX_PADDED_BYTES, PROVIDER_SECRET_PAD_BLOCK_BYTES, ProviderProvisioningConfigV1Schema, ProviderProvisioningExpectedProfileSchema, ProviderProvisioningHeaderV1Schema, ProviderProvisioningIdentityRevisionSchema, ProviderProvisioningRequestV1Schema, SEALING_KEY_ID_LENGTH, SealedProviderSecretV1Schema, SealingKeyClaimV1Schema, SealingKeyIdSchema, SealingPublicJwkSchema, assertProviderProvisioningConfigDigest, deriveSealingKeyId, openProviderProvisioningSecret, parseProviderProvisioningRequest, providerProvisioningConfigDigest, providerProvisioningRequestDigest, providerSecretAadBytes, sealProviderProvisioningRequest, sealingKeyClaimCanonicalBytes, } from './sealed-provider-secret';
-export type { ProviderProvisioningConfigV1, ProviderProvisioningExpectedProfile, ProviderProvisioningHeaderV1, ProviderProvisioningOperation, ProviderProvisioningRequestV1, ProviderSecretRecipient, SealProviderProvisioningRequestInput, SealedProviderSecretV1, SealingKeyClaimV1, SealingPublicJwk, WebCryptoKey, } from './sealed-provider-secret';
-export { AGENT_MEMORY_INTENT_DIGEST_VERSION, agentMemoryIntentOperationDigest } from './agent-memory-intent';
-export type { AgentMemoryIntentDigestInput } from './agent-memory-intent';
-export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing';
-export { IN_MEMORY_CLOCK_EPOCH, InMemoryBoardStore, InMemoryMailboxStore, InMemoryDeviceAssertionReplayAuthority, InMemoryObjectStore, InMemoryPresenceStore, InMemoryQuotaStore, InMemorySkillPackStore, InMemoryTruthStore, createInMemoryCoreStores, createInMemoryCoreCompositionWithClock, createMutableClock, } from './in-memory/index';
-export type { InMemoryCoreComposition, InMemoryCoreOptions } from './in-memory/index';
-export { assertCollectExpiredInput, CollectExpiredFailure } from './retention';
-export type { CollectExpiredInput, CollectExpiredCounts, CollectExpiredResult } from './retention';
-export type { QuotaCollectExpiredInput } from './quota';
-export type { ObjectCollectExpiredInput } from './blob';
-export type { LocalStoreId, StoreCompatibility, StoreCompatibilityVerdict } from './store-compatibility';
-export { InMemoryStorageLedger } from './in-memory/storage-ledger';
-export type { InMemoryObjectBytes } from './in-memory/blob';
+export { tenantId, isTenantId, tenantKey, TENANT_ID_MAX_LENGTH, TENANT_KEY_SEPARATOR, } from './tenant.js';
+export type { TenantId } from './tenant.js';
+export { PRINCIPAL_KINDS, isDevicePrincipal, isControlPlanePrincipal, principalTenant, } from './principals.js';
+export type { ControlPlanePrincipal, DevicePrincipal, Principal, PrincipalKind, } from './principals.js';
+export { ByokCoreError, CoreConflictError, CORE_ERROR_CODES, isCoreError, isCoreConflictError } from './errors.js';
+export type { CoreErrorCode } from './errors.js';
+export { CANONICAL_TIMESTAMP_PATTERN, assertCanonicalTimestamp, isCanonicalTimestamp, } from './time.js';
+export { MAILBOX_MESSAGE_STATES, MAILBOX_STREAM_CLOSE_CAUSES, MailboxStreamClosedError } from './mailbox.js';
+export type { MailboxAdmission, MailboxAdvanceCursorInput, MailboxAppendInput, MailboxBody, MailboxCursorState, MailboxMessage, MailboxMessageState, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxCloseStreamInput, MailboxCollectExpiredInput, MailboxExpirePendingInput, MailboxReopenStreamInput, MailboxStreamCloseCause, MailboxStore, MailboxUsage, } from './mailbox.js';
+export { BOARD_STATUSES, BOARD_TRANSITIONS, isLegalBoardTransition } from './board.js';
+export type { BoardAssignee, BoardClaimInput, BoardItem, BoardItemInput, BoardListQuery, BoardPage, BoardStatus, BoardStatusUpdateInput, BoardStore, BoardUnclaimInput, } from './board.js';
+export { TRUTH_RECORD_KINDS } from './truth.js';
+export type { SnapshotWriteInput, TerminalWriteInput, TruthBodyRef, TruthManifestEntry, TruthManifestQuery, TruthRecord, TruthRecordKind, TruthRecordSelector, TruthStore, } from './truth.js';
+export { freezePresenceRuntimeFact, PRESENCE_LEVELS } from './presence.js';
+export type { PresenceHint, PresenceHintInput, PresenceLevel, PresenceRuntimeCapabilities, PresenceRuntimeFact, PresenceStore, TenantReadinessDevice, TenantReadinessPresence, TenantReadiness, } from './presence.js';
+export { CONTENT_HASH_PATTERN, OBJECT_KEY_PREFIX_PATTERN, OBJECT_STATES, OBJECT_STATE_TRANSITIONS, contentHash, isContentHash, isLegalObjectTransition, objectKeyPrefix, tenantObjectKey, } from './blob.js';
+export type { ContentHash, ObjectCommitInput, ObjectKeyPrefix, ObjectListQuery, ObjectManifestEntry, ObjectManifestInput, ObjectReference, ObjectReferenceInput, ObjectState, ObjectStore, } from './blob.js';
+export { STORAGE_ERROR_CODES, STORAGE_ERROR_HTTP_STATUS, STORAGE_RESERVATION_STATES, STORAGE_WRITE_KINDS, STORAGE_WRITE_POSTURES, } from './quota.js';
+export type { QuotaStore, StorageErrorCode, StorageFinalizeInput, StorageFinalizeResult, StorageReservation, StorageReservationInput, StorageReservationState, StorageStatus, StorageWriteKind, StorageWritePosture, TenantStorageEntitlement, TenantStorageEntitlementInput, TenantStorageUsage, } from './quota.js';
+export { CAPABILITY_DECLARATION_SCHEMA_ID, CAPABILITY_NAME_PATTERN, CapabilityDeclarationSchema, assertCapability, hasCapability, parseCapabilityDeclaration, } from './capabilities.js';
+export type { CapabilityDeclaration } from './capabilities.js';
+export { SKILL_FRONTMATTER_FIELDS, SKILL_PACK_DESCRIPTION_MAX_LENGTH, SKILL_PACK_ENTRY_PATH, SKILL_PACK_FILE_MAX_BYTES, SKILL_PACK_FILE_PATH_MAX_LENGTH, SKILL_PACK_FILE_PATH_PATTERN, SKILL_PACK_FORBIDDEN_FIELDS, SKILL_PACK_MANIFEST_SCHEMA_ID, SKILL_PACK_MAX_BYTES, SKILL_PACK_MAX_FILES, SKILL_PACK_NAME_MAX_LENGTH, SKILL_PACK_NAME_PATTERN, SKILL_PACK_REJECTIONS, SKILL_PACK_VERSION_PATTERN, SkillPackFileSchema, SkillPackManifestSchema, checkSkillPackEntry, checkSkillPackFileContent, checkSkillPackManifest, isSkillPackPathSafe, parseSkillFrontmatter, parseSkillPackManifest, skillPackContentHashInput, } from './skill-pack.js';
+export type { ObservedSkillPackFile, SkillFrontmatter, SkillPackCheck, SkillPackFile, SkillPackFileContent, SkillPackListQuery, SkillPackManifest, SkillPackPublishInput, SkillPackRejection, SkillPackStore, } from './skill-pack.js';
+export { CORE_STORE_NAMES } from './stores.js';
+export type { Clock, CoreStoreName, CoreStores, MutableClock } from './stores.js';
+export { CORE_NON_COMPOSITION_PORT_NAMES, CORE_PORT_INTERFACES, CORE_PORT_METHODS, } from './ports-contract.js';
+export { DEVICE_PROOF_ALGORITHMS, DEVICE_PROOF_DOMAIN_PREFIX, DEVICE_PROOF_HEADER, DEVICE_PROOF_SCHEMA_ID, DEVICE_PROOF_VERSION, DeviceProofEnvelopeV1Schema, DeviceProofProtectedClaimsSchema, canonicalizeJson, canonicalizeJsonBytes, deviceProofCanonicalClaims, deviceProofCanonicalJson, deviceProofSigningInput, parseDeviceProofEnvelope, } from './attestation.js';
+export type { DeviceProofAlgorithm, DeviceProofEnvelopeV1, DeviceProofProtectedClaims, DeviceProofVerifier, DeviceProofVerifyInput, JsonObject, JsonPrimitive, JsonValue, } from './attestation.js';
+export { authenticateDeviceAssertion, DEVICE_ASSERTION_ALGORITHMS, DEVICE_ASSERTION_AUDIENCE_MAX_BYTES, DEVICE_ASSERTION_DEFAULT_TTL_MS, DEVICE_ASSERTION_DOMAIN_PREFIX, DEVICE_ASSERTION_MAX_TTL_MS, DEVICE_ASSERTION_SCHEMA_ID, DEVICE_ASSERTION_VERSION, DeviceAssertionClaimsSchema, DeviceAssertionEnvelopeV1Schema, deviceAssertionCanonicalClaims, deviceAssertionCanonicalJson, deviceAssertionSigningInput, parseDeviceAssertionEnvelope, verifyDeviceAssertion, } from './device-assertion.js';
+export { authenticateTaskAssertion, TASK_ASSERTION_AGENT_REF_MAX_BYTES, TASK_ASSERTION_DOMAIN_PREFIX, TASK_ASSERTION_SCHEMA_ID, TASK_ASSERTION_TOOLSET_ID_MAX_LENGTH, TASK_ASSERTION_VERSION, TaskAssertionAgentRefSchema, TaskAssertionClaimsSchema, TaskAssertionEnvelopeV1Schema, parseTaskAssertionEnvelope, taskAssertionCanonicalClaims, taskAssertionCanonicalJson, taskAssertionSigningInput, verifyTaskAssertion, } from './device-assertion.js';
+export type { AuthenticateDeviceAssertionDeps, AuthenticatedAssertion, AuthenticatedDeviceAssertion, AuthenticatedTaskAssertion, DeviceAssertionAlgorithm, DeviceAssertionAuthorityRow, DeviceAssertionClaims, DeviceAssertionDeviceRow, DeviceAssertionEnvelopeV1, DeviceAssertionExpectedBinding, DeviceAssertionReplayConsumeInput, DeviceAssertionReplayAuthority, DeviceAssertionReplaySchemaId, DeviceAssertionVerifier, DeviceAssertionVerifyDeps, DeviceAssertionVerifyInput, TaskAssertionAgentRef, TaskAssertionClaims, TaskAssertionEnvelopeV1, } from './device-assertion.js';
+export { PROVIDER_PROVISIONING_MAX_TTL_MS, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_REQUEST_VERSION, PROVIDER_PROVISIONING_SECRET_OPERATIONS, PROVIDER_SECRET_HPKE_INFO, PROVIDER_SECRET_HPKE_SUITE, PROVIDER_SECRET_MAX_BYTES, PROVIDER_SECRET_MAX_PADDED_BYTES, PROVIDER_SECRET_PAD_BLOCK_BYTES, ProviderProvisioningConfigV1Schema, ProviderProvisioningExpectedProfileSchema, ProviderProvisioningHeaderV1Schema, ProviderProvisioningIdentityRevisionSchema, ProviderProvisioningRequestV1Schema, SEALING_KEY_ID_LENGTH, SealedProviderSecretV1Schema, SealingKeyClaimV1Schema, SealingKeyIdSchema, SealingPublicJwkSchema, assertProviderProvisioningConfigDigest, deriveSealingKeyId, openProviderProvisioningSecret, parseProviderProvisioningRequest, providerProvisioningConfigDigest, providerProvisioningRequestDigest, providerSecretAadBytes, sealProviderProvisioningRequest, sealingKeyClaimCanonicalBytes, } from './sealed-provider-secret.js';
+export type { ProviderProvisioningConfigV1, ProviderProvisioningExpectedProfile, ProviderProvisioningHeaderV1, ProviderProvisioningOperation, ProviderProvisioningRequestV1, ProviderSecretRecipient, SealProviderProvisioningRequestInput, SealedProviderSecretV1, SealingKeyClaimV1, SealingPublicJwk, WebCryptoKey, } from './sealed-provider-secret.js';
+export { AGENT_MEMORY_INTENT_DIGEST_VERSION, agentMemoryIntentOperationDigest } from './agent-memory-intent.js';
+export type { AgentMemoryIntentDigestInput } from './agent-memory-intent.js';
+export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing.js';
+export { IN_MEMORY_CLOCK_EPOCH, InMemoryBoardStore, InMemoryMailboxStore, InMemoryDeviceAssertionReplayAuthority, InMemoryObjectStore, InMemoryPresenceStore, InMemoryQuotaStore, InMemorySkillPackStore, InMemoryTruthStore, createInMemoryCoreStores, createInMemoryCoreCompositionWithClock, createMutableClock, } from './in-memory/index.js';
+export type { InMemoryCoreComposition, InMemoryCoreOptions } from './in-memory/index.js';
+export { assertCollectExpiredInput, CollectExpiredFailure } from './retention.js';
+export type { CollectExpiredInput, CollectExpiredCounts, CollectExpiredResult } from './retention.js';
+export type { QuotaCollectExpiredInput } from './quota.js';
+export type { ObjectCollectExpiredInput } from './blob.js';
+export type { LocalStoreId, StoreCompatibility, StoreCompatibilityVerdict } from './store-compatibility.js';
+export { InMemoryStorageLedger } from './in-memory/storage-ledger.js';
+export type { InMemoryObjectBytes } from './in-memory/blob.js';
 // ==== @byok-sdk/core dist/mailbox.d.ts ====
-import type { CollectExpiredInput, CollectExpiredResult } from './retention';
+import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
 /**
  * Hosted mailbox contract (§12.7.3).
  *
@@ -1449,9 +1449,9 @@ import type { CollectExpiredInput, CollectExpiredResult } from './retention';
  * message because core is protocol-free: the frozen v1 shape lives in
  * `@byok-sdk/protocol`, and core must not grow an edge to it (§12.1 invariant).
  */
-import type { ContentHash } from './blob';
-import { ByokCoreError } from './errors';
-import type { TenantId } from './tenant';
+import type { ContentHash } from './blob.js';
+import { ByokCoreError } from './errors.js';
+import type { TenantId } from './tenant.js';
 /**
  * Row lifecycle. `pending` and `acked` are derived from the device cursor;
  * `expired` is the dead-letter state for rows that aged out before ever being
@@ -1749,7 +1749,7 @@ export declare function nonceSigningBytes(nonce: string): Uint8Array;
  * Adding a port method means editing this table, which is the point: a port
  * grows by contract, not by whichever composition needed something.
  */
-import { type CoreStoreName } from './stores';
+import { type CoreStoreName } from './stores.js';
 /**
  * Ports that are core ports but NOT members of the composition contract.
  *
@@ -1771,7 +1771,7 @@ export declare const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly 
 /** The interface each port name is declared as, for the source-side scan. */
 export declare const CORE_PORT_INTERFACES: Readonly<Record<CoreStoreName, string>>;
 // ==== @byok-sdk/core dist/presence.d.ts ====
-import type { CollectExpiredInput, CollectExpiredResult } from './retention';
+import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
 /**
  * Presence hints (§12.3).
  *
@@ -1787,7 +1787,7 @@ import type { CollectExpiredInput, CollectExpiredResult } from './retention';
  * moved anywhere.
  *
  */
-import type { TenantId } from './tenant';
+import type { TenantId } from './tenant.js';
 /** The five presence levels. */
 export declare const PRESENCE_LEVELS: readonly ['online', 'thinking', 'working', 'error', 'offline'];
 export type PresenceLevel = (typeof PRESENCE_LEVELS)[number];
@@ -1922,7 +1922,7 @@ export interface PresenceStore {
  * Putting them on the principal would create permanently-empty fields on every
  * principal minted by a non-proof path.
  */
-import type { TenantId } from './tenant';
+import type { TenantId } from './tenant.js';
 /** Principal kinds. A composition may not invent a third without a contract change. */
 export declare const PRINCIPAL_KINDS: readonly ['device', 'control-plane'];
 export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number];
@@ -1961,7 +1961,7 @@ export declare function isControlPlanePrincipal(principal: Principal): principal
  */
 export declare function principalTenant(principal: Principal): TenantId;
 // ==== @byok-sdk/core dist/quota.d.ts ====
-import type { CollectExpiredInput, CollectExpiredResult } from './retention';
+import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
 /**
  * Tenant storage entitlement, usage, reservation and retention (§12.7.6-12.7.7).
  *
@@ -1982,8 +1982,8 @@ import type { CollectExpiredInput, CollectExpiredResult } from './retention';
  * checked under the reservation lock, which is what makes concurrent uploads
  * unable to oversell the tenant.
  */
-import type { ContentHash } from './blob';
-import type { TenantId } from './tenant';
+import type { ContentHash } from './blob.js';
+import type { TenantId } from './tenant.js';
 /**
  * The host-issued numeric entitlement (§12.7.6, verbatim).
  *
@@ -2147,7 +2147,7 @@ export interface QuotaCollectExpiredInput extends CollectExpiredInput {
     readonly settledBefore: string;
 }
 // ==== @byok-sdk/core dist/retention.d.ts ====
-import { ByokCoreError } from './errors';
+import { ByokCoreError } from './errors.js';
 export interface CollectExpiredInput {
     readonly now: string;
     readonly limit: number;
@@ -2178,22 +2178,22 @@ export declare class CollectExpiredFailure extends ByokCoreError {
  * closure that imports the root do not grow. Only a consumer that seals or
  * opens content imports it.
  */
-export { SEALED_CATEGORIES, SEALED_CONTENT_SUITE, SEALED_CONTENT_VERSION, SEALED_DIRECTIONS, SealedContentHeaderV1Schema, openSealedContent, sealContent, } from './sealed-content';
-export type { OpenSealedContentInput, SealContentInput, SealedBinding, SealedCategory, SealedContent, SealedContentHeaderV1, SealedContentOpenFailure, SealedContentOpenResult, SealedDirection, SealedScopePolicy, } from './sealed-content';
-export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from './scope-key';
-export type { OpenScopeKeyPackageInput, ScopeKeyPackage, ScopeKeyPackageOpenResult, ScopeKeyPackageV1, ScopeKeyPackageV2, SealScopeKeyPackageInput, } from './scope-key';
-export { MEMBER_CHAIN_OPS, deriveMemberId, memberChainEntryHash, signMemberChainEntry, verifyMemberChainEntry, } from './member-chain';
-export type { MemberChainEntryV1, MemberChainEntryVerifyResult, MemberChainOp, UnsignedMemberChainEntryV1, } from './member-chain';
-export { MEMBER_KEY_BUNDLE_VERSION, createMemberKeyBundle, parseMemberKeyBundle, verifyMemberKem } from './member-bundle';
-export type { CreateMemberKeyBundleInput, MemberKeyBundleV1 } from './member-bundle';
-export { beginMemberKemRotation, finishMemberKemRotation, generateMemberKeyRecord, openMemberKeyRecord, } from './member-key-record';
-export type { MemberKemKey, MemberKeyBinding, MemberKeyStore, MemberKeys } from './member-key-record';
-export { MEMBER_FINGERPRINT_DOMAIN, memberApprovalCode, memberFingerprint } from './member-fingerprint';
-export type { MemberFingerprintInput } from './member-fingerprint';
-export { CLIENT_PAIRING_MAC_DOMAIN, DEVICE_PAIRING_MAC_DOMAIN, PAIRING_VERIFICATION_SECRET_BYTES, computeClientPairingMac, computeDevicePairingMac, decodePairingVerificationSecret, encodePairingVerificationSecret, formatPairingInput, generatePairingVerificationSecret, parsePairingInput, verifyClientPairingMac, verifyDevicePairingMac, } from './pairing-verification';
-export type { ClientPairingMacInput, DevicePairingMacInput, PairingInput } from './pairing-verification';
-export { applyMemberChainEntries, emptyMemberChainState, memberChainScopeRecipients, verifyMemberChainFromAnchor } from './member-chain-walk';
-export type { MemberChainAnchorFailure, MemberChainAnchorResult, MemberChainHead, MemberChainScope, MemberChainState, MemberChainWalkFailure, MemberChainWalkResult, VerifyMemberChainFromAnchorInput, } from './member-chain-walk';
+export { SEALED_CATEGORIES, SEALED_CONTENT_SUITE, SEALED_CONTENT_VERSION, SEALED_DIRECTIONS, SealedContentHeaderV1Schema, openSealedContent, sealContent, } from './sealed-content.js';
+export type { OpenSealedContentInput, SealContentInput, SealedBinding, SealedCategory, SealedContent, SealedContentHeaderV1, SealedContentOpenFailure, SealedContentOpenResult, SealedDirection, SealedScopePolicy, } from './sealed-content.js';
+export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from './scope-key.js';
+export type { OpenScopeKeyPackageInput, ScopeKeyPackage, ScopeKeyPackageOpenResult, SealScopeKeyPackageInput, } from './scope-key.js';
+export { MEMBER_CHAIN_OPS, deriveMemberId, memberChainEntryHash, signMemberChainEntry, verifyMemberChainEntry, } from './member-chain.js';
+export type { MemberChainEntryV1, MemberChainEntryVerifyResult, MemberChainOp, UnsignedMemberChainEntryV1, } from './member-chain.js';
+export { MEMBER_KEY_BUNDLE_VERSION, createMemberKeyBundle, parseMemberKeyBundle, verifyMemberKem } from './member-bundle.js';
+export type { CreateMemberKeyBundleInput, MemberKeyBundleV1 } from './member-bundle.js';
+export { beginMemberKemRotation, finishMemberKemRotation, generateMemberKeyRecord, openMemberKeyRecord, } from './member-key-record.js';
+export type { MemberKemKey, MemberKeyBinding, MemberKeyStore, MemberKeys } from './member-key-record.js';
+export { MEMBER_FINGERPRINT_DOMAIN, memberApprovalCode, memberFingerprint } from './member-fingerprint.js';
+export type { MemberFingerprintInput } from './member-fingerprint.js';
+export { CLIENT_PAIRING_MAC_DOMAIN, DEVICE_PAIRING_MAC_DOMAIN, PAIRING_VERIFICATION_SECRET_BYTES, computeClientPairingMac, computeDevicePairingMac, decodePairingVerificationSecret, encodePairingVerificationSecret, formatPairingInput, generatePairingVerificationSecret, parsePairingInput, verifyClientPairingMac, verifyDevicePairingMac, } from './pairing-verification.js';
+export type { ClientPairingMacInput, DevicePairingMacInput, PairingInput } from './pairing-verification.js';
+export { applyMemberChainEntries, emptyMemberChainState, memberChainScopeRecipients, verifyMemberChainFromAnchor } from './member-chain-walk.js';
+export type { MemberChainAnchorFailure, MemberChainAnchorResult, MemberChainHead, MemberChainScope, MemberChainState, MemberChainWalkFailure, MemberChainWalkResult, VerifyMemberChainFromAnchorInput, } from './member-chain-walk.js';
 // ==== @byok-sdk/core dist/sealed-payload/member-bundle.d.ts ====
 /**
  * The member key bundle (#654 design §7.1, §7.2, E2b; owner decision 10a).
@@ -2211,8 +2211,8 @@ export type { MemberChainAnchorFailure, MemberChainAnchorResult, MemberChainHead
  * later slice, the device registers it with device proof.
  */
 import { z } from 'zod';
-import type { WebCryptoKey } from '../webcrypto';
-import { type Bytes, type P256PublicJwk } from './primitives';
+import type { WebCryptoKey } from '../webcrypto.js';
+import { type Bytes, type P256PublicJwk } from './primitives.js';
 export declare const MEMBER_KEY_BUNDLE_VERSION = 1;
 /** Prepended to the canonical KEM statement, so `kemSig` never verifies as another signed object. */
 export declare const MEMBER_KEM_DOMAIN_PREFIX = "byok-member-kem-v1\n";
@@ -2260,9 +2260,9 @@ export declare function verifyMemberKem(member: {
  */
 export declare function parseMemberKeyBundle(value: unknown): Promise<MemberKeyBundleV1 | undefined>;
 // ==== @byok-sdk/core dist/sealed-payload/member-chain-walk.d.ts ====
-import { type MemberKeyBundleV1 } from './member-bundle';
-import { type P256PublicJwk } from './primitives';
-import { type SealedCategory } from './sealed-content';
+import { type MemberKeyBundleV1 } from './member-bundle.js';
+import { type P256PublicJwk } from './primitives.js';
+import { type SealedCategory } from './sealed-content.js';
 export interface MemberChainScope {
     readonly categories: readonly SealedCategory[];
     /** Member ids from the latest `scope-policy` entry, sorted. Some may be removed since. */
@@ -2338,9 +2338,9 @@ export interface VerifyMemberChainFromAnchorInput {
  */
 export declare function verifyMemberChainFromAnchor(input: VerifyMemberChainFromAnchorInput): Promise<MemberChainAnchorResult>;
 // ==== @byok-sdk/core dist/sealed-payload/member-chain.d.ts ====
-import { type JsonObject } from '../attestation';
-import type { WebCryptoKey } from '../webcrypto';
-import { type Bytes, type P256PublicJwk } from './primitives';
+import { type JsonObject } from '../attestation.js';
+import type { WebCryptoKey } from '../webcrypto.js';
+import { type Bytes, type P256PublicJwk } from './primitives.js';
 /** Domain separation for {@link deriveMemberId}. */
 export declare const MEMBER_ID_DOMAIN = "byok-member-id-v1\n";
 /** `base64url(sha256(MEMBER_ID_DOMAIN || 0x04 || x || y))`: 43 characters, no padding. */
@@ -2397,7 +2397,7 @@ export type MemberChainEntryVerifyResult = {
  */
 export declare function verifyMemberChainEntry(entry: unknown, signerPublicJwk: P256PublicJwk): Promise<MemberChainEntryVerifyResult>;
 // ==== @byok-sdk/core dist/sealed-payload/member-fingerprint.d.ts ====
-import { type P256PublicJwk } from './primitives';
+import { type P256PublicJwk } from './primitives.js';
 export declare const MEMBER_FINGERPRINT_DOMAIN = "byok-member-fingerprint-v1\n";
 export interface MemberFingerprintInput {
     readonly tenantId: string;
@@ -2412,8 +2412,8 @@ export declare function memberFingerprint(input: MemberFingerprintInput): Promis
  */
 export declare function memberApprovalCode(tenantId: string, first: P256PublicJwk, second: P256PublicJwk): Promise<string>;
 // ==== @byok-sdk/core dist/sealed-payload/member-key-record.d.ts ====
-import { type WebCryptoKey } from '../webcrypto';
-import { type P256PublicJwk } from './primitives';
+import { type WebCryptoKey } from '../webcrypto.js';
+import { type P256PublicJwk } from './primitives.js';
 export declare const MEMBER_KEY_RECORD_VERSION = 1;
 /**
  * Whose keys a store holds. A device member's binding names its SDK device
@@ -2474,8 +2474,8 @@ export declare function beginMemberKemRotation(text: string): Promise<string>;
  */
 export declare function finishMemberKemRotation(text: string, epoch: number): string | undefined;
 // ==== @byok-sdk/core dist/sealed-payload/pairing-verification.d.ts ====
-import type { MemberKeyBundleV1 } from './member-bundle';
-import { type Bytes } from './primitives';
+import type { MemberKeyBundleV1 } from './member-bundle.js';
+import { type Bytes } from './primitives.js';
 export declare const PAIRING_VERIFICATION_SECRET_BYTES = 16;
 export declare const PAIRING_VERIFICATION_TEXT_LENGTH = 26;
 /** 128 fresh CSPRNG bits. */
@@ -2539,9 +2539,9 @@ export declare function verifyClientPairingMac(pv: Uint8Array, input: ClientPair
  * bytes; they return a typed failure.
  */
 import { z } from 'zod';
-import { ByokCoreError } from '../errors';
-import { decodeBase64Url, encodeBase64Url, type SealingPublicJwk } from '../sealed-provider-secret';
-import { type WebCryptoKey } from '../webcrypto';
+import { ByokCoreError } from '../errors.js';
+import { decodeBase64Url, encodeBase64Url, type SealingPublicJwk } from '../sealed-provider-secret.js';
+import { type WebCryptoKey } from '../webcrypto.js';
 export type Bytes = Uint8Array<ArrayBuffer>;
 /**
  * The strict EC P-256 public JWK core already uses for sealing keys. Member
@@ -2580,18 +2580,15 @@ export declare function ecdsaSign(publicJwk: P256PublicJwk, privateKey: WebCrypt
 /** True only for a canonical 64-byte P1363 signature that verifies under `publicJwk`. */
 export declare function ecdsaVerify(publicJwk: P256PublicJwk, signature: string, data: Uint8Array): Promise<boolean>;
 // ==== @byok-sdk/core dist/sealed-payload/scope-key.d.ts ====
-import type { WebCryptoKey } from '../webcrypto';
-import { type Bytes, type P256PublicJwk } from './primitives';
+import type { WebCryptoKey } from '../webcrypto.js';
+import { type Bytes, type P256PublicJwk } from './primitives.js';
 export declare const SCOPE_KEY_BYTES = 32;
 export declare const SCOPE_KEY_ID_PATTERN: RegExp;
 /** Byte length of the per-content HKDF salt. */
 export declare const SEALED_SALT_BYTES = 32;
-export declare const SCOPE_KEY_PACKAGE_VERSION = 1;
-export declare const SCOPE_KEY_HPKE_INFO = "byok-sdk.scope-key.v1";
-/** Prepended to the canonical package bytes the sender signs. */
-export declare const SCOPE_KEY_PACKAGE_DOMAIN_PREFIX = "byok-scope-key-package-v1\n";
 export declare const SCOPE_KEY_PACKAGE_V2 = 2;
 export declare const SCOPE_KEY_HPKE_INFO_V2 = "byok-sdk.scope-key.v2";
+/** Prepended to the canonical package bytes the sender signs. */
 export declare const SCOPE_KEY_PACKAGE_V2_DOMAIN_PREFIX = "byok-scope-key-package-v2\n";
 /** A fresh scope key from the platform CSPRNG. */
 export declare function generateScopeKey(): Bytes;
@@ -2604,8 +2601,8 @@ export declare function deriveSealedContentKey(scopeKey: Uint8Array, salt: Uint8
  * runtime has to accept a zero-length HKDF salt.
  */
 export declare function deriveSealedMacKey(scopeKey: Uint8Array): Promise<Bytes>;
-export interface ScopeKeyPackageV1 {
-    readonly v: typeof SCOPE_KEY_PACKAGE_VERSION;
+export interface ScopeKeyPackage {
+    readonly v: typeof SCOPE_KEY_PACKAGE_V2;
     readonly tenantId: string;
     readonly scopeId: string;
     readonly epoch: number;
@@ -2620,13 +2617,9 @@ export interface ScopeKeyPackageV1 {
     readonly ciphertext: string;
     /** Sender's ECDSA P-256 / SHA-256 signature, base64url of the 64-byte P1363 form. */
     readonly sig: string;
-}
-export interface ScopeKeyPackageV2 extends Omit<ScopeKeyPackageV1, 'v'> {
-    readonly v: typeof SCOPE_KEY_PACKAGE_V2;
     /** The KEM epoch of the recipient key the package is wrapped to. */
     readonly recipientKemEpoch: number;
 }
-export type ScopeKeyPackage = ScopeKeyPackageV1 | ScopeKeyPackageV2;
 export interface SealScopeKeyPackageInput {
     readonly scopeKey: Uint8Array;
     readonly tenantId: string;
@@ -2648,7 +2641,7 @@ export interface SealScopeKeyPackageInput {
  * the version 2 package. A signing private key that does not pair with
  * `sender.signingPublicJwk` throws `sealed_secret_invalid`.
  */
-export declare function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Promise<ScopeKeyPackageV2>;
+export declare function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Promise<ScopeKeyPackage>;
 export interface OpenScopeKeyPackageInput {
     readonly package: unknown;
     /** What the caller asked the Host for. A package for anything else is refused. */
@@ -2661,7 +2654,7 @@ export interface OpenScopeKeyPackageInput {
         readonly memberId: string;
         readonly kemPublicJwk: P256PublicJwk;
         readonly kemPrivateKey: WebCryptoKey;
-        /** The KEM epoch of this key pair. A version 2 package must name it. */
+        /** The KEM epoch of this key pair. The package must name it. */
         readonly kemEpoch: number;
     };
     /** The signing key the caller's verified chain holds for `package.sender`. */
@@ -2677,10 +2670,10 @@ export type ScopeKeyPackageOpenResult = {
 };
 /**
  * Verify and open one key package, in this order: shape; addressed to this
- * recipient (and, for version 2, its KEM epoch) for the expected tenant,
- * scope and epoch; sender key matches the
- * sender id; sender signature; HPKE open; key length; and `keyId` equal to
- * the opened key's own id. Nothing here throws for hostile input.
+ * recipient and its KEM epoch for the expected tenant, scope and epoch;
+ * sender key matches the sender id; sender signature; HPKE open; key
+ * length; and `keyId` equal to the opened key's own id. Nothing here throws
+ * for hostile input.
  */
 export declare function openScopeKeyPackage(input: OpenScopeKeyPackageInput): Promise<ScopeKeyPackageOpenResult>;
 // ==== @byok-sdk/core dist/sealed-payload/sealed-content.d.ts ====
@@ -2713,8 +2706,8 @@ export declare function openScopeKeyPackage(input: OpenScopeKeyPackageInput): Pr
  * plus its own `paddedLength` and the JSON Pointer `fieldPath` to its BlobRef.
  */
 import { z } from 'zod';
-import { type JsonObject } from '../attestation';
-import { type Bytes } from './primitives';
+import { type JsonObject } from '../attestation.js';
+import { type Bytes } from './primitives.js';
 export declare const SEALED_CONTENT_VERSION = 1;
 /** The only suite v1 admits. A new suite is a new constant and a new capability, never a parser branch. */
 export declare const SEALED_CONTENT_SUITE = "byok-sealed-v1.hkdf-sha256.aes-256-gcm";
@@ -2892,9 +2885,9 @@ export declare function openSealedContent(input: OpenSealedContentInput): Promis
  * Error messages never include plaintext, ciphertext, or key material.
  */
 import { z } from 'zod';
-import { type JsonObject } from './attestation';
-import { type WebCryptoKey } from './webcrypto';
-export type { WebCryptoKey } from './webcrypto';
+import { type JsonObject } from './attestation.js';
+import { type WebCryptoKey } from './webcrypto.js';
+export type { WebCryptoKey } from './webcrypto.js';
 /** The only HPKE suite v1 admits. There is no negotiation and no second value. */
 export declare const PROVIDER_SECRET_HPKE_SUITE = "hpke-base.dhkem-p256-hkdf-sha256.hkdf-sha256.aes-128-gcm";
 /** HPKE `info`, versioned; a v2 is a new constant, never a parser branch. */
@@ -3174,8 +3167,8 @@ export declare function openProviderProvisioningSecret(input: {
  * pushes into a task stream.
  */
 import { z } from 'zod';
-import { type ContentHash } from './blob';
-import type { TenantId } from './tenant';
+import { type ContentHash } from './blob.js';
+import type { TenantId } from './tenant.js';
 export declare const SKILL_PACK_MANIFEST_SCHEMA_ID = "byok-skill-pack-v1";
 /**
  * Pack names: lowercase, starting alphanumeric — the same shape
@@ -3451,13 +3444,13 @@ export interface StoreCompatibility {
  * omission: "move this to another tenant" is the one operation that would make
  * every cross-tenant assertion in the conformance suite unfalsifiable.
  */
-import type { PresenceStore } from './presence';
-import type { BoardStore } from './board';
-import type { MailboxStore } from './mailbox';
-import type { ObjectStore } from './blob';
-import type { QuotaStore } from './quota';
-import type { SkillPackStore } from './skill-pack';
-import type { TruthStore } from './truth';
+import type { PresenceStore } from './presence.js';
+import type { BoardStore } from './board.js';
+import type { MailboxStore } from './mailbox.js';
+import type { ObjectStore } from './blob.js';
+import type { QuotaStore } from './quota.js';
+import type { SkillPackStore } from './skill-pack.js';
+import type { TruthStore } from './truth.js';
 /**
  * Injected time.
  *
@@ -3608,8 +3601,8 @@ export declare function assertCanonicalTimestamp(value: string, field: string): 
  * bodies to fetch is a local decision (§S6.4), so shipping bodies in the list
  * response would both defeat that and make the response unbounded.
  */
-import type { ContentHash } from './blob';
-import type { TenantId } from './tenant';
+import type { ContentHash } from './blob.js';
+import type { TenantId } from './tenant.js';
 export declare const TRUTH_RECORD_KINDS: readonly ['task.terminal', 'profile', 'memory'];
 export type TruthRecordKind = (typeof TRUTH_RECORD_KINDS)[number];
 /**

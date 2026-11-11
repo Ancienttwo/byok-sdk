@@ -4,16 +4,16 @@ import { agentKey, canonical, fifoHeads, frozenInput, hash, isSealed, promoteOcc
   type Conclusion, type RetryPolicy, type ExecutionTemplate, type FrozenExecutionInput, type FrozenSubmitPort, type IntentExecution, type Json } from '@byok-sdk/server/execution-core';
 import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { dreamIntentIds } from '@byok-sdk/example-bot-collaboration/dream';
-import { autonomousIntentIds, userFirst } from '@byok-sdk/example-bot-collaboration/rules/priority';
+import { admitDeviceSlot, autonomousIntentIds, DEVICE_CONCURRENCY, userFirst, type DispatchIntent } from '@byok-sdk/example-bot-collaboration/rules/priority';
 import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
 import type { IntentConclusions } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import type { SeatFacts, settleDelegations, SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { activeBinding, DeviceBindingError, deviceRefusals } from './binding';
-import { SUPPORTED_STORE_VERSIONS } from './ddl';
+import { STORE_VERSION } from './ddl';
 import { idOf, storedKey } from './layout';
 import { retiredIntents, retiredTurns } from './retention';
 import { switchDueVersions, type RoutineSlice } from './routines';
-import { inSchema, lockScope } from './store';
+import { inSchema, lockScope } from './transaction';
 
 /**
  * What a Turn freezes: the `freeze` step input of the sync rule, or a promoted routine occurrence. `key` is the Turn id.
@@ -36,9 +36,9 @@ const ONE_ATTEMPT: RetryPolicy = { maxAttempts: 1, delaysMs: [], retryFailures: 
 /**
  * Saves one intent of generation 0 with its frozen input and its stable task id, `taskId(key, 0)`. The caller holds the
  * scope lock. A second freeze of the same Turn with the same identity changes nothing and returns the stored input, whose
- * task id is the stored row's (an imported row may be of a later generation, #975); another identity throws, as in K4 `enqueue`.
+ * task id is the stored row's (an imported row may be of a later generation, #975); another identity throws.
  * The handler is part of the identity, so a Turn never takes over a Host intent row, and a Host intent never a Turn's.
- * A Turn whose intent compaction retired throws `RetiredIntentIdentityError`, as K4 `enqueue` refuses a retired key (#793 S8).
+ * A Turn whose intent compaction retired throws `RetiredIntentIdentityError` (#793 S8).
  */
 export async function freezeIntent<E extends IntentExecution>(client: PoolClient, scope: string, freeze: IntentFreeze<E>, routine: RoutineTimes = {}):
   Promise<E & { taskId: string }> {
@@ -92,7 +92,7 @@ export async function currentIntent(client: PoolClient, scope: string, key: stri
 
 /**
  * The frozen input of task `task` of an earlier generation of an imported intent (#975 D1): the intent's input with that
- * task id, as K4 `frozenInput` builds each generation's input.
+ * task id.
  */
 export async function earlierIntent(client: PoolClient, scope: string, task: string): Promise<{ turnId: string; input: FrozenExecutionInput } | undefined> {
   const found = await client.query<{ key: string; input: FrozenExecutionInput }>(`SELECT e.key, i.input FROM intent_execution e
@@ -130,7 +130,7 @@ async function loadIntentFacts(client: PoolClient, scope: string, turnIds: reado
     earlierStarted: new Set(found.rows.filter(row => row.earlier_started).map(row => row.key)) };
 }
 /**
- * The intent facts that a command reads (K8 `CommandPorts.intents`), as L reads its K4 intents in the commit transaction.
+ * The intent facts that a command reads (K8 `CommandPorts.intents`).
  * The caller holds the scope lock.
  */
 export async function commandIntentFacts(client: PoolClient, scope: string, turnIds: readonly string[]): Promise<Pick<SyncFacts, 'intent'>> {
@@ -138,8 +138,8 @@ export async function commandIntentFacts(client: PoolClient, scope: string, turn
   return { intent };
 }
 /**
- * The K8 room seat facts (#793 S6), from the intent rows of the seat Turns, as K8 `advanceRooms` (rooms.ts) reads L's K4
- * intents: `admitted` when the seat Turn has an intent, `started` from the reconciliation's claim fact, and the conclusion.
+ * The K8 room seat facts (#793 S6), from the intent rows of the seat Turns:
+ * `admitted` when the seat Turn has an intent, `started` from the reconciliation's claim fact, and the conclusion.
  * The caller holds the scope lock.
  */
 export async function seatFacts(client: PoolClient, scope: string, seatIds: readonly string[]): Promise<Record<string, SeatFacts>> {
@@ -183,8 +183,8 @@ export async function cancelIntent(client: PoolClient, scope: string, turnId: st
 }
 
 /**
- * The intent conclusions that the K8 delivery rules read (#793 D2b-out-2), keyed by K4 `hash(turnId)` as L's ledger keys
- * its intents. The caller holds the scope lock.
+ * The intent conclusions that the K8 delivery rules read (#793 D2b-out-2), keyed by K4 `hash(turnId)`.
+ * The caller holds the scope lock.
  */
 export async function intentConclusions(client: PoolClient, scope: string): Promise<IntentConclusions> {
   const rows = await client.query<{ key: string; conclusion: Conclusion | null }>('SELECT key, conclusion FROM intent WHERE scope = $1', [storedKey(scope)]);
@@ -209,7 +209,7 @@ export async function deliverCancels(client: PoolClient, scope: string, state: C
 
 /**
  * The K4 facts that K8 `settleDelegations` (#793 D2f-5) and `observeDevices` (#793 S11) read, from the intent rows of these
- * Turns, as K8 `intentFacts` reads them from L's ledger: a Turn started when any generation of its intent did, the current
+ * Turns: a Turn started when any generation of its intent did, the current
  * row or an earlier one that an import moved (`intent_execution`, #975). A generation started when the reconciliation saw a
  * claim (`started`) or it has a terminal that is not a decline. The caller holds the scope lock.
  */
@@ -231,9 +231,9 @@ export async function settleFacts(client: PoolClient, scope: string, turnIds: re
 type SettleFacts = Parameters<typeof settleDelegations>[1];
 
 /**
- * Writes the intent side of one sync step, as L writes it to K4 (K8 commit.ts). A routine step and a routine Turn's `ended`
+ * Writes the intent side of one sync step (K8 commit.ts). A routine step and a routine Turn's `ended`
  * step run the K4 rules on `slice`, which the caller writes back after the last step. The caller holds the scope lock.
- * Returns true when the step changed an intent fact or an occurrence, so the sync runs its Turns again, as L drains again.
+ * Returns true when the step changed an intent fact or an occurrence, so the sync runs its Turns again.
  */
 export async function writeSyncStep(client: PoolClient, scope: string, state: CollaborationState, turn: Turn, step: SyncStep<ExecutionTemplate>, slice: RoutineSlice,
   now: number): Promise<boolean> {
@@ -286,6 +286,11 @@ export interface SubmitterOptions {
   /** The most rows that one pass takes. */
   batch?: number;
   /**
+   * The concurrent task limit of each device (#1229 item 1), as L's `deviceConcurrency`. Default 8. The submitter leaves one
+   * slot free for user-source work; submitted work is never cancelled to make room.
+   */
+  deviceConcurrency?: number;
+  /**
    * Called once for each scope where this pass concluded an intent with no SDK call (the queued expiry, or a sealed row
    * with no sealed lane), in the order of its first one, at the end of the pass. The Host syncs those scopes, so the Turn
    * of that intent settles, as for the reconciler's `changed`. A throw from the callback propagates.
@@ -298,6 +303,22 @@ export interface SubmitFailure { scope: string; turnId: string; error: unknown }
 export interface SubmitPass { tried: number; failed: SubmitFailure[] }
 
 /**
+ * K8 `admitDeviceSlot` (#1229 item 1) for the row `key` over the open intents of its device in the scope. A row holds a slot,
+ * as in L, once it is tried and has delivery or attempt evidence. Returns false for a row that is not open.
+ */
+async function admitsDeviceSlot(client: PoolClient, scopeKey: string, key: string, limit: number): Promise<boolean> {
+  const found = await client.query<{ key: string; agent: string; ordinal: string; tries: number; source: DispatchIntent['source']; device: string; occupies: boolean }>(
+    `SELECT key, agent, ordinal::text, tries, source, input->>'deviceId' AS device,
+      tries > 0 AND (submission = 'delivered' OR attempt IS NOT NULL OR started) AS occupies
+      FROM intent WHERE scope = $1 AND conclusion IS NULL
+      AND input->>'deviceId' = (SELECT input->>'deviceId' FROM intent WHERE scope = $1 AND key = $2)`, [scopeKey, key]);
+  const rows: DispatchIntent[] = found.rows.map(row => ({ id: row.key, agent: row.agent, sequence: Number(row.ordinal),
+    phase: row.tries === 0 ? 'queued' : 'inflight', attempts: row.tries, source: row.source, deviceId: row.device, occupies: row.occupies }));
+  const intent = rows.find(row => row.id === key);
+  return intent !== undefined && admitDeviceSlot(intent, rows, limit);
+}
+
+/**
  * Submits frozen intents (#793 D2b-1). It uses the K4 rules: the FIFO head, the queued expiry and `submitFrozen`.
  * Each try raises `tries` under the scope lock before any SDK call. A late write is fenced by that value, and a
  * delivered row never changes back. A tried row past `wait_until` is never submitted again: it gets
@@ -305,8 +326,11 @@ export interface SubmitPass { tried: number; failed: SubmitFailure[] }
  */
 export class HostedSubmitter {
   private readonly now: () => number;
+  private readonly deviceConcurrency: number;
   constructor(private readonly pool: Pool, readonly schema: string, private readonly options: SubmitterOptions) {
     this.now = options.now ?? Date.now;
+    this.deviceConcurrency = options.deviceConcurrency ?? DEVICE_CONCURRENCY;
+    if (!Number.isSafeInteger(this.deviceConcurrency) || this.deviceConcurrency < 1) throw new Error('Invalid device concurrency');
   }
 
   /**
@@ -314,18 +338,9 @@ export class HostedSubmitter {
    * whose try throws is backed off when its scope can be locked, and the pass goes on with the next row.
    */
   async run(): Promise<SubmitPass> {
-    // The NOT EXISTS head filter must match K4 fifoHeads, which the claim checks again under the scope lock.
-    // A scope of a store version this code does not support is left out before the limit: its rows cannot be
-    // claimed or written, so they must not fill a pass ahead of the healthy scopes. So is an exported scope, and one with an
-    // uncommitted import (#975).
-    const due = await inSchema(this.pool, this.schema, client => client.query<{ scope: string; key: string }>(
-      `SELECT i.scope, i.key FROM intent i JOIN scope s ON s.scope = i.scope
-        WHERE s.state_version = ANY($3::integer[]) AND s.switch_export IS NULL AND s.switch_import IS NULL AND i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
-        AND i.next_at <= $1 AND NOT EXISTS (SELECT 1 FROM intent o WHERE o.scope = i.scope AND o.agent = i.agent
-          AND o.conclusion IS NULL AND o.ordinal < i.ordinal)
-        ORDER BY i.next_at, i.scope, i.ordinal LIMIT $2`, [this.now(), this.options.batch ?? 100, [...SUPPORTED_STORE_VERSIONS]]), true);
+    const due = await this.due();
     const pass: SubmitPass = { tried: 0, failed: [] }, changed = new Set<string>();
-    for (const row of due.rows) {
+    for (const row of due) {
       try { if (await this.try(row.scope, row.key, changed)) pass.tried++; }
       catch (error) {
         pass.failed.push({ scope: JSON.parse(row.scope) as string, turnId: JSON.parse(row.key) as string, error });
@@ -335,6 +350,52 @@ export class HostedSubmitter {
     }
     for (const scope of changed) this.options.changed?.(scope);
     return pass;
+  }
+
+  /**
+   * The due FIFO heads of one pass, at most `batch`. The NOT EXISTS head filter must match K4 fifoHeads, which the claim
+   * checks again under the scope lock. A scope of a store version this code does not support is left out before the
+   * limit: its rows cannot be claimed or written, so they must not fill a pass ahead of the healthy scopes. So is an
+   * exported scope, and one with an uncommitted import (#975). A head that its device has no slot for (#1229) keeps its
+   * `next_at`, as L does not delay it, so the scan reads on in pages past it and the held heads cannot fill the batch. A held head whose
+   * queued expiry is reached is still picked, so the claim concludes it.
+   */
+  private due(): Promise<Array<{ scope: string; key: string }>> {
+    const batch = this.options.batch ?? 100, now = this.now();
+    return inSchema(this.pool, this.schema, async client => {
+      const picked: Array<{ scope: string; key: string }> = [];
+      // An untried row holds no slot, so its answer depends only on its scope, device and source while the scan reads.
+      const answers = new Map<string, boolean>();
+      const admits = async (row: { scope: string; key: string; tries: number; device: string; source: string }) => {
+        if (row.tries > 0) return admitsDeviceSlot(client, row.scope, row.key, this.deviceConcurrency);
+        const memo = JSON.stringify([row.scope, row.device, row.source === 'user']);
+        if (!answers.has(memo)) answers.set(memo, await admitsDeviceSlot(client, row.scope, row.key, this.deviceConcurrency));
+        return answers.get(memo)!;
+      };
+      let after: [string, string, string] | undefined;
+      for (;;) {
+        const page = await client.query<{ scope: string; key: string; next_at: string; ordinal: string; tries: number; wait_until: string;
+          retry_until: string | null; device: string; source: string }>(
+          `SELECT i.scope, i.key, i.next_at::text, i.ordinal::text, i.tries, i.wait_until::text, i.retry_until::text,
+            i.input->>'deviceId' AS device, i.source FROM intent i JOIN scope s ON s.scope = i.scope
+            WHERE s.state_version = $3 AND s.switch_export IS NULL AND s.switch_import IS NULL AND i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
+            AND i.next_at <= $1 AND NOT EXISTS (SELECT 1 FROM intent o WHERE o.scope = i.scope AND o.agent = i.agent
+              AND o.conclusion IS NULL AND o.ordinal < i.ordinal)
+            ${after ? 'AND (i.next_at, i.scope, i.ordinal) > ($4::bigint, $5::text, $6::bigint)' : ''}
+            ORDER BY i.next_at, i.scope, i.ordinal LIMIT $2`, [now, batch, STORE_VERSION, ...(after ?? [])]);
+        for (const row of page.rows) {
+          // The claim settles a queued expiry before the slot check, as K4 does whatever the admission says.
+          const expires = row.tries === 0 && queuedExpiry({ waitUntil: Number(row.wait_until),
+            ...(row.retry_until === null ? {} : { retryUntil: Number(row.retry_until) }) }, now) !== undefined;
+          if (!expires && !await admits(row)) continue;
+          picked.push({ scope: row.scope, key: row.key });
+          if (picked.length === batch) return picked;
+        }
+        const last = page.rows.at(-1);
+        if (page.rows.length < batch || !last) return picked;
+        after = [last.next_at, last.scope, last.ordinal];
+      }
+    }, true);
   }
 
   /** Saves the error of a failed try and delays the row. It does not touch a row that another try holds. */
@@ -408,6 +469,10 @@ export class HostedSubmitter {
           await switchDueVersions(client, scopeKey, now);
           return 'concluded';
         }
+      }
+      // K4 `begin`: a row that its device has no slot for keeps its phase and waits; it is not backed off.
+      if (!await admitsDeviceSlot(client, scopeKey, key, this.deviceConcurrency)) return 'skipped';
+      if (row.tries === 0) {
         // K4 `begin`: a sealed row that was never tried fails before any SDK call when the port has no sealed lane, so it
         // does not hold its agent's queue until `wait_until`. A tried row may have reached the SDK, so it keeps its resubmit.
         if (isSealed(row.input) && !this.options.port(JSON.parse(scopeKey) as string).submitSealed) {

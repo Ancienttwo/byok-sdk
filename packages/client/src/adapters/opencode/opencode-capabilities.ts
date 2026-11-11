@@ -1,11 +1,11 @@
-import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../types';
+import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../types.js';
 
-/** Native user configuration and transcripts are inherited. Host MCP toolsets await qualification. */
+/** Native user configuration and transcripts are inherited. */
 export const OPENCODE_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   steer: false,
   resume: true,
   approvalInteractive: false,
-  mcpToolsets: false,
+  mcpToolsets: true,
   messageDraft: false,
   preparedLane: false,
   isolation: Object.freeze({

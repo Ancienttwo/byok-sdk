@@ -89,6 +89,7 @@ types from the K4 root entry, and `hash` and `canonical` from the canonical entr
 that format and writes the format into an L tenant.
 
 ```vendor host
+src/adapter-steps.ts
 src/channel.ts
 src/coalesce.ts
 src/commit.ts
@@ -97,7 +98,6 @@ src/delegation.ts
 src/delivery-routing.ts
 src/delivery.ts
 src/dream.ts
-src/history.ts
 src/home-projections.ts
 src/host.ts
 src/inbound.ts
@@ -173,6 +173,64 @@ node:path
 node:readline
 vitest
 ```
+
+## Reply visibility
+
+A Bot reply is visible iff its Turn's intent concluded `succeeded` with that
+reply's task id (#1762). The SDK accepts the reply while the Turn still runs, so
+an accepted reply is not yet a Turn that happened: the Turn can still fail, for
+example when the daemon stops before its outcome commits.
+
+- K8's channel outbox follows this itself. An accepted reply's delivery is
+  `staged`, and no sender takes it. The outcome transaction that concludes the
+  intent `succeeded` promotes it to `pending`. A staged delivery whose intent
+  concludes otherwise becomes `rejected` with code `outcome_not_applied` at the
+  next sync, and its reply stays only as an audit fact.
+- `replies` records every accepted reply, including withheld ones. A Host that
+  shows or uploads replies from `replies` checks the conclusion first: skip a
+  reply unless `core.intent(turnId)` has `conclusion === 'succeeded'` and
+  `taskId` equal to the reply's task id. For example, AiphaBee adds this check
+  to its `k8RootUploads` before it returns a body. A failed Turn then shows its
+  failure, never its reply.
+- The conclusion check covers replies that K8 accepted while the Turn was
+  running. K4 `consumeMessage` has no conclusion check, so a message that
+  arrives after its intent concluded is still accepted and recorded in
+  `replies`, and the check passes it when the intent concluded `succeeded`.
+  K8 stages any delivery it queues for that message, and the next sync
+  withholds it as `outcome_not_applied`. The SDK daemon is not expected to
+  publish such a message, but a Host with a channel takes K8's delivery state
+  as the authority: it shows a reply only when its delivery was promoted, not
+  `staged` and not rejected `outcome_not_applied`. A Host without a channel has
+  only the conclusion check.
+- A Turn that outlives its reply route token cannot answer on that route. If
+  the token has expired at acceptance, K8 queues the reply on the conversation's
+  active push route, or records `reply_route_expired` and queues nothing. If it
+  expires after acceptance, the promoted delivery is rejected
+  `reply_route_expired`, and an active push route gets a new delivery with its
+  own id.
+- A send is at-least-once from the durable outbox. The receiver deduplicates by
+  the delivery id, which stays the same across resends of one row; a Host
+  upload deduplicates by task id, and only the task that concluded the intent
+  can pass the check above.
+
+## Would-do rows
+
+Each would-do row names the Turn whose outcome proposed it, in `turnId`
+(#1756). Retention moves the row with that Turn's root into the `wouldDo`
+application rows, so `wouldDoRecords` lists only the rows of roots that are
+still in the state. A Host that keeps the would-do feed longer copies the rows
+before it acknowledges the root.
+
+A ledger written by an earlier copy has rows without `turnId`. Run
+`migrateWouldDo(ledger)` from `commit.ts` once per ledger, before the new copy
+serves. It fills `turnId` from the K4 task id of each live Turn intent, over
+every generation, and moves each row whose intent K4 already compacted, or
+whose Turn left the state, to the `wouldDo` application rows. It returns
+`{ backfilled, archived }`. `archived` counts rows that leave the feed early;
+they are history of settled Turns, so no Turn reads them. A second run returns
+zeros. A switch export or import refuses a would-do row without `turnId`, so
+migrate the source before a switch. For example, AiphaBee runs it on each
+device ledger in its runtime update.
 
 ## K4
 

@@ -5,10 +5,10 @@ import {
   AgentContentReceiptPayloadSchema,
   type AgentContentReceiptPayload,
 } from '@byok-sdk/protocol';
-import type { AgentRef } from '../agent-home';
-import { DurableJsonlFile } from '../util/durable-jsonl';
-import { ensureSecureDir } from '../util/secure-dir';
-import { type AgentEgressPolicy, type AgentEgressDropReason, eventBytes } from './agent-egress-policy';
+import type { AgentRef } from '../agent-home.js';
+import { DurableJsonlFile } from '../util/durable-jsonl.js';
+import { ensureSecureDir } from '../util/secure-dir.js';
+import { type AgentEgressPolicy, type AgentEgressDropReason, eventBytes } from './agent-egress-policy.js';
 
 export const AGENT_EGRESS_DIRECTORY = path.join('.byok', 'egress');
 export const AGENT_RELIABLE_SPOOL_FILENAME = 'reliable-v1.jsonl';

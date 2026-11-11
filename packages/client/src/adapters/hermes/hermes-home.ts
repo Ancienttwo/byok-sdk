@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { HermesModelSelection } from './hermes-adapter';
-import { ensureSecureDir } from '../../util/secure-dir';
-import { identifyHermesGateway } from './gateway-identity';
+import type { HermesModelSelection } from './hermes-adapter.js';
+import { ensureSecureDir } from '../../util/secure-dir.js';
+import { identifyHermesGateway } from './gateway-identity.js';
 
 /**
  * Hermes home layout owned by the SDK.

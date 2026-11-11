@@ -3,21 +3,21 @@ import type { HostedCollaborationStore } from './store';
 
 type TenantReadiness = Awaited<ReturnType<ByokCloud['readTenantReadiness']>>;
 
-/** The SDK device read of one tenant: the SDK `readTenantReadiness`, the read behind L's `machines.list`. */
+/** The SDK device read of one tenant: the SDK `readTenantReadiness`. */
 export interface HostedDevicePort {
   readiness(): Promise<Pick<TenantReadiness, 'devices'>>;
 }
 export interface DeviceObserverOptions {
   /** The SDK calls of the tenant that owns `scope`. */
   port: (scope: string) => HostedDevicePort;
-  /** How long the read may take, 1 s as in L. A read that takes longer writes nothing. */
+  /** How long the read may take. Default 1 s. A read that takes longer writes nothing. */
   timeoutMs?: number;
   /** The clock that the observation reads under the scope lock. */
   now?: () => number;
 }
 
 /**
- * The `connected` fact of each device of a readiness read, as the server's `machines.list` gives it to L: a device is connected
+ * The `connected` fact of each device of a readiness read: a device is connected
  * when it has unexpired presence.
  */
 export function connectedDevices(readiness: Pick<TenantReadiness, 'devices'>): Map<string, boolean> {
@@ -25,9 +25,9 @@ export function connectedDevices(readiness: Pick<TenantReadiness, 'devices'>): M
 }
 
 /**
- * The H device observation (#793 S11), as L's `refreshDevices`: when a delegation of `scope` can change, one SDK readiness
+ * The H device observation (#793 S11): when a delegation of `scope` can change, one SDK readiness
  * read outside any transaction, then the K8 `observeDevices` rule under the scope lock. Presence is display only. A read
- * that throws or times out writes nothing, as in L; a store error propagates. The deployment runs it from its due scheduler
+ * that throws or times out writes nothing; a store error propagates. The deployment runs it from its due scheduler
  * `sync`, before `store.sync`. It has no due time of its own, so a waiting delegation's display can lag until its scope's
  * next sync, where L polls on each pass.
  */

@@ -9,13 +9,13 @@
 import { randomUUID } from 'node:crypto';
 import { tenantId, type Clock, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
-import type { ByokPool } from './pool';
-import { assertByokPool } from './pool-brand';
+import type { ByokPool } from './pool.js';
+import { assertByokPool } from './pool-brand.js';
 import {
   R2ObjectMaintenanceStore,
   type R2BlobStoreOptions,
   type R2ObjectMaintenance,
-} from './stores/r2-blobs';
+} from './stores/r2-blobs.js';
 
 const DEFAULT_BATCH_SIZE = 100;
 const DEFAULT_MAX_PAGES_PER_RUN = 10;
@@ -59,6 +59,7 @@ export const TENANT_ERASURE_TABLES = [
   'e2ee_member_key',
   'agent_message_admission',
   'task',
+  'task_agentless_retired',
   'device_presence',
   'device_assertion_replay',
   'device_stream',

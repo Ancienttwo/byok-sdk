@@ -25,7 +25,7 @@ for (const entry of ['dist/index.js', 'dist/adapters/index.js']) {
   const deps = {
     RuntimeExecutionFailure: api.RuntimeExecutionFailure,
     RuntimeDisposalFailure: api.RuntimeDisposalFailure,
-    infrastructure: (phase, reason, retry = 'non-retryable') => new api.RuntimeExecutionFailure({ phase, reason, retry, category: 'infrastructure' }),
+    infrastructure: (phase, reason, retry = 'non-retryable') => new api.RuntimeExecutionFailure({ phase, reason, retry }),
     isRuntimeExecutionFailure: value => value instanceof api.RuntimeExecutionFailure,
     removeHermesProfile: async () => { if (refuseCleanup) throw new Error('synthetic cleanup refusal'); },
   };

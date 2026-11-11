@@ -1,14 +1,14 @@
-import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits';
-import { withCodexMcpToolGrants } from './reserved-mcp-tool-grants';
-import type { ExecutionScratch } from '../../daemon/retention/scratch';
-import type { RuntimeTaskInput } from '../../types';
-import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
-import { CodexNativeInteractions } from './native-interactions';
+import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
+import { withCodexMcpToolGrants } from './reserved-mcp-tool-grants.js';
+import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
+import type { RuntimeTaskInput } from '../../types.js';
+import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions.js';
+import { CodexNativeInteractions } from './native-interactions.js';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
-import * as codexRuntime from '../../runtime/codex-session-runtime';
-import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure';
+import * as codexRuntime from '../../runtime/codex-session-runtime.js';
+import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import type {
   AgentEvent,
   TaskFailure,
@@ -24,27 +24,27 @@ import {
   type MessageDraftDelta,
   type RuntimeOperationStartInput,
   type Session,
-} from '../../types';
+} from '../../types.js';
 import {
   RuntimeExecutionFailure,
   RuntimeStartupDisposalFailure,
   isRuntimeExecutionFailure,
-} from '../../runtime-failure';
-import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
-import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
-import { codexFailure } from '../../runtime/oar-failure-runtime';
-import { CodexProjection, type CodexRecord } from './projection';
-import { AsyncQueue } from '../../util/async-queue';
-import { RetainedRecordBudget, haltGate, SettleWaiters, raceDeadline, RetryableOnce } from '../session-kit';
-import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
-import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation';
-import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
-import { CODEX_RUNTIME_CAPABILITIES } from './codex-capabilities';
-import { CODEX_VERSION_POLICY, codexVersionToken } from './codex-version';
-import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
-import { verifyCodexUserMcpServersExcluded, withCodexUserMcpServersExcluded } from './agent-user-mcp-servers';
-import { assertCodexFileCredentials, createCodexAgentHome } from './agent-user-context';
+} from '../../runtime-failure.js';
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
+import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
+import { codexFailure } from '../../runtime/oar-failure-runtime.js';
+import { CodexProjection, type CodexRecord } from './projection.js';
+import { AsyncQueue } from '../../util/async-queue.js';
+import { RetainedRecordBudget, haltGate, SettleWaiters, raceDeadline, RetryableOnce } from '../session-kit.js';
+import { resolveCodexBin, type ResolvedBin } from './resolve-bin.js';
+import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation.js';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import { CODEX_RUNTIME_CAPABILITIES } from './codex-capabilities.js';
+import { CODEX_VERSION_POLICY, codexVersionToken } from './codex-version.js';
+import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
+import { verifyCodexUserMcpServersExcluded, withCodexUserMcpServersExcluded } from './agent-user-mcp-servers.js';
+import { assertCodexFileCredentials, createCodexAgentHome } from './agent-user-context.js';
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
@@ -117,8 +117,6 @@ export interface CodexAdapterOptions {
   agentUserContext?: 'inherit' | 'excluded';
   /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
   versionPolicy?: RuntimeVersionPolicy;
-  /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-  versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 
 /**
@@ -173,12 +171,7 @@ export class CodexAdapter implements RuntimeAdapter {
       (options.operationTimeoutMs ?? DEFAULT_OPERATION_MS) > 2_147_483_647
     )
       throw new TypeError('invalid Codex operation timeout');
-    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
-      descriptor: CODEX_VERSION_POLICY,
-      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
-        ? { daemonConfig: options.versionPolicy }
-        : { adapterOption: options.versionPolicy }),
-    }).policy;
+    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy(CODEX_VERSION_POLICY, options.versionPolicy);
   }
   runtimeEnvironment(): Promise<RuntimeEnvironment> {
     return buildRuntimeEnvironment(this.environmentPolicy);
@@ -365,14 +358,12 @@ export class CodexAdapter implements RuntimeAdapter {
 const authority = (reason: string) =>
   new RuntimeExecutionFailure({
     phase: 'start',
-    category: 'authority',
     retry: 'non-retryable',
     reason,
   });
 const infrastructure = (reason: string, failure?: TaskFailure) =>
   new RuntimeExecutionFailure({
     phase: 'run',
-    category: 'infrastructure',
     retry: 'non-retryable',
     reason,
     failure,
@@ -381,7 +372,6 @@ const infrastructure = (reason: string, failure?: TaskFailure) =>
 const retryable = (reason: string) =>
   new RuntimeExecutionFailure({
     phase: 'start',
-    category: 'infrastructure',
     retry: 'retryable',
     reason,
   });
@@ -420,7 +410,7 @@ class CodexSession implements Session {
       this.interactions = this.native.channel;
     }
   }
-  serverRequest(id: string | number, method: string, params: Record<string, unknown>, reply: import('./native-interactions').CodexNativeReply): void {
+  serverRequest(id: string | number, method: string, params: Record<string, unknown>, reply: import('./native-interactions.js').CodexNativeReply): void {
     this.native!.receive(id, method, params, reply);
   }
   own(child: { dispose(): Promise<void>; kill(): void; readonly exitedOnItsOwn: boolean }): void {
@@ -495,7 +485,6 @@ class CodexSession implements Session {
           this.fail(
             new RuntimeExecutionFailure({
               phase: 'run',
-              category: 'semantic',
               retry: 'non-retryable',
               reason,
               failure: { class: classified.fromText ? 'unknown' : classified.failure },

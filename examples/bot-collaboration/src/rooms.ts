@@ -3,6 +3,7 @@ import { hash, type LedgerState } from '@byok-sdk/server/execution-core';
 import type { Publish } from './rules/delegation';
 import { addTurn, type CollaborationState, type Turn } from './model';
 import * as rules from './rules/rooms';
+import type { AutonomyGate } from './rules/autonomy';
 
 // K8 adapter for the pure room rules in `rules/rooms.ts`.
 export { DEFAULT_MEMBER_MENTIONS, ROOM_GRACE_MS, memberMentions, memberPresent, roomContext, roomMessageProjection, roomMessages, roomVisibility,
@@ -13,8 +14,8 @@ export function roomInput(state: CollaborationState, key: string, roomId: string
   return rules.roomInput(state.team, key, roomId, text, mentions, publish, from);
 }
 export function applySpeech(state: CollaborationState, turn: Turn, document: BotTurnOutcome, taskId: string, now: number, publish: Publish,
-  accept: (action: string, work: () => void) => void): void {
-  rules.applySpeech(state.team, turn.id, document, taskId, now, publish, accept);
+  accept: (action: string, work: () => void) => void, gate: AutonomyGate): void {
+  rules.applySpeech(state.team, turn.id, document, taskId, now, publish, accept, gate);
 }
 /**
  * Seat facts come from the K4 intent and execution of each seat Turn. A cancel of admitted work sets

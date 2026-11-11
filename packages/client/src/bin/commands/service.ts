@@ -1,10 +1,10 @@
 import path from 'node:path';
-import { createServiceLifecycle, type DaemonConfig, type ServiceDefinition, type ServiceLifecycle } from '../../index';
-import { agentServiceDefinition, agentServiceInstallation } from '../../lifecycle/agent-service';
-import { createServiceInstallation, readServiceInstallationRecord, type ServiceInstallation } from '../../lifecycle/service-installation';
-import { readLastLifecycleRecord } from '../../daemon/audit-log';
-import { argValue, hasFlag, resolveStoreDir } from '../config';
-import { formatLifecycle, formatLifecycleRemedy } from '../../diagnostics/format';
+import { createServiceLifecycle, type DaemonConfig, type ServiceDefinition, type ServiceLifecycle } from '../../index.js';
+import { agentServiceDefinition, agentServiceInstallation } from '../../lifecycle/agent-service.js';
+import { createServiceInstallation, readServiceInstallationRecord, type ServiceInstallation } from '../../lifecycle/service-installation.js';
+import { readLastLifecycleRecord } from '../../daemon/audit-log.js';
+import { argValue, hasFlag, resolveStoreDir } from '../config.js';
+import { formatLifecycle, formatLifecycleRemedy } from '../../diagnostics/format.js';
 
 export interface ServiceCommandDeps {
   log?: (line: string) => void;

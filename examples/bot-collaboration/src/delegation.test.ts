@@ -4,6 +4,9 @@ import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { addTurn, stateOf } from './model';
 import { abandonDelegation, applyDelegate, arbitrateCancel, claimUnit, delegationDue, releaseUnit, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply, ROOT_BOT_BUDGET,
   settleDelegations, DEFAULT_CANCEL_GRACE_MS } from './delegation';
+import type { AutonomyGate } from './rules/autonomy';
+/** These cases apply every autonomous action, as a Bot in `auto` does. */
+const auto: AutonomyGate = { autonomy: 'auto', record: () => { throw new Error('auto records nothing'); } };
 
 function setup() {
   const state = stateOf({});
@@ -13,7 +16,7 @@ function setup() {
   const events: string[] = [];
   const emit = (id: string, _value: Json) => { events.push(id); };
   const apply = () => applyDelegate(state, turn, 'task', { delegate: [{ to: 'b', request: 'Check' }, { to: 'a', request: 'Continue' }] },
-    false, 0, emit, (_kind, work) => work());
+    false, 0, emit, (_kind, work) => work(), auto);
   return { state, events, emit, apply };
 }
 

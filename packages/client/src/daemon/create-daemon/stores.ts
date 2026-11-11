@@ -1,21 +1,21 @@
-import { DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME } from '../task-runner';
-import { resolveAgentEgressPolicy } from '../agent-egress-policy';
-import type { ProgressBatcherOptions } from '../progress-batcher';
-import { resolveDaemonOperationalConfig } from './operational-config';
-import { DeviceStore, type DeviceRecord } from '../store';
-import { resolveStorageConfig } from '../retention/config';
-import { ScratchRoot } from '../retention/scratch';
-import { StoragePressure } from '../retention/pressure';
-import type { RuntimeAdapter } from '../../types';
-import { createPreparedToolSurfaceAssembler } from '../prepared-tool-surface';
-import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory';
-import { LocalTeamWorkspace } from '../team-workspace';
-import { createDeviceCredentialStore, createDeviceMemberCustody } from '../device-credential-provider';
-import { DeviceMemberRecords } from '../device-member-custody';
-import type { DeviceMemberKeyring } from '../e2ee-keyring';
-import type { DaemonInputs } from './scope';
-import type { DaemonConfigScope } from './config';
-import { assertAgySessionStoreTtl } from './support';
+import { DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME } from '../task-runner.js';
+import { resolveAgentEgressPolicy } from '../agent-egress-policy.js';
+import type { ProgressBatcherOptions } from '../progress-batcher.js';
+import { resolveDaemonOperationalConfig } from './operational-config.js';
+import { DeviceStore, type DeviceRecord } from '../store.js';
+import { resolveStorageConfig } from '../retention/config.js';
+import { ScratchRoot } from '../retention/scratch.js';
+import { StoragePressure } from '../retention/pressure.js';
+import type { RuntimeAdapter } from '../../types.js';
+import { createPreparedToolSurfaceAssembler } from '../prepared-tool-surface.js';
+import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory.js';
+import { LocalTeamWorkspace } from '../team-workspace.js';
+import { createDeviceCredentialStore, createDeviceMemberCustody } from '../device-credential-provider.js';
+import { DeviceMemberRecords } from '../device-member-custody.js';
+import type { DeviceMemberKeyring } from '../e2ee-keyring.js';
+import type { DaemonInputs } from './scope.js';
+import type { DaemonConfigScope } from './config.js';
+import { assertAgySessionStoreTtl } from './support.js';
 
 /**
  * The second stage of `buildDaemonWithAdapters` (#926): resolves the

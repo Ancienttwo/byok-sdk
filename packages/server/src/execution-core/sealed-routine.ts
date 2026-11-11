@@ -5,7 +5,7 @@
  */
 import { sealContent, type SealedBinding, type SealedCategory } from '@byok-sdk/core/sealed-payload';
 import { SEALED_INLINE_MAX_PADDED_LENGTH, type AgentRef, type TaskSealing } from '@byok-sdk/protocol';
-import type { SealedExecutionTemplate } from './model';
+import type { SealedExecutionTemplate } from './model.js';
 
 export type RoutineRef = NonNullable<SealedExecutionTemplate['payload']['routineRef']>;
 /** The inline `sealed` member of a sealed offer. */

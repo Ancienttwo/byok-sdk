@@ -12,10 +12,10 @@ import type {
   McpToolsetRegistryStatus,
   McpToolsetReloadReceipt,
   McpToolsetStatus,
-} from '../types';
-import { GRANTABLE_MCP_SERVER_NAME, GRANTABLE_TOOL_NAME } from '../mcp/observation';
-import { isReservedMcpServerName } from '../sdk-reserved-mcp';
-import { compareCodeUnits } from '../util/compare-code-units';
+} from '../types.js';
+import { GRANTABLE_MCP_SERVER_NAME, GRANTABLE_TOOL_NAME } from '../mcp/observation.js';
+import { isReservedMcpServerName } from '../sdk-reserved-mcp.js';
+import { compareCodeUnits } from '../util/compare-code-units.js';
 
 const MAX_LOCAL_MCP_SERVERS_PER_TOOLSET = 16;
 const MAX_LOCAL_MCP_ARGS = 64;

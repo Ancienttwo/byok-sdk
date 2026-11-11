@@ -1,4 +1,4 @@
-import type { ResolvedBin } from '../codex/resolve-bin';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
 
 /**
  * Resolve the Grok Build CLI. Like Codex, it is a standalone user install

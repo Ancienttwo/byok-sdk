@@ -6,7 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout';
-import type { PassReport } from './worker';
+import type { PassReport } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
 import { alarmReports, openHome, RUN, until, type Home } from './worker.test-support';
 
 /** A wait long enough for any notified pass of a local instance to have run. Nothing may change in it. */

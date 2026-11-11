@@ -10,7 +10,7 @@
  */
 import { z } from 'zod';
 
-import { CONTENT_HASH_RE } from './blob';
+import { CONTENT_HASH_RE } from './blob.js';
 
 /** The most chain entries one append accepts. */
 export const E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES = 64;
@@ -128,8 +128,13 @@ export const E2eeMemberChainEntrySchema = z
   });
 export type E2eeMemberChainEntry = z.infer<typeof E2eeMemberChainEntrySchema>;
 
-const E2eeScopeKeyPackageV1Schema = z.strictObject({
-  v: z.literal(1),
+/**
+ * One scope key wrapped to one member's KEM key of `recipientKemEpoch` (§7.4,
+ * §77a), as a put takes it and a read returns it. Version 2 is the only
+ * version (#1789).
+ */
+export const E2eeScopeKeyPackageSchema = z.strictObject({
+  v: z.literal(2),
   tenantId: z.string().min(1),
   scopeId: z.string().min(1),
   epoch: PositiveSafeIntegerSchema,
@@ -139,17 +144,8 @@ const E2eeScopeKeyPackageV1Schema = z.strictObject({
   enc: base64UrlBytes(65),
   ciphertext: base64UrlBytes(48),
   sig: SignatureSchema,
-});
-
-/** One scope key wrapped to one member's KEM key of `recipientKemEpoch` (§7.4, §77a). A put takes version 2 only. */
-export const E2eeScopeKeyPackageV2Schema = z.strictObject({
-  ...E2eeScopeKeyPackageV1Schema.shape,
-  v: z.literal(2),
   recipientKemEpoch: PositiveSafeIntegerSchema,
 });
-
-/** A stored package as a read returns it: version 1 from before `e2ee.member.kem-epoch`, version 2 after. */
-export const E2eeScopeKeyPackageSchema = z.union([E2eeScopeKeyPackageV1Schema, E2eeScopeKeyPackageV2Schema]);
 export type E2eeScopeKeyPackage = z.infer<typeof E2eeScopeKeyPackageSchema>;
 
 /** A pairing MAC (§7.2 steps 3 and 4): HMAC-SHA-256 under `pv`, which the Host never holds. */

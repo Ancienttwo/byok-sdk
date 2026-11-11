@@ -14,7 +14,7 @@
  * Adding a port method means editing this table, which is the point: a port
  * grows by contract, not by whichever composition needed something.
  */
-import type { CloudStoreName } from './ports';
+import type { CloudStoreName } from './ports.js';
 
 export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string[]>> = {
   activity: ['append', 'read', 'settle', 'collectExpired'],
@@ -26,7 +26,6 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
   nonces: ['issue', 'consumeIfValid', 'collectExpired'],
   dedup: ['checkAndRecord', 'checkAndRecordAgent'],
   tasks: [
-    'open',
     'reserveAgentOffer',
     'reserveAgentMessage',
     'recordFirstOutput',

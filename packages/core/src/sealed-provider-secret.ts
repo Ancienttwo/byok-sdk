@@ -20,21 +20,21 @@
  */
 import { z } from 'zod';
 
-import { canonicalizeJson, canonicalizeJsonBytes, type JsonObject, type JsonValue } from './attestation';
-import { CONTENT_HASH_PATTERN } from './blob';
-import { ByokCoreError } from './errors';
+import { canonicalizeJson, canonicalizeJsonBytes, type JsonObject, type JsonValue } from './attestation.js';
+import { CONTENT_HASH_PATTERN } from './blob.js';
+import { ByokCoreError } from './errors.js';
 import {
   HPKE_AEAD_TAG_BYTES,
   HPKE_P256_PUBLIC_KEY_BYTES,
   hpkeOpenBase,
   hpkeSealBase,
   importP256PublicKey,
-} from './hpke';
-import { isCanonicalTimestamp } from './time';
-import { safeParseTotal } from './total-parse';
-import { webCryptoSubtle, type WebCryptoKey } from './webcrypto';
+} from './hpke.js';
+import { isCanonicalTimestamp } from './time.js';
+import { safeParseTotal } from './total-parse.js';
+import { webCryptoSubtle, type WebCryptoKey } from './webcrypto.js';
 
-export type { WebCryptoKey } from './webcrypto';
+export type { WebCryptoKey } from './webcrypto.js';
 
 /** The only HPKE suite v1 admits. There is no negotiation and no second value. */
 export const PROVIDER_SECRET_HPKE_SUITE = 'hpke-base.dhkem-p256-hkdf-sha256.hkdf-sha256.aes-128-gcm';

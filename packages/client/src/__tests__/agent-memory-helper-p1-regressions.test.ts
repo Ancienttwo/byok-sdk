@@ -60,8 +60,8 @@ const helperHarness = vi.hoisted(() => {
           stdout.emit('data', Buffer.from(`${JSON.stringify({
             id: request.id,
             ok: true,
-            protocol: 3,
-            result: { helperVersion: '3', identity: request.expectedIdentity },
+            protocol: 4,
+            result: { helperVersion: '4', identity: request.expectedIdentity },
           })}\n`));
           return;
         }
@@ -76,12 +76,22 @@ const helperHarness = vi.hoisted(() => {
     return child;
   });
 
-  return { spawn, lastChild: () => lastChild, requests: () => requests };
+  const execFile = vi.fn((_bin: string, args: string[], _options: unknown,
+    callback: (error: Error | null, stdout: string, stderr: string) => void) => {
+    expect(args).toEqual(['root-barrier']);
+    const stdin = Object.assign(new Emitter(), {
+      end: vi.fn(() => queueMicrotask(() => callback(null, '', ''))),
+    });
+    return { stdin };
+  });
+
+  return { spawn, execFile, lastChild: () => lastChild, requests: () => requests };
 });
 
 vi.mock('node:child_process', async (importOriginal) => ({
   ...(await importOriginal<typeof import('node:child_process')>()),
   spawn: helperHarness.spawn,
+  execFile: helperHarness.execFile,
 }));
 
 // Transport-only fault injection. Deployment admission has its own real
@@ -143,6 +153,7 @@ describe('Agent memory helper P1 regressions', () => {
         const filesystem = await openAgentMemoryFilesystemHelper({
           helperBin: '/opt/byok-agent-memory-fs',
           canonicalHome: '/tmp/byok-agent-memory-helper-epipe',
+          ancestorRoot: '/tmp',
           homeIdentity: { dev: 1n, ino: 2n },
         });
         const expectedRevision = `sha256:${'0'.repeat(64)}`;

@@ -1,13 +1,13 @@
-import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl, RejectTaskOptions } from '../cloud';
+import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl, RejectTaskOptions } from '../cloud.js';
 import { type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import { createEnvelope } from '@byok-sdk/protocol';
-import { StaleApprovalError, pendingApproval, type PendingApproval } from '../approval-control';
-import type { ApprovalTimelineTail } from '../approval-timeline';
-import { ByokCloudError } from '../errors';
-import { uuidFromSha256 } from '../offer-identity';
-import type { TaskAttempt } from '../stores/ports';
-import { tenantStoresFor, type CloudRootStores } from '../tenant-stores';
-import { isTerminalAttemptStatus, type EnqueuePaths } from './enqueue';
+import { StaleApprovalError, pendingApproval, type PendingApproval } from '../approval-control.js';
+import type { ApprovalTimelineTail } from '../approval-timeline.js';
+import { ByokCloudError } from '../errors.js';
+import { uuidFromSha256 } from '../offer-identity.js';
+import type { TaskAttempt } from '../stores/ports.js';
+import { tenantStoresFor, type CloudRootStores } from '../tenant-stores.js';
+import { isTerminalAttemptStatus, type EnqueuePaths } from './enqueue.js';
 
 interface Dependencies {
   root: CloudRootStores;

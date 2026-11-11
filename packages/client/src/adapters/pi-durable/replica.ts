@@ -1,8 +1,8 @@
-import { loadSqliteModule } from '../../util/sqlite-support';
+import { loadSqliteModule } from '../../util/sqlite-support.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { ensureSecureDir } from '../../util/secure-dir';
+import { ensureSecureDir } from '../../util/secure-dir.js';
 
 /** `<storeDir>/durable-replicas`: the replica root the daemon hands pi-durable. */
 export const DURABLE_REPLICA_DIRNAME = 'durable-replicas';

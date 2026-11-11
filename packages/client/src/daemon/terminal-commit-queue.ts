@@ -1,4 +1,4 @@
-import { backoffCeilingMs } from './deterministic-jitter';
+import { backoffCeilingMs } from './deterministic-jitter.js';
 
 /** First automatic retry delay; later ones double up to `backoffCeilingMs`'s ceiling. */
 export const TERMINAL_COMMIT_RETRY_BASE_MS = 1_000;

@@ -1,6 +1,6 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
-import { RuntimeExecutionFailure } from '../runtime-failure';
-import type { RuntimeAdapterDescriptor, Session, SessionEvidence } from '../types';
+import { RuntimeExecutionFailure } from '../runtime-failure.js';
+import type { RuntimeAdapterDescriptor, Session, SessionEvidence } from '../types.js';
 
 /**
  * The optional `Session` members that the adapter descriptor declares, bound
@@ -31,7 +31,6 @@ export function bindDeclaredSessionMembers(descriptor: RuntimeAdapterDescriptor,
     if (typeof session.progressStartsMessage !== 'function') {
       throw new RuntimeExecutionFailure({
         phase: 'start',
-        category: 'authority',
         retry: 'non-retryable',
         reason: `runtime_session_incomplete: runtime "${descriptor.id}" declares progressMessageBoundary "session" but its Session has no progressStartsMessage()`,
       });

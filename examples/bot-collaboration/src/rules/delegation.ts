@@ -40,6 +40,10 @@ export interface Delegation {
 export interface Batch { id: string; delegationIds: string[]; slots: string[]; released?: true }
 /** `turnId` is the Turn that holds the unit. A free A slot has none. */
 export interface Unit { id: string; root: string; state: 'reserved' | 'spent' | 'released'; turnId?: string }
+/**
+ * The receipt of one accepted Agent message, written while the Turn still runs. A Host shows a reply only when the intent of
+ * `turnId` concluded `succeeded` with this task id (#1762): any other reply was accepted, but its Turn outcome was not applied.
+ */
 export interface AcceptedReply {
   /** The intent key. For a Bot Turn, it is the Turn id. */
   turnId: string; messageId: string; contentHash: string; contentType: string; acceptedAt: number;
@@ -228,7 +232,7 @@ export function reserveUnits(n: number): number { return n + Math.max(n, 1); }
  * #1229: an observing Bot records a cross-Bot item as would-do: no delegation row, no bot_request Turn, no budget unit.
  */
 export function applyDelegate(state: DelegationState, turn: Turn, taskId: string, outcome: BotTurnOutcome, seat: boolean,
-  now: number, emit: Publish, accept: (action: string, work: () => void) => void, gate?: AutonomyGate): { successor: boolean } {
+  now: number, emit: Publish, accept: (action: string, work: () => void) => void, gate: AutonomyGate): { successor: boolean } {
   let successor = false;
   const rows: Delegation[] = [];
   const accepted: Delegation[] = [];
@@ -331,6 +335,73 @@ function resolveCancel(state: DelegationState, d: Delegation, taskId: string | u
   resolveDelegation(state, d, 'cancelled', now, emit, d.cancel!.reason ?? 'user_cancelled', reply);
 }
 const CANCELLABLE = new Set<Delegation['status']>(['queued', 'waiting_device', 'running', 'reply_pending']);
+/** The result of an owner cancel (#1405). `cancel_pending` and `already_settled` write nothing and send no cancel. */
+export type CancelOutcome = 'cancelled' | 'cancel_pending' | 'already_settled';
+export interface TurnCancelResult { turnId: string; result: CancelOutcome; conclusion?: string }
+export interface DelegationCancelResult { delegationId: string; result: CancelOutcome; verdict?: Verdict }
+/**
+ * `cancelTurn` refuses with `cancelDelegation`'s codes on a chain Turn, and `cancelDelegation` with `unknown_delegation` or with
+ * `not_cancellable` for a delegation whose state a cancel cannot act on: end a `reply_held` or `uncertain` one with
+ * `abandonDelegation` (#1405). `key` is the delegation id. A delegation is no intent key, so this is not a `HostIntentError`.
+ */
+export class DelegationError extends Error {
+  constructor(readonly key: string, readonly code: 'unknown_delegation' | 'not_cancellable', message: string) {
+    super(message); this.name = 'DelegationError';
+  }
+}
+/**
+ * A refused intent key. `cancelHostIntent` (#1320): `unknown_intent` for a key with no Host intent, or `not_host_intent` for a
+ * Bot Turn. `failStuckIntent` (#1405): `unknown_intent` for a key with no K4 intent, `already_settled`, or `not_stuck` for an
+ * intent whose terminal K8 did not refuse.
+ */
+export class HostIntentError extends Error {
+  constructor(readonly key: string, readonly code: 'unknown_intent' | 'not_host_intent' | 'already_settled' | 'not_stuck', message: string) {
+    super(message); this.name = 'HostIntentError';
+  }
+}
+/**
+ * `cancelled`: the intent was not submitted and settled as `cancelled`. `cancel_pending`: the SDK cancel went out, and K4
+ * settles the intent at its terminal. `already_settled`: no cancel was sent; `conclusion` is the earlier one.
+ */
+export interface IntentCancelResult<C extends string> { key: string; result: CancelOutcome; conclusion?: C }
+/**
+ * The answer of a Host intent cancel that sends nothing, or `undefined` when the cancel goes to K4 (#1320). `intent` is the
+ * open or settled intent of a key that has a Host intent record, or `undefined`. Refuses a Bot Turn key and an unknown key.
+ */
+export function hostIntentCancelAnswer<C extends string>(key: string, turn: boolean, intent: { conclusion?: C } | undefined):
+  Omit<IntentCancelResult<C>, 'key'> | undefined {
+  if (turn) throw new HostIntentError(key, 'not_host_intent', 'The key is a Bot Turn: use cancelTurn');
+  if (!intent) throw new HostIntentError(key, 'unknown_intent', 'No Host intent has this key');
+  return intent.conclusion ? { result: 'already_settled', conclusion: intent.conclusion } : undefined;
+}
+/**
+ * The answer of a delegation cancel that writes nothing, or `undefined` when the cancel commits. Refuses before any write what
+ * `arbitrateCancel` would refuse, with a code.
+ */
+export function delegationCancelAnswer(state: DelegationState, id: string): Omit<DelegationCancelResult, 'delegationId'> | undefined {
+  const d = Object.hasOwn(state.delegations, id) ? state.delegations[id]! : undefined;
+  if (!d) throw new DelegationError(id, 'unknown_delegation', 'Delegation not found');
+  if (d.verdict) return { result: 'already_settled', verdict: d.verdict };
+  if (d.cancel) return { result: 'cancel_pending' };
+  if (!cancellable(d.status)) throw new DelegationError(id, 'not_cancellable', 'Delegation cannot be cancelled in this state; use abandonDelegation');
+  return undefined;
+}
+/**
+ * The answer of a Turn cancel that writes nothing, or `undefined` when the cancel commits. It follows the `cancel_turn` rule:
+ * a chain Turn with no verdict is its delegation's cancel, an input names its batch, and an open batch commits its seal.
+ * A missing Turn commits, so the rule refuses it. `intents` holds the K4 intent of the Turn that the cancel targets.
+ */
+export function turnCancelAnswer(state: DelegationState & { inputs?: Record<string, { batchId: string }>; inputBatches?: Record<string, { id: string; state: string }> },
+  intents: Pick<IntentFacts, 'intent'>, id: string): Omit<TurnCancelResult, 'turnId'> | undefined {
+  const chain = state.turns[id]?.delegationId;
+  if (chain && !state.delegations[chain]!.verdict) return delegationCancelAnswer(state, chain);
+  const input = state.inputs?.[id], batch = input && state.inputBatches![input.batchId]!;
+  if (batch?.state === 'open') return undefined;
+  const target = batch ? batch.id : id, turn = state.turns[target], intent = intents.intent(target);
+  if (!turn) return undefined;
+  if (intent) return intent.conclusion ? { result: 'already_settled', conclusion: intent.conclusion } : intent.cancelReason ? { result: 'cancel_pending' } : undefined;
+  return turn.conclusion ? { result: 'already_settled', conclusion: turn.conclusion } : undefined;
+}
 /** A delegation status that a cancel can act on (§8.8). The owner cancel refuses another one with a code before it commits (#1405). */
 export function cancellable(status: Delegation['status']): boolean { return CANCELLABLE.has(status); }
 /**

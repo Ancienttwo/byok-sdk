@@ -1,9 +1,9 @@
-import { createLaunchdLifecycle, type LaunchdDeps } from './launchd';
-import { createSystemdLifecycle, type SystemdDeps } from './systemd';
-import { createWindowsUserLifecycle, type WindowsUserDeps } from './windows-user';
-import { createWinswLifecycle, type WinswDeps } from './winsw';
-import type { ManagedServiceLifecycle } from './managed-lifecycle';
-import type { ServiceDefinition, ServiceLifecycle } from './service-types';
+import { createLaunchdLifecycle, type LaunchdDeps } from './launchd.js';
+import { createSystemdLifecycle, type SystemdDeps } from './systemd.js';
+import { createWindowsUserLifecycle, type WindowsUserDeps } from './windows-user.js';
+import { createWinswLifecycle, type WinswDeps } from './winsw.js';
+import type { ManagedServiceLifecycle } from './managed-lifecycle.js';
+import type { ServiceDefinition, ServiceLifecycle } from './service-types.js';
 
 export class UnsupportedServicePlatformError extends Error {
   constructor(platform: string) {
@@ -22,6 +22,26 @@ export interface CreateServiceLifecycleOptions {
   platform?: NodeJS.Platform;
   /** Platform-specific DI seams (mocked exec, mocked fs, mocked homedir/getuid) — only the fields matching the resolved platform are ever read. */
   deps?: LaunchdDeps & SystemdDeps & WinswDeps & WindowsUserDeps;
+  /**
+   * An isolated root for the `service-lifecycle` gate that install, repair,
+   * uninstall and `owned` hold, for tests and parallel consumers. Omitted,
+   * the gate uses `/tmp/byok-pm-<uid>`. Lifecycles exclude each other only
+   * when they use the same root. Only this lifecycle's gate moves:
+   * `claimServiceLifecycleOwner`, `releaseServiceLifecycleOwner` and
+   * `localStateRelocation` still lock the default root, so a lifecycle on a
+   * `gateRoot` no longer excludes them. It must be an absolute path and gets
+   * the default root's check. An absent root is created with mode 0700.
+   * A gateRoot owned by the process user is set to 0700; a symlink,
+   * non-directory or foreign-owned path is refused. The refusal's `code` is
+   * `private_dir_symlink`, `private_dir_not_directory` or
+   * `private_dir_foreign_owner`, and `private_dir_mode` when the root cannot
+   * be set to 0700. The check covers the root itself, not a
+   * swap of its parent, so choose a root whose parent directory other users
+   * cannot write. The option takes effect on macOS only: Linux and Windows
+   * ignore it, a relative path included, because their gates have no
+   * filesystem root.
+   */
+  gateRoot?: string;
 }
 
 /**
@@ -75,11 +95,11 @@ export function createManagedServiceLifecycle(def: ServiceDefinition, opts: Crea
   const platform = opts.platform ?? process.platform;
   switch (platform) {
     case 'darwin':
-      return createLaunchdLifecycle(def, opts.deps);
+      return createLaunchdLifecycle(def, opts.deps, opts.gateRoot);
     case 'linux':
-      return createSystemdLifecycle(def, opts.deps);
+      return createSystemdLifecycle(def, opts.deps, opts.gateRoot);
     case 'win32':
-      return def.windows?.scope === 'user' ? createWindowsUserLifecycle(def, opts.deps) : createWinswLifecycle(def, opts.deps);
+      return def.windows?.scope === 'user' ? createWindowsUserLifecycle(def, opts.deps, opts.gateRoot) : createWinswLifecycle(def, opts.deps, opts.gateRoot);
     default:
       throw new UnsupportedServicePlatformError(platform);
   }

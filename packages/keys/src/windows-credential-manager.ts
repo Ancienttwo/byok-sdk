@@ -1,6 +1,6 @@
-import { ByokKeysError } from './errors';
-import { assertSecretName, assertSecretNamespace } from './secret-name';
-import { DEFAULT_SECRET_SERVICE_PREFIX, type SecretStore } from './secret-store';
+import { ByokKeysError } from './errors.js';
+import { assertSecretName, assertSecretNamespace } from './secret-name.js';
+import { DEFAULT_SECRET_SERVICE_PREFIX, type SecretStore } from './secret-store.js';
 
 const CRED_TYPE_GENERIC = 1;
 const CRED_PERSIST_LOCAL_MACHINE = 2;

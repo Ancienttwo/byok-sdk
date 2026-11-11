@@ -55,7 +55,7 @@ func TestWindowsMemoryResultBarrierFailsClosedOnNTFS(t *testing.T) {
 				}
 				base = stateForBytes([]byte("old")).Revision
 			}
-			active, openErr := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identityForTest(t, home)})
+			active, openErr := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, AncestorRoot: filepath.Dir(home), ExpectedIdentity: identityForTest(t, home)})
 			if openErr != nil {
 				t.Fatalf("open: %#v", openErr)
 			}

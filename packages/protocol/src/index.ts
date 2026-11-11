@@ -1,13 +1,13 @@
-export { HostOfferPlainPayloadSchema, HostOfferSealedPayloadSchema, type HostOfferPlainPayload, type HostOfferSealedPayload } from './host-offer-input';
-export * from './constants';
-export { MAILBOX_READ_AHEAD_MAX_SEQS } from './version';
-export { PROTOCOL_VERSION, CAPABILITY_FLAGS, AGENT_HOME_READERS_CAPABILITY } from './version';
-export type { CapabilityFlag } from './version';
-export { WIRE_ADDITIONS, requiredReceiverCapabilities } from './wire-additions';
-export type { WireAddition } from './wire-additions';
+export { HostOfferPlainPayloadSchema, HostOfferSealedPayloadSchema, type HostOfferPlainPayload, type HostOfferSealedPayload } from './host-offer-input.js';
+export * from './constants.js';
+export { MAILBOX_READ_AHEAD_MAX_SEQS } from './version.js';
+export { PROTOCOL_VERSION, CAPABILITY_FLAGS, AGENT_HOME_READERS_CAPABILITY } from './version.js';
+export type { CapabilityFlag } from './version.js';
+export { WIRE_ADDITIONS, requiredReceiverCapabilities } from './wire-additions.js';
+export type { WireAddition } from './wire-additions.js';
 
-export { BlobRefSchema, CONTENT_HASH_RE } from './blob';
-export type { BlobRef } from './blob';
+export { BlobRefSchema, CONTENT_HASH_RE } from './blob.js';
+export type { BlobRef } from './blob.js';
 export {
   SEALED_DECLINE_CODES,
   SEALED_INLINE_MAX_PADDED_LENGTH,
@@ -29,7 +29,7 @@ export {
   sealedBase64UrlByteLength,
   sealedMovedFields,
   sealedPayloadPaddedLength,
-} from './sealed-payload';
+} from './sealed-payload.js';
 export type {
   SealedDeclineCode,
   SealedDigestRule,
@@ -38,7 +38,7 @@ export type {
   SealedPayloadCategory,
   SealedSplitEntry,
   TaskSealing,
-} from './sealed-payload';
+} from './sealed-payload.js';
 
 
 export {
@@ -48,14 +48,14 @@ export {
   ProviderProfileHashSchema,
   ProviderModelCapabilitySchema,
   ProviderProfileBindingSchema,
-} from './provider-profile-binding';
+} from './provider-profile-binding.js';
 export type {
   ProviderProfileRef,
   ProviderProfileRevision,
   ProviderProfileHash,
   ProviderModelCapability,
   ProviderProfileBinding,
-} from './provider-profile-binding';
+} from './provider-profile-binding.js';
 
 export {
   PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION,
@@ -76,7 +76,7 @@ export {
   ProviderProvisioningCompletionSchema,
   ProviderProvisioningDispositionSchema,
   ProviderProvisioningReadbackSchema,
-} from './provider-provisioning';
+} from './provider-provisioning.js';
 export type {
   ProviderProvisioningAvailablePayload,
   ProviderProvisioningOperation,
@@ -89,7 +89,7 @@ export type {
   ProviderProvisioningReadback,
   ProviderProvisioningKeyCheckResult,
   ProviderProvisioningKeyCheck,
-} from './provider-provisioning';
+} from './provider-provisioning.js';
 
 export {
   AGENT_MEMORY_INTENT_CONTENT_MAX_BYTES,
@@ -119,7 +119,7 @@ export {
   AgentMemoryIntentFetchRequestSchema,
   AgentMemoryIntentFetchResponseSchema,
   agentMemoryIntentFetchResponseSchemaFor,
-} from './agent-memory-intent';
+} from './agent-memory-intent.js';
 export type {
   AgentMemoryIntentRevision,
   AgentMemoryIntentOperationDigest,
@@ -138,7 +138,7 @@ export type {
   AgentMemoryIntentFetchRequest,
   AgentMemoryIntentFetchDisposition,
   AgentMemoryIntentFetchResponse,
-} from './agent-memory-intent';
+} from './agent-memory-intent.js';
 
 export {
   AgentEventSchema,
@@ -149,8 +149,8 @@ export {
   KNOWN_AGENT_EVENT_TYPES,
   isKnownAgentEvent,
   partitionAgentEvents,
-} from './agent-event';
-export type { AgentEvent, AgentEventSpill, UnknownAgentEvent, AgentEventOrUnknown } from './agent-event';
+} from './agent-event.js';
+export type { AgentEvent, AgentEventSpill, UnknownAgentEvent, AgentEventOrUnknown } from './agent-event.js';
 
 export {
   AgentEgressPolicySchema,
@@ -176,7 +176,7 @@ export {
   AgentMessageEgressRequirementSchema,
   AGENT_MESSAGE_MAX_BYTES,
   AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES,
-} from './agent-egress';
+} from './agent-egress.js';
 export type {
   AgentEgressPolicy,
   AgentEgressActivityPolicy,
@@ -193,7 +193,7 @@ export type {
   AgentContentDecodeAs,
   AgentContentReadDecision,
   AgentContentReadDenialReason,
-} from './agent-egress';
+} from './agent-egress.js';
 
 export {
   AGENT_HOME_PROJECTION_MAX_BYTES,
@@ -203,14 +203,14 @@ export {
   AgentHomeProjectionHashSchema,
   AgentHomeProjectionOutcomeSchema,
   AgentHomeProjectionValueSchema,
-} from './agent-home-projection';
+} from './agent-home-projection.js';
 export type {
   AgentHomeProjectionProfileRevision,
   AgentHomeProjectionHostRevision,
   AgentHomeProjectionHash,
   AgentHomeProjectionOutcome,
   AgentHomeProjectionValue,
-} from './agent-home-projection';
+} from './agent-home-projection.js';
 
 export {
   InputPreparationContentHashSchema,
@@ -242,7 +242,7 @@ export {
   InputPreparationReferenceSchema,
   InputPreparationOfferBindingSchema,
   InputPreparationRejectionReasonSchema,
-} from './input-preparation';
+} from './input-preparation.js';
 export type {
   InputPreparationSource,
   InputPreparationModel,
@@ -258,7 +258,7 @@ export type {
   InputPreparationReceiptSummary,
   InputPreparationOfferBinding,
   InputPreparationRejectionReason,
-} from './input-preparation';
+} from './input-preparation.js';
 
 export {
   AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES,
@@ -275,7 +275,7 @@ export {
   AgentMemoryProjectionPlainReceiptSchema,
   AgentMemoryProjectionEraseResultSchema,
   agentMemoryProjectionBase64UrlByteLength,
-} from './agent-memory-projection';
+} from './agent-memory-projection.js';
 export type {
   AgentMemoryProjectionGrantRef,
   AgentMemoryProjectionSessionRef,
@@ -291,15 +291,15 @@ export type {
   AgentMemoryProjectionSealedReceipt,
   AgentMemoryProjectionSealedMeteringReceipt,
   AgentMemoryProjectionEraseResult,
-} from './agent-memory-projection';
+} from './agent-memory-projection.js';
 
 
 export {
   TerminalProjectionContractSchema,
   TerminalProjectionSelectionSchema,
   ResultDocumentSchemaSchema,
-} from './terminal-projection';
-export type { TerminalProjectionSelection } from './terminal-projection';
+} from './terminal-projection.js';
+export type { TerminalProjectionSelection } from './terminal-projection.js';
 
 export {
   RESULT_SCHEMA_MAX_BYTES,
@@ -312,7 +312,7 @@ export {
   RESULT_SCHEMA_INSTANCE_TYPES,
   checkResultSchema,
   validateResultOutcome,
-} from './result-schema';
+} from './result-schema.js';
 export type {
   ResultSchema,
   ResultSchemaKeyword,
@@ -321,10 +321,10 @@ export type {
   ResultDocumentFailureReason,
   ResultSchemaCheck,
   ResultOutcomeCheck,
-} from './result-schema';
+} from './result-schema.js';
 
-export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
-export type { TaskState } from './task-state';
+export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state.js';
+export type { TaskState } from './task-state.js';
 
 export {
   MESSAGE_TYPES,
@@ -404,7 +404,8 @@ export {
   TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS,
   TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH,
   TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH,
-} from './messages';
+  offerSelectionViolation,
+} from './messages.js';
 export type {
   ResultDocumentCheck,
   MessageType,
@@ -474,20 +475,22 @@ export type {
   AgentHomeAccess,
   AgentMemorySelection,
   AgentMemoryCommit,
-} from './messages';
+  OfferSelectionRule,
+  OfferSelectionViolation,
+} from './messages.js';
 
-export { EnvelopeSchema, isServerToDaemonType } from './envelope';
-export type { Envelope } from './envelope';
+export { EnvelopeSchema, isServerToDaemonType } from './envelope.js';
+export type { Envelope } from './envelope.js';
 
 export {
   ProtocolError,
   EnvelopeParseError,
   UnknownMessageTypeError,
   EnvelopeValidationError,
-} from './errors';
+} from './errors.js';
 
-export { encodeEnvelope, decodeEnvelope, createEnvelope, parseMessage } from './codec';
-export type { CreateEnvelopeOptions } from './codec';
+export { encodeEnvelope, decodeEnvelope, createEnvelope, parseMessage } from './codec.js';
+export type { CreateEnvelopeOptions } from './codec.js';
 
 export {
   PairRequestSchema,
@@ -560,7 +563,7 @@ export {
   InputPreparationStatusSchema,
   InputPreparationReadbackSchema,
   InputPreparationStatusQuerySchema,
-} from './http-api';
+} from './http-api.js';
 export type {
   PairRequest,
   PairResponse,
@@ -589,11 +592,11 @@ export type {
   InputPreparationStatus,
   InputPreparationReadback,
   InputPreparationStatusQuery,
-} from './http-api';
+} from './http-api.js';
 
-export type { HarnessId, HarnessInfo } from './messages';
+export type { HarnessId, HarnessInfo } from './messages.js';
 
-export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
+export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation.js';
 
 export {
   E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES,
@@ -613,8 +616,7 @@ export {
   E2eeKeyPackageAvailablePayloadSchema,
   E2eePairingMacSchema,
   E2eeScopeKeyPackageSchema,
-  E2eeScopeKeyPackageV2Schema,
-} from './e2ee-member';
+} from './e2ee-member.js';
 export type {
   E2eeClientPairingMac,
   E2eeKeyPackageAvailablePayload,
@@ -622,10 +624,10 @@ export type {
   E2eeMemberKeyBundle,
   E2eeMemberKeyRegisterRequest,
   E2eeScopeKeyPackage,
-} from './e2ee-member';
+} from './e2ee-member.js';
 
-export * from './bot-turn-outcome';
-export * from './routine-schedule';
-export { resultOutcomeMaxBytes } from './result-schema';
-export * from './dream';
-export * from './handoff-pack';
+export * from './bot-turn-outcome.js';
+export * from './routine-schedule.js';
+export { resultOutcomeMaxBytes } from './result-schema.js';
+export * from './dream.js';
+export * from './handoff-pack.js';

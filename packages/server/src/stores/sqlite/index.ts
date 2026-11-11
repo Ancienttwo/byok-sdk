@@ -79,33 +79,33 @@ import {
   secureSqliteFilePermissions,
   SqliteSchemaError,
   type SqliteSchemaErrorCode,
-} from '../../sqlite-support';
+} from '../../sqlite-support.js';
 
 const DEFAULT_MAILBOX_READ_LIMIT = 50;
 const DEFAULT_OBJECT_LIST_LIMIT = 100;
 const DEFAULT_BLOB_URL_TTL_MS = 15 * 60_000;
 const SIGNING_SECRET_BYTES = 32;
-const SQLITE_SCHEMA_VERSION = '8';
+const SQLITE_SCHEMA_VERSION = '9';
 const TASK_PHASE_COLUMNS = ['offered_at', 'claimed_at', 'first_output_at', 'terminal_at'] as const;
 /** Host retention instants (#1120): when a terminal task may be archived, when it was, and when its board item went. */
 const TASK_ARCHIVE_COLUMNS = ['archive_after', 'archived_at', 'archive_settled_at'] as const;
 
-import { SqliteWakeStore, WAKE_SCHEMA } from './wakes';
-import { APPROVAL_TIMELINE_SCHEMA, APPROVAL_TIMELINE_V7_REBUILD, SqliteApprovalTimelineStore } from './approval-timeline';
-import { ACTIVITY_LOG_PROJECTIONS, ACTIVITY_LOG_SCHEMA, SqliteActivityStore } from './activity';
-import { OUTPUT_CLOSURE_BACKFILL, OUTPUT_CLOSURE_TRIGGER, OUTPUT_CLOSURE_TRIGGER_NAME } from './output-closure';
-import type { WakeStore } from '../../wakes/store';
-import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types';
+import { SqliteWakeStore, WAKE_SCHEMA } from './wakes.js';
+import { APPROVAL_TIMELINE_SCHEMA, APPROVAL_TIMELINE_V7_REBUILD, SqliteApprovalTimelineStore } from './approval-timeline.js';
+import { ACTIVITY_LOG_PROJECTIONS, ACTIVITY_LOG_SCHEMA, SqliteActivityStore } from './activity.js';
+import { OUTPUT_CLOSURE_BACKFILL, OUTPUT_CLOSURE_TRIGGER, OUTPUT_CLOSURE_TRIGGER_NAME } from './output-closure.js';
+import type { WakeStore } from '../../wakes/store.js';
+import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types.js';
 
-import { SqliteTaskArchiveStore } from './task-archive';
-import { SqliteDeviceDirectory, DEVICE_SCHEMA } from './device-directory';
-import { abandonTask, closeMailboxStream, expirePendingMailbox, reopenMailboxStream } from './task-retirement';
+import { SqliteTaskArchiveStore } from './task-archive.js';
+import { SqliteDeviceDirectory, DEVICE_SCHEMA } from './device-directory.js';
+import { abandonTask, closeMailboxStream, expirePendingMailbox, reopenMailboxStream } from './task-retirement.js';
 import {
   PROOF_REQUEST_RECEIPT_PROJECTION,
   PROOF_REQUEST_RECEIPT_SCHEMA,
   SqliteProofReceiptRetentionAuthority,
   SqliteProofRequestReceiptStore,
-} from './proof-receipts';
+} from './proof-receipts.js';
 
 const RECEIPT_SCHEMA = `
 CREATE TABLE request_receipt (
@@ -176,10 +176,27 @@ function upgradeSchemaFromV7(db: DatabaseSync): void {
   db.prepare("UPDATE byok_sqlite_meta SET value = '8' WHERE key = 'schema_version'").run();
 }
 
+/**
+ * The in-place upgrade from v8 to v9 (#1780): every task attempt carries its
+ * Agent identity. No build since v0.31.0 writes an attempt without one, so the
+ * step only proves it. A file that still holds such a row is refused with the
+ * count and left unchanged: no Agent identity is invented for it.
+ */
+function upgradeSchemaFromV8(db: DatabaseSync): void {
+  const { missing } = db.prepare('SELECT count(*) AS missing FROM task_attempt WHERE agent_ref_json IS NULL').get() as { missing: number };
+  if (missing > 0) {
+    throw new SqliteSchemaError('SQLITE_SCHEMA_UNSUPPORTED',
+      `BYOK SQLite file holds ${missing} task attempt(s) without an Agent identity; this build cannot adopt it. ` +
+      'Start on a new database.', '8', SQLITE_SCHEMA_VERSION);
+  }
+  db.prepare("UPDATE byok_sqlite_meta SET value = '9' WHERE key = 'schema_version'").run();
+}
+
 /** Older versions this build upgrades in place, oldest first; a file runs every step from its own version. */
 const SCHEMA_UPGRADES: readonly (readonly [from: string, step: (db: DatabaseSync) => void])[] = [
   ['6', upgradeSchemaFromV6],
   ['7', upgradeSchemaFromV7],
+  ['8', upgradeSchemaFromV8],
 ];
 
 const SCHEMA = `
@@ -349,11 +366,13 @@ class SqliteCoordinator {
           foundVersion = version?.value;
           const firstStep = SCHEMA_UPGRADES.findIndex(([from]) => from === version?.value);
           if (firstStep >= 0) {
-            for (const [, step] of SCHEMA_UPGRADES.slice(firstStep)) step(this.db);
-            createdOutputLogs = true;
+            const steps = SCHEMA_UPGRADES.slice(firstStep);
+            for (const [, step] of steps) step(this.db);
+            // The v7 step is the one that creates the logs.
+            createdOutputLogs = steps.some(([from]) => from === '7');
           } else if (version?.value !== SQLITE_SCHEMA_VERSION) {
             throw schemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
-              `this build requires ${SQLITE_SCHEMA_VERSION} and upgrades only ${SCHEMA_UPGRADES.map(([from]) => from).join(' and ')} in place. ` +
+              `this build requires ${SQLITE_SCHEMA_VERSION} and upgrades only ${SCHEMA_UPGRADES.map(([from]) => from).join(', ').replace(/, (?=[^,]*$)/, ' and ')} in place. ` +
               'An older file is not adopted: start on a new database. A newer file needs a newer build.');
           }
           for (const projection of [
@@ -511,7 +530,7 @@ interface TaskRow extends Record<string, unknown> {
   tenant_id: string;
   task_id: string;
   device_id: string;
-  agent_ref_json: string | null;
+  agent_ref_json: string;
   owner_device_id: string | null;
   claimed_runtime: string | null;
   claimed_harness_id: string | null;
@@ -534,7 +553,7 @@ function taskRow(row: TaskRow): TaskAttempt {
     tenantId: row.tenant_id as TenantId,
     taskId: row.task_id,
     deviceId: row.device_id,
-    ...(row.agent_ref_json === null ? {} : { agentRef: JSON.parse(row.agent_ref_json) as AgentRef }),
+    agentRef: JSON.parse(row.agent_ref_json) as AgentRef,
     ...(row.owner_device_id === null ? {} : { ownerDeviceId: row.owner_device_id }),
     ...(row.claimed_runtime === null ? {} : { claimedRuntime: row.claimed_runtime as RuntimeId }),
     ...(row.claimed_harness_id === null ? {} : { claimedHarnessId: row.claimed_harness_id }),
@@ -567,8 +586,8 @@ function readTask(db: DatabaseSync, tenant: TenantId, taskId: string): TaskAttem
   return row === undefined ? undefined : taskRow(row);
 }
 
-function sameAgentRef(left: AgentRef | undefined, right: AgentRef | undefined): boolean {
-  return left?.agentId === right?.agentId && left?.profileRevision === right?.profileRevision;
+function sameAgentRef(left: AgentRef, right: AgentRef): boolean {
+  return left.agentId === right.agentId && left.profileRevision === right.profileRevision;
 }
 
 /** Receipts are lifetime facts: mailbox retirement must never delete them. */
@@ -616,18 +635,6 @@ class SqliteRequestReceiptStore implements RequestReceiptStore {
 
 export class SqliteTaskAttemptStore implements TaskAttemptStore {
   constructor(private readonly coordinator: SqliteCoordinator, private readonly clock: Clock) {}
-
-  open(tenant: TenantId, input: { taskId: string; deviceId: string; agentRef?: AgentRef }): Promise<TaskAttempt> {
-    return this.coordinator.run((db) => {
-      const now = this.#now();
-      db.prepare(
-        `INSERT OR IGNORE INTO task_attempt
-         (tenant_id, task_id, device_id, agent_ref_json, status, offered_at, updated_at)
-         VALUES (?, ?, ?, ?, 'offered', ?, ?)`,
-      ).run(tenant, input.taskId, input.deviceId, input.agentRef === undefined ? null : JSON.stringify(input.agentRef), now, now);
-      return readTask(db, tenant, input.taskId)!;
-    });
-  }
 
   reserveAgentOffer(
     tenant: TenantId,
@@ -826,7 +833,7 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
 
   recordStatus(
     tenant: TenantId,
-    input: { taskId: string; status: TaskAttemptStatus; agentRef?: AgentRef; terminalCause?: string },
+    input: { taskId: string; status: TaskAttemptStatus; agentRef: AgentRef; terminalCause?: string },
   ): Promise<TaskAttempt | undefined> {
     return this.coordinator.run((db) => {
       const existing = readTask(db, tenant, input.taskId);

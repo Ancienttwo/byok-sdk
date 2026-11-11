@@ -38,14 +38,14 @@ import {
   type AgentMessageDispositionPayload,
   type MessagesSendResponse,
 } from '@byok-sdk/protocol';
-import type { AgentMessageConsumers } from '../agent-message-disposition';
-import { handleInboundEnvelope, readAgentMessageDisposition, type ByokCloudObserver, type InboundRefusalReason } from '../inbound';
-import type { ActivityBounds } from '../coordination';
-import type { AgentEgressRecord } from '../stores/ports';
-import type { TenantStores } from '../tenant-stores';
-import { DeviceRetiredError } from '../errors';
-import { CLOUD_PROTOCOL_CAPABILITIES } from './events';
-import { authenticateDevice, rateLimited, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
+import type { AgentMessageConsumers } from '../agent-message-disposition.js';
+import { handleInboundEnvelope, readAgentMessageDisposition, type ByokCloudObserver, type InboundRefusalReason } from '../inbound.js';
+import type { ActivityBounds } from '../coordination.js';
+import type { AgentEgressRecord } from '../stores/ports.js';
+import type { TenantStores } from '../tenant-stores.js';
+import { DeviceRetiredError } from '../errors.js';
+import { CLOUD_PROTOCOL_CAPABILITIES } from './events.js';
+import { authenticateDevice, rateLimited, readBoundedJsonBody, type DeviceRouteDeps } from './shared.js';
 
 
 /** Coarse wire vocabulary deliberately hides task existence and identity bindings. */

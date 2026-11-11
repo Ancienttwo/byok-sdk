@@ -8,7 +8,7 @@ import { admitUserInput } from './coalesce';
 import { callCardsInLedger, commitInLedger, retainInLedger, syncTurnInLedger } from './commit';
 import { intentRows } from './delegation';
 import { CONNECTOR_OUTCOME_UNKNOWN, expireCards, reportCardDecisions, type CommandPorts } from './rules/commands';
-import { SwitchExportedError } from './switch';
+import { SwitchExportedError } from './migration';
 import { cardCallVectors, seedCollaboration, SYNC_OPTIONS, VECTOR_NOW, type CardCallSubject, type SyncIntentRecord } from './commit-vectors.test-support';
 
 // #793 S12: the shared card call vectors on the L ledger, with L's card call step (K8 host.ts `flushCards`).
@@ -102,7 +102,7 @@ it('#958: ends a card whose claim never settled with the unknown outcome, and ne
 it('#975: a ledger with an uncommitted switch import refuses the card call before the connector runs, a command, a sync step and retention', async () => {
   const subject = await confirmed();
   subject.change(state => { state.switchImport = { digest: 'd', devices: ['d1'] }; });
-  const before = subject.stored(), refusal = 'This ledger holds the switch import d; commit it toward L or discard it first';
+  const before = subject.stored(), refusal = 'The domain holds the switch import d; commit it or discard it first';
   let calls = 0;
   await expect(subject.callCards(async () => { calls++; return { sent: true }; })).rejects.toThrow(refusal);
   expect(calls).toBe(0);

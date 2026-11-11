@@ -55,7 +55,7 @@ export default defineConfig({
     setup(build) {
       // Both public entries must use the same error class and method core.
       // Inlining this import would create a private McpServerToolError copy.
-      build.onResolve({ filter: /^\.\/index$/ }, args => {
+      build.onResolve({ filter: /^\.\/index\.js$/ }, args => {
         if (args.importer.replace(/\\/g, '/').endsWith('/src/mcp-server/http.ts')) {
           return { path: './index.js', external: true };
         }
@@ -69,7 +69,7 @@ export default defineConfig({
   // and so the win32 branch loads the host's own prebuilt addon.
   external: [
     'koffi', '#byok-hermes-session', '#byok-acp-runtime', '#byok-pi-runtime-host', '#byok-pi-todo-runtime',
-    'typebox', 'typebox/compile',
+    /^typebox(?:\/|$)/,
     'undici',
   ],
   define: { __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version) },

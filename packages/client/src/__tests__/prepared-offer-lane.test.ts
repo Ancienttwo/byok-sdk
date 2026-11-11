@@ -23,8 +23,8 @@ import {
 import {
   PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX,
   PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX,
-  RESULT_NOT_SUBMITTED_REASON_PREFIX,
 } from '../daemon/task-runner/state';
+import { RESULT_NOT_SUBMITTED_REASON_PREFIX } from '../daemon/task-runner/result-reason-prefixes';
 import {
   InputPreparationStore,
   type CounterReservationInput,
@@ -824,8 +824,8 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       }, 1, { homeAccess: 'memory-reader', agentMemory: 'read-write', requiredToolsets: undefined }));
       expect(sent.filter((e) => e.type === 'task.decline').map((e) => e.payload)).toEqual([
         expect.objectContaining({
-          reason: 'agent_memory_selection_invalid: a memory-reader Attempt reads memory only',
-          retryable: false, agentRef: AGENT_REF,
+          reason: 'agent_memory_selection_invalid: agentMemory read-write requires a writer; a memory-reader Attempt reads memory only',
+          code: 'agent_memory_selection_invalid', retryable: false, agentRef: AGENT_REF,
         }),
       ]);
       expect(sent.some((e) => e.type === 'task.claim')).toBe(false);

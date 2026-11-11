@@ -1,13 +1,13 @@
-import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits';
+import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
 import { execFile, spawn, type spawn as nodeSpawn } from 'node:child_process';
-import type { RuntimeTaskInput } from '../../types';
+import type { RuntimeTaskInput } from '../../types.js';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure';
+import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
-import type { ExecutionScratch } from '../../daemon/retention/scratch';
+import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import {
   freezeRuntimeAdapterDescriptor,
   PolicyUnsupportedError,
@@ -20,24 +20,24 @@ import {
   type MessageDraftDelta,
   type RuntimeOperationStartInput,
   type Session,
-} from '../../types';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
-import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
-import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
-import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process';
-import type { AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime';
-import { AsyncQueue } from '../../util/async-queue';
-import { RetainedRecordBudget, haltGate, SettleWaiters, raceDeadline, oarCancelSettled, RetryableOnce } from '../session-kit';
-import type { ResolvedBin } from '../codex/resolve-bin';
-import { agentPersona } from '../agent-persona';
-import { GROK_USER_MCP_SERVERS_OFF, grokUserMcpServersRefusal } from './agent-user-mcp-servers';
-import { GrokProjection, type GrokTurnOutcome } from './projection';
-import { resolveGrokBin } from './resolve-bin';
-import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
-import { GROK_RUNTIME_CAPABILITIES } from './grok-capabilities';
-import { GROK_VERSION_POLICY, grokVersionToken } from './grok-version';
-import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
+} from '../../types.js';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
+import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
+import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process.js';
+import type { AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime.js';
+import { AsyncQueue } from '../../util/async-queue.js';
+import { RetainedRecordBudget, haltGate, SettleWaiters, raceDeadline, oarCancelSettled, RetryableOnce } from '../session-kit.js';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
+import { agentPersona } from '../agent-persona.js';
+import { GROK_USER_MCP_SERVERS_OFF, grokUserMcpServersRefusal } from './agent-user-mcp-servers.js';
+import { GrokProjection, type GrokTurnOutcome } from './projection.js';
+import { resolveGrokBin } from './resolve-bin.js';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import { GROK_RUNTIME_CAPABILITIES } from './grok-capabilities.js';
+import { GROK_VERSION_POLICY, grokVersionToken } from './grok-version.js';
+import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
@@ -85,8 +85,6 @@ export interface GrokAdapterOptions {
   agentUserMcpServers?: 'inherit' | 'excluded';
   /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
   versionPolicy?: RuntimeVersionPolicy;
-  /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-  versionPolicySource?: 'adapter-option' | 'daemon-config';
   resolveBin?: () => ResolvedBin;
   spawnFn?: typeof nodeSpawn;
   maxRetainedBytes?: number;
@@ -134,12 +132,7 @@ export class GrokAdapter implements RuntimeAdapter {
       throw new TypeError('GrokAdapterOptions.compatInstructions must be inherit or disabled');
     if (options.agentUserMcpServers !== undefined && options.agentUserMcpServers !== 'inherit' && options.agentUserMcpServers !== 'excluded')
       throw new TypeError('GrokAdapterOptions.agentUserMcpServers must be inherit or excluded');
-    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
-      descriptor: GROK_VERSION_POLICY,
-      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
-        ? { daemonConfig: options.versionPolicy }
-        : { adapterOption: options.versionPolicy }),
-    }).policy;
+    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy(GROK_VERSION_POLICY, options.versionPolicy);
     this.options = { ...options };
   }
 
@@ -266,9 +259,9 @@ function grokAuthPresent(env: NodeJS.ProcessEnv): boolean {
 }
 
 const authority = (reason: string) =>
-  new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
+  new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
 const infrastructure = (reason: string, failure?: TaskFailure) =>
-  new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason, failure });
+  new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason, failure });
 
 class GrokSession implements Session {
   sessionRef = '';
@@ -331,7 +324,6 @@ class GrokSession implements Session {
     if (turn.kind === 'failed')
       this.fail(new RuntimeExecutionFailure({
         phase: 'run',
-        category: 'semantic',
         retry: turn.failure === 'rate_limited' ? 'retryable' : 'non-retryable',
         reason: turn.reason,
         // A class OAR took from error text is not structured evidence (docs/spec.md runtime failure class).
@@ -339,7 +331,7 @@ class GrokSession implements Session {
       }));
     // Grok 1.0.52 calls no model after the refusal, so the turn did not do the work. A `reject_once` answer ends it the same way.
     else if (turn.kind === 'aborted' && !cancelledBySdk)
-      this.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: PERMISSION_STOP_REASON }));
+      this.fail(new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason: PERMISSION_STOP_REASON }));
     else this.queue.push({ type: 'turn_end' });
   }
   fail(error: unknown): void {

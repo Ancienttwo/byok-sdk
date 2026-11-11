@@ -326,11 +326,19 @@ describe('diagnostics collector', () => {
         async () => { throw new Error('unknown method'); },
         async () => ({ runtimes: [{ runtimeId: 'claude', status: 'built', names: [{ name: 'HOME', source: 'login-shell', value: '/home/user' }], removed: [] }] }),
         async () => ({ runtimes: [{ runtimeId: 'claude', status: 'built', names: [{ name: 'A=B', source: 'pass' }], removed: [] }] }),
+        async () => ({ runtimes: [{ runtimeId: 'pi', status: 'built', names: [], removed: [], lanes: [{ lane: 'pi-keys-profile', narrowedBy: 'keys-launcher', removed: [] }] }] }),
+        async () => ({ runtimes: [{ runtimeId: 'pi', status: 'built', names: [], removed: [], lanes: [{ lane: 'pi-rpc', narrowedBy: 'sdk', removed: [] }] }] }),
       ]) {
         const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: () => connected({}, answer) });
         expect(snapshot.control.status).toBe('online');
         expect(snapshot.runtimeEnvironment).toEqual({ status: 'unknown', reason: 'request-failed' });
       }
+      const lanes = { runtimes: [{ runtimeId: 'pi', status: 'built', names: [], removed: [], lanes: [
+        { lane: 'pi-prepared', narrowedBy: 'sdk', removed: ['PI_OFFLINE'] }, { lane: 'pi-keys-profile', narrowedBy: 'keys-launcher' },
+      ] }] };
+      const json: string[] = [];
+      await runDoctorCommand(config(dir), { adapters: [], connectControl: () => connected({}, async () => lanes), json: true, log: (line) => json.push(line) });
+      expect((JSON.parse(json.join('')) as { runtimeEnvironment: unknown }).runtimeEnvironment).toEqual({ status: 'known', ...lanes });
       const failed: string[] = [];
       await runDoctorCommand(config(dir), { adapters: [], connectControl: () => connected({}, async () => { throw new Error('unknown method'); }), log: (line) => failed.push(line) });
       expect(failed).toContain('runtime-environment: unknown (the daemon did not report it)');
@@ -349,6 +357,38 @@ describe('diagnostics collector', () => {
     expect(snapshot.checks.find((check) => check.id === 'health')?.status).toBe('fail');
     expect(await digest(healthPath)).toBe(before);
     expect(await fs.readdir(dir)).toEqual([OPERATIONAL_HEALTH_FILENAME]);
+  });
+
+  it('names a recorded control endpoint refusal instead of daemon offline', async () => {
+    const dir = await tempDir();
+    const tracker = new OperationalHealthTracker(dir, { clock: () => new Date('2026-08-09T00:00:00.000Z') });
+    await tracker.noteControlEndpoint({ code: 'private_dir_symlink', path: '/tmp/byok-0123456789abcdef' });
+    await tracker.startRun();
+
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+
+    expect(snapshot.checks.find((check) => check.id === 'control')).toEqual({
+      id: 'control',
+      status: 'warn',
+      summary: 'control endpoint refused: private_dir_symlink /tmp/byok-0123456789abcdef (recorded 2026-08-09T00:00:00.000Z); '
+        + 'remove /tmp/byok-0123456789abcdef if no byok process uses it, or shorten storeDir',
+    });
+
+    await tracker.noteControlEndpoint({ code: 'socket_path_not_socket', path: '/tmp/byok-0123456789abcdef/control.sock' });
+    const socket = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(socket.checks.find((check) => check.id === 'control')?.summary).toBe(
+      'control endpoint refused: socket_path_not_socket /tmp/byok-0123456789abcdef/control.sock (recorded 2026-08-09T00:00:00.000Z); '
+        + 'remove /tmp/byok-0123456789abcdef/control.sock if no byok process uses it',
+    );
+
+    await tracker.noteControlEndpoint({ code: 'socket_mode', path: '/tmp/byok-0123456789abcdef/control.sock' });
+    const mode = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(mode.checks.find((check) => check.id === 'control')?.summary).toContain('refused setting the mode to 0600');
+
+    await tracker.noteControlEndpoint({ code: 'private_dir_mode', path: '/tmp/byok-0123456789abcdef' });
+    const dirMode = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(dirMode.checks.find((check) => check.id === 'control')?.summary)
+      .toContain('shorten storeDir so the socket needs no fallback directory, or allow chmod on /tmp/byok-0123456789abcdef');
   });
 
   it('reports valid health and bounds quarantine inventory', async () => {

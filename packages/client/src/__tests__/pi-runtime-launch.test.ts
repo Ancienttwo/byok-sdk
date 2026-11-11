@@ -43,6 +43,19 @@ describe('client runtime launch resources', () => {
     } finally { await resources.release(); }
   });
 
+  it('starts the foreground host with the original executable and an unchanged sdkDir', async () => {
+    const f = await fixture();
+    const { keysSessionDir: _unused, ...options } = f.options;
+    const before = await fs.readdir(options.scratch.sdkDir);
+    const launch = await resolvePiRuntimeLaunch({ ...options,
+      resolveInvocation: () => ({ command: process.execPath, fixedArgs: ['__byok_sdk_helper', 'pi-rpc'] }) });
+    try {
+      expect(launch.command).toBe(process.execPath);
+      expect(launch.env.PATH).toBe(options.env.PATH);
+      expect(await fs.readdir(options.scratch.sdkDir)).toEqual(before);
+    } finally { await launch.release(); }
+  });
+
   it('launches in the session cwd with a private client-owned projection', async () => {
     const f = await fixture();
     const resources = await resolvePiRuntimeLaunch(f.options);
@@ -63,9 +76,16 @@ describe('client runtime launch resources', () => {
         expect(stat.uid).toBe(process.getuid!());
       } else {
         // #1373: the keys launcher requires OWNER RIGHTS READ_CONTROL on the projection.
+        // A protected DACL with exactly these ACEs, in any order: none inherited, no other principal (#1710).
         const save = path.join(f.root, 'projection.acl');
         await promisify(execFile)('icacls', [projection, '/save', save], { windowsHide: true });
-        expect((await fs.readFile(save)).toString('utf16le')).toMatch(/^[^\r\n]+\r\nD:P[A-Z]*\(.*\(A;;RC;;;OW\)/u);
+        const sddl = (await fs.readFile(save)).toString('utf16le').split('\r\n')[1]!;
+        const dacl = /^D:P[A-Z]*((?:\([^()]*\))+)$/u.exec(sddl);
+        expect(dacl, sddl).not.toBeNull();
+        // icacls renders the built-in Administrator (RID 500) as LA, and any other account as its SID.
+        const sid = /"(S-1-[0-9-]+)"/u.exec((await promisify(execFile)('whoami', ['/user', '/fo', 'csv', '/nh'], { windowsHide: true })).stdout)![1]!;
+        const user = sid.endsWith('-500') ? 'LA' : sid;
+        expect(dacl![1]!.slice(1, -1).split(')(').sort()).toEqual(['A;;RC;;;OW', 'A;OICI;FA;;;BA', 'A;OICI;FA;;;SY', `A;OICI;FA;;;${user}`].sort());
       }
       expect(await fs.readdir(projection)).toEqual([]);
       expect(path.dirname(projection)).toBe(f.options.scratch.sdkDir);
@@ -185,4 +205,28 @@ it('prepared launch on the Pi auth store keeps every provider credential name pi
     expect(resources.env.ANTHROPIC_AUTH_TOKEN).toBe('ambient-bearer');
     expect(resources.env).not.toHaveProperty('UNRELATED_SECRET');
   } finally { await resources.release(); }
+});
+
+it('reports the prepared lane as exactly the names its launch drops, and the keys-profile lane by name (#1688)', async () => {
+  const f = await fixture();
+  vi.stubEnv('PI_OFFLINE', 'offline-value-sentinel');
+  vi.stubEnv('PI_CODING_AGENT_DIR', f.root);
+  try {
+    const adapter = new PiAdapter({
+      runtimeEnvironment: { base: 'allowlist', pass: ['PI_CODING_AGENT_DIR', 'PI_OFFLINE'] },
+      byokLauncher: { command: process.execPath, profileDbPath: path.join(f.root, 'profiles.sqlite'), sessionDir: path.join(f.root, 'sessions') },
+    });
+    const { env, report } = await adapter.runtimeEnvironment();
+    const [prepared, keys] = report.lanes!;
+    if (prepared?.narrowedBy !== 'sdk') throw new Error('expected the prepared lane first');
+    expect(prepared.lane).toBe('pi-prepared');
+    expect(prepared.removed).toContain('PI_OFFLINE');
+    expect(prepared.removed).not.toContain('PI_CODING_AGENT_DIR');
+    expect(keys).toEqual({ lane: 'pi-keys-profile', narrowedBy: 'keys-launcher' });
+    expect(JSON.stringify(report)).not.toContain('offline-value-sentinel');
+    const launch = await resolvePiRuntimeLaunch({ ...f.options, kind: 'pi-prepared', env });
+    try {
+      expect(Object.keys(env).filter((name) => !Object.hasOwn(launch.env, name)).sort()).toEqual(prepared.removed);
+    } finally { await launch.release(); }
+  } finally { vi.unstubAllEnvs(); }
 });

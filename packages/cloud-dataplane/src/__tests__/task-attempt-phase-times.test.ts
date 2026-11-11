@@ -21,8 +21,8 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres 0030 and the attempts stored before it
       }
       await migrate(scope.pool, before);
       await scope.pool.query(
-        `INSERT INTO task (tenant_id, task_id, device_id, status, updated_at)
-         VALUES ($1, 'old', 'device-1', 'offered', '2026-01-01T00:00:00.000Z')`,
+        `INSERT INTO task (tenant_id, task_id, device_id, agent_id, agent_profile_revision, status, updated_at)
+         VALUES ($1, 'old', 'device-1', 'agent-1', 'rev-1', 'offered', '2026-01-01T00:00:00.000Z')`,
         [TENANT],
       );
       // Add only 0030, so later migrations do not change what this run applies.

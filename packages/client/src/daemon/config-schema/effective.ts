@@ -1,20 +1,22 @@
 import path from 'node:path';
-import { AGENT_HOME_DIRECTORY } from '../../agent-home';
+import { AGENT_HOME_DIRECTORY } from '../../agent-home.js';
 import {
   AGENT_MEMORY_MCP_SERVER_NAME,
   AGENT_MESSAGE_MCP_SERVER_NAME,
   AGENT_RESULT_MCP_SERVER_NAME,
-} from '../../sdk-reserved-mcp';
+} from '../../sdk-reserved-mcp.js';
 import {
   parseToolAuthorizationPolicy, toolAuthorizationMode,
   type ToolAuthorizationMode, type ToolFileScope,
-} from '../../tool-authorization';
-import type { RuntimeAdapter, RuntimeVersionPolicy } from '../../types';
-import { serviceLogDir } from '../host-layout';
-import { scratchRootSocketBudget } from '../retention/scratch';
-import type { DaemonConfig, DaemonStatus } from '../create-daemon';
-import { DAEMON_CONFIG_SCHEMA_VERSION } from './schema.generated';
-import type { DaemonConfigIssue } from './validate';
+} from '../../tool-authorization.js';
+import type { RuntimeAdapter, RuntimeVersionPolicy } from '../../types.js';
+import { serviceLogDir } from '../host-layout.js';
+import { scratchRootSocketBudget } from '../retention/scratch.js';
+import type { DaemonConfig, DaemonStatus } from '../create-daemon.js';
+import { DAEMON_CONFIG_SCHEMA_VERSION } from './schema.generated.js';
+import type { DaemonConfigIssue } from './validate.js';
+import { runtimeEnvironmentFor } from '../../adapters/runtime-adapters.js';
+import type { RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 
 /**
  * How daemon construction resolved the SDK Agent memory filesystem helper
@@ -60,6 +62,13 @@ export interface DaemonEffectiveRuntime {
    * construction; only the policy, never the installed runtime token.
    */
   readonly versionPolicy?: RuntimeVersionPolicy;
+  /**
+   * The environment policy `createDaemon` gives an SDK-built adapter (#1759),
+   * with its base spelled out: `runtimes.<id>.runtimeEnvironment`, else the
+   * top-level `runtimeEnvironment`. Names only, never values. Absent for an
+   * injected adapter.
+   */
+  readonly runtimeEnvironment?: RuntimeEnvironmentPolicy;
 }
 
 /**
@@ -178,6 +187,10 @@ function sdkBuiltIsolation(id: string, config: DaemonConfig): Readonly<Record<st
   }
 }
 
+function spelledRuntimeEnvironment(policy: RuntimeEnvironmentPolicy | undefined): RuntimeEnvironmentPolicy {
+  return policy?.base === 'allowlist' ? policy : { base: 'login-shell', ...policy };
+}
+
 function effectiveToolAuthorization(config: DaemonConfig, adapters: readonly RuntimeAdapter[]): DaemonEffectiveToolAuthorization {
   const localToolApproval = config.localToolApproval === 'allow' ? 'allow' : 'host-only';
   const policy = config.toolAuthorization;
@@ -246,12 +259,14 @@ export function describeEffectiveDaemonConfig(input: EffectiveDaemonConfigInput)
       const id = adapter.descriptor.id;
       const isolation = input.runtimeSource === 'sdk-built' ? sdkBuiltIsolation(id, config) : undefined;
       const versionPolicy = adapter.descriptor.versionPolicy;
+      const runtimeEnvironment = input.runtimeSource === 'sdk-built' ? spelledRuntimeEnvironment(runtimeEnvironmentFor(id, config)) : undefined;
       return {
         id,
         source: input.runtimeSource,
         toolAuthorizationAuto: adapter.descriptor.capabilities.toolAuthorizationAuto === true,
         ...(isolation === undefined ? {} : { isolation }),
         ...(versionPolicy === undefined ? {} : { versionPolicy }),
+        ...(runtimeEnvironment === undefined ? {} : { runtimeEnvironment }),
       };
     }),
     toolAuthorization: effectiveToolAuthorization(config, input.adapters),

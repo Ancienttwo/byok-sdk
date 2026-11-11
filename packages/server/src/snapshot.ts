@@ -1,7 +1,7 @@
 import type { DeviceRecord, PendingApproval, TaskAttempt, TaskAttemptStatus, TaskOfferReadback, TerminalResult } from '@byok-sdk/cloud';
 import type { TaskState } from '@byok-sdk/protocol';
 import type { TenantReadinessPresence } from '@byok-sdk/core';
-import type { MachineInfo, TaskResult, TaskSnapshot } from './types';
+import type { MachineInfo, TaskResult, TaskSnapshot } from './types.js';
 
 /**
  * Projections from the cloud kernel's read model onto this package's public
@@ -97,7 +97,7 @@ export function toTaskSnapshot(
     state: taskStateOf(attempt.status, attempt.cancellation !== undefined, pending !== undefined),
     deviceId: attempt.deviceId,
     sessionRef,
-    ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
+    agentRef: attempt.agentRef,
     createdAt: offer?.recordedAt ?? attempt.updatedAt,
     updatedAt: attempt.updatedAt,
     ...(result === undefined ? {} : { result }),

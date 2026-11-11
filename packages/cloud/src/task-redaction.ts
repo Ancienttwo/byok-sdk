@@ -12,8 +12,8 @@
  * tombstones only through the {@link TaskRedactionCodec} that cloud passes in.
  */
 import { contentHash, type ContentHash, type TenantId } from '@byok-sdk/core';
-import type { CloudCrypto } from './crypto/port';
-import { ByokCloudError } from './errors';
+import type { CloudCrypto } from './crypto/port.js';
+import { ByokCloudError } from './errors.js';
 
 /** The largest number of task ids that one `redactTasks` call accepts. */
 export const TASK_REDACTION_MAX_TASKS = 100;

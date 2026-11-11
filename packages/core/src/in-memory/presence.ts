@@ -1,4 +1,4 @@
-import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpiredResult } from '../retention';
+import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpiredResult } from '../retention.js';
 /**
  * In-memory {@link PresenceStore} reference (§12.3).
  *
@@ -7,15 +7,15 @@ import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpire
  * it for a live one. Both stores read time from the injected clock, which is
  * what lets the conformance suite assert expiry without sleeping.
  */
-import { ByokCoreError } from '../errors';
+import { ByokCoreError } from '../errors.js';
 import {
   freezePresenceRuntimeFact,
   type PresenceHint,
   type PresenceHintInput,
   type PresenceStore,
-} from '../presence';
-import type { Clock } from '../stores';
-import { tenantKey, type TenantId } from '../tenant';
+} from '../presence.js';
+import type { Clock } from '../stores.js';
+import { tenantKey, type TenantId } from '../tenant.js';
 
 function assertTtl(ttlMs: number): void {
   if (!Number.isFinite(ttlMs) || ttlMs <= 0) {

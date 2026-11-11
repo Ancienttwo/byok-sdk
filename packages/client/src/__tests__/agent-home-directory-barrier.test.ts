@@ -3,11 +3,39 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentHomeManager, AgentHomeResolutionError, ensureDirectoryNoSymlink } from '../agent-home';
+import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
+import { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper';
 
+const helperBin = builtAgentMemoryFilesystemHelperBin();
 const roots: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
+});
+
+describe('host storage root native barrier', () => {
+  async function hostRoot() {
+    const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-created-root-')));
+    roots.push(parent);
+    return path.join(parent, 'host');
+  }
+
+  it.skipIf(helperBin === undefined)('initializes a newly created root through the actual release helper', async () => {
+    const host = await hostRoot();
+    const binding = await new AgentHomeManager({ hostStorageRoot: host }).prepare({ agentId: 'one', profileRevision: 'p1' });
+    try {
+      const filesystem = await openAgentMemoryFilesystemHelper({ helperBin: helperBin!,
+        canonicalHome: binding.resolution.canonicalHome, ancestorRoot: binding.resolution.hostStorageRoot,
+        homeIdentity: binding.lease.homeIdentity });
+      try {
+        expect(await filesystem.read('MEMORY.md', 8192)).toMatchObject({ exists: true, content: '' });
+      } finally {
+        await filesystem.close();
+      }
+    } finally {
+      await binding.lease.release();
+    }
+  });
 });
 
 describe.skipIf(process.platform !== 'linux')('Linux new Agent home directory barriers', () => {
