@@ -23,6 +23,8 @@ export interface ConversationOptions {
   readonly execution: ExecutionTemplate;
   /** The brand catalog as K8 `models`: a Bot's `model` is one of these keys. */
   readonly models: Readonly<Record<string, ExecutionTemplate>>;
+  /** K8's `dreaming` from the user's settings (`dreamingOption`): `false` turns dreaming off and ends open dream routines. */
+  readonly dreaming: { readonly models: readonly string[] } | false;
   readonly now?: () => number;
 }
 
@@ -70,7 +72,7 @@ export class Conversation {
     try {
       bot = new BotCollaboration(options.server, ledger, {
         botId: options.execution.payload.agentRef.agentId, execution: options.execution, models: { ...options.models },
-        team: 'external',
+        team: 'external', dreaming: options.dreaming,
         // The template has no connectors, so no Turn is offered `confirmable_action` and no routine actions (#1499 s1.4).
         outcome: { actions: { turn: ['delegate', 'ask_user'] } },
         connector: async () => { throw new Error('This Host has no connectors'); },

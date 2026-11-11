@@ -10,6 +10,9 @@ export interface DreamingSetting {
 
 export interface HostSettings { readonly dreaming: DreamingSetting }
 
+/** The settings file beside the Host stores: the settings domain writes it, the k8 domain reads dreaming from it at start. */
+export const settingsFile = (hostStorageRoot: string): string => path.join(hostStorageRoot, 'host', 'settings.json');
+
 export const DEFAULT_SETTINGS: HostSettings = { dreaming: { enabled: true, models: [] } };
 
 export class SettingsDamagedError extends Error {

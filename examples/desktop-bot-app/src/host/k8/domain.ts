@@ -5,6 +5,7 @@ import type { K8Methods } from '../../bridge/domains/k8.ts';
 import { executionCatalog } from '../conversation/catalog.ts';
 import { ConversationService } from '../conversation/service.ts';
 import type { HostDomain, HostContext } from '../domains.ts';
+import { dreamingOption, settingsFile, settingsStore } from '../settings/store.ts';
 import { HostStore } from '../store/store.ts';
 import { Conversation } from './conversation.ts';
 
@@ -22,9 +23,11 @@ export async function createK8Domain(context: HostContext): Promise<HostDomain<K
   let conversation: Conversation;
   try {
     catalog = executionCatalog(brand, deviceId, await context.profiles.load());
+    // The dreaming setting applies from this start on; a damaged settings file stops the Host here.
+    const settings = await settingsStore(settingsFile(context.hostStorageRoot)).read();
     conversation = await Conversation.open({
       server: context.server, productId: context.daemonConfig.productId, ledgerFile: path.join(hostDir, 'k8.sqlite'), store,
-      execution: catalog.execution, models: catalog.models,
+      execution: catalog.execution, models: catalog.models, dreaming: dreamingOption(settings.dreaming),
     });
   } catch (error) {
     store.close();

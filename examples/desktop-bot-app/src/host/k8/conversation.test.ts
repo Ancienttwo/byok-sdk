@@ -41,8 +41,11 @@ function newDaemon(fx: Pick<Fixture, 'root' | 'listener' | 'adapter' | 'deviceCr
     agentHome: { hostStorageRoot: fx.root, projection: createBotPersonaProjection() }, agentEgress: { policy },
   }, [fx.adapter], { deviceCredentials: fx.deviceCredentials });
 }
-const openConversation = (fx: Pick<Fixture, 'root' | 'server' | 'store' | 'execution'>) => Conversation.open({ server: fx.server, productId,
-  ledgerFile: path.join(fx.root, 'host', 'k8.sqlite'), store: fx.store, execution: fx.execution, models: { default: fx.execution } });
+const openConversation = (fx: Pick<Fixture, 'root' | 'server' | 'store' | 'execution'>, dreaming: { models: string[] } | false = { models: [] }) =>
+  Conversation.open({ server: fx.server, productId, ledgerFile: path.join(fx.root, 'host', 'k8.sqlite'), store: fx.store, execution: fx.execution,
+    models: { default: fx.execution }, dreaming });
+const openDreams = (fx: Fixture) => Object.values(fx.conversation.bot.ledger.snapshot().routines)
+  .filter(row => row.definition.id.startsWith('dream:') && row.lifecycle !== 'completed');
 
 /** K8's synthetic adapter on a real embedded server, loopback listener and daemon; the store and K8 ledger are files. */
 async function open(): Promise<Fixture> {
@@ -69,9 +72,9 @@ async function open(): Promise<Fixture> {
   f = { root, server, listener, daemon, adapter, store, conversation, execution, deviceCredentials };
   return f;
 }
-async function reopen(fx: Fixture): Promise<void> {
+async function reopen(fx: Fixture, dreaming?: false): Promise<void> {
   await fx.conversation.close();
-  fx.conversation = await openConversation(fx);
+  fx.conversation = await openConversation(fx, dreaming);
 }
 async function running(fx: Fixture, turnId: string) {
   return vi.waitFor(async () => {
@@ -123,7 +126,10 @@ it('finishes sends at reopen: inputRoot for one K8 committed, input for one it n
   // A crash after K8's input and before the store recorded its Turn.
   fx.store.recordInput('committed', WRITER.id, 'Reached K8');
   const committed = await fx.conversation.bot.input('committed', 'Reached K8', WRITER.id);
-  await reopen(fx);
+  expect(openDreams(fx)).toHaveLength(1);
+  // Dreaming turned off in settings: the next open ends the Bot's dream routine.
+  await reopen(fx, false);
+  expect(openDreams(fx)).toEqual([]);
   const inputs = fx.store.transcript(WRITER.id).filter(entry => entry.kind === 'input');
   expect(inputs.map(entry => entry.turnId)).toEqual([expect.any(String), committed]);
   expect(Object.keys(fx.conversation.bot.snapshot().turns).sort()).toEqual(inputs.map(entry => entry.turnId).sort());

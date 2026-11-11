@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LoginItemView } from '../../bridge/domains/settings.ts';
 import type { ModelChoice } from '../../host/conversation/catalog.ts';
 import type { DeviceView } from '../../host/settings/device.ts';
@@ -10,27 +10,44 @@ type Read<T> = { readonly value: T; readonly error?: undefined } | { readonly va
 const read = <T,>(call: Promise<T>): Promise<Read<T>> => call.then(value => ({ value }), (error: Error) => ({ error: error.message }));
 
 /**
- * Device, runtimes, clock skew and doctor, then dreaming, login item and diagnostics export. The doctor runs on open
- * and on Refresh only, not on every Host hint. Each read and command shows its own error; nothing is guessed.
+ * Device, runtimes, clock skew and doctor, then dreaming, login item and diagnostics export. The shell mounts every
+ * section hidden at launch, so the section reads when it becomes visible and on Refresh, not on every Host hint. Only
+ * the latest refresh lands; each read and command shows its own error, and nothing is guessed.
  */
 export function SettingsSection() {
   const [device, setDevice] = useState<Read<DeviceView>>();
   const [dreaming, setDreaming] = useState<Read<DreamingSetting>>();
   const [models, setModels] = useState<Read<readonly ModelChoice[]>>();
   const [loginItem, setLoginItem] = useState<Read<LoginItemView>>();
-  // Each refresh starts the dreaming form again from the saved setting; a save keeps the form and its message.
+  // Bumped when a refresh's settings arrive, so the dreaming form starts again from them; a save keeps the form.
   const [loaded, setLoaded] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const latest = useRef(0);
+  const section = useRef<HTMLElement>(null);
   const refresh = useCallback(() => {
-    setLoaded(count => count + 1);
-    void read(window.byok.call('settings.device', undefined)).then(setDevice);
-    void read(window.byok.call('settings.get', undefined).then(settings => settings.dreaming)).then(setDreaming);
-    void read(window.byok.call('k8.view', { botId: null }).then(view => view.models)).then(setModels);
-    void read(window.byok.call('settings.loginItem', undefined)).then(setLoginItem);
+    const pull = ++latest.current;
+    const land = <T,>(set: (value: Read<T>) => void) => (value: Read<T>) => { if (pull === latest.current) set(value); };
+    setBusy(true);
+    void Promise.all([
+      read(window.byok.call('settings.device', undefined)).then(land(setDevice)),
+      read(window.byok.call('settings.get', undefined).then(settings => settings.dreaming)).then(land<DreamingSetting>(value => {
+        setDreaming(value);
+        setLoaded(count => count + 1);
+      })),
+      read(window.byok.call('k8.view', { botId: null }).then(view => view.models)).then(land(setModels)),
+      read(window.byok.call('settings.loginItem', undefined)).then(land(setLoginItem)),
+    ]).then(() => { if (pull === latest.current) setBusy(false); });
   }, []);
-  useEffect(refresh, [refresh]);
+  useEffect(() => {
+    const element = section.current;
+    if (!element) return;
+    const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) refresh(); });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [refresh]);
   return (
-    <section className="settings">
-      <h1>Settings <button type="button" onClick={refresh}>Refresh</button></h1>
+    <section className="settings" ref={section}>
+      <h1>Settings <button type="button" disabled={busy} onClick={refresh}>{busy ? 'Refreshing…' : 'Refresh'}</button></h1>
       {device?.error !== undefined && <p className="settings-error" role="alert">Device unavailable: {device.error}</p>}
       {device?.value && <DevicePanel device={device.value} />}
       <h2>Dreaming</h2>
@@ -63,7 +80,7 @@ function DreamingForm(props: { saved: DreamingSetting; models: readonly ModelCho
   return (
     <form onSubmit={event => { event.preventDefault(); void save(); }}>
       <label><input type="checkbox" checked={draft.enabled} onChange={event => setDraft({ ...draft, enabled: event.target.checked })} /> Dreaming on</label>
-      <fieldset disabled={!draft.enabled}>
+      <fieldset>
         <legend>Models, preferred first</legend>
         {props.models.map(model => (
           <label key={model.id}>
