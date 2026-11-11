@@ -119,6 +119,9 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres 0038, retireAgentlessTasks, 0039 over 
       const [offerKey] = (await taskArchiveInput(crypto, tenant, { taskId: 'legacy-done', deviceId: 'device' }, clock.now().toISOString())).receiptKeys;
       await scope.pool.query(`INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at) VALUES ('tenant', $1, '{"secret":"offer"}', now())`, [offerKey]);
       await new PostgresBoardStore(scope.pool, clock).create(tenant, { itemId: 'legacy-done', channel: 'c', title: 't' });
+      await scope.pool.query(`INSERT INTO object_manifest (tenant_id, hash, byte_size, content_type, state, ref_count, created_at, updated_at)
+        VALUES ('tenant', 'sha256:x', 1, 'application/octet-stream', 'committed', 1, 'now', 'now')`);
+      await scope.pool.query(`INSERT INTO object_reference (tenant_id, hash, ref_kind, ref_id, created_at) VALUES ('tenant', 'sha256:x', 'sealed-task', 'legacy-done', 'now')`);
       // A terminal task whose cancel never reached its offline device.
       await scope.pool.query(`INSERT INTO outbox (tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at)
         VALUES ('tenant', 'device', 1, 'm1', '{"task_id":"legacy-done"}', 'h', 25, 'pending', '2026-01-01T00:00:00.000Z')`);
@@ -138,6 +141,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres 0038, retireAgentlessTasks, 0039 over 
       await expect(retireAgentlessTasks(scope.pool, { clock, crypto })).resolves.toEqual({ retired: {} });
       expect((await scope.pool.query(`SELECT body FROM device_request_receipts WHERE key = $1`, [offerKey])).rows[0].body).not.toContain('secret');
       expect((await scope.pool.query(`SELECT count(*)::int AS n FROM board_item`)).rows).toEqual([{ n: 0 }]);
+      expect((await scope.pool.query(`SELECT ref_count FROM object_manifest WHERE hash = 'sha256:x'`)).rows).toEqual([{ ref_count: 0 }]);
       expect((await scope.pool.query(`SELECT task_id FROM task_agentless_retired ORDER BY task_id`)).rows)
         .toEqual([{ task_id: 'legacy-done' }, { task_id: 'legacy-live' }]);
       await expect(migrate(scope.pool, directory)).resolves.toMatchObject({ applied: ['0039_task_agent_ref_not_null.sql'] });

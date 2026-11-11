@@ -56,7 +56,8 @@ export async function retireAgentlessTasks(
   if (Object.keys(blocked).length > 0) {
     throw new Error(`Tasks without an Agent identity cannot be retired yet; nothing was changed. Per tenant: ${JSON.stringify(blocked)}. ` +
       'On v0.41.0, settle task_not_terminal ones with cancelTask, or abandonTask for a task whose device is gone or that stays cancel_requested; ' +
-      'for pending_delivery, bring the device online to receive them, or revokeDevice a device that will not return so its pending rows expire.');
+      'for pending_delivery, bring the device online to receive them, revokeDevice a device that will not return so its pending rows expire, ' +
+      'or expire just those rows with the core mailbox expirePending.');
   }
   const archive = new PostgresTaskArchiveStore(pool, options.clock);
   const board = new PostgresBoardStore(pool, options.clock);
