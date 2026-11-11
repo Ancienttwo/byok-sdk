@@ -1,5 +1,6 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
 import { execFile, spawn, type spawn as nodeSpawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import type { RuntimeTaskInput } from '../../types.js';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -272,6 +273,8 @@ class GrokSession implements Session {
   private readonly queue = new AsyncQueue<AgentEvent | MessageDraftDelta>();
   private failure?: RuntimeExecutionFailure;
   private active = false;
+  /** The input id of the SDK prompt OAR holds until Grok's own turn closes. */
+  private held?: string;
   /** The SDK asked for the active turn's cancel. Grok also ends a turn as cancelled on its own, on a permission request answered `cancelled`. */
   private interruptRequested = false;
   private readonly turnWaiters = new SettleWaiters();
@@ -317,6 +320,12 @@ class GrokSession implements Session {
     }
   }
   private turnEnded(turn: GrokTurnOutcome): void {
+    if (!this.active) {
+      this.fail(infrastructure('grok reported a turn end with no turn open'));
+      return;
+    }
+    this.held = undefined;
+    this.projection?.endSdkTurn();
     const cancelledBySdk = this.interruptRequested || this.stopping;
     this.active = false;
     this.interruptRequested = false;
@@ -363,11 +372,19 @@ class GrokSession implements Session {
     if (!this.raw) throw infrastructure('grok session is not open');
     if (this.active) throw infrastructure('grok turn is already active');
     this.active = true;
+    const inputId = randomUUID();
+    this.projection?.beginSdkTurn(inputId);
     try {
-      const result = await this.raw.prompt(input);
+      let result = await this.raw.prompt(input, { inputId });
+      // OAR adopted a turn Grok runs on its own and refuses the prompt as busy: hold it until that turn closes.
+      if (result.response.body.code === 'busy' && this.projection?.grokTurnOpen === true) {
+        result = await this.raw.queue(input, { inputId });
+        if (result.response.body.kind === 'accepted') this.held = inputId;
+      }
       if (result.response.body.kind !== 'accepted') throw infrastructure(result.response.body.reason ?? 'grok prompt refused');
     } catch (error) {
       this.active = false;
+      this.projection?.endSdkTurn();
       throw error;
     }
   }
@@ -377,12 +394,22 @@ class GrokSession implements Session {
     await this.prompt(task.instruction);
   }
   async steer(): Promise<void> {
-    // Grok's `_meta.sendNow` cancels the running prompt and re-runs its tool calls: not an injection.
+    // The bridge exposes no Grok steer: OAR's `_x.ai/interject` steer is not qualified for the SDK.
     throw new SteerUnsupportedError('grok', 'grok cannot inject into an active turn');
   }
   async interrupt(): Promise<void> {
     if (!this.raw || !this.active) return;
     this.interruptRequested = true;
+    if (this.held !== undefined) {
+      // Taken back before the drain sends it, no prompt for this task reaches Grok; once sent, it is cancelled below.
+      if (!this.raw.withdraw) throw infrastructure('grok session cannot take held input back');
+      const withdrawn = await this.raw.withdraw(this.held);
+      if (withdrawn.response.body.kind === 'accepted') {
+        this.turnEnded({ kind: 'aborted' });
+        return;
+      }
+      this.held = undefined;
+    }
     const waiter = this.turnWaiters.wait();
     try {
       await raceDeadline(oarCancelSettled(this.raw.abort(), waiter.settled, 'grok'), this.interruptMs, () => infrastructure('grok interrupt timed out'));

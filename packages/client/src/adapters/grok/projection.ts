@@ -41,11 +41,31 @@ export class GrokProjection {
   /** OAR reports this session's tokens cumulatively from open; each turn's usage is the difference. */
   private billed: Required<Pick<Tokens, 'input' | 'output'>> & Tokens = { input: 0, output: 0 };
   private pending?: Usage;
+  /** The SDK prompt's input id, and whether the drained prompt request carrying it was recorded. */
+  private sdkTurn?: { readonly inputId: string; drained: boolean };
+  /** OAR adopted a turn Grok runs on its own (a background command or sub-agent wake) as the active turn. */
+  private grokTurn = false;
 
   constructor(private readonly rootSessionId: string) {}
 
-  /** Events for one record; `outcome` receives the root turn end, after its events. `GrokSession` decides whether the turn ends or fails. */
+  /** The SDK sends a prompt named `inputId`, directly or through OAR's held input. */
+  beginSdkTurn(inputId: string): void {
+    this.sdkTurn = { inputId, drained: false };
+  }
+  endSdkTurn(): void {
+    this.sdkTurn = undefined;
+  }
+  /** OAR holds a prompt as busy while this is true. */
+  get grokTurnOpen(): boolean {
+    return this.grokTurn;
+  }
+
+  /** Events for one record; `outcome` receives the root turn end of an SDK turn, after its events. `GrokSession` decides whether the turn ends or fails. */
   consume(input: AcpRecord, emit: (event: AgentEvent | MessageDraftDelta) => void, outcome: (turn: GrokTurnOutcome) => void): void {
+    const request = input.kind === 'request' ? record(input.body) : undefined;
+    // The drained prompt request is recorded before any frame of its turn, so a later turn_active
+    // without an input id belongs to this SDK turn (OAR names a drained prompt without its input id).
+    if (request?.kind === 'prompt' && Array.isArray(request.carries) && this.sdkTurn !== undefined && request.carries.includes(this.sdkTurn.inputId)) this.sdkTurn.drained = true;
     if (input.kind !== 'frame' || input.sessionId !== this.rootSessionId || input.agentPath.length > 0) return;
     const body = record(input.body);
     const events = body?.events;
@@ -62,6 +82,8 @@ export class GrokProjection {
     if (!events.some(value => record(value)?.kind === 'tool_call_ended')) observe();
     // The prompt answer's frame lists `turn_ended` before its `usage`: end the turn after every other event.
     let ended: Record<string, unknown> | undefined;
+    // OAR reports a Grok turn deferred by an SDK turn on that turn's closing frame, after its turn_ended.
+    let grokTurnAfterEnd = false;
     for (const value of events) {
       const event = record(value);
       switch (event?.kind) {
@@ -95,6 +117,13 @@ export class GrokProjection {
         case 'usage':
           this.usage(record(event.usage));
           break;
+        case 'turn_active':
+          // While an SDK turn is open OAR defers a Grok turn and reports nothing; a turn_active without
+          // an input id outside it is Grok's own (native-turns.ts), as is one after this frame's turn end.
+          if (event.inputId !== undefined) break;
+          if (ended !== undefined) grokTurnAfterEnd = true;
+          else if (this.sdkTurn?.drained !== true) this.grokTurn = true;
+          break;
         case 'turn_ended':
           ended = record(event.outcome) ?? {};
           break;
@@ -103,11 +132,17 @@ export class GrokProjection {
       }
     }
     if (ended !== undefined) this.endTurn(ended, emit, outcome);
+    if (grokTurnAfterEnd) this.grokTurn = true;
   }
 
   private endTurn(turn: Record<string, unknown>, emit: (event: AgentEvent) => void, outcome: (turn: GrokTurnOutcome) => void): void {
     this.flush(emit);
     this.endOpenTools(emit, turn.kind === 'aborted' ? 'interrupted' : 'ended');
+    if (this.grokTurn) {
+      // Grok's own turn is no SDK task turn: its usage stays pending and is reported with the next one.
+      this.grokTurn = false;
+      return;
+    }
     this.flushUsage(emit);
     if (turn.kind === 'failed') {
       // The vendored OAR outcome owns the class and marks one a text rule chose; the SDK adds no rule of its own.
