@@ -229,7 +229,7 @@ describe('daemon/audit-log: appendAuditRecord / readAuditRecords', () => {
   });
 });
 
-describe('daemon/audit-log: 0600 file, 0700 storeDir', () => {
+describe('daemon/audit-log: 0600 file', () => {
   it('the file stays 0600 across repeated appends, even if something else loosened it in between', async () => {
     const storeDir = await tmpDir('byok-audit-mode-persist-');
     await appendAuditRecord(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' });

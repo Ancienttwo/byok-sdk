@@ -558,6 +558,23 @@ describe('the local store is not trusted blindly either', () => {
     };
   }
 
+  it.skipIf(process.platform === 'win32')('refuses before writing anything when the skill-packs directory cannot be made owner-only', async () => {
+    const entryText = await fs.readFile(FIXTURE_ENTRY, 'utf8');
+    const store = new InMemorySkillPackStore();
+    await store.publish(TENANT, packOf([{ path: SKILL_PACK_ENTRY_PATH, content: entryText }]));
+    const cloud = await startCloud({ skillPacks: store });
+    const dataDir = await tmpDir('byok-skill-pack-data-');
+    const auth = await pairedAuth(cloud, await tmpDir('byok-skill-pack-store-'));
+    await fs.mkdir(skillPacksRoot(dataDir), { mode: 0o755 });
+    await fs.chmod(skillPacksRoot(dataDir), 0o755);
+    vi.spyOn(fs, 'chmod').mockRejectedValue(Object.assign(new Error('EPERM'), { code: 'EPERM' }));
+
+    await expect(installSkillPacks({ dataDir, serverUrl: cloud.url, auth, declaration: declaration() })).rejects.toMatchObject({
+      code: 'secure_dir_mode',
+    });
+    expect(await fs.readdir(skillPacksRoot(dataDir))).toEqual([]);
+  }, HEAVY_TEST_TIMEOUT_MS);
+
   it('refuses to project a pack file that was replaced with a symlink', async () => {
     const { dataDir, revision } = await installFixture();
     const decoy = path.join(dataDir, 'decoy.md');

@@ -352,10 +352,16 @@ async function checkedFile(root: string, relative: string, create: boolean): Pro
   return target;
 }
 
+/**
+ * Owner-only skill-packs directory, checked once per operation before its first
+ * write so a refusal leaves nothing behind (win32 spawns `icacls` here).
+ */
+async function secureSkillPacksDir(dataDir: string): Promise<void> {
+  await ensureSecureDir(await checkedDirectory(dataDir, SKILL_PACKS_DIRNAME, true));
+}
+
 async function appendAuditLine(dataDir: string, record: Record<string, unknown>): Promise<void> {
   const filePath = await checkedFile(dataDir, `${SKILL_PACKS_DIRNAME}/${SKILL_PACK_AUDIT_FILENAME}`, true);
-  const root = path.dirname(filePath);
-  await ensureSecureDir(root);
   const handle = await fs.open(filePath, 'a', FILE_MODE);
   try {
     // chmod BEFORE the append, for the same reason `daemon/audit-log.ts` does it:
@@ -442,6 +448,7 @@ async function installOne(
   source: string,
   base: string,
 ): Promise<InstalledSkillPack> {
+  await secureSkillPacksDir(options.dataDir);
   const refuse = async (code: SkillPackInstallErrorCode, message: string): Promise<never> => {
     await appendAuditLine(options.dataDir, {
       ts: new Date().toISOString(),
@@ -668,6 +675,7 @@ async function projectSkillPackUnderGate(dataDir: string, name: string, targetDi
       packName: name,
     });
   }
+  await secureSkillPacksDir(dataDir);
 
   const copied: string[] = [];
   const paths: { source: string; destination: string }[] = [];
