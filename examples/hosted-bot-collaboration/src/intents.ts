@@ -357,23 +357,37 @@ export class HostedSubmitter {
    * checks again under the scope lock. A scope of a store version this code does not support is left out before the
    * limit: its rows cannot be claimed or written, so they must not fill a pass ahead of the healthy scopes. So is an
    * exported scope, and one with an uncommitted import (#975). A head that its device has no slot for (#1229) keeps its
-   * `next_at`, as L does not delay it, so the scan reads on in pages past it and the held heads cannot fill the batch.
+   * `next_at`, as L does not delay it, so the scan reads on in pages past it and the held heads cannot fill the batch. A held head whose
+   * queued expiry is reached is still picked, so the claim concludes it.
    */
   private due(): Promise<Array<{ scope: string; key: string }>> {
     const batch = this.options.batch ?? 100, now = this.now();
     return inSchema(this.pool, this.schema, async client => {
       const picked: Array<{ scope: string; key: string }> = [];
+      // An untried row holds no slot, so its answer depends only on its scope, device and source while the scan reads.
+      const answers = new Map<string, boolean>();
+      const admits = async (row: { scope: string; key: string; tries: number; device: string; source: string }) => {
+        if (row.tries > 0) return admitsDeviceSlot(client, row.scope, row.key, this.deviceConcurrency);
+        const memo = JSON.stringify([row.scope, row.device, row.source === 'user']);
+        if (!answers.has(memo)) answers.set(memo, await admitsDeviceSlot(client, row.scope, row.key, this.deviceConcurrency));
+        return answers.get(memo)!;
+      };
       let after: [string, string, string] | undefined;
       for (;;) {
-        const page = await client.query<{ scope: string; key: string; next_at: string; ordinal: string }>(
-          `SELECT i.scope, i.key, i.next_at::text, i.ordinal::text FROM intent i JOIN scope s ON s.scope = i.scope
+        const page = await client.query<{ scope: string; key: string; next_at: string; ordinal: string; tries: number; wait_until: string;
+          retry_until: string | null; device: string; source: string }>(
+          `SELECT i.scope, i.key, i.next_at::text, i.ordinal::text, i.tries, i.wait_until::text, i.retry_until::text,
+            i.input->>'deviceId' AS device, i.source FROM intent i JOIN scope s ON s.scope = i.scope
             WHERE s.state_version = $3 AND s.switch_export IS NULL AND s.switch_import IS NULL AND i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
             AND i.next_at <= $1 AND NOT EXISTS (SELECT 1 FROM intent o WHERE o.scope = i.scope AND o.agent = i.agent
               AND o.conclusion IS NULL AND o.ordinal < i.ordinal)
             ${after ? 'AND (i.next_at, i.scope, i.ordinal) > ($4::bigint, $5::text, $6::bigint)' : ''}
             ORDER BY i.next_at, i.scope, i.ordinal LIMIT $2`, [now, batch, STORE_VERSION, ...(after ?? [])]);
         for (const row of page.rows) {
-          if (!await admitsDeviceSlot(client, row.scope, row.key, this.deviceConcurrency)) continue;
+          // The claim settles a queued expiry before the slot check, as K4 does whatever the admission says.
+          const expires = row.tries === 0 && queuedExpiry({ waitUntil: Number(row.wait_until),
+            ...(row.retry_until === null ? {} : { retryUntil: Number(row.retry_until) }) }, now) !== undefined;
+          if (!expires && !await admits(row)) continue;
           picked.push({ scope: row.scope, key: row.key });
           if (picked.length === batch) return picked;
         }

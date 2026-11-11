@@ -383,6 +383,9 @@ describe.skipIf(POSTGRES_URL === undefined)('H Host intents on real Postgres (#9
     expect(await run(1)).toEqual({ tried: 1, failed: [] });
     expect((await rows(scope)).map(found => [found.key, found.submission]))
       .toEqual([['bot-a', 'delivered'], ['bot-b', 'reserved'], ['user-c', 'delivered'], ['bot-d', 'delivered']]);
+    // A held row still expires at its wait while its device stays full.
+    await inSchema(opened!.pool, opened!.store.schema, client => client.query('UPDATE intent SET wait_until = 1 WHERE key = $1', [storedKey('bot-b')]));
+    expect([await run(1), (await row(scope, 'bot-b'))?.conclusion]).toEqual([{ tried: 1, failed: [] }, 'expired']);
   });
 
   it('compaction removes a settled Host intent with its handler, and its key can never freeze again', async () => {
