@@ -2181,7 +2181,7 @@ export declare class CollectExpiredFailure extends ByokCoreError {
 export { SEALED_CATEGORIES, SEALED_CONTENT_SUITE, SEALED_CONTENT_VERSION, SEALED_DIRECTIONS, SealedContentHeaderV1Schema, openSealedContent, sealContent, } from './sealed-content';
 export type { OpenSealedContentInput, SealContentInput, SealedBinding, SealedCategory, SealedContent, SealedContentHeaderV1, SealedContentOpenFailure, SealedContentOpenResult, SealedDirection, SealedScopePolicy, } from './sealed-content';
 export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from './scope-key';
-export type { OpenScopeKeyPackageInput, ScopeKeyPackage, ScopeKeyPackageOpenResult, ScopeKeyPackageV2, SealScopeKeyPackageInput, } from './scope-key';
+export type { OpenScopeKeyPackageInput, ScopeKeyPackage, ScopeKeyPackageOpenResult, SealScopeKeyPackageInput, } from './scope-key';
 export { MEMBER_CHAIN_OPS, deriveMemberId, memberChainEntryHash, signMemberChainEntry, verifyMemberChainEntry, } from './member-chain';
 export type { MemberChainEntryV1, MemberChainEntryVerifyResult, MemberChainOp, UnsignedMemberChainEntryV1, } from './member-chain';
 export { MEMBER_KEY_BUNDLE_VERSION, createMemberKeyBundle, parseMemberKeyBundle, verifyMemberKem } from './member-bundle';
@@ -2601,7 +2601,7 @@ export declare function deriveSealedContentKey(scopeKey: Uint8Array, salt: Uint8
  * runtime has to accept a zero-length HKDF salt.
  */
 export declare function deriveSealedMacKey(scopeKey: Uint8Array): Promise<Bytes>;
-export interface ScopeKeyPackageV2 {
+export interface ScopeKeyPackage {
     readonly v: typeof SCOPE_KEY_PACKAGE_V2;
     readonly tenantId: string;
     readonly scopeId: string;
@@ -2620,7 +2620,6 @@ export interface ScopeKeyPackageV2 {
     /** Sender's ECDSA P-256 / SHA-256 signature, base64url of the 64-byte P1363 form. */
     readonly sig: string;
 }
-export type ScopeKeyPackage = ScopeKeyPackageV2;
 export interface SealScopeKeyPackageInput {
     readonly scopeKey: Uint8Array;
     readonly tenantId: string;
@@ -2642,7 +2641,7 @@ export interface SealScopeKeyPackageInput {
  * the version 2 package. A signing private key that does not pair with
  * `sender.signingPublicJwk` throws `sealed_secret_invalid`.
  */
-export declare function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Promise<ScopeKeyPackageV2>;
+export declare function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Promise<ScopeKeyPackage>;
 export interface OpenScopeKeyPackageInput {
     readonly package: unknown;
     /** What the caller asked the Host for. A package for anything else is refused. */

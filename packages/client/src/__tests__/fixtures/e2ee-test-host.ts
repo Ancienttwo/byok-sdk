@@ -10,7 +10,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash, createPublicKey, verify as edVerify } from 'node:crypto';
 import { DEVICE_PROOF_HEADER, deviceProofSigningInput, type DeviceProofProtectedClaims } from '@byok-sdk/core';
-import type { ScopeKeyPackageV2 } from '@byok-sdk/core/sealed-payload';
+import type { ScopeKeyPackage } from '@byok-sdk/core/sealed-payload';
 import {
   BYOK_E2EE_CHAIN_PATH,
   BYOK_E2EE_KEY_PACKAGES_PATH,
@@ -73,7 +73,7 @@ export class E2eeTestHost {
   /** When set, each pairing MAC read waits for it before it answers. */
   holdPairingMacReads: Promise<void> | undefined;
   /** Every key package put, as stored. */
-  readonly packages: ScopeKeyPackageV2[] = [];
+  readonly packages: ScopeKeyPackage[] = [];
   /** The KEM floor per member: the epoch of its latest appended `rotate` entry. */
   readonly kemFloors = new Map<string, number>();
   /** Answer this many key package reads with 503 first. */
@@ -90,11 +90,11 @@ export class E2eeTestHost {
   /** When set, every paged own-package read answers with this body as it is. */
   pageResponse: unknown;
   /** When set, paged own-package reads leave out each package it matches, as a Host that withholds rows. */
-  withholdPages: ((pkg: ScopeKeyPackageV2) => boolean) | undefined;
+  withholdPages: ((pkg: ScopeKeyPackage) => boolean) | undefined;
   /** When set, each key package read waits for it before it answers. */
   holdPackageReads: Promise<void> | undefined;
   /** Every device key package put body, in order. */
-  readonly devicePuts: ScopeKeyPackageV2[][] = [];
+  readonly devicePuts: ScopeKeyPackage[][] = [];
   /** When set, each device key package put waits for it before it stores. */
   holdPackagePuts: Promise<void> | undefined;
   /** Answer this many device key package puts with 503 first. */
@@ -123,7 +123,7 @@ export class E2eeTestHost {
    * recipient). `false` when a package is wrapped below its recipient's KEM
    * floor: nothing is stored.
    */
-  clientPutPackages(...packages: ScopeKeyPackageV2[]): boolean {
+  clientPutPackages(...packages: ScopeKeyPackage[]): boolean {
     if (this.#stale(packages)) return false;
     this.packages.push(...packages);
     return true;
@@ -269,7 +269,7 @@ export class E2eeTestHost {
       this.failPackagePuts -= 1;
       return respond(res, 503, { error: 'unavailable' });
     }
-    const { packages } = JSON.parse(body.toString('utf8')) as { packages: ScopeKeyPackageV2[] };
+    const { packages } = JSON.parse(body.toString('utf8')) as { packages: ScopeKeyPackage[] };
     this.devicePuts.push(packages);
     await this.holdPackagePuts;
     if (packages.some((pkg) => pkg.v !== 2)) return respond(res, 400, { error: 'coordination_input_invalid' });
@@ -319,7 +319,7 @@ export class E2eeTestHost {
   }
 
   /** Whether a package is wrapped to an older KEM epoch than its recipient's floor. */
-  #stale(packages: readonly ScopeKeyPackageV2[]): boolean {
+  #stale(packages: readonly ScopeKeyPackage[]): boolean {
     return packages.some((pkg) => pkg.recipientKemEpoch < (this.kemFloors.get(pkg.recipient) ?? 0));
   }
 

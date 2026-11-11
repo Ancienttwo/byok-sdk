@@ -616,7 +616,6 @@ export {
   E2eeKeyPackageAvailablePayloadSchema,
   E2eePairingMacSchema,
   E2eeScopeKeyPackageSchema,
-  E2eeScopeKeyPackageV2Schema,
 } from './e2ee-member';
 export type {
   E2eeClientPairingMac,

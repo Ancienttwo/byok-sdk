@@ -122,7 +122,7 @@ import {
   type E2eeMemberChainEntry,
   type E2eeMemberKeyBundle,
   type E2eeScopeKeyPackage,
-  type E2eeScopeKeyPackageV2Schema,
+  type E2eeScopeKeyPackageSchema,
 } from '@byok-sdk/protocol';
 import type { SteerRejectedError } from './steer-control';
 import { createAuthPlane, type AuthPlane } from './auth/plane';
@@ -734,7 +734,7 @@ export interface ByokCloud {
    */
   putScopeKeyPackages(
     tenant: TenantId,
-    input: { readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageV2Schema>[] },
+    input: { readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageSchema>[] },
   ): Promise<{ readonly stored: number; readonly skippedDeviceIds: readonly string[] }>;
   /** Host control plane: the stored packages of one scope, optionally for one epoch or one recipient. */
   readScopeKeyPackages(

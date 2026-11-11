@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "6023989437bc74894c9a0d05a1de61796fff4c4b82fc74fbe99a466dd0bfaff1"
+    "snapshotSha256": "3dc8c189e061f6f4e00194ef64019bcdc71fe20baaced23fe700f7dcc8838e90"
   },
   "configFields": {
     "status": "tracked",
@@ -168,12 +168,15 @@
     {
       "id": "scope-key-package-v1-removed",
       "impact": "breaking",
-      "summary": "Version 1 scope-key packages are removed (#1789). @byok-sdk/core no longer exports ScopeKeyPackageV1, ScopeKeyPackage is ScopeKeyPackageV2, and openScopeKeyPackage refuses a version 1 package with key_package_invalid, so a recipient opens a package only when it names the recipient's KEM epoch. A device no longer re-wraps a version 1 package during a KEM rotation. @byok-sdk/protocol E2eeScopeKeyPackageSchema, the read shape, is now the version 2 shape, so a Host read that meets a stored version 1 row fails the whole read with e2ee_member_state_unreadable; the put path already took version 2 only. Before upgrading, run the version 1 count check on every Host store; a Host with version 1 rows runs a KEM rotation on each affected member on the previous version first.",
+      "summary": "Version 1 scope-key packages are removed (#1789). @byok-sdk/core no longer exports ScopeKeyPackageV1 or ScopeKeyPackageV2; ScopeKeyPackage is the one package type and sealScopeKeyPackage returns it, and openScopeKeyPackage refuses a version 1 package with key_package_invalid, so a recipient opens a package only when it names the recipient's KEM epoch. A device no longer re-wraps a version 1 package during a KEM rotation. @byok-sdk/protocol E2eeScopeKeyPackageSchema, the read shape, is now the version 2 shape for puts and reads, and E2eeScopeKeyPackageV2Schema is removed (use E2eeScopeKeyPackageSchema; ByokCloud and E2eeMemberStore put inputs name it). A Host read that meets a stored version 1 row fails the whole read with e2ee_member_state_unreadable; the put path already took version 2 only. Before upgrading, run the version 1 count check on every Host store; a Host with version 1 rows runs a KEM rotation on each affected member on the previous version first.",
       "migration": "docs/releases/host-upgrade-next-minor.md#scope-key-packages-are-version-2-only",
       "items": [
+        "export:@byok-sdk/cloud#ByokCloud",
+        "export:@byok-sdk/cloud#E2eeMemberStore",
         "export:@byok-sdk/core/sealed-payload#ScopeKeyPackage",
         "export:@byok-sdk/core/sealed-payload#ScopeKeyPackageV1",
         "export:@byok-sdk/core/sealed-payload#ScopeKeyPackageV2",
+        "export:@byok-sdk/core/sealed-payload#sealScopeKeyPackage",
         "export:@byok-sdk/protocol#E2eeScopeKeyPackageSchema",
         "export:@byok-sdk/protocol#E2eeScopeKeyPackageV2Schema"
       ]
@@ -397,6 +400,16 @@
       "entry": "agent-memory-helper-protocol-4"
     },
     {
+      "item": "export:@byok-sdk/cloud#ByokCloud",
+      "change": "changed",
+      "entry": "scope-key-package-v1-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#E2eeMemberStore",
+      "change": "changed",
+      "entry": "scope-key-package-v1-removed"
+    },
+    {
       "item": "export:@byok-sdk/core/sealed-payload#ScopeKeyPackage",
       "change": "changed",
       "entry": "scope-key-package-v1-removed"
@@ -408,6 +421,11 @@
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#ScopeKeyPackageV2",
+      "change": "removed",
+      "entry": "scope-key-package-v1-removed"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#sealScopeKeyPackage",
       "change": "changed",
       "entry": "scope-key-package-v1-removed"
     },
@@ -438,7 +456,7 @@
     },
     {
       "item": "export:@byok-sdk/protocol#E2eeScopeKeyPackageV2Schema",
-      "change": "changed",
+      "change": "removed",
       "entry": "scope-key-package-v1-removed"
     },
     {

@@ -33,7 +33,6 @@ export type {
   OpenScopeKeyPackageInput,
   ScopeKeyPackage,
   ScopeKeyPackageOpenResult,
-  ScopeKeyPackageV2,
   SealScopeKeyPackageInput,
 } from './scope-key';
 export {

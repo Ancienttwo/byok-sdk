@@ -29,7 +29,6 @@ import {
   E2eeMemberKeyBundleSchema,
   E2eeMemberKeyRegisterRequestSchema,
   E2eeScopeKeyPackageSchema,
-  E2eeScopeKeyPackageV2Schema,
   requiredReceiverCapabilities,
   type E2eeClientPairingMac,
   type E2eeKeyPackageAvailablePayload,
@@ -417,12 +416,12 @@ export async function readMemberChain(
 
 export async function putScopeKeyPackages(
   ctx: E2eeMemberContext,
-  input: { readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageV2Schema>[] },
+  input: { readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageSchema>[] },
   writer: E2eeMemberWriter,
 ): Promise<{ readonly stored: number; readonly skippedDeviceIds: readonly string[] }> {
   const list = boundedList(() => input.packages, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, 'Scope key packages');
   const rows = list.map((input, index) => {
-    const { text, value } = canonicalParse(E2eeScopeKeyPackageV2Schema, input, `Scope key package ${index}`);
+    const { text, value } = canonicalParse(E2eeScopeKeyPackageSchema, input, `Scope key package ${index}`);
     if (value.tenantId !== ctx.tenant) throw invalid(`Scope key package ${index} names another tenant`);
     if (!scopeIdValid(value.scopeId)) throw invalid(`Scope key package ${index} has a scopeId over ${E2EE_SCOPE_ID_MAX_LENGTH} characters`);
     return {

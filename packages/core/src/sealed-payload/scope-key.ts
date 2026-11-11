@@ -100,7 +100,7 @@ export async function deriveSealedMacKey(scopeKey: Uint8Array): Promise<Bytes> {
   return hkdfSha256(scopeKey, new Uint8Array(32), MAC_KEY_INFO, 32);
 }
 
-export interface ScopeKeyPackageV2 {
+export interface ScopeKeyPackage {
   readonly v: typeof SCOPE_KEY_PACKAGE_V2;
   readonly tenantId: string;
   readonly scopeId: string;
@@ -119,8 +119,6 @@ export interface ScopeKeyPackageV2 {
   /** Sender's ECDSA P-256 / SHA-256 signature, base64url of the 64-byte P1363 form. */
   readonly sig: string;
 }
-
-export type ScopeKeyPackage = ScopeKeyPackageV2;
 
 const ScopeKeyPackageSchema = z.strictObject({
   v: z.literal(SCOPE_KEY_PACKAGE_V2),
@@ -165,7 +163,7 @@ const PackageIdentitySchema = ScopeKeyPackageSchema.omit({ enc: true, ciphertext
  * the version 2 package. A signing private key that does not pair with
  * `sender.signingPublicJwk` throws `sealed_secret_invalid`.
  */
-export async function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Promise<ScopeKeyPackageV2> {
+export async function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Promise<ScopeKeyPackage> {
   const parsed = safeParseTotal(PackageIdentitySchema, {
     v: SCOPE_KEY_PACKAGE_V2,
     tenantId: input.tenantId,

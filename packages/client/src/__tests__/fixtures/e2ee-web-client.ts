@@ -21,7 +21,7 @@ import {
   type MemberChainOp,
   type MemberKeyBundleV1,
   type MemberKeys,
-  type ScopeKeyPackageV2,
+  type ScopeKeyPackage,
   type SealedCategory,
 } from '@byok-sdk/core/sealed-payload';
 import type { E2eeTestHost } from './e2ee-test-host';
@@ -104,7 +104,7 @@ export class E2eeWebClient {
   }
 
   /** One key package of `scopeKey`, from this client to `recipient`. */
-  sealPackage(scopeId: string, recipient: MemberKeyBundleV1, scopeKey: Uint8Array, epoch = 1): Promise<ScopeKeyPackageV2> {
+  sealPackage(scopeId: string, recipient: MemberKeyBundleV1, scopeKey: Uint8Array, epoch = 1): Promise<ScopeKeyPackage> {
     return sealScopeKeyPackage({
       scopeKey, tenantId: this.tenantId, scopeId, epoch,
       recipient: { memberId: recipient.memberId, kemPublicJwk: recipient.kemPublicJwk, kemEpoch: recipient.kemEpoch },

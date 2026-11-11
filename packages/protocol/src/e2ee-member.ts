@@ -128,8 +128,12 @@ export const E2eeMemberChainEntrySchema = z
   });
 export type E2eeMemberChainEntry = z.infer<typeof E2eeMemberChainEntrySchema>;
 
-/** One scope key wrapped to one member's KEM key of `recipientKemEpoch` (§7.4, §77a). */
-export const E2eeScopeKeyPackageV2Schema = z.strictObject({
+/**
+ * One scope key wrapped to one member's KEM key of `recipientKemEpoch` (§7.4,
+ * §77a), as a put takes it and a read returns it. Version 2 is the only
+ * version (#1789).
+ */
+export const E2eeScopeKeyPackageSchema = z.strictObject({
   v: z.literal(2),
   tenantId: z.string().min(1),
   scopeId: z.string().min(1),
@@ -142,9 +146,6 @@ export const E2eeScopeKeyPackageV2Schema = z.strictObject({
   sig: SignatureSchema,
   recipientKemEpoch: PositiveSafeIntegerSchema,
 });
-
-/** A stored package as a read returns it. Version 2 is the only version (#1789). */
-export const E2eeScopeKeyPackageSchema = E2eeScopeKeyPackageV2Schema;
 export type E2eeScopeKeyPackage = z.infer<typeof E2eeScopeKeyPackageSchema>;
 
 /** A pairing MAC (§7.2 steps 3 and 4): HMAC-SHA-256 under `pv`, which the Host never holds. */

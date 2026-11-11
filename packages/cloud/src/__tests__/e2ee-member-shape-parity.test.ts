@@ -25,7 +25,6 @@ import {
   E2eeMemberChainEntrySchema,
   E2eeMemberKeyBundleSchema,
   E2eeScopeKeyPackageSchema,
-  E2eeScopeKeyPackageV2Schema,
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 
@@ -206,7 +205,6 @@ describe('protocol E2EE member shapes match core', () => {
       });
       const core = verdict.ok || verdict.reason !== 'key_package_invalid';
       expect(E2eeScopeKeyPackageSchema.safeParse(json(value)).success, label).toBe(core);
-      expect(E2eeScopeKeyPackageV2Schema.safeParse(json(value)).success, label).toBe(core);
     }
   });
 });
