@@ -3,9 +3,8 @@ import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest'
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { hash, taskId } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { DelegationError, type DelegationCancelResult, type TurnCancelResult } from '@byok-sdk/example-bot-collaboration/rules/delegation';
-import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
+import { type CollaborationState, type DelegationCancelResult, DelegationError, type TurnCancelResult } from '@byok-sdk/bot-collaboration/host-kit';
+import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/bot-collaboration/testing';
 import { DeviceBindingError } from './binding';
 import { EntryRefusedError, HostedCommandEntry, UnauthenticatedError, type EntryCaller } from './entry';
 import { storedKey } from './layout';

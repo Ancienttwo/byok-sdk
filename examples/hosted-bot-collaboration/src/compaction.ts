@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg';
 import { CompactVetoError } from '@byok-sdk/server/execution-core';
-import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { compactVeto } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import type { CollaborationState } from '@byok-sdk/bot-collaboration/host-kit';
+import { compactVeto } from '@byok-sdk/bot-collaboration/rules';
 import { storedKey } from './layout';
 import { intentIdentity, retire, retiredIntents } from './retention';
 

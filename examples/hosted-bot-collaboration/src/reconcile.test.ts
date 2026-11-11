@@ -3,10 +3,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { hash, taskId, type FrozenInput } from '@byok-sdk/server/execution-core';
 import { openHost, template } from '@byok-sdk/example-host-execution-core/test-support';
-import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { OFFER_WAIT_MS } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { revisionOf } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
+import { type CollaborationState, revisionOf } from '@byok-sdk/bot-collaboration/host-kit';
+import { OFFER_WAIT_MS } from '@byok-sdk/bot-collaboration/rules';
+import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/bot-collaboration/testing';
 import { waitForTaskCleanup } from '../../basic/goal-btw.test-support';
 import { openHostedCloud, SKIP_HOSTED_CLOUD, type HostedCloud } from './hosted-cloud.test-support';
 import { freezeIntent, HostedSubmitter } from './intents';

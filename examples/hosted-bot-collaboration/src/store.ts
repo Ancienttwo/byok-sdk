@@ -2,24 +2,25 @@ import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { canonical, concludeOccurrence, hash, occurrenceIntentKey, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type HostJobHandler,
   type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine, type RoutineCommands } from '@byok-sdk/server/execution-core';
-import { BOT_DREAM, botRoutines, endable, owned, resealDefinition, routineTurn, sealedDefinition, sealedTemplate, updateDefinition, type BotRoutineInput,
-  type SealedRoutineAction } from '@byok-sdk/example-bot-collaboration/routines';
-import { admitBotToolsets, applyHomeTerminal, applyManagement, applyModels, failHomeFlush, homeEnqueued, homeHead, inactive, planHomeRetry, requireMain, updateBot,
-  writeSnapshotBot, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
-import { admitUserInput, coalescePolicy, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
+import { acceptDeliveryEcho, admitUserInput, applyHomeTerminal, applyManagement, applyModels, BOT_DREAM, botOutcomePorts, type BotRoutineInput,
+  botRoutines, type Card, type ChannelPort, checkDreamInstruction, classifyInbound, cleanReplyTokens, type CollaborationState, type Command,
+  type CommandPorts, type CommitRequest, type CommitResult, type DelegationCancelResult, type Delivery, deliveryRoute, type DreamingOptions,
+  dreamPolicy, type DreamSync, echoCandidates, enablePush, endable, exportMarkOf, failHomeFlush, homeEnqueued, homeHead, type HomeReadback,
+  type InboundClass, inboundKey, type InboundMessage, type IntentOutcomeError, type OutboxIntent, owned, planHomeRetry, type PushRoute,
+  readbackDelivery, reconcileDreamRoutines, recordDream, recoverDelivery, refuseRoute, rememberInbound, type ReplyRoute, resealDefinition,
+  resendUnknown, type RetentionInput, type RetentionLimits, type RetentionResult, revisionOf, revokePush, routineTurn, sealedDefinition,
+  type SealedRoutineAction, sealedTemplate, sealSwitchExport, settleDelivery, startDelivery, stateOf, type SwitchExport, SwitchExportedError,
+  SwitchExportError, type SwitchExportMark, SwitchImportedError, type SwitchReceipt, syncHead, syncTail, type Turn, type TurnCancelResult,
+  unknownDelivery, updateBot, updateDefinition, verified, verifySwitchExport, writeSnapshotBot } from '@byok-sdk/bot-collaboration/host-kit';
+import { addTurn, admitBotToolsets, advanceRoomSeats, cardCallDue, checkReply, coalescePolicy, type CoalescePolicy, collaborationDue, commandBots,
+  CONNECTOR_OUTCOME_UNKNOWN, delegationCancelAnswer, type DelegationTimers, hostIntentCancelAnswer, inactive, type InputFields,
+  type IntentCancelResult, observeDevices, type ReplyCheck, replyCheckDue, reportCardDecisions, requireMain, seatTurn, settleCardCall,
+  settleDelegations, type SyncOptions, type SyncStep, syncTurn, turnCancelAnswer } from '@byok-sdk/bot-collaboration/rules';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
-import { addTurn, stateOf, type Card, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { checkDreamInstruction, dreamPolicy, recordDream, reconcileDreamRoutines, type DreamingOptions, type DreamSync } from '@byok-sdk/example-bot-collaboration/dream';
-import { advanceRoomSeats, cardCallDue, checkReply, CONNECTOR_OUTCOME_UNKNOWN, collaborationDue, observeDevices, replyCheckDue, reportCardDecisions,
-  commandBots, seatTurn, settleCardCall, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { botOutcomePorts, syncHead, syncTail, type IntentOutcomeError } from '@byok-sdk/example-bot-collaboration/adapter-steps';
-import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, beginSwitch, refusesHomeWrites, requireBound, switchRefusal, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION } from './ddl';
-import { delegationCancelAnswer, hostIntentCancelAnswer, turnCancelAnswer, type DelegationCancelResult, type IntentCancelResult,
-  type TurnCancelResult } from '@byok-sdk/example-bot-collaboration/rules/delegation';
 import { cancelIntent, commandIntentFacts, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { syncDreamSlice } from './dreams';
 import { HostedStoreVersionError, inSchema, lockScope, SCHEMA } from './transaction';
@@ -28,15 +29,7 @@ import { decideFinish, type HostedIntentHandler, type TaskEvidence } from './rec
 import { archivedRow, commitInStore, commitStored, decideRetention } from './retention';
 import { dueRoutine, hostedRoutineCommands, hostJobCommands, hostJobRowKey, loadSlice, planSlice, recordDue, switchDueVersions,
   writeSlice } from './routines';
-import type { RetentionInput, RetentionLimits, RetentionResult } from '@byok-sdk/example-bot-collaboration/retention';
-import { classifyInbound, inboundKey, verified, type ChannelPort, type Delivery, type InboundClass, type InboundMessage, type PushRoute,
-  type ReplyRoute } from '@byok-sdk/example-bot-collaboration/channel';
-import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from '@byok-sdk/example-bot-collaboration/delivery';
-import { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, refuseRoute, rememberInbound, resendUnknown,
-  revokePush } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import { assemble, entryGroup, idOf, split, storedKey, type EntityKind, type EntryKind, type Split } from './layout';
-import { sealSwitchExport, SwitchExportError, verifySwitchExport, type SwitchExport } from '@byok-sdk/example-bot-collaboration/migration';
-import { exportMarkOf, SwitchExportedError, SwitchImportedError, type SwitchExportMark, type SwitchReceipt } from '@byok-sdk/example-bot-collaboration/migration';
 import { hostedSwitchContent, importMarkOf, writeSwitchRows, type SwitchImportMark } from './switch';
 
 export type Publish = (id: string, value: Json) => void;

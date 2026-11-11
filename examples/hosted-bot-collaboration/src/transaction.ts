@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import { STORE_VERSION } from './ddl';
-import { exportMarkOf, SwitchExportedError, SwitchImportedError } from '@byok-sdk/example-bot-collaboration/migration';
+import { exportMarkOf, SwitchExportedError, SwitchImportedError } from '@byok-sdk/bot-collaboration/host-kit';
 import { importMarkOf } from './switch';
 
 /** A stored scope row of a store version that this code does not support. Nothing was written. */

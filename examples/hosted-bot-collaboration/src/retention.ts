@@ -1,12 +1,9 @@
 import type { PoolClient } from 'pg';
 import { hash, occurrenceOfIntentKey, time, type Json, type LedgerDumpTombstone } from '@byok-sdk/server/execution-core';
-import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { retainRoots, RetentionRefused, type RetentionInput, type RetentionLimits, type RetentionResult,
-  type RetentionStore } from '@byok-sdk/example-bot-collaboration/retention';
-import { commitCommand, refuseRetired, retiredIdentity, type AdmittedIds, type Command, type CommandPorts,
-  type RetiredNamespace } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import type { CommandRecord, CommitRequest, CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { promoteStaged, queueDelivery } from '@byok-sdk/example-bot-collaboration/delivery-routing';
+import { type AdmittedIds, type CollaborationState, type Command, type CommandPorts, type CommitRequest, type CommitResult, promoteStaged,
+  queueDelivery, refuseRetired, retainRoots, type RetentionInput, type RetentionLimits, RetentionRefused, type RetentionResult,
+  type RetentionStore, retiredIdentity, type RetiredNamespace, type Turn } from '@byok-sdk/bot-collaboration/host-kit';
+import { type CommandRecord, commitCommand } from '@byok-sdk/bot-collaboration/rules';
 import { commandIntentFacts, intentConclusions } from './intents';
 import { storedKey } from './layout';
 import { loadSlice } from './routines';

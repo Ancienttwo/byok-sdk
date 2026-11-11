@@ -116,7 +116,7 @@ test('shared device credential fixtures select client consumers and native smoke
   const impact = selectImpact(['packages/client/src/testing/device-credentials.ts',
     'scripts/testing/device-credentials.mjs', 'scripts/testing/device-credentials.d.mts']);
   for (const dir of ['packages/client', 'examples/basic', 'examples/host-execution-core',
-    'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/hosted-bot-collaboration',
+    'packages/bot-collaboration', 'examples/byok-mcp-server', 'examples/hosted-bot-collaboration',
     'examples/hosted-bot-collaboration-worker', 'examples/packaging']) {
     assert.ok(impact.dirs.includes(dir), dir);
   }
@@ -505,7 +505,7 @@ test('no routine selection ever includes the complete test suite', () => {
 
 test('shared protocol changes propagate through multiple dependency levels', () => {
   const impact = selectImpact(['packages/protocol/src/task.ts']);
-  for (const dir of ['packages/server', 'packages/client', 'packages/cloud-dataplane', 'packages/ui-runtime', 'examples/bot-collaboration']) assert.ok(impact.dirs.includes(dir), dir);
+  for (const dir of ['packages/server', 'packages/client', 'packages/cloud-dataplane', 'packages/ui-runtime', 'packages/bot-collaboration']) assert.ok(impact.dirs.includes(dir), dir);
   assert.ok(impact.families.includes('dataplane'));
   assert.ok(!impact.dirs.includes('packages/keys'));
 });

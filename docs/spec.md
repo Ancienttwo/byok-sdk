@@ -4500,7 +4500,7 @@ storage, Windows persona persistence or two-process relay.
 A dream is a background writer task that checks and tidies an Agent's memory
 against the turns a Host holds. [ADR-049](adr/ADR-049-host-owned-bot-dreaming.md)
 records the decision, and the
-[K8 README](../examples/bot-collaboration/README.md#dreaming-1475) holds the
+[K8 README](../packages/bot-collaboration/README.md#dreaming-1475) holds the
 operating details.
 
 Dreaming belongs to the Host layer. The SDK schedules nothing, stores no history

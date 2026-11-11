@@ -18,17 +18,6 @@ export const workspaceGraph = {
       "@byok-sdk/server"
     ]
   },
-  "examples/bot-collaboration": {
-    "name": "@byok-sdk/example-bot-collaboration",
-    "dependencies": [
-      "@byok-sdk/client",
-      "@byok-sdk/cloud",
-      "@byok-sdk/core",
-      "@byok-sdk/example-host-execution-core",
-      "@byok-sdk/protocol",
-      "@byok-sdk/server"
-    ]
-  },
   "examples/byok-mcp-server": {
     "name": "@byok-sdk/example-byok-mcp-server",
     "dependencies": [
@@ -48,8 +37,8 @@ export const workspaceGraph = {
   "examples/desktop-bot-app": {
     "name": "@byok-sdk/example-desktop-bot-app",
     "dependencies": [
+      "@byok-sdk/bot-collaboration",
       "@byok-sdk/client",
-      "@byok-sdk/example-bot-collaboration",
       "@byok-sdk/keys",
       "@byok-sdk/server",
       "@byok-sdk/ui-runtime"
@@ -68,11 +57,11 @@ export const workspaceGraph = {
   "examples/hosted-bot-collaboration": {
     "name": "@byok-sdk/example-hosted-bot-collaboration",
     "dependencies": [
+      "@byok-sdk/bot-collaboration",
       "@byok-sdk/client",
       "@byok-sdk/cloud",
       "@byok-sdk/cloud-dataplane",
       "@byok-sdk/core",
-      "@byok-sdk/example-bot-collaboration",
       "@byok-sdk/example-host-execution-core",
       "@byok-sdk/server"
     ]
@@ -80,11 +69,11 @@ export const workspaceGraph = {
   "examples/hosted-bot-collaboration-worker": {
     "name": "@byok-sdk/example-hosted-bot-collaboration-worker",
     "dependencies": [
+      "@byok-sdk/bot-collaboration",
       "@byok-sdk/client",
       "@byok-sdk/cloud",
       "@byok-sdk/cloud-dataplane",
       "@byok-sdk/core",
-      "@byok-sdk/example-bot-collaboration",
       "@byok-sdk/example-host-execution-core",
       "@byok-sdk/example-hosted-bot-collaboration",
       "@byok-sdk/server"
@@ -114,6 +103,17 @@ export const workspaceGraph = {
   "examples/service-upgrade": {
     "name": "@byok-sdk/example-service-upgrade",
     "dependencies": ["@byok-sdk/client", "@byok-sdk/server"]
+  },
+  "packages/bot-collaboration": {
+    "name": "@byok-sdk/bot-collaboration",
+    "dependencies": [
+      "@byok-sdk/client",
+      "@byok-sdk/cloud",
+      "@byok-sdk/core",
+      "@byok-sdk/example-host-execution-core",
+      "@byok-sdk/protocol",
+      "@byok-sdk/server"
+    ]
   },
   "packages/client": {
     "name": "@byok-sdk/client",
@@ -243,7 +243,8 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/(?:adapters|runtime)\//,
     /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes|shared)\//,
     /^packages\/client\/scripts\/adapter-task-smoke\.mjs$/,
-    /^examples\/(?:host-execution-core|bot-collaboration)\//,
+    /^examples\/host-execution-core\//,
+    /^packages\/bot-collaboration\//,
     // #1106: the K4 source the K4 Windows qualification runs against.
     /^packages\/server\/src\/execution-core\//,
     /^examples\/basic\/goal-btw\.test-support\.ts$/,
@@ -504,12 +505,13 @@ function todoSnapshotListed(path, context) {
 }
 // #1030: the workspaces whose vitest.config.ts uses scripts/vitest/tmp-root.mjs.
 export const vitestTmpRootConsumers = Object.freeze([
-  'examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/codex-interaction-host',
+  'examples/basic', 'examples/byok-mcp-server', 'examples/codex-interaction-host',
   'examples/host-execution-core', 'examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker',
-  'examples/packaging', 'examples/service-upgrade', 'packages/client', 'packages/cloud-dataplane', 'packages/cloud-do', 'packages/keys', 'packages/server',
+  'examples/packaging', 'examples/service-upgrade', 'packages/bot-collaboration', 'packages/client', 'packages/cloud-dataplane', 'packages/cloud-do', 'packages/keys', 'packages/server',
 ]);
 // Reviewed M build inputs: exact paths retain workspace consumers and packed-artifact checks.
 const reviewedBuildConfigOwners = Object.freeze({
+  'packages/bot-collaboration/tsup.config.ts': 'packages/bot-collaboration',
   'packages/client/tsup.sealed.config.ts': 'packages/client', // retired by #1589; a deleting PR still lists it
   'packages/cloud-dataplane/tsup.config.ts': 'packages/cloud-dataplane',
   'packages/cloud-do/tsup.config.ts': 'packages/cloud-do',
@@ -575,6 +577,10 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
+    // #1845 S2: K8 moved from examples/bot-collaboration; a deleted old path selects the package at its new home.
+    if (path.startsWith('examples/bot-collaboration/') && !existsSync(resolve(context.cwd ?? process.cwd(), path))) {
+      dirs.add('packages/bot-collaboration'); continue;
+    }
     if (path === 'package.json' || path === 'bun.lock' || /^(?:packages|examples)\/[^/]+\/package\.json$/.test(path)) {
       // A reviewed dependency move also runs the suites of the workspaces that declare it.
       const impact = verifyReviewedContent(path, context);
@@ -609,7 +615,7 @@ export function selectImpact(paths, context = {}) {
     }
     if (path === 'examples/basic/goal-btw.test-support.ts') {
       // Shared runtime fixture is imported directly across these example suites.
-      for (const dir of ['examples/basic', 'examples/host-execution-core', 'examples/bot-collaboration']) dirs.add(dir);
+      for (const dir of ['examples/basic', 'examples/host-execution-core', 'packages/bot-collaboration']) dirs.add(dir);
       continue;
     }
     if (path === 'examples/basic/clarification.ts' || path === 'examples/basic/clarification.test.ts'
@@ -746,7 +752,7 @@ export function selectImpact(paths, context = {}) {
       dirs.add('packages/client'); continue;
     }
     if (path === 'examples/host-execution-core/VALIDATION.md'
-      || path === 'examples/bot-collaboration/VALIDATION.md'
+      || path === 'packages/bot-collaboration/VALIDATION.md' || path === 'packages/bot-collaboration/SECOND-DEVICE.md'
       || path === 'examples/host-execution-core/PLAN-612.md'
       || path === 'templates/service/README.md'
       || /^examples\/byok-mcp-server\/docs\/[a-z0-9-]+\.md$/.test(path)) continue;

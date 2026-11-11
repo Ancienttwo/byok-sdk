@@ -174,6 +174,8 @@ Hosts that vendor K8 must also copy `src/adapter-steps.ts` in Layer 2 (#1664). T
 
 Layer 3 no longer needs a module of your own for K4 test data (#1845). Copy `src/k4-fixtures.test-support.ts` with the vectors and drop whatever you resolved `@byok-sdk/example-host-execution-core/test-support` to: the `policy` constant and the `template(deviceId, agentId)` function are K8's own copy now, and the vectors read them from there. Nothing else in the layer changed, and the returned template is the same value, so a ledger and a daemon fixture behave as before.
 
+K8 now lives at `packages/bot-collaboration` (#1845), as the private package `@byok-sdk/bot-collaboration`. A vendoring Host copies from that path and records it with the tag; the file list in `src/VENDOR.md` adds the entry barrels `src/host-kit.ts`, `src/rules/index.ts` and `src/testing.ts`, and three test-only helpers move under `src/__tests__/`. A Host that imported example subpaths maps them to the four entries: `.` for the L Host (`BotCollaboration`, `botCompactVeto`, the persona projection, `teamSnapshot`), `./host-kit` for the L modules it composes, which a Worker can bundle, `./rules` for the remaining pure rules, which load without `node:sqlite`, and `./testing` for the vectors and the L test Host. See the entry table in the package README.
+
 H vendors also receive one outbox projection row per stored inbound destination from sync; an unchanged destination reuses its projection row (#1664 PR-3b).
 
 ## Doctor names a refused control endpoint
@@ -254,7 +256,7 @@ The hosted submitter now applies the local Host's device slot rule: per scope an
 
 ## Bot collaboration switch contract
 
-The owner switch records and errors are defined once, in `@byok-sdk/example-bot-collaboration/migration` (#1667): `SwitchHeader`, `SwitchReceipt`, `SwitchExportMark`, `exportMarkOf`, `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError`. The roots of both packages still export the classes and `SwitchReceipt` (and the hosted root `SwitchExportMark`), but the local `./switch` and `./topology` modules and the hosted `./switch` and `./binding` modules no longer do; a deep import moves to `./migration`. `DeviceSwitchingError` takes `target: 'L' | 'H'`. The messages of `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError` changed and their `code` values did not, so match on `code`. The local `refuseImported` now throws `SwitchImportedError` (`switch_imported`) instead of a plain `Error`.
+The owner switch records and errors are defined once, in `@byok-sdk/bot-collaboration` (#1667): `SwitchHeader`, `SwitchReceipt`, `SwitchExportMark`, `exportMarkOf`, `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError`. The roots of both packages still export the classes and `SwitchReceipt` (and the hosted root `SwitchExportMark`), but the local `./switch` and `./topology` modules and the hosted `./switch` and `./binding` modules no longer do; a deep import moves to `./migration`. `DeviceSwitchingError` takes `target: 'L' | 'H'`. The messages of `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError` changed and their `code` values did not, so match on `code`. The local `refuseImported` now throws `SwitchImportedError` (`switch_imported`) instead of a plain `Error`.
 
 ## Bot collaboration legacy ledger branches
 

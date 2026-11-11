@@ -25,7 +25,7 @@ import pg from 'pg';
 import { CLOUD_CAPABILITIES, createByokCloud, createHmacTokenSigner, createInProcessMailboxWake, createWebCrypto, fullCapabilityDeclaration,
   tenantId, type ByokCloud, type ByokCloudObserver, type TenantId } from '@byok-sdk/cloud';
 import { createByokPool, createPostgresCloudStores, createPostgresCoreStores, PostgresProofReceiptRetentionAuthority } from '@byok-sdk/cloud-dataplane/runtime';
-import { COALESCE_DEFAULTS } from '@byok-sdk/example-bot-collaboration/coalesce';
+import { COALESCE_DEFAULTS } from '@byok-sdk/bot-collaboration/rules';
 import type { FrozenSubmitPort } from '@byok-sdk/server/execution-core';
 import { EntryRefusedError, HostedCollaborationStore, HostedCommandEntry, HostedPasses, hostedMessageConsumer, UnauthenticatedError,
   type HostedSyncOptions, type HostedTaskPort, type PassReport } from '@byok-sdk/example-hosted-bot-collaboration/src/index';

@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { hash, type Routine } from '@byok-sdk/server/execution-core';
-import { isOwner, verified, type Principal } from '@byok-sdk/example-bot-collaboration/channel';
-import type { Command, KeylessCommand } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { CommitConflict, type CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import type { DelegationCancelResult, TurnCancelResult } from '@byok-sdk/example-bot-collaboration/rules/delegation';
+import { type Command, CommitConflict, type CommitResult, type DelegationCancelResult, isOwner, type Principal, type TurnCancelResult, verified } from '@byok-sdk/bot-collaboration/host-kit';
+import type { KeylessCommand } from '@byok-sdk/bot-collaboration/rules';
 import type { HostedCollaborationStore } from './store';
 
 type RoomInputCommand = Extract<Command, { kind: 'room_input' }>;

@@ -2,7 +2,7 @@
 
 This is the WO-10b measurement method for [issue #610](https://github.com/Ancienttwo/byok-sdk/issues/610).
 It defines a reproducible baseline, not measured success rates or a release gate.
-The [K8 validation rows](../examples/bot-collaboration/VALIDATION.md#open-acceptance-rows)
+The [K8 validation rows](../packages/bot-collaboration/VALIDATION.md#open-acceptance-rows)
 remain OPEN until separately authorized real-runtime evidence is recorded.
 Synthetic adapters and fake model endpoints validate plumbing; they do not measure
 model behavior. No paid run is authorized by this document.
@@ -483,14 +483,14 @@ is not proof of zero failure risk.
 
 ## Runner
 
-[`examples/bot-collaboration/src/submit-result-measurement/`](../examples/bot-collaboration/src/submit-result-measurement/)
+[`packages/bot-collaboration/src/submit-result-measurement/`](../packages/bot-collaboration/src/submit-result-measurement/)
 runs this method for one cell.
 It starts an embedded Host, one paired daemon and one runtime adapter.
 The runtime uses the real SDK `submit_result` helper.
 
 ```bash
 bun run build
-bun examples/bot-collaboration/src/submit-result-measurement/cli.ts --runtime codex --model <model-id>
+bun packages/bot-collaboration/src/submit-result-measurement/cli.ts --runtime codex --model <model-id>
 ```
 
 The default is a dry run.

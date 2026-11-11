@@ -7,15 +7,15 @@ import { windowsBotArgs } from './run-windows-bot-tests.mjs';
 // #738: the persona consumer writes with the SDK writeHomeFile, so the suites
 // that use the real persona fixture run on Windows too. Nothing is excluded.
 test('the K8 Windows runner runs every suite, with the real persona fixture suites', () => {
-  const root = new URL('../../examples/bot-collaboration/src/', import.meta.url);
+  const root = new URL('../../packages/bot-collaboration/src/', import.meta.url);
   const persona = readdirSync(root).filter(name => name.endsWith('.test.ts')
-    && readFileSync(new URL(name, root), 'utf8').includes("from './team.test-support'"));
+    && readFileSync(new URL(name, root), 'utf8').includes("from './__tests__/team.test-support'"));
   assert.ok(persona.length > 0);
-  assert.deepEqual(windowsBotArgs(), ['run', '--cwd', 'examples/bot-collaboration', 'test']);
+  assert.deepEqual(windowsBotArgs(), ['run', '--cwd', 'packages/bot-collaboration', 'test']);
 });
 
 test('K4, K8 and Windows runner changes require the Windows-containing family', () => {
-  for (const path of ['packages/server/src/execution-core/core.ts', 'examples/host-execution-core/src/core.test.ts', 'examples/bot-collaboration/src/channel.ts', 'scripts/ci/run-windows-bot-tests.mjs']) {
+  for (const path of ['packages/server/src/execution-core/core.ts', 'examples/host-execution-core/src/core.test.ts', 'packages/bot-collaboration/src/channel.ts', 'scripts/ci/run-windows-bot-tests.mjs']) {
     assert.ok(selectImpact([path]).families.includes('adapter-lifecycle-smoke'));
   }
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');

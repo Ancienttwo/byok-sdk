@@ -29,6 +29,7 @@ const alignedPackages = [...dispatchPackages];
 // longer attests tool or runtime executables.
 const publicPackages = [...alignedPackages, keys];
 const privatePackages = [
+  ['packages/bot-collaboration', '@byok-sdk/bot-collaboration'],
   ['packages/conformance', '@byok-sdk/conformance'],
   ['packages/testkit', '@byok-sdk/testkit'],
 ];
