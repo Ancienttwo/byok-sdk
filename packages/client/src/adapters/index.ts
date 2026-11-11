@@ -22,7 +22,6 @@ export type {
   RuntimeDisposalFailureInput,
   RuntimeDisposalStage,
   RuntimeExecutionFailureInput,
-  RuntimeFailureCategory,
   RuntimeFailurePhase,
   RuntimeRetryDisposition,
 } from '../runtime-failure';

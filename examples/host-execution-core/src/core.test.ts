@@ -226,7 +226,7 @@ it('settles runtime failure without a message and retries only when source polic
 it('retries a retryable device failure only with an explicit source policy', async () => {
   host = await openHost({ reconcileMs: 20 });
   vi.spyOn(host.adapter, 'prepare').mockResolvedValueOnce({ kind: 'prepared', operation: { start: async () => {
-    throw new RuntimeExecutionFailure({ phase: 'start', category: 'infrastructure', retry: 'retryable', reason: 'fixture launch unavailable' });
+    throw new RuntimeExecutionFailure({ phase: 'start', retry: 'retryable', reason: 'fixture launch unavailable' });
   } } });
   const intent = await host.core.enqueue(host.intent('retry-failure', { retry: { maxAttempts: 2, delaysMs: [20], retryFailures: true } }));
   await vi.waitFor(() => expect(host.core.intent('retry-failure')?.generation).toBe(1), { timeout: 5000 });

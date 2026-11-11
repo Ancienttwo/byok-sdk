@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "55e14cf7d2460eb1b941018f58802fa23418c9436931528ab9793877a7218717"
+    "snapshotSha256": "59d1d208b3f346128addc51ed12e72b0f9bfcda92b8616603086c89edaafee77"
   },
   "configFields": {
     "status": "tracked",
@@ -190,6 +190,20 @@
         "export:@byok-sdk/server/execution-core#OccurrenceTransaction",
         "export:@byok-sdk/server/execution-core#OutcomeTransaction"
       ]
+    },
+    {
+      "id": "runtime-failure-category-removed",
+      "impact": "breaking",
+      "summary": "RuntimeExecutionFailure no longer has a category axis (#1758). The category field is removed from RuntimeExecutionFailure and RuntimeExecutionFailureInput, and the RuntimeFailureCategory type is no longer exported from @byok-sdk/client or @byok-sdk/client/adapters. Nothing read the field: retry stays the only retry authority and failure (TaskFailure) the only failure-class authority, and the wire projection (reason, retryable, failure) is unchanged. A Host or runtime adapter that passes category when it constructs a RuntimeExecutionFailure deletes that key; one that names RuntimeFailureCategory deletes the reference.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#runtime-failures-have-no-category",
+      "items": [
+        "export:@byok-sdk/client#RuntimeExecutionFailure",
+        "export:@byok-sdk/client#RuntimeExecutionFailureInput",
+        "export:@byok-sdk/client#RuntimeFailureCategory",
+        "export:@byok-sdk/client/adapters#RuntimeExecutionFailure",
+        "export:@byok-sdk/client/adapters#RuntimeExecutionFailureInput",
+        "export:@byok-sdk/client/adapters#RuntimeFailureCategory"
+      ]
     }
   ],
   "changes": [
@@ -211,7 +225,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=01e1d1c922e507dd",
-      "after": "K8 0.0.1 src-sha256=0bf64f591721cc06",
+      "after": "K8 0.0.1 src-sha256=5732182be4ef6681",
       "entry": "example-bot-collaboration-autonomy"
     },
     {
@@ -315,6 +329,21 @@
       "entry": "runtime-environment-lanes"
     },
     {
+      "item": "export:@byok-sdk/client#RuntimeExecutionFailure",
+      "change": "changed",
+      "entry": "runtime-failure-category-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeExecutionFailureInput",
+      "change": "changed",
+      "entry": "runtime-failure-category-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeFailureCategory",
+      "change": "removed",
+      "entry": "runtime-failure-category-removed"
+    },
+    {
       "item": "export:@byok-sdk/client#resolveStorageConfig",
       "change": "changed",
       "entry": "codex-session-store"
@@ -403,6 +432,21 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentReport",
       "change": "changed",
       "entry": "runtime-environment-lanes"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeExecutionFailure",
+      "change": "changed",
+      "entry": "runtime-failure-category-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeExecutionFailureInput",
+      "change": "changed",
+      "entry": "runtime-failure-category-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeFailureCategory",
+      "change": "removed",
+      "entry": "runtime-failure-category-removed"
     },
     {
       "item": "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper",

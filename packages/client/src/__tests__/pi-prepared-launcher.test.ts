@@ -523,7 +523,7 @@ describe('the prepared pi launch entry', () => {
         if (event.type === 'turn_end') break;
       }
     })()).rejects.toMatchObject({
-      name: 'RuntimeExecutionFailure', phase: 'run', category: 'authority',
+      name: 'RuntimeExecutionFailure', phase: 'run',
       retry: 'non-retryable', message: 'prepared_context_drift',
     });
     // Only D is sent; the second request's typed refusal crosses the real RPC boundary.

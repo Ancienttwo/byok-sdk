@@ -259,9 +259,9 @@ function grokAuthPresent(env: NodeJS.ProcessEnv): boolean {
 }
 
 const authority = (reason: string) =>
-  new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
+  new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
 const infrastructure = (reason: string, failure?: TaskFailure) =>
-  new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason, failure });
+  new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason, failure });
 
 class GrokSession implements Session {
   sessionRef = '';
@@ -324,7 +324,6 @@ class GrokSession implements Session {
     if (turn.kind === 'failed')
       this.fail(new RuntimeExecutionFailure({
         phase: 'run',
-        category: 'semantic',
         retry: turn.failure === 'rate_limited' ? 'retryable' : 'non-retryable',
         reason: turn.reason,
         // A class OAR took from error text is not structured evidence (docs/spec.md runtime failure class).
@@ -332,7 +331,7 @@ class GrokSession implements Session {
       }));
     // Grok 1.0.52 calls no model after the refusal, so the turn did not do the work. A `reject_once` answer ends it the same way.
     else if (turn.kind === 'aborted' && !cancelledBySdk)
-      this.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: PERMISSION_STOP_REASON }));
+      this.fail(new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason: PERMISSION_STOP_REASON }));
     else this.queue.push({ type: 'turn_end' });
   }
   fail(error: unknown): void {

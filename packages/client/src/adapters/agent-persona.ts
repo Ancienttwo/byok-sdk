@@ -6,7 +6,7 @@ import { sameContent, sameFile } from '../util/file-state';
 
 // Session-local instructions have their own read budget, independent of model context size.
 const MAX_PERSONA_BYTES = 64 * 1024;
-const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
+const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
 
 /**
  * Read only the admitted Agent home's persona; never grant runtime folder

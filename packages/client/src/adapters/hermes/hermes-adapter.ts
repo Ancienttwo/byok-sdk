@@ -165,9 +165,9 @@ function stopProcessGroup(pid: number): void {
 }
 
 const infrastructure = (phase: 'start' | 'run', reason: string, retry: 'retryable' | 'non-retryable' = 'non-retryable') =>
-  new RuntimeExecutionFailure({ phase, category: 'infrastructure', retry, reason });
+  new RuntimeExecutionFailure({ phase, retry, reason });
 const authority = (reason: string) =>
-  new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
+  new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
 
 /**
  * Hermes Agent over ACP stdio (`hermes acp`). The `hermes acp` process is a

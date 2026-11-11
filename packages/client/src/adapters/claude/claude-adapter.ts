@@ -59,7 +59,7 @@ function startupExit(client: ClaudeProcessClient) {
 /** One owner covers process teardown and task config on every failed start. */
 async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | undefined, scratch: ExecutionScratch, retainPendingDisposal = false): Promise<never> {
   const failure = isRuntimeExecutionFailure(cause) ? cause : new RuntimeExecutionFailure({
-    phase: 'start', category: 'infrastructure', retry: 'retryable',
+    phase: 'start', retry: 'retryable',
     reason: 'claude runtime startup failed',
   }, { cause });
   let disposalAttempt: Promise<void> | undefined;
@@ -259,7 +259,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
   ): Promise<Session> {
     const signal = startInput.signal;
     const cancellationFailure = () => new RuntimeExecutionFailure({
-      phase: 'start', category: 'infrastructure', retry: 'retryable',
+      phase: 'start', retry: 'retryable',
       reason: 'claude runtime startup was cancelled',
     }, { cause: signal?.reason });
     if (signal?.aborted) throw cancellationFailure();
@@ -271,7 +271,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
     if (startInput.kind !== 'instruction') {
       throw new RuntimeExecutionFailure({
         phase: 'start',
-        category: 'authority',
         retry: 'non-retryable',
         reason: 'the claude adapter has no prepared-input lane',
       });
@@ -279,7 +278,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
     if (typeof startInput.instruction !== 'string') {
       throw new RuntimeExecutionFailure({
         phase: 'start',
-        category: 'authority',
         retry: 'non-retryable',
         reason: 'prepared claude operation requires a resolved string instruction',
       });
@@ -352,7 +350,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
       } catch (cause) {
         throw new RuntimeExecutionFailure({
           phase: 'start',
-          category: 'authority',
           retry: 'non-retryable',
           reason: 'prepared claude operation received an invalid runtime selection manifest',
         }, { cause });
@@ -360,7 +357,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
       if (manifestModelId !== modelId) {
         throw new RuntimeExecutionFailure({
           phase: 'start',
-          category: 'authority',
           retry: 'non-retryable',
           reason: 'prepared claude operation received a manifest with different runtime selection',
         });
@@ -368,7 +364,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       const manifestCwd = startInput.manifest.cwd;
       if (manifestCwd === undefined) {
         throw new RuntimeExecutionFailure({
-          phase: 'start', category: 'authority', retry: 'non-retryable',
+          phase: 'start', retry: 'non-retryable',
           reason: 'prepared claude operation received a manifest without a sealed cwd',
         });
       }
@@ -423,7 +419,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       } catch (cause) {
         if (isRuntimeStartupDisposalFailure(cause)) throw cause;
         throw new RuntimeExecutionFailure({
-          phase: 'start', category: 'infrastructure', retry: 'retryable',
+          phase: 'start', retry: 'retryable',
           reason: 'claude runtime process could not be spawned',
         }, { cause });
       }
@@ -433,14 +429,14 @@ export class ClaudeAdapter implements RuntimeAdapter {
         const initialized = await Promise.race([control.initialize(), cancelled]);
         throwIfCancelled();
         if (!initialized) throw new RuntimeExecutionFailure({
-          phase: 'start', category: 'infrastructure', retry: 'retryable',
+          phase: 'start', retry: 'retryable',
           reason: 'Claude native control initialization failed',
           failure: startupExit(client),
         });
         throwIfCancelled();
         // No prompt is sent unless the runtime confirms the gate is registered.
         if (gate !== undefined && control.hooksApplied !== true) throw new RuntimeExecutionFailure({
-          phase: 'start', category: 'semantic', retry: 'non-retryable',
+          phase: 'start', retry: 'non-retryable',
           reason: 'tool_authorization_unsupported: Claude did not confirm registration of the PreToolUse authorization hook',
         });
         native?.beginTurn();
@@ -458,7 +454,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       } catch (cause) {
         if (isRuntimeStartupDisposalFailure(cause) || isRuntimeExecutionFailure(cause)) throw cause;
         throw new RuntimeExecutionFailure({
-          phase: 'start', category: 'infrastructure', retry: 'retryable',
+          phase: 'start', retry: 'retryable',
           reason: 'claude initial instruction transport failed',
           failure: startupExit(client),
         }, { cause });
@@ -485,7 +481,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         if (isRuntimeStartupDisposalFailure(err)) throw err;
         if (isRuntimeExecutionFailure(err)) throw err;
         throw new RuntimeExecutionFailure({
-          phase: 'start', category: 'infrastructure', retry: 'retryable',
+          phase: 'start', retry: 'retryable',
           reason: `claude exited before yielding an authoritative session id: ${errorMessage(err)}`,
           failure: startupExit(client),
         }, { cause: err });
@@ -502,7 +498,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
       if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
         throw new RuntimeExecutionFailure({
           phase: 'start',
-          category: 'authority',
           retry: 'non-retryable',
           reason: `claude --resume echoed a different session id than requested (requested ${resumeSessionId}, got ${sessionRef})`,
         });
@@ -693,7 +688,6 @@ class ClaudeSession implements Session {
               } catch (cause) {
                 throw new RuntimeExecutionFailure({
                   phase: 'run',
-                  category: 'infrastructure',
                   retry: 'retryable',
                   reason: 'claude runtime event transport failed',
                 }, { cause });
@@ -702,7 +696,6 @@ class ClaudeSession implements Session {
               if (done) {
                 throw new RuntimeExecutionFailure({
                   phase: 'run',
-                  category: 'infrastructure',
                   retry: 'retryable',
                   reason: 'claude runtime process ended before a terminal result frame',
                   failure: { class: client.processExited ? 'runtime_exited' : 'unknown' },
@@ -789,7 +782,7 @@ class ClaudeSession implements Session {
       await this.client.writeUserMessage(task.instruction);
     } catch (cause) {
       throw new RuntimeExecutionFailure({
-        phase: 'run', category: 'infrastructure', retry: 'retryable',
+        phase: 'run', retry: 'retryable',
         reason: 'claude follow-up instruction transport failed',
       }, { cause });
     }

@@ -119,8 +119,8 @@ class FakeSession implements Session {
       case 'no-call': this.emit({ type: 'progress', text: JSON.stringify(target) }); break;
       case 'hang': return;
       // Typed run failures, as the real adapters report them; the SDK copies `reason` into task.fail.
-      case 'runtime-error': throw new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason: 'fake runtime crashed' });
-      case 'capacity': throw new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: FAKE_CAPACITY_REASON });
+      case 'runtime-error': throw new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason: 'fake runtime crashed' });
+      case 'capacity': throw new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason: FAKE_CAPACITY_REASON });
       case 'decline': throw new Error('decline is handled at prepare');
     }
     this.emit({ type: 'usage', inputTokens: 10, outputTokens: 5 });

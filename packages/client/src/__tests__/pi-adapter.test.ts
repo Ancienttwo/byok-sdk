@@ -187,7 +187,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       failure = error;
     }
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'start', category: 'infrastructure', retry: 'retryable' });
+    expect(failure).toMatchObject({ phase: 'start', retry: 'retryable' });
   });
 
   it('routes an authoritative BYOK selection through the credential launcher without a key in argv or env', async () => {
@@ -619,7 +619,7 @@ const __executionScratch = await testExecutionScratch();
     }
     expect(events).toContainEqual({ type: 'error', message: 'provider still unavailable' });
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable' });
+    expect(failure).toMatchObject({ phase: 'run', retry: 'non-retryable' });
   });
 
   it.each([
@@ -641,7 +641,7 @@ const __executionScratch = await testExecutionScratch();
     const session = await startAdapter(fakePiAdapter(), baseTask, await makeCtx({ ...process.env, FAKE_PI_TRAJECTORY: 'killed' }));
     openSessions.push(session);
     const failure = await (async () => { for await (const _event of session.events); })().then(() => undefined, (error: unknown) => error);
-    expect(failure).toMatchObject({ category: 'infrastructure', failure: { class: 'runtime_exited' } });
+    expect(failure).toMatchObject({ failure: { class: 'runtime_exited' } });
   });
 
   it('marks a Pi child error during an admitted turn unknown, since the process did not exit (#869)', async () => {
@@ -656,7 +656,7 @@ const __executionScratch = await testExecutionScratch();
     if (!child) throw new Error('pi child was not spawned');
     child.emit('error', new Error('simulated pi child error'));
     const failure = await (async () => { for await (const _event of session.events); })().then(() => undefined, (error: unknown) => error);
-    expect(failure).toMatchObject({ category: 'infrastructure', failure: { class: 'unknown' } });
+    expect(failure).toMatchObject({ failure: { class: 'unknown' } });
   });
 
   it('marks pi exiting before it answers the initial prompt runtime_exited (#869)', async () => {
@@ -671,7 +671,7 @@ const __executionScratch = await testExecutionScratch();
       phase: 'start', message: expect.stringMatching(/before yielding an authoritative session id/), failure: { class: 'runtime_exited' },
     });
     await expect(startAdapter(fakePiAdapter(), baseTask, await makeCtx({ ...process.env, FAKE_PI_GET_STATE_FAIL: '1' }))).rejects.toMatchObject({
-      phase: 'start', category: 'authority', failure: { class: 'unknown' },
+      phase: 'start', failure: { class: 'unknown' },
     });
   });
 
@@ -878,7 +878,6 @@ const __executionScratch = await testExecutionScratch();
     ctx.startMcpToolsetTools = observationOf({ docs: ['search_docs', 'peek_docs'] });
 
     await expect(startAdapter(adapter, baseTask, ctx)).rejects.toMatchObject({
-      category: 'authority',
       retry: 'non-retryable',
       message: expect.stringContaining('different MCP toolset tool authority'),
     });

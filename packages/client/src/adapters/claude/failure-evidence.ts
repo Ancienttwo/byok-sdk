@@ -60,7 +60,6 @@ export class ClaudeFailureEvidence {
     if (frame.type !== 'result' || frame.is_error !== true || this.#turn === undefined) return failure;
     return new RuntimeExecutionFailure({
       phase: failure.phase,
-      category: failure.category,
       retry: failure.retry,
       reason: failure.message,
       failure: this.#turn,

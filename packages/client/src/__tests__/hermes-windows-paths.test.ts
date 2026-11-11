@@ -79,7 +79,7 @@ async function readyWait() {
   dirs.push(home);
   const session = createHermesSession({} as ExecutionScratch, home, new Set(), 1_000, {
     RuntimeExecutionFailure, isRuntimeExecutionFailure, servesHermesHome, ownsHermesGatewayPid,
-    infrastructure: (phase, reason, retry = 'non-retryable') => new RuntimeExecutionFailure({ phase, category: 'infrastructure', retry, reason }),
+    infrastructure: (phase, reason, retry = 'non-retryable') => new RuntimeExecutionFailure({ phase, retry, reason }),
     identifyHermesGateway: async () => ({ pid: 300, state: 'ready', servedHomes: [home] }),
   } as Partial<HermesSessionDependencies> as HermesSessionDependencies);
   return { home, session };

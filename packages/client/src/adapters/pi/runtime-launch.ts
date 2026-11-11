@@ -35,7 +35,7 @@ export interface PiRuntimeLaunchResources extends RuntimeLaunchResources {
 }
 
 function failure(reason: string): RuntimeExecutionFailure {
-  return new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
+  return new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
 }
 
 /**

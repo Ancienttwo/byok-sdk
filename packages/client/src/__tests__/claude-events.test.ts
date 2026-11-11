@@ -144,7 +144,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
     const result = mapClaudeMessageToAgentEvents(msg, createToolUseCorrelation(), { workspaceDir: '/tmp/ws' });
     expect(result.events).toEqual([]);
     expect(result.terminalFailure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(result.terminalFailure).toMatchObject({ phase: 'run', category: 'authority', retry: 'non-retryable' });
+    expect(result.terminalFailure).toMatchObject({ phase: 'run', retry: 'non-retryable' });
   });
 
   it('flags a non-tool_result user content block as unmapped', () => {
@@ -210,7 +210,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
     const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
     expect(result.events).toEqual([{ type: 'error', message: 'No conversation found with session ID: bogus' }]);
     expect(result.terminalFailure).toEqual(expect.objectContaining({
-      phase: 'run', category: 'semantic', retry: 'non-retryable',
+      phase: 'run', retry: 'non-retryable',
     }));
     expect(result.terminalFailure).toBeInstanceOf(RuntimeExecutionFailure);
   });
@@ -229,7 +229,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
         { type: 'usage', inputTokens: 50, outputTokens: 0 },
         { type: 'error', message: 'model overloaded' },
     ]);
-    expect(result.terminalFailure).toMatchObject({ category: 'semantic', retry: 'non-retryable' });
+    expect(result.terminalFailure).toMatchObject({ retry: 'non-retryable' });
   });
 
   it('falls back to a generic error message when a failed result has neither errors nor a result string', () => {
@@ -237,7 +237,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
     const msg: ClaudeStreamMessage = { type: 'result', is_error: true };
     const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
     expect(result.events).toEqual([{ type: 'error', message: 'claude reported an error result' }]);
-    expect(result.terminalFailure).toMatchObject({ category: 'semantic', retry: 'non-retryable' });
+    expect(result.terminalFailure).toMatchObject({ retry: 'non-retryable' });
   });
 
   it('cross-model review (Fix 3): a result with a MISSING is_error is never reported as success — fails closed rather than treating an absent flag as success', () => {

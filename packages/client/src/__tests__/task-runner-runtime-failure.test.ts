@@ -55,7 +55,6 @@ describe('TaskRunner typed runtime failure projection', () => {
     const adapter = new StubRuntimeAdapter('pi');
     adapter.startError = new RuntimeExecutionFailure({
       phase: 'start',
-      category: 'infrastructure',
       retry: 'retryable',
       reason: 'runtime process could not be spawned',
     });
@@ -74,7 +73,6 @@ describe('TaskRunner typed runtime failure projection', () => {
     adapter.sessions[0]!.emit({ type: 'error', message: 'provider diagnostic' });
     adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
       phase: 'run',
-      category: 'semantic',
       retry: 'non-retryable',
       reason: 'runtime reported terminal task failure',
     }));
@@ -94,7 +92,6 @@ describe('TaskRunner typed runtime failure projection', () => {
     const session = adapter.sessions[0]!;
     session.fail(new RuntimeExecutionFailure({
       phase: 'run',
-      category: 'authority',
       retry: 'non-retryable',
       reason: 'authoritative terminal mismatch',
     }));
@@ -153,7 +150,7 @@ describe('TaskRunner typed runtime failure projection', () => {
       await offer('scope-run');
       await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'scope-run');
       adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
-        phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'weekly limit',
+        phase: 'run', retry: 'non-retryable', reason: 'weekly limit',
         failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' },
       }));
       const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'scope-run');
