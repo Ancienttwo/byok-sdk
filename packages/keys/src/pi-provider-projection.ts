@@ -58,13 +58,20 @@ export function piProjectionProviderId(profileRef: string): string {
  * or base URL.
  */
 export function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry): object {
-  const { thinkingLevel: _, api, ...modelSettings } = requirePiModelConfig(profile);
+  const { thinkingLevel: _, api: declaredApi, ...modelSettings } = requirePiModelConfig(profile);
+  const api = piApiOf(profile.adapter, declaredApi);
+  if (api === undefined) {
+    throw new ByokKeysError(
+      'PROVIDER_PROFILE_INVALID',
+      `${profile.profile_ref} Anthropic profiles project anthropic-messages and declare no Pi api`,
+    );
+  }
   const projectedProviderId = piProjectionProviderId(profile.profile_ref);
   return {
     providers: {
       [projectedProviderId]: {
         baseUrl: profile.adapter === 'anthropic' ? piAnthropicBaseUrl(profile) : profile.base_url,
-        api: piApiOf(profile.adapter, api),
+        api,
         apiKey: piApiKey(profile, runtimeEntry),
         ...(profile.auth_mode === 'bearer' ? { authHeader: true } : {}),
         models: [
