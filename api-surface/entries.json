@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2364097,
+      "budgetBytes": 2364520,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -643,7 +643,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 564631,
+      "budgetBytes": 567357,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -730,11 +730,11 @@
         "eventsource-parser",
         "get-east-asian-width",
         "graceful-fs",
-        "grok-mermaid",
         "highlight.js",
         "hosted-git-info",
         "ignore",
         "isexe",
+        "lovely-mermaid",
         "lru-cache",
         "marked",
         "marked-cjk-friendly",
@@ -812,6 +812,7 @@
           "node:process",
           "node:querystring",
           "node:readline",
+          "node:readline/promises",
           "node:sqlite",
           "node:stream",
           "node:stream/web",
@@ -840,7 +841,7 @@
       "codegen": [
         {
           "file": "@earendil-works/pi-ai/dist/api/bedrock-converse-stream.lazy.js",
-          "line": 18,
+          "line": 20,
           "rule": "opaque import()"
         },
         {
@@ -850,7 +851,7 @@
         },
         {
           "file": "@earendil-works/pi-ai/dist/auth/oauth/load.js",
-          "line": 17,
+          "line": 20,
           "rule": "opaque import()"
         },
         {
@@ -1608,7 +1609,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Headless Pi model route: choices, linkage, field errors and submission",
-      "budgetBytes": 314751,
+      "budgetBytes": 322905,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1688,7 +1689,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Pinned pi-ai catalog lookup for pi_model",
-      "budgetBytes": 287539,
+      "budgetBytes": 295693,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2181,7 +2182,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2334827,
+      "budgetBytes": 2335323,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

@@ -1,7 +1,7 @@
 import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
 import { Harness, GenerationTask, ToolTask, LiveDoc, UserEntry, AssistantEntry, SystemEntry, hook,
   type Registry, type JsonObject, type TaskId, type ConversationId } from '@earendil-works/pi-durable';
-import type { JsonValue } from '@earendil-works/chord';
+import type { JsonValue } from '@earendil-works/chord/json';
 import { commitWrites } from '@earendil-works/pi-durable/testing';
 import { AgentDO } from '../src/agent-do';
 import { agentObjectName, sessionObjectName, getSessionObject, type SessionIdentity } from '../src/identity';
