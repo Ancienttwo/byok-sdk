@@ -34,6 +34,11 @@ describe.skipIf(!RUN)('H Worker faults on local workerd (#794 D3)', () => {
     expect(await h.intent(turnId)).toMatchObject({ tries: 1, conclusion: 'succeeded' });
     // No notified pass ran, and nothing called /host/passes: the alarm passes offered the Turn and applied its terminal.
     expect(worker.lines(NOTIFIED)).toEqual([]);
+    // The pass prints its report after the Turn commit and the sender tail, so wait for the line instead of reading it once.
+    await until(async () => {
+      if (alarmReports(worker).some(report => report.reconcile.concluded > 0)) return true;
+      throw new Error('timed out waiting for an alarm-pass report with reconcile.concluded > 0');
+    });
     const reports = alarmReports(worker);
     expect(reports.some(report => report.submit.tried > 0)).toBe(true);
     expect(reports.some(report => report.reconcile.concluded > 0)).toBe(true);
