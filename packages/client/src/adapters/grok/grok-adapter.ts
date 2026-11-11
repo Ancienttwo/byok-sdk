@@ -275,8 +275,8 @@ class GrokSession implements Session {
   private active = false;
   /** The input id of the SDK prompt OAR holds until Grok's own turn closes. */
   private held?: string;
-  /** The queue request in flight; an interrupt waits for its answer so it can take the input back. */
-  private queuing?: Promise<unknown>;
+  /** The prompt in flight, its queue request included; an interrupt waits for its answer so it can take the input back. */
+  private sending?: Promise<void>;
   /** The SDK asked for the active turn's cancel. Grok also ends a turn as cancelled on its own, on a permission request answered `cancelled`. */
   private interruptRequested = false;
   private readonly turnWaiters = new SettleWaiters();
@@ -376,23 +376,29 @@ class GrokSession implements Session {
     this.active = true;
     const inputId = randomUUID();
     this.projection?.beginSdkTurn(inputId);
-    const grokTurnsClosed = this.projection?.grokTurnsClosed;
+    // Marked from the first await: an interrupt in the same tick must not cancel a Grok turn OAR adopted meanwhile.
+    const sending = this.send(this.raw, input, inputId);
+    this.sending = sending;
     try {
-      let result = await this.raw.prompt(input, { inputId });
-      // OAR adopted a turn Grok runs on its own and refuses the prompt as busy: hold it until that turn closes.
-      // A Grok turn that closed while the busy answer was in flight still holds: the drain then sends it at once.
-      if (result.response.body.code === 'busy' && (this.projection?.grokTurnOpen === true || this.projection?.grokTurnsClosed !== grokTurnsClosed)) {
-        const queued = this.raw.queue(input, { inputId });
-        this.queuing = queued;
-        try { result = await queued; } finally { this.queuing = undefined; }
-        if (result.response.body.kind === 'accepted') this.held = inputId;
-      }
-      if (result.response.body.kind !== 'accepted') throw infrastructure(result.response.body.reason ?? 'grok prompt refused');
+      await sending;
     } catch (error) {
       this.active = false;
       this.projection?.endSdkTurn();
       throw error;
+    } finally {
+      this.sending = undefined;
     }
+  }
+  private async send(raw: RawAcpSession, input: string, inputId: string): Promise<void> {
+    const grokTurnsClosed = this.projection?.grokTurnsClosed;
+    let result = await raw.prompt(input, { inputId });
+    // OAR adopted a turn Grok runs on its own and refuses the prompt as busy: hold it until that turn closes.
+    // A Grok turn that closed while the busy answer was in flight still holds: the drain then sends it at once.
+    if (result.response.body.code === 'busy' && (this.projection?.grokTurnOpen === true || this.projection?.grokTurnsClosed !== grokTurnsClosed)) {
+      result = await raw.queue(input, { inputId });
+      if (result.response.body.kind === 'accepted') this.held = inputId;
+    }
+    if (result.response.body.kind !== 'accepted') throw infrastructure(result.response.body.reason ?? 'grok prompt refused');
   }
   async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string') throw new PolicyUnsupportedError('grok requires a string instruction');
@@ -406,7 +412,11 @@ class GrokSession implements Session {
   async interrupt(): Promise<void> {
     if (!this.raw || !this.active) return;
     this.interruptRequested = true;
-    if (this.queuing !== undefined) await this.queuing.catch(() => {});
+    if (this.sending !== undefined) {
+      await this.sending.catch(() => {});
+      // A refused prompt opened no turn; a directly accepted one may already have ended.
+      if (!this.active) return;
+    }
     if (this.held !== undefined) {
       // Taken back before the drain sends it, no prompt for this task reaches Grok; once sent, it is cancelled below.
       if (!this.raw.withdraw) throw infrastructure('grok session cannot take held input back');

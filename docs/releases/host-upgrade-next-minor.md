@@ -17,6 +17,10 @@ A Host on 0.41.0 reads these as `unknown` with `reportedClass` until it upgrades
 
 A Grok follow-up sent while Grok runs a turn of its own is held until that turn closes; budget the task deadline for that wait. Grok 429s that name a spending limit now fail as `quota` or `billing` (non-retryable) instead of retryable `rate_limited`. A Codex older than OAR needs, or with an unreadable `config.toml`, fails the start as non-retryable `invalid_request`. Confirm that the Host does not retry those classes as transient.
 
+## Grok qualified version 1.0.77
+
+The Grok adapter qualifies Grok 1.0.77 (#1884). A device on another version, 1.0.52 included, now reports `runtime_version_unqualified` with `qualifiedVersion: '1.0.77'`; the default policy stays `warn`, so tasks still run. A Host that pins its own Grok `versionPolicy` is unchanged. Grok's own turns, and the follow-up hold they cause, need 1.0.70 or later.
+
 ## OpenCode start failures
 
 OpenCode now reports unclassified start failures as retryable infrastructure failures. A native process that exits on its own reports `runtime_exited` during start or a turn; an archived resume target is non-retryable, while a target in use is retryable. Session limits accept fractional interrupt milliseconds and report invalid limits as `invalid opencode interrupt timeout` or `invalid opencode retention budget` (#1681).

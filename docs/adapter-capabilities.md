@@ -32,7 +32,7 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | agy | Claude | Codex | dsh | Grok | Hermes | OpenCode | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `2.2.6` | `1.5.0` | `1.5.0` |
+| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.77` | `0.22.2+2364.g0b10b9f` | `2.2.6` | `1.5.0` | `1.5.0` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | no | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | no | yes | no |
 | Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | no | yes | yes |
@@ -1023,13 +1023,23 @@ dependency.
   as cancelled. The end of Grok's own turn is not a task turn end; its text
   still reaches the event stream, and its token usage is reported with the
   next task turn. A Grok turn end while no turn is open fails the session as
-  a non-retryable infrastructure failure.
+  a non-retryable infrastructure failure. An interrupt sent before the
+  follow-up's prompt is answered waits for that answer, so it takes the held
+  input back instead of cancelling Grok's turn. The runtime contract `ownTurn`
+  case runs this on the qualified Grok: a background command's completion
+  wakes Grok, the follow-up sent during that turn reaches the model after it,
+  and each model request's usage is reported once.
+- Qualified version: 1.0.77, the newest stable release on 2026-11-12 (npm
+  `latest`; 1.0.78 to 1.0.81 are published only under `alpha`). Grok gates
+  its own turns at 1.0.70, and OAR 0.99's native-turn wire evidence is 1.0.77.
+  The 1.0.52 probes recorded elsewhere on this page were not repeated on
+  1.0.77 unless they say so; the runtime contract runs on 1.0.77.
 - Failure classes: a 429 is `quota` or `billing` when Grok's answer names a
   spending limit (Grok's free-usage code, or a provider error type such as
   `insufficient_quota`), otherwise `rate_limited`. A -32603 that carries the
   provider's `http_status` is classed by that status (402 is `billing`).
-- Detection: `grok --version` (advisory when it is not the qualified 1.0.52,
-  the newest OAR live evidence), `grok agent stdio --help` (else
+- Detection: `grok --version` (advisory when it is not the qualified 1.0.77),
+  `grok agent stdio --help` (else
   `refused: acp_unavailable`), and a login signal: `$GROK_HOME/auth.json`
   (default `~/.grok/auth.json`) exists, or `XAI_API_KEY` is set. The file is
   never read and no session opens.
