@@ -216,11 +216,11 @@ describe('SDK ordinary Pi RPC entry', () => {
     await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
     const address = server.address();
     if (address === null || typeof address === 'string') throw new Error('missing loopback address');
-    // An 11 s cache lifetime puts Pi's first refresh 1 s after the request; the
+    // A 13 s cache lifetime puts Pi's first refresh 3 s after the request; the
     // prices make an idle refresh pay for itself, so only the mode can stop it.
     writeFileSync(join(agent, 'models.json'), JSON.stringify({ providers: { probe: { api: 'openai-completions', baseUrl: `http://127.0.0.1:${address.port}/v1`,
       apiKey: 'synthetic', models: [{ id: 'probe', name: 'probe', contextWindow: 2_000_000, maxTokens: 32, input: ['text'], reasoning: false,
-        cost: { input: 100, output: 1, cacheRead: 1, cacheWrite: 0 }, promptCache: { short: 11 } }] } } }));
+        cost: { input: 100, output: 1, cacheRead: 1, cacheWrite: 0 }, promptCache: { short: 13 } }] } } }));
     let settled = () => {};
     const done = new Promise<void>(resolve => { settled = resolve; });
     const client = new PiRpcClient({ command: bun, cwd: f.sealed, env: f.env,
@@ -229,7 +229,7 @@ describe('SDK ordinary Pi RPC entry', () => {
     try {
       expect((await client.send({ type: 'prompt', message: 'hello' })).success).toBe(true);
       await done;
-      await new Promise(resolve => setTimeout(resolve, 2_500));
+      await new Promise(resolve => setTimeout(resolve, 4_500));
       expect(requests).toBe(1);
     } finally {
       await client.dispose();
