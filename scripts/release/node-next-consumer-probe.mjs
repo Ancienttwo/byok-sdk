@@ -7,13 +7,17 @@
 //
 // cloud-do loads the Workers types, whose globals clash with the Node types in
 // library checking under every resolution mode, so its consumer keeps
-// `skipLibCheck: true`; its wrong-type assignment still proves real types.
+// `skipLibCheck: true`. There an unresolved specifier in a transitive
+// declaration would silently become `any`, so that lane also reads every
+// installed declaration of its packages and refuses an extensionless relative
+// specifier.
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { runtimeSmokeImports } from '../api-surface/entry-closure.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -28,16 +32,36 @@ const LANES = {
   },
 };
 
-/** Every exports entry with declarations, split by whether its runtime needs `cloudflare:`. */
+/** The runtime smoke lanes, kept to the exports entries that carry declarations. */
 export function typesBearingEntries(root = repoRoot) {
   const entries = JSON.parse(readFileSync(path.join(root, 'api-surface', 'entries.json'), 'utf8'));
-  const lanes = { node: [], worker: [] };
-  for (const [specifier, entry] of Object.entries(entries)) {
-    if (entry.kind !== 'exports' || !entry.facts?.types?.length) continue;
-    const worker = (entry.facts.bareImports ?? []).some(bare => bare.startsWith('cloudflare:'));
-    lanes[worker ? 'worker' : 'node'].push(specifier);
+  const lanes = runtimeSmokeImports(root);
+  const typed = specifier => entries[specifier]?.facts?.types?.length > 0;
+  return { node: lanes.node.filter(typed), worker: lanes.worker.filter(typed) };
+}
+
+const RELATIVE_SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s*)(['"])(\.\.?(?:\/[^'"\n]*)?)\1/gm;
+
+function* declarationFiles(directory) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory()) yield* declarationFiles(file);
+    else if (/\.d\.[cm]?ts$/.test(entry.name)) yield file;
   }
-  return { node: lanes.node.sort(), worker: lanes.worker.sort() };
+}
+
+/** Fails on any relative specifier without a runtime extension in the installed declarations of these packages. */
+export function assertExplicitDeclarationSpecifiers(installRoot, specifiers) {
+  const packages = [...new Set(specifiers.map(specifier => specifier.split('/').slice(0, 2).join('/')))];
+  const offenders = [];
+  for (const name of packages) {
+    for (const file of declarationFiles(path.join(installRoot, 'node_modules', ...name.split('/'), 'dist'))) {
+      for (const match of readFileSync(file, 'utf8').matchAll(RELATIVE_SPECIFIER)) {
+        if (!/\.(?:[cm]?js|json)$/.test(match[2])) offenders.push(`${path.relative(installRoot, file)}: ${match[2]}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `[node-next-consumer] extensionless relative specifiers in installed declarations:\n${offenders.join('\n')}`);
 }
 
 function probeSource(specifiers, wrong) {
@@ -93,6 +117,7 @@ export function nodeNextConsumerProbe(installRoot, entries = typesBearingEntries
       ...(lane === 'worker' ? { files: workerTypeFiles() } : {}),
       include: ['probe.ts'],
     }, null, 2)}\n`);
+    if (LANES[lane].skipLibCheck) assertExplicitDeclarationSpecifiers(installRoot, entries[lane]);
     const result = spawnSync(process.execPath, [tscEntry(), '--project', 'tsconfig.json', '--pretty', 'false'], {
       cwd: consumer, encoding: 'utf8', timeout: 300_000,
     });
