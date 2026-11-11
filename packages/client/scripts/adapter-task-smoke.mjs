@@ -8,7 +8,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '../dist/testing/index.js';
 import { AGY_AUDIT_KEY, CANARY_RELATIVE_PATHS } from './credential-audit-core.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -360,7 +360,7 @@ try {
     },
     adapters,
     {
-      deviceCredentials: new InMemoryDeviceCredentialStore(),
+      deviceCredentials: new InMemoryDeviceCredentialBackend(),
       backoff: { baseMs: 10, maxMs: 100, factor: 1.5 },
       liveness: { timeoutMs: 5_000, checkIntervalMs: 250 },
       longPoll: { retryDelayMs: 10, idleDelayMs: 10 },

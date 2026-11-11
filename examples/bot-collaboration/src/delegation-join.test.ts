@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { hash, type Json } from '@byok-sdk/server/execution-core';
-import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import { template } from './k4-fixtures.test-support';
 import { addTurn, stateOf, type CollaborationState, type Delegation, type Turn, type Verdict } from './model';
 import { applyDelegate, claimUnit, endChain, releaseUnit, REPLY_UNCERTAIN_AFTER_MS, reserveUnits, resolveDelegation, retryReply, ROOT_BOT_BUDGET } from './delegation';
 import type { AutonomyGate } from './rules/autonomy';

@@ -160,9 +160,9 @@ test('a bin API entry selects the package that declares the bin; an undeclared b
   assert.throws(() => selectImpact(['api-surface/entries.json'], f), /unmapped API entry bin:byok-unknown/);
 });
 test('reviewed vendor and registry paths map explicitly, siblings still refuse', () => {
-  assert.ok(selectImpact(['packages/client/vendor/oar/45488e7/runtimes/grok/session.ts']).dirs.includes('packages/client'));
+  assert.ok(selectImpact(['packages/client/vendor/oar/ac7fde4/runtimes/grok/session.ts']).dirs.includes('packages/client'));
   assert.deepEqual(selectImpact(['scripts/release/registry-contract.test.mjs', 'scripts/release/registry-expectations.json']).dirs, []);
-  assert.throws(() => selectImpact(['packages/client/vendor/oar/45488e7/unreviewed.ts']));
+  assert.throws(() => selectImpact(['packages/client/vendor/oar/ac7fde4/unreviewed.ts']));
   assert.throws(() => selectImpact(['scripts/release/registry-contract.mjs']));
 });
 test('CLI and aggregate revalidate content against the same trusted comparison base', t => {
@@ -1076,7 +1076,8 @@ test('root CI composition admits only the exact helper and prefix, retaining the
 
 test('new graph-registered private workspaces and matching lock rows are admitted; unregistered additions fail', t => {
   const f = fixture(t);
-  for (const id of ['protocol', 'server', 'keys']) {
+  // #1808: the desktop example's ui-runtime edge needs ui-runtime declared in the base.
+  for (const id of ['protocol', 'server', 'keys', 'ui-runtime']) {
     const manifest = { name: `@byok-sdk/${id}`, version: '0.28.0' };
     f.write(`packages/${id}/package.json`, manifest); f.lock.workspaces[`packages/${id}`] = manifest;
   }

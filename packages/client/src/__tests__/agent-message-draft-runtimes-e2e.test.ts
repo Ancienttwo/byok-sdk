@@ -12,7 +12,7 @@ import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { taskRuntimeTarget } from '../runtime-detection';
 import { createDaemonWithAdapters, type Daemon } from '@byok-sdk/client';
 import type { RuntimeAdapter } from '../types';
-import { InMemoryDeviceCredentialStore } from './fixtures/device-credentials';
+import { InMemoryDeviceCredentialBackend } from './fixtures/device-credentials';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { waitForDaemonOpen } from './fixtures/lifecycle-barrier';
 import { startRealServer, type RealServerHandle } from './fixtures/real-server';
@@ -102,7 +102,7 @@ async function setup(runtime: RuntimeCase) {
     productName: 'Draft runtime test', productId, serverUrl: server.url,
     storeDir: path.join(root, 'store'),
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy },
-  }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
+  }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialBackend() });
   const { deviceId } = await daemon.pair((await server.createPairingCode()).code);
   await daemon.start();
   await waitForDaemonOpen(daemon);

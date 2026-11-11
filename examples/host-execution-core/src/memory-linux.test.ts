@@ -7,7 +7,7 @@ import { createInMemoryByokCloud } from '@byok-sdk/cloud';
 import { tenantId } from '@byok-sdk/core';
 import { createDaemonWithAdapters, AgentHomeManager } from '@byok-sdk/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { BotStubAdapter, waitForReady, waitForTaskCleanup } from '../../basic/goal-btw.test-support';
 import { createByokServer } from '@byok-sdk/server';
 import {
@@ -73,7 +73,7 @@ async function openMemoryHost(mode: 'cloud' | 'embedded') {
       redactor: { redact: snapshot => Buffer.from(JSON.stringify({ residentMemory: snapshot.files.find(file => file.path === 'MEMORY.md')?.content.replaceAll('private-value', '[redacted]') ?? null })) },
       port: { publish: input => page.projectionPort(deviceId).publish(input) },
     },
-  }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 20, idleDelayMs: 20 } });
+  }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialBackend(), longPoll: { retryDelayMs: 20, idleDelayMs: 20 } });
   const pairing = await (embedded ? embedded.pairing.createPairingCode({ productId }) : cloud!.createPairingCode(tenant, { productId }));
   deviceId = (await daemon.pair(pairing.code)).deviceId;
   await daemon.start(); await waitForReady(daemon);

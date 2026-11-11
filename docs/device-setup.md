@@ -128,6 +128,13 @@ For E2EE enrollment the Host also passes the base32 verification-secret string t
 `daemon.pair(code, { verificationSecret })`; use the Host's pairing flow rather
 than treating the combined UI string as an ordinary code.
 
+A Host that serves the SDK server through `listenLoopback` shuts down in this
+order: `daemon.stop()`, `listener.close()`, `server.close()`. `listener.close()`
+answers 503 to requests not yet dispatched, destroys connections, and resolves
+only after every dispatched handler has settled; it has no timeout. A
+request-scoped hook must therefore not wait on anything the Host releases after
+`listener.close()`.
+
 Embedded callbacks such as a `toolAuthorization` function and
 `agentHome.projection` cannot be encoded in CLI JSON. They remain typed Host
 integration points; a config file sets the static `toolAuthorization` policy

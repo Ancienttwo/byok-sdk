@@ -12,7 +12,7 @@ import { createEnvelope, PROTOCOL_VERSION, type AgentRef, type BlobRef, type Env
 import { policy } from '@byok-sdk/example-host-execution-core/test-support';
 import { createDeviceSimulator } from '@byok-sdk/testkit';
 import { expect, vi } from 'vitest';
-import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { BetaLedger, createBetaMcpServer, createTaskTools } from './index';
 
 type Event = Session['events'] extends AsyncIterable<infer E> ? E : never;
@@ -95,7 +95,7 @@ export async function openDaemonHost() {
   const daemon = createDaemonWithAdapters({ productId: PRODUCT_ID, productName: 'B3 test', localAgentRelease: { version: '0.0.0-test' },
     serverUrl: host.origin, storeDir: join(host.root, 'sdk'),
     agentHome: { hostStorageRoot: join(host.root, 'homes') }, agentEgress: { policy } },
-  [runtime], { deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 20, idleDelayMs: 20 } });
+  [runtime], { deviceCredentials: new InMemoryDeviceCredentialBackend(), longPoll: { retryDelayMs: 20, idleDelayMs: 20 } });
   const events: unknown[] = [];
   const unsubscribe = daemon.subscribe(event => events.push(event)); cleanup.push(unsubscribe);
   runtime.diagnostics = () => ({ events, status: daemon.status() });

@@ -51,7 +51,8 @@ export const workspaceGraph = {
       "@byok-sdk/client",
       "@byok-sdk/example-bot-collaboration",
       "@byok-sdk/keys",
-      "@byok-sdk/server"
+      "@byok-sdk/server",
+      "@byok-sdk/ui-runtime"
     ]
   },
   "examples/host-execution-core": {
@@ -228,6 +229,8 @@ export const familyOwners = Object.freeze({
     /^scripts\/release\/agent-memory-helper-source\.test\.mjs$/,
     /^packages\/client\/src\/(?:agent-memory\/|agent-home|daemon\/(?:agent-memory|resolve-agent-memory)|util\/agent-memory-helper)/,
     /^packages\/client\/src\/__tests__\/(?:agent-memory|agent-home-directory-barrier|daemon-conn-hello-capabilities)[^/]*$/,
+    // daemon-conn-hello-capabilities' win32 branch spawns through this fixture; only this Windows leg runs it.
+    /^packages\/client\/src\/__tests__\/fixtures\/script-command\.ts$/,
     // #605 W5: the power-cut harness modules live in their own directory.
     /^packages\/client\/src\/__tests__\/agent-memory-powercut\//,
   ],
@@ -627,9 +630,11 @@ export function selectImpact(paths, context = {}) {
     if (path === 'scripts/integration/fixtures/salesko-recurring-daemon.ts' || path === 'scripts/integration/salesko-recurring.test.ts') {
       dirs.add('packages/client'); continue;
     }
-    // Shared by client fixtures and their dependent examples, plus the built
-    // adapter and packaging smokes that import this backend directly.
-    if (path === 'scripts/testing/device-credentials.mjs') {
+    // #1844: the in-memory backend of @byok-sdk/client/testing, imported through
+    // dist/testing by the built adapter and packaging smokes. The two removed
+    // scripts/testing paths stay inputs of the PR and push that deleted them.
+    if (path === 'packages/client/src/testing/device-credentials.ts'
+      || path === 'scripts/testing/device-credentials.mjs' || path === 'scripts/testing/device-credentials.d.mts') {
       dirs.add('packages/client');
       families.add('adapter-lifecycle-smoke'); families.add('packageability-smoke');
       continue;
@@ -650,10 +655,10 @@ export function selectImpact(paths, context = {}) {
     if (Object.hasOwn(reviewedBuildConfigOwners, path)) {
       dirs.add(reviewedBuildConfigOwners[path]); families.add('npm-release-pack'); continue;
     }
-    // Client build inputs: the entry checks, the main build config, the todo
-    // build config (check-adapters-entry.mjs --build-todo runs it) and the
-    // retired vendored-subagents build plugin and sealed host build check
-    // (a PR that deletes a path still lists it).
+    // Client build inputs: the adapters entry check, the main build config, the
+    // todo build config (check-adapters-entry.mjs --build-todo runs it) and the
+    // retired vendored-subagents build plugin, sealed host build check and
+    // Hermes session entry check (a PR that deletes a path still lists it).
     if (path === 'packages/client/scripts/check-hermes-session-entry.mjs' || path === 'packages/client/scripts/check-adapters-entry.mjs'
       || path === 'packages/client/tsup.config.ts' || path === 'packages/client/tsup.todo.config.ts' || path === 'packages/client/scripts/build-sealed-host.mjs'
       || path === 'packages/client/scripts/subagents-build.ts') {
@@ -714,7 +719,7 @@ export function selectImpact(paths, context = {}) {
       scripts = true; continue;
     }
     // #652 trims these reviewed files in the pinned OAR snapshot.
-    if (/^packages\/client\/vendor\/oar\/45488e7\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
+    if (/^packages\/client\/vendor\/oar\/ac7fde4\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {

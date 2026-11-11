@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "fcf109c518ad814e2b4ca13acf101339ad6b6a7eb44de817ea37ff995aff8208"
+    "snapshotSha256": "415b9418b8163dabc9f39d6e9d3f97759ca7c143b603ecdfbafab76ce4687870"
   },
   "configFields": {
     "status": "tracked",
@@ -258,6 +258,15 @@
       ]
     },
     {
+      "id": "model-route-host-entry-default-thinking-level",
+      "impact": "additive",
+      "summary": "ModelRouteHostEntry accepts an optional default_thinking_level that a draft takes when the entry is selected. modelRouteContext throws when the level is not one the entry's config supports; an entry without the field behaves as before.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-model-route-entries-can-declare-a-default-thinking-level",
+      "items": [
+        "export:@byok-sdk/keys/model-route#ModelRouteHostEntry"
+      ]
+    },
+    {
       "id": "daemon-embedded-pairing",
       "impact": "additive",
       "summary": "Daemon.pairEmbedded(server) pairs an embedded Host's daemon against its in-process server and reconciles an existing enrollment; every other state throws the new EmbeddedPairingError (enrollment_missing, device_unknown, re_pair_required, store_not_bound) and writes nothing. EmbeddedPairingServer is the structural server type it reads. Daemon.whenOpen({ signal }) resolves on running/open and rejects with DaemonHaltError, the new DaemonNotOpenError (stopped, crashed) or signal.reason. Both Daemon members are required, so a Host test double typed as Daemon adds them (#1840).",
@@ -290,6 +299,47 @@
         "export:@byok-sdk/keys#parseHermesProviderLauncherRequest",
         "export:@byok-sdk/keys#runHermesProviderLauncher"
       ]
+    },
+    {
+      "id": "testing-in-memory-device-credential-backend",
+      "impact": "additive",
+      "summary": "@byok-sdk/client/testing exports InMemoryDeviceCredentialBackend, a DeviceCredentialBackend held in memory for a Host's tests. A Host that hand-rolls a memory backend injects this one as deviceCredentials; no runtime Host change is required. The host-execution-core example's tests import it instead of the repo's removed scripts/testing helper.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#in-memory-device-credential-backend-1844",
+      "items": [
+        "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
+        "example:host-execution-core"
+      ]
+    },
+    {
+      "id": "resolve-sdk-hosting",
+      "impact": "additive",
+      "summary": "resolveSdkHosting({ assetRoot, helperHost }) resolves a packaged Host's SDK hosting values from the copySdkPackagingAssets directory for process.platform and process.arch: daemon spreads into DaemonConfig and adapters into RuntimeAdaptersConfig. A missing required asset throws the new SdkHostingAssetsMissingError (code sdk_hosting_assets_missing, sorted relative missing paths); an unsupported target throws. sdkPackagingAssetLayout and sdkDistributionManifest keep the same values; only their declaration text changed (the agent-memory-fs directory now has one definition). The four existing configuration fields are unchanged (#1839).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#packaged-hosts-resolve-sdk-hosting-from-the-asset-root",
+      "items": [
+        "export:@byok-sdk/client#SdkHosting",
+        "export:@byok-sdk/client#SdkHostingAssetsMissingError",
+        "export:@byok-sdk/client#SdkHostingOptions",
+        "export:@byok-sdk/client#resolveSdkHosting",
+        "export:@byok-sdk/client#sdkDistributionManifest",
+        "export:@byok-sdk/client#sdkPackagingAssetLayout"
+      ]
+    },
+    {
+      "id": "agent-memory-start-refusal-classes",
+      "impact": "breaking",
+      "summary": "A claimed task that the Agent home's memory refuses before its runtime starts now carries a typed task.fail.failure.class from AGENT_MEMORY_START_REFUSALS (resident MEMORY.md over the limit, with more than one link, not a regular file or not UTF-8; a commit-on-success start copy over the snapshot file or byte limit, or refused otherwise). The reason text is unchanged. A task that seals its output sends unknown. TaskFailureReading gains a member, so an exhaustive switch over its class stops compiling until it handles the new classes. AgentMemorySnapshotLimitError takes the bound it hit as its new first constructor argument and exposes it as limit.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-start-refusal-classes",
+      "items": [
+        "export:@byok-sdk/client#AgentMemorySnapshotLimitError",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_START_REFUSALS",
+        "export:@byok-sdk/protocol#AgentMemoryStartRefusal",
+        "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+        "export:@byok-sdk/protocol#TaskFailSealedPayload",
+        "export:@byok-sdk/protocol#TaskFailureReading",
+        "export:@byok-sdk/protocol#TaskFailureSchema",
+        "export:@byok-sdk/protocol/constants#AGENT_MEMORY_START_REFUSALS",
+        "export:@byok-sdk/protocol/constants#AgentMemoryStartRefusal"
+      ]
     }
   ],
   "changes": [
@@ -311,8 +361,20 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=01e1d1c922e507dd",
-      "after": "K8 0.0.1 src-sha256=c329c3d65446c4f0",
+      "after": "K8 0.0.1 src-sha256=708b24f55f86244f",
       "entry": "example-bot-collaboration-autonomy"
+    },
+    {
+      "item": "example:host-execution-core",
+      "change": "changed",
+      "before": "K4 0.0.1 src-sha256=29b76c2746aa7b33",
+      "after": "K4 0.0.1 src-sha256=a62de5b4c4495e5e",
+      "entry": "testing-in-memory-device-credential-backend"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentMemorySnapshotLimitError",
+      "change": "changed",
+      "entry": "agent-memory-start-refusal-classes"
     },
     {
       "item": "export:@byok-sdk/client#AgyAdapter",
@@ -495,9 +557,39 @@
       "entry": "dts-node-next-specifiers"
     },
     {
+      "item": "export:@byok-sdk/client#SdkHosting",
+      "change": "added",
+      "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#SdkHostingAssetsMissingError",
+      "change": "added",
+      "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#SdkHostingOptions",
+      "change": "added",
+      "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#resolveSdkHosting",
+      "change": "added",
+      "entry": "resolve-sdk-hosting"
+    },
+    {
       "item": "export:@byok-sdk/client#resolveStorageConfig",
       "change": "changed",
       "entry": "codex-session-store"
+    },
+    {
+      "item": "export:@byok-sdk/client#sdkDistributionManifest",
+      "change": "changed",
+      "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#sdkPackagingAssetLayout",
+      "change": "changed",
+      "entry": "resolve-sdk-hosting"
     },
     {
       "item": "export:@byok-sdk/client/adapters#AgyAdapter",
@@ -638,6 +730,11 @@
       "item": "export:@byok-sdk/client/testing#FakeRuntimeAdapterId",
       "change": "changed",
       "entry": "hermes-runtime-adapter-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
+      "change": "added",
+      "entry": "testing-in-memory-device-credential-backend"
     },
     {
       "item": "export:@byok-sdk/cloud#ByokCloud",
@@ -790,9 +887,24 @@
       "entry": "opencode-go-keys-store"
     },
     {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteHostEntry",
+      "change": "changed",
+      "entry": "model-route-host-entry-default-thinking-level"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_START_REFUSALS",
+      "change": "added",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
       "item": "export:@byok-sdk/protocol#AgentHomeProjectionPayloadSchema",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryStartRefusal",
+      "change": "added",
+      "entry": "agent-memory-start-refusal-classes"
     },
     {
       "item": "export:@byok-sdk/protocol#E2eeScopeKeyPackageSchema",
@@ -860,6 +972,26 @@
       "entry": "offer-selection-rules"
     },
     {
+      "item": "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+      "change": "changed",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailSealedPayload",
+      "change": "changed",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailureReading",
+      "change": "changed",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailureSchema",
+      "change": "changed",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
       "item": "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
@@ -878,6 +1010,16 @@
       "item": "export:@byok-sdk/protocol#offerSelectionViolation",
       "change": "added",
       "entry": "offer-selection-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#AGENT_MEMORY_START_REFUSALS",
+      "change": "added",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#AgentMemoryStartRefusal",
+      "change": "added",
+      "entry": "agent-memory-start-refusal-classes"
     },
     {
       "item": "export:@byok-sdk/server#TaskSnapshot",

@@ -172,6 +172,10 @@ second registry.
   turn resumes in a new process; Pi's durable lane refuses it too.
 - Codex steering targets the exact active `expectedTurnId`. An adapter without
   `steer` returns a typed rejection.
+- A Codex release older than a method the vendored OAR needs (for example
+  `thread/settings/update` before 0.133.0), or a `config.toml` Codex cannot
+  read, fails the start as non-retryable, class `invalid_request`, with Codex's
+  version and the first release that has the method, or Codex's own words.
 - Message drafts come from Claude's `--include-partial-messages` text deltas,
   Codex `item/agentMessage/delta`, Grok ACP `text_delta` and Pi `text_delta`
   progress.
@@ -528,7 +532,7 @@ task's and the SDK's MCP servers. It changes MCP servers only; the user's
 `AGENTS.md` still loads unless `agentUserContext` is also `excluded`. A run without an `agentRef`, and the default
 `'inherit'`, are unchanged. The adapter works on the session's own
 app server, through two caller-owned steps of the
-[vendored session](../packages/client/vendor/oar/45488e7/PROVENANCE.md):
+[vendored session](../packages/client/vendor/oar/ac7fde4/PROVENANCE.md):
 
 - Before the thread opens, `config/read` for the task cwd lists the servers of
   the user and project `config.toml` layers. Each one that is not a task
@@ -584,7 +588,7 @@ ACP `terminal: false` does not hide Grok 1.0.52's native terminal tool. The SDK
 does not provide a hidden-terminal mode; see the [qualified observation and
 limits](researches/2026-10-28-grok-terminal-capability-boundary.md).
 
-The [vendored launch profile](../packages/client/vendor/oar/45488e7/runtimes/grok/session.ts)
+The [vendored launch profile](../packages/client/vendor/oar/ac7fde4/runtimes/grok/session.ts)
 uses `agent --always-approve --no-leader stdio`; the adapter forwards the task
 environment. `grok agent` 1.0.52 has no flag for rule loading or folder trust.
 Grok's [Project rules guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/12-project-rules.md)
@@ -842,7 +846,7 @@ What the upstream runtimes offer that the SDK does not use:
 
 - Codex: the 0.164.0 app-server schema has `ephemeral` on `thread/start` (a
   thread that "should not be materialized on disk"), and `codex exec --help`
-  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/45488e7/runtimes/codex/open.ts)
+  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/ac7fde4/runtimes/codex/open.ts)
   does not send it. Inferred: 0.160.0 has the field, and an ephemeral thread
   leaves the other `CODEX_HOME` files alone.
 - Grok: `grok` 1.0.62 has no persistence flag, and the `session/new` `_meta`
@@ -949,7 +953,7 @@ and adding persona text alone does not establish isolation.
 
 `GrokAdapter` runs Grok Build over ACP: `grok agent --always-approve
 --no-leader stdio`, through the vendored OAR Grok profile
-(`packages/client/vendor/oar/45488e7`). The ACP stack is a private entry that
+(`packages/client/vendor/oar/ac7fde4`). The ACP stack is a private entry that
 loads at session start, so `@byok-sdk/client/adapters` carries no ACP
 dependency.
 
@@ -981,6 +985,20 @@ dependency.
 - Interrupt: `session/cancel`, then a wait for the cancelled prompt answer,
   bounded by `interruptTimeoutMs` (default 1000 ms). OAR still kills the
   process when Grok answers nothing for 10 s.
+- Grok's own turns: Grok also runs turns no prompt started (a finished
+  background command or sub-agent wakes the session). The vendored OAR 0.99
+  profile names every SDK prompt and adopts any other Grok turn as the
+  session's active turn. A follow-up sent during such a turn is held by OAR
+  and sent when that turn closes, so the task turn starts later. An interrupt
+  while it is held takes it back: Grok never receives it and the turn ends
+  as cancelled. The end of Grok's own turn is not a task turn end; its text
+  still reaches the event stream, and its token usage is reported with the
+  next task turn. A Grok turn end while no turn is open fails the session as
+  a non-retryable infrastructure failure.
+- Failure classes: a 429 is `quota` or `billing` when Grok's answer names a
+  spending limit (Grok's free-usage code, or a provider error type such as
+  `insufficient_quota`), otherwise `rate_limited`. A -32603 that carries the
+  provider's `http_status` is classed by that status (402 is `billing`).
 - Detection: `grok --version` (advisory when it is not the qualified 1.0.52,
   the newest OAR live evidence), `grok agent stdio --help` (else
   `refused: acp_unavailable`), and a login signal: `$GROK_HOME/auth.json`

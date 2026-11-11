@@ -8,6 +8,7 @@ import * as v5Release from 'byok-protocol-previous';
 import * as v6Release from 'byok-protocol-v6-baseline';
 import * as currentModule from '../index';
 import {
+  AGENT_MEMORY_START_REFUSALS,
   AgentMemorySelectionSchema,
   CAPABILITY_FLAGS,
   EnvelopeSchema,
@@ -23,6 +24,7 @@ import {
   isServerToDaemonType,
   offerSelectionViolation,
   parseMessage,
+  readTaskFailure,
   requiredReceiverCapabilities,
   type MessageType,
   type WireAddition,
@@ -481,6 +483,15 @@ describe('compat v6: the current decoder reads every v6 corpus line exactly', ()
       expect(decoded, 'the current decoder dropped or changed a committed field').toEqual(JSON.parse(line.raw));
     },
   );
+
+  it('reads each Agent-memory start refusal of the corpus as its own class (#1843)', () => {
+    for (const refusal of AGENT_MEMORY_START_REFUSALS) {
+      const line = v6Corpus.find((candidate) => candidate.type === 'task.fail' && (candidate.payload.failure as { class?: string } | undefined)?.class === refusal);
+      expect(line, refusal).toBeDefined();
+      const decoded = decodeEnvelope(line!.raw) as Extract<ReturnType<typeof decodeEnvelope>, { type: 'task.fail' }>;
+      expect(readTaskFailure(decoded.payload.failure!)).toEqual({ class: refusal });
+    }
+  });
 
   it('every approval request and decision names its approval', () => {
     for (const type of ['task.await_approval', 'task.approve', 'task.reject'] as const) {

@@ -1,10 +1,10 @@
-import { InMemoryDeviceCredentialStore } from '../../../../../scripts/testing/device-credentials.mjs';
-export { InMemoryDeviceCredentialStore };
+import { InMemoryDeviceCredentialBackend } from '../../testing/device-credentials.js';
+export { InMemoryDeviceCredentialBackend };
 
-const credentials = new Map<string, InMemoryDeviceCredentialStore>();
-export function testDeviceCredentials(productId: string): InMemoryDeviceCredentialStore {
+const credentials = new Map<string, InMemoryDeviceCredentialBackend>();
+export function testDeviceCredentials(productId: string): InMemoryDeviceCredentialBackend {
   let backend = credentials.get(productId);
-  if (backend === undefined) { backend = new InMemoryDeviceCredentialStore(); credentials.set(productId, backend); }
+  if (backend === undefined) { backend = new InMemoryDeviceCredentialBackend(); credentials.set(productId, backend); }
   return backend;
 }
 

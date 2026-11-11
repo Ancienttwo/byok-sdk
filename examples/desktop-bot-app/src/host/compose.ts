@@ -24,6 +24,8 @@ export interface HostCompositionOptions {
   readonly sdkHelperHost?: SdkHelperHostConfig;
   /** Enrollment custody; omitted, the daemon uses this product's OS credential store. */
   readonly deviceCredentials?: DeviceCredentialBackend;
+  /** Called when a bridge domain's views changed (`HostContext.changed`). */
+  readonly onChanged: () => void;
 }
 
 /** The running server, daemon and bridge domains of one Host process. */
@@ -176,6 +178,7 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
           consumers = next;
         },
       },
+      changed: options.onChanged,
     });
     return { daemon: started, domains, close };
   } catch (error) {
