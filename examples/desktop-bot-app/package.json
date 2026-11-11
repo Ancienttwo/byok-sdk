@@ -16,7 +16,8 @@
     "@byok-sdk/client": "workspace:*",
     "@byok-sdk/example-bot-collaboration": "workspace:*",
     "@byok-sdk/keys": "workspace:*",
-    "@byok-sdk/server": "workspace:*"
+    "@byok-sdk/server": "workspace:*",
+    "@byok-sdk/ui-runtime": "workspace:*"
   },
   "devDependencies": {
     "@electron/fuses": "2.1.3",

@@ -39,6 +39,7 @@ let root: string;
 const options = (): HostCompositionOptions => ({
   productId: 'byok-desktop-test', productName: 'BYOK Desktop Test', releaseVersion: '0.0.1',
   storeDir: path.join(root, 'store'), hostStorageRoot: path.join(root, 'home'), deviceCredentials: new MemoryDeviceCredentials(),
+  onChanged: () => {},
 });
 const keysDb = () => path.join(root, 'home', 'host', 'keys.db');
 
