@@ -28,6 +28,8 @@ await bundle({ entryPoints: [at('src', 'main', 'index.ts')], bundle: true, platf
   outfile: path.join(app, 'dist', 'src', 'main', 'index.js'), external: ['electron'], logLevel: 'warning',
   banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" } });
 for (const part of ['preload', 'renderer']) cpSync(at('dist', 'src', part), path.join(app, 'dist', 'src', part), { recursive: true });
+// Main resolves its tray icons under assets/ at the app root, as in dev.
+cpSync(at('assets'), path.join(app, 'assets'), { recursive: true });
 writeFileSync(path.join(app, 'package.json'), `${JSON.stringify({ name: manifest.name, version: manifest.version,
   description: manifest.description, license: manifest.license, type: 'module', main: 'dist/src/main/index.js' }, null, 2)}\n`);
 

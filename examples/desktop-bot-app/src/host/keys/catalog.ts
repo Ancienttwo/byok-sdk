@@ -1,5 +1,5 @@
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
-import { exactProviderProfileBinding, SqliteProviderProfileStore, type ModelProviderProfile } from '@byok-sdk/keys';
+import { exactProviderProfileBinding, inspectProviderProfileStore, SqliteProviderProfileStore, type ModelProviderProfile } from '@byok-sdk/keys';
 
 /**
  * Pins a Pi catalog entry to one provider profile (R6): lane `byok-profile`
@@ -25,13 +25,20 @@ export function catalogEntryFor(profile: ModelProviderProfile, base: ExecutionTe
  */
 export class ProviderProfiles {
   readonly #keysDb: string;
-  readonly #listeners = new Set<(profiles: readonly ModelProviderProfile[]) => void>();
+  readonly #listeners = new Set<(profiles: readonly ModelProviderProfile[]) => unknown>();
 
   constructor(keysDb: string) {
     this.#keysDb = keysDb;
   }
 
+  /**
+   * The store's profiles: none before custody first writes the store (the store's own verdict `absent`). Any verdict
+   * but `absent` or `accepted` refuses, with the store's reason.
+   */
   async load(): Promise<readonly ModelProviderProfile[]> {
+    const inspected = await inspectProviderProfileStore(this.#keysDb);
+    if (inspected.verdict === 'absent') return [];
+    if (inspected.verdict !== 'accepted') throw new Error(`Keys store ${this.#keysDb} is ${inspected.verdict}: ${inspected.reason}`);
     const store = new SqliteProviderProfileStore({ path: this.#keysDb, readOnly: true });
     try {
       return await store.list();
@@ -40,14 +47,14 @@ export class ProviderProfiles {
     }
   }
 
-  subscribe(listener: (profiles: readonly ModelProviderProfile[]) => void): () => void {
+  subscribe(listener: (profiles: readonly ModelProviderProfile[]) => unknown): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   }
 
-  /** A custody receipt arrived: reread the store and hand every listener the new profiles. */
+  /** A custody receipt arrived: reread the store and hand every listener the new profiles; a listener's failure rejects. */
   async changed(): Promise<void> {
     const profiles = await this.load();
-    for (const listener of this.#listeners) listener(profiles);
+    for (const listener of this.#listeners) await listener(profiles);
   }
 }

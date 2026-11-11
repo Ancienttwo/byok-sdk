@@ -1,5 +1,7 @@
 import type { AgentEgressPolicy } from '@byok-sdk/client';
+import type { ModelProviderProfile } from '@byok-sdk/keys';
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
+import { catalogEntryFor } from '../keys/catalog.ts';
 
 /**
  * The Agent egress policy of this Host. The daemon consumes only an offer carrying exactly its configured policy, so
@@ -31,14 +33,25 @@ export interface ConversationBrand {
   readonly models: Readonly<Record<string, ModelEntry>>;
 }
 
+/** One model a Bot can pick: its catalog id and the label the UI shows. */
+export interface ModelChoice {
+  readonly id: string;
+  readonly label: string;
+}
+
+/** The catalog id of the Pi entry pinned to one keys profile. */
+export const profileModelId = (profileRef: string): string => `pi:${profileRef}`;
+
 /**
- * K8's execution templates from the brand catalog (#1499 s1.4 "Models"): one fresh-lane template per catalog entry, on
- * this device, replying through `messageEgress`. K8 sets each Bot's `agentRef`, its instruction and its outcome
- * projection when it freezes a Turn; the values here are the base it starts from.
+ * K8's execution templates (#1499 s1.4 "Models"): one fresh-lane template per brand catalog entry, then one Pi entry per
+ * keys profile Pi can launch, pinned to that profile (R6, `catalogEntryFor`); a profile without `pi_model` has none, and
+ * the enabled profile is not read as a default. All run on this device and reply through `messageEgress`. K8 sets each
+ * Bot's `agentRef`, its instruction and its outcome projection when it freezes a Turn; the values here are the base.
  */
-export function executionCatalog(brand: Pick<ConversationBrand, 'instruction' | 'models'>, deviceId: string): {
+export function executionCatalog(brand: Pick<ConversationBrand, 'instruction' | 'models'>, deviceId: string, profiles: readonly ModelProviderProfile[]): {
   readonly execution: ExecutionTemplate;
   readonly models: Readonly<Record<string, ExecutionTemplate>>;
+  readonly choices: readonly ModelChoice[];
 } {
   const ids = Object.keys(brand.models);
   if (ids.length === 0) throw new Error('brand.config.ts lists no models');
@@ -51,6 +64,15 @@ export function executionCatalog(brand: Pick<ConversationBrand, 'instruction' | 
       terminalProjection: { mode: 'result-document', contract: 'desktop-turn-v1', schema: { type: 'object' } },
     },
   });
-  const models = Object.fromEntries(ids.map(id => [id, template(brand.models[id]!.runtime)]));
-  return { execution: models[ids[0]!]!, models };
+  const models: Record<string, ExecutionTemplate> = Object.fromEntries(ids.map(id => [id, template(brand.models[id]!.runtime)]));
+  const choices: ModelChoice[] = ids.map(id => ({ id, label: brand.models[id]!.label }));
+  for (const profile of profiles) {
+    const entry = catalogEntryFor(profile, template('pi'));
+    if (entry === undefined) continue;
+    const id = profileModelId(profile.profile_ref);
+    if (Object.hasOwn(models, id)) throw new Error(`brand.config.ts model ${id} collides with the keys profile ${profile.profile_ref}`);
+    models[id] = entry;
+    choices.push({ id, label: profile.display_name });
+  }
+  return { execution: models[ids[0]!]!, models, choices };
 }

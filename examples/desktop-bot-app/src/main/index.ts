@@ -8,12 +8,15 @@ import { createMainHandlers } from './domains.ts';
 import { HostProcess, spawnDevHost, spawnDevHostCommand, type SupervisedHostState } from './host-process.ts';
 import { spawnPackagedHost, spawnPackagedHostCommand } from './packaged-host.ts';
 import { coalesceStateHints } from './state-hint.ts';
+import { createAppTray } from './tray.ts';
 import { startUpdater } from './updater.ts';
 
 const SCHEME = 'app';
 const RENDERER_HOST = 'renderer';
 const RENDERER_DIR = fileURLToPath(new URL('../renderer/', import.meta.url));
 const PRELOAD = fileURLToPath(new URL('../preload/index.cjs', import.meta.url));
+// assets/ at the app root, in dev and in the asar (scripts/package/build.mjs); macOS picks the @2x template itself.
+const TRAY_ICON = fileURLToPath(new URL(`../../../assets/tray/${process.platform === 'darwin' ? 'trayTemplate.png' : 'tray.png'}`, import.meta.url));
 // Packaged local resources only: no remote content, no inline script or style, no network.
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; "
   + "connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -21,6 +24,8 @@ const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 's
 protocol.registerSchemesAsPrivileged([{ scheme: SCHEME, privileges: { standard: true, secure: true } }]);
 
 let window: BrowserWindow | undefined;
+let tray: ReturnType<typeof createAppTray> | undefined;
+let lastState: SupervisedHostState | undefined;
 let powerBlocker: number | undefined;
 
 /** Keeps the app from suspending while the Host has work; the display may still sleep (docs/host-execution-core.md "Device sleep"). */
@@ -49,8 +54,10 @@ const hintState = coalesceStateHints(() => {
 const host = new HostProcess({
   spawnHost: app.isPackaged ? spawnPackagedHost : spawnDevHost,
   onState: state => {
+    lastState = state;
     holdPower(state);
     hintState();
+    tray?.update(state);
     if (state.state === 'stopped' || state.state === 'restarting' || state.state === 'failed') console.error(`Host ${state.state}: ${state.reason}`);
     // Fail closed: no window talks to a Host that did not pass hello.
     if (state.state === 'failed') app.exit(1);
@@ -99,6 +106,13 @@ function createWindow(): void {
   void window.loadURL(`${SCHEME}://${RENDERER_HOST}/index.html`);
 }
 
+function showWindow(): void {
+  if (!window) return createWindow();
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
 app.on('web-contents-created', (_event, contents) => {
   contents.on('will-navigate', event => event.preventDefault());
   contents.on('will-attach-webview', event => event.preventDefault());
@@ -112,12 +126,9 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.setName(brand.productName);
-  app.on('second-instance', () => {
-    if (!window) return createWindow();
-    if (window.isMinimized()) window.restore();
-    window.focus();
-  });
-  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+  app.on('second-instance', showWindow);
+  // The app stays in the tray when its last window closes (#1499 s1.3); the tray's Quit ends it.
+  app.on('window-all-closed', () => {});
   app.on('activate', () => { if (!window) createWindow(); });
 
   let stopping = false;
@@ -138,5 +149,11 @@ if (!app.requestSingleInstanceLock()) {
     host.start();
     startUpdater({ beforeInstall: () => host.stop() });
     createWindow();
+    tray = createAppTray(TRAY_ICON, brand.productName, { showWindow, quit: () => app.quit() });
+    tray.update(lastState);
+  }).catch((error: Error) => {
+    // A missing tray icon or another startup failure leaves no way back to the app. The Host closes with its pipe.
+    console.error(`Startup failed: ${error.message}`);
+    app.exit(1);
   });
 }

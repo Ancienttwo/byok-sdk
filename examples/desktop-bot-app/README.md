@@ -88,11 +88,22 @@ bridge and composes the Host after main's hello (`src/host/compose.ts`):
   other state stops the Host with the refusal reason, as does a halt at start.
 - Wakes and Agent messages the server delivers before the conversation opens wait for
   it; one still waiting when the Host closes is refused and retried on the next run.
+- K8's model catalog is the `brand.config.ts` entries, then one Pi entry `pi:<profile_ref>`
+  per keys profile that has `pi_model`, pinned to that profile (`catalogEntryFor`, lane
+  `byok-profile`). The enabled profile is not read as a default. The catalog is built from
+  the keys store at Host start and rebuilt after every custody receipt; a profile edited
+  since is refused by the Pi launcher until then.
 
 A stopped Host keeps answering `status` with its reason and is not restarted. A Host
 that exits unasked is restarted with backoff (1 s, doubling to 30 s; back to 1 s after
 a minute of running). While the Host reports active work, main holds
 `powerSaveBlocker.start('prevent-app-suspension')`.
+
+The app stays in the tray when its last window closes; the tray menu shows the window,
+the Host's active tasks or why it is not running, and quits (which stops the Host). The
+login item is the OS's own setting: main answers `settings.loginItem` and
+`settings.setLoginItem` from it, and Linux has none (`supported: false`). The tray icons
+in `assets/tray/` are drawn for this app; macOS uses the `Template` images.
 
 ## Security baseline
 
