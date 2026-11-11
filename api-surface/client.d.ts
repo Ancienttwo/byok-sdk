@@ -1994,6 +1994,12 @@ export type AgentMemoryHomeCheck = {
  * no secure memory backend on this platform. On macOS and Windows pass the
  * helper's filesystem for this home as `commit.filesystem`; the caller closes it.
  *
+ * The verdict is about the home, and the device applies each half to one kind
+ * of task: resident refusals to a task that carries `MEMORY.md` into its
+ * prompt, start-record refusals to a task with `agentMemoryCommit`. The repair
+ * task (`agentMemory:"none"`, no commit) is never refused, so this verdict does
+ * not gate it.
+ *
  * The check holds no home lease and has no task id, so it is advisory: a home
  * within a task id's length of the start-record bound can pass and still be refused.
  */
