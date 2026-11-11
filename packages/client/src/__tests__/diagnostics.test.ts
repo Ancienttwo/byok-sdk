@@ -154,6 +154,15 @@ describe('diagnostics collector', () => {
     expect(live.checks.find((check) => check.id === 'lifecycle')?.status).toBe('pass');
   });
 
+  it.skipIf(process.platform === 'win32')('#1732: an offline daemon with an owned store root that is not 0700 names secure_dir_mode', async () => {
+    const dir = await tempDir();
+    const control = async (): Promise<string | undefined> =>
+      (await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable })).checks.find((check) => check.id === 'control')?.summary;
+    expect(await control()).toBe('daemon offline');
+    await fs.chmod(dir, 0o755);
+    expect(await control()).toContain(`secure_dir_mode ${path.resolve(dir)}`);
+  });
+
   describe('#1114: the clock-skew check reports the daemon-measured device clock offset', () => {
     const observedAt = '2026-10-14T00:00:00.000Z';
     const clockSkewCheck = (snapshot: Awaited<ReturnType<typeof collectDiagnostics>>) => snapshot.checks.find((check) => check.id === 'clock-skew');
