@@ -28,6 +28,7 @@ import {
 } from './profile-store';
 import {
   type ModelProviderProfile,
+  ModelProviderProfileSchema,
   type ProviderProfileRef,
   parseModelProviderProfile,
 } from './provider-profile';
@@ -35,20 +36,13 @@ import {
 export const PROVIDER_PROFILE_TRUTH_RECORD_KEY =
   'byok-sdk.keys/model-provider-registry-v1';
 
-const PROFILE_KEYS = [
-  'adapter',
-  'auth_mode',
-  'base_url',
-  'capabilities',
-  'created_at',
-  'display_name',
-  'enabled',
-  'kind',
-  'model',
-  'profile_ref',
-  'provider_kind',
-  'updated_at',
-] as const;
+// Schema shape order is the persisted key order; optional keys are emitted only when set.
+const PROFILE_KEYS = Object.keys(ModelProviderProfileSchema.shape) as Array<
+  keyof ModelProviderProfile
+>;
+const REQUIRED_PROFILE_KEYS = PROFILE_KEYS.filter(
+  (key) => !ModelProviderProfileSchema.shape[key].safeParse(undefined).success,
+);
 
 /**
  * Upper bound on how many profiles one tenant's registry snapshot may carry.
@@ -264,21 +258,12 @@ function encodeRegistry(profiles: readonly ModelProviderProfile[]): string {
   assertRegistryInvariants(normalized);
   const snapshot: ProviderRegistrySnapshotV1 = {
     schema_version: 1,
-    profiles: normalized.map((profile) => ({
-      adapter: profile.adapter,
-      auth_mode: profile.auth_mode,
-      base_url: profile.base_url,
-      capabilities: profile.capabilities,
-      created_at: profile.created_at,
-      display_name: profile.display_name,
-      enabled: profile.enabled,
-      kind: profile.kind,
-      model: profile.model,
-      ...(profile.pi_model === undefined ? {} : { pi_model: profile.pi_model }),
-      profile_ref: profile.profile_ref,
-      provider_kind: profile.provider_kind,
-      updated_at: profile.updated_at,
-    })),
+    profiles: normalized.map(
+      (profile) =>
+        Object.fromEntries(
+          PROFILE_KEYS.filter((key) => profile[key] !== undefined).map((key) => [key, profile[key]]),
+        ) as unknown as ModelProviderProfile,
+    ),
   };
   return JSON.stringify(snapshot);
 }
@@ -326,7 +311,7 @@ function decodeRegistryRecord(
   try {
     profiles = raw.profiles.map((candidate) => {
       if (!isPlainRecord(candidate) || !hasExactKeys(candidate,
-        Object.hasOwn(candidate, 'pi_model') ? [...PROFILE_KEYS, 'pi_model'] : PROFILE_KEYS)) {
+        PROFILE_KEYS.filter((key) => Object.hasOwn(candidate, key) || REQUIRED_PROFILE_KEYS.includes(key)))) {
         throw invalidTruth('Provider profile TruthStore body contains an unknown profile field');
       }
       return parseModelProviderProfile(candidate);

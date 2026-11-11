@@ -121,6 +121,26 @@ describe('TruthStoreProviderProfileStore authority', () => {
     expect(record.byteSize).toBe(BigInt(new TextEncoder().encode(body).byteLength));
   });
 
+  it('persists an optional pi_model between model and profile_ref and reads it back', async () => {
+    const truth = new InMemoryTruthStore(CLOCK);
+    const piModel = {
+      contextWindow: 128000, maxTokens: 4096, reasoning: false, thinkingLevel: 'off',
+      compat: {},
+    } as unknown as NonNullable<ModelProviderProfile['pi_model']>;
+    await store(truth).save(profile('openai', { pi_model: piModel }));
+
+    const record = (await truth.getRecord(TENANT, {
+      kind: 'profile',
+      recordKey: PROVIDER_PROFILE_TRUTH_RECORD_KEY,
+    }))!;
+    const body = record.body.kind === 'inline' ? record.body.body : '';
+    expect(Object.keys(JSON.parse(body).profiles[0])).toEqual([
+      'adapter', 'auth_mode', 'base_url', 'capabilities', 'created_at', 'display_name',
+      'enabled', 'kind', 'model', 'pi_model', 'profile_ref', 'provider_kind', 'updated_at',
+    ]);
+    expect((await store(truth).list())[0]?.pi_model).toEqual(piModel);
+  });
+
   it('keeps tenant registries isolated in one shared TruthStore', async () => {
     const truth = new InMemoryTruthStore(CLOCK);
     await store(truth).save(profile('openai'));
