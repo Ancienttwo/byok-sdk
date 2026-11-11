@@ -448,62 +448,6 @@ export declare function requiredProviderSecret(profile: ProviderAuthProfile, sec
  * - `none` adds nothing.
  */
 export declare function providerHeaders(profile: ProviderAuthProfile, secret: string | undefined): Record<string, string>;
-// ==== @byok-sdk/keys dist/hermes-provider-launcher.d.ts ====
-import { z } from 'zod';
-import { type ModelProviderProfile } from './provider-profile.js';
-import { type ExactProviderProfileBinding } from './provider-profile-binding.js';
-import { type SecretStore } from './secret-store.js';
-declare const RequestSchema: z.ZodObject<{
-    profileDbPath: z.ZodString;
-    binding: z.ZodObject<{
-        profileRef: z.ZodString;
-        profileRevision: z.ZodString;
-        profileHash: z.ZodString;
-        modelId: z.ZodString;
-        requiredCapabilities: z.ZodArray<z.ZodEnum<{
-            "image-input": "image-input";
-        }>>;
-    }, z.core.$strict>;
-    launch: z.ZodOptional<z.ZodObject<{
-        hermesBin: z.ZodString;
-        home: z.ZodString;
-        role: z.ZodEnum<{
-            gateway: "gateway";
-            viewer: "viewer";
-        }>;
-    }, z.core.$strict>>;
-}, z.core.$strict>;
-export type HermesProviderLauncherRequest = Omit<z.infer<typeof RequestSchema>, 'binding'> & {
-    binding: ExactProviderProfileBinding;
-};
-export declare const HERMES_PROVIDER_KEY_ENV = "SDK_HERMES_PROVIDER_KEY";
-/** Non-secret Hermes custom-provider projection. Other provider/auth semantics remain unqualified. */
-export declare function hermesProviderModel(profile: ModelProviderProfile): {
-    provider: string;
-    model: string;
-    baseUrl: string;
-    keyEnv: string;
-};
-/** Parse only the SDK launcher grammar; no caller-supplied Hermes arguments or environment. */
-export declare function parseHermesProviderLauncherRequest(args: readonly string[]): HermesProviderLauncherRequest;
-/**
- * Run only in a dedicated Host launcher process. Validation returns non-secret
- * model metadata. On POSIX, launch replaces this process, preserving the
- * Hermes gateway PID. Windows has no process replacement: launch starts Hermes
- * as a child with the credential in the child's environment only, resolves
- * when Hermes exits and sets `process.exitCode` to its exit code. The adapter
- * accepts a gateway below the launcher PID on Windows.
- * Before it reads the credential, launch reads one byte from stdin: the
- * adapter writes it after it has adopted this process (on Windows, into its
- * kill-on-close job), so neither the key nor Hermes exists outside the owned
- * tree. End of input fails the launch. The launcher program must not read
- * stdin itself.
- * The Host supplies its account-scoped store here, never in the daemon.
- */
-export declare function runHermesProviderLauncher(request: HermesProviderLauncherRequest, host: {
-    createSecretStore(): SecretStore;
-}): Promise<void>;
-export {};
 // ==== @byok-sdk/keys dist/http.d.ts ====
 /** Injectable `fetch`. Defaults to `globalThis.fetch` at every call site. */
 export type ProviderFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -614,8 +558,6 @@ export type { ModelProviderClient, ProviderConfiguration, ProviderRegistryOption
 export { PI_AUTH_NONE_API_KEY, PI_PROJECTED_KEY_ENV, assertPiLaunchArgs, buildPiProviderProjection, } from './pi-provider-projection.js';
 export { parsePiProviderLauncherOptions, runPiProviderLauncher, } from './pi-provider-launcher-core.js';
 export type { PiProviderLauncherHost, PiProviderLauncherOptions, } from './pi-provider-launcher-core.js';
-export { HERMES_PROVIDER_KEY_ENV, hermesProviderModel, parseHermesProviderLauncherRequest, runHermesProviderLauncher } from './hermes-provider-launcher.js';
-export type { HermesProviderLauncherRequest } from './hermes-provider-launcher.js';
 // ==== @byok-sdk/keys dist/linux-secret-service.d.ts ====
 import { type CommandRunner } from './command-runner.js';
 import { type SecretStore } from './secret-store.js';

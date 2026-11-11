@@ -6,7 +6,9 @@ import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, STATE_HINT_CHANNEL, type BridgeMe
 import { createRendererRouter } from '../bridge/route.ts';
 import { createMainHandlers } from './domains.ts';
 import { HostProcess, spawnDevHost, spawnDevHostCommand, type SupervisedHostState } from './host-process.ts';
+import { spawnPackagedHost, spawnPackagedHostCommand } from './packaged-host.ts';
 import { coalesceStateHints } from './state-hint.ts';
+import { startUpdater } from './updater.ts';
 
 const SCHEME = 'app';
 const RENDERER_HOST = 'renderer';
@@ -45,7 +47,7 @@ const hintState = coalesceStateHints(() => {
 });
 
 const host = new HostProcess({
-  spawnHost: spawnDevHost,
+  spawnHost: app.isPackaged ? spawnPackagedHost : spawnDevHost,
   onState: state => {
     holdPower(state);
     hintState();
@@ -57,7 +59,7 @@ const host = new HostProcess({
 
 const route = createRendererRouter<BridgeMethods, MainMethod>({
   allowed: RENDERER_METHODS,
-  main: createMainHandlers({ callHost: (method, params) => host.call(method, params), spawnHostCommand: spawnDevHostCommand }),
+  main: createMainHandlers({ callHost: (method, params) => host.call(method, params), spawnHostCommand: app.isPackaged ? spawnPackagedHostCommand : spawnDevHostCommand }),
   host: (method, params) => host.call(method, params as never),
 });
 
@@ -134,6 +136,7 @@ if (!app.requestSingleInstanceLock()) {
     protocol.handle(SCHEME, serveRenderer);
     ipcMain.handle(BRIDGE_IPC_CHANNEL, forward);
     host.start();
+    startUpdater({ beforeInstall: () => host.stop() });
     createWindow();
   });
 }

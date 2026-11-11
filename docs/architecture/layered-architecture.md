@@ -52,11 +52,11 @@ flowchart TB
     direction TB
     DEntry["入口<br/>byok-agent · createDaemon<br/>8 个 bin"]:::device
     DOrch["编排 daemon 41.1k<br/>Auth · Connection · Journal<br/>TaskRunner · retention"]:::device
-    DAdapt["adapters 13.6k<br/>内置 Pi · Claude · Codex<br/>注入 Hermes · Grok"]:::device
+    DAdapt["adapters 13.6k<br/>内置 Pi · Claude · Codex<br/>注入 Grok"]:::device
     DEntry --> DOrch --> DAdapt
   end
 
-  CLIs["agent CLI<br/>claude · codex · pi · hermes · grok<br/>用户自装、自登录"]:::ext
+  CLIs["agent CLI<br/>claude · codex · pi · grok<br/>用户自装、自登录"]:::ext
   Keys["keys 9.7k<br/>ProviderRegistry · launcher"]:::side
   CloudDo["cloud-do 3.8k<br/>AgentDO · 平台 key<br/>无 workspace 依赖"]:::side
 
@@ -163,7 +163,7 @@ flowchart TB
 
   subgraph A["runtime 适配 · 17.6k"]
     direction LR
-    Ad["adapters 14.3k<br/>pi · pi-durable · claude<br/>codex · hermes · grok · process-tree"]:::adapt
+    Ad["adapters 14.3k<br/>pi · pi-durable · claude<br/>codex · grok · process-tree"]:::adapt
     Mcp["mcp 1.0k · mcp-server 1.3k<br/>MCP client 与对外 server"]:::adapt
     Sub["runtime 0.6k<br/>agent-memory 0.4k"]:::adapt
   end
@@ -202,7 +202,7 @@ flowchart TB
 | `bin/` | 8 个 bin 的入口：`byok-agent` 子命令、Pi 三种 host（rpc、prepared、durable）、4 个 SDK 保留 MCP helper。只剩 argv/config/exit 外壳与 bin 内部 runner；被非 bin 代码使用的库已按层移出：`audit-log.ts` → `daemon/audit-log.ts`，`format.ts`、`tasks-view.ts` → `diagnostics/`，`agent-memory-mcp-server.ts` → `agent-memory/mcp-server.ts`，`sdk-reserved-helper-command.ts` → `lifecycle/`，`team-tmux-view.ts` → `util/`（#1244）。`runtime-probe.ts` 已移到 `diagnostics/runtime-probe.ts`（#1099）；`control-client.ts` 已移到 `daemon/control-client.ts`，`lifecycle/exec-runner.ts` 已移到 `util/exec-runner.ts`（#1205）。 | `packages/client/src/bin/byok-agent.ts`；`packages/client/src/bin/sdk-reserved-helper-runners.ts`；`packages/client/src/lifecycle/sdk-reserved-helper-command.ts` |
 | `index.ts` | 公开 API 汇总，只做 re-export；`adapters/`、`agent-memory/` 等子路径各有自己的入口。`bin/` 有 4 个文件从这里取 API；`runtime-probe` 的库代码已移到 `diagnostics/runtime-probe.ts`，不再经公开入口与 `diagnostics/` 成环（R-L1）；`runSdkReservedHelperCommand` 与 `openTeamTmuxView` 的实现随 #1244 移到 `lifecycle/` 与 `util/`，re-export 名称不变。 | `packages/client/src/index.ts`；`packages/client/src/bin/commands/runtimes.ts` |
 | 根模块 | Agent home 布局、工具授权模式与 IPC、runtime 失败投影、共享类型。被 daemon 与 adapters 广泛依赖。 | `packages/client/src/agent-home.ts:28`；`packages/client/src/tool-authorization.ts:13`；`packages/client/src/tool-authorization-ipc.ts:74` |
-| `daemon/create-daemon/` | 把 store、journal、连接、TaskRunner、控制通道组合成 `Daemon`。`createDaemon` 只构建 pi、claude、codex，Hermes 与 Grok 由 Host 经 `createDaemonWithAdapters` 注入。`daemon.start()` 总会拉起控制通道，内嵌 Host 也一样。 | `packages/client/src/daemon/create-daemon.ts:718,963`；`packages/client/src/daemon/create-daemon/support.ts:288-292`；`packages/client/src/daemon/create-daemon/lifecycle.ts:41` |
+| `daemon/create-daemon/` | 把 store、journal、连接、TaskRunner、控制通道组合成 `Daemon`。`createDaemon` 只构建 pi、claude、codex，Grok 由 Host 经 `createDaemonWithAdapters` 注入。`daemon.start()` 总会拉起控制通道，内嵌 Host 也一样。 | `packages/client/src/daemon/create-daemon.ts:718,963`；`packages/client/src/daemon/create-daemon/support.ts:288-292`；`packages/client/src/daemon/create-daemon/lifecycle.ts:41` |
 | `daemon/connection-manager.ts` 等 | 单会话 HTTP long-poll：`conn.hello` 握手、cursor 持久化即 ack、outbox 批量发送、token 续期。 | `packages/client/src/daemon/connection-manager.ts:273-327`；`packages/client/src/daemon/auth-manager.ts:312` |
 | `daemon/task-runner/` | offer 准入、Agent home 预留、workspace 与 manifest 封存、claim/started、事件泵、审批、终态与清理。 | `packages/client/src/daemon/task-runner/offer.ts`；`offer-activation.ts:179-203`；`approvals.ts:11`；`finish.ts:145` |
 | `daemon/journal/`、`daemon/retention/` | SQLite journal（offer 与终态的崩溃恢复）、scratch 与 session ledger 的保留清理。 | `packages/client/src/daemon/journal/sqlite-journal.ts`；`packages/client/src/daemon/retention/scratch.ts` |

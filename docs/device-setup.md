@@ -297,7 +297,7 @@ and a static tool-authorization policy in `toolAuthorization`:
   `auto`, because it never applies to an `all` task. Only Pi enforces a file
   scope, so the example lists Pi alone. On a daemon with `fileScope`, every
   Claude task declines before claim with `file_scope_unsupported`; Codex,
-  Grok, Hermes and dsh have no `toolAuthorizationAuto` capability, so a static
+  Grok and dsh have no `toolAuthorizationAuto` capability, so a static
   `auto` for them is a construction error. To run Codex instead, remove
   `fileScope`, keep Codex in `runtimeAllowlist`, and set
   `toolAuthorization.byRuntime.codex` to `"all"`. Codex isolation still comes

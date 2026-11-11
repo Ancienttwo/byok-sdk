@@ -147,8 +147,8 @@ const loadedKoffi = new Map<string | symbol, KoffiModule>();
 
 /**
  * koffi from the installed optional dependency, or from the SDK native assets
- * at `nativeAssetRoot`. The Hermes pipe client gets koffi here, so the lazy
- * Hermes session entry carries no second native-asset loader.
+ * at `nativeAssetRoot`. Other win32 bindings get koffi here, so the SDK
+ * carries one native-asset loader.
  */
 export async function loadKoffi(nativeAssetRoot?: string): Promise<unknown> {
   const key = nativeAssetRoot === undefined ? installedBindings : nativeAssetRoot;
