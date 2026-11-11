@@ -1605,7 +1605,8 @@ export class HostedCollaborationStore {
    * this transaction, it inserts the row, sets `settled_at` once the entity is `accepted` or `rejected`, and sets `next_at`
    * for a `pending` entity. It does not touch `next_at` of a `sending` or `unknown` entity: the sender owns that value.
    * So every queued, refused, revoked, resent, echoed or sent delivery gets its row, also the push fallback that
-   * `refuseRoute` inserts with no outbox intent.
+   * `refuseRoute` inserts with no outbox intent. A `staged` entity gets its row only when its outcome promotes it, and a
+   * staged entity that K8 withholds never gets one (#1762).
    */
   private async indexDeliveries(client: PoolClient, scopeKey: string, before: Split, after: Split, now: number | undefined): Promise<void> {
     const old = before.entities.get('delivery'), next = after.entities.get('delivery');
@@ -1613,7 +1614,9 @@ export class HostedCollaborationStore {
       const prior = old?.get(key);
       if (prior === body) continue;
       const row = JSON.parse(body) as Delivery, was = prior === undefined ? undefined : JSON.parse(prior) as Delivery;
-      if (!was) {
+      const promoted = was?.state === 'staged';
+      if (row.state === 'staged' || promoted && row.state === 'rejected') continue;
+      if (!was || promoted) {
         await client.query(`INSERT INTO outbox (scope, key, ordinal, kind) SELECT $1, $2, coalesce(max(ordinal) + 1, 0), 'delivery'
           FROM outbox WHERE scope = $1`, [scopeKey, key]);
       } else if (was.state === row.state && was.nextAttemptAt === row.nextAttemptAt) continue;

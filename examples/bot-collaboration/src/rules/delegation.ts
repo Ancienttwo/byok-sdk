@@ -40,6 +40,10 @@ export interface Delegation {
 export interface Batch { id: string; delegationIds: string[]; slots: string[]; released?: true }
 /** `turnId` is the Turn that holds the unit. A free A slot has none. */
 export interface Unit { id: string; root: string; state: 'reserved' | 'spent' | 'released'; turnId?: string }
+/**
+ * The receipt of one accepted Agent message, written while the Turn still runs. A Host shows a reply only when the intent of
+ * `turnId` concluded `succeeded` with this task id (#1762): any other reply was accepted, but its Turn outcome was not applied.
+ */
 export interface AcceptedReply {
   /** The intent key. For a Bot Turn, it is the Turn id. */
   turnId: string; messageId: string; contentHash: string; contentType: string; acceptedAt: number;

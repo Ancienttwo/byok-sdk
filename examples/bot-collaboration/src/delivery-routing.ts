@@ -82,22 +82,44 @@ export function revokePush(state: CollaborationState, id: string, now: number): 
 function activePush(state: CollaborationState, conversation: Conversation): PushRoute | undefined {
   return Object.values(state.channel?.pushRoutes ?? {}).find(route => route.revokedAt === undefined && sameConversation(route.conversation, conversation));
 }
-function insert(state: CollaborationState, input: Pick<Delivery, 'taskId' | 'turnId' | 'messageId' | 'body' | 'conversation' | 'channel' | 'route'>): Delivery {
+function insert(state: CollaborationState, input: Pick<Delivery, 'taskId' | 'turnId' | 'messageId' | 'body' | 'conversation' | 'channel' | 'route'>,
+  staged = false): Delivery {
   const id = deliveryId(input.taskId, input.messageId, input.route);
-  return channelState(state).deliveries[id] ??= { id, ...input, state: 'pending', attempts: 0 };
+  return channelState(state).deliveries[id] ??= { id, ...input, state: staged ? 'staged' : 'pending', attempts: 0 };
 }
-/** Called in the content acceptance transaction. No external call or projection contains the token. */
-export function queueDelivery(ledger: IntentConclusions, state: CollaborationState, turn: Turn, taskId: string, messageId: string, body: string, now: number): Delivery | undefined {
+/**
+ * Called in the content acceptance transaction. No external call or projection contains the token. A `staged` delivery
+ * waits for `promoteStaged` in its Turn's outcome transaction (#1762).
+ */
+export function queueDelivery(ledger: IntentConclusions, state: CollaborationState, turn: Turn, taskId: string, messageId: string, body: string, now: number,
+  staged = false): Delivery | undefined {
   const conversation = turnConversation(state, turn), root = turnRoot(state, turn);
   const inbound = Object.values(state.channel?.inbounds ?? {}).filter(row => row.root === root && sameConversation(row.conversation, conversation))
     .sort((a, b) => b.sequence - a.sequence)[0];
   if (inbound?.reply?.token && inbound.reply.expiresAt > now && rootOpen(ledger, state, root, conversation)) {
-    return insert(state, { taskId, turnId: turn.id, messageId, body, conversation, channel: inbound.reply.channel, route: { kind: 'reply', inboundId: inbound.id } });
+    return insert(state, { taskId, turnId: turn.id, messageId, body, conversation, channel: inbound.reply.channel, route: { kind: 'reply', inboundId: inbound.id } }, staged);
   }
   const push = activePush(state, conversation);
-  if (push) return insert(state, { taskId, turnId: turn.id, messageId, body, conversation, channel: push.channel, route: { kind: 'push', pushRouteId: push.id } });
+  if (push) return insert(state, { taskId, turnId: turn.id, messageId, body, conversation, channel: push.channel, route: { kind: 'push', pushRouteId: push.id } }, staged);
   state.audit.push(`Delivery ${inbound?.reply ? 'reply_route_expired' : 'no_push_route'}: ${taskId} ${messageId}`);
   return undefined;
+}
+/** The outcome transaction of task `taskId` makes its staged deliveries sendable. The only promotion (#1762). */
+export function promoteStaged(state: CollaborationState, taskId: string): string[] {
+  const rows = Object.values(state.channel?.deliveries ?? {}).filter(row => row.state === 'staged' && row.taskId === taskId);
+  for (const row of rows) row.state = 'pending';
+  return rows.map(row => row.id);
+}
+/**
+ * A staged delivery whose intent concluded was not promoted by that conclusion's outcome: the Turn failed, or another task
+ * generation concluded it. Its reply is withheld and stays only as an audit fact (#1762).
+ */
+export function withholdStaged(ledger: IntentConclusions, state: CollaborationState): void {
+  for (const row of Object.values(state.channel?.deliveries ?? {})) {
+    if (row.state !== 'staged' || !ledger.intents[hash(row.turnId)]?.conclusion) continue;
+    row.state = 'rejected'; row.code = 'outcome_not_applied';
+    state.audit.push(`Delivery outcome_not_applied: ${row.taskId} ${row.messageId}`);
+  }
 }
 /** A pending delivery already owns its reply slot, including across terminal settlement. */
 export function deliveryRoute(state: CollaborationState, row: Delivery, now: number): ReplyRoute | PushRoute | undefined {
@@ -119,11 +141,15 @@ export function refuseRoute(state: CollaborationState, row: Delivery): void {
   if (push) insert(state, { taskId: row.taskId, turnId: row.turnId, messageId: row.messageId, body: row.body, conversation: row.conversation,
     channel: push.channel, route: { kind: 'push', pushRouteId: push.id } });
 }
+/**
+ * A reply is sent after its Turn concluded (#1762), so an open delivery keeps its token until expiry: a staged row waits for
+ * promotion, and an unknown row can return to pending after a readback.
+ */
 export function cleanReplyTokens(ledger: IntentConclusions, state: CollaborationState, now: number): void {
   for (const row of Object.values(state.channel?.inbounds ?? {})) {
     if (!row.reply?.token || row.root === undefined) continue;
     const reserved = Object.values(state.channel!.deliveries).some(delivery => delivery.route.kind === 'reply'
-      && delivery.route.inboundId === row.id && (delivery.state === 'pending' || delivery.state === 'sending'));
+      && delivery.route.inboundId === row.id && ['staged', 'pending', 'sending', 'unknown'].includes(delivery.state));
     if (now >= row.reply.expiresAt || !reserved && !rootOpen(ledger, state, row.root, row.conversation)) delete row.reply.token;
   }
 }

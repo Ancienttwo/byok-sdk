@@ -42,7 +42,7 @@ import { sealSwitchExport, SwitchExportError, type SwitchExport, type SwitchHead
 import { admitUserInput, coalescePolicy, type CoalescePolicy } from './coalesce';
 import { classifyInbound, inboundKey, isOwner, verified, type ChannelOptions, type Conversation, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel';
 import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from './delivery';
-import { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, queueDelivery, refuseRoute, rememberFilteredInbound, rememberInbound,
+import { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, promoteStaged, queueDelivery, refuseRoute, rememberFilteredInbound, rememberInbound,
   resendUnknown, revokePush } from './delivery-routing';
 import { inboundDispositionsOf } from './inbound';
 import type { InboundDisposition } from './rules/inbound';
@@ -655,9 +655,10 @@ export class BotCollaboration {
     });
   }
   /** The channel outbox port of a K4 callback. Delivery code reads the committed ledger. */
-  private deliverPort(state: CollaborationState, taskId: string): Pick<CommandPorts, 'deliver'> {
+  private deliverPort(state: CollaborationState, taskId: string): Pick<CommandPorts, 'deliver' | 'promote'> {
     if (!this.options.channel) return {};
-    return { deliver: (turn, key, text) => queueDelivery(this.ledger.snapshot(), state, turn, taskId, key, text, this.now())?.id };
+    return { deliver: (turn, key, text, staged) => queueDelivery(this.ledger.snapshot(), state, turn, taskId, key, text, this.now(), staged)?.id,
+      promote: id => promoteStaged(state, id) };
   }
   /** An owner command in its own ledger transaction. K4 callbacks use `commitCallback` inside the K4 transaction. */
   private commitOwner(commandId: string, command: Command, extra?: (s: LedgerState, state: CollaborationState) => Partial<CommandPorts>): CommitResult {

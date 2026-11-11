@@ -11,7 +11,11 @@ export interface PushRoute {
   kind: 'push'; id: string; conversation: Conversation; channel: string; target: string;
   optedInBy: string; optedInAt: number; revokedAt?: number;
 }
-export type DeliveryState = 'pending' | 'sending' | 'accepted' | 'rejected' | 'unknown';
+/**
+ * `staged`: a Bot reply accepted before its Turn outcome committed (#1762). No sender takes it. The outcome transaction
+ * promotes it to `pending`; a Turn whose intent concludes otherwise rejects it as `outcome_not_applied`.
+ */
+export type DeliveryState = 'staged' | 'pending' | 'sending' | 'accepted' | 'rejected' | 'unknown';
 /** `turnId` is the Turn that queued the delivery. Retention keeps the delivery with that Turn's root. */
 export interface Delivery {
   id: string; taskId: string; turnId: string; messageId: string; body: string;

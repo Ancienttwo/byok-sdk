@@ -125,13 +125,16 @@ export class ResultStubSession implements Session {
     }.bind(this),
   };
   emit(event: Event): void { this.pending.push(event); this.wake?.(); this.wake = undefined; }
-  /** Resolves after result submission and event injection; failures still travel through events. */
-  finish(document: unknown, submit = true): Promise<void> {
+  /**
+   * Resolves after result submission and event injection; failures still travel through events. `text` is the final runtime
+   * text, which a required message egress publishes as the Agent message.
+   */
+  finish(document: unknown, submit = true, text = JSON.stringify(document)): Promise<void> {
     if (this.closed) return Promise.resolve();
     const finishing = (async () => {
       if (submit && this.input.mcpServers?.byokagentresult) await submitResult(this.input, document, this.resultAbort.signal);
       if (this.closed) return;
-      this.emit({ type: 'progress', text: JSON.stringify(document) }); this.emit({ type: 'turn_end' });
+      this.emit({ type: 'progress', text }); this.emit({ type: 'turn_end' });
     })().catch(error => {
       if (!this.closed) { this.failure = error; this.wake?.(); this.wake = undefined; }
     }).finally(() => { this.finishing.delete(finishing); });

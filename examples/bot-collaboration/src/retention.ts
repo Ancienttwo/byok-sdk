@@ -54,7 +54,7 @@ export class RetentionRefused extends Error {
     super(`Retention refused: ${reason}`); this.name = 'RetentionRefused';
   }
 }
-const OPEN_DELIVERY = new Set(['pending', 'sending', 'unknown']);
+const OPEN_DELIVERY = new Set(['staged', 'pending', 'sending', 'unknown']);
 const values = <T>(rows: Record<string, T> | undefined): T[] => Object.values(rows ?? {});
 const own = <T>(rows: Record<string, T> | undefined, id: string): T | undefined => rows && Object.hasOwn(rows, id) ? rows[id] : undefined;
 

@@ -1,6 +1,6 @@
 import type { RoutineCommands } from '@byok-sdk/server/execution-core';
 import { sealDueBatches, projectInputBatches, type CoalescePolicy } from './coalesce';
-import { cleanReplyTokens, type IntentConclusions } from './delivery-routing';
+import { cleanReplyTokens, withholdStaged, type IntentConclusions } from './delivery-routing';
 import { projectInboundDispositions } from './inbound';
 import type { Publish } from './rules/delegation';
 import { expireCards } from './rules/commands';
@@ -73,12 +73,15 @@ export function syncHead(state: CollaborationState, coalesce: CoalescePolicy | u
 }
 
 /**
- * Cleans reply tokens and projects every input batch and inbound destination after the sync's Turn steps.
+ * Withholds the staged replies of concluded intents, cleans reply tokens and projects every input batch and inbound destination after the sync's Turn steps.
  * H's finishDelivery also cleans reply tokens, corresponding to L's cleanup in each flush pass.
  * #1229 item 3: one projection per destination; an unchanged destination keeps the same projection id and value.
  */
 export function syncTail(state: CollaborationState, conclusions: IntentConclusions | undefined, now: number, emit: Publish): void {
-  if (conclusions !== undefined) cleanReplyTokens(conclusions, state, now);
+  if (conclusions !== undefined) {
+    withholdStaged(conclusions, state);
+    cleanReplyTokens(conclusions, state, now);
+  }
   projectInputBatches(state, emit);
   projectInboundDispositions(state, emit);
 }
