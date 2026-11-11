@@ -1534,7 +1534,7 @@ export declare function runtimeEnvironmentFor(id: string, config: Pick<RuntimeAd
 /** Validates `piByokLauncher` and folds its `sessionDir`; the daemon and its retention build Pi from this one value. */
 export declare function resolvePiByokLauncher(config: Pick<RuntimeAdaptersConfig, 'piByokLauncher'>): PiByokLauncherConfig | undefined;
 // ==== @byok-sdk/client dist/agent-home-readers.d.ts ====
-import { type AgentMemoryStartRefusal, type TerminalAgentHomeMemoryChange } from '@byok-sdk/protocol';
+import { type TerminalAgentHomeMemoryChange } from '@byok-sdk/protocol';
 /**
  * How one Agent Attempt uses its home. The wire carries only
  * `homeAccess: 'memory-reader'`; an absent value is the writer.
@@ -1564,34 +1564,6 @@ export type AgentHomeMemoryDigest = ReadonlyMap<string, string>;
  * read fails; the caller then reports `unmeasured`.
  */
 export declare function digestAgentHomeMemory(home: string): Promise<AgentHomeMemoryDigest | undefined>;
-/**
- * One read of the resident `MEMORY.md`; see {@link readResidentMemory}. An
- * unreadable file names its `refusal` class when the home itself is at fault
- * (#1843); a missing file, a changed home identity or an I/O error has none.
- */
-export type ResidentMemoryRead = {
-    readonly kind: 'read';
-    readonly content: string;
-    readonly revision: string;
-    readonly byteCount: number;
-} | {
-    readonly kind: 'over-limit';
-    readonly byteCount: number;
-} | {
-    readonly kind: 'unreadable';
-    readonly reason: string;
-    readonly refusal?: AgentMemoryStartRefusal;
-};
-/**
- * Reads the resident `MEMORY.md` of a leased home (#1439) with one
- * implementation on every platform, at most the limit plus one byte, as strict
- * UTF-8. The `lstat` covers a platform without `O_NOFOLLOW`. The revision is
- * the one `memory_save` compares. A file problem is a result, never a throw.
- */
-export declare function readResidentMemory(home: string, homeIdentity: Readonly<{
-    dev: bigint;
-    ino: bigint;
-}>): Promise<ResidentMemoryRead>;
 /**
  * Compares the reader's start and terminal digests. `writerOverlapped` is
  * true when a writer Attempt of the same home was active at any time
@@ -2001,6 +1973,35 @@ export declare function createAgentHomeProjection(prepare: AgentHomeProjectionFu
  * no task-time fallback is inferred.
  */
 export declare function createAgentHomeProjectionConsumer(apply: AgentHomeProjectionApplyFunction): AgentHomeProjection;
+// ==== @byok-sdk/client dist/agent-memory/check-home.d.ts ====
+import type { AgentMemoryStartRefusal } from '@byok-sdk/protocol/constants';
+import type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem.js';
+/** The verdict of {@link checkAgentMemoryHome}. `reason` is the `task.fail` reason the device sends for the same home. */
+export type AgentMemoryHomeCheck = {
+    readonly ok: true;
+} | {
+    readonly ok: false;
+    readonly code: AgentMemoryStartRefusal;
+    readonly reason: string;
+};
+/**
+ * Whether the device would refuse a task on this Agent home because of its
+ * memory (#1843), with the code and reason it fails that task with. It runs the
+ * device's own readers, read-only, so the two cannot drift.
+ *
+ * It throws and decides nothing when it cannot read: a `MEMORY.md` that is
+ * missing (every lease creates one), a changed home identity, an I/O error, or
+ * no secure memory backend on this platform. On macOS and Windows pass the
+ * helper's filesystem for this home as `commit.filesystem`; the caller closes it.
+ *
+ * The check holds no home lease and has no task id, so it is advisory: a home
+ * within a task id's length of the start-record bound can pass and still be refused.
+ */
+export declare function checkAgentMemoryHome(home: string, options?: {
+    readonly commit?: {
+        readonly filesystem?: AgentMemoryFilesystem;
+    };
+}): Promise<AgentMemoryHomeCheck>;
 // ==== @byok-sdk/client dist/agent-memory/index.d.ts ====
 /**
  * `@byok-sdk/client/agent-memory` — the embedded-host composition surface for
@@ -2022,6 +2023,7 @@ export declare function createAgentHomeProjectionConsumer(apply: AgentHomeProjec
  * - `openAgentMemoryFilesystemHelper`— admission of the host's macOS or Windows helper.
  * - `serveAgentMemoryMcpOverStdio`   — the two memory tools over stdio.
  * - `prependAgentMemoryGuidance`     — the prompt half of the path contract.
+ * - `checkAgentMemoryHome`           — the device's pre-start memory verdict for one home.
  *
  * Three things are deliberately absent, and this file is the record of why.
  *
@@ -2088,6 +2090,10 @@ export type { AgentMemoryMcpDeps } from './mcp-server.js';
 export { AGENT_MEMORY_GUIDANCE } from '../daemon/memory-guidance.js';
 /** Prepends that guidance to an Agent instruction, exactly as the daemon's task runner does. */
 export { prependAgentMemoryGuidance } from '../daemon/memory-guidance.js';
+/** Whether the device would refuse a task on this Agent home over its memory, with the same code and reason; read-only and advisory. */
+export { checkAgentMemoryHome } from './check-home.js';
+/** The verdict of `checkAgentMemoryHome`. */
+export type { AgentMemoryHomeCheck } from './check-home.js';
 /** The validated Agent identity carried by `AgentMemoryTaskContext`. */
 export type { AgentRef } from '../agent-home.js';
 // ==== @byok-sdk/client dist/agent-memory/mcp-server.d.ts ====
