@@ -9,16 +9,19 @@
 // On Windows the App either registers a WinSW service (--winsw-bin, needs an
 // administrator) or autostarts at the user's logon (--windows-user, #1337).
 // A `user` scope service needs the Host's own stop program; this App's is its
-// `stop-daemon` action.
+// `stop-daemon` action. After `uninstall`, `clear-enrollment` removes the
+// store's device enrollment from this account's OS credential set with
+// clearDeviceEnrollment; the store directory stays.
 //
-//   node app-installer.ts <install|upgrade|rollback|recover|uninstall|status|stop-daemon> --config <path> --install-root <dir>
+//   node app-installer.ts <install|upgrade|rollback|recover|uninstall|status|stop-daemon|clear-enrollment> --config <path> --install-root <dir>
 //     [--payload <dir>] [--name <svc>] [--winsw-bin <exe> [--winsw-install-dir <dir>] | --windows-user]
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import {
-  agentServiceDefinition, agentServiceInstallation, createServiceInstallation, ServiceInstallationError, type DaemonConfig, type ServiceWindowsOptions,
+  agentServiceDefinition, agentServiceInstallation, clearDeviceEnrollment, createServiceInstallation, DeviceEnrollmentClearError,
+  ServiceInstallationError, type DaemonConfig, type ServiceWindowsOptions,
 } from '@byok-sdk/client';
 
 const { positionals, values } = parseArgs({
@@ -32,7 +35,7 @@ const [action] = positionals;
 if (values.config === undefined || values['install-root'] === undefined) throw new Error('--config and --install-root are required');
 
 const configPath = path.resolve(values.config);
-const config = JSON.parse(readFileSync(configPath, 'utf8')) as Pick<DaemonConfig, 'productId' | 'productName' | 'storeDir' | 'branding'>;
+const config = JSON.parse(readFileSync(configPath, 'utf8')) as Pick<DaemonConfig, 'productId' | 'productName' | 'storeDir' | 'branding' | 'nativeAssetRoot'>;
 
 /**
  * The `user` scope service's stop program: ends the daemon that owns the
@@ -59,6 +62,21 @@ async function stopDaemon(): Promise<void> {
 
 if (action === 'stop-daemon') {
   await stopDaemon();
+  process.exit(0);
+}
+
+if (action === 'clear-enrollment') {
+  const { storeDir } = agentServiceDefinition({ config, configPath, agentBin: 'byok-agent.mjs', owner: 'app' });
+  try {
+    await clearDeviceEnrollment({
+      productId: config.productId, storeDir, ...(config.nativeAssetRoot === undefined ? {} : { nativeAssetRoot: config.nativeAssetRoot }),
+    });
+  } catch (error) {
+    // A live owner of the store or another store's enrollment is an answer for the App's user.
+    if (!(error instanceof DeviceEnrollmentClearError) || error.code === 'clear_failed') throw error;
+    console.log(JSON.stringify({ error: error.code }));
+    process.exit(3);
+  }
   process.exit(0);
 }
 

@@ -9,6 +9,8 @@ import { DaemonHaltError } from '../daemon/daemon-lifecycle';
 import { readDeviceEnrollmentIdentity, readDeviceEnrollmentStatus } from '../daemon/store';
 import { DeviceStoreBindingMismatchError } from '../daemon/daemon-errors';
 import { createTestDeviceStore } from './fixtures/device-credentials';
+import { testDeviceCredentials } from './fixtures/credential-backend';
+import { clearDeviceEnrollment, DeviceEnrollmentClearError } from '../daemon/enrollment-clear';
 import { repairDeviceEnrollmentMetadata } from '../diagnostics/device-doctor';
 import { connectControlClient } from '../daemon/control-client';
 import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
@@ -147,6 +149,46 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
 
     await expect(daemonFor(second).unpair()).rejects.toBeInstanceOf(DeviceStoreBindingMismatchError);
     expect(await readDeviceEnrollmentStatus(first)).toEqual({ state: 'paired', deviceId });
+  });
+
+  describe('clearDeviceEnrollment clears a store without a daemon (#1841)', () => {
+    const clear = (config: DaemonConfig) =>
+      clearDeviceEnrollment({ productId, storeDir: config.storeDir! }, { deviceCredentials: testDeviceCredentials(productId) });
+
+    it('clears a paired store, and a second call succeeds', async () => {
+      const config = await storeConfig();
+      await daemonFor(config).pair('pairing-code');
+
+      await clear(config);
+
+      expect(await testDeviceCredentials(productId).read()).toBeUndefined();
+      expect(await readDeviceEnrollmentStatus(config)).toEqual({ state: 'unpaired' });
+      await clear(config);
+    });
+
+    it('refuses with store_owned while a daemon holds the store and leaves the enrollment', async () => {
+      const config = await storeConfig();
+      const daemon = daemonFor(config);
+      const { deviceId } = await daemon.pair('pairing-code');
+      await daemon.start();
+      await waitForDaemonOpen(daemon);
+
+      const refused: unknown = await clear(config).catch((error: unknown) => error);
+
+      expect(refused).toBeInstanceOf(DeviceEnrollmentClearError);
+      expect(refused).toMatchObject({ code: 'store_owned' });
+      expect(await readDeviceEnrollmentStatus(config)).toEqual({ state: 'paired', deviceId });
+    });
+
+    it('refuses with store_not_bound on another store\'s enrollment and leaves it', async () => {
+      const first = await storeConfig();
+      const { deviceId } = await daemonFor(first).pair('pairing-code');
+
+      const refused: unknown = await clear(await storeConfig()).catch((error: unknown) => error);
+
+      expect(refused).toMatchObject({ code: 'store_not_bound', cause: expect.any(DeviceStoreBindingMismatchError) });
+      expect(await readDeviceEnrollmentStatus(first)).toEqual({ state: 'paired', deviceId });
+    });
   });
 
   describe('pairEmbedded reconciles the enrollment with the in-process server (#1840)', () => {

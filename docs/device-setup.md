@@ -536,40 +536,35 @@ A Host that bundles `@byok-sdk/client` without the `byok-agent` bin (for example
 in an uninstaller) clears an enrollment in process, once per `storeDir`:
 
 ```ts
-import { createDaemonWithAdapters, readDeviceEnrollmentStatus } from '@byok-sdk/client';
+import { clearDeviceEnrollment } from '@byok-sdk/client';
 
-const daemon = createDaemonWithAdapters({
-  productId,
-  productName,
-  serverUrl,
-  storeDir,
-  ...(nativeAssetRoot === undefined ? {} : { nativeAssetRoot }),
-  localAgentRelease,
-}, []);
-await daemon.unpair();
-const status = await readDeviceEnrollmentStatus({
+await clearDeviceEnrollment({
   productId,
   storeDir,
   ...(nativeAssetRoot === undefined ? {} : { nativeAssetRoot }),
 });
-if (status.state !== 'unpaired') throw new Error('enrollment still present');
 ```
 
-- Constructing the daemon with no adapters starts nothing: `start()` is never
-  called and nothing connects to the server.
-- `unpair()` is the same `Daemon.unpair()` the CLI and a running daemon use. It
-  clears the device enrollment and the member custody entries and reads back each
-  deletion. It throws if a live daemon owns the store or any deletion does not
-  stick.
-- Unpair before deleting the data directory. `unpair()` takes the daemon owner
-  lease, which recreates `storeDir` if it is already gone.
-- On Windows, pass `nativeAssetRoot`; the native credential backend loads from it.
-- A Host that sets `deviceCredentials` (for example `macosKeychainPath`) passes the
-  same `deviceCredentials` to both `createDaemonWithAdapters` and
-  `readDeviceEnrollmentStatus`.
-- `byok-agent unpair --yes --config <file>` runs the same `Daemon.unpair()` and
-  adds the control-socket shutdown and service-status checks. The in-process
-  route has neither, so the Host keeps its own "daemon not running" guard.
+- It needs only `productId` and `storeDir` (plus `nativeAssetRoot` on a packaged
+  Windows Host and `deviceCredentials` when the daemon sets them); no
+  `serverUrl`, no daemon and no network call. It never reads or deletes Host
+  secrets and returns nothing secret.
+- It runs the same clear as `Daemon.unpair()` under the store's owner lease:
+  the member custody entries, then the device credential with a read-back, then
+  `device.json`. The one difference: it leaves the delivery cursor file, which no
+  later pairing reads because each pairing mints a new device id.
+- `DeviceEnrollmentClearError.code` is `store_owned` when another process holds
+  the owner lease (nothing is read or cleared), `store_not_bound` when the OS
+  entry holds an enrollment another `storeDir` paired (it is left in place), or
+  `clear_failed` with the provider or filesystem error as `cause`. A failure
+  before the credential is deleted leaves the store paired, and a retry is safe.
+  A store with no enrollment clears successfully.
+- It clears the OS credential set of the account it runs as. A Windows
+  `LocalSystem` service's enrollment is out of an interactive user's reach.
+- Clear before deleting the data directory. The owner lease recreates
+  `storeDir` if it is already gone.
+- `byok-agent unpair --yes --config <file>` runs `Daemon.unpair()`, which also
+  shuts the daemon down over the control socket and checks the service status.
 
 ## Uninstall
 
@@ -577,7 +572,9 @@ if (status.state !== 'unpaired') throw new Error('enrollment still present');
 the unit, the launcher and the lifecycle owner record, and for a payload install
 also `versions/`, the pointers, `snapshots/`, the receipt and the installation
 record. It refuses a foreign
-unit. Unpair first if enrollment must be removed. Remove the installed application
+unit. To remove the enrollment too, unpair before uninstalling, or call
+`clearDeviceEnrollment` once the daemon has exited
+([Clearing an enrollment without running the daemon](#clearing-an-enrollment-without-running-the-daemon)). Remove the installed application
 through the Host's installer/package manager. Service uninstall is not a promise
 to erase the SDK store, Agent files, provider keys or runtime login directories.
 

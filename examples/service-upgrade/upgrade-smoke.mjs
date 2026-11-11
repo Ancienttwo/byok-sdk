@@ -12,6 +12,7 @@
 //     → health check fails → v2 and its store snapshot restored → running
 //   rollback → v1 and the v2 upgrade's snapshot → running
 //   uninstall → no service, no versions; the store stays
+//   clear the enrollment (app: clearDeviceEnrollment; cli: byok-agent unpair, not on Windows)
 //
 // On Windows the cli run keeps its store on an 8.3 short-name path and the app
 // run on a path longer than 260 characters (#1030).
@@ -28,7 +29,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import { sdkNativeAssetTargets } from '@byok-sdk/client';
+import { readDeviceEnrollmentStatus, sdkNativeAssetTargets } from '@byok-sdk/client';
 import { byokSdkPackaging } from '@byok-sdk/client/packaging';
 import { createByokServer, listenLoopback } from '@byok-sdk/server';
 import { writeKoffiAssetRoot } from '../../scripts/testing/sdk-koffi-asset-root.mjs';
@@ -279,13 +280,19 @@ async function lifecycle(variant, cmd, server, payloads) {
   log(`${owner}: rolled back to v1`);
 
   await ok(cmd.uninstall());
-  // macOS and Linux keep the enrollment in the user's keychain or Secret Service; leave none behind.
-  // On Windows `byok-agent unpair` checks only a WinSW service, so neither run unpairs there.
-  if (!isWindows) {
+  // Leave no enrollment in this user's keychain, Secret Service or Credential Manager. The app run clears it
+  // with clearDeviceEnrollment, as an App's uninstaller does. The cli run's WinSW service enrolled as
+  // LocalSystem, out of this user's reach, and `byok-agent unpair` checks only a WinSW service, so the cli
+  // run unpairs outside Windows only.
+  if (owner === 'app' || !isWindows) {
     // The manager unloads the service before its daemon has released the store.
     await until(async () => (/^live status: daemon not reachable/mu.test((await run([agentCli, 'status', '--config', variant.config])).stdout) ? true : undefined),
       `${variant.name} exit`);
-    await ok([agentCli, 'unpair', '--yes', '--config', variant.config]);
+    if (owner === 'app') await ok([installer, 'clear-enrollment', '--config', variant.config, '--install-root', variant.installRoot]);
+    else await ok([agentCli, 'unpair', '--yes', '--config', variant.config]);
+    const { nativeAssetRoot } = JSON.parse(await fs.readFile(variant.config, 'utf8'));
+    assert.deepEqual(await readDeviceEnrollmentStatus({ productId: variant.productId, storeDir, nativeAssetRoot }), { state: 'unpaired' });
+    log(`${owner}: enrollment cleared`);
   }
   const left = await fs.readdir(variant.installRoot);
   assert.deepEqual(left, [], `install root after uninstall: ${left.join(', ')}`);

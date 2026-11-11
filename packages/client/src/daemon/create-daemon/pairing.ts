@@ -1,5 +1,6 @@
 import { assertServerUrlAllowed, formatServerUrl } from '../url.js';
 import { type DeviceEnrollment, type DeviceRecord, DeviceRecordRePairRequiredError } from '../store.js';
+import { clearEnrollmentUnderLease } from '../enrollment-clear.js';
 import { DeviceStoreBindingMismatchError, EmbeddedPairingError } from '../daemon-errors.js';
 import { checkVerificationSecret, enrollDeviceMember } from '../device-member.js';
 import { acquireDaemonOwner } from '../../util/daemon-owner.js';
@@ -253,37 +254,15 @@ export async function unpairUnderLease(daemonScope: DaemonScope): Promise<void> 
     // device and cursor mutations. A pair that wins stop()'s release gap is
     // therefore either wholly before this cleanup (and is fully removed) or
     // wholly after it; stale pre-lease identity can never drive cleanup.
-    let current: DeviceRecord | undefined;
-    try {
-      current = await daemonState.auth.readCurrent();
-    } catch (error) {
-      if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
-    }
-    // The member entries go first: if their deletion fails, the device
-    // stays paired, and the unpair reports the failure.
     daemonState.carriedFreshness = undefined;
-    await memberRecords?.clear();
-    try {
-      await store.credentials.clear();
-    } catch {
-      // The OS credential remains the sole secret authority. Leave the
-      // metadata and in-memory auth binding observable until its deletion
-      // succeeds; never report an unpair that did not clear that authority.
-      throw new Error('device credential could not be cleared; enrollment remains paired and fail-closed');
-    }
-    try {
-      await store.remove();
-    } catch (error) {
-      // Secret clearance won but metadata cleanup lost. Rebuild auth so this
-      // process cannot continue with the previous cache; the surviving
-      // projection subsequently reads as re-pair-required.
+    const current = await clearEnrollmentUnderLease({ store, memberRecords }, () => daemonState.auth.readCurrent(), () => {
+      // Once the credential is gone this process must not keep the previous
+      // cache, even if the metadata removal below fails.
       daemonState.auth = buildAuthManager();
-      throw error;
-    }
+    });
     if (current) await cursorStore.clear(config.serverUrl, current.deviceId);
   } finally {
     await cleanupLease.release();
   }
-  daemonState.auth = buildAuthManager();
   observer.noteUnpaired();
 }

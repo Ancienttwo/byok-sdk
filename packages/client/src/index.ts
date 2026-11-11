@@ -416,6 +416,8 @@ export { LocalStorageEmergencyError } from './daemon/retention/pressure.js';
 export type { StoragePressureState } from './daemon/retention/pressure.js';
 export type { ExpiringClassId, ProtectedClassId, RetentionClassId, ClassUsage, SweepReport } from './daemon/retention/registry.js';
 export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store.js';
+export { clearDeviceEnrollment, DeviceEnrollmentClearError } from './daemon/enrollment-clear.js';
+export type { DeviceEnrollmentClearErrorCode } from './daemon/enrollment-clear.js';
 export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError, DeviceCredentialCommandAbortedError } from './daemon/device-credential-store.js';
 export { AuthResponseInvalidError } from './daemon/auth-manager.js';
 export type { DeviceCredentialBackend, DeviceCredentialConfig } from './daemon/device-credential-store.js';
