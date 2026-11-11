@@ -188,7 +188,7 @@ export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> 
     if (failure.contractViolation) {
       // Never the error object itself (issue #395); see the start() case.
       console.error(
-        `[byok/client] runtime adapter ${active.adapter.descriptor.id} events iterable returned an untyped failure for task ${active.taskId}`,
+        `[byok/client] runtime adapter ${active.adapter.descriptor.id} events iterable or an event it yielded produced an untyped failure for task ${active.taskId}`,
       );
     }
     await this['fail'](active.taskId, failure.reason, failure.retryable, failure.failure);

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Fixed (client; #1774)** — A task runner reducer dispatch that rejects now fails the task's open terminal receipt through `TaskRunnerHost.dispatchOrReject` instead of being dropped; once the task is terminal it is a no-op. An event that `JSON.stringify` cannot serialize now fails the task through the event pump instead of counting as 0 bytes toward `maxTaskOutputBytes`.
+- **Fixed (client; #1774)** — A task runner reducer dispatch that rejects now fails the task's open terminal receipt through `TaskRunnerHost.dispatchOrReject` instead of being dropped; with no open receipt (not yet begun or already settled) the rejection is logged. An event that `JSON.stringify` cannot serialize now fails the task through the event pump instead of counting as 0 bytes toward `maxTaskOutputBytes`.
 
 - **Fixed (client; #1760)** — Redelivered offers for tasks that failed after claim but before the runtime started (instruction blob, native sessions, Agent memory, resident MEMORY.md or file scope failures) no longer claim and fail the task again. These failures now retain the task in the bounded finished collection; the first `task.claim` and `task.fail` are unchanged.
 
