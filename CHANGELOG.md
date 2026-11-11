@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (client; #1730)** — SDK-owned Pi hosts (rpc, prepared, durable and team-operator) set Node's per-address connect attempt timeout to 3000 ms at start, instead of Node's 250 ms default. Provider requests no longer fail on a device whose IPv6 route is broken and whose IPv4 connect takes longer than 250 ms. The value is internal; there is no option, environment variable or argv for it. Request deadlines are unchanged. The provider key check runs in the Host's process, so the Host sets its own value; [device setup troubleshooting](docs/device-setup.md#troubleshooting) names the Node API and flag.
+
 - **Fixed (client; #1774)** — A task runner reducer dispatch that rejects now fails the task's open terminal receipt through `TaskRunnerHost.dispatchOrReject` instead of being dropped; with no open receipt (not yet begun or already settled) the rejection is logged. An event that `JSON.stringify` cannot serialize now fails the task through the event pump instead of counting as 0 bytes toward `maxTaskOutputBytes`.
 
 - **Fixed (client; #1774)** — The journal's storage measurement (`measureUsage`) returns 0 only for a missing file or directory (an absent WAL/SHM or quarantine). Any other stat or readdir error now rejects the measurement, which the retention sweeper already records as `measurement_failed`, instead of reading as a small healthy journal.
