@@ -251,13 +251,22 @@ async function secureDir(dir: string, buildArgs: (dir: string, username: string)
   }
 }
 
-// stat, not lstat: a symlinked directory root stays supported, and its target's mode is the one that matters.
-async function requireMode0700(dir: string, role: 'owned' | 'store-root'): Promise<void> {
+/**
+ * Whether `dir` breaks the POSIX 0700 rule for `role`, without changing it.
+ * Nothing to report on a platform without getuid, or for a store root another
+ * user owns. stat, not lstat: a symlinked directory root stays supported, and
+ * its target's mode is the one that matters.
+ */
+export async function isModeNot0700(dir: string, role: 'owned' | 'store-root'): Promise<boolean> {
   const uid = process.getuid?.();
-  if (uid === undefined) return;
+  if (uid === undefined) return false;
   const stat = await fs.stat(dir);
-  if (role === 'store-root' && stat.uid !== uid) return;
-  if ((stat.mode & 0o777) === 0o700) return;
+  if (role === 'store-root' && stat.uid !== uid) return false;
+  return (stat.mode & 0o777) !== 0o700;
+}
+
+async function requireMode0700(dir: string, role: 'owned' | 'store-root'): Promise<void> {
+  if (!(await isModeNot0700(dir, role))) return;
   await fs.chmod(dir, 0o700).catch((error: unknown) => {
     throw new SecureDirModeError(dir, error);
   });
