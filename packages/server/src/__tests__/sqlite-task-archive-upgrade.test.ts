@@ -7,6 +7,7 @@ import { createMutableClock, tenantId } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
 import { isSqliteAvailable } from '../sqlite-support';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
+import { rewindToV6 } from './test-support';
 
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const TENANT = tenantId('sqlite-task-archive');
@@ -27,7 +28,7 @@ describeSqlite('SQLite terminal-task archive columns (#1120)', () => {
     for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
   });
 
-  it('backfills archive_after once on open to a file from before it, and later opens keep it', async () => {
+  it('backfills archive_after once when it upgrades a v6 file from before it, and later opens keep it', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'byok-sqlite-archive-'));
     directories.push(directory);
     const path = join(directory, 'server.sqlite');
@@ -39,10 +40,10 @@ describeSqlite('SQLite terminal-task archive columns (#1120)', () => {
     await first.cloud.tasks.recordStatus(TENANT, { taskId: 'done', status: 'complete' });
     await first.cloud.tasks.open(TENANT, { taskId: 'running', deviceId: 'device-1' });
     await first.close();
-    // The file as an earlier release wrote it: no archive columns, and a
+    // The file as the v6 release wrote it: no archive columns, and a
     // terminal task whose terminal instant was never recorded.
     const raw = new DatabaseSync(path);
-    raw.exec('DROP INDEX task_attempt_archive_idx; DROP INDEX task_attempt_unsettled_idx;');
+    raw.exec(`${rewindToV6('2026-10-27T00:10:00.000Z')} DROP INDEX task_attempt_archive_idx; DROP INDEX task_attempt_unsettled_idx;`);
     for (const column of ['archive_after', 'archived_at', 'archive_settled_at']) raw.exec(`ALTER TABLE task_attempt DROP COLUMN ${column}`);
     raw.prepare("UPDATE task_attempt SET terminal_at = NULL, updated_at = '2026-10-26T00:00:00.000Z' WHERE task_id = 'done'").run();
     raw.close();
