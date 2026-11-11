@@ -4593,7 +4593,7 @@ export declare const HANDSHAKE_TIMEOUT_MS = 3000;
 /**
  * The Unix domain socket path for a daemon rooted at `storeDir`. Prefers
  * `<storeDir>/control.sock`; paths over 100 UTF-8 bytes use the deterministic
- * `/tmp/byok-<storeDir hash>/sock` fallback. The shared private Unix socket
+ * `/tmp/byok-<uid>-<storeDir hash>/sock` fallback. The shared private Unix socket
  * utility creates and checks that fallback directory before binding, keeping
  * its permissions at 0700 and refusing symlinks or a foreign owner. Both the
  * daemon and CLI derive the same address independently of the environment.

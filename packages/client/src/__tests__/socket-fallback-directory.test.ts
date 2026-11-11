@@ -21,10 +21,10 @@ import { ensureOwnedPrivateDirectory, listenPrivateUnixSocket, privateSocketEndp
 const dirsToRemove: string[] = [];
 const servers: net.Server[] = [];
 
-async function fallbackDir(): Promise<{ dir: string; sock: string }> {
-  // The real shape the derivations produce: a prefix plus 16 hex digits. Built
+async function fallbackDir(owner: number | string = process.getuid?.() ?? 'unknown'): Promise<{ dir: string; sock: string }> {
+  // The real shape the derivations produce: a prefix, the uid and 16 hex digits. Built
   // literally rather than from `mkdtemp`, whose six-character suffix is not it.
-  const dir = path.join('/tmp', `byok-store-mutex-${randomBytes(8).toString('hex')}`);
+  const dir = path.join('/tmp', `byok-store-mutex-${owner}-${randomBytes(8).toString('hex')}`);
   await fs.mkdir(dir, { mode: 0o700 });
   dirsToRemove.push(dir);
   return { dir, sock: path.join(dir, 'sock') };
@@ -50,7 +50,7 @@ describe('private Unix sockets', () => {
     const id = '0123456789abcdef';
     for (const [kind, prefix] of [['control', 'byok'], ['storeMutex', 'byok-store-mutex']] as const) {
       expect(privateSocketEndpoint(kind, 'a'.repeat(100), id)).toBe('a'.repeat(100));
-      expect(privateSocketEndpoint(kind, 'é'.repeat(51), id)).toBe(path.join('/tmp', `${prefix}-${id}`, 'sock'));
+      expect(privateSocketEndpoint(kind, 'é'.repeat(51), id)).toBe(path.join('/tmp', `${prefix}-${process.getuid?.() ?? 'unknown'}-${id}`, 'sock'));
       for (const invalid of ['', 'ABCDEF0123456789', id + '0', 'z'.repeat(16)]) {
         expect(() => privateSocketEndpoint(kind, '/short', invalid)).toThrow(TypeError);
       }
@@ -243,6 +243,12 @@ describe('reclaimPrivateSocketFallbackDirectory', () => {
     if (process.platform === 'win32') return;
     const { dir, sock } = await fallbackDir();
     await fs.writeFile(path.join(dir, 'stray'), 'x');
+    await reclaimPrivateSocketFallbackDirectory(sock);
+    await expect(fs.stat(dir)).resolves.toBeDefined();
+  });
+
+  it.skipIf(process.platform === 'win32')('leaves a fallback-shaped directory named for another uid', async () => {
+    const { dir, sock } = await fallbackDir(process.getuid!() + 1);
     await reclaimPrivateSocketFallbackDirectory(sock);
     await expect(fs.stat(dir)).resolves.toBeDefined();
   });
