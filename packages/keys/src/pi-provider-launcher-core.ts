@@ -689,10 +689,7 @@ export async function startPiProvider(
  * recursive chmod sink.
  */
 export async function ensurePiSessionDirectory(sessionDir: string): Promise<void> {
-  const firstCreated = await fs.mkdir(sessionDir, { recursive: true, mode: 0o700 });
-  if (firstCreated !== undefined) {
-    await fs.chmod(sessionDir, 0o700).catch(() => {});
-  }
+  await fs.mkdir(sessionDir, { recursive: true, mode: 0o700 });
   const stat = await fs.stat(sessionDir);
   if (!stat.isDirectory()) {
     throw new Error('Pi session path must be a directory');

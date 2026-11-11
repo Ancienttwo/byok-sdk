@@ -150,7 +150,13 @@ export async function runServiceStatusCommand(config: DaemonConfig, configPath: 
   for (const file of status.logs.files) log(`log-file: ${file.name} kind=${file.kind} bytes=${file.sizeBytes}`);
   // Issue #394: a halted service exits 0 and stays stopped; its last
   // lifecycle event says why and what to do.
-  const last = await readLastLifecycleRecord(resolveStoreDir(config));
+  let last: Awaited<ReturnType<typeof readLastLifecycleRecord>>;
+  try {
+    last = await readLastLifecycleRecord(resolveStoreDir(config));
+  } catch (err) {
+    log(`lifecycle: unknown (audit log unreadable: ${err instanceof Error ? err.message : String(err)})`);
+    return;
+  }
   log(last ? `lifecycle: last-known ${formatLifecycle(last.lifecycle)} at=${last.ts}` : 'lifecycle: unknown (no lifecycle event yet)');
   const remedy = last ? formatLifecycleRemedy(last.lifecycle) : undefined;
   if (remedy !== undefined) log(`lifecycle-remedy: ${remedy}`);

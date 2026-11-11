@@ -204,6 +204,21 @@ describe('bin/commands/service: run*Command (DI lifecycle)', () => {
     expect(lines).toEqual(['installed: no', 'running: no', 'detail: (none)', ...UNIT_LINES, 'lifecycle: unknown (no lifecycle event yet)']);
   });
 
+  it.skipIf(process.platform === 'win32')('runServiceStatusCommand reports an unreadable audit log instead of "no lifecycle event yet"', async () => {
+    const storeDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-service-status-unreadable-')));
+    try {
+      await fs.symlink(path.join(storeDir, 'elsewhere'), path.join(storeDir, 'audit.jsonl'));
+      const lifecycle = fakeLifecycle({
+        status: vi.fn().mockResolvedValue(statusOf({ installed: true, running: false, determinate: true, detail: '' })),
+      });
+      const { log, lines } = collectLog();
+      await runServiceStatusCommand(baseConfig({ storeDir }), '/c.json', [], { lifecycle, log });
+      expect(lines.at(-1)).toMatch(/^lifecycle: unknown \(audit log unreadable: /);
+    } finally {
+      await fs.rm(storeDir, { recursive: true, force: true });
+    }
+  });
+
   it('runServiceStatusCommand logs installed:yes/running:yes with real detail text', async () => {
     const lifecycle = fakeLifecycle({
       status: vi.fn().mockResolvedValue(statusOf({ installed: true, running: true, determinate: true, detail: 'state = running' })),
