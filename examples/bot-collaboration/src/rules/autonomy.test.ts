@@ -75,6 +75,8 @@ it('records a room_call in observe while the accepted speech stays, and creates 
   expect(accepted).toEqual(['speech', 'room_call']);
   expect(wouldDoRows(state)).toEqual([expect.objectContaining({ action: 'room_call', detail: { members: ['b'] } })]);
   expect(rows).toHaveLength(1);
+  delete (state.wouldDo![rows[0]!] as { turnId?: string }).turnId;
+  expect(() => wouldDoRows(state)).toThrow('A would-do row has no turnId: run migrateWouldDo');
   // The same seat cannot speak twice, so a second application records nothing new either.
   applySpeech(team, seat, { speech: { kind: 'post', text: 'Ready' }, room_call: { members: ['b'] } }, 'task', 1, noPublish, accept, gate);
   expect(rows).toHaveLength(1);

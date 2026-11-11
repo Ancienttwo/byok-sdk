@@ -294,7 +294,7 @@ Operator step, once per store, before the new code serves:
 
 The migration fills `turnId` from the K4 task id `taskId(turnId, generation)` of each live Turn intent: L checks every generation of the intent, H joins `intent` and `intent_execution`. A row whose intent was already compacted, or whose Turn already left the state, cannot be linked to a Turn. It moves to the `wouldDo` archived rows and is counted in `archived` (L) or `wouldDoArchived` (H). Those rows are settled history, never read by a Turn; the count is how many rows leave the would-do feed early. Record it. A second run returns zeros.
 
-A switch export or import refuses a would-do row without `turnId` (`invalid`), so migrate the source before a switch. Retention never moves a row without `turnId`, so a store that skipped the step keeps those rows in the state.
+A switch export or import refuses a would-do row without `turnId` (`invalid`), so migrate the source before a switch. A switch in flight across the upgrade holds an export that old code sealed with rows that have no `turnId`, and the new code's verify refuses it: abort the switch (`abortSwitch`), run the migration on the source, then export again. A store that skipped the step refuses every `retain` call and every `wouldDoRecords` read with `A would-do row has no turnId: run migrateWouldDo (local) or HostedCollaborationStore.migrate() (hosted) first`, and changes nothing, until the migration runs.
 
 ## Offer selection rules
 

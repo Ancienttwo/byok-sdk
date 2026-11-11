@@ -2,6 +2,7 @@ import { buildHandoffPack, type HandoffPackBudgets } from '@byok-sdk/protocol';
 import { hash, MIN_TOMBSTONE_RETENTION_MS, time, type Json } from '@byok-sdk/server/execution-core';
 import { DEFAULT_CONTEXT_TURN_LIMIT, handoffFrameBytes, handoffTurn } from './rules/context';
 import type { CollaborationState, Turn } from './model';
+import { refuseUnmigratedWouldDo } from './rules/autonomy';
 
 /**
  * Explicit retention (#798). The Host acknowledges settled roots. One call moves every row of each root out of the
@@ -160,6 +161,7 @@ export function retainRoots(state: CollaborationState, input: RetentionInput, li
   const roots = [...new Set(input.acknowledgedRoots)];
   if (roots.some(root => typeof root !== 'string' || !root)) throw new Error('Invalid acknowledged root');
   if (!Number.isSafeInteger(limits.contextTurnLimit) || limits.contextTurnLimit < 1) throw new Error('Invalid ContextPack limits');
+  refuseUnmigratedWouldDo(state);
   const result: RetentionResult = { archivedRoots: 0, alreadyArchivedRoots: 0, archivedRows: 0, archivedCommands: 0,
     expiredCommands: store.expire('commands', now), beforeBytes: bytes(state), afterBytes: 0 };
   // Decide every root on the state before this call, then move. A refusal throws before any move.

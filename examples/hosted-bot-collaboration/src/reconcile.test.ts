@@ -206,8 +206,14 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
     await opened!.pool.query(`UPDATE ${entity} SET body = $2::json WHERE scope = $1 AND kind = 'would_do'`, [storedKey(scope), JSON.stringify(old)]);
     await opened!.pool.query(`INSERT INTO ${entity} (scope, kind, key, ordinal, body) VALUES ($1, 'would_do', '"gone"', 99, $2::json)`,
       [storedKey(scope), JSON.stringify({ ...old, id: 'gone', taskId: 'compacted' })]);
-    expect(await store().migrate()).toEqual({ wouldDoBackfilled: 1, wouldDoArchived: 1 });
-    expect(Object.values((await store().read(scope)).wouldDo ?? {})).toEqual([{ ...old, turnId: 'q1' }]);
+    // A row of another generation's task, which an import keeps in intent_execution.
+    await opened!.pool.query(`INSERT INTO ${table('intent_execution')} (scope, key, generation, task_id, submission, started, attempt, terminal)
+      VALUES ($1, '"q1"', 1, $2, 'delivered', true, '{}', '{}')`, [storedKey(scope), taskId('q1', 1)]);
+    await opened!.pool.query(`INSERT INTO ${entity} (scope, kind, key, ordinal, body) VALUES ($1, 'would_do', '"g1"', 98, $2::json)`,
+      [storedKey(scope), JSON.stringify({ ...old, id: 'g1', taskId: taskId('q1', 1) })]);
+    expect(await store().migrate()).toEqual({ wouldDoBackfilled: 2, wouldDoArchived: 1 });
+    expect(Object.values((await store().read(scope)).wouldDo ?? {}).map(row => [row.id, row.turnId]).sort())
+      .toEqual([[old.id, 'q1'], ['g1', 'q1']].sort());
     expect(await count(`SELECT count(*)::text AS n FROM ${table('archived_row')} WHERE scope = $1 AND namespace = 'wouldDo' AND id = '"gone"'`)).toBe('1');
     expect(await store().migrate()).toEqual({ wouldDoBackfilled: 0, wouldDoArchived: 0 });
   });
