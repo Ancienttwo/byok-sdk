@@ -8,7 +8,7 @@ import { bundledSdkHelperHost, resolveHostLayout, runSdkReservedHelperCommand } 
 import brand from '../../brand.config.ts';
 import manifest from '../../package.json' with { type: 'json' };
 import { encodeMessage, type HostState } from '../bridge/protocol.ts';
-import { serveBridge } from '../bridge/server.ts';
+import { serveBridge, type BridgeHandlers } from '../bridge/server.ts';
 import { composeHost, HostStoppedError, type ComposedHost, type HostCompositionOptions } from './compose.ts';
 import { HostStoreRefusedError } from './precheck.ts';
 
@@ -29,6 +29,8 @@ export async function superviseHost(
     io.output.write(encodeMessage({ event: 'state', state }));
   };
   let composing: Promise<ComposedHost | undefined> = Promise.resolve(undefined);
+  /** The composed Host while it serves domain calls: set once composed, cleared when closing starts. */
+  let running: ComposedHost | undefined;
   let crash: (error: unknown) => void = () => {};
   const crashed = new Promise<never>((_resolve, reject) => { crash = reject; });
 
@@ -50,11 +52,15 @@ export async function superviseHost(
     };
     host.daemon.subscribe(observe);
     observe();
+    if (!closing) running = host;
     return host;
   };
 
   let closing: Promise<void> | undefined;
-  const close = () => closing ??= composing.then(host => host?.close());
+  const close = () => {
+    running = undefined;
+    return closing ??= composing.then(host => host?.close());
+  };
 
   await Promise.race([crashed, serveBridge({
     greeted: () => {
@@ -62,7 +68,8 @@ export async function superviseHost(
       composing = compose();
       composing.catch(crash);
     },
-    status: () => state,
+    // Read on every call: the domain methods exist only while the Host runs, and are `unknown_method` before.
+    get methods() { return { status: () => state, ...running?.domains.handlers } as BridgeHandlers['methods']; },
     shutdown: close,
   }, io)]);
   await close();

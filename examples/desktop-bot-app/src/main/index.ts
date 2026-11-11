@@ -2,7 +2,9 @@ import { resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { app, BrowserWindow, ipcMain, net, powerSaveBlocker, protocol, session, shell, type IpcMainInvokeEvent } from 'electron';
 import brand from '../../brand.config.ts';
-import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, type RendererMethod } from '../bridge/protocol.ts';
+import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, type BridgeMethods, type MainMethod } from '../bridge/protocol.ts';
+import { createRendererRouter } from '../bridge/route.ts';
+import { MAIN_HANDLERS } from './domains.ts';
 import { HostProcess, spawnDevHost, type SupervisedHostState } from './host-process.ts';
 
 const SCHEME = 'app';
@@ -38,6 +40,12 @@ const host = new HostProcess({
   },
 });
 
+const route = createRendererRouter<BridgeMethods, MainMethod>({
+  allowed: RENDERER_METHODS,
+  main: MAIN_HANDLERS,
+  host: (method, params) => host.call(method, params as never),
+});
+
 /** Serves the renderer directory on app://renderer/ with the CSP header; anything outside it is 404. */
 function serveRenderer(request: Request): Promise<Response> | Response {
   const url = new URL(request.url);
@@ -59,8 +67,7 @@ function forward(event: IpcMainInvokeEvent, method: unknown, params: unknown): P
   if (!window || frame !== window.webContents.mainFrame || url?.protocol !== `${SCHEME}:` || url.host !== RENDERER_HOST) {
     throw new Error('bridge_sender_refused');
   }
-  if (!RENDERER_METHODS.includes(method as RendererMethod)) throw new Error('bridge_method_refused');
-  return host.call(method as RendererMethod, params as undefined);
+  return route(method, params);
 }
 
 function openExternal(target: string): void {

@@ -6,7 +6,7 @@ import { serveBridge } from './server.ts';
 
 serveBridge({
   greeted: () => {},
-  status: () => ({ state: 'running', pid: process.pid, activeWork: 0 }),
+  methods: { status: () => ({ state: 'running', pid: process.pid, activeWork: 0 }) },
   shutdown: async () => {},
 }).catch((error: Error) => {
   console.error(`Host bridge stopped: ${error.message}`);

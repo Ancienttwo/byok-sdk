@@ -5,6 +5,11 @@
  * there is no negotiation. Main sends requests; the Host sends replies and
  * `state` pushes, which carry no id.
  */
+import { ACTIVITY_DOMAIN, type ActivityMethods } from './domains/activity.ts';
+import { K8_DOMAIN, type K8Methods } from './domains/k8.ts';
+import { KEYS_DOMAIN, type KeysMethods } from './domains/keys.ts';
+import { SETTINGS_DOMAIN, type SettingsMethods } from './domains/settings.ts';
+
 export const BRIDGE_VERSION = 1;
 
 /** The ipcRenderer.invoke channel the preload forwards renderer calls on. */
@@ -22,24 +27,45 @@ export type HostState =
 /** The one Host-to-main push: the Host's state after every change. */
 export interface HostStateEvent { readonly event: 'state'; readonly state: HostState }
 
-/** Every bridge method with its params and result. */
-export interface BridgeMethods {
+/** The bridge's own methods. `hello` and `shutdown` belong to main alone. */
+export interface CoreMethods {
   hello: { params: { bridgeVersion: number }; result: { bridgeVersion: number } };
   status: { params: undefined; result: HostState };
   shutdown: { params: undefined; result: null };
 }
+
+/**
+ * Every bridge method with its params and result: the core methods and each
+ * domain's (`src/bridge/domains/`). A name two modules declare fails to compile.
+ */
+export interface BridgeMethods extends CoreMethods, K8Methods, ActivityMethods, SettingsMethods, KeysMethods {}
 export type BridgeMethod = keyof BridgeMethods;
 
-/** The methods main forwards from the renderer. `hello` and `shutdown` belong to main alone. */
-export const RENDERER_METHODS = ['status'] as const satisfies readonly BridgeMethod[];
-export type RendererMethod = (typeof RENDERER_METHODS)[number];
+const DOMAINS = [K8_DOMAIN, ACTIVITY_DOMAIN, SETTINGS_DOMAIN, KEYS_DOMAIN] as const;
+
+/** The methods the renderer may call. Main answers {@link MAIN_METHODS} itself and forwards the rest to the Host. */
+export const RENDERER_METHODS = ['status', ...DOMAINS.flatMap(domain => domain.renderer), ...DOMAINS.flatMap(domain => domain.main)] as const satisfies readonly BridgeMethod[];
+export type RendererMethod = 'status' | (typeof DOMAINS)[number]['renderer'][number] | MainMethod;
+
+/** The renderer methods main answers without the Host. */
+export const MAIN_METHODS: readonly MainMethod[] = DOMAINS.flatMap(domain => domain.main);
+export type MainMethod = (typeof DOMAINS)[number]['main'][number];
+
+/** The methods the Host answers behind the bridge, besides `hello` and `shutdown`. */
+export type HostMethods = Omit<BridgeMethods, 'hello' | 'shutdown' | MainMethod>;
 
 /** What the preload exposes to the renderer as `window.byok`. */
 export interface ByokBridge {
   call<M extends RendererMethod>(method: M, params: BridgeMethods[M]['params']): Promise<BridgeMethods[M]['result']>;
 }
 
-export type BridgeErrorCode = 'bridge_version_mismatch' | 'hello_required' | 'unknown_method' | 'invalid_message' | 'host_exited';
+/**
+ * `invalid_params`: a handler refused the params. `method_failed`: a handler
+ * threw something other than an `invalid_params` `BridgeError`. Both answer one
+ * call; the bridge keeps serving.
+ */
+export type BridgeErrorCode = 'bridge_version_mismatch' | 'hello_required' | 'unknown_method' | 'invalid_message' | 'host_exited'
+  | 'invalid_params' | 'method_failed';
 
 export class BridgeError extends Error {
   readonly code: BridgeErrorCode;

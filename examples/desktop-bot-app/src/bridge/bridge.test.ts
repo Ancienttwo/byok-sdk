@@ -1,11 +1,20 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
+import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { HostProcess, type SupervisedHostState } from '../main/host-process.ts';
 import { BridgeClient, type HostChild } from './client.ts';
-import { BRIDGE_VERSION, encodeMessage } from './protocol.ts';
+import { BRIDGE_VERSION, BridgeError, encodeMessage } from './protocol.ts';
+import { createRendererRouter } from './route.ts';
+import { serveBridge } from './server.ts';
+
+/** A domain as a `src/bridge/domains/` module declares one; `test.reset` is not on the renderer allowlist. */
+interface TestMethods {
+  'test.echo': { params: { text: string }; result: { text: string } };
+  'test.reset': { params: undefined; result: null };
+}
 
 // Dev mode: the Host child runs under plain Node, as main spawns it.
 const stubHost = (): HostChild =>
@@ -80,5 +89,45 @@ describe('desktop bridge', () => {
     const exited = once(child, 'exit');
     await expect(host.stop()).rejects.toThrow('Host did not shut down within 100 ms');
     expect((await exited)[1]).toBe('SIGTERM');
+  });
+
+  it('answers a domain method through the Host bridge, and a refused param answers only that call', async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const replies = createInterface({ input: output })[Symbol.asyncIterator]();
+    const next = async () => JSON.parse((await replies.next()).value as string) as unknown;
+    const served = serveBridge<TestMethods>({
+      greeted: () => {},
+      shutdown: async () => {},
+      methods: {
+        'test.echo': params => {
+          const text = (params as { text?: unknown } | undefined)?.text;
+          if (typeof text !== 'string') throw new BridgeError('invalid_params', 'test.echo needs a text');
+          return { text };
+        },
+        'test.reset': () => null,
+      },
+    }, { input, output });
+
+    input.write(encodeMessage({ id: 1, method: 'hello', params: { bridgeVersion: BRIDGE_VERSION } }));
+    expect(await next()).toEqual({ id: 1, result: { bridgeVersion: BRIDGE_VERSION } });
+    input.write(encodeMessage({ id: 2, method: 'test.echo', params: { text: 'hi' } }));
+    expect(await next()).toEqual({ id: 2, result: { text: 'hi' } });
+    input.write(encodeMessage({ id: 3, method: 'test.echo', params: {} }));
+    expect(await next()).toEqual({ id: 3, error: { code: 'invalid_params', message: 'test.echo needs a text' } });
+    input.write(encodeMessage({ id: 4, method: 'test.other' }));
+    expect(await next()).toMatchObject({ id: 4, error: { code: 'unknown_method' } });
+    input.write(encodeMessage({ id: 5, method: 'shutdown' }));
+    expect(await next()).toEqual({ id: 5, result: null });
+    await served;
+  });
+
+  it('refuses a renderer call to a domain method outside the allowlist before it reaches the Host', async () => {
+    const host = vi.fn(async (method: string, params: unknown) => ({ method, params }));
+    const route = createRendererRouter<TestMethods, never>({ allowed: ['test.echo'], main: {}, host });
+
+    expect(() => route('test.reset', undefined)).toThrow('bridge_method_refused');
+    expect(host).not.toHaveBeenCalled();
+    expect(await route('test.echo', { text: 'hi' })).toEqual({ method: 'test.echo', params: { text: 'hi' } });
   });
 });

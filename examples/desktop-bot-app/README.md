@@ -40,6 +40,14 @@ to stderr only.
   `shutdown` are main's alone. Params are validated once, in the Host.
 - The Host pushes `{ "event": "state" }` lines (no id) after every change: `starting`,
   `running` with its active work count, or `stopped` with a reason.
+- Domains add methods without editing the bridge. A domain declares its methods
+  (`<domain>.<verb>`) and its renderer allowlist in `src/bridge/domains/<domain>.ts`, and
+  its Host handlers in `src/host/<domain>/domain.ts`. `protocol.ts` composes the method
+  types and the allowlist, and `src/host/domains.ts` composes the handlers. A method a
+  domain lists as `main` is answered by main (`src/main/domains.ts`) and never reaches
+  the Host. Handlers validate their own params and refuse them with `invalid_params`;
+  that error, or a failing handler (`method_failed`), answers only the one call. Domain
+  methods exist only while the Host runs; before that they are `unknown_method`.
 - On quit, main sends `shutdown`. The app exits 0 only when the Host acknowledged it
   and exited 0; a Host still running after 10 s is killed and the app exits 1.
 
