@@ -9,6 +9,7 @@
  * is not throws to the owned line transport, which fails and disposes the
  * process tree.
  */
+import type { RuntimeStartClassifier } from '../runtime-start-failure';
 
 export interface AcpLineTransport {
   write(text: string): void;
@@ -28,6 +29,10 @@ export class AcpRpcError extends Error {
     this.name = 'AcpRpcError';
   }
 }
+
+/** Hermes start classifier: an ACP error answer is a non-retryable failure of unknown class. */
+export const hermesStartClass: RuntimeStartClassifier = (error) =>
+  error instanceof AcpRpcError ? { category: 'infrastructure', retry: 'non-retryable', failure: { class: 'unknown' } } : undefined;
 
 export class AcpMethodNotFound extends Error {
   constructor(method: string) {

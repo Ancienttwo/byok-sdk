@@ -8,7 +8,7 @@ import { execFile, type spawn as nodeSpawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import * as codexRuntime from '../../runtime/codex-session-runtime';
-import { oarStartFailure } from '../oar-start-failure';
+import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure';
 import type {
   AgentEvent,
   TaskFailure,
@@ -358,7 +358,7 @@ export class CodexAdapter implements RuntimeAdapter {
           cause: disposal,
         });
       }
-      throw oarStartFailure(session.halted ?? thrown, { classes: codexRuntime, exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'codex' });
+      throw runtimeStartFailure(session.halted ?? thrown, { classify: oarStartClassifier(codexRuntime), exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'codex' });
     }
   }
 }
