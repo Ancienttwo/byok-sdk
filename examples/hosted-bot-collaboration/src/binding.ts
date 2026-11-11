@@ -88,7 +88,7 @@ export async function switchRefusal(client: PoolClient, scopeKey: string, device
 }
 
 /**
- * H sends no new Agent home write to this device (#957), as L's `flushHomes` for a refused device: its row is not revoked
+ * H sends no new Agent home write to this device (#957): its row is not revoked
  * and its switch away from H is open. A write that was sent is still read back. A device with no row, or a revoked one,
  * keeps the flush it had before. A row in mode L is on a scope that the switch fence refuses (#975: exported, or an
  * uncommitted import), so no flush of it commits.

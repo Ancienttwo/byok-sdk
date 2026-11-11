@@ -20,7 +20,7 @@ export function acknowledgedTurnIds(input: IntentCompactionInput): string[] {
 }
 
 /**
- * Removes the settled intent rows of the acknowledged Turns, as K4 `compact` removes settled intents (#793 S8). The caller
+ * Removes the settled intent rows of the acknowledged Turns (#793 S8). The caller
  * holds the scope lock and passes the state of its transaction. Each removed row leaves a permanent intent tombstone in the
  * same transaction, so the Turn can never freeze again. A refusal or a throw writes nothing.
  *
@@ -35,7 +35,7 @@ export async function decideCompaction(client: PoolClient, scopeKey: string, sta
   const rows = new Map(found.rows.map(row => [row.key, row]));
   const present = turnIds.filter(id => rows.has(storedKey(id)));
   const retired = await retiredIntents(client, scopeKey, turnIds.filter(id => !rows.has(storedKey(id))));
-  // As K4 `compact`, the K8 veto sees every acknowledged intent before anything is removed. H keeps one receipt per task,
+  // The K8 veto sees every acknowledged intent before anything is removed. H keeps one receipt per task,
   // the accepted reply itself (messages.ts), so only a delegated reply body without its verdict can refuse on the receipt.
   for (const turnId of present) {
     const reason = compactVeto(state, turnId, { hasIntent: id => rows.has(storedKey(id)), receipt: taskId => state.replies[taskId] });

@@ -215,8 +215,8 @@ export function hostedRoutineCommands(slice: RoutineSlice, now: number): Routine
     update: definition => { botRoutineOnly(definition); commands.update(definition); } };
 }
 /**
- * The K4 routine commands of the Host's own Host job routines (#793 S14), as L's `core.addRoutine`, `updateRoutine` and
- * `lifecycle`, with the Host's handlers. They take only Host job routines, so a Bot routine stays under its Bot policy.
+ * The K4 routine commands of the Host's own Host job routines (#793 S14), with the Host's
+ * handlers. They take only Host job routines, so a Bot routine stays under its Bot policy.
  */
 export function hostJobCommands(slice: RoutineSlice, now: number, hostJobs: ReadonlyMap<string, HostJobHandler>): Omit<RoutineCommands, 'list'> {
   const commands = routineCommands(slice.state, { now: () => now, nextTime: routineCalendar, hostJobs, occurrenceHooks: new Map() });

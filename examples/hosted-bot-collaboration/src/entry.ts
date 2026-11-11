@@ -47,8 +47,8 @@ export interface CommandEntryOptions<C> {
 
 /**
  * The authenticated product command entry of H (#793 S10), L's owner API (K8 host.ts) for requests: each method
- * authenticates, checks the principal as L's R2 checks do, commits with L's command id, then syncs the scope, as L runs its
- * pass. A commit that adds work (a Turn that is not concluded, a room seat, or an input batch or an input to one) for a Bot
+ * authenticates, checks the principal (R2), commits with L's command id, then syncs the scope.
+ * A commit that adds work (a Turn that is not concluded, a room seat, or an input batch or an input to one) for a Bot
  * whose device has no active H binding rolls back with `DeviceBindingError` (§55a, the entry half).
  *
  * L trusts the caller of `setMainBot`, `createRoom`, `updateRoom`, `retryPersona` and its routine API; every call here comes from a
@@ -76,7 +76,7 @@ export class HostedCommandEntry<C> {
     const { scope } = await this.owned(credential, 'answer', questionId);
     await this.commit(scope, hash(['answer', questionId]), { kind: 'answer', questionId, answer });
   }
-  /** A refused decision, or another decision for a decided card, throws after the sync, as L. */
+  /** A refused decision, or another decision for a decided card, throws after the sync. */
   async decide(credential: C, cardId: string, decision: 'confirmed' | 'rejected'): Promise<void> {
     const { scope } = await this.owned(credential, 'decide', cardId);
     let error: string | undefined;
@@ -91,14 +91,14 @@ export class HostedCommandEntry<C> {
     await this.options.sync(scope, this.now());
     if (error) throw new Error(error);
   }
-  /** As L `cancelTurn` (#1405): only a `cancelled` result committed, so only it syncs. */
+  /** Only a `cancelled` result committed, so only it syncs (#1405). */
   async cancelTurn(credential: C, turnId: string): Promise<TurnCancelResult> {
     const { scope } = await this.owned(credential, 'cancelTurn', turnId);
     const result = await this.store.cancelTurn(scope, turnId, this.now);
     if (result.result === 'cancelled') await this.options.sync(scope, this.now());
     return result;
   }
-  /** As L `cancelDelegation` (#1405). Refuses with `DelegationError`. */
+  /** Refuses with `DelegationError` (#1405). */
   async cancelDelegation(credential: C, delegationId: string): Promise<DelegationCancelResult> {
     const { scope } = await this.owned(credential, 'cancelDelegation', delegationId);
     const result = await this.store.cancelDelegation(scope, delegationId, this.now);
@@ -212,7 +212,7 @@ export class HostedCommandEntry<C> {
     await this.options.sync(scope, this.now());
     return result;
   }
-  /** A keyless owner command (#739 6a): a new command id at each call, as L's `commitKeyless`. */
+  /** A keyless owner command (#739 6a): a new command id at each call. */
   private keyless(scope: string, command: KeylessCommand): Promise<CommitResult> {
     return this.commit(scope, randomUUID(), command);
   }

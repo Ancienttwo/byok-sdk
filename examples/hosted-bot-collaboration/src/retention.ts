@@ -20,7 +20,7 @@ function checkRow(namespace: string, id?: string): void {
   if (id !== undefined && (typeof id !== 'string' || !id || id.length > ID_MAX)) throw new Error('Invalid application row id');
 }
 
-/** One archived row of a scope, as K4 `ApplicationRows.get` reads it: an expired row stays until a retention call removes it. */
+/** One archived row of a scope: an expired row stays until a retention call removes it. */
 export async function archivedRow(client: PoolClient, scopeKey: string, namespace: string, id: string): Promise<Json | undefined> {
   const found = await client.query<{ body: Json }>('SELECT body FROM archived_row WHERE scope = $1 AND namespace = $2 AND id = $3',
     [scopeKey, namespace, storedKey(id)]);
@@ -45,7 +45,7 @@ async function retiredHashes(client: PoolClient, scopeKey: string, kind: Tombsto
     'SELECT identity FROM retired_identity WHERE scope = $1 AND kind = $2 AND identity = ANY($3::text[])', [scopeKey, kind, hashes]);
   return new Set(found.rows.map(row => row.identity));
 }
-/** Loads the tombstones of `ids` and returns a lookup, as K4 `isRetired`. A query outside `ids` throws. */
+/** Loads the tombstones of `ids` and returns a lookup. A query outside `ids` throws. */
 async function tombstones(client: PoolClient, scopeKey: string, ids: Array<[RetiredNamespace | 'root', string]>) {
   const asked = new Set(ids.map(([namespace, id]) => hash([namespace, id])));
   const retired = await retiredHashes(client, scopeKey, 'row', [...asked]);
@@ -66,7 +66,7 @@ export async function retiredIntents(client: PoolClient, scopeKey: string, turnI
   const retired = await retiredHashes(client, scopeKey, 'intent', turnIds.map(intentIdentity));
   return new Set(turnIds.filter(id => retired.has(intentIdentity(id))));
 }
-/** Writes permanent tombstones of `kind`. A tombstone already there becomes permanent, as K4's row retire does. */
+/** Writes permanent tombstones of `kind`. A tombstone already there becomes permanent. */
 export async function retire(client: PoolClient, scopeKey: string, kind: TombstoneKind, identities: Iterable<string>): Promise<void> {
   for (const identity of identities) {
     await client.query(`INSERT INTO retired_identity (scope, kind, identity, expires_at) VALUES ($1, $2, $3, NULL)
@@ -74,21 +74,21 @@ export async function retire(client: PoolClient, scopeKey: string, kind: Tombsto
   }
 }
 
-/** The Turn ids among `turnIds` that retention retired (#798), as L reads them in its sync (K8 `commit.ts`). */
+/** The Turn ids among `turnIds` that retention retired (#798). */
 export async function retiredTurns(client: PoolClient, scopeKey: string, turnIds: readonly string[]): Promise<Set<string>> {
   const isRetired = await tombstones(client, scopeKey, turnIds.flatMap(id => identities('turn', id)));
   return new Set(turnIds.filter(id => retiredIdentity('turn', id, isRetired)));
 }
 
 /**
- * One command through the commit contract in the store's transaction, as L `commitInLedger` runs it (#798): a record that
+ * One command through the commit contract in the store's transaction (#798): a record that
  * retention moved still answers a replay, and an id that retention retired is refused at admission. A throw rolls back.
  */
 export async function commitStored(client: PoolClient, scope: string, state: CollaborationState, request: CommitRequest<Command>,
   ports: Omit<CommandPorts, 'intents' | 'deliver' | 'outcome'> & { outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> },
   channel: boolean): Promise<CommitResult> {
   const scopeKey = storedKey(scope), command = request.command, { outcome, ...rest } = ports;
-  // The channel outbox port of a K4 callback, as L's (K8 host.ts `deliverPort`). The delivery rules read the intent
+  // The channel outbox port of a K4 callback (K8 host.ts `deliverPort`). The delivery rules read the intent
   // conclusions committed before this command, so the view is read here, before any write of this transaction (#793 D2b-out-2).
   const taskId = command.kind === 'message' ? command.message.taskId : command.kind === 'outcome' ? command.taskId : undefined;
   const conclusions = channel && taskId !== undefined ? await intentConclusions(client, scope) : undefined;
@@ -101,7 +101,7 @@ export async function commitStored(client: PoolClient, scope: string, state: Col
     ? await archivedRow(client, scopeKey, 'commands', request.commandId) as CommandRecord | undefined : undefined;
   let admitted: AdmittedIds | undefined;
   const result = commitCommand(state, request, { scope, recordCallbacks: true,
-    // As K4 `rows.get` in L: a keyed command that is not in the state checks its row id here, and an over-limit id throws.
+    // A keyed command that is not in the state checks its row id here, and an over-limit id throws.
     archived: (id: string) => { checkRow('commands', id); return id === request.commandId ? archived : undefined; },
     admitted: ids => { admitted = ids; } }, { ...rest, ...deliver, intents, ...(outcome ? { outcome: { ...outcome, committed: intents } } : {}) });
   if (admitted) {
