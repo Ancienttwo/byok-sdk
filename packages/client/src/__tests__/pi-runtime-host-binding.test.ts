@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { extractPiConfigDigest, readPiHostConfig, serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
 
 const roots: string[] = [];
@@ -36,6 +37,19 @@ describe('Pi child launch config digest', () => {
     expect(extractPiConfigDigest([`--config-digest=${f.serialized.digest}`,'--config',f.configPath]))
       .toEqual({digest:f.serialized.digest,args:['--config',f.configPath]});
     expect(readPiHostConfig(f.configPath,f.serialized.digest)).toEqual(f.config);
+  });
+
+  it('every Pi host entry sets the 3000 ms family attempt timeout before it reads argv', async () => {
+    const host = await import('../bin/pi-runtime-host');
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('exit'); });
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      for (const run of [host.runPiRpcHost, host.runPiPreparedHost, host.runPiDurableHost, host.runPiTeamOperatorHost]) {
+        net.setDefaultAutoSelectFamilyAttemptTimeout(250);
+        await expect(run([])).rejects.toThrow();
+        expect(net.getDefaultAutoSelectFamilyAttemptTimeout()).toBe(3000);
+      }
+    } finally { exit.mockRestore(); vi.restoreAllMocks(); net.setDefaultAutoSelectFamilyAttemptTimeout(250); }
   });
 
   it('rejects changed complete config bytes', async () => {

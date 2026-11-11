@@ -1,5 +1,6 @@
 import { parsePiAgentResources } from '../adapters/pi/agent-resources.js';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding.js';
+import { applyPiHostNetworkDefaults } from './pi-host-network-defaults.js';
 import { readFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -208,6 +209,7 @@ export function parsePiRpcHostArgs(
  * SDK-reserved helper; its assets then live in its Pi asset root.
  */
 export async function runPiRpcHost(argv: readonly string[], packaging: 'installed' | 'bundled' = 'installed'): Promise<void> {
+  applyPiHostNetworkDefaults();
   // Capture before Pi redirects ordinary stdout to stderr. Replacements keep
   // this same JSONL writer, so their ready event remains on the RPC channel.
   const writeHostFrame = process.stdout.write.bind(process.stdout);

@@ -5,6 +5,11 @@
   "packageVersion": "0.94.0",
   "repository": "https://github.com/botiverse/oar",
   "commit": "45488e745abc9e320da9adb2df851b249160c74e",
+  "fork": {
+    "repository": "https://github.com/Ancienttwo/oar",
+    "branch": "byok/0.94.0",
+    "commit": "8a354e16504ec8363cd9f3d26b975bb6c20ac6b3"
+  },
   "release": {
     "ecosystem": "npm",
     "name": "@botiverse/oar",
@@ -454,6 +459,7 @@
     {
       "path": "runtimes/opencode/failure.ts",
       "sourcePath": "packages/oar/src/runtimes/opencode/failure.ts",
+      "upstreamCommit": "b986c781c8f022c41db2778689ccd6485538e22c",
       "upstreamSha256": "f20f44de095eb1ab6354974a13369570ab17347bd99d858fa2f55d2d38e34316",
       "vendoredSha256": "f20f44de095eb1ab6354974a13369570ab17347bd99d858fa2f55d2d38e34316"
     },
