@@ -131,8 +131,8 @@ and `notes/` resolve from the cwd and the device injects no memory. See
 
 ## Layer 3: shared vectors
 
-The roots are the package entries `./test-support`, `./retention-vectors`,
-`./routine-vectors`, `./delivery-vectors` and `./l-test-host`. Each runs the
+The root is the package entry `./testing` (`src/testing.ts`): the commit,
+retention, routine and delivery vectors and the L test Host. Each runs the
 same cases against a Host's own store, as the hosted example does on Postgres.
 The vectors need layers 1 and 2: `CollaborationState`, the outcome schema and
 the routine rules come from L files. They also import `hash` and `taskId` from

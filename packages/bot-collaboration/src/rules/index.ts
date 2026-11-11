@@ -1,6 +1,6 @@
 // The `./rules` entry: the pure K8 rules, no I/O. It imports only `@byok-sdk/protocol` and
 // `@byok-sdk/server/execution-core/canonical`, so a Worker loads it without `node:sqlite`.
-// A symbol the `.` entry exports is not repeated here: each symbol has one public path.
+// A symbol that `.` or `./host-kit` exports is not repeated here: each symbol has one public path.
 export { cardCallDue, CONNECTOR_OUTCOME_UNKNOWN, reportCardDecisions, settleCardCall } from './cards.js';
 export { COALESCE_DEFAULTS, coalescePolicy, type CoalescePolicy, type InputFields } from './coalesce.js';
 export { commandBots, commitCommand, type KeylessCommand } from './commands.js';

@@ -11,7 +11,8 @@ export const scriptTestInputs = Object.freeze({
     /^packages\/client\/src\/(?:daemon\/journal\/sqlite-journal|util\/path-mutation-gate)\.ts$/,
     /^packages\/keys\/src\//,
     /^deploy\/sql\//,
-    /^examples\/(?:host-execution-core|bot-collaboration)\/(?:package\.json$|src\/)/,
+    /^examples\/host-execution-core\/(?:package\.json$|src\/)/,
+    /^packages\/bot-collaboration\/src\//,
     /^scripts\/release\/(?:check-upgrade-manifest\.mjs$|upgrade-manifest\/)/,
   ] },
   'scripts/release/install-matrix.test.mjs': { inputs: [

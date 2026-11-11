@@ -2770,9 +2770,9 @@ command name never reaches admission or a runtime `start()`. A server accepts
 only `command`, `args` and `approveTools` (`toolset-registry.ts:180`).
 `readOnlyToolsets` is the Host's list and is enforced where the Host composes
 offers: `ownReadOnlyToolsets` validates the ids
-(`examples/bot-collaboration/src/toolset-policy.ts:4`) and `admitBotToolsets`
+(`packages/bot-collaboration/src/toolset-policy.ts:4`) and `admitBotToolsets`
 refuses an execution whose `requiredToolsets` names a toolset the list does not
-hold (`examples/bot-collaboration/src/rules/team.ts:14`).
+hold (`packages/bot-collaboration/src/rules/team.ts:14`).
 
 One declaration per product toolset is enough. A toolset carrying
 `approveTools` runs on every runtime since 0.35.0: the daemon projects the

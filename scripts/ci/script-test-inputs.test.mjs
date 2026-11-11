@@ -36,6 +36,7 @@ test('reader inventory includes copied fixtures, native identity and built cross
     ['packages/client/upgrade-history/0.33.0-0.34.0.json', upgrade],
     ['scripts/release/upgrade-manifest/history.mjs', upgrade],
     ['api-surface/core.d.ts', upgrade],
+    ['packages/bot-collaboration/src/retention.ts', upgrade],
     ['packages/client/native/agent-memory-fs/main.go', 'scripts/release/agent-memory-helper-source.test.mjs'],
     ['packages/client/src/util/agent-memory-helper-release-pin.ts', 'scripts/release/agent-memory-helper-source.test.mjs'],
     ['packages/client/src/runtime/codex-session-runtime.d.ts', 'scripts/api-surface/check-oar-bridge.test.mjs'],

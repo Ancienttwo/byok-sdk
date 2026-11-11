@@ -506,6 +506,9 @@ test('#1845 S2: K8 moves to packages/bot-collaboration with its reviewed manifes
     [{ ...manifest, peerDependenciesMeta: { vitest: { optional: true } } }, /optional testing peers/],
     [{ ...manifest, exports: { ...manifest.exports, './internal': './dist/internal.js' } }, /unreviewed shape/],
     [{ ...manifest, private: false }, /unreviewed shape/],
+    [{ ...manifest, bin: { k8: './dist/bin.js' } }, /unreviewed field/],
+    [{ ...manifest, devDependencies: { ...manifest.devDependencies, 'left-pad': '1.0.0' } }, /reuse a base dependency spec \(left-pad\)/],
+    [{ ...manifest, devDependencies: (({ '@byok-sdk/cloud': _cloud, ...rest }) => rest)(manifest.devDependencies) }, /edges differ from the reviewed graph/],
   ]) {
     f.write(path, candidate);
     assert.throws(() => selectImpact([path], f), reason);
