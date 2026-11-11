@@ -6,7 +6,7 @@ import { createAgentHomeProjectionConsumer, createDaemonWithAdapters } from '@by
 import type { TenantId } from '@byok-sdk/cloud';
 import type { FrozenSubmitPort } from '@byok-sdk/server/execution-core';
 import { policy } from '@byok-sdk/example-host-execution-core/test-support';
-import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { createTestKeychain } from '../../../scripts/testing/macos-keychain.mjs';
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
 import type { CanaryCloud } from './canary-cloud.test-support';
@@ -36,7 +36,7 @@ export async function openHostedDevice(cloud: CanaryCloud, tenant: TenantId, ser
         await writeHomeFile('AGENTS.md', String((projection as { persona?: unknown }).persona ?? ''));
       }) },
       agentEgress: { policy },
-    }, [adapter], options.e2ee === undefined ? { deviceCredentials: new InMemoryDeviceCredentialStore() } : {});
+    }, [adapter], options.e2ee === undefined ? { deviceCredentials: new InMemoryDeviceCredentialBackend() } : {});
     const { code } = await cloud.createPairingCode(tenant, { productId: PRODUCT_ID });
     const member = options.e2ee === undefined ? undefined : await HostedMember.create(cloud, tenant);
     const { deviceId } = await daemon.pair(code, member === undefined ? undefined : { verificationSecret: member.verificationSecret });

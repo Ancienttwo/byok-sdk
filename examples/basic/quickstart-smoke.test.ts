@@ -1,4 +1,4 @@
-import { InMemoryDeviceCredentialStore } from '../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 // Quickstart smoke (#389 item 2, #384 item 1, #418): the README's "Run it" loop
 // against the unmodified `server.ts`, with every network and lifecycle default
 // left alone and a stub runtime in place of a real agent. No `longPollHoldMs`
@@ -94,7 +94,7 @@ describe('examples/basic quickstart with default settings', () => {
       // The README's JSON `"agentEgress": {}`, cast as the CLI config loader
       // casts it: an absent policy is the client default policy.
       agentEgress: {} as AgentEgressConfig,
-    }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
+    }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialBackend() });
 
     // Step 1 of the README: the page's "Create pairing code" button.
     const pairing = await fetch(`${server.url}/api/pair`, { method: 'POST' });

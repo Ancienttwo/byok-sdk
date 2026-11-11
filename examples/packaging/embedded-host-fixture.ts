@@ -18,7 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { createByokServer, listenLoopback } from '@byok-sdk/server';
 import { bundledSdkHelperHost, createDaemon, runSdkReservedHelperCommand, sdkPackagingAssetLayout } from '@byok-sdk/client';
 import { InMemorySecretStore, parseModelProviderProfile, parsePiProviderLauncherOptions, runPiProviderLauncher, SqliteProviderProfileStore } from '@byok-sdk/keys';
-import { InMemoryDeviceCredentialStore } from '../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 
 const MARKER = 'BYOK_EMBEDDED_HOST';
 const PRODUCT_ID = 'byok-packaging-embedded';
@@ -102,7 +102,7 @@ async function host(): Promise<void> {
     ...(native ? { agentMemoryHelperAssetRoot: path.join(assets, sdkPackagingAssetLayout.agentMemoryHelper) } : {}),
     piByokLauncher: { command: helperHost.executable, args: [...(helperHost.entry === undefined ? [] : [helperHost.entry]), LAUNCHER_COMMAND],
       profileDbPath, sessionDir: path.join(root, 'sessions') },
-  }, { deviceCredentials: new InMemoryDeviceCredentialStore() });
+  }, { deviceCredentials: new InMemoryDeviceCredentialBackend() });
   try {
     const { code } = await byok.pairing.createPairingCode({ productId: PRODUCT_ID });
     const { deviceId } = await daemon.pair(code);

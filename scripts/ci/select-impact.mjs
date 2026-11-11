@@ -640,9 +640,9 @@ export function selectImpact(paths, context = {}) {
     if (path === 'scripts/integration/fixtures/salesko-recurring-daemon.ts' || path === 'scripts/integration/salesko-recurring.test.ts') {
       dirs.add('packages/client'); continue;
     }
-    // Shared by client fixtures and their dependent examples, plus the built
-    // adapter and packaging smokes that import this backend directly.
-    if (path === 'scripts/testing/device-credentials.mjs') {
+    // #1844: the backend moved to @byok-sdk/client/testing; this removal still
+    // reruns the client consumers and the built smokes that imported it.
+    if (path === 'scripts/testing/device-credentials.mjs' || path === 'scripts/testing/device-credentials.d.mts') {
       dirs.add('packages/client');
       families.add('adapter-lifecycle-smoke'); families.add('packageability-smoke');
       continue;

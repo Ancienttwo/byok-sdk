@@ -13648,6 +13648,21 @@ export declare const SDK_RESERVED_MCP_TOOL_NAMES: Readonly<{
     byokagentteam: readonly string[];
     byokagentresult: readonly string[];
 }>;
+// ==== @byok-sdk/client dist/testing/device-credentials.d.ts ====
+import type { DeviceCredentialBackend, DeviceRecord, FirstPairingAttempt } from '../daemon/device-credential-store.js';
+/**
+ * A `DeviceCredentialBackend` held in memory, so a test never reaches the
+ * operating system's credential store. Product source never imports it and
+ * the environment never selects it; a test injects it as `deviceCredentials`.
+ */
+export declare class InMemoryDeviceCredentialBackend implements DeviceCredentialBackend {
+    #private;
+    read(): Promise<DeviceRecord | undefined>;
+    readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined>;
+    saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void>;
+    replace(record: DeviceRecord): Promise<void>;
+    clear(): Promise<boolean>;
+}
 // ==== @byok-sdk/client dist/testing/index.d.ts ====
 import { type RuntimeEnvironment } from '../runtime/environment.js';
 import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeDetectResult } from '../types.js';
@@ -13668,6 +13683,7 @@ export interface FakeRuntimeAdapterBehavior {
  * SDK. Only `detect`, `prepare` and `runtimeEnvironment` are the test's.
  */
 export declare function fakeRuntimeAdapter(id: FakeRuntimeAdapterId, behavior?: FakeRuntimeAdapterBehavior): RuntimeAdapter;
+export { InMemoryDeviceCredentialBackend } from './device-credentials.js';
 // ==== @byok-sdk/client dist/tool-authorization.d.ts ====
 import type { AgentRef } from './agent-home.js';
 /**

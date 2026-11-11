@@ -16,7 +16,7 @@ import {
 } from '@byok-sdk/client';
 import { BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, type AgentEvent, type DispatchSelection, type OfferAdmissionTimings } from '@byok-sdk/protocol';
 import { createByokServer, type ByokServer } from '@byok-sdk/server';
-import { InMemoryDeviceCredentialStore } from '../../../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { CORPUS, CORPUS_REVISION, corpusCase, corpusContract, preflightCorpus } from './corpus';
 import { resultDigest } from './digest';
 import {
@@ -323,7 +323,7 @@ async function openHost(options: RunCellOptions): Promise<Host> {
     productId: PRODUCT_ID, productName: 'submit_result measurement', localAgentRelease: { version: '0.0.0-measurement' },
     serverUrl: `http://127.0.0.1:${port}`, storeDir: path.join(options.workRoot, 'sdk'),
     agentHome: { hostStorageRoot: homes }, agentEgress: { policy: EGRESS_POLICY }, ...DAEMON_LIMITS,
-  }, options.adapters().map(adapter => recorder.wrap(adapter)), { deviceCredentials: new InMemoryDeviceCredentialStore() });
+  }, options.adapters().map(adapter => recorder.wrap(adapter)), { deviceCredentials: new InMemoryDeviceCredentialBackend() });
   const close = async () => {
     await daemon.stop().catch(() => {});
     await server.close().catch(() => {});

@@ -8,7 +8,7 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { AgentMessageOutbox } from '../daemon/agent-message-outbox';
-import { InMemoryDeviceCredentialStore } from './fixtures/credential-backend';
+import { InMemoryDeviceCredentialBackend } from './fixtures/credential-backend';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startRealServer, type RealServerHandle } from './fixtures/real-server';
 import { waitForDaemonOpen } from './fixtures/lifecycle-barrier';
@@ -46,7 +46,7 @@ it.skipIf(process.platform === 'win32').each([
     serverUrl: server.url, storeDir: path.join(root, 'store'),
     storage: { scratchRoot: testScratchRoot() }, agentHome: { hostStorageRoot: path.join(root, 'homes') },
     agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } };
-  const credentials = new InMemoryDeviceCredentialStore();
+  const credentials = new InMemoryDeviceCredentialBackend();
   const pairing = createDaemonWithAdapters(config, [new StubRuntimeAdapter()], { deviceCredentials: credentials });
   const { deviceId } = await pairing.pair((await server.createPairingCode()).code);
   const checkpoint = path.join(root, 'checkpoint');

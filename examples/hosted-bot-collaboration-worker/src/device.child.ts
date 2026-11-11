@@ -13,7 +13,7 @@
  */
 import { createHash } from 'node:crypto';
 import { createDeviceSession, deviceConfig, type DeviceEvent } from './device-session.js';
-import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 
 export type ParentMessage =
   | { type: 'pair'; serverUrl: string; code: string; root: string }
@@ -30,7 +30,7 @@ process.on('message', (message: ParentMessage) => {
       device = createDeviceSession({ ...deviceConfig(message.serverUrl, message.root),
         localAgentRelease: { version: '0.0.0-test' },
         machineId: async () => createHash('sha256').update(message.root).digest('hex'),
-      }, 'stub', send, { deviceCredentials: new InMemoryDeviceCredentialStore() });
+      }, 'stub', send, { deviceCredentials: new InMemoryDeviceCredentialBackend() });
       await device.pair(message.code);
     } else if (message.type === 'finish') {
       if (!device) throw new Error('device is not paired');

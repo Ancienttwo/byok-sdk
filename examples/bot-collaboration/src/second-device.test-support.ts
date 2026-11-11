@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { createDaemonWithAdapters, type AgentEgressPolicy } from '@byok-sdk/client';
-import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
 import { createBotPersonaProjection } from './persona';
 
@@ -12,7 +12,7 @@ export async function enrollSecondDevice(serverUrl: string, code: string, root: 
     machineId: async () => createHash('sha256').update(root).digest('hex'), serverUrl, storeDir: join(root, 'sdk'),
     agentHome: { hostStorageRoot: join(root, 'homes'), projection: createBotPersonaProjection() },
     agentEgress: { policy } };
-  const credentials = new InMemoryDeviceCredentialStore();
+  const credentials = new InMemoryDeviceCredentialBackend();
   let daemon = createDaemonWithAdapters(config, [adapter], { deviceCredentials: credentials });
   const { deviceId } = await daemon.pair(code);
   await daemon.start(); await waitForReady(daemon);

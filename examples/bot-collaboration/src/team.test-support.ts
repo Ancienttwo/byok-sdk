@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { serve } from '@hono/node-server';
 import { createByokServer, type ByokServer } from '@byok-sdk/server';
 import { createDaemonWithAdapters } from '@byok-sdk/client';
-import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
 import { HostLedger } from '@byok-sdk/server/execution-core';
 import { stateOf } from './model';
@@ -68,7 +68,7 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
     agentHome: { hostStorageRoot: join(root, 'homes'), projection: {
       ...projection, apply: async input => { await options.holdProjection?.(); return projection.apply!(input); },
     } }, agentEgress: { policy },
-  }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
+  }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialBackend() });
   const pairing = await server.pairing.createPairingCode({ productId });
   const { deviceId } = await daemon.pair(pairing.code);
   const secondDevice = options.secondDevice ? await enrollSecondDevice(`http://127.0.0.1:${address.port}`,
