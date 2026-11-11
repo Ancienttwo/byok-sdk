@@ -11,6 +11,7 @@ import {
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { catalogEntryFor, ProviderProfiles } from '../host/keys/catalog.ts';
 import { refusalReceipt, runCustody } from './child.ts';
+import { keysMainHandlers } from './main-handlers.ts';
 import { CustodyError } from './protocol.ts';
 import { submitToCustody, type CustodyChild } from './submit.ts';
 
@@ -86,5 +87,25 @@ describe('custody child', () => {
     child.stdin.end(`{"op":"configure","secret":"${SECRET}"`);
     await exited;
     expect(JSON.parse(receipts[0]!)).toEqual(refusalReceipt(new CustodyError('custody_request_invalid', 'Request is not JSON')));
+  });
+
+  it('answers a bad profileRef with invalid_params and never asks the Host to reload', async () => {
+    const reloads: string[] = [];
+    const submit = keysMainHandlers({
+      spawnHostCommand: () => custodyChild(new InMemorySecretStore(), []),
+      callHost: async method => { reloads.push(method); return null; },
+    })['keys.submit'];
+    await expect(submit({ op: 'replace_secret', profileRef: '../writer', secret: SECRET })).rejects.toMatchObject({ code: 'invalid_params' });
+    expect(reloads).toEqual([]);
+  });
+
+  it('rejects the submission when the custody child died before reading stdin', async () => {
+    const events = new EventEmitter();
+    const stdin = new PassThrough();
+    const child: CustodyChild = { stdin, stdout: new PassThrough(),
+      once: (event, listener) => { events.once(event, listener); return child; } };
+    const submitted = submitToCustody(child, { op: 'replace_secret', profileRef: 'writer', secret: SECRET });
+    stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+    await expect(submitted).rejects.toMatchObject({ code: 'custody_exited' });
   });
 });

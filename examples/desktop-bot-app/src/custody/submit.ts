@@ -26,17 +26,23 @@ function parseReceipt(text: string): CustodyReceipt | undefined {
 
 /** Resolves to the committed profile's secret-free status; a refusal rejects with its code. */
 export async function submitToCustody(child: CustodyChild, request: CustodyRequest): Promise<ProviderStatus> {
-  const exited = new Promise<number | null>((resolve, reject) => {
-    child.once('exit', resolve);
-    child.once('error', error => reject(new CustodyError('custody_exited', `Custody child failed to run: ${error.message}`)));
+  // A child that cannot spawn never exits, and a dead child's stdin raises EPIPE: either rejects this submission.
+  const failed = new Promise<never>((_resolve, reject) => {
+    const broken = (error: Error) => reject(new CustodyError('custody_exited', `Custody child pipe failed: ${error.message}`));
+    child.once('error', broken);
+    child.stdin.on('error', broken);
   });
+  const exited = new Promise<number | null>(resolve => child.once('exit', resolve));
   let output = '';
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk: string) => { output += chunk; });
   const drained = once(child.stdout, 'end');
+  // Settled through the races below; these keep a late rejection from becoming unhandled.
+  failed.catch(() => {});
+  drained.catch(() => {});
   child.stdin.end(JSON.stringify(request));
-  const code = await exited;
-  await drained;
+  const code = await Promise.race([exited, failed]);
+  await Promise.race([drained, failed]);
   const receipt = parseReceipt(output.trim());
   if (receipt === undefined) throw new CustodyError('custody_exited', `Custody child exited with code ${code} and no receipt`);
   if (!receipt.ok) throw new CustodyError(receipt.code, receipt.message);

@@ -45,7 +45,9 @@ function parseRequest(value: unknown): CustodyRequest {
   }
   if (request.op === 'replace_secret') {
     if (typeof request.secret !== 'string') throw invalid('replace_secret requires a secret');
-    return { op: 'replace_secret', profileRef: ProviderProfileRefSchema.parse(request.profileRef), secret: request.secret };
+    const profileRef = ProviderProfileRefSchema.safeParse(request.profileRef);
+    if (!profileRef.success) throw invalid('profileRef is not a provider profile ref');
+    return { op: 'replace_secret', profileRef: profileRef.data, secret: request.secret };
   }
   throw invalid('op must be configure or replace_secret');
 }
