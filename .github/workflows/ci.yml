@@ -1006,7 +1006,9 @@ jobs:
             src/__tests__/support-bundle.test.ts `
             src/__tests__/daemon-auth.test.ts `
             src/__tests__/daemon-stop-shutdown-parity.test.ts `
-            src/__tests__/service-enrollment-handover.test.ts
+            src/__tests__/service-enrollment-handover.test.ts `
+            src/__tests__/agent-home-contract.test.ts `
+            src/__tests__/local-state-relocation.test.ts
 
       - name: Run runtime executable detection tests on Windows
         run: |
