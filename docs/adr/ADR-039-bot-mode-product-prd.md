@@ -460,6 +460,8 @@ spec 修改：P1 加 README 链接；P2 改平台句子；K8-S 加 outcome 片�
 
 ## 12. 决策表
 
+> Q5 的「不提升为包」只针对 K4、K8 当时的状态。K4 已在 [ADR-038](../architecture/adr-2026-10-13-bot-platform.md) 的 2026-10-29 修订中并入 `@byok-sdk/server/execution-core`，K8 可以作为独立的包发布，见 [ADR-046](ADR-046-bot-shape-agent-unit.md) 的 2026-11-11 修订。
+
 | # | 问题 | 决定 | 状态 | 理由 |
 |---|---|---|---|---|
 | Q1 | Bot 模式的首个下游 | Aiphabee | 已定（Aimpact，2026-10-18） | 它已是 Topology L，没选 runtime 时用 Pi BYOK（R4）；routine 的 A1–A4 接入计划已有；Salesko 暂不做 |

@@ -1,4 +1,4 @@
-# ADR-046：SDK 不内置 Bot 产品形态，Agent 是 SDK 的单位
+# ADR-046：核心包不内置 Bot 产品形态，Agent 是核心包的单位
 
 > **来源**：owner 2026-11-03 批准。依据是 owner 与 advisor 对两种 Bot 形态的讨论：多 Bot，以及单 Bot + Channel。PR：[#1354](https://github.com/Ancienttwo/byok-sdk/pull/1354)。
 > **关联**：[ADR-038](../architecture/adr-2026-10-13-bot-platform.md)（Bot 平台与协作）、[ADR-039](ADR-039-bot-mode-product-prd.md)（Bot 模式产品方案）、[ADR-041](ADR-041-k8b-cross-bot.md)（K8b 跨 Bot）。
@@ -20,7 +20,7 @@
 
 ## 2. 决定
 
-**D1. SDK 不内置产品形态。** 多 Bot 和单 Bot + Channel 都由 Host 用同一组原语组合出来。
+**D1. 核心包不内置产品形态。** 多 Bot 和单 Bot + Channel 都由 Host 用同一组原语组合出来。
 
 **D2. SDK 的单位是 Agent，即 agentRef 加它的 home。**
 
@@ -37,7 +37,7 @@
 | 单 Bot + Channel | 1:N，每个会话一个 Agent，同一份 persona 投影到每个 home |
 | 混合 | 两种映射并存 |
 
-**D4. 发布的包里不放 Bot、群、团队的状态和规则**，包括账本、发言仲裁和团队快照。`@byok-sdk/protocol` 的 `bot-turn-outcome` 只提供 Host 组合 outcome schema 用的词汇，不带状态，保持不变。
+**D4. 核心包不认识 Bot 的状态。** 除 Bot 协作包以外，发布的包里不放 Bot、群、团队的状态和规则，包括账本、发言仲裁和团队快照；没有 Bot 的产品只装这些包就能用。`@byok-sdk/protocol` 的 `bot-turn-outcome` 只提供无状态的词汇，保持不变。K8（D5 的 1:1 参考实现）作为独立的包随同一个 train 发布，依赖 `protocol`、`server`、`client`，核心包不依赖它；它的状态写在 Host 自己的存储里（D3）。这条保护 D1：核心原语不固化任何一种形态。（2026-11 修订，见文末）
 
 **D5. K8 是 1:1 映射的参考实现，不加模式开关。** 加了开关，每条规则都要按模式分叉，一个状态机里就同时有两套语义。
 
@@ -46,7 +46,7 @@
 ## 3. 后果
 
 - 下游现在就能用发布的包实现任一种形态，不必等 SDK。
-- 如果有 issue 要求把 Bot、群或团队的状态放进发布的包，按 D4 拒绝，或改成在 Host 或 K8 里做。
+- 要把 Bot、群或团队的状态放进核心包的 issue，改在 K8 的包或 Host 里做。下游要 1:1 协作就装 K8 的包，要别的形态就用核心包自己组合（D6）。核心包不 import K8 的包，由 `check:release-graph` 的依赖方向检查保证。
 - 走 1:N 时还要处理下面这些问题，到时在对应的 issue 里定：
   1. **home 回收。** 会话多、寿命短，home 会越积越多。现在归档 Bot 不会删它的 home（`examples/bot-collaboration/README.md:773`）。回收规则和 #1105 的保留规则一起定。
   2. **跨会话的共享记忆。** 由 Host 放进每一轮的上下文。SDK 不加跨 Agent 的记忆。
@@ -58,4 +58,8 @@
 
 - **SDK 内置两种模式，让下游选。** 第二套参考实现没有消费者，细节只能靠猜，维护面和测试矩阵还会翻倍。
 - **在 K8 里加模式开关。** 理由见 D5。
-- **把「一个 Bot 对一个 Agent」写进发布的包，例如让 K4 按 Bot 排队。** 这样会挡住 1:N，而现有下游也不需要这样做。
+- **把「一个 Bot 对一个 Agent」写进核心包，例如让 K4 按 Bot 排队。** 这样会挡住 1:N，而现有下游也不需要这样做。
+
+## 修订记录
+
+- **2026-11-11（owner 决定，[#1837](https://github.com/Ancienttwo/byok-sdk/issues/1837)，PR：[#1850](https://github.com/Ancienttwo/byok-sdk/pull/1850)）**：D4 原文是「发布的包里不放 Bot、群、团队的状态和规则」，后果一节据此写了「按 D4 拒绝」。D4 保护的不变量是 D1，核心原语不固化一种形态，而「发布的包」比这个不变量宽。结果是 K8 只能由下游逐文件复制，AiphaBee 的副本约 7,000 行，每次 SDK 升级都要重新复制。D4 改为「核心包不认识 Bot 的状态」，允许 K8 作为独立的包发布，后果一节删去「按 D4 拒绝」。标题、D1 和 §4 的「写进发布的包」同步改为「核心包」。

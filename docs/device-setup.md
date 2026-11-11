@@ -663,6 +663,18 @@ after promotion, the entry is an ordinary enrollment again. The public credentia
 backend API shape is unchanged; injected backends must preserve the same staging
 and renewal semantics.
 
+**Provider unreachable on a slow IPv4 network.** Node tries each resolved
+address for 250 ms by default before it moves to the next one. When a device's
+IPv6 route is broken and IPv4 takes longer than that to connect, every provider
+request fails before any HTTP response (`EHOSTUNREACH` for IPv6, `ETIMEDOUT` for
+IPv4); a key check reports it as `unreachable`. The SDK's Pi hosts set a
+3000 ms per-address attempt timeout at start. The provider key check runs in the
+Host's own process, and the Host owns that process's network defaults: call
+`net.setDefaultAutoSelectFamilyAttemptTimeout(3000)` from `node:net` at process
+start, or start Node with `--network-family-autoselection-attempt-timeout=3000`.
+A Bun-compiled Host accepts the same call, but it has no effect on Bun's own
+`fetch`, which resolves and connects natively without `node:net`.
+
 ## Directory ownership
 
 | Datum / directory | Authority | Host responsibility |

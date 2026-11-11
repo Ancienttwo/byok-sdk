@@ -89,26 +89,15 @@ export type ZeroHitHost = Omit<HostedCloud, 'cloud'> & { readonly cloud: CanaryC
 /** One set of assertions for both runtime compositions. */
 export function sealedZeroHitSuite(name: string, skip: boolean, openHost: (options: HostedCloudOptions) => Promise<ZeroHitHost>) {
   let host: ZeroHitHost | undefined;
-  let storage: ObjectStorageScope | undefined;
-  afterAll(async () => {
-    try { await host?.close(); }
-    finally {
-      if (storage) {
-        const bucket = `${storage.config.endpoint}/${storage.bucket}`;
-        for (const key of (await readObjects(storage)).keys()) {
-          const removed = await storage.client.fetch(`${bucket}/${key}`, { method: 'DELETE' });
-          if (!removed.ok) throw new Error(`DELETE ${key}: HTTP ${removed.status}`);
-        }
-        const removed = await storage.client.fetch(bucket, { method: 'DELETE' });
-        if (!removed.ok) throw new Error(`DELETE bucket: HTTP ${removed.status}`);
-      }
-    }
-  });
+  // The bucket belongs to dataplane.ts's own teardown, which deletes every bucket
+  // `createObjectStorageScope` created. Draining it here as well would be a second
+  // source of truth for the same cleanup (#1819).
+  afterAll(async () => { await host?.close(); });
 
   describe.skipIf(skip)(name, () => {
     it('keeps the sealed canary out of every store and log, and the member opens what the Host keeps', { timeout: 120_000 }, async () => {
       const consoleSpies = (['debug', 'info', 'log', 'warn', 'error'] as const).map((level) => vi.spyOn(console, level));
-      const objectStorage = storage = await createObjectStorageScope();
+      const objectStorage = await createObjectStorageScope();
       const adapter = new ZeroHitAdapter();
       // What the product's observer is handed is a location too: it is the only reader of a sealed task.artifact.
       const observed: { envelope: { type: string; task_id?: string; payload: unknown } }[] = [];
