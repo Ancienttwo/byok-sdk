@@ -15,7 +15,7 @@ Only this note and the Linux CI steps in the `desktop` lane are committed.
 | Memory helper starts from `resources/host/` | **Proven** (`agent-memory-fs/darwin-arm64 serve` ran; `memory_recall` returned) | Open (win-ci slot) | Not applicable (no helper on Linux) |
 | Background subagent -> `pi_background_unavailable` (R2) | **Proven** (packaged, signed app) | Open (win-ci slot) | Open (A7) |
 | Nested signing | **Ad-hoc dry run proven**: `codesign --verify --deep --strict` passes; Developer ID, notarize and staple are owner steps | `koffi.node` matches the pin before signing; electron-builder's default signs only `.exe` (static read); post-signing hash open (win-ci slot) | No OS signing |
-| libsecret / AppArmor | - | - | libsecret round trip and fail-closed proven on the GitHub runner (Ubuntu 26.04) and in a container. Electron without a setuid `chrome-sandbox` aborts under the userns restriction on 26.04; the 24.04 answer and the packaged app stay open |
+| libsecret / AppArmor | - | - | libsecret round trip and fail-closed proven on GitHub runners (Ubuntu 24.04.5 and 26.04.1) and in a container. On both, Electron without a setuid `chrome-sandbox` aborts under the userns restriction; the packaged app stays open (A7) |
 
 ## Setup
 
@@ -264,7 +264,24 @@ electron no-sandbox exit=0
 D0_ELECTRON_READY noSandboxSwitch=true
 ```
 
-On Ubuntu 26.04 the unprivileged user-namespace restriction is on, and an Electron whose `chrome-sandbox` is not setuid root refuses to start rather than run unsandboxed. It starts only with `--no-sandbox`, which the app must not ship. A Linux package therefore needs either a setuid-root `chrome-sandbox` (what electron-builder's deb `postinst` sets up) or an AppArmor profile granting `userns` to the app binary. AppImage, which cannot carry a setuid file, needs the profile. Because `ubuntu-latest` moved to 26.04, the lane now pins `ubuntu-24.04` so it reports the 24.04 answer this issue asks for.
+Second run with the lane pinned to `ubuntu-24.04` (run 42996279984, job 130441554783, image `ubuntu-24.04` 20261101.360.1; all steps passed):
+
+```
+Package: libsecret-tools  Version: 0.21.4-1build3
+Package: gnome-keyring    Version: 46.1-2ubuntu0.2
+D0 libsecret: round trip ok, no-bus fails closed
+PRETTY_NAME="Ubuntu 24.04.5 LTS"
+kernel.apparmor_restrict_unprivileged_userns=1
+kernel.unprivileged_userns_clone=1
+chrome-sandbox 755 runner
+electron default exit=133
+[FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:172] The SUID sandbox helper binary was found,
+  but is not configured correctly. Rather than run without sandboxing I'm aborting now. ...
+electron no-sandbox exit=0
+D0_ELECTRON_READY noSandboxSwitch=true
+```
+
+On both Ubuntu 24.04 and 26.04 the unprivileged user-namespace restriction is on, and an Electron whose `chrome-sandbox` is not setuid root refuses to start rather than run unsandboxed. It starts only with `--no-sandbox`, which the app must not ship. A Linux package therefore needs either a setuid-root `chrome-sandbox` (what electron-builder's deb `postinst` sets up) or an AppArmor profile granting `userns` to the app binary. AppImage, which cannot carry a setuid file, needs the profile. Because `ubuntu-latest` moved to 26.04, the lane pins `ubuntu-24.04`, the release this issue asks about.
 
 Limits: the container proves the store logic against a real Secret Service, but not on Ubuntu's libsecret build or on x64; the runner result in the `desktop` lane replaces it. The `=1` read is the Colima VM's Ubuntu 24.04 kernel, which shows the restriction is on by default there, not what an end user's desktop session or AppArmor profile allows. Neither the container nor the runner installs the packaged app: whether a deb-installed (setuid `chrome-sandbox`) or AppImage build starts under Ubuntu 24.04's restriction without a custom AppArmor profile is open until A7 (#1811) builds the Linux packages.
 
@@ -277,12 +294,13 @@ Proven (macOS arm64, this machine):
 - The SEA needs `allow-jit`.
 - Unsigned-after-fuses apps do not start on arm64.
 - `koffi.node` copied from the pinned archive equals the pin, and electron-builder's default Windows signing does not touch `.node` files.
-- The Linux keys store works against a real Secret Service and fails closed without a bus (container).
+- The Linux keys store works against a real Secret Service and fails closed without a bus (Ubuntu 24.04 and 26.04 runners, container).
+- On Ubuntu 24.04 and 26.04, Electron without a setuid `chrome-sandbox` aborts rather than run unsandboxed; a Linux package needs a setuid `chrome-sandbox` or an AppArmor `userns` profile.
 
 Open:
 
 - Developer ID signing, notarization, stapling and `spctl` (owner steps above), and whether the SEA needs more than `allow-jit` with a team ID.
 - Keychain prompts per signed binary.
 - Windows: sizes, the packaged run and the post-signing `koffi.node` hash (win-ci slot).
-- Linux: the Ubuntu 24.04 runner answer (the lane now pins `ubuntu-24.04`), and whether a deb (setuid `chrome-sandbox`) or an AppImage plus AppArmor profile starts sandboxed (A7).
+- Linux: whether a deb (setuid `chrome-sandbox`) or an AppImage with an AppArmor profile starts sandboxed on Ubuntu 24.04 (A7).
 - macOS x64 (not built).
