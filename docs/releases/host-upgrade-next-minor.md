@@ -359,3 +359,11 @@ A rotation leaves a version 1 row in place when its sender is no longer a curren
 - [ ] Exercise foreground and, where supported, background Pi subagents and workflows in each packaged product on its target platforms.
 
 Documentation checks do not establish release, platform or production acceptance.
+
+## Windows configured roots refuse links
+
+On Windows, the SDK now refuses a configured root that passes through a symbolic link or a junction to a drive-letter path (#1759). Construction fails with `configured_path_untrusted_link`, reason `windows_link`, and the message names the link and its target. The rule covers `agentHome.hostStorageRoot`, `storeDir`, the local-state relocation roots, `storage.scratchRoot`, `storage.skillPackDataDirs` and `piByokLauncher.sessionDir`. `new AgentHomeLayout` reports it as `AgentHomeResolutionError` and relocation as `LocalStateRelocationIntegrityError`.
+
+Before, a `hostStorageRoot` behind a link was followed silently, and relocation already refused the same root. A `storeDir` behind a link failed later in the scratch, retention or relocation checks. Subst drives, mapped network drives and mount points to a volume with a drive letter still resolve to their final path. A mount point to a volume with no drive letter is expected to fail construction. A subst or mapped drive whose backing path contains a link is still followed, because only the configured spelling is checked. POSIX keeps its trusted-link rule.
+
+Before upgrading a Windows Host, check every configured root for a link in its existing ancestors, for example with `dir /AL` on each parent or `(Get-Item <path>).LinkType` in PowerShell. Point a linked setting at the physical directory, the link's target. Roots without a link keep their identities. Changing `storeDir` to its physical spelling changes its control pipe name and Agent-home owner id, so stop the daemon before changing it.

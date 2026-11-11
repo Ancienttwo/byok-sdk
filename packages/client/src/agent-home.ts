@@ -443,7 +443,7 @@ export class AgentHomeLayout {
   constructor(hostStorageRoot: string) {
     assertAbsolutePath(hostStorageRoot, 'agentHome.hostStorageRoot');
     try {
-      this.hostStorageRootInput = process.platform === 'win32' ? path.resolve(hostStorageRoot) : foldNameAliases(hostStorageRoot);
+      this.hostStorageRootInput = foldNameAliases(hostStorageRoot);
     } catch (error) {
       if (error instanceof ConfiguredPathLinkError) {
         throw new AgentHomeResolutionError(`agentHome.hostStorageRoot: ${error.message}`);

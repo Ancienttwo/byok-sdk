@@ -173,7 +173,7 @@ async function acquire(input: LocalStateRelocationInput): Promise<LocalStateRelo
 
   const foldRoot = (value: string, label: string): string => {
     try {
-      return process.platform === 'win32' ? path.resolve(value) : foldNameAliases(value);
+      return foldNameAliases(value);
     } catch (error) {
       if (error instanceof ConfiguredPathLinkError) {
         throw new LocalStateRelocationIntegrityError(`${label}: ${error.message}`);

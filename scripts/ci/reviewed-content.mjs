@@ -156,17 +156,30 @@ function admitHostedLock(before, after, cwd, example) {
   delete after.packages[example.name];
 }
 
+// #1804: the desktop example's reviewed additions to the checked shape, exact:
+// its Electron build and dev scripts and the two Electron devDependencies.
+const REGISTERED_PRIVATE_ADDITIONS = Object.freeze({
+  'examples/desktop-bot-app': Object.freeze({
+    scripts: Object.freeze({
+      build: "tsc -p tsconfig.build.json && node -e \"require('node:fs').cpSync('src/renderer/index.html', 'dist/src/renderer/index.html')\"",
+      dev: 'bun run build && electron dist/src/main/index.js',
+    }),
+    devDependencies: Object.freeze({ electron: '45.3.0', '@electron/fuses': '2.1.3' }),
+  }),
+});
+
 /** A new private workspace is admitted only by the reviewed graph, with
  * executable checks and dependencies already declared by a base workspace.
  */
 function verifyRegisteredPrivateManifest(manifest, dir, { base, cwd, workspaceGraph }) {
   const registration = workspaceGraph?.[dir];
+  const additions = REGISTERED_PRIVATE_ADDITIONS[dir];
   const allowed = new Set([...HOSTED_FIELDS, 'license', 'engines']);
   if (!dir.startsWith('examples/') || !registration || !plain(manifest)
     || Object.keys(manifest).some(key => !allowed.has(key))
     || manifest.name !== registration.name || manifest.private !== true
     || manifest.type !== 'module' || !version(manifest.version)
-    || !isDeepStrictEqual(manifest.scripts, { typecheck: 'tsc --noEmit', test: 'vitest run' })) {
+    || !isDeepStrictEqual(manifest.scripts, { typecheck: 'tsc --noEmit', test: 'vitest run', ...additions?.scripts })) {
     throw new Error('Reviewed CI mapping required: new private workspace must be graph-registered with checked manifest shape');
   }
   const localEdges = [...new Set(DEPENDENCY_FIELDS.flatMap(field => Object.keys(manifest[field] ?? {}).filter(name => name.startsWith('@byok-sdk/'))))].sort();
@@ -179,15 +192,16 @@ function verifyRegisteredPrivateManifest(manifest, dir, { base, cwd, workspaceGr
     for (const [name, spec] of Object.entries(manifest[field] ?? {})) {
       const valid = name.startsWith('@byok-sdk/')
         ? spec === 'workspace:*' && declarations.some(other => other.name === name)
-        : declarations.some(other => DEPENDENCY_FIELDS.some(key => other[key]?.[name] === spec));
+        : declarations.some(other => DEPENDENCY_FIELDS.some(key => other[key]?.[name] === spec)) || additions?.[field]?.[name] === spec;
       if (!valid) throw new Error(`New workspace must reuse a base dependency spec (${name})`);
     }
   }
   return manifest;
 }
 
+/** Returns the admitted workspace records too: their dependencies declare the lock rows they add. */
 function admitRegisteredPrivateLock(before, after, context) {
-  const added = [];
+  const added = [], records = [];
   for (const dir of Object.keys(after.workspaces ?? {})) {
     if (Object.hasOwn(before.workspaces ?? {}, dir)) continue;
     const manifest = verifyRegisteredPrivateManifest(JSON.parse(readFileSync(resolve(context.cwd, dir, 'package.json'), 'utf8')), dir, context);
@@ -196,10 +210,11 @@ function admitRegisteredPrivateLock(before, after, context) {
     if (!isDeepStrictEqual(after.workspaces[dir], expected)
       || !isDeepStrictEqual(after.packages?.[manifest.name], [`${manifest.name}@workspace:${dir}`])
       || before.packages?.[manifest.name] !== undefined) throw new Error('New workspace lock rows differ from its manifest');
+    records.push(after.workspaces[dir]);
     delete after.workspaces[dir]; delete after.packages[manifest.name];
     added.push(dir);
   }
-  return added;
+  return { added, records };
 }
 
 /** Returns qualifying workspaces and any verified lock-format full-matrix reason. */
@@ -273,8 +288,8 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     for (const example of PRIVATE_HOSTED) {
       if (!before.workspaces?.[example.dir] && after.workspaces?.[example.dir]) admitHostedLock(before, after, cwd, example);
     }
-    const added = admitRegisteredPrivateLock(before, after, { base, cwd, workspaceGraph });
-    const impact = dependencyLockImpact(before, after, { cwd });
+    const { added, records } = admitRegisteredPrivateLock(before, after, { base, cwd, workspaceGraph });
+    const impact = dependencyLockImpact(before, after, { cwd, admitted: records });
     return { ...impact, dirs: [...new Set([...added, ...impact.dirs])] };
   } else if (path === `${HOSTED_WORKER.dir}/package.json`) {
     // #654 W4: the browser member page imports core's sealed-payload entry directly.

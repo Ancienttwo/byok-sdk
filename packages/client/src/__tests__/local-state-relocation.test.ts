@@ -211,10 +211,8 @@ describe('localStateRelocation', () => {
 
       await expect(localStateRelocation.acquire({ ...input, [pathField]: alias }))
         .rejects.toBeInstanceOf(LocalStateRelocationIntegrityError);
-      if (process.platform !== 'win32') {
-        await expect(localStateRelocation.acquire({ ...input, [pathField]: alias }))
-          .rejects.toThrow(`${pathField}: configured path`);
-      }
+      await expect(localStateRelocation.acquire({ ...input, [pathField]: alias }))
+        .rejects.toThrow(process.platform === 'win32' ? `${pathField}: configured path ${alias} passes through` : `${pathField}: configured path`);
       expect(await fs.readdir(realTarget)).toEqual([]);
       if (pathField !== 'destinationStoreDir') {
         await expect(fs.lstat(input.destinationStoreDir)).rejects.toMatchObject({ code: 'ENOENT' });
