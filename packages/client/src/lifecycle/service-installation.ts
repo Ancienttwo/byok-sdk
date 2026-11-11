@@ -14,7 +14,7 @@ import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } fro
 import type { ManagedServiceLifecycle } from './managed-lifecycle.js';
 import {
   isJsonObject, isPayloadPath, listPayloadFiles, SERVICE_PAYLOAD_MANIFEST, sha256File, SHA256_HEX, VERSION_ID, type ServicePayloadManifest,
-} from './service-payload-manifest.js';
+} from '../service-payload-manifest.js';
 import { serviceStateDir } from './service-unit.js';
 import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types.js';
 

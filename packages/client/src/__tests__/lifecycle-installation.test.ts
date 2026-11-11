@@ -11,7 +11,7 @@ import {
   type ServiceInstallation,
   type ServiceInstallationOptions,
 } from '../lifecycle/service-installation';
-import { SERVICE_PAYLOAD_MANIFEST, writeServicePayloadManifest, type ServicePayloadManifest } from '../lifecycle/service-payload-manifest';
+import { SERVICE_PAYLOAD_MANIFEST, writeServicePayloadManifest, type ServicePayloadManifest } from '../service-payload-manifest';
 import { createManagedLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
 import { SERVICE_UNIT_MARKER, withServiceOwnerGate } from '../lifecycle/service-unit';
 import * as daemonOwner from '../util/daemon-owner';

@@ -532,8 +532,8 @@ export type {
   ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord,
   ServiceStoreVerdict, ServiceUpgradeReceipt,
 } from './lifecycle/service-installation.js';
-export { SERVICE_PAYLOAD_MANIFEST } from './lifecycle/service-payload-manifest.js';
-export type { ServicePayloadManifest } from './lifecycle/service-payload-manifest.js';
+export { SERVICE_PAYLOAD_MANIFEST } from './service-payload-manifest.js';
+export type { ServicePayloadManifest } from './service-payload-manifest.js';
 export {
   claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError,
 } from './lifecycle/service-unit.js';
