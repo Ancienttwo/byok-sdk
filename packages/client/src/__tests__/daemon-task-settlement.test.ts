@@ -110,6 +110,8 @@ describe('Daemon.whenTaskSettled', () => {
     const release = adapter.blockStart();
     offer('task-cancel-in-start');
     await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-cancel-in-start');
+    // task.claim precedes start(); a cancel before it would leave no runtime to dispose.
+    await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
     const settlement = d.whenTaskSettled('task-cancel-in-start');
     const tracked = track(settlement);
     server.send(createEnvelope('task.cancel', { reason: 'host cancelled' }, { taskId: 'task-cancel-in-start', seq: server.nextSeq() }));
