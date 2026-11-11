@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { AgentEventSchema, type AgentEvent } from '@byok-sdk/protocol';
 import type { MessageDraftDelta } from '../types';
 import { mcpEventIdentities } from '../mcp/event-identity';
-import { createToolUseCorrelation, mapClaudeMessageToAgentEvents } from '../adapters/claude/events';
+import { createToolUseCorrelation, mapClaudeMessageToAgentEvents } from '../adapters/claude/projection';
 import { mapPiMessageToAgentEvent } from '../adapters/pi/events';
 import { projectDurableEvent, withMcpIdentity } from '../adapters/pi-durable/events';
 import { GrokProjection } from '../adapters/grok/projection';

@@ -13,6 +13,7 @@
     "vendor/oar/ac7fde4/**/*.ts",
     "src/bin/pi-todo-runtime.js",
     "src/runtime/dsh-session-runtime.js",
+    "src/runtime/claude-session-runtime.js",
     "vendor/pi-tui/0.85.1/**/*.d.ts",
     "vendor/get-east-asian-width/1.6.0/**/*.d.ts"
   ],

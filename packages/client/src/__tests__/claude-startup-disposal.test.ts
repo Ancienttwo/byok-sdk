@@ -3,8 +3,7 @@ import { EventEmitter } from 'node:events';
 import { promises as fs } from 'node:fs';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import { ClaudeProcessClient, type SpawnFn } from '../adapters/claude/process-client';
+import { ClaudeAdapter, type SpawnFn } from '../adapters/claude/claude-adapter';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 
@@ -37,7 +36,8 @@ const children: { emit(event: string, ...args: unknown[]): boolean }[] = [];
 function childFixture() {
   const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() });
   children.push(child);
-  const spawnFn = vi.fn(() => child) as unknown as SpawnFn;
+  // The owned line process adopts the tree on the child's own 'spawn' event.
+  const spawnFn = vi.fn(() => { queueMicrotask(() => child.emit('spawn')); return child; }) as unknown as SpawnFn;
   return { child, spawnFn, init: (id = 'wrong-session') => child.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: id }) + '\n') };
 }
 function resources(): PreparedOperationResources {
@@ -118,21 +118,6 @@ describe('Claude failed-start resource ownership', () => {
     expect(fs.rm).toHaveBeenCalledTimes(2);
   });
 
-  it('a client adoption failure cannot hide failed owned disposal', async () => {
-    const fixture = childFixture();
-    const adoptionError = new Error('adoption refused');
-    const disposalError = new Error('disposal failed');
-    tree.adopt.mockRejectedValue(adoptionError);
-    tree.dispose.mockRejectedValueOnce(disposalError);
-    const client = new ClaudeProcessClient({ command: 'inert', args: [], cwd: '/', env: {}, spawnFn: fixture.spawnFn });
-    const failure = await client.waitForInit().catch(error => error);
-    expect(failure).toBeInstanceOf(RuntimeStartupDisposalFailure);
-    expect(containsCause(failure, adoptionError)).toBe(true);
-    expect(containsCause(failure, disposalError)).toBe(true);
-    await (failure as RuntimeStartupDisposalFailure).retryDisposal();
-    expect(tree.dispose).toHaveBeenCalledTimes(2);
-  });
-
   it('keeps an adapter adoption failure and config owned until a successful disposal retry', async () => {
     const fixture = childFixture();
     const adoptionError = new Error('adoption refused');
@@ -172,20 +157,5 @@ describe('Claude failed-start resource ownership', () => {
     await failure.retryDisposal(); await failure.retryDisposal();
     expect(fs.rm).toHaveBeenCalledTimes(2);
     expect(tree.dispose).not.toHaveBeenCalled();
-  });
-
-  it('retains a child when client initialization throws after spawn', async () => {
-    const fixture = childFixture();
-    const original = new Error('stdout initialization failed');
-    vi.spyOn(fixture.child.stdout, 'setEncoding').mockImplementation(() => { throw original; });
-    const disposalError = new Error('tree not yet disposed');
-    tree.dispose.mockRejectedValue(disposalError);
-    const failure = await start(fixture.spawnFn).catch(error => error);
-    expect(failure).toBeInstanceOf(RuntimeStartupDisposalFailure);
-    expect(containsCause(failure, original)).toBe(true);
-    expect(fs.rm).not.toHaveBeenCalled();
-    tree.dispose.mockResolvedValue(undefined);
-    await failure.retryDisposal();
-    expect(fs.rm).toHaveBeenCalledTimes(1);
   });
 });

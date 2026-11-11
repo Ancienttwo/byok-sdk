@@ -30,13 +30,14 @@ import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEn
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin.js';
 import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation.js';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
-import { createClaudeControlChannel } from './control-channel.js';
 import { ClaudeToolAuthorizationBridge } from './tool-authorization.js';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions.js';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions.js';
-import { AssistantMessageTracker, createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ClaudeStreamMessage, type ToolUseCorrelation } from './events.js';
+import { AssistantMessageTracker, createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ClaudeStreamMessage, type ToolUseCorrelation } from './projection.js';
 import { ClaudeFailureEvidence } from './failure-evidence.js';
-import { ClaudeProcessClient, type SpawnFn } from './process-client.js';
+import { ClaudeStreamSession } from './stream-session.js';
+import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
+import type { spawn } from 'node:child_process';
 import { servedModelName } from '../served-model.js';
 import { CLAUDE_VERSION_POLICY, claudeVersionToken } from './claude-version.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
@@ -51,13 +52,10 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** A start step claude's own exit ended, before any adoption, transport or spawn failure, is `runtime_exited`. */
-function startupExit(client: ClaudeProcessClient) {
-  return client.processExited ? { class: 'runtime_exited' as const } : undefined;
-}
+export type SpawnFn = typeof spawn;
 
 /** One owner covers process teardown and task config on every failed start. */
-async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | undefined, scratch: ExecutionScratch, retainPendingDisposal = false): Promise<never> {
+async function rejectOwnedStartup(cause: unknown, stream: ClaudeStreamSession | undefined, scratch: ExecutionScratch, retainPendingDisposal = false): Promise<never> {
   const failure = isRuntimeExecutionFailure(cause) ? cause : new RuntimeExecutionFailure({
     phase: 'start', retry: 'retryable',
     reason: 'claude runtime startup failed',
@@ -70,7 +68,7 @@ async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | 
         // having returned a client. Preserve that owner, rather than guessing
         // that a thrown constructor means no process was spawned.
         if (isRuntimeStartupDisposalFailure(cause)) await cause.retryDisposal();
-        else await client?.dispose();
+        else await stream?.dispose();
         await scratch.release();
       })();
       disposalAttempt = attempt.catch(error => { disposalAttempt = undefined; throw error; });
@@ -285,7 +283,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     const mcpArgs: string[] = [];
 
     // Generate only task-scoped host/reserved MCP config outside the operation workspace.
-    let client: ClaudeProcessClient | undefined;
+    let stream: ClaudeStreamSession | undefined;
     let gate: ClaudeToolAuthorizationBridge | undefined;
     let cancellation: RuntimeExecutionFailure | undefined;
     let rejectCancellation!: (failure: RuntimeExecutionFailure) => void;
@@ -294,14 +292,14 @@ export class ClaudeAdapter implements RuntimeAdapter {
     void cancelled.catch(() => {});
     const onAbort = () => {
       cancellation ??= cancellationFailure();
-      client?.abortStartup(cancellation);
+      stream?.halt(cancellation);
       rejectCancellation(cancellation);
     };
     const throwIfCancelled = () => {
       if (signal?.aborted && !cancellation) onAbort();
       if (cancellation) {
-        // Also covers an abort inside spawnFn, before client was assigned.
-        client?.abortStartup(cancellation);
+        // Also covers an abort inside spawnFn, before the stream was assigned.
+        stream?.halt(cancellation);
         throw cancellation;
       }
     };
@@ -394,107 +392,83 @@ export class ClaudeAdapter implements RuntimeAdapter {
       ];
 
       throwIfCancelled();
-      const mcpIdentity = createClaudeMcpIdentityResolver(() => control.mcpStatus(), new Map(Object.entries(taskMcpServers)));
+      const mcpIdentity = createClaudeMcpIdentityResolver(() => stream?.mcpStatus() ?? Promise.resolve(undefined), new Map(Object.entries(taskMcpServers)));
       gate = startInput.toolAuthorization === undefined ? undefined
-        : new ClaudeToolAuthorizationBridge(startInput.toolAuthorization, error => client?.abortStartup(error), mcpIdentity.resolve);
-      const control = createClaudeControlChannel(this.interruptTimeoutMs, gate?.hooks);
+        : new ClaudeToolAuthorizationBridge(startInput.toolAuthorization, error => stream?.fail(error), mcpIdentity.resolve);
       const native = this.nativeOptions === undefined ? undefined : new ClaudeNativeInteractionBridge({
         ...this.nativeOptions,
         // The adapter, never the host callback, owns fatal process termination.
-        onFatal: error => client?.abortStartup(error),
+        onFatal: error => stream?.fail(error),
       }, resumeSessionId);
+      const spawnLineProcess = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'claude' });
+      const env = { ...startInput.env, ...startInput.scratch.env } as Record<string, string>;
       try {
-        client = new ClaudeProcessClient({
-          command: invocation.command,
-          args: [...invocation.args, ...args],
-          cwd: manifestCwd,
-          env: { ...startInput.env, ...startInput.scratch.env },
-          nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
-          control: native === undefined && gate === undefined ? control : {
-            bind: write => { control.bind(write); native?.bind(write); gate?.bind(write); },
-            receive: message => { control.receive(message); if (!gate?.receive(message)) native?.receive(message); },
-            closed: () => { control.closed(); native?.close(); gate?.close(); },
-          },
-        });
+        stream = new ClaudeStreamSession(spawnLineProcess(invocation.command, [...invocation.args, ...args], { cwd: manifestCwd, env }));
       } catch (cause) {
-        if (isRuntimeStartupDisposalFailure(cause)) throw cause;
         throw new RuntimeExecutionFailure({
           phase: 'start', retry: 'retryable',
           reason: 'claude runtime process could not be spawned',
         }, { cause });
       }
+      const opened = stream;
 
       throwIfCancelled();
-      if (native !== undefined || gate !== undefined) {
-        const initialized = await Promise.race([control.initialize(), cancelled]);
-        throwIfCancelled();
-        if (!initialized) throw new RuntimeExecutionFailure({
-          phase: 'start', retry: 'retryable',
-          reason: 'Claude native control initialization failed',
-          failure: startupExit(client),
-        });
-        throwIfCancelled();
-        // No prompt is sent unless the runtime confirms the gate is registered.
-        if (gate !== undefined && control.hooksApplied !== true) throw new RuntimeExecutionFailure({
-          phase: 'start', retry: 'non-retryable',
-          reason: 'tool_authorization_unsupported: Claude did not confirm registration of the PreToolUse authorization hook',
-        });
-        native?.beginTurn();
-      }
-      // `--input-format stream-json` expects the first turn's instruction on
-      // stdin too, not as a positional CLI argument — empirically confirmed
-      // live (this task's persistent-process multi-turn probes never passed
-      // a positional prompt at all, relying entirely on this same write for
-      // turn one). Using the identical mechanism for turn one and every
-      // `followUp()` afterward (see `ClaudeSession.followUp` /
-      // `ClaudeProcessClient.writeUserMessage`) avoids two different
-      // send-a-prompt code paths.
       try {
-        await Promise.race([client.writeUserMessage(startInput.instruction), cancelled]);
+        await Promise.race([opened.open({
+          ...(resumeSessionId === undefined ? {} : { resume: resumeSessionId }),
+          env,
+          mcpServers: taskMcpServers,
+          ...(native === undefined && gate === undefined ? {} : { initialize: { hooks: gate?.hooks ?? null } }),
+          onFrame: frame => native?.receive(frame),
+          onExit: () => { native?.close(); gate?.close(); },
+          // A request neither bridge takes is never answered: no default allow.
+          onAppRequest: (message, respond) => { if (!gate?.receive(message, respond)) native?.request(message, respond); },
+        }), cancelled]);
       } catch (cause) {
         if (isRuntimeStartupDisposalFailure(cause) || isRuntimeExecutionFailure(cause)) throw cause;
         throw new RuntimeExecutionFailure({
           phase: 'start', retry: 'retryable',
-          reason: 'claude initial instruction transport failed',
-          failure: startupExit(client),
+          reason: 'claude runtime process could not be opened',
+          failure: opened.startupExit(),
         }, { cause });
+      }
+      throwIfCancelled();
+      // No prompt is sent unless the runtime confirms the gate is registered.
+      if (gate !== undefined && opened.hooksApplied !== true) throw new RuntimeExecutionFailure({
+        phase: 'start', retry: 'non-retryable',
+        reason: 'tool_authorization_unsupported: Claude did not confirm registration of the PreToolUse authorization hook',
+      });
+      native?.beginTurn();
+      // `--input-format stream-json` takes the first turn's instruction on
+      // stdin, as every follow-up: one send path. Claude's `system/init`
+      // after it carries the session id.
+      const prompted = await Promise.race([opened.raw.prompt(startInput.instruction), cancelled]);
+      if (prompted.response.body.kind !== 'accepted') {
+        throw new RuntimeExecutionFailure({
+          phase: 'start', retry: 'retryable',
+          reason: `claude initial instruction transport failed: ${prompted.response.body.reason ?? prompted.response.body.kind}`,
+          failure: opened.startupExit(),
+        });
       }
 
       let sessionRef: string;
       try {
-        // Resolves with claude's own real `session_id` off its `system/init`
-        // frame — see `ClaudeProcessClient.waitForInit`'s doc comment for why
-        // this is needed at all (claude's stream-json protocol has no
-        // request/response ack the way pi's RPC mode does) and why, unlike
-        // pi's `resolveFreshSessionId`, no separate follow-up round-trip is
-        // needed: claude always surfaces `session_id` directly on the very
-        // first frame of a successful run, resume or fresh alike (confirmed:
-        // a `--resume <id>` run's own `system/init.session_id` always equals
-        // the requested id). An unresolvable `--resume` target (or any other
-        // immediate failure) never emits an `init` frame at all and instead
-        // exits promptly — `waitForInit()` rejects with the enriched exit
-        // error in that case (see `process-client.ts`), which is exactly
-        // what should make `start()` fail here, fail-closed, never a
-        // fabricated sessionRef.
-        sessionRef = await Promise.race([client.waitForInit(), cancelled]);
+        // Claude reports its real `session_id` on the first `system/init`,
+        // resume or fresh alike. An unresolvable `--resume` target never
+        // emits one and exits: fail closed, never a fabricated sessionRef.
+        sessionRef = await Promise.race([opened.sessionRef, cancelled]);
       } catch (err) {
         if (isRuntimeStartupDisposalFailure(err)) throw err;
         if (isRuntimeExecutionFailure(err)) throw err;
         throw new RuntimeExecutionFailure({
           phase: 'start', retry: 'retryable',
           reason: `claude exited before yielding an authoritative session id: ${errorMessage(err)}`,
-          failure: startupExit(client),
+          failure: opened.startupExit(),
         }, { cause: err });
       }
 
-      // Cross-model review finding: the doc comment above states this is
-      // "confirmed" to always hold empirically — but nothing actually verified
-      // it in code, so a future/unobserved claude behavior (or a bug) silently
-      // resuming a DIFFERENT session than `task.sessionRef` asked for would
-      // have gone completely unnoticed: this adapter would return a
-      // `ClaudeSession` for whatever `sessionRef` claude happened to report,
-      // running the task against the wrong workspace/history with no signal
-      // to the caller at all. Fail closed instead of trusting the assumption.
+      // A resume that reports another session would run the task against
+      // the wrong history: fail closed instead of trusting the echo.
       if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
         throw new RuntimeExecutionFailure({
           phase: 'start',
@@ -506,9 +480,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
       throwIfCancelled();
       return new ClaudeSession(
         sessionRef,
-        client,
+        opened,
         manifestCwd,
-        control,
+        this.interruptTimeoutMs,
         startInput.scratch,
         mcpIdentity,
         manifestModelId,
@@ -517,7 +491,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       );
     } catch (cause) {
       gate?.close();
-      return rejectOwnedStartup(cause, client, startInput.scratch, cancellation !== undefined);
+      return rejectOwnedStartup(cause, stream, startInput.scratch, cancellation !== undefined);
     } finally {
       signal?.removeEventListener('abort', onAbort);
     }
@@ -613,9 +587,9 @@ class ClaudeSession implements Session {
 
   constructor(
     public readonly sessionRef: string,
-    private readonly client: ClaudeProcessClient,
+    private readonly stream: ClaudeStreamSession,
     private readonly workspaceDir: string,
-    private readonly control: ReturnType<typeof createClaudeControlChannel>,
+    private readonly interruptTimeoutMs: number,
     /** Task-scoped temp `--mcp-config` directory, if any — removed in `close()`. */
     private readonly scratch: ExecutionScratch,
     private readonly mcpIdentity: ReturnType<typeof createClaudeMcpIdentityResolver>,
@@ -625,20 +599,19 @@ class ClaudeSession implements Session {
   ) { this.correlation = createToolUseCorrelation(this.mcpIdentity.identities); if (native !== undefined) this.interactions = native.channel; }
 
   get events(): AsyncIterable<AgentEvent | MessageDraftDelta> {
-    const client = this.client;
+    const stream = this.stream;
     const correlation = this.correlation;
     const assistantMessages = this.assistantMessages;
     const servedModel = this.servedModel;
     const failureEvidence = this.failureEvidence;
     const workspaceDir = this.workspaceDir;
-    const control = this.control;
     const mcpIdentity = this.mcpIdentity;
     return {
       [Symbol.asyncIterator](): AsyncIterator<AgentEvent | MessageDraftDelta> {
-        const inner = client.events[Symbol.asyncIterator]();
+        const inner = stream.frames[Symbol.asyncIterator]();
         // A single raw claude frame can map to more than one AgentEvent
         // (e.g. a Write `tool_result` plus a derived `artifact` — see
-        // `events.ts`'s `mapUser`) — buffered here and drained before
+        // `projection.ts`'s `mapUser`) — buffered here and drained before
         // pulling the next raw line, so this iterator still yields exactly
         // one `AgentEvent` per `next()` call like every other adapter's
         // `Session.events`.
@@ -648,7 +621,7 @@ class ClaudeSession implements Session {
         // class"): set once THIS turn's own `result` frame has been read off
         // `inner` — `result` is claude's real "whole run settled" signal and
         // is always the LAST frame of a turn, success or failure alike (see
-        // `events.ts`'s `mapResult` doc comment). On the SUCCESS path
+        // `projection.ts`'s `mapResult` doc comment). On the SUCCESS path
         // (`turn_end`) this is inert: `task-runner.ts`'s `pump()` returns the
         // instant it sees `turn_end`, so no further `next()` call ever
         // happens. It matters on the FAILURE/malformed path: `mapResult`
@@ -656,15 +629,15 @@ class ClaudeSession implements Session {
         // `turn_end` — and unlike codex (one process per turn, whose own
         // process-close watcher ends the queue — see codex-adapter.ts's
         // `runCodexTurn`), claude's process is PERSISTENT: it stays alive
-        // after `result`, awaiting a possible `followUp()` write on stdin
-        // (see process-client.ts's own doc comment). Nothing would otherwise
+        // after `result`, awaiting a possible `followUp()` write on stdin.
+        // Nothing would otherwise
         // ever end this iterator, so `task-runner.ts`'s `pump()` would await
         // a raw line that never arrives — a real, confirmed hang, not just a
         // theoretical one. Once `turnSettled` is true and `pending` has been
         // fully drained (every event from the `result` frame delivered),
         // this iterator ends itself (`done:true`) WITHOUT pulling `inner`
         // again — ending only THIS TURN's own exposed event stream, never
-        // the underlying session-lifetime `client.events` queue a future
+        // the underlying session-lifetime `stream.frames` queue a future
         // `followUp()` still needs, and never killing the process itself
         // (that stays this session's `close()`/`interrupt()`'s job). This is
         // exactly what lets `pump()`'s existing "iterable ended without
@@ -682,7 +655,7 @@ class ClaudeSession implements Session {
                 return { value: undefined as never, done: true };
               }
 
-              let raw: IteratorResult<import('./events.js').ClaudeStreamMessage>;
+              let raw: IteratorResult<ClaudeStreamMessage>;
               try {
                 raw = await inner.next();
               } catch (cause) {
@@ -698,8 +671,8 @@ class ClaudeSession implements Session {
                   phase: 'run',
                   retry: 'retryable',
                   reason: 'claude runtime process ended before a terminal result frame',
-                  failure: { class: client.processExited ? 'runtime_exited' : 'unknown' },
-                }, { cause: client.terminalError });
+                  failure: { class: stream.processExited ? 'runtime_exited' : 'unknown' },
+                }, { cause: stream.terminalError });
               }
 
               if (value.type === 'result') turnSettled = true;
@@ -715,9 +688,9 @@ class ClaudeSession implements Session {
               servedModel.observe(value);
               if (value.type === 'result') {
                 const model = servedModel.takeTurnModel();
-                if (control.contextWindow !== null || model !== undefined) {
+                if (stream.contextWindow !== null || model !== undefined) {
                   const observed = {
-                    ...(control.contextWindow === null ? {} : { contextWindow: control.contextWindow, contextSource: 'provider' as const }),
+                    ...(stream.contextWindow === null ? {} : { contextWindow: stream.contextWindow, contextSource: 'provider' as const }),
                     ...(model === undefined ? {} : { model }),
                   };
                   const usage = mapped.events.find(event => event.type === 'usage');
@@ -728,7 +701,7 @@ class ClaudeSession implements Session {
               assistantMessages.observe(value, mapped.events);
               if (mapped.terminalFailure !== undefined) terminalFailure = failureEvidence.attach(value, mapped.terminalFailure);
               if (mapped.unmappedLabel) {
-                client.recordUnmappedFrame(mapped.unmappedLabel);
+                stream.recordUnmappedFrame(mapped.unmappedLabel);
               }
               if (mapped.events.length > 0) {
                 pending = mapped.events;
@@ -771,27 +744,29 @@ class ClaudeSession implements Session {
         `claude persistent session cannot change model from ${this.modelId ?? '(legacy default)'} to ${requestedModel}`,
       );
     }
-    // Writes onto the SAME persistent process this session already has
-    // open — empirically confirmed live that claude keeps a
+    // A prompt on the SAME persistent process: claude keeps a
     // `--input-format stream-json` process alive across sequential turns,
     // reusing the identical `session_id`, until stdin closes or the
-    // process is killed (see `ClaudeProcessClient.writeUserMessage`'s doc
-    // comment).
+    // process is killed. OAR refuses it while a turn is still running.
+    let refusal: unknown;
     try {
       this.native?.beginTurn();
-      await this.client.writeUserMessage(task.instruction);
+      const prompted = await this.stream.raw.prompt(task.instruction);
+      if (prompted.response.body.kind === 'accepted') return;
+      refusal = prompted.response.body;
     } catch (cause) {
-      throw new RuntimeExecutionFailure({
-        phase: 'run', retry: 'retryable',
-        reason: 'claude follow-up instruction transport failed',
-      }, { cause });
+      refusal = cause;
     }
+    throw new RuntimeExecutionFailure({
+      phase: 'run', retry: 'retryable',
+      reason: 'claude follow-up instruction transport failed',
+    }, { cause: refusal });
   }
 
   /** Native interrupt ACK is bounded; TaskRunner still closes after cancellation acknowledgment. */
   async interrupt(): Promise<void> {
     this.native?.endTurn('interrupted');
-    if (!await this.control.interruptAndSettle()) { this.client.kill(); await this.client.dispose(); }
+    if (!await this.stream.interruptAndSettle(this.interruptTimeoutMs)) await this.stream.dispose();
   }
 
   async close(): Promise<void> {
@@ -799,7 +774,10 @@ class ClaudeSession implements Session {
     this.gate?.close();
     if (!this.closeAttempt) {
       const attempt = (async () => {
-        await this.client.dispose();
+        // OAR records the dispose request and, on close, the exit; the owned
+        // process tree's disposal, which that request starts, is the receipt.
+        void this.stream.raw.dispose().catch(() => {});
+        await this.stream.dispose();
         await this.scratch.release();
       })();
       this.closeAttempt = attempt.catch((error: unknown) => {

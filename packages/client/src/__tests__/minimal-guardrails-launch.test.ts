@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import type { SpawnFn } from '../adapters/claude/process-client';
+import type { SpawnFn } from '../adapters/claude/claude-adapter';
 import { CodexAdapter, type CodexAdapterOptions } from '../adapters/codex/codex-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';

@@ -1,10 +1,10 @@
 import type { McpEventIdentities } from '../../mcp/event-identity.js';
-import { parseClaudeContextWindow } from './control-channel.js';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { MessageDraftDelta } from '../../types.js';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
+import type { ClaudeRecord } from '../../runtime/claude-session-runtime.js';
 
 /**
  * A raw parsed line from `claude --output-format stream-json`. Shapes vary
@@ -17,6 +17,37 @@ import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 export interface ClaudeStreamMessage {
   type: string;
   [key: string]: unknown;
+}
+
+/** Control traffic: session controls and runtime requests, never AgentEvents. */
+const CONTROL_FRAMES: ReadonlySet<unknown> = new Set(['control_request', 'control_response', 'control_cancel_request']);
+
+/**
+ * The native stream-json frame a session record retains, for the mapping
+ * below. The OAR stream-json session records every parsed stdout line as a
+ * frame with its `native` line, except the control responses the adapter's
+ * profile consumes; requests and responses are their own records.
+ */
+export function claudeRecordFrame(record: ClaudeRecord): ClaudeStreamMessage | undefined {
+  if (record.kind !== 'frame') return undefined;
+  const native = (record.body as { native?: unknown }).native;
+  if (native === null || typeof native !== 'object' || Array.isArray(native)) return undefined;
+  const frame = native as ClaudeStreamMessage;
+  return CONTROL_FRAMES.has(frame.type) ? undefined : frame;
+}
+
+/** The context window of the model `system/init` named, else the one window `result.modelUsage` reports. */
+export function parseClaudeContextWindow(modelUsage: unknown, initModel?: string): number | null {
+  if (!modelUsage || typeof modelUsage !== 'object' || Array.isArray(modelUsage)) return null;
+  const windows = new Set<number>();
+  for (const [model, value] of Object.entries(modelUsage)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const window = (value as { contextWindow?: unknown }).contextWindow;
+    if (typeof window !== 'number' || !Number.isSafeInteger(window) || window <= 0) continue;
+    if (model === initModel) return window;
+    windows.add(window);
+  }
+  return windows.size === 1 ? [...windows][0]! : null;
 }
 
 /**
@@ -62,7 +93,7 @@ export interface MapClaudeMessageResult {
    * `ROUTINE_CLAUDE_SYSTEM_SUBTYPES` and the `thinking`/`redacted_thinking`
    * cases below). The caller (`ClaudeSession`'s event iterator) is
    * responsible for actually recording it (via
-   * `ClaudeProcessClient.recordUnmappedFrame`) — mirrors pi's
+   * `ClaudeStreamSession.recordUnmappedFrame`) — mirrors pi's
    * `ROUTINE_PI_EVENT_TYPES` check living in `PiSession`'s iterator rather
    * than inside `mapPiMessageToAgentEvent` itself. At most one label per
    * call even if a frame has several unmapped things in it — sufficient
@@ -91,10 +122,8 @@ function isAuthoritativeToolCallId(value: unknown): value is string {
  *
  * - `init`: session/turn start. Carries `session_id`, `tools`, `cwd`,
  *   `permissionMode`, etc. `session_id` specifically is NOT read here —
- *   `ClaudeProcessClient.waitForInit()` (`process-client.ts`) captures it
- *   directly off the raw line as part of this adapter's own
- *   `start()`/sessionRef bookkeeping, since it's needed before any
- *   `AgentEvent` mapping is even relevant.
+ *   the adapter's session (`stream-session.ts`) captures it from the
+ *   init record for its sessionRef bookkeeping.
  * - `hook_started` / `hook_response`: fired when the user's own Claude Code
  *   installation has configured lifecycle hooks (e.g. `SessionStart`) —
  *   machine/config-specific, not part of this protocol's surface at all.

@@ -17,6 +17,10 @@ A Host on 0.41.0 reads these as `unknown` with `reportedClass` until it upgrades
 
 A Grok follow-up sent while Grok runs a turn of its own is held until that turn closes; budget the task deadline for that wait. Grok 429s that name a spending limit now fail as `quota` or `billing` (non-retryable) instead of retryable `rate_limited`. A Codex older than OAR needs, or with an unreadable `config.toml`, fails the start as non-retryable `invalid_request`. Confirm that the Host does not retry those classes as transient.
 
+## Claude on the OAR stream-json session (#1853)
+
+No Host action. The Claude adapter's events, capabilities, launch arguments and failure classes are unchanged. Two failure texts change: a Claude process that exits after the first instruction but before `system/init` fails the start with `claude exited before yielding an authoritative session id: …` (was `claude initial instruction transport failed`), and the exit diagnostic reads `claude exited (code=N); stderr: …`. A Host that matches those texts should branch on `failure.class`, which is unchanged.
+
 ## OpenCode start failures
 
 OpenCode now reports unclassified start failures as retryable infrastructure failures. A native process that exits on its own reports `runtime_exited` during start or a turn; an archived resume target is non-retryable, while a target in use is retryable. Session limits accept fractional interrupt milliseconds and report invalid limits as `invalid opencode interrupt timeout` or `invalid opencode retention budget` (#1681).

@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.99.0",
-    "commit": "c96ac74776bff409a5d3337ef83dad3dbc292c88"
+    "commit": "66124527c9d1b950dc38591b234e271833a02c9b"
   },
   "release": {
     "ecosystem": "npm",
@@ -255,6 +255,43 @@
       "sourcePath": "packages/oar/src/runtimes/antigravity/session.ts",
       "upstreamSha256": "35cc51a8916ac58e952ddf606c27f751600ccafbebd2d77a3a6a471dd434f9fd",
       "vendoredSha256": "35cc51a8916ac58e952ddf606c27f751600ccafbebd2d77a3a6a471dd434f9fd"
+    },
+    {
+      "path": "runtimes/claude/context-usage.ts",
+      "sourcePath": "packages/oar/src/runtimes/claude/context-usage.ts",
+      "upstreamSha256": "1d53388f744f4ee7fe7bfe3b9f11732a1e3674ce89b92c1700a5f053c0d95b9c",
+      "vendoredSha256": "1d53388f744f4ee7fe7bfe3b9f11732a1e3674ce89b92c1700a5f053c0d95b9c"
+    },
+    {
+      "path": "runtimes/claude/failure.ts",
+      "sourcePath": "packages/oar/src/runtimes/claude/failure.ts",
+      "upstreamSha256": "eb1eef4ac14acd2ba0c593056ce88d749f11b7641bb1f17c2b7ab73686a175c9",
+      "vendoredSha256": "e9f74912fa9d26108221a26c22f2d0c527e339a19e0f6cbccf1d6a1faa0eb7c1",
+      "delta": "Mark fromText on a class from Anthropic's 400 wording (anthropicLimitText); the class itself is unchanged."
+    },
+    {
+      "path": "runtimes/claude/projection.ts",
+      "sourcePath": "packages/oar/src/runtimes/claude/projection.ts",
+      "upstreamSha256": "287a05faf50a8c974756554c5c4a243eb5b96f10a25c5d97e95174a830971306",
+      "vendoredSha256": "287a05faf50a8c974756554c5c4a243eb5b96f10a25c5d97e95174a830971306"
+    },
+    {
+      "path": "runtimes/claude/service-tier.ts",
+      "sourcePath": "packages/oar/src/runtimes/claude/service-tier.ts",
+      "upstreamSha256": "47a8e565b07dd8612ae539a1dd85643481e8e9249e22128bd01108261b4ef2f7",
+      "vendoredSha256": "47a8e565b07dd8612ae539a1dd85643481e8e9249e22128bd01108261b4ef2f7"
+    },
+    {
+      "path": "runtimes/claude/tasks.ts",
+      "sourcePath": "packages/oar/src/runtimes/claude/tasks.ts",
+      "upstreamSha256": "518e97ba1108e49c2ef20314613f24e4a260cadce429274410d8bf2dc8798d43",
+      "vendoredSha256": "518e97ba1108e49c2ef20314613f24e4a260cadce429274410d8bf2dc8798d43"
+    },
+    {
+      "path": "runtimes/claude/token-usage.ts",
+      "sourcePath": "packages/oar/src/runtimes/claude/token-usage.ts",
+      "upstreamSha256": "0e47a86cc45d15d667c2e93a8fc6f9cd44383584168147587e3d89ce34d5d158",
+      "vendoredSha256": "0e47a86cc45d15d667c2e93a8fc6f9cd44383584168147587e3d89ce34d5d158"
     },
     {
       "path": "runtimes/codex/app-server-client.ts",
@@ -797,6 +834,58 @@
       "sourcePath": "packages/oar/src/shared/session-options.ts",
       "upstreamSha256": "9386b404ee66a5313b74e517c06f27aa6fedbcd15aa35b2fe74e1124904a643d",
       "vendoredSha256": "9386b404ee66a5313b74e517c06f27aa6fedbcd15aa35b2fe74e1124904a643d"
+    },
+    {
+      "path": "shared/stream-json/compaction.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/compaction.ts",
+      "upstreamSha256": "2380a634c4934b6a15c5fc4cc70c1a34fe84f31680000cdebd9aa99e577d5195",
+      "vendoredSha256": "ccf97071d6fdb0d0ddcbd2bbab2f48041176bd4546458f41319f400a8e8e7a43",
+      "delta": "Type the caller-injected Codex LineProcess."
+    },
+    {
+      "path": "shared/stream-json/content.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/content.ts",
+      "upstreamSha256": "d9969bf7463a64102ed6890f41094aef558a3ca3ed83e036df71eaf04942c5aa",
+      "vendoredSha256": "d9969bf7463a64102ed6890f41094aef558a3ca3ed83e036df71eaf04942c5aa"
+    },
+    {
+      "path": "shared/stream-json/input-lifecycle.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/input-lifecycle.ts",
+      "upstreamSha256": "25cca1f48fa16a0eb11eb9ab5b1aa929f0e637e4b0b0e92e4ac434c55434109b",
+      "vendoredSha256": "25cca1f48fa16a0eb11eb9ab5b1aa929f0e637e4b0b0e92e4ac434c55434109b"
+    },
+    {
+      "path": "shared/stream-json/profile.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/profile.ts",
+      "upstreamSha256": "0340c760b8bedc805550274e41660e7b2f6c49132acfde424caee4f54417ec86",
+      "vendoredSha256": "0340c760b8bedc805550274e41660e7b2f6c49132acfde424caee4f54417ec86"
+    },
+    {
+      "path": "shared/stream-json/projection.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/projection.ts",
+      "upstreamSha256": "100b9a2e895cb72b0b45a71c8dc9d9ff3d028c2fd6beed8d1cba745fdd50b9f2",
+      "vendoredSha256": "100b9a2e895cb72b0b45a71c8dc9d9ff3d028c2fd6beed8d1cba745fdd50b9f2"
+    },
+    {
+      "path": "shared/stream-json/session.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/session.ts",
+      "upstreamSha256": "8c396d0a7908891f0f7746f4ba5600092382b5ccc4c002f5ef49fadf4c495694",
+      "vendoredSha256": "acd911f6b0438a4dda1c6283e08f2b50e7f7f3ef959f09002e86b08b6021c5a6",
+      "delta": "Caller-owned process: streamJsonSession takes the injected Codex LineProcess and a CredentialRedactor built with sessionCredentialRedactor, creates the upstream kernel with it as the redact hook and returns the raw AdapterSession without sealSession; open and control errors go through the same redaction guard. hooks.onRecord is a kernel observer registered before any record is appended. Every toApp request, whatever its type, is recorded and passed to hooks.onAppRequest, whose respond writes the native reply through the acknowledged stdin write and records it; profile.permissionResponse is not read, and a request no hook answers stays unanswered. No diagnostics(), resources or cleanup reason. The synchronous hooks.beforeInterrupt replaces the upstream cancellation observation window: it runs before the interrupt is written, and a throw rejects the abort with code error and writes nothing."
+    },
+    {
+      "path": "shared/stream-json/state.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/state.ts",
+      "upstreamSha256": "db0365828c98cbb3d3893aebea16559b134f7ae4de49c96cb803541ddc11a619",
+      "vendoredSha256": "d35e2ca29ce33be9a526ba65a09c52419a1c226f710ab8c4a07ad06071edee85",
+      "delta": "Type the caller-injected Codex LineProcess."
+    },
+    {
+      "path": "shared/stream-json/task-control.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/task-control.ts",
+      "upstreamSha256": "cf2a4b274f8dcd457577a05b9ca40b69f5a613f802af9f1f24a9c79104df7af5",
+      "vendoredSha256": "70e8f441fde900abf2bd3fb153bea4c5f56c57b2c150b5c4abd889e175e70117",
+      "delta": "Type the caller-injected Codex LineProcess."
     },
     {
       "path": "shared/token-totals.ts",

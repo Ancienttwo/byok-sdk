@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ClaudeFailureEvidence } from '../adapters/claude/failure-evidence';
-import type { ClaudeStreamMessage } from '../adapters/claude/events';
+import type { ClaudeStreamMessage } from '../adapters/claude/projection';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 
 const RESETS_AT_SECONDS = 1_792_832_400;

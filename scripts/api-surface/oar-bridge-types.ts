@@ -267,3 +267,37 @@ export type CheckCodexUnsupportedOption = Assert<Equal<Bridge.UnsupportedOptionE
 export type CheckCodexStartErrors = Assert<Equal<ErrorExports<typeof Bridge>, keyof OarStartErrorClasses>>;
 export type CheckAcpStartErrors = Assert<Equal<ErrorExports<typeof AcpBridge>, keyof OarStartErrorClasses>>;
 export type CheckDshStartErrors = Assert<Equal<ErrorExports<typeof DshBridge>, keyof OarStartErrorClasses>>;
+
+// The Claude bridge: the vendored stream-json session and the Claude projection
+// profile. The adapter assembles the session profile; the fold stays opaque.
+import type * as ClaudeBridge from '../../packages/client/src/runtime/claude-session-runtime.js';
+import type { streamJsonSession as vendorStreamJsonSession, StreamJsonSessionHooks } from '../../packages/client/vendor/oar/ac7fde4/shared/stream-json/session.js';
+import type { StreamJsonSessionProfile } from '../../packages/client/vendor/oar/ac7fde4/shared/stream-json/profile.js';
+import type { claudeProjectionProfile as vendorClaudeProfile, ClaudeProjectionState as VendorClaudeState } from '../../packages/client/vendor/oar/ac7fde4/runtimes/claude/projection.js';
+import type { sessionCredentialRedactor as vendorRedactor, CredentialRedactor } from '../../packages/client/vendor/oar/ac7fde4/shared/credential-redactor.js';
+
+type ClaudeVendorArgs = Parameters<typeof vendorStreamJsonSession<VendorClaudeState>>;
+type ClaudeVendorProfile = StreamJsonSessionProfile<VendorClaudeState>;
+type ClaudeBridgeArgs = Parameters<typeof ClaudeBridge.streamJsonSession>;
+type ClaudeVendorSession = Awaited<ReturnType<typeof vendorStreamJsonSession>>;
+type ClaudeBridgeSession = {
+  readonly id: AdapterSession['id'];
+  prompt(...args: FirstInput<AdapterSession['prompt']>): Promise<ClaudeBridge.ClaudeControl>;
+  abort(...args: Parameters<AdapterSession['abort']>): Promise<ClaudeBridge.ClaudeControl>;
+  records(): readonly ClaudeBridge.ClaudeRecord[];
+  dispose: AdapterSession['dispose'];
+};
+type ClaudeSharedProfileKeys = 'capabilities' | 'steer' | 'consume' | 'open' | 'exited' | 'disposing';
+export type CheckClaudeExports = Assert<Equal<keyof typeof ClaudeBridge,
+  'streamJsonSession' | 'claudeProjectionProfile' | 'initialClaudeProjection' | 'resumedClaudeProjection' | 'sessionCredentialRedactor'>>;
+export type CheckClaudeControl = Assert<Equal<ClaudeBridge.ClaudeControl, BridgeControl>>;
+export type CheckClaudeRecord = Assert<Equal<ClaudeBridge.ClaudeRecord, Flatten<BridgeRecord>>>;
+export type CheckClaudeSession = Assert<Equal<ClaudeBridge.RawClaudeSession, ClaudeBridgeSession>>;
+export type CheckClaudeVendorSession = Assert<Assignable<ClaudeVendorSession, ClaudeBridge.RawClaudeSession>>;
+export type CheckClaudeSpawn = Assert<Assignable<ClaudeBridgeArgs[0], ClaudeVendorArgs[0]>>;
+export type CheckClaudeRedactor = Assert<Equal<ClaudeBridge.ClaudeCredentialRedactor, CredentialRedactor>>;
+export type CheckClaudeRedactorFactory = Assert<Assignable<Parameters<typeof ClaudeBridge.sessionCredentialRedactor>[0], Parameters<typeof vendorRedactor>[0]>>;
+export type CheckClaudeProfileValue = Assert<Assignable<typeof vendorClaudeProfile, ClaudeBridge.ClaudeProjectionProfile>>;
+export type CheckClaudeStateValue = Assert<Assignable<VendorClaudeState, ClaudeBridge.ClaudeProjectionState>>;
+export type CheckClaudeProfile = Assert<Assignable<Pick<ClaudeBridge.ClaudeSessionProfile, ClaudeSharedProfileKeys>, Pick<ClaudeVendorProfile, ClaudeSharedProfileKeys>>>;
+export type CheckClaudeHooks = Assert<Assignable<ClaudeBridge.ClaudeSessionHooks, Partial<Mutable<StreamJsonSessionHooks>>>>;
