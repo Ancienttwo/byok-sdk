@@ -202,6 +202,16 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     const missing = await payload('1.0.2');
     await fs.rm(path.join(missing, 'precheck.cjs'));
     await expect(installation.install(missing)).rejects.toMatchObject({ code: 'payload_invalid' });
+    // A leading BOM stays invalid JSON, as it was for 0.41.0's reader.
+    const bom = await payload('1.0.3');
+    const manifestPath = path.join(bom, SERVICE_PAYLOAD_MANIFEST);
+    await fs.writeFile(manifestPath, `\uFEFF${await fs.readFile(manifestPath, 'utf8')}`);
+    await expect(installation.install(bom)).rejects.toMatchObject({ code: 'payload_invalid' });
+    const parsed = JSON.parse((await fs.readFile(manifestPath, 'utf8')).slice(1)) as ServicePayloadManifest;
+    await fs.writeFile(manifestPath, JSON.stringify({ ...parsed, meta: [] }));
+    await expect(installation.install(bom)).rejects.toMatchObject({ code: 'payload_invalid' });
+    await fs.writeFile(manifestPath, 'null');
+    await expect(installation.install(bom)).rejects.toMatchObject({ code: 'payload_invalid' });
     expect(await pointer('current')).toBeUndefined();
   });
 
@@ -211,19 +221,26 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await fs.writeFile(path.join(dir, 'precheck.cjs'), PRECHECK);
     await fs.writeFile(path.join(dir, 'host.js'), '// built');
     await fs.writeFile(path.join(dir, 'lib', 'b.js'), 'b');
+    await fs.writeFile(path.join(dir, '9'), '9');
+    await fs.writeFile(path.join(dir, '10'), '10');
     await expect(writeServicePayloadManifest(dir, { id: '../x' })).rejects.toThrow('Invalid payload id');
     await expect(writeServicePayloadManifest(dir, { id: '1.0.0', meta: [] as never })).rejects.toThrow('JSON object');
     const bytes = await writeServicePayloadManifest(dir, { id: '1.0.0', meta: { node: '>=22' } });
     expect(await fs.readFile(path.join(dir, SERVICE_PAYLOAD_MANIFEST))).toEqual(Buffer.from(bytes));
-    const written = JSON.parse(new TextDecoder().decode(bytes)) as ServicePayloadManifest;
+    const text = new TextDecoder().decode(bytes);
+    const written = JSON.parse(text) as ServicePayloadManifest;
     expect(Object.keys(written)).toEqual(['format', 'version', 'id', 'files', 'meta']);
-    expect(Object.keys(written.files)).toEqual(['host.js', 'lib/b.js', 'precheck.cjs']);
+    // By code unit, so "10" precedes "9" even though object key order would put integer-like keys first.
+    const order = ['10', '9', 'host.js', 'lib/b.js', 'precheck.cjs'].map((name) => text.indexOf(`"${name}":`));
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(order[0]).toBeGreaterThan(0);
     await expect(writeServicePayloadManifest(dir, { id: '1.0.0' })).rejects.toThrow('already exists');
 
     const seen: ServicePayloadManifest[] = [];
     installation = installationOver(fakeLifecycle(), { verifyPayload: (_dir, manifest) => { seen.push(manifest); } });
     await installation.install(dir);
     expect(seen[0]?.meta).toEqual({ node: '>=22' });
+    expect(Object.isFrozen(seen[0]?.files)).toBe(true);
     expect(await fs.readFile(path.join(installRoot, 'versions', '1.0.0', SERVICE_PAYLOAD_MANIFEST))).toEqual(Buffer.from(bytes));
 
     const empty = path.join(root, 'empty');

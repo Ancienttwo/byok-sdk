@@ -108,7 +108,7 @@ export interface ServiceInstallationOptions {
    * ceilings or file modes. Runs on the staged copy after every digest
    * passed and before it becomes `versions/<id>`, and on an existing
    * `versions/<id>` whose manifest matched, so it checks the exact bytes
-   * that will run. A throw is `payload_invalid` with the error as `cause`;
+   * that will run. `manifest` is a frozen copy. A throw is `payload_invalid` with the error as `cause`;
    * nothing new appears under `versions/`.
    */
   verifyPayload?(stagedDir: string, manifest: ServicePayloadManifest): void | Promise<void>;
@@ -400,11 +400,12 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   /** Copies the payload into `versions/<id>`, checking every file against the manifest. Returns the id. */
   async function stage(payloadDir: string): Promise<string> {
     const { manifest, bytes } = await readPayload(payloadDir);
-    const target = path.join(versionsDir, manifest.id);
+    const id = manifest.id;
+    const target = path.join(versionsDir, id);
     if (await exists(target)) {
       if (!(await matchesManifest(target, manifest, bytes))) throw new ServiceInstallationError('version_conflict');
       await verifyStaged(target, manifest);
-      return manifest.id;
+      return id;
     }
     const staging = path.join(versionsDir, `.staging-${randomUUID()}`);
     await fs.mkdir(staging, { recursive: true });
@@ -425,13 +426,14 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       await fs.rm(staging, { recursive: true, force: true });
       throw error;
     }
-    return manifest.id;
+    return id;
   }
 
   async function verifyStaged(dir: string, manifest: ServicePayloadManifest): Promise<void> {
     if (opts.verifyPayload === undefined) return;
     try {
-      await opts.verifyPayload(dir, manifest);
+      // A frozen copy: the hook reads the manifest and cannot change what stage uses.
+      await opts.verifyPayload(dir, deepFreeze(structuredClone(manifest)));
     } catch (error) {
       throw new ServiceInstallationError('payload_invalid', undefined, { cause: error });
     }
@@ -825,7 +827,7 @@ async function readPayload(payloadDir: string): Promise<{ manifest: ServicePaylo
   let manifest: Partial<ServicePayloadManifest>;
   try {
     bytes = await fs.readFile(path.join(payloadDir, SERVICE_PAYLOAD_MANIFEST));
-    manifest = JSON.parse(new TextDecoder().decode(bytes)) as Partial<ServicePayloadManifest>;
+    manifest = JSON.parse(Buffer.from(bytes).toString('utf8')) as Partial<ServicePayloadManifest>;
   } catch {
     throw new ServiceInstallationError('payload_invalid');
   }
@@ -955,6 +957,14 @@ async function writeFileAtomic(file: string, content: string): Promise<void> {
   const temp = `${file}.${randomUUID()}.tmp`;
   await fs.writeFile(temp, content, 'utf8');
   await fs.rename(temp, file);
+}
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value === 'object' && value !== null) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
 }
 
 function delay(ms: number): Promise<void> {

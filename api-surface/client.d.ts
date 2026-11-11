@@ -11487,7 +11487,7 @@ export interface ServiceInstallationOptions {
      * ceilings or file modes. Runs on the staged copy after every digest
      * passed and before it becomes `versions/<id>`, and on an existing
      * `versions/<id>` whose manifest matched, so it checks the exact bytes
-     * that will run. A throw is `payload_invalid` with the error as `cause`;
+     * that will run. `manifest` is a frozen copy. A throw is `payload_invalid` with the error as `cause`;
      * nothing new appears under `versions/`.
      */
     verifyPayload?(stagedDir: string, manifest: ServicePayloadManifest): void | Promise<void>;

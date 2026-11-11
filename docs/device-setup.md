@@ -437,9 +437,9 @@ payload is a directory plus `byok-payload.json`:
 `meta` is optional Host data: any JSON object, which the SDK copies verbatim
 and does not interpret. Write the manifest at build time with
 `writeServicePayloadManifest(dir, { id, meta })` from
-`@byok-sdk/client/packaging`; it lists every regular file, sorted, refuses a
-symlink, an existing manifest and an empty directory, and returns the bytes
-it wrote, so the Host can sign exactly those.
+`@byok-sdk/client/packaging`; it lists every regular file sorted by UTF-16
+code unit, refuses a symlink, an existing manifest and an empty directory,
+and returns the bytes it wrote, so the Host can sign exactly those.
 
 Verify the payload's signature before handing it to the SDK; the SDK only
 checks every file against `files`, refuses a file the manifest does not list

@@ -61,15 +61,16 @@ export async function writeServicePayloadManifest(dir: string, options: { id: st
   const relatives = await listPayloadFiles(dir, (relative) => new Error(`Payload entry ${relative} is not a regular file or directory`));
   if (relatives.includes(SERVICE_PAYLOAD_MANIFEST)) throw new Error(`${path.join(dir, SERVICE_PAYLOAD_MANIFEST)} already exists`);
   if (relatives.length === 0) throw new Error(`Payload directory ${dir} has no files`);
-  const files: Record<string, string> = {};
+  const files: string[] = [];
   // Default sort compares UTF-16 code units, so the output does not depend on the file system's order or locale.
   for (const relative of relatives.sort()) {
     if (!isPayloadPath(relative)) throw new Error(`Payload path ${relative} cannot be listed in a manifest`);
-    files[relative] = await sha256File(path.join(dir, ...relative.split('/')));
+    files.push(`    ${JSON.stringify(relative)}: "${await sha256File(path.join(dir, ...relative.split('/')))}"`);
   }
-  const manifest: ServicePayloadManifest = { format: 'byok-service-payload', version: 1, id: options.id, files };
-  if (options.meta !== undefined) manifest.meta = options.meta;
-  const bytes = new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`);
+  // Written as text, not from an object: object key order puts integer-like paths ("9", "10") first.
+  const fields = ['"format": "byok-service-payload"', '"version": 1', `"id": ${JSON.stringify(options.id)}`, `"files": {\n${files.join(',\n')}\n  }`];
+  if (options.meta !== undefined) fields.push(`"meta": ${JSON.stringify(options.meta, null, 2).replaceAll('\n', '\n  ')}`);
+  const bytes = new TextEncoder().encode(`{\n  ${fields.join(',\n  ')}\n}\n`);
   await fs.writeFile(path.join(dir, SERVICE_PAYLOAD_MANIFEST), bytes, { flag: 'wx' });
   return bytes;
 }
