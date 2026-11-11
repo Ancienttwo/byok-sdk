@@ -11,7 +11,7 @@ import { admitUserInput, coalescePolicy, type CoalescePolicy, type InputFields }
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { addTurn, stateOf, type Card, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { checkDreamInstruction, dreamPolicy, recordDream, reconcileDreamRoutines, type DreamingOptions, type DreamSync } from '@byok-sdk/example-bot-collaboration/dream';
-import { advanceRoomSeats, cardCallDue, checkReply, CONNECTOR_OUTCOME_UNKNOWN, collaborationDue, commitCommand, observeDevices, replyCheckDue, reportCardDecisions,
+import { advanceRoomSeats, cardCallDue, checkReply, CONNECTOR_OUTCOME_UNKNOWN, collaborationDue, observeDevices, replyCheckDue, reportCardDecisions,
   commandBots, seatTurn, settleCardCall, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { botOutcomePorts, syncHead, syncTail, type IntentOutcomeError } from '@byok-sdk/example-bot-collaboration/adapter-steps';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
@@ -24,7 +24,7 @@ import { syncDreamSlice } from './dreams';
 import { HostedStoreVersionError, inSchema, lockScope, SCHEMA } from './transaction';
 import { decideMessage, messageCommandId, type AgentMessageInput, type HostedIntentMessageHandler, type MessageDecision } from './messages';
 import { decideFinish, type HostedIntentHandler, type TaskEvidence } from './reconcile';
-import { archivedRow, commitStored, decideRetention } from './retention';
+import { archivedRow, commitInStore, commitStored, decideRetention } from './retention';
 import { dueRoutine, hostedRoutineCommands, hostJobCommands, hostJobRowKey, loadSlice, planSlice, recordDue, switchDueVersions,
   writeSlice } from './routines';
 import type { RetentionInput, RetentionLimits, RetentionResult } from '@byok-sdk/example-bot-collaboration/retention';
@@ -704,8 +704,8 @@ export class HostedCollaborationStore {
       if (!inactive(bot)) await activeBinding(client, key, bot.execution.deviceId);
       const occurrence = recordDue(slice, scope, routine, now);
       const run = occurrenceRun(routine, occurrence);
-      const result = commitCommand(state, { scope, commandId: occurrence.key, command: { kind: 'occurrence', key: occurrence.key } },
-        { scope, recordCallbacks: false }, { now: () => now, publish, occurrence: () => routineTurn(state, run) });
+      const result = await commitInStore(client, scope, state, { scope, commandId: occurrence.key, command: { kind: 'occurrence', key: occurrence.key } },
+        false, { now: () => now, publish, occurrence: () => routineTurn(state, run) });
       await writeSlice(client, key, slice, occurrence.key);
       return { value: 'fired' as const, outbox: result.outbox };
     }), false);

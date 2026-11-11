@@ -13,11 +13,11 @@ import { contextTurns, DEFAULT_HANDOFF_BUDGETS, outcomeOffer, outcomeSchema, SYS
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation';
 import { delegationCancelAnswer, turnCancelAnswer, type CancelOutcome, type DelegationCancelResult, type TurnCancelResult } from './rules/delegation';
-import { checkReply, collaborationDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, replyCheckDue, reportCardDecisions,
-  commandBots, type Command, type CommandPorts, type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
+import { checkReply, collaborationDue, CONNECTOR_OUTCOME_UNKNOWN, replyCheckDue, reportCardDecisions,
+  commandBots, type Command, type CommandPorts, type KeylessCommand, type ReplyCheck } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
 import { hostMessageDisposition, type MessageDisposition } from './rules/message';
-import { callCardsInLedger, CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, writeLedger, type CommitResult } from './commit';
+import { callCardsInLedger, CommitConflict, commitInLedger, commitInRows, retainInLedger, syncTurnInLedger, writeLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
 import { BOT_DREAM, BOT_ROUTINE, botRoutines, endable, owned, routineCalendar, routineTurn,
   ownerRoutineUpdate, updateDefinition, type BotRoutineInput } from './routines';
@@ -355,7 +355,7 @@ export class BotCollaboration {
         // the new owner schedules the routine's wakes on its own SDK.
         admitBot(state, (run.input as BotRoutineInput).owner);
         refuseExported(state);
-        this.commitCallback(state, run.occurrenceKey, { kind: 'occurrence', key: run.occurrenceKey },
+        this.commitCallback(state, tx.rows, run.occurrenceKey, { kind: 'occurrence', key: run.occurrenceKey },
           { publish: tx.publish, occurrence: () => routineTurn(state, run) });
       }, [BOT_DREAM]: (run, tx) => {
         const state = stateOf(tx.application);
@@ -551,7 +551,7 @@ export class BotCollaboration {
     }
   }
   private commitBotOutcome(state: CollaborationState, key: string, taskId: string, document: unknown, tx: OutcomeTransaction): void {
-    this.commitCallback(state, taskId, { kind: 'outcome', turnId: key, taskId, document: document as Json }, {
+    this.commitCallback(state, tx.rows, taskId, { kind: 'outcome', turnId: key, taskId, document: document as Json }, {
       publish: tx.publish,
       ...this.deliverPort(state, taskId),
       outcome: {
@@ -676,10 +676,9 @@ export class BotCollaboration {
   }
   /** A keyless owner command (#739 6a). Its id is new at each call, because the store keeps no record of it. */
   private commitKeyless(command: KeylessCommand): CommitResult { return this.commitOwner(randomUUID(), command); }
-  private commitCallback(state: CollaborationState, commandId: string, command: Command, ports: Omit<CommandPorts, 'now'>,
-    archived?: CommandStore['archived']): CommitResult {
-    return commitCommand(state, { scope: this.ledger.tenant, commandId, command },
-      { scope: this.ledger.tenant, recordCallbacks: false, ...(archived ? { archived } : {}) }, { now: this.now, ...ports });
+  private commitCallback(state: CollaborationState, rows: ApplicationRows, commandId: string, command: Command,
+    ports: Omit<CommandPorts, 'now'>): CommitResult {
+    return commitInRows(state, this.ledger.tenant, { scope: this.ledger.tenant, commandId, command }, rows, { now: this.now, ...ports });
   }
 
   /**
@@ -699,12 +698,10 @@ export class BotCollaboration {
     const name = hostIntent(state, tx.intent.key)?.handler, handler = name === undefined ? undefined : this.hostIntentMessageHandlers.get(name);
     let disposition;
     try {
-      ({ disposition } = this.commitCallback(state, `${input.taskId}:${input.payload.messageId}`,
+      ({ disposition } = this.commitCallback(state, tx.rows, `${input.taskId}:${input.payload.messageId}`,
         { kind: 'message', turnId: tx.intent.key, message: { taskId: input.taskId, payload: input.payload } },
         { publish: tx.publish, ...this.deliverPort(state, input.taskId),
-          ...(handler ? { hostMessage: () => hostMessageDisposition(handler(input, tx)) } : {}) },
-        // A refused message keeps a command record, and retention can move it into K4 rows (#798).
-        id => tx.rows.get('commands', id) as CommandRecord | undefined));
+          ...(handler ? { hostMessage: () => hostMessageDisposition(handler(input, tx)) } : {}) }));
     } catch (cause) {
       // Other content for the id of a refused message: the same refusal that K4 gives for an accepted one.
       if (cause instanceof CommitConflict && cause.code === 'identity_conflict') return { outcome: 'refused', reasonCode: 'message_conflict' };
