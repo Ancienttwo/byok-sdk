@@ -73,6 +73,10 @@ describe('custody child', () => {
       [profile!, { ...withoutPi, profile_ref: 'no-pi' }]);
     expect(catalog.choices).toEqual([{ id: 'pi', label: 'Pi' }, { id: 'pi:writer', label: 'Writer model' }]);
     expect(catalog.models['pi:writer']).toEqual(catalogEntryFor(profile!, catalog.models.pi!));
+    expect(() => executionCatalog({ instruction: 'reply', models: { 'pi:writer': { label: 'Brand', runtime: 'pi' } } }, 'device', [profile!]))
+      .toThrow('brand.config.ts model pi:writer collides with the keys profile writer');
+    // A store that is neither absent nor accepted refuses with the store's own reason.
+    await expect(new ProviderProfiles(root).load()).rejects.toThrow(`Keys store ${root} is rejected: The store path is not a regular file`);
     const rotated = await submitToCustody(custodyChild(secrets, receipts), { op: 'replace_secret', profileRef: 'writer', secret: `${SECRET}-2` });
     expect([rotated.profile_revision, rotated.profile_hash]).toEqual([status.profile_revision, status.profile_hash]);
     await profiles.changed();

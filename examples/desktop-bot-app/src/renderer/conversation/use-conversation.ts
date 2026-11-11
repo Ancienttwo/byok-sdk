@@ -45,6 +45,8 @@ export function useConversation(botId: string | null): { loaded: Loaded | undefi
       } finally {
         reading = false;
       }
+      // A hint that arrived during a failed read still gets its read.
+      if (again && !stopped) void read();
     };
     const unsubscribe = window.byok.onStateChanged(() => void read());
     void read();

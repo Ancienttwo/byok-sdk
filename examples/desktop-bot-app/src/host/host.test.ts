@@ -62,6 +62,21 @@ describe('desktop Host composition', () => {
 
     const second = await composeHost(config);
     expect(second.daemon.status().deviceId).toBe(deviceId);
+    // A custody receipt rebuilds K8's catalog: the new profile's Pi entry takes a Bot.
+    const keys = new SqliteProviderProfileStore({ path: keysDb() });
+    const now = new Date().toISOString();
+    await keys.save(parseModelProviderProfile({
+      adapter: 'openai_compatible', auth_mode: 'none', base_url: 'http://127.0.0.1:9/v1', capabilities: [], created_at: now, updated_at: now,
+      display_name: 'Local', enabled: true, kind: 'model', model: 'local-model', profile_ref: 'local', provider_kind: 'custom',
+      pi_model: { contextWindow: 8192, maxTokens: 1024, reasoning: false, thinkingLevel: 'off',
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsUsageInStreaming: true, maxTokensField: 'max_tokens' } },
+    }));
+    await keys.close();
+    const bot = { id: 'writer', name: 'Writer', role: 'Writes', persona: 'Short.', model: 'pi:local' };
+    await expect(second.domains.handlers['k8.saveBot'](bot)).rejects.toThrow('Unavailable model: pi:local');
+    await second.domains.handlers['keys.profilesChanged'](undefined);
+    await second.domains.handlers['k8.saveBot'](bot);
+    expect((await second.domains.handlers['k8.view']({ botId: null })).models).toContainEqual({ id: 'pi:local', label: 'Local' });
     await second.close();
 
     // A server that no longer lists this device refuses the pairing; nothing re-pairs.
