@@ -4,10 +4,11 @@ import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
+import { createDaemonWithAdapters, type Daemon, type DaemonConfig, type EmbeddedPairingServer } from '../daemon/create-daemon';
 import { DaemonHaltError } from '../daemon/daemon-lifecycle';
 import { readDeviceEnrollmentIdentity, readDeviceEnrollmentStatus } from '../daemon/store';
 import { DeviceStoreBindingMismatchError } from '../daemon/daemon-errors';
+import { createTestDeviceStore } from './fixtures/device-credentials';
 import { repairDeviceEnrollmentMetadata } from '../diagnostics/device-doctor';
 import { connectControlClient } from '../daemon/control-client';
 import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
@@ -146,5 +147,67 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
 
     await expect(daemonFor(second).unpair()).rejects.toBeInstanceOf(DeviceStoreBindingMismatchError);
     expect(await readDeviceEnrollmentStatus(first)).toEqual({ state: 'paired', deviceId });
+  });
+
+  describe('pairEmbedded reconciles the enrollment with the in-process server (#1840)', () => {
+    function embeddedServer(deviceIds: string[]): EmbeddedPairingServer & { codes: number } {
+      const server = {
+        codes: 0,
+        pairing: { createPairingCode: async () => { server.codes += 1; return { code: 'pairing-code' }; } },
+        machines: { list: async () => deviceIds.map((deviceId) => ({ deviceId })) },
+      };
+      return server;
+    }
+
+    async function refusal(daemon: Daemon, server: EmbeddedPairingServer): Promise<unknown> {
+      return daemon.pairEmbedded(server).then(() => undefined, (error: unknown) => error);
+    }
+
+    it('an unpaired store against an empty server pairs', async () => {
+      const config = await storeConfig();
+      const server = embeddedServer([]);
+      const { deviceId } = await daemonFor(config).pairEmbedded(server);
+      expect(server.codes).toBe(1);
+      expect(await readDeviceEnrollmentStatus(config)).toEqual({ state: 'paired', deviceId });
+    });
+
+    it('an unpaired store against a server with devices refuses with enrollment_missing and writes nothing', async () => {
+      const config = await storeConfig();
+      const server = embeddedServer(['another-device']);
+      expect(await refusal(daemonFor(config), server)).toMatchObject({ name: 'EmbeddedPairingError', reason: 'enrollment_missing' });
+      expect(server.codes).toBe(0);
+      expect(await readDeviceEnrollmentStatus(config)).toEqual({ state: 'unpaired' });
+    });
+
+    it('a paired store whose device the server lists is accepted without a new pairing', async () => {
+      const config = await storeConfig();
+      const { deviceId } = await daemonFor(config).pair('pairing-code');
+      const server = embeddedServer([deviceId]);
+      expect(await daemonFor(config).pairEmbedded(server)).toEqual({ deviceId });
+      expect(server.codes).toBe(0);
+    });
+
+    it('a paired store whose device the server does not list refuses with device_unknown', async () => {
+      const config = await storeConfig();
+      const { deviceId } = await daemonFor(config).pair('pairing-code');
+      const server = embeddedServer(['another-device']);
+      expect(await refusal(daemonFor(config), server)).toMatchObject({ reason: 'device_unknown' });
+      expect(server.codes).toBe(0);
+      expect(await readDeviceEnrollmentStatus(config)).toEqual({ state: 'paired', deviceId });
+    });
+
+    it('a device record without its OS entry refuses with re_pair_required', async () => {
+      const config = await storeConfig();
+      await daemonFor(config).pair('pairing-code');
+      await createTestDeviceStore(config.storeDir!, undefined, productId).credentials.clear();
+      expect(await refusal(daemonFor(config), embeddedServer([]))).toMatchObject({ reason: 're_pair_required' });
+    });
+
+    it('an OS entry another storeDir paired refuses with store_not_bound', async () => {
+      const { deviceId } = await daemonFor(await storeConfig()).pair('pairing-code');
+      const server = embeddedServer([deviceId]);
+      expect(await refusal(daemonFor(await storeConfig()), server)).toMatchObject({ reason: 'store_not_bound' });
+      expect(server.codes).toBe(0);
+    });
   });
 });

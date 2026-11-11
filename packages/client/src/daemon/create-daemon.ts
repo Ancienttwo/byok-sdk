@@ -30,7 +30,8 @@ import type { RuntimeEnvironmentPolicy } from '../runtime/environment.js';
 import { ApprovalRegistry, type LocalToolApprovalPolicy } from './approvals.js';
 import { AuthManager } from './auth-manager.js';
 import { resolveMachineId } from './machine-id.js';
-import { DaemonHaltError, type DaemonLifecycle } from './daemon-lifecycle.js';
+import { DaemonHaltError, type DaemonLifecycle, type DaemonNotOpenError } from './daemon-lifecycle.js';
+import type { EmbeddedPairingError } from './daemon-errors.js';
 import {
   type ControlStorageStatus,
 } from './control-protocol.js';
@@ -692,6 +693,15 @@ export interface DaemonStatus {
   config: DaemonEffectiveConfig;
 }
 
+/**
+ * The server surface {@link Daemon.pairEmbedded} reads: structural, so the
+ * client takes no package edge on `@byok-sdk/server`.
+ */
+export interface EmbeddedPairingServer {
+  readonly pairing: { createPairingCode(input: { productId: string }): Promise<{ readonly code: string }> };
+  readonly machines: { list(): Promise<readonly { readonly deviceId: string }[]> };
+}
+
 export interface Daemon {
   /** Present only with agentMemoryExport: true. Holds the home writer lease; AgentHomeBusyError is retryable. Raw contents remain Host-owned. */
   exportAgentMemory?(agentRef: AgentRef, options?: AgentMemoryExportOptions): Promise<AgentMemoryExport>;
@@ -709,6 +719,14 @@ export interface Daemon {
    */
   pair(pairingCode: string, options?: { readonly verificationSecret?: string; readonly replaceOtherStore?: boolean }): Promise<DeviceEnrollment>;
   /**
+   * The embedded Host's pairing: this daemon reads its own enrollment under
+   * the owner lease and reconciles it with `server`. An unpaired store
+   * against a server with no devices pairs; a paired store whose device the
+   * server lists is returned unchanged. Every other state throws
+   * {@link EmbeddedPairingError} and writes nothing. Never starts the daemon.
+   */
+  pairEmbedded(server: EmbeddedPairingServer): Promise<DeviceEnrollment>;
+  /**
    * Resolves once local startup is done — store ownership, storage, journal
    * recovery, the control socket and the task runner — with the reconnect
    * loop running. It does not wait for the server: `status().lifecycle` and
@@ -717,6 +735,13 @@ export interface Daemon {
    * is a crash.
    */
   start(): Promise<void>;
+  /**
+   * Valid after `start()` resolved. Resolves once `lifecycle` is
+   * `running/open`; rejects with {@link DaemonHaltError} on a halt,
+   * {@link DaemonNotOpenError} on `crashed` or `stopped`, and with
+   * `signal.reason` on abort (`AbortSignal.timeout(ms)` bounds the wait).
+   */
+  whenOpen(options: { readonly signal: AbortSignal }): Promise<void>;
   stop(): Promise<void>;
   status(): DaemonStatus;
   /** Append one sanitized reliable record before its first transport attempt. */
@@ -1045,12 +1070,14 @@ function buildDaemon(
   const reliableEnvelopes = new WeakMap<AgentReliableEgressRecord, Envelope>();
 
   const {
-    pair, start, stop, status, publishReliableAgentEgress, reloadMcpToolsets,
+    pair, pairEmbedded, start, whenOpen, stop, status, publishReliableAgentEgress, reloadMcpToolsets,
     reportMcpToolsetObservation, subscribe, tasks, unpair, approve, reject,
   } = daemonScope;
   return {
     pair,
+    pairEmbedded,
     start,
+    whenOpen,
     stop,
     status,
     publishReliableAgentEgress,

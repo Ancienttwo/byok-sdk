@@ -5,7 +5,7 @@
 // One executable, three roles, decided by argv before anything else runs:
 //   __byok_sdk_helper <kind>  the SDK-reserved helpers (Pi host lanes, MCP helpers)
 //   pi-provider-launcher ...  the keys custody launcher, re-entered as the Host's own command
-//   host                      pair, start, dispatch one Pi task to an offline model, report
+//   host                      pairEmbedded, start, whenOpen, dispatch one Pi task to an offline model, report
 //
 // The SDK assets ship beside the bundle or executable, as copySdkPackagingAssets
 // writes them. The model is an OpenAI-compatible endpoint inside this process.
@@ -104,13 +104,9 @@ async function host(): Promise<void> {
       profileDbPath, sessionDir: path.join(root, 'sessions') },
   }, { deviceCredentials: new InMemoryDeviceCredentialBackend() });
   try {
-    const { code } = await byok.pairing.createPairingCode({ productId: PRODUCT_ID });
-    const { deviceId } = await daemon.pair(code);
+    const { deviceId } = await daemon.pairEmbedded(byok);
     await daemon.start();
-    await until(() => {
-      const lifecycle = daemon.status().lifecycle;
-      return lifecycle.phase === 'running' && lifecycle.connection === 'open' ? true : undefined;
-    }, 'daemon connection');
+    await daemon.whenOpen({ signal: AbortSignal.timeout(60_000) });
     const { taskId } = await byok.executions.submit({
       taskId: randomUUID(), deviceId,
       payload: { instruction: 'reply once', runtime: 'pi', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY,

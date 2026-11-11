@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "bb7d0ed20282f0d5a7d651d154f695a9725cc1854d2f34bb3434e4842a8067f1"
+    "snapshotSha256": "0c4922a4bd59eed9383ceb9717175c7efb33125d0076ef7dce3ed82a59851130"
   },
   "configFields": {
     "status": "tracked",
@@ -260,6 +260,28 @@
         "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
         "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema"
       ]
+    },
+    {
+      "id": "daemon-embedded-pairing",
+      "impact": "additive",
+      "summary": "Daemon.pairEmbedded(server) pairs an embedded Host's daemon against its in-process server and reconciles an existing enrollment; every other state throws the new EmbeddedPairingError (enrollment_missing, device_unknown, re_pair_required, store_not_bound) and writes nothing. EmbeddedPairingServer is the structural server type it reads. Daemon.whenOpen({ signal }) resolves on running/open and rejects with DaemonHaltError, the new DaemonNotOpenError (stopped, crashed) or signal.reason. Both Daemon members are required, so a Host test double typed as Daemon adds them (#1840).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#embedded-pairing-and-connection-wait",
+      "items": [
+        "export:@byok-sdk/client#Daemon",
+        "export:@byok-sdk/client#DaemonNotOpenError",
+        "export:@byok-sdk/client#EmbeddedPairingError",
+        "export:@byok-sdk/client#EmbeddedPairingServer"
+      ]
+    },
+    {
+      "id": "testing-in-memory-device-credential-backend",
+      "impact": "additive",
+      "summary": "@byok-sdk/client/testing exports InMemoryDeviceCredentialBackend, a DeviceCredentialBackend held in memory for a Host's tests. A Host that hand-rolls a memory backend injects this one as deviceCredentials; no runtime Host change is required. The host-execution-core example's tests import it instead of the repo's removed scripts/testing helper.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#in-memory-device-credential-backend-1844",
+      "items": [
+        "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
+        "example:host-execution-core"
+      ]
     }
   ],
   "changes": [
@@ -281,8 +303,15 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=01e1d1c922e507dd",
-      "after": "K8 0.0.1 src-sha256=c329c3d65446c4f0",
+      "after": "K8 0.0.1 src-sha256=541fd2a5376a664e",
       "entry": "example-bot-collaboration-autonomy"
+    },
+    {
+      "item": "example:host-execution-core",
+      "change": "changed",
+      "before": "K4 0.0.1 src-sha256=29b76c2746aa7b33",
+      "after": "K4 0.0.1 src-sha256=a62de5b4c4495e5e",
+      "entry": "testing-in-memory-device-credential-backend"
     },
     {
       "item": "export:@byok-sdk/client#AgyAdapter",
@@ -325,6 +354,11 @@
       "entry": "dts-node-next-specifiers"
     },
     {
+      "item": "export:@byok-sdk/client#Daemon",
+      "change": "changed",
+      "entry": "daemon-embedded-pairing"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonConfig",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
@@ -333,6 +367,11 @@
       "item": "export:@byok-sdk/client#DaemonEffectiveRuntime",
       "change": "changed",
       "entry": "per-runtime-environment"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonNotOpenError",
+      "change": "added",
+      "entry": "daemon-embedded-pairing"
     },
     {
       "item": "export:@byok-sdk/client#DaemonOverrides",
@@ -353,6 +392,16 @@
       "item": "export:@byok-sdk/client#DshAdapterOptions",
       "change": "changed",
       "entry": "version-policy-source"
+    },
+    {
+      "item": "export:@byok-sdk/client#EmbeddedPairingError",
+      "change": "added",
+      "entry": "daemon-embedded-pairing"
+    },
+    {
+      "item": "export:@byok-sdk/client#EmbeddedPairingServer",
+      "change": "added",
+      "entry": "daemon-embedded-pairing"
     },
     {
       "item": "export:@byok-sdk/client#ExpiringClassId",
@@ -563,6 +612,11 @@
       "item": "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper",
       "change": "changed",
       "entry": "agent-memory-helper-protocol-4"
+    },
+    {
+      "item": "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
+      "change": "added",
+      "entry": "testing-in-memory-device-credential-backend"
     },
     {
       "item": "export:@byok-sdk/cloud#ByokCloud",
