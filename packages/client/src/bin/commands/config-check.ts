@@ -20,10 +20,11 @@ export interface ConfigCheckDeps {
  * daemon would run with. Returns the exit code: 1 on any error, and with
  * `--strict` on any warning; otherwise 0.
  *
- * #1095: every runtime `start` builds takes the file's `runtimeEnvironment`
- * policy, so the check prints that policy. The names it yields come from the
- * user's login shell, which a check never runs: `doctor` reads them from the
- * running daemon.
+ * #1095: the check prints the file's top-level `runtimeEnvironment` policy,
+ * the default of every runtime `start` builds; #1759: it also prints each
+ * built runtime's effective policy, `runtimes.<id>.runtimeEnvironment` where
+ * set. The names they yield come from the user's login shell, which a check
+ * never runs: `doctor` reads them from the running daemon.
  */
 export function runConfigCheckCommand(configPath: string, options: ConfigCheckOptions, deps: ConfigCheckDeps = {}): number {
   const log = deps.log ?? ((line: string) => console.log(line));
@@ -39,7 +40,7 @@ export function runConfigCheckCommand(configPath: string, options: ConfigCheckOp
     }, null, 2));
   } else {
     for (const line of formatConfigCheck(configPath, check, options.strict, ok)) log(line);
-    if (runtimeEnvironment !== undefined) log(formatRuntimeEnvironmentPolicy(runtimeEnvironment));
+    if (runtimeEnvironment !== undefined) log(`  runtime environment: ${formatRuntimeEnvironmentPolicy(runtimeEnvironment)}`);
   }
   return ok ? 0 : 1;
 }
@@ -64,7 +65,7 @@ function effectiveRuntimeEnvironmentPolicy(value: unknown): RuntimeEnvironmentPo
 function formatRuntimeEnvironmentPolicy(policy: RuntimeEnvironmentPolicy): string {
   const list = (names: readonly string[] | undefined): string => names === undefined || names.length === 0 ? '(none)' : names.join(',');
   const allow = policy.base === 'allowlist' ? ` allow=${list(policy.allow)}` : '';
-  return `  runtime environment: base=${policy.base ?? 'login-shell'}${allow} pass=${list(policy.pass)} (names: byok-agent doctor, from the running daemon)`;
+  return `base=${policy.base ?? 'login-shell'}${allow} pass=${list(policy.pass)} (names: byok-agent doctor, from the running daemon)`;
 }
 
 function formatEffectiveConfig(effective: DaemonEffectiveConfig): string[] {
@@ -92,8 +93,9 @@ function formatEffectiveConfig(effective: DaemonEffectiveConfig): string[] {
     '  runtimes:',
     ...effective.runtimes.map((runtime) => {
       const isolation = runtime.isolation === undefined ? '' : ` ${Object.entries(runtime.isolation).map(([key, value]) => `${key}=${value}`).join(' ')}`;
-      return `    ${runtime.id} [${runtime.source}] auto ${runtime.toolAuthorizationAuto ? 'supported' : 'unsupported'}${isolation}`;
-    }),
+      const line = `    ${runtime.id} [${runtime.source}] auto ${runtime.toolAuthorizationAuto ? 'supported' : 'unsupported'}${isolation}`;
+      return runtime.runtimeEnvironment === undefined ? [line] : [line, `      environment: ${formatRuntimeEnvironmentPolicy(runtime.runtimeEnvironment)}`];
+    }).flat(),
     `  tool authorization: ${toolAuthorization.mode} (local tool approval: ${toolAuthorization.localToolApproval})`,
     ...fileScopeLines,
   ];

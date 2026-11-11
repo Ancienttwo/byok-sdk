@@ -236,7 +236,9 @@ Claude Code and Codex remain user-installed runtimes and use their own login
 state. Each runtime child gets the user's login-shell environment, provider
 API keys included, as a new terminal would (#1095). The daemon captures it
 once per process and never from its own `process.env`, so a variable the Host
-sets reaches a runtime only when `runtimeEnvironment.pass` names it. The
+sets reaches a runtime only when the `pass` of its policy names it:
+`runtimes.<id>.runtimeEnvironment` for that runtime, else the default
+`runtimeEnvironment` (#1759; never merged). The
 daemon removes `CLAUDECODE` and its own `BYOK_*` names, and adds `127.0.0.1`
 and `localhost` to `NO_PROXY`. Loader names such as `NODE_OPTIONS` reach the
 child as the user's shell set them. A failed capture refuses the runtimes with
@@ -1131,7 +1133,7 @@ compatibility or a bundled product's complete distribution.
 ### Direct adapter environments
 
 Every adapter takes a `runtimeEnvironment` policy, the same type as
-`DaemonConfig.runtimeEnvironment`, and builds the environment of its children
+`DaemonConfig.runtimeEnvironment` and `DaemonConfig.runtimes.<id>.runtimeEnvironment`, and builds the environment of its children
 itself (`RuntimeAdapter.runtimeEnvironment()`), so a Host that constructs an
 adapter gets the same environment as `createDaemon`:
 
@@ -1157,8 +1159,8 @@ which returns `{ env, report }`: the environment, and its names with their
 sources for `byok-agent doctor` (never values).
 Names are case-insensitive on Windows.
 
-`createDaemonWithAdapters` rejects `DaemonConfig.runtimeEnvironment`: set the
-policy on each injected adapter.
+`createDaemonWithAdapters` rejects `DaemonConfig.runtimeEnvironment` and
+`runtimes`: set the policy on each injected adapter.
 
 `codexSandbox` belongs to `createDaemon`, which builds the default adapters.
 `createDaemonWithAdapters` rejects that key. Set `sandbox` on the injected

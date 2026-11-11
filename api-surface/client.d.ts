@@ -1336,6 +1336,7 @@ import type { RuntimeId } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, RuntimeVersionPolicy } from '../types';
 import { type RuntimeEnvironmentPolicy } from '../runtime/environment';
 import type { SdkHelperHostConfig } from '../sdk-reserved-helper-host';
+import type { DaemonConfigIssue } from '../daemon/config-schema/validate';
 import { type PiAdapterOptions, type PiByokLauncherConfig } from './pi/pi-adapter';
 import { type ClaudeAdapterOptions } from './claude/claude-adapter';
 import { type CodexAdapterOptions, type CodexSandboxSetting } from './codex/codex-adapter';
@@ -1348,6 +1349,8 @@ export interface PiRuntimeConfig {
     agentUserContext?: PiAdapterOptions['agentUserContext'];
     /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
+    /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /**
      * `PiAdapterOptions.packageDir`: the absolute Pi asset root of a product
      * that bundles Pi. It is the only source: the SDK sets it as
@@ -1372,6 +1375,8 @@ export interface RuntimeAdaptersRuntimes {
         agentSessionPersistence?: ClaudeAdapterOptions['agentSessionPersistence'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
+        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+        runtimeEnvironment?: RuntimeEnvironmentPolicy;
     };
     codex?: {
         /** `CodexAdapterOptions.agentUserMcpServers`: `excluded` disables the user's MCP servers and plugins for an Agent task. Default `inherit`. */
@@ -1380,6 +1385,8 @@ export interface RuntimeAdaptersRuntimes {
         agentUserContext?: CodexAdapterOptions['agentUserContext'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
+        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+        runtimeEnvironment?: RuntimeEnvironmentPolicy;
     };
     /** Applies only when `runtimeAllowlist` lists `grok`. */
     grok?: {
@@ -1389,6 +1396,8 @@ export interface RuntimeAdaptersRuntimes {
         agentUserMcpServers?: GrokAdapterOptions['agentUserMcpServers'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
+        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+        runtimeEnvironment?: RuntimeEnvironmentPolicy;
     };
     /** Required when `runtimeAllowlist` lists `dsh`, and applies only then. dsh has no default model and runs on darwin and linux only. */
     dsh?: {
@@ -1400,6 +1409,8 @@ export interface RuntimeAdaptersRuntimes {
         sandbox?: DshAdapterOptions['sandbox'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
+        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+        runtimeEnvironment?: RuntimeEnvironmentPolicy;
     };
     /** Required when runtimeAllowlist lists opencode. Native user configuration is inherited. */
     opencode?: {
@@ -1407,6 +1418,8 @@ export interface RuntimeAdaptersRuntimes {
         /** Absolute executable override, resolved before PATH. Never installs or migrates OpenCode. */
         executable?: string;
         versionPolicy?: RuntimeVersionPolicy;
+        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+        runtimeEnvironment?: RuntimeEnvironmentPolicy;
     };
     /** Required when `runtimeAllowlist` lists `agy`, and applies only then. */
     agy?: {
@@ -1416,6 +1429,8 @@ export interface RuntimeAdaptersRuntimes {
         model?: AgyAdapterOptions['model'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
+        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+        runtimeEnvironment?: RuntimeEnvironmentPolicy;
     };
 }
 /**
@@ -1432,7 +1447,7 @@ export interface RuntimeAdaptersConfig {
     /** Runtimes to build: unset = pi, claude and codex; set = exactly the listed ids (unknown ids ignored). `grok`, `dsh` and `agy` are built only when listed. */
     runtimeAllowlist?: string[];
     runtimes?: RuntimeAdaptersRuntimes;
-    /** The environment every built runtime gives its children (#1095); `pass` must not name `PI_PACKAGE_DIR`. */
+    /** The environment a built runtime gives its children (#1095) when `runtimes.<id>.runtimeEnvironment` is unset; Pi's policy must not pass `PI_PACKAGE_DIR`. */
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /** Separate-process Pi BYOK credential boundary. */
     piByokLauncher?: PiByokLauncherConfig;
@@ -1491,6 +1506,31 @@ export declare function createRuntimeAdapters(config: RuntimeAdaptersConfig): Ru
  * {@link createRuntimeAdapters} after its own validation.
  */
 export declare function buildRuntimeAdapters(config: DaemonRuntimeAdaptersConfig, piByokLauncher: PiByokLauncherConfig | undefined): RuntimeAdapter[];
+/**
+ * The one validation of every configured environment policy: the top-level
+ * `runtimeEnvironment` and each `runtimes.<id>.runtimeEnvironment`, as config
+ * issues at their own paths. `checkDaemonConfig` reports them, and
+ * {@link assertRuntimeEnvironmentPolicies} throws the first.
+ *
+ * @internal
+ */
+export declare function runtimeEnvironmentPolicyIssues(config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): DaemonConfigIssue[];
+/**
+ * {@link runtimeEnvironmentPolicyIssues} for `createDaemon` and
+ * `createRuntimeAdapters`: throws a `TypeError` with the first issue's
+ * message, the message `assertRuntimeEnvironmentPolicy` threw.
+ *
+ * @internal
+ */
+export declare function assertRuntimeEnvironmentPolicies(config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): void;
+/**
+ * The one environment policy of an SDK-built runtime (#1759):
+ * `runtimes.<id>.runtimeEnvironment` replaces the top-level policy wholesale,
+ * like `versionPolicy` (ADR-044); the two are never merged.
+ *
+ * @internal
+ */
+export declare function runtimeEnvironmentFor(id: string, config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): RuntimeEnvironmentPolicy | undefined;
 /** Validates `piByokLauncher` and folds its `sessionDir`; the daemon and its retention build Pi from this one value. */
 export declare function resolvePiByokLauncher(config: Pick<RuntimeAdaptersConfig, 'piByokLauncher'>): PiByokLauncherConfig | undefined;
 // ==== @byok-sdk/client dist/agent-home-readers.d.ts ====
@@ -3857,6 +3897,7 @@ import { type ToolAuthorizationMode, type ToolFileScope } from '../../tool-autho
 import type { RuntimeAdapter, RuntimeVersionPolicy } from '../../types';
 import type { DaemonConfig, DaemonStatus } from '../create-daemon';
 import type { DaemonConfigIssue } from './validate';
+import type { RuntimeEnvironmentPolicy } from '../../runtime/environment';
 /**
  * How daemon construction resolved the SDK Agent memory filesystem helper
  * (#603, #614).
@@ -3904,6 +3945,13 @@ export interface DaemonEffectiveRuntime {
      * construction; only the policy, never the installed runtime token.
      */
     readonly versionPolicy?: RuntimeVersionPolicy;
+    /**
+     * The environment policy `createDaemon` gives an SDK-built adapter (#1759),
+     * with its base spelled out: `runtimes.<id>.runtimeEnvironment`, else the
+     * top-level `runtimeEnvironment`. Names only, never values. Absent for an
+     * injected adapter.
+     */
+    readonly runtimeEnvironment?: RuntimeEnvironmentPolicy;
 }
 /**
  * Effective values of one daemon's configuration (#1094): what it resolved
@@ -5189,7 +5237,7 @@ import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agen
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
 import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
-import { type RuntimeEnvironmentPolicy } from '../runtime/environment';
+import type { RuntimeEnvironmentPolicy } from '../runtime/environment';
 import { type LocalToolApprovalPolicy } from './approvals';
 import { type DaemonLifecycle } from './daemon-lifecycle';
 import { type ControlStorageStatus } from './control-protocol';
@@ -5404,9 +5452,11 @@ export interface DaemonConfig {
      */
     runtimes?: DaemonRuntimesConfig;
     /**
-     * The environment every runtime `createDaemon` builds gives its children
-     * (#1095): by default the user's login-shell snapshot, so a variable the
-     * Host sets in `process.env` reaches a runtime only when `pass` names it.
+     * The default environment a runtime `createDaemon` builds gives its
+     * children (#1095): by default the user's login-shell snapshot, so a
+     * variable the Host sets in `process.env` reaches a runtime only when `pass`
+     * names it. `runtimes.<id>.runtimeEnvironment` overrides it for that runtime
+     * (#1759): it replaces this policy and is not merged with this `pass`.
      * `createDaemonWithAdapters` refuses this field: each injected adapter
      * takes its own `runtimeEnvironment` option.
      */

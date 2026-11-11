@@ -1111,8 +1111,10 @@ source (`login-shell`, `windows-session`, `allowlist`, `pass`, or `sdk` for the
 admitted that the hard deny or the conflict rule then removed. It carries no
 value. Each SDK adapter
 builds it under its `runtimeEnvironment` constructor option; `createDaemon`
-passes `DaemonConfig.runtimeEnvironment` to the adapters it builds, and
-`createDaemonWithAdapters` rejects that field.
+gives each adapter it builds `DaemonConfig.runtimes.<id>.runtimeEnvironment`,
+else `DaemonConfig.runtimeEnvironment` (#1759). A per-runtime policy replaces
+the top-level one for that runtime; the two are never merged.
+`createDaemonWithAdapters` rejects both fields.
 
 - `login-shell` (default): the user's login-shell snapshot, captured once per
   process from a closed seed and a fixed `PATH`, never from the daemon's
@@ -1146,7 +1148,7 @@ reports `unknown`. Names an adapter adds to one task's environment when it
 starts that task are not listed. The diagnostics snapshot and the support
 bundle keep only counts per hashed runtime id, and `audit.jsonl` keeps no
 names. `byok-agent config check` starts no login shell, so it prints the
-file's `runtimeEnvironment` policy and no names; the same file's static
+file's `runtimeEnvironment` policy, each runtime's effective policy and no names; the same file's static
 `toolAuthorization` (including `fileScope`) and bundled `runtimes` isolation
 are validated and reported as effective values, so a CLI task selects its
 runtime and `auto`/`all` mode from that file without embedded adapters.

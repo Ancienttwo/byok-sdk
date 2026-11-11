@@ -876,6 +876,47 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "unqualified"
               ]
             },
+            "runtimeEnvironment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "login-shell"
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "allowlist"
+                    },
+                    "allow": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "base"
+                  ]
+                }
+              ]
+            },
             "packageDir": {
               "type": "string"
             }
@@ -1025,6 +1066,47 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "qualifiedVersion",
                 "unqualified"
               ]
+            },
+            "runtimeEnvironment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "login-shell"
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "allowlist"
+                    },
+                    "allow": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "base"
+                  ]
+                }
+              ]
             }
           }
         },
@@ -1172,6 +1254,47 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "qualifiedVersion",
                 "unqualified"
               ]
+            },
+            "runtimeEnvironment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "login-shell"
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "allowlist"
+                    },
+                    "allow": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "base"
+                  ]
+                }
+              ]
             }
           }
         },
@@ -1318,6 +1441,47 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               "required": [
                 "qualifiedVersion",
                 "unqualified"
+              ]
+            },
+            "runtimeEnvironment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "login-shell"
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "allowlist"
+                    },
+                    "allow": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "base"
+                  ]
+                }
               ]
             }
           }
@@ -1486,6 +1650,47 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "qualifiedVersion",
                 "unqualified"
               ]
+            },
+            "runtimeEnvironment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "login-shell"
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "allowlist"
+                    },
+                    "allow": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "base"
+                  ]
+                }
+              ]
             }
           },
           "required": [
@@ -1634,6 +1839,47 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "qualifiedVersion",
                 "unqualified"
               ]
+            },
+            "runtimeEnvironment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "login-shell"
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "allowlist"
+                    },
+                    "allow": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "base"
+                  ]
+                }
+              ]
             }
           },
           "required": [
@@ -1777,6 +2023,47 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               "required": [
                 "qualifiedVersion",
                 "unqualified"
+              ]
+            },
+            "runtimeEnvironment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "login-shell"
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "allowlist"
+                    },
+                    "allow": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "base"
+                  ]
+                }
               ]
             }
           },
