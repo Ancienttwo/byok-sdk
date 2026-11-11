@@ -2,6 +2,10 @@
 
 Draft checklist for a Host moving from the current release to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Packaged Hosts resolve SDK hosting from the asset root
+
+A single-file Host that ships `copySdkPackagingAssets` output can replace its hand-built `sdkHelperHost`, `runtimes.pi.packageDir`, `nativeAssetRoot` and `agentMemoryHelperAssetRoot` with one `resolveSdkHosting({ assetRoot, helperHost })` call at startup (#1839). Spread `hosting.daemon` into `DaemonConfig` and `hosting.adapters` into `RuntimeAdaptersConfig`, merging `hosting.adapters.runtimes.pi` into the Host's own `runtimes`; pass `hosting.daemon.nativeAssetRoot` to `readDeviceEnrollmentStatus` and to `loadSdkKoffiAsset` in a provider launcher. A missing required asset now throws `SdkHostingAssetsMissingError` at that call instead of failing at the first Windows credential, Job Object or memory helper use. Hosts that keep setting the four fields directly need no change.
+
 ## OpenCode start failures
 
 OpenCode now reports unclassified start failures as retryable infrastructure failures. A native process that exits on its own reports `runtime_exited` during start or a turn; an archived resume target is non-retryable, while a target in use is retryable. Session limits accept fractional interrupt milliseconds and report invalid limits as `invalid opencode interrupt timeout` or `invalid opencode retention budget` (#1681).
