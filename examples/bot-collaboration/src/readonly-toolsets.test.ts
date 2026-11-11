@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
+import { openHost, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
+import { template } from './k4-fixtures.test-support';
 import { BotCollaboration } from './host';
 
 let fixture: TestHost | undefined;

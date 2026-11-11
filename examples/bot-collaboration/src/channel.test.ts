@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { hash, type LedgerState } from '@byok-sdk/server/execution-core';
-import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import { template } from './k4-fixtures.test-support';
 import { classifyInbound, inboundKey, isOwner, type InboundMessage, type Principal } from './channel';
 import { stateOf } from './model';
 import { advanceRooms, roomInput } from './rooms';

@@ -9,7 +9,7 @@ import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support'
 import { HostLedger } from '@byok-sdk/server/execution-core';
 import { stateOf } from './model';
 import type { Autonomy } from './rules/autonomy';
-import { policy, template } from '@byok-sdk/example-host-execution-core/test-support';
+import { policy, template } from './k4-fixtures.test-support';
 import { BotCollaboration, type AgentMessageInput, type BotOptions } from './host';
 import { createBotPersonaProjection } from './persona';
 import { enrollSecondDevice } from './second-device.test-support';

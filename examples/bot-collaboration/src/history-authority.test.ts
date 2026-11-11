@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { canonical, hash } from '@byok-sdk/server/execution-core';
-import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
+import { openHost, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
+import { template } from './k4-fixtures.test-support';
 import { BotCollaboration } from './host';
 import type { ContextTurn } from './schema';
 import { botCompactVeto } from './compaction';

@@ -7,24 +7,19 @@ import { createInterface } from 'node:readline';
 import { serve } from '@hono/node-server';
 import {
   buildRuntimeEnvironment, createDaemonWithAdapters, freezeRuntimeAdapterDescriptor, RuntimeDisposalFailure,
-  type AgentEgressPolicy, type Daemon, type DeviceCredentialBackend, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
+  type Daemon, type DeviceCredentialBackend, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeEnvironment, type RuntimeOperationStartInput, type Session,
 } from '@byok-sdk/client';
 import { createByokServer, type CreateByokServerOptions, type DueWake } from '@byok-sdk/server';
 import { HostLedger, type HostLedgerOptions } from '@byok-sdk/server/execution-core';
+import { policy } from './k4-fixtures.test-support';
 
 /**
  * #1325: a running L Host for the routine and delivery vectors, built only from published packages, so a Host that
  * vendors K8 runs them too. It is the `externalCore` branch of K4's `openHost`: the caller drives its own core on the
- * returned ledger, so the fixture creates none.
+ * returned ledger, so the fixture creates none. The daemon admits only the `policyRevision` of the vectors' `template`,
+ * so both come from `./k4-fixtures.test-support` (#1845).
  */
-
-/** Equals the `egressPolicy` of `template()` from `@byok-sdk/example-host-execution-core/test-support`: the daemon admits only that revision. */
-const policy: AgentEgressPolicy = {
-  policyRevision: 'k4-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
-  reliable: { maxPendingEventsPerAgent: 16, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 16384 },
-  transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
-};
 
 type DeviceRecord = Parameters<DeviceCredentialBackend['replace']>[0];
 type FirstPairingAttempt = Parameters<DeviceCredentialBackend['saveFirstPairingAttempt']>[0];
