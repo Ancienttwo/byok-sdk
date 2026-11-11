@@ -120,6 +120,8 @@ export { PostgresCloudCleanup, createPostgresCloudMaintenance, } from './cleanup
 export type { ObjectStorageReconcileResult, DeadLetterPage, DeadLetterQuery, DeadLetterRef, DeadLetterReplayInput, ObjectUsageRebuildResult, PostgresCloudCleanupOptions, PostgresCloudMaintenanceOptions, } from './cleanup';
 export { TENANT_ERASURE_ERROR_CODES, TENANT_ERASURE_TABLES, PostgresTenantErasure, TenantErasureError, createPostgresTenantErasure, } from './tenant-erasure';
 export type { PostgresTenantErasureCompositionOptions, PostgresTenantErasureOptions, TenantErasureConflict, TenantErasureErrorCode, TenantErasureReadback, TenantErasureResult, TenantErasureStatus, } from './tenant-erasure';
+export { retireAgentlessTasks } from './retire-agentless-tasks';
+export type { RetireAgentlessTasksOptions, RetireAgentlessTasksResult } from './retire-agentless-tasks';
 export { createPostgresMailboxWake, MailboxWakeProbeMissedError } from './mailbox-wake';
 export type { PostgresMailboxWake, PostgresMailboxWakeOptions } from './mailbox-wake';
 export { createPostgresTaskEventsWake, TaskEventsWakeProbeMissedError } from './task-events-wake';
@@ -349,6 +351,29 @@ export interface PostgresWake {
 }
 /** One resident Node listener, independent of the request pool and the authority it hints about. */
 export declare function createPostgresWake(spec: PostgresWakeChannel, options: PostgresWakeOptions): PostgresWake;
+// ==== @byok-sdk/cloud-dataplane dist/retire-agentless-tasks.d.ts ====
+/**
+ * One-shot operator command between migrations 0038 and 0039 (#1780).
+ *
+ * Builds up to v0.30.2 stored task rows without an Agent identity. Each such
+ * terminal task is archived through the archive step's own store transaction
+ * (bodies become tombstones, object references go), its board item is removed,
+ * and its row moves into `task_agentless_retired`, the fence that keeps its id
+ * used. A task that is not terminal stops the command before any change: settle
+ * it on v0.41.0 first. Safe to run again; a later run finds nothing to retire.
+ */
+import { type CloudCrypto } from '@byok-sdk/cloud';
+import { type Clock } from '@byok-sdk/core';
+import type { ByokPool } from './pool';
+export interface RetireAgentlessTasksOptions {
+    readonly clock: Clock;
+    readonly crypto: Pick<CloudCrypto, 'sha256'>;
+}
+export interface RetireAgentlessTasksResult {
+    /** Tasks moved into `task_agentless_retired` by this run, per tenant. */
+    readonly retired: Readonly<Record<string, number>>;
+}
+export declare function retireAgentlessTasks(pool: ByokPool, options: RetireAgentlessTasksOptions): Promise<RetireAgentlessTasksResult>;
 // ==== @byok-sdk/cloud-dataplane dist/runtime.d.ts ====
 /**
  * The Worker-loadable online surface of `@byok-sdk/cloud-dataplane`.

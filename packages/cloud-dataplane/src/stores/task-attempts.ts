@@ -77,11 +77,11 @@ function admissionRowToRecord(row: AgentMessageAdmissionRow): AgentMessageAdmiss
 
 export function taskRowToAttempt(row: TaskRow): TaskAttempt {
   // The one task row mapping (the archive step reads through it too). The
-  // Agent columns are NOT NULL from 0038 on; before it, a legacy row fails
+  // Agent columns are NOT NULL from 0039 on; before it, a legacy row fails
   // closed and names the step.
   if (row.agent_id === null || row.agent_profile_revision === null) {
     throw new ByokCloudError('task_attempt_agent_ref_missing',
-      `Task ${row.task_id} of tenant ${row.tenant_id} has no Agent identity: run deploy/sql/0038_task_agent_ref_required.sql.`);
+      `Task ${row.task_id} of tenant ${row.tenant_id} has no Agent identity: run retireAgentlessTasks, then migration 0039.`);
   }
   return {
     tenantId: row.tenant_id as TenantId,
@@ -132,7 +132,7 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
     tenant: TenantId,
     input: { readonly taskId: string; readonly deviceId: string; readonly agentRef: AgentRef },
   ): Promise<{ readonly attempt: TaskAttempt; readonly created: boolean }> {
-    // A task id that 0038 retired stays fenced: the same statement refuses it.
+    // A task id retireAgentlessTasks retired stays fenced: the same statement refuses it.
     const inserted = await this.#pool.query<TaskRow>(
       `INSERT INTO task (
          tenant_id, task_id, device_id, agent_id, agent_profile_revision,
@@ -148,7 +148,7 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
     if (created !== undefined) return { attempt: taskRowToAttempt(created), created: true };
     const existing = await this.get(tenant, input.taskId);
     // The insert declines on a conflicting row or a retired id. With no row
-    // to read back, the id is one 0038 retired.
+    // to read back, the id is one retireAgentlessTasks retired.
     if (existing === undefined) {
       throw new ByokCloudError('agent_task_already_exists', `Task ${input.taskId} was retired without an Agent identity and cannot be enqueued again.`);
     }

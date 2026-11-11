@@ -2910,8 +2910,8 @@ export declare const CLOUD_ERROR_CODES: {
     readonly agent_task_already_exists: 'agent_task_already_exists';
     /**
      * A stored task attempt has no Agent identity: the Postgres store has not run
-     * `deploy/sql/0038_task_agent_ref_required.sql`. The read fails closed; the
-     * operator runs that migration (docs/releases/host-upgrade-next-minor.md).
+     * `retireAgentlessTasks` and migration 0039. The read fails closed; the
+     * operator runs them (docs/releases/host-upgrade-next-minor.md).
      */
     readonly task_attempt_agent_ref_missing: 'task_attempt_agent_ref_missing';
     /**
@@ -3316,6 +3316,7 @@ export type { CloudErrorCode } from './errors';
 export { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore, } from './stores/in-memory/agent-memory-projection';
 export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionSealing, AgentMemoryProjectionStore, } from './agent-memory-projection';
 export type { TaskArchiveCounts, TaskArchiveListInput, TaskArchiveStepCounts, TaskArchiveStore, TaskArchiveStoreInput, TaskArchiveStoreResult, TaskArchiveWork, } from './task-archive';
+export { taskArchiveInput } from './task-archive';
 export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
 export type { TaskRedactionCodec, TaskRedactionCounts, TaskRedactionRefusal, TaskRedactionResult, TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult, } from './task-redaction';
 export { parseRecordedWriteResult } from './e2ee-member';
@@ -5262,6 +5263,17 @@ export interface TaskArchiveStepCounts {
     readonly refused: number;
     readonly more: boolean;
 }
+/**
+ * The archive input for one task: every receipt key holding its content and its
+ * sealed object reference. `agentRef` is absent only for a task stored without an
+ * Agent identity, which `retireAgentlessTasks` (cloud-dataplane, #1780) archives
+ * once; builds up to v0.30.2 keyed its offer without one.
+ */
+export declare function taskArchiveInput(crypto: Pick<CloudCrypto, 'sha256'>, tenant: TenantId, unit: {
+    readonly taskId: string;
+    readonly deviceId: string;
+    readonly agentRef?: AgentRef;
+}, archivedAt: string): Promise<TaskArchiveStoreInput>;
 export declare function archiveTerminalTasks(ports: {
     readonly core: CoreStores;
     readonly cloud: CloudStores;

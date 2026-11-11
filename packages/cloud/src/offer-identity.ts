@@ -10,7 +10,7 @@ export function uuidFromSha256(value: string): string {
   return `${hex.slice(0, 8).join('')}-${hex.slice(8, 12).join('')}-${hex.slice(12, 16).join('')}-${hex.slice(16, 20).join('')}-${hex.slice(20).join('')}`;
 }
 
-export async function taskOfferMessageId(tenant: string, taskId: string, deviceId: string, agentRef: AgentRef,
+export async function taskOfferMessageId(tenant: string, taskId: string, deviceId: string, agentRef: AgentRef | undefined,
   sha256: (bytes: Uint8Array) => Promise<string>): Promise<string> {
   return uuidFromSha256(await sha256(new TextEncoder().encode(JSON.stringify({ domain: 'byok:task-offer', tenant, taskId, deviceId, agentRef }))));
 }

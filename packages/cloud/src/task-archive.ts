@@ -97,27 +97,41 @@ export interface TaskArchiveStepCounts {
   readonly more: boolean;
 }
 
+/**
+ * The archive input for one task: every receipt key holding its content and its
+ * sealed object reference. `agentRef` is absent only for a task stored without an
+ * Agent identity, which `retireAgentlessTasks` (cloud-dataplane, #1780) archives
+ * once; builds up to v0.30.2 keyed its offer without one.
+ */
+export async function taskArchiveInput(
+  crypto: Pick<CloudCrypto, 'sha256'>,
+  tenant: TenantId,
+  unit: { readonly taskId: string; readonly deviceId: string; readonly agentRef?: AgentRef },
+  archivedAt: string,
+): Promise<TaskArchiveStoreInput> {
+  const messageId = await taskOfferMessageId(tenant, unit.taskId, unit.deviceId, unit.agentRef, bytes => crypto.sha256(bytes));
+  return {
+    taskId: unit.taskId,
+    receiptKeys: [`task-offer:${messageId}`, terminalReceiptKey(unit.taskId), `agent-message-offer:${unit.deviceId}:${unit.taskId}`],
+    terminalReceiptKey: terminalReceiptKey(unit.taskId),
+    releaseObjectReferences: [{ refKind: SEALED_TASK_REFERENCE_KIND, refId: unit.taskId }],
+    archivedAt,
+    codec: taskRedactionCodec(crypto),
+  };
+}
+
 export async function archiveTerminalTasks(
   ports: { readonly core: CoreStores; readonly cloud: CloudStores; readonly clock: Clock; readonly crypto: Pick<CloudCrypto, 'sha256'> },
   tenant: TenantId,
   input: TaskArchiveListInput & { readonly now: string },
 ): Promise<TaskArchiveStepCounts> {
   const work = await ports.cloud.taskArchive.listWork(tenant, input);
-  const codec = taskRedactionCodec(ports.crypto);
   let archived = 0;
   let settled = 0;
   let refused = 0;
   for (const unit of work) {
     if (unit.phase === 'archive') {
-      const messageId = await taskOfferMessageId(tenant, unit.taskId, unit.deviceId, unit.agentRef, bytes => ports.crypto.sha256(bytes));
-      const result = await ports.cloud.taskArchive.archive(tenant, {
-        taskId: unit.taskId,
-        receiptKeys: [`task-offer:${messageId}`, terminalReceiptKey(unit.taskId), `agent-message-offer:${unit.deviceId}:${unit.taskId}`],
-        terminalReceiptKey: terminalReceiptKey(unit.taskId),
-        releaseObjectReferences: [{ refKind: SEALED_TASK_REFERENCE_KIND, refId: unit.taskId }],
-        archivedAt: input.now,
-        codec,
-      });
+      const result = await ports.cloud.taskArchive.archive(tenant, await taskArchiveInput(ports.crypto, tenant, unit, input.now));
       if (result.outcome === 'refused') { refused += 1; continue; }
       if (result.outcome === 'not_found') continue;
       if (result.outcome === 'archived') archived += 1;

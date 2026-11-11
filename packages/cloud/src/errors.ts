@@ -110,8 +110,8 @@ export const CLOUD_ERROR_CODES = {
   agent_task_already_exists: 'agent_task_already_exists',
   /**
    * A stored task attempt has no Agent identity: the Postgres store has not run
-   * `deploy/sql/0038_task_agent_ref_required.sql`. The read fails closed; the
-   * operator runs that migration (docs/releases/host-upgrade-next-minor.md).
+   * `retireAgentlessTasks` and migration 0039. The read fails closed; the
+   * operator runs them (docs/releases/host-upgrade-next-minor.md).
    */
   task_attempt_agent_ref_missing: 'task_attempt_agent_ref_missing',
   /**

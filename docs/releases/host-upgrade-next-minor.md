@@ -317,33 +317,31 @@ A rotation leaves a version 1 row in place when its sender is no longer a curren
 
 `TaskAttemptStore.open` is removed (#1780). `reserveAgentOffer` is the only way to create a task attempt, and `TaskAttempt.agentRef` is required, as is `agentRef` on `recordStatus`; server `TaskSnapshot.agentRef` is required too. A store that implements `TaskAttemptStore` drops `open` and always returns `agentRef`. No build since v0.31.0 creates an attempt without an Agent identity. Builds up to v0.30.2 did, through the legacy `enqueueOffer` and `enqueueToolsetOffer`, and the rows they wrote are still stored: task rows are never deleted.
 
-This build reads such a row as an error. On Postgres, a task read, a task page or the archive step that meets one throws `ByokCloudError` `task_attempt_agent_ref_missing`, naming the task and `deploy/sql/0038_task_agent_ref_required.sql`; a page that contains one fails as a whole. Task counts (`countByStatus`) do not read the Agent columns and keep working. Before 0038 has run, offer reservation fails with a missing-table error (`task_agentless_retired`). The gate is `verifyMigrations()`: serve this build only after it passes, which it does only once 0038 has applied.
+This build reads such a row as an error. On Postgres, a task read, a task page or the archive step that meets one throws `ByokCloudError` `task_attempt_agent_ref_missing`, naming the task, `retireAgentlessTasks` and migration 0039; a page that contains one fails as a whole. Task counts (`countByStatus`) do not read the Agent columns and keep working. The gate is `verifyMigrations()`: serve this build only after it passes, which it does only once 0039 has applied.
 
-**Postgres (cloud-dataplane).** The settle build is **v0.41.0**: it uses migrations 0001–0037, still reads tasks without an Agent identity, and has every call needed to settle them. A Host on an older release (Salesko runs 0.22.0) upgrades to v0.41.0 first. Do not settle on 0.22.0: there `cancelTask` leaves a claimed task at `cancel_requested`, which is not terminal, and there is no `abandonTask`.
+**Postgres (cloud-dataplane).** The settle build is **v0.41.0**: it uses migrations 0001–0037, still reads tasks without an Agent identity, and has every call needed to settle them. Do not settle on 0.22.0 (Salesko's current release): there `cancelTask` leaves a claimed task at `cancel_requested`, which is not terminal, and there is no `abandonTask`. The order is: count, settle on v0.41.0, upgrade, migrate to 0038, run `retireAgentlessTasks`, migrate to 0039.
 
-Set the Host schema (for example `SET search_path TO byok_control;`) and run this read-only count. Record its result.
+1. Set the Host schema (for example `SET search_path TO byok_control;`), run this read-only count and record it.
 
-```sql
-SELECT tenant_id,
-       count(*)                                                                 AS no_agent_ref,
-       count(*) FILTER (WHERE status NOT IN ('complete','failed','cancelled'))  AS no_agent_ref_live,
-       min(updated_at)                                                          AS oldest_update,
-       max(updated_at)                                                          AS newest_update
-  FROM task
- WHERE agent_id IS NULL
- GROUP BY tenant_id
- ORDER BY tenant_id;
-SELECT count(*) AS no_agent_ref_total FROM task WHERE agent_id IS NULL;
-```
+   ```sql
+   SELECT tenant_id,
+          count(*)                                                                 AS no_agent_ref,
+          count(*) FILTER (WHERE status NOT IN ('complete','failed','cancelled'))  AS no_agent_ref_live,
+          min(updated_at)                                                          AS oldest_update,
+          max(updated_at)                                                          AS newest_update
+     FROM task
+    WHERE agent_id IS NULL
+    GROUP BY tenant_id
+    ORDER BY tenant_id;
+   SELECT count(*) AS no_agent_ref_total FROM task WHERE agent_id IS NULL;
+   ```
 
-1. If `no_agent_ref_live` is above 0 for any tenant, upgrade to v0.41.0 first (its `migrate()` applies 0023–0037 to a 0.22.0 schema) and settle those tasks there. `cancelTask` cancels an unclaimed task at once and asks a claimed task's device to stop; a claimed task stays `cancel_requested` until its device reports. For a task whose device is gone, or that stays `cancel_requested`, call `abandonTask(tenant, taskId, 'operator')`: it moves any unfinished task to `cancelled` without the device. Run the count again until `no_agent_ref_live` is 0 everywhere.
-2. Running v0.41.0 also lets its archive step (the `tasks` step of `runMaintenance`) archive the legacy tasks that are past their retention window, as it archives every terminal task: their offer, terminal and message receipts become tombstones and their object references are released. Run it before step 3 if those bodies should go: 0038 does not archive them (see below).
-3. Stop the application, then run the package migrations (`migrate()` over the new `dist/sql`). Each file applies in its own transaction. 0038 locks `task`, and:
-   - refuses with `0038_task_agent_ref_required: N task(s) without an Agent identity are not terminal; nothing was changed. ...`, when N such tasks are not terminal. Only 0038 rolls back: every earlier migration, 0001–0037, stays applied, so the store now matches v0.41.0, and v0.41.0 is the build to run until 0038 succeeds. Go back to step 1 on v0.41.0;
-   - otherwise moves every terminal task without an Agent identity, whole, into `task_agentless_retired`, removes it from `task`, reports `NOTICE: 0038_task_agent_ref_required: retired N terminal task(s) ...`, and makes `task.agent_id` and `task.agent_profile_revision` NOT NULL.
-4. Record the retired count: `SELECT tenant_id, count(*) FROM task_agentless_retired GROUP BY tenant_id ORDER BY tenant_id;`. It equals `no_agent_ref_total` from the last count, and `SELECT count(*) FROM task WHERE agent_id IS NULL` returns 0 (the column now refuses NULL).
+2. If `no_agent_ref_live` is above 0 anywhere, upgrade to v0.41.0 (its `migrate()` applies 0023–0037 to a 0.22.0 schema) and settle those tasks there. `cancelTask` cancels an unclaimed task at once and asks a claimed task's device to stop; a claimed task stays `cancel_requested` until its device reports. For a task whose device is gone, or that stays `cancel_requested`, call `abandonTask(tenant, taskId, 'operator')`: it moves any unfinished task to `cancelled` without the device. Repeat the count until `no_agent_ref_live` is 0 everywhere.
+3. Stop the application and install this build. Run the package migrations (`migrate()` over the new `dist/sql`) with only 0001–0038 present, for example a copy of `dist/sql` without `0039_task_agent_ref_not_null.sql`. 0038 creates `task_agentless_retired`. If you run every file instead, 0039 refuses as in step 5, and only 0039 rolls back: each file applies in its own transaction.
+4. Run `retireAgentlessTasks(pool, { clock, crypto })` from `@byok-sdk/cloud-dataplane` once, with the Host's pool, clock and `CloudCrypto` (`createWebCrypto()` from `@byok-sdk/cloud`). Record the result: `retired` gives the count per tenant. For each terminal task without an Agent identity it does what the archive step does (its offer, terminal and message receipts become tombstones, its object references are released), removes its board item, and moves its row, whole, into `task_agentless_retired`. It refuses before any change if one of them is not terminal (go back to step 2 on v0.41.0), and stops with the task named if the archive refuses one. It can be run again; a later run retires what is left and returns an empty count. The sum of `retired` equals `no_agent_ref_total` from the last count.
+5. Run the migrations again with every file. 0039 locks `task`, refuses with `0039_task_agent_ref_not_null: N task(s) have no Agent identity; nothing was changed. ...` while any such row remains (go back to step 4, or to step 2 on v0.41.0 for one that is not terminal), and otherwise makes `task.agent_id` and `task.agent_profile_revision` NOT NULL. Hold `task` locked for that one scan.
 
-A retired task id stays used: `enqueueAgentOffer` with that `taskId` throws `agent_task_already_exists`. No Agent identity is invented and 0038 deletes nothing else. A retired task leaves task reads, lists, counts, archiving and per-task redaction, so whatever it still holds stays until tenant erasure: receipt bodies a v0.41.0 archive did not tombstone, its board item, its object references, and its mailbox rows, activity and approval history. Tenant erasure also erases `task_agentless_retired`. Rerunning the migrations is a no-op. Allow for the lock: 0038 holds `task` exclusively until it commits.
+A retired task id stays used: `enqueueAgentOffer` with that `taskId` throws `agent_task_already_exists`. No Agent identity is invented. A retired task's mailbox rows, activity log and approval timeline stay as the archive step leaves them, until retention or tenant erasure; tenant erasure also erases `task_agentless_retired`.
 
 **Embedded SQLite.** The SQLite schema moves to version 9 when a version 8 file is opened. The step changes nothing else; it refuses a file that holds any task attempt without an Agent identity with `SqliteSchemaError` `SQLITE_SCHEMA_UNSUPPORTED`, naming the count, and leaves the file at version 8. No SQLite file this build can open was written by a build that created such attempts (every adoptable file is from v0.31.0 or later), so the expected count is 0. To check before upgrading, open the state file read-only (`sqlite3 -readonly <file>`):
 
@@ -359,7 +357,7 @@ A version 9 file cannot be opened by an earlier build.
 - [ ] Run the H `unmigrated_dreams` and L `legacy_home` queries on v0.41.0; both must be 0 before the upgrade (#1669).
 - [ ] Run `HostedCollaborationStore.migrate()` on every existing hosted schema, then set `setBotAutonomy(..., 'auto')` for each Bot that must keep acting on its own (#1662).
 - [ ] Run `hostProjectionDdl(HOST_SCHEMA)` once before serving the new Worker, and watch `send.failed` in the first pass reports (#1663).
-- [ ] On every hosted Postgres store, run the agent-identity count and record it, then run the migrations including 0038 and record the retired count (#1780).
+- [ ] On every hosted Postgres store, run the agent-identity count, settle live ones on v0.41.0, migrate to 0038, run `retireAgentlessTasks` and record its count, then migrate to 0039 (#1780).
 - [ ] Pin the Host's direct and resolved SDK dependencies to the release graph.
 - [ ] Apply the Host's backup, stop, precheck, smoke and rollback gates, adjusted to the final release.
 - [ ] Check Codex retention settings and resume behavior where `agentUserContext: 'excluded'` is enabled.

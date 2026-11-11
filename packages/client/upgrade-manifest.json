@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "42af568ce9bd4280089e5f7cf6dc68b9116d09ef9deaa1d4a8ed98d7278d9cf5"
+    "snapshotSha256": "c155e37fb10afcf9390f23c2b865d3bf0ff553896c64614bfba8f34aeac92d3c"
   },
   "configFields": {
     "status": "tracked",
@@ -185,7 +185,7 @@
       "id": "task-attempt-agent-ref-required",
       "impact": "breaking",
       "acceptance": "migrate",
-      "summary": "Every task attempt has an Agent identity (#1780). TaskAttemptStore.open and TenantBoundTaskAttempts.open are removed; reserveAgentOffer is the only way to create an attempt. TaskAttempt.agentRef, the recordStatus agentRef, TaskArchiveWork.agentRef and server TaskSnapshot.agentRef are required. Postgres migration 0038_task_agent_ref_required refuses, with the count and no change, while a task without an Agent identity is not terminal; otherwise it moves those tasks into task_agentless_retired, reports the count, and makes task.agent_id and task.agent_profile_revision NOT NULL. A retired task id refuses a new offer with agent_task_already_exists, and TENANT_ERASURE_TABLES gains task_agentless_retired. Before 0038 runs, a read that meets such a row throws the new CLOUD_ERROR_CODES member task_attempt_agent_ref_missing. The embedded SQLite schema moves to version 9 on open; the upgrade refuses a file holding such an attempt. Run the read-only count, settle live legacy tasks on the previous version, then run the migrations and record the retired count.",
+      "summary": "Every task attempt has an Agent identity (#1780). TaskAttemptStore.open and TenantBoundTaskAttempts.open are removed; reserveAgentOffer is the only way to create an attempt. TaskAttempt.agentRef, the recordStatus agentRef, TaskArchiveWork.agentRef and server TaskSnapshot.agentRef are required. Postgres rows written without an Agent identity (builds up to v0.30.2) are retired by the operator: migration 0038 creates task_agentless_retired, the one-shot retireAgentlessTasks (cloud-dataplane, new) archives each terminal such task, removes its board item, moves it into that table and returns the count, and migration 0039 refuses while any remains, then makes the task Agent columns NOT NULL. Live ones are settled first on v0.41.0. A retired task id refuses a new offer with agent_task_already_exists; TENANT_ERASURE_TABLES gains task_agentless_retired; taskArchiveInput (cloud, new) is the shared archive input. Before that, a read that meets such a row throws the new CLOUD_ERROR_CODES member task_attempt_agent_ref_missing. The embedded SQLite schema moves to version 9 on open; the upgrade refuses a file holding such an attempt.",
       "migration": "docs/releases/host-upgrade-next-minor.md#every-task-attempt-has-an-agent-identity",
       "items": [
         "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
@@ -194,8 +194,12 @@
         "export:@byok-sdk/cloud#TaskAttempt",
         "export:@byok-sdk/cloud#TaskAttemptStore",
         "export:@byok-sdk/cloud#TenantBoundTaskAttempts",
+        "export:@byok-sdk/cloud#taskArchiveInput",
         "export:@byok-sdk/cloud-dataplane#PostgresTaskAttemptStore",
+        "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksOptions",
+        "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksResult",
         "export:@byok-sdk/cloud-dataplane#TENANT_ERASURE_TABLES",
+        "export:@byok-sdk/cloud-dataplane#retireAgentlessTasks",
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskAttemptStore",
         "export:@byok-sdk/server#TaskSnapshot",
         "store:cloud-dataplane-postgres",
@@ -461,13 +465,33 @@
       "entry": "task-attempt-agent-ref-required"
     },
     {
+      "item": "export:@byok-sdk/cloud#taskArchiveInput",
+      "change": "added",
+      "entry": "task-attempt-agent-ref-required"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskAttemptStore",
       "change": "changed",
       "entry": "task-attempt-agent-ref-required"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksOptions",
+      "change": "added",
+      "entry": "task-attempt-agent-ref-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksResult",
+      "change": "added",
+      "entry": "task-attempt-agent-ref-required"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#TENANT_ERASURE_TABLES",
       "change": "changed",
+      "entry": "task-attempt-agent-ref-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#retireAgentlessTasks",
+      "change": "added",
       "entry": "task-attempt-agent-ref-required"
     },
     {
@@ -564,7 +588,7 @@
       "item": "store:cloud-dataplane-postgres",
       "change": "changed",
       "before": "migrations=37 last=0037_agent_memory_projection_sealed.sql sha256=90707df3bd89ebed",
-      "after": "migrations=38 last=0038_task_agent_ref_required.sql sha256=e0bc971ecb7ea849",
+      "after": "migrations=39 last=0039_task_agent_ref_not_null.sql sha256=e0c76802ed91b5ec",
       "entry": "task-attempt-agent-ref-required"
     },
     {
