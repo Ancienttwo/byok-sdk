@@ -4,8 +4,8 @@ import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, type DaemonConfig } from '../index';
-import { DeviceStore, type DeviceRecord } from '../daemon/store';
+import { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, type DaemonConfig } from '../index';
+import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceRecord } from '../daemon/store';
 import { AuthManager } from '../daemon/auth-manager';
 import { acquireDaemonOwner } from '../util/daemon-owner';
 import { connectControlClient } from '../daemon/control-client';
@@ -209,5 +209,13 @@ describe('public diagnostics and CLI consumers', () => {
   ])('rejects conflicting/unsupported CLI actions before mutation: %j', async (options) => {
     await expect(runDoctorCommand(config, { ...options, confirmed: true })).rejects.toThrow();
     expect(await fs.readdir(root)).toEqual([]);
+  });
+});
+
+describe('cursor reset reads the device record', () => {
+  it('reports an absent record as unpaired and an unreadable one as its own error', async () => {
+    await expect(resetDeviceCursor(config, { confirmed: true })).rejects.toMatchObject({ code: 'unpaired' });
+    await fs.writeFile(path.join(root, 'device.json'), '{"deviceId":', { mode: 0o600 });
+    await expect(resetDeviceCursor(config, { confirmed: true })).rejects.toBeInstanceOf(DeviceRecordRePairRequiredError);
   });
 });

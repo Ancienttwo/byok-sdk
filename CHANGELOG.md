@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (client; #1774)** — `resetDeviceCursor` no longer reports an unreadable `device.json` as `unpaired`: a missing record still throws `unpaired`, and a corrupt one throws the store's `DeviceRecordRePairRequiredError` (other read failures throw `reset-failed`). `doctor` now fails the `lifecycle` and `environment` checks with `unknown (audit log unreadable)` when the audit-log read itself throws, instead of reading as no record. The `operationalHealth` write in the retention sweep already marks the tracker unavailable on a failed write, so it is unchanged.
+
 - **Fixed (client; #1760)** — Redelivered offers for tasks that failed after claim but before the runtime started (instruction blob, native sessions, Agent memory, resident MEMORY.md or file scope failures) no longer claim and fail the task again. These failures now retain the task in the bounded finished collection; the first `task.claim` and `task.fail` are unchanged.
 
 - **Fixed (client; #1732)** — `byok-agent doctor` now names `secure_dir_mode <storeDir>` with a hint when the daemon is offline, no refusal is recorded, and the process-owned store root's mode is not 0700. A daemon that cannot set that mode refuses to start before it can record anything, so doctor previously showed only `daemon offline`. A foreign-owned store root is still not reported.

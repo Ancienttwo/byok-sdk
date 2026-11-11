@@ -1,7 +1,7 @@
 import { isTenantId } from '@byok-sdk/core';
 import type { DaemonConfig } from '../daemon/create-daemon';
 import type { RuntimeAdapter } from '../types';
-import { DeviceStore } from '../daemon/store';
+import { DeviceRecordRePairRequiredError, DeviceStore } from '../daemon/store';
 import { createDeviceCredentialStore } from '../daemon/device-credential-provider';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../util/daemon-owner';
 import { connectControlClient } from '../daemon/control-client';
@@ -173,7 +173,7 @@ export async function resetDeviceCursor(config: DaemonConfig, input: ResetDevice
     const owner = await acquireDaemonOwner(storeDir, 'doctor');
     try {
       const store = new DeviceStore(storeDir, createDeviceCredentialStore({ productId, storeDir, deviceCredentials: config.deviceCredentials }));
-      const record = await store.load().catch(() => undefined);
+      const record = await store.load();
       if (record === undefined) throw new DeviceCursorResetError('unpaired');
       const cursors = new CursorStore(storeDir);
       await cursors.save(config.serverUrl, record.deviceId, 0);
@@ -183,7 +183,7 @@ export async function resetDeviceCursor(config: DaemonConfig, input: ResetDevice
       await owner.release();
     }
   } catch (error) {
-    if (error instanceof DeviceCursorResetError) throw error;
+    if (error instanceof DeviceCursorResetError || error instanceof DeviceRecordRePairRequiredError) throw error;
     if (error instanceof DaemonOwnerActiveError) throw new DeviceCursorResetError('store-busy');
     throw new DeviceCursorResetError('reset-failed');
   }
