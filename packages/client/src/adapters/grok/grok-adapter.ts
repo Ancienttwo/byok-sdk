@@ -415,7 +415,10 @@ class GrokSession implements Session {
     if (this.sending !== undefined) {
       await this.sending.catch(() => {});
       // A refused prompt opened no turn; a directly accepted one may already have ended.
-      if (!this.active) return;
+      if (!this.active) {
+        this.interruptRequested = false;
+        return;
+      }
     }
     if (this.held !== undefined) {
       // Taken back before the drain sends it, no prompt for this task reaches Grok; once sent, it is cancelled below.
