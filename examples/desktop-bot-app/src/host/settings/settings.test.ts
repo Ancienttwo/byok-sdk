@@ -4,7 +4,9 @@ import path from 'node:path';
 import type { DiagnosticsSnapshot } from '@byok-sdk/client';
 import { describe, expect, it, vi } from 'vitest';
 import { trayMenu } from '../../main/tray-menu.ts';
+import type { HostContext } from '../domains.ts';
 import { deviceView } from './device.ts';
+import { createSettingsDomain } from './domain.ts';
 import { DEFAULT_SETTINGS, dreamingOption, SettingsDamagedError, settingsStore } from './store.ts';
 
 const status = {
@@ -60,5 +62,17 @@ describe('tray menu', () => {
     expect(actions.quit).toHaveBeenCalledOnce();
     expect(trayMenu({ state: 'stopped', pid: 1, reason: 'store refused' }, actions, 'App')[1]!.label).toBe('Host stopped: store refused');
     expect(trayMenu(undefined, actions, 'App')[1]!.label).toBe('Host starting');
+  });
+});
+
+describe('settings domain', () => {
+  it('validates renderer params and persists dreaming under the Host directory', async () => {
+    const hostStorageRoot = await mkdtemp(path.join(tmpdir(), 'settings-domain-'));
+    const { handlers } = await createSettingsDomain({ hostStorageRoot } as HostContext);
+    expect(await handlers['settings.get'](undefined)).toEqual(DEFAULT_SETTINGS);
+    await expect(handlers['settings.setDreaming']({ enabled: 'on', models: [] })).rejects.toMatchObject({ code: 'invalid_params' });
+    await expect(handlers['settings.setDreaming']({ enabled: true, models: ['a', 'a'] })).rejects.toMatchObject({ code: 'invalid_params' });
+    await handlers['settings.setDreaming']({ enabled: false, models: ['cheap'] });
+    expect(JSON.parse(await readFile(path.join(hostStorageRoot, 'host', 'settings.json'), 'utf8'))).toEqual({ dreaming: { enabled: false, models: ['cheap'] } });
   });
 });
