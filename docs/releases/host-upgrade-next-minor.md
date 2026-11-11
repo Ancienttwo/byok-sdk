@@ -283,6 +283,19 @@ K8 `CommandStore.archived` and `admitted` are required. A vendoring Host that ca
 
 None of these is reachable in normal flow: new Turn, input and round ids are fresh, so the refusal guards only against corrupt state. No persisted format changes.
 
+## Would-do rows name their Turn
+
+A would-do row gains a required `turnId`: the Turn whose outcome proposed the action (#1756). Retention moves each row with that Turn's root, into the `wouldDo` archived rows, so `wouldDoRecords` and the stored `wouldDo` map list only the rows of roots still in the state. The row id and the `would-do:<id>` projection key are unchanged; the projection body gains `turnId`. No DDL changes, and `STORE_VERSION` stays 2.
+
+Operator step, once per store, before the new code serves:
+
+- Local (L) Host: run `migrateWouldDo(ledger)` on each ledger. A vendoring Host, such as AiphaBee, runs it on each device ledger.
+- Hosted (H) Host: run `HostedCollaborationStore.migrate()` on each schema. It now returns `{ wouldDoBackfilled, wouldDoArchived }`.
+
+The migration fills `turnId` from the K4 task id `taskId(turnId, generation)` of each live Turn intent: L checks every generation of the intent, H joins `intent` and `intent_execution`. A row whose intent was already compacted, or whose Turn already left the state, cannot be linked to a Turn. It moves to the `wouldDo` archived rows and is counted in `archived` (L) or `wouldDoArchived` (H). Those rows are settled history, never read by a Turn; the count is how many rows leave the would-do feed early. Record it. A second run returns zeros.
+
+A switch export or import refuses a would-do row without `turnId` (`invalid`), so migrate the source before a switch. A switch in flight across the upgrade holds an export that old code sealed with rows that have no `turnId`, and the new code's verify refuses it: abort the switch (`abortSwitch`), run the migration on the source, then export again. A store that skipped the step refuses every `retain` call and every `wouldDoRecords` read with `A would-do row has no turnId: run migrateWouldDo (local) or HostedCollaborationStore.migrate() (hosted) first`, and changes nothing, until the migration runs.
+
 ## Offer selection rules
 
 `@byok-sdk/protocol` exports `offerSelectionViolation(payload)` and the types `OfferSelectionRule` and `OfferSelectionViolation` (#1674). The offer selection rules have one definition, which the Host offer schemas and the daemon both run. A `HostOfferPlainPayloadSchema` or `HostOfferSealedPayloadSchema` issue carries `params.rule`, and the daemon declines the same offer with `task.decline.code` equal to that rule:
@@ -330,6 +343,7 @@ A rotation leaves a version 1 row in place when its sender is no longer a curren
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.
 - [ ] Run the H `unmigrated_dreams` and L `legacy_home` queries on v0.41.0; both must be 0 before the upgrade (#1669).
 - [ ] Run `HostedCollaborationStore.migrate()` on every existing hosted schema, then set `setBotAutonomy(..., 'auto')` for each Bot that must keep acting on its own (#1662).
+- [ ] Run `migrateWouldDo(ledger)` on each L ledger and `HostedCollaborationStore.migrate()` on each H schema; record the archived would-do count (#1756).
 - [ ] Run `hostProjectionDdl(HOST_SCHEMA)` once before serving the new Worker, and watch `send.failed` in the first pass reports (#1663).
 - [ ] Pin the Host's direct and resolved SDK dependencies to the release graph.
 - [ ] Apply the Host's backup, stop, precheck, smoke and rollback gates, adjusted to the final release.
