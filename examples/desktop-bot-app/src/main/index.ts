@@ -2,9 +2,8 @@ import { resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { app, BrowserWindow, ipcMain, net, powerSaveBlocker, protocol, session, shell, type IpcMainInvokeEvent, type WebFrameMain } from 'electron';
 import brand from '../../brand.config.ts';
-import { BRIDGE_IPC_CHANNEL, BridgeError, RENDERER_METHODS, STATE_HINT_CHANNEL, type BridgeMethods, type BridgeOutcome, type MainMethod } from '../bridge/protocol.ts';
-import { CustodyError } from '../custody/protocol.ts';
-import { createRendererRouter, settleCall } from '../bridge/route.ts';
+import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, STATE_HINT_CHANNEL, type BridgeMethods, type BridgeOutcome, type MainMethod } from '../bridge/protocol.ts';
+import { createRendererRouter, isAppRefusal, settleCall } from '../bridge/route.ts';
 import { createMainHandlers } from './domains.ts';
 import { HostProcess, spawnDevHost, spawnDevHostCommand, type SupervisedHostState } from './host-process.ts';
 import { spawnPackagedHost, spawnPackagedHostCommand } from './packaged-host.ts';
@@ -86,14 +85,12 @@ function serveRenderer(request: Request): Promise<Response> | Response {
 }
 
 /** Only the main frame of our own window, on our own origin, may call the bridge, and only allowlisted methods. */
-/** The app's own refusals: their codes are the ones the renderer may branch on. */
-const coded = (error: unknown): error is BridgeError | CustodyError => error instanceof BridgeError || error instanceof CustodyError;
-
 async function forward(event: IpcMainInvokeEvent, method: unknown, params: unknown): Promise<BridgeOutcome> {
   if (!isOwnRenderer(event.senderFrame)) throw new Error('bridge_sender_refused');
-  const outcome = await settleCall(() => route(method, params), coded);
-  // A refusal no longer rejects the IPC handler, so Electron logs nothing: name the method and the message, never the params.
-  if (!outcome.ok && outcome.code === 'method_failed') console.error(`Bridge call ${String(method)} failed: ${outcome.message}`);
+  const outcome = await settleCall(() => route(method, params), isAppRefusal);
+  // A refusal no longer rejects the IPC handler, so Electron logs nothing: name the method (one line, whatever the renderer
+  // sent) and the message, never the params.
+  if (!outcome.ok && outcome.code === 'method_failed') console.error(`Bridge call ${String(method).replace(/[\r\n]/g, ' ')} failed: ${outcome.message}`);
   return outcome;
 }
 

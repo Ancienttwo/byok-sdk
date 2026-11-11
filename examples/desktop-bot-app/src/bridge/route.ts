@@ -1,5 +1,6 @@
 import type { MethodHandlers, MethodTable } from './domain.ts';
-import type { BridgeOutcome } from './protocol.ts';
+import { CustodyError } from '../custody/protocol.ts';
+import { BridgeError, type BridgeOutcome } from './protocol.ts';
 
 export interface RendererRoutes<M extends MethodTable<M>, Main extends keyof M & string> {
   /** Every method the renderer may call. */
@@ -23,9 +24,12 @@ export function createRendererRouter<M extends MethodTable<M>, Main extends keyo
   };
 }
 
+/** The app's own refusals: their codes (bridge, custody and keys) are the ones the renderer may branch on. */
+export const isAppRefusal = (error: unknown): error is BridgeError | CustodyError => error instanceof BridgeError || error instanceof CustodyError;
+
 /**
  * Settles one routed call as a {@link BridgeOutcome}. A refusal keeps its code only when `coded` recognizes the error as
- * one of the app's own (main passes `BridgeError` and `CustodyError`); anything else, a Node or Electron error with its
+ * one of the app's own (main passes {@link isAppRefusal}); anything else, a Node or Electron error with its
  * own `code` or a thrown non-error included, is `method_failed` with its message.
  */
 export async function settleCall(
