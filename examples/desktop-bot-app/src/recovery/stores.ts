@@ -6,7 +6,7 @@
  * every store it moved back.
  */
 import { existsSync } from 'node:fs';
-import { cp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, lstat, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 /** The `resolveHostLayout` paths the stores live under. */
@@ -47,13 +47,28 @@ export async function completeSnapshot(layout: StoreLayout, version: string): Pr
 /** One rename an action did, so a failure can undo it. */
 export interface Move { readonly from: string; readonly to: string }
 
-/** Renames each existing `from` to its `to`, refusing a `to` that exists; on a failure renames back what it moved and rethrows. */
+/** Only ENOENT means absent; access and other inspection errors must refuse recovery. */
+async function present(file: string): Promise<boolean> {
+  try {
+    await lstat(file);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw new Error(`Cannot inspect ${file}: ${(error as Error).message}`, { cause: error });
+  }
+}
+
+/** Inspects all paths before renaming existing sources; on a failure renames back what it moved and rethrows. */
 export async function moveAll(moves: readonly Move[]): Promise<Move[]> {
+  const planned: Move[] = [];
+  for (const move of moves) {
+    if (!await present(move.from)) continue;
+    if (await present(move.to)) throw new Error(`${move.to} already exists`);
+    planned.push(move);
+  }
   const done: Move[] = [];
   try {
-    for (const move of moves) {
-      if (!existsSync(move.from)) continue;
-      if (existsSync(move.to)) throw new Error(`${move.to} already exists`);
+    for (const move of planned) {
       await rename(move.from, move.to);
       done.push(move);
     }
