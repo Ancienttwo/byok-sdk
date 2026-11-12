@@ -28,16 +28,20 @@ THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH RE
 /** The heading line of a package's section; package-smoke.mjs looks for it. */
 export const noticeHeading = entry => `${entry.name}@${entry.version}`;
 
+/** The heading line of the Host SEA's Node runtime section; package-smoke.mjs looks for it. */
+export const nodeHeading = version => `Node.js ${version}`;
+
 function authorOf(pkg) {
   const author = typeof pkg.author === 'string' ? pkg.author : pkg.author?.name;
   return typeof author === 'string' ? author : undefined;
 }
 
 /**
- * One section per inventoried package (`licenseInventory(...).packages`, `where` relative to `root`), then the
- * first-party files of resources/host/ that need none; throws naming each package that has no license text.
+ * One section per inventoried package (`licenseInventory(...).packages`, `where` relative to `root`), the Host SEA's
+ * Node runtime (`node`: `seaNodeLicense()`), then the first-party files of resources/host/ that need none; throws
+ * naming each package that has no license text.
  */
-export function noticesText({ root, packages, firstParty }) {
+export function noticesText({ root, packages, node, firstParty }) {
   const missing = [];
   const sections = packages.map(entry => {
     const dir = path.join(root, entry.where);
@@ -56,6 +60,8 @@ export function noticesText({ root, packages, firstParty }) {
     return [RULE, noticeHeading(entry), `License: ${entry.license}`, RULE, ...licenses, ...names.filter(name => NOTICE_FILE.test(name)).map(read), ''].join('\n');
   });
   if (missing.length > 0) throw new Error(`Third-party notices: no license file and no held text for ${missing.join(', ')}`);
+  const runtime = [RULE, nodeHeading(node.version), 'The runtime inside the Host executable (resources/host/). Its LICENSE includes the licenses of the code Node bundles.', RULE,
+    `--- LICENSE ---\n${readFileSync(node.licenseFile, 'utf8').trimEnd()}`, ''].join('\n');
   const own = [RULE, 'First-party files in resources/host/ (this repository, no third-party notice):', RULE, ...firstParty, ''].join('\n');
-  return `Third-party notices for the npm packages this app ships. Electron's license and Chromium's notices ship with the app as Electron packages them.\n\n${sections.join('\n')}\n${own}`;
+  return `Third-party notices for the npm packages and the Node.js runtime this app ships. Electron and Chromium are covered by the files electron-builder ships with the app: Electron's LICENSE and Chromium's LICENSES.chromium.html.\n\n${sections.join('\n')}\n${runtime}\n${own}`;
 }

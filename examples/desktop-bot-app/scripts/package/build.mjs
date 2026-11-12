@@ -19,7 +19,7 @@ import { build as bundle } from 'esbuild';
 import { build } from 'electron-builder';
 import config from '../../electron-builder.config.mjs';
 import manifest from '../../package.json' with { type: 'json' };
-import { bundleHost, hostFile } from './bundle-host.mjs';
+import { bundleHost, hostFile, seaNodeLicense } from './bundle-host.mjs';
 import { licenseInventory, licenseReport } from './license-gate.mjs';
 import { NOTICES_FILE, noticesText } from './notices.mjs';
 
@@ -74,7 +74,7 @@ if (refused.length > 0) {
 }
 
 // The notices ship as resources/THIRD_PARTY_NOTICES.txt (electron-builder.config.mjs); package-smoke.mjs checks it against the inventory.
-writeFileSync(path.join(stage, NOTICES_FILE), noticesText({ root, packages: inventory.packages,
+writeFileSync(path.join(stage, NOTICES_FILE), noticesText({ root, packages: inventory.packages, node: seaNodeLicense(),
   firstParty: inventory.reviewed.filter(entry => entry.package === undefined).map(entry => path.posix.relative(hostDir, entry.file)) }));
 writeFileSync(path.join(stage, 'license-inventory.json'), `${JSON.stringify(inventory.packages, null, 2)}\n`);
 

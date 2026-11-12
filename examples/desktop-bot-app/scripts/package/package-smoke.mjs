@@ -4,7 +4,7 @@
 //   binaries packaging may re-sign (the SEA and the Agent memory helper); koffi.node
 //   on Windows stays the official addon (its SHA-256 equals the SDK manifest's pin);
 // - resources/THIRD_PARTY_NOTICES.txt has a section for every package of the
-//   license gate's inventory (#1923, notices.mjs);
+//   license gate's inventory and for the Host SEA's Node runtime (#1923, notices.mjs);
 // - the app's Electron binary carries the app fuses (src/main/fuses.ts);
 // - macOS: the ad-hoc or Developer ID signature verifies deep and strict;
 // - the packaged ffmpeg is Electron's codec-free build (#1499 D7, ffmpeg.mjs);
@@ -31,9 +31,9 @@ import brand from '../../brand.config.ts';
 import manifest from '../../package.json' with { type: 'json' };
 import { APP_FUSES } from '../../src/main/fuses.ts';
 import { hostEnvironment } from '../../src/main/packaged-host.ts';
-import { buildHostExecutable, hostFile } from './bundle-host.mjs';
+import { buildHostExecutable, hostFile, seaNodeLicense } from './bundle-host.mjs';
 import { codecFreeFfmpeg, packagedFfmpeg } from './ffmpeg.mjs';
-import { NOTICES_FILE, noticeHeading } from './notices.mjs';
+import { NOTICES_FILE, nodeHeading, noticeHeading } from './notices.mjs';
 
 // The packaged Host pairs and keeps its device credential in this machine's OS store.
 if (process.env.CI !== 'true') throw new Error('package-smoke.mjs writes a device credential into the OS credential store: run it on CI only (CI=true)');
@@ -83,11 +83,11 @@ if (process.platform === 'win32') {
   console.log(`[package-smoke] koffi.node SHA-256 ${pin} equals the pin`);
 }
 
-// 1b. Third-party notices: one section per inventoried package.
+// 1b. Third-party notices: one section per inventoried package, and the Host SEA's Node runtime.
 const notices = readFileSync(path.join(resources, NOTICES_FILE), 'utf8');
 const inventory = JSON.parse(readFileSync(path.join(root, 'dist', 'package', 'stage', 'license-inventory.json'), 'utf8'));
-const unlisted = inventory.filter(entry => !notices.includes(`\n${noticeHeading(entry)}\n`)).map(noticeHeading);
-assert.deepEqual(unlisted, [], `${NOTICES_FILE} has no section for these inventoried packages`);
+const unlisted = [...inventory.map(noticeHeading), nodeHeading(seaNodeLicense().version)].filter(heading => !notices.includes(`\n${heading}\n`));
+assert.deepEqual(unlisted, [], `${NOTICES_FILE} has no section for these inventoried packages or the Host's Node runtime`);
 console.log(`[package-smoke] ${NOTICES_FILE}: ${inventory.length} packages`);
 
 // 2. Fuses, read back from the packaged binary.

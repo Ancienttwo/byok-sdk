@@ -58,17 +58,21 @@ describe('license gate', () => {
     write(root, 'a/NOTICE', 'a notice');
     write(root, 'b/package.json', { name: 'b', version: '2.0.0', license: 'MIT', author: 'B Author' });
     write(root, 'c/package.json', { name: 'c', version: '3.0.0', license: 'BlueOak-1.0.0' });
+    write(root, 'node/LICENSE', 'Node.js license and bundled licenses');
+    const node = { version: 'v24.0.0', licenseFile: path.join(root, 'node/LICENSE') };
     const packages = [{ name: 'a', version: '1.0.0', license: 'Apache-2.0', where: 'a' }, { name: 'b', version: '2.0.0', license: 'MIT', where: 'b' }];
 
-    const text = noticesText({ root, packages, firstParty: ['host'] });
+    const text = noticesText({ root, packages, node, firstParty: ['host'] });
     expect(text).toContain('\na@1.0.0\n');
     expect(text).toContain('--- LICENSE ---\nApache text');
     expect(text).toContain('--- NOTICE ---\na notice');
     expect(text).toContain('\nb@2.0.0\n');
     expect(text).toContain('Author (package.json): B Author');
     expect(text).toContain('Permission is hereby granted, free of charge');
+    expect(text).toContain('\nNode.js v24.0.0\n');
+    expect(text).toContain('Node.js license and bundled licenses');
     expect(text).toMatch(/First-party files in resources\/host\/.*\n=+\nhost\n/);
-    expect(() => noticesText({ root, firstParty: [], packages: [...packages, { name: 'c', version: '3.0.0', license: 'BlueOak-1.0.0', where: 'c' }] }))
+    expect(() => noticesText({ root, node, firstParty: [], packages: [...packages, { name: 'c', version: '3.0.0', license: 'BlueOak-1.0.0', where: 'c' }] }))
       .toThrow('c@3.0.0 "BlueOak-1.0.0"');
   });
 });
