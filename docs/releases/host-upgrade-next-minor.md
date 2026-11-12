@@ -16,4 +16,6 @@ stays `pending`, `snapshots/<to>` is kept, and the error (an
 the snapshot path and `recover()`. On this error, call `recover()` as soon as
 possible and do not restart the machine first: the unit stays installed, so a
 reboot or login before `recover()` starts the previous version on the partial
-stores.
+stores. This covers the restore after a failed preparation only; a failed
+restore after a failed health check still throws the underlying error, which
+need not name the snapshot, and is left to #1992.

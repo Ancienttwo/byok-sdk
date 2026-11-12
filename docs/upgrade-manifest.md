@@ -234,7 +234,8 @@ and exits 0 or 2 by the same rule (#1328). When a store is
 `migration-required`, the installation runs the Host's `migrate` program from
 the staged candidate after the snapshot, then the precheck again, which must
 report every store `accepted` or `absent` (#1577). Without `migrate` the
-upgrade is `store_migration_required` and the store is unchanged. A `migrate`
+upgrade is `store_migration_required`, the store is unchanged, the receipt is
+`failed` and the old version is started again. A `migrate`
 that exits non-zero, or a second precheck that still refuses a store, restores
 the snapshot and is `store_migration_failed`. When that restore succeeds the
 receipt is `failed` and the old version is started again. When the restore
