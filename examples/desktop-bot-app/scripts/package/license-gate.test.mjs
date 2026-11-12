@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { licenseInventory, licenseReport, permissive } from './license-gate.mjs';
+import { noticesText } from './notices.mjs';
 
 const roots = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -46,5 +47,26 @@ describe('license gate', () => {
     expect(licenseReport(inventory).refused.map(entry => entry.name)).toEqual(['copyleft']);
     write(root, 'stage/host/native/addon.node', '');
     expect(() => licenseInventory(options)).toThrow('stage/host/native/addon.node ships in no package');
+  });
+
+  it('writes each package\'s license files and NOTICE, holds the MIT text for a package without one, and fails for any other license without one', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'byok-notices-'));
+    roots.push(root);
+    write(root, 'a/package.json', { name: 'a', version: '1.0.0', license: 'Apache-2.0' });
+    write(root, 'a/LICENSE', 'Apache text');
+    write(root, 'a/NOTICE', 'a notice');
+    write(root, 'b/package.json', { name: 'b', version: '2.0.0', license: 'MIT', author: 'B Author' });
+    write(root, 'c/package.json', { name: 'c', version: '3.0.0', license: 'BlueOak-1.0.0' });
+    const packages = [{ name: 'a', version: '1.0.0', license: 'Apache-2.0', where: 'a' }, { name: 'b', version: '2.0.0', license: 'MIT', where: 'b' }];
+
+    const text = noticesText({ root, packages });
+    expect(text).toContain('\na@1.0.0\n');
+    expect(text).toContain('--- LICENSE ---\nApache text');
+    expect(text).toContain('--- NOTICE ---\na notice');
+    expect(text).toContain('\nb@2.0.0\n');
+    expect(text).toContain('Author (package.json): B Author');
+    expect(text).toContain('Permission is hereby granted, free of charge');
+    expect(() => noticesText({ root, packages: [...packages, { name: 'c', version: '3.0.0', license: 'BlueOak-1.0.0', where: 'c' }] }))
+      .toThrow('c@3.0.0 "BlueOak-1.0.0"');
   });
 });
