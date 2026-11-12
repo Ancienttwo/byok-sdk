@@ -838,7 +838,7 @@ describe('SqliteLocalTaskJournal', () => {
     const at = (iso: string) => () => new Date(iso);
     const cancel = (taskId: string, seq: number, bound: { taskId?: string; seq?: number } = {}) => {
       const bytes = encodeEnvelope(createEnvelope('task.cancel', { reason: 'cancelled' }, { taskId: bound.taskId ?? taskId, seq: bound.seq ?? seq }));
-      return envelopeRecord({ envelopeId: `cancel-${taskId}`, taskId, seq, bytes, bytesHash: journalHash(bytes), opensTask: false });
+      return envelopeRecord({ envelopeId: `cancel-${taskId}-${seq}`, taskId, seq, bytes, bytesHash: journalHash(bytes), opensTask: false });
     };
     const offer = (taskId: string, seq: number) => envelopeRecord({ envelopeId: `offer-${taskId}`, taskId, seq,
       bytes: JSON.stringify({ v: 1, id: `offer-${taskId}`, type: 'task.offer', task_id: taskId }),
@@ -897,13 +897,21 @@ describe('SqliteLocalTaskJournal', () => {
       expect(countRows(storeDir, 'journal_envelope')).toBe(2);
     });
 
-    it.each([['task id', { taskId: 'other' }], ['sequence', { seq: 1 }]] as const)('refuses to prune a cancellation whose bytes bind another %s', async (_kind, bound) => {
+    it.each([
+      ['task id', [{ taskId: 'other' }]],
+      ['earlier sequence', [{ seq: 1 }]],
+      // Hash-valid bytes whose sequence is later than, but not equal to, the row's.
+      ['row sequence', [{ seq: 3 }]],
+      // A valid cancellation does not excuse another cancellation row of the task.
+      ['second row', [{}, { taskId: 'other' }]],
+    ] as const)('refuses to prune when a cancellation row binds another %s, keeping all evidence', async (_kind, rows) => {
       const storeDir = await tmpStore();
       const journal = build(storeDir);
       await journal.appendEnvelope(offer('cancelled', 1));
-      await journal.appendEnvelope(cancel('cancelled', 2, bound));
-      await expect(journal.pruneConfirmedJournalTask('cancelled', new Date())).rejects.toThrow('invalid durable cancellation binding');
-      expect(countRows(storeDir, 'journal_envelope')).toBe(2);
+      for (const [index, bound] of rows.entries()) await journal.appendEnvelope(cancel('cancelled', 2 + index, bound));
+      await expect(journal.pruneConfirmedJournalTask('cancelled', new Date(Date.now() + 60_000))).rejects.toThrow('invalid durable cancellation binding');
+      expect(countRows(storeDir, 'journal_envelope')).toBe(1 + rows.length);
+      expect(countRows(storeDir, 'journal_task')).toBe(1);
     });
 
     it('refuses to prune when a stored envelope of the cancelled task no longer matches its hash', async () => {
@@ -911,7 +919,7 @@ describe('SqliteLocalTaskJournal', () => {
       const journal = build(storeDir);
       await journal.appendEnvelope(offer('cancelled', 1));
       await journal.appendEnvelope(cancel('cancelled', 2));
-      readRows(storeDir, "UPDATE journal_envelope SET bytes = replace(bytes, 'task.cancel', 'task.started') WHERE envelope_id = 'cancel-cancelled'");
+      readRows(storeDir, "UPDATE journal_envelope SET bytes = replace(bytes, 'task.cancel', 'task.started') WHERE envelope_id = 'cancel-cancelled-2'");
       await expect(journal.pruneConfirmedJournalTask('cancelled', new Date())).rejects.toThrow('durable cancellation candidate bytes/hash mismatch');
       expect(countRows(storeDir, 'journal_envelope')).toBe(2);
       expect((await journal.readTask('cancelled', IDENTITY))?.localState).toBe('received');

@@ -841,12 +841,12 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
 
   readTaskCancellation(taskId: string, identity: JournalIdentity, afterSeq: number) {
     return this.#enqueue('readTaskCancellation', () => {
-      const row = this.#taskCancellation(taskId, identity, afterSeq);
-      return row && { identity: row.identity, bytes: row.bytes, bytesHash: row.bytesHash };
+      return this.#taskCancellation(taskId, identity, afterSeq);
     });
   }
 
-  #taskCancellation(taskId: string, identity: JournalIdentity, afterSeq: number) {
+  /** Every stored envelope of the task, in sequence order, after its enrollment and hash are verified. */
+  #taskEnvelopeRows(taskId: string, identity: JournalIdentity): Record<string, unknown>[] {
     const rows = this.#db.prepare(`SELECT tenant_id, product_id, device_id, seq, bytes, bytes_hash, committed_at FROM journal_envelope
       WHERE task_id = ? AND withheld_bytes IS NULL
       ORDER BY seq, envelope_id`).all(taskId) as Record<string, unknown>[];
@@ -858,12 +858,16 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
         throw new Error('durable cancellation candidate bytes/hash mismatch');
       }
     }
-    const row = rows.find((candidate) => (candidate.seq as number) > afterSeq
+    return rows;
+  }
+
+  #taskCancellation(taskId: string, identity: JournalIdentity, afterSeq: number) {
+    const row = this.#taskEnvelopeRows(taskId, identity).find((candidate) => (candidate.seq as number) > afterSeq
       && JSON.parse(candidate.bytes as string).type === 'task.cancel');
     if (!row) return undefined;
     return {
       identity: { tenantId: row.tenant_id as string, productId: row.product_id as string, deviceId: row.device_id as string },
-      bytes: row.bytes as string, bytesHash: row.bytes_hash as string, seq: Number(row.seq), committedAt: row.committed_at as string,
+      bytes: row.bytes as string, bytesHash: row.bytes_hash as string,
     };
   }
 
@@ -1089,14 +1093,18 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       WHERE t.task_id = ? AND ${CANCELLED_RECEIVED_TASK}`).get(taskId) as Record<string, unknown> | undefined;
     if (!task) return false;
     const identity = { tenantId: task.tenant_id as string, productId: task.product_id as string, deviceId: task.device_id as string };
-    const cancellation = this.#taskCancellation(taskId, identity, Number(task.seq));
-    if (cancellation === undefined) return false;
-    // The same decode and binding recovery applies, plus the row's own sequence.
-    if (assertTaskCancellationBinding(cancellation.bytes, taskId, Number(task.seq)) !== cancellation.seq) {
-      throw new Error('invalid durable cancellation binding');
+    const cancellations = this.#taskEnvelopeRows(taskId, identity)
+      .filter((row) => JSON.parse(row.bytes as string).type === 'task.cancel');
+    // Pruning deletes every envelope of the task, so every cancellation row must
+    // pass the binding recovery applies, with bytes sequenced exactly at its row.
+    for (const row of cancellations) {
+      if (assertTaskCancellationBinding(row.bytes as string, taskId, Number(row.seq) - 1) !== Number(row.seq)) {
+        throw new Error('invalid durable cancellation binding');
+      }
     }
+    const cancellation = cancellations.find((row) => Number(row.seq) > Number(task.seq));
     // Fresh evidence under a reused task id, or a direct call, is not yet past retention.
-    return cancellation.committedAt < before;
+    return cancellation !== undefined && (cancellation.committed_at as string) < before;
   }
 
   /**

@@ -7025,12 +7025,17 @@ export interface LocalTaskJournal {
     listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
     /**
      * Transactionally rechecks confirmation and recovery protection before
-     * pruning, and returns `false` without deleting unless the task is still
-     * past `cutoff` under the write lock: a confirmed terminal last updated
-     * before `cutoff`, or a received offer whose stored `task.cancel` passes the
-     * cancellation binding (task id and a sequence above the offer's) and was
-     * committed before `cutoff`. The recheck guards a direct call and a task id
-     * replaced after listing; the SDK does not repeat it for an injected journal.
+     * pruning. Inside its delete transaction, under the write lock, it returns
+     * `false` and deletes nothing when the task is valid but not prunable: a
+     * confirmed terminal last updated at or after `cutoff`, or a received offer
+     * whose first stored `task.cancel` sequenced above the offer was committed
+     * at or after `cutoff` (including evidence replaced under the same task id)
+     * or that has no such cancellation. It throws and deletes nothing when the
+     * evidence is broken: any stored envelope of the task fails its hash or
+     * enrollment check, or any stored `task.cancel` of the task names another
+     * task id or carries a `seq` different from its row's. An implementation
+     * that ignores `cutoff` still compiles but can delete unexpired or replaced
+     * evidence; the SDK does not repeat these checks.
      */
     pruneConfirmedJournalTask(taskId: string, cutoff: Date): Promise<boolean>;
     /** Bounded WAL checkpoint + incremental vacuum. Maintenance only; never on the envelope path. */
