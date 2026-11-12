@@ -171,6 +171,26 @@ describe('SqliteLocalTaskJournal', () => {
       expect(await journal.listPendingTerminals(IDENTITY)).toEqual([]);
     });
 
+    it('builds the task index on a store opened before it existed, and the cancellation read uses it', async () => {
+      const storeDir = await tmpStore();
+      await build(storeDir).close();
+      readRows(storeDir, 'DROP INDEX journal_envelope_task');
+      await build(storeDir).close();
+      const plan = readRows(storeDir, `EXPLAIN QUERY PLAN SELECT tenant_id, product_id, device_id, seq, bytes, bytes_hash FROM journal_envelope
+        WHERE task_id = 'task-1' AND withheld_bytes IS NULL ORDER BY seq, envelope_id`).map((row) => String(row.detail));
+      expect(plan.join('\n')).toMatch(/SEARCH journal_envelope USING INDEX journal_envelope_task \(task_id=\?\)/);
+    });
+
+    it('refuses to open without changing the store when the task index cannot be built', async () => {
+      const storeDir = await tmpStore();
+      await build(storeDir).close();
+      readRows(storeDir, 'DROP INDEX journal_envelope_task');
+      readRows(storeDir, 'CREATE TABLE journal_envelope_task (x)');
+      expect(() => build(storeDir)).toThrow(JournalUnavailableError);
+      expect(readRows(storeDir, "SELECT type FROM sqlite_master WHERE name = 'journal_envelope_task'")).toEqual([{ type: 'table' }]);
+      await expect(fs.stat(path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME))).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
     it.each(['tenantId', 'productId', 'deviceId'] as const)('refuses a cancellation read with another %s', async (field) => {
       const journal = build(await tmpStore());
       const bytes = JSON.stringify({ v: 1, id: 'cancel-1', type: 'task.cancel', task_id: 'task-1' });

@@ -265,6 +265,9 @@ DROP TABLE IF EXISTS local_storage_usage;
 CREATE INDEX IF NOT EXISTS journal_terminal_retention ON journal_terminal (truth_state, updated_at);
 `;
 
+/** Task-keyed envelope lookups (stored cancellation, prune) read through this instead of scanning the table. */
+const ENVELOPE_TASK_INDEX = 'CREATE INDEX IF NOT EXISTS journal_envelope_task ON journal_envelope (task_id, seq)';
+
 /** `local_state` for a task whose admission declined it — terminal for local purposes, and NOT something recovery should re-offer. */
 const DECLINED_STATE = 'declined';
 /** `local_state` a task starts in: its offer envelope is durable, nothing has been decided yet. */
@@ -428,6 +431,15 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     if (!envelopeColumns.some((column) => column.name === 'withheld_bytes')) {
       db.close();
       throw new JournalUnavailableError('journal written before the withheld-offer column (#826); preserve/export this journal and resolve it before starting this build');
+    }
+    // Built after the format checks so a refused predecessor is left byte-for-byte
+    // unchanged. A deployed store gains the index on its first open; a failure is
+    // a refusal to start, not corruption, so the file stays in place.
+    try {
+      db.exec(ENVELOPE_TASK_INDEX);
+    } catch (err) {
+      db.close();
+      throw new JournalUnavailableError(`journal task index could not be built: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
     }
     this.#db = db;
     try {
