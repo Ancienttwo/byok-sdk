@@ -3,6 +3,8 @@
 ## Unreleased
 
 - **Fixed (client; #1949)** — Every SDK Pi RPC session caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings, so it warms its prompt cache at most during an active run: Pi cancels the warmer at settlement and revalidates a pending decision before dispatch, so no warming request is sent after the run settled, even for a late `"warm"` answer. No Host action is needed. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#pi-cache-warming-stops-at-settlement-1949).
+- **Fixed (client; #1986)** — `ServiceInstallation.upgrade()` no longer rejects after a committed switch when an earlier version snapshot cannot be removed: it resolves with the `switched` receipt and the next upgrade removes the leftover. Other pruning errors still reject.
+
 - **Fixed (client; #1987)** — `ServiceInstallation.upgrade()` no longer restarts the previous version when a failed migration's snapshot restore fails too, since the stores may be partial. The service stays stopped, the `pending` receipt and `snapshots/<to>` stay, and the error (an `AggregateError` with the preparation and restore errors) names the snapshot path and `recover()`. Call `recover()` before anything restarts the machine: the unit stays installed, so a reboot or login before it starts the previous version on those stores.
 
 ## 0.42.0 — 2026-11-13 (published)

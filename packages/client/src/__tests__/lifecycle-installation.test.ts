@@ -461,6 +461,19 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await installation.upgrade(await payload('3.0.0'));
     expect((await fs.readdir(path.join(installRoot, 'versions'))).sort()).toEqual(['2.0.0', '3.0.0']);
     expect(await fs.readdir(path.join(installRoot, 'snapshots'))).toEqual(['3.0.0']);
+
+    // Pruning after the switch is cleanup (#1986): a removal failure keeps the committed upgrade, and the next prune removes it.
+    const originalRm = fs.rm.bind(fs);
+    const rm = vi.spyOn(fs, 'rm').mockImplementation(async (target, options) => {
+      if (String(target) === path.join(installRoot, 'snapshots', '3.0.0')) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+      return originalRm(target, options);
+    });
+    const switched = await installation.upgrade(await payload('4.0.0')).finally(() => rm.mockRestore());
+    expect(switched).toMatchObject({ state: 'switched', from: '3.0.0', to: '4.0.0' });
+    expect((await fs.readdir(path.join(installRoot, 'snapshots'))).sort()).toEqual(['3.0.0', '4.0.0']);
+    await installation.upgrade(await payload('5.0.0'));
+    expect((await fs.readdir(path.join(installRoot, 'versions'))).sort()).toEqual(['4.0.0', '5.0.0']);
+    expect(await fs.readdir(path.join(installRoot, 'snapshots'))).toEqual(['5.0.0']);
   });
 
   it('stops before the switch when the candidate needs a new store path, and restarts the old version', async () => {
