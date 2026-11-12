@@ -12,7 +12,8 @@
 //   Windows: CSC_LINK + CSC_KEY_PASSWORD (or WIN_CSC_LINK + WIN_CSC_KEY_PASSWORD).
 // The update feed is BYOK_UPDATE_FEED_URL (a generic provider); unset, the app
 // ships without app-update.yml and its updater stays off.
-import { existsSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Arch } from 'electron-builder';
@@ -43,6 +44,10 @@ async function afterPack(context) {
   const ffmpeg = packagedFfmpeg(app, platform);
   if (!existsSync(ffmpeg)) throw new Error(`Electron's ffmpeg is not at ${ffmpeg}`);
   writeFileSync(ffmpeg, await codecFreeFfmpeg({ version: manifest.devDependencies.electron, platform, arch: Arch[context.arch] }));
+  console.log(`[afterPack] codec-free ffmpeg ${JSON.stringify({
+    artifact: `ffmpeg-v${manifest.devDependencies.electron}-${platform}-${Arch[context.arch]}.zip`, destination: ffmpeg,
+    rawSha256: createHash('sha256').update(readFileSync(ffmpeg)).digest('hex'),
+  })}`);
   if (platform === 'darwin') return flipAppFuses(path.join(app, 'Contents', 'MacOS', name));
   if (platform === 'win32') return flipAppFuses(path.join(app, `${name}.exe`));
   if (platform === 'linux') return flipAppFuses(path.join(app, context.packager.executableName));

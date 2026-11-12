@@ -34,6 +34,18 @@ export async function codecFreeFfmpeg({ version, platform, arch }) {
   }
 }
 
+/** The stock library from the pinned Electron zip, used as the smoke's negative control. */
+export async function stockFfmpeg({ version, platform, arch }) {
+  const zip = await downloadArtifact({ version, artifactName: 'electron', platform, arch, checksums: require('electron/checksums.json') });
+  const dir = mkdtempSync(path.join(tmpdir(), 'byok-desktop-stock-ffmpeg-'));
+  try {
+    await extract(zip, { dir });
+    return readFileSync(packagedFfmpeg(platform === 'darwin' ? path.join(dir, 'Electron.app') : dir, platform));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** Where a packaged app keeps Electron's ffmpeg library: inside the framework of the macOS `.app`, beside the executable elsewhere. */
 export function packagedFfmpeg(app, platform) {
   return platform === 'darwin' ? path.join(app, 'Contents', 'Frameworks', 'Electron Framework.framework', 'Libraries', library(platform))
