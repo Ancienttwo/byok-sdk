@@ -611,7 +611,7 @@ reinstall into the same root to record it again before CLI uninstall.
 When a migration fails and its snapshot restore fails too, the stores may be
 partial. `upgrade apply` then leaves the old version stopped, keeps the
 `pending` receipt and `snapshots/<id>`, and the error names the snapshot path
-and says to run `recover()` (CLI: `upgrade recover`). Run it as soon as
+and says to run `recover()` (CLI: `byok-agent upgrade recover`). Run it as soon as
 possible, before restarting the machine: the service unit stays installed,
 so a reboot or login before `recover()` starts the old version on those
 partial stores.

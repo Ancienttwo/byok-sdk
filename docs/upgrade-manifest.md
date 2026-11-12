@@ -236,9 +236,13 @@ the staged candidate after the snapshot, then the precheck again, which must
 report every store `accepted` or `absent` (#1577). Without `migrate` the
 upgrade is `store_migration_required` and the store is unchanged. A `migrate`
 that exits non-zero, or a second precheck that still refuses a store, restores
-the snapshot and is `store_migration_failed`. Either way the receipt is
-`failed` and the old version is started again; a death during the migration
-leaves the `pending` receipt, and `recover()` restores the snapshot. `ServiceStoreVerdict` is
+the snapshot and is `store_migration_failed`. When that restore succeeds the
+receipt is `failed` and the old version is started again. When the restore
+fails too, the stores may be partial: the old version stays stopped, the
+receipt stays `pending`, the snapshot is kept, and the error says to run
+`recover()` (CLI: `byok-agent upgrade recover`) before anything restarts the
+service. A death during the migration also leaves the `pending` receipt, and
+`recover()` restores the snapshot. `ServiceStoreVerdict` is
 `StoreCompatibility` widened for a Host:
 
 - `store` is an SDK `LocalStoreId` or a Host store id: 1-64 of `a-z 0-9 -`,

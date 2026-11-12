@@ -955,21 +955,22 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     return new StoreRestoreError([error], `The stores of an earlier failed install were not restored; the snapshot is retained at ${kept}.`);
   }
 
-  /**
-   * Run by a first install under the store leases, before its precheck:
-   * restores the stores a failed restore left, as they were before that
-   * install. Without it, a retry would read half-restored stores as absent.
-   * A failure is the same restore error and changes nothing else.
-   */
   /** Restores an upgrade's snapshot after a failed preparation; a failure keeps the snapshot and the pending receipt for recover(). */
   async function restoreUpgradeSnapshot(to: string, failure: unknown): Promise<void> {
     try {
       await restoreSnapshot(to);
     } catch (restoreError) {
-      throw new StoreRestoreError([failure, restoreError], `Store preparation failed and its stores could not be restored; the snapshot is retained at ${path.join(snapshotsDir, to)}. The service was not restarted and the upgrade stays pending: call recover() before anything restarts the service.`);
+      throw new StoreRestoreError([failure, restoreError], `Store preparation failed and its stores could not be restored; the snapshot is retained at ${path.join(snapshotsDir, to)}. The service was not restarted and the upgrade stays pending: call recover() (CLI: byok-agent upgrade recover) before anything restarts the service.`);
     }
   }
 
+  /**
+   * Run by a first install under the store leases, before its precheck:
+   * when an earlier install failed and could not restore its own snapshot,
+   * restores the stores from that kept repair snapshot, as they were before
+   * the earlier install. Without it, a retry would read half-restored stores
+   * as absent. A failure is the same restore error and changes nothing else.
+   */
   async function restoreRepairSnapshots(names: readonly string[]): Promise<void> {
     for (const name of names) {
       const repair = path.join(snapshotsDir, name);
