@@ -14,7 +14,8 @@ import { promises as fs, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DatabaseSync } from 'node:sqlite';
 import { createEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
 import {
   JournalCorruptError,
@@ -176,9 +177,18 @@ describe('SqliteLocalTaskJournal', () => {
       const storeDir = await tmpStore();
       await build(storeDir).close();
       readRows(storeDir, 'DROP INDEX journal_envelope_task');
-      await build(storeDir).close();
-      const plan = readRows(storeDir, `EXPLAIN QUERY PLAN SELECT tenant_id, product_id, device_id, seq, bytes, bytes_hash, committed_at FROM journal_envelope
-        WHERE task_id = 'task-1' AND withheld_bytes IS NULL ORDER BY seq, envelope_id`).map((row) => String(row.detail));
+      const journal = build(storeDir);
+      // Plan the statement the journal actually prepares, not a copy of its text.
+      const prepare = vi.spyOn(DatabaseSync.prototype, 'prepare');
+      let statements: string[];
+      try {
+        await journal.readTaskCancellation('task-1', IDENTITY, 0);
+        statements = prepare.mock.calls.map(([statement]) => statement).filter((statement) => statement.includes('FROM journal_envelope'));
+      } finally {
+        prepare.mockRestore();
+      }
+      expect(statements).toHaveLength(1);
+      const plan = readRows(storeDir, `EXPLAIN QUERY PLAN ${statements[0]}`).map((row) => String(row.detail));
       expect(plan.join('\n')).toMatch(/SEARCH journal_envelope USING INDEX journal_envelope_task \(task_id=\?\)/);
     });
 
@@ -376,6 +386,8 @@ describe('SqliteLocalTaskJournal', () => {
       await journal.close();
       const db = openJournalDatabase(path.join(storeDir, JOURNAL_DB_FILENAME), DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
       db.prepare('ALTER TABLE journal_terminal DROP COLUMN bytes').run();
+      // A real predecessor predates the task index; refusal must not build it.
+      db.prepare('DROP INDEX journal_envelope_task').run();
       db.close();
       const dbPath = path.join(storeDir, JOURNAL_DB_FILENAME);
       const before = readRows(storeDir, "SELECT task_id, payload_hash, truth_state FROM journal_terminal");
@@ -388,6 +400,7 @@ describe('SqliteLocalTaskJournal', () => {
       expect(stableDbBytes(afterRefusalBytes)).toEqual(stableDbBytes(beforeRefusalBytes));
       expect(createHash('sha256').update(stableDbBytes(afterRefusalBytes)).digest('hex'))
         .toBe(createHash('sha256').update(stableDbBytes(beforeRefusalBytes)).digest('hex'));
+      expect(readRows(storeDir, "SELECT name FROM sqlite_master WHERE name = 'journal_envelope_task'")).toEqual([]);
       expect(await fs.stat(dbPath)).toBeTruthy();
       await expect(fs.stat(path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME))).rejects.toMatchObject({ code: 'ENOENT' });
     });
