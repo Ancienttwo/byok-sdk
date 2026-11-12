@@ -191,6 +191,27 @@ export function readLockedPiClosure(lockText, identity, label = 'bun.lock') {
   return locked;
 }
 
+const canonicalBase64 = value => typeof value === 'string' && value.length > 0 && Buffer.from(value, 'base64').toString('base64') === value;
+const decimalString = value => typeof value === 'string' && /^(0|[1-9]\d*)$/.test(value);
+/** Structural preservation of the collector's Sigstore bundle; signature verification belongs to collection. */
+function hasPiVerificationMaterial(bundle) {
+  const material = bundle.verificationMaterial;
+  return bundle.mediaType === 'application/vnd.dev.sigstore.bundle.v0.3+json'
+    && canonicalBase64(material?.certificate?.rawBytes)
+    && Array.isArray(material?.tlogEntries) && material.tlogEntries.length > 0
+    && material.tlogEntries.every(log => {
+      const proof = log?.inclusionProof;
+      return decimalString(log?.logIndex) && decimalString(log?.integratedTime) && canonicalBase64(log?.logId?.keyId)
+        && log?.kindVersion?.kind === 'dsse' && log.kindVersion.version === '0.0.1'
+        && canonicalBase64(log?.inclusionPromise?.signedEntryTimestamp) && canonicalBase64(log?.canonicalizedBody)
+        && decimalString(proof?.logIndex) && decimalString(proof?.treeSize) && canonicalBase64(proof?.rootHash)
+        && Array.isArray(proof?.hashes) && proof.hashes.every(canonicalBase64)
+        && typeof proof?.checkpoint?.envelope === 'string' && proof.checkpoint.envelope.trim().length > 0;
+    })
+    && Array.isArray(material?.timestampVerificationData?.rfc3161Timestamps)
+    && material.timestampVerificationData.rfc3161Timestamps.every(timestamp => canonicalBase64(timestamp?.signedTimestamp));
+}
+
 /** Bind the collected provenance subject to the recorded SRI and the installation lock authority. */
 export function assertRecordedPiClosureIntegrity(record, locked, identity) {
   const fail = (name, reason) => { throw new Error(`official Pi closure: ${name}: ${reason}`); };
@@ -213,8 +234,11 @@ export function assertRecordedPiClosureIntegrity(record, locked, identity) {
     if (!bundle || createHash('sha256').update(JSON.stringify(bundle)).digest('hex') !== entry.provenanceDigest) {
       fail(entry.name, 'provenance bundle digest mismatch');
     }
+    if (!hasPiVerificationMaterial(bundle)) fail(entry.name, 'malformed provenance bundle verification material');
     const envelope = bundle.dsseEnvelope;
-    if (envelope?.payloadType !== 'application/vnd.in-toto+json' || typeof envelope.payload !== 'string' || !envelope.payload) {
+    if (envelope?.payloadType !== 'application/vnd.in-toto+json' || typeof envelope.payload !== 'string' || !envelope.payload
+      || !Array.isArray(envelope.signatures) || envelope.signatures.length === 0
+      || !envelope.signatures.every(signature => canonicalBase64(signature?.sig) && typeof signature?.keyid === 'string')) {
       fail(entry.name, 'missing or malformed provenance envelope');
     }
     const payload = Buffer.from(envelope.payload, 'base64');

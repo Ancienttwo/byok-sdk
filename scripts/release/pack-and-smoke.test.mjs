@@ -280,6 +280,26 @@ for (const [label, mutate] of [
   assert.throws(() => checkPiIntegrity(f), /provenance (?:envelope|payload)/);
 });
 
+for (const [label, mutate] of [
+  ['stripped evidence', bundle => { delete bundle.dsseEnvelope.signatures; delete bundle.verificationMaterial; }],
+  ['missing signatures', bundle => { delete bundle.dsseEnvelope.signatures; }],
+  ['empty signatures', bundle => { bundle.dsseEnvelope.signatures = []; }],
+  ['malformed signature', bundle => { bundle.dsseEnvelope.signatures[0].sig = '!'; }],
+  ['missing key id', bundle => { delete bundle.dsseEnvelope.signatures[0].keyid; }],
+  ['missing verification material', bundle => { delete bundle.verificationMaterial; }],
+  ['missing certificate', bundle => { delete bundle.verificationMaterial.certificate; }],
+  ['malformed certificate', bundle => { bundle.verificationMaterial.certificate.rawBytes = '!'; }],
+  ['missing transparency entries', bundle => { bundle.verificationMaterial.tlogEntries = []; }],
+  ['missing inclusion proof', bundle => { delete bundle.verificationMaterial.tlogEntries[0].inclusionProof; }],
+  ['missing checkpoint', bundle => { delete bundle.verificationMaterial.tlogEntries[0].inclusionProof.checkpoint; }],
+  ['missing signed entry', bundle => { delete bundle.verificationMaterial.tlogEntries[0].inclusionPromise; }],
+  ['malformed log body', bundle => { bundle.verificationMaterial.tlogEntries[0].canonicalizedBody = '!'; }],
+  ['wrong media type', bundle => { bundle.mediaType = 'wrong'; }],
+]) test(`rejects Pi ${label} after recomputing provenanceDigest`, () => {
+  const f = piIntegrityFixture(), entry = f.record.packages[0]; mutate(entry.provenanceBundle); rehashPiBundle(entry);
+  assert.throws(() => checkPiIntegrity(f), /malformed provenance (?:bundle|envelope)/);
+});
+
 /**
  * One isolated npm install: `node_modules/<name>/package.json` per installed
  * package and the `package-lock.json` npm writes beside it.
