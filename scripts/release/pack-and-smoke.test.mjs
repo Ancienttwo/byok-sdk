@@ -238,6 +238,24 @@ for (const name of PI_RUNTIME_CLOSURE) for (const changed of ['record', 'lock', 
     assert.throws(() => checkPiIntegrity(f), changed === 'both' ? /provenance subject SHA-512/ : /recorded integrity differs from bun\.lock/);
   });
 }
+// Review forgeries: each keeps the bundle well formed and its digest recomputed, so only signature verification can refuse it.
+for (const [label, forge] of [
+  ['forged subject with matching record and lock', f => {
+    const entry = f.record.packages[0], envelope = entry.provenanceBundle.dsseEnvelope;
+    const statement = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf8'));
+    const forged = Buffer.alloc(64, 7);
+    statement.subject[0].digest.sha512 = forged.toString('hex');
+    envelope.payload = Buffer.from(JSON.stringify(statement)).toString('base64');
+    entry.tarballIntegrity = `sha512-${forged.toString('base64')}`; f.locked.set(entry.name, entry.tarballIntegrity);
+  }],
+  ['placeholder signature', f => { f.record.packages[0].provenanceBundle.dsseEnvelope.signatures[0].sig = 'AAAA'; }],
+  ['another package\'s verification material', f => {
+    f.record.packages[0].provenanceBundle.verificationMaterial = structuredClone(f.record.packages[1].provenanceBundle.verificationMaterial);
+  }],
+]) test(`rejects Pi provenance with a ${label}`, () => {
+  const f = piIntegrityFixture(); forge(f); rehashPiBundle(f.record.packages[0]);
+  assert.throws(() => checkPiIntegrity(f), /provenance signature or certificate identity does not verify/);
+});
 for (const [label, mutate] of [
   ['subject name', statement => { statement.subject[0].name = 'pkg:npm/foreign@1.5.2'; }],
   ['subject version', statement => { statement.subject[0].name = statement.subject[0].name.replace('@1.5.2', '@9.0.0'); }],

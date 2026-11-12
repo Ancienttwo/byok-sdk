@@ -26,6 +26,7 @@ import { OFFICIAL_PI_PROVENANCE } from '../../packages/client/src/adapters/pi/of
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
@@ -193,7 +194,7 @@ export function readLockedPiClosure(lockText, identity, label = 'bun.lock') {
 
 const canonicalBase64 = value => typeof value === 'string' && value.length > 0 && Buffer.from(value, 'base64').toString('base64') === value;
 const decimalString = value => typeof value === 'string' && /^(0|[1-9]\d*)$/.test(value);
-/** Structural preservation of the collector's Sigstore bundle; signature verification belongs to collection. */
+/** Structural preservation of the collector's Sigstore bundle; `verifyPiProvenance` verifies it cryptographically. */
 function hasPiVerificationMaterial(bundle) {
   const material = bundle.verificationMaterial;
   return bundle.mediaType === 'application/vnd.dev.sigstore.bundle.v0.3+json'
@@ -212,7 +213,63 @@ function hasPiVerificationMaterial(bundle) {
     && material.timestampVerificationData.rfc3161Timestamps.every(timestamp => canonicalBase64(timestamp?.signedTimestamp));
 }
 
-/** Bind the collected provenance subject to the recorded SRI and the installation lock authority. */
+const PI_REPOSITORY = 'https://github.com/earendil-works/pi';
+const PI_CERTIFICATE_ISSUER = 'https://token.actions.githubusercontent.com';
+let sigstore;
+// Sigstore's verifier with the trusted root bundled in the pinned sigstore
+// package. No TUF, transparency or auth endpoint is contacted. A Sigstore root
+// rotation that this bundled root predates fails closed until sigstore is upgraded.
+function loadSigstore() {
+  if (sigstore) return sigstore;
+  const sigstoreRequire = createRequire(createRequire(import.meta.url).resolve('sigstore'));
+  const { bundleFromJSON } = sigstoreRequire('@sigstore/bundle');
+  const { Verifier, toTrustMaterial, toSignedEntity } = sigstoreRequire('@sigstore/verify');
+  const { TrustedRoot } = sigstoreRequire('@sigstore/protobuf-specs');
+  const seeds = sigstoreRequire(path.join(path.dirname(sigstoreRequire.resolve('@sigstore/tuf')), '../seeds.json'));
+  const root = TrustedRoot.fromJSON(JSON.parse(Buffer.from(seeds['https://tuf-repo-cdn.sigstore.dev'].targets['trusted_root.json'], 'base64')));
+  sigstore = { bundleFromJSON, toSignedEntity, verifier: new Verifier(toTrustMaterial(root), { ctlogThreshold: 1, tlogThreshold: 1 }) };
+  return sigstore;
+}
+
+/**
+ * The one provenance verification the collector and the release graph share:
+ * the statement names exactly `name@version` with `integrity` as its SHA-512
+ * subject and the upstream repository and commit, and its Sigstore bundle
+ * verifies offline for Pi's release workflow at `refs/tags/v<version>`.
+ * Throws an Error whose message is the reason; returns the statement.
+ */
+export function verifyPiProvenance({ name, version, integrity, upstreamCommit, bundle }) {
+  let statement;
+  try { statement = JSON.parse(Buffer.from(bundle.dsseEnvelope.payload, 'base64').toString('utf8')); }
+  catch { throw new Error('malformed provenance payload'); }
+  if (statement?._type !== 'https://in-toto.io/Statement/v1' || statement.predicateType !== 'https://slsa.dev/provenance/v1'
+    || !Array.isArray(statement.subject) || statement.subject.length !== 1
+    || statement.subject[0]?.name !== `pkg:npm/${name.replace('@', '%40')}@${version}`) {
+    throw new Error('provenance subject does not identify exactly this package');
+  }
+  const subjectDigest = statement.subject[0].digest?.sha512;
+  if (typeof subjectDigest !== 'string' || !/^[0-9a-f]{128}$/.test(subjectDigest)
+    || subjectDigest !== Buffer.from(integrity.slice(7), 'base64').toString('hex')) {
+    throw new Error('provenance subject SHA-512 differs from recorded integrity');
+  }
+  const build = statement.predicate?.buildDefinition;
+  if (build?.externalParameters?.workflow?.repository !== PI_REPOSITORY || typeof upstreamCommit !== 'string'
+    || !/^[0-9a-f]{40}$/.test(upstreamCommit) || !build.resolvedDependencies?.some?.(dependency => dependency?.digest?.gitCommit === upstreamCommit)) {
+    throw new Error('provenance predicate does not name the upstream repository and commit');
+  }
+  const { bundleFromJSON, toSignedEntity, verifier } = loadSigstore();
+  try {
+    verifier.verify(toSignedEntity(bundleFromJSON(bundle)), {
+      subjectAlternativeName: `${PI_REPOSITORY}/.github/workflows/build-binaries.yml@refs/tags/v${version}`,
+      extensions: { issuer: PI_CERTIFICATE_ISSUER },
+    });
+  } catch (error) {
+    throw new Error(`provenance signature or certificate identity does not verify (${error?.code ?? error?.message ?? error})`);
+  }
+  return statement;
+}
+
+/** Bind the recorded SRI to the installation lock and to its retained, offline-verified provenance. */
 export function assertRecordedPiClosureIntegrity(record, locked, identity) {
   const fail = (name, reason) => { throw new Error(`official Pi closure: ${name}: ${reason}`); };
   if (record?.format !== 'byok.official-pi-closure' || record.version !== 1
@@ -241,20 +298,10 @@ export function assertRecordedPiClosureIntegrity(record, locked, identity) {
       || !envelope.signatures.every(signature => canonicalBase64(signature?.sig) && typeof signature?.keyid === 'string')) {
       fail(entry.name, 'missing or malformed provenance envelope');
     }
-    const payload = Buffer.from(envelope.payload, 'base64');
-    if (payload.toString('base64') !== envelope.payload) fail(entry.name, 'malformed provenance payload');
-    let statement;
-    try { statement = JSON.parse(payload.toString('utf8')); }
-    catch { fail(entry.name, 'malformed provenance payload'); }
-    if (statement?._type !== 'https://in-toto.io/Statement/v1' || statement.predicateType !== 'https://slsa.dev/provenance/v1'
-      || !Array.isArray(statement.subject) || statement.subject.length !== 1
-      || statement.subject[0]?.name !== `pkg:npm/${entry.name.replace('@', '%40')}@${entry.version}`) {
-      fail(entry.name, 'provenance subject does not identify exactly this package');
-    }
-    const subjectDigest = statement.subject[0].digest?.sha512;
-    if (typeof subjectDigest !== 'string' || !/^[0-9a-f]{128}$/.test(subjectDigest) || subjectDigest !== bytes.toString('hex')) {
-      fail(entry.name, 'provenance subject SHA-512 differs from recorded integrity');
-    }
+    if (Buffer.from(envelope.payload, 'base64').toString('base64') !== envelope.payload) fail(entry.name, 'malformed provenance payload');
+    try {
+      verifyPiProvenance({ name: entry.name, version: entry.version, integrity, upstreamCommit: entry.upstreamCommit, bundle });
+    } catch (error) { fail(entry.name, error.message); }
   }
 }
 

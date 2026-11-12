@@ -184,6 +184,24 @@ separate evidence and authorization; see the
 
    Artifacts expire after 30 days; past that, re-run CI on the same commit rather than repacking locally.
 
+## Official Pi provenance gate
+
+`check:release-graph` (CI and `scripts/release/pack-and-smoke.mjs`) verifies the
+retained Sigstore bundle of every official Pi package in
+`packages/client/src/adapters/pi/official-pi-closure.json` offline, with the
+trusted root bundled in the pinned `sigstore` package. It shares
+`verifyPiProvenance` (`scripts/release/pi-runtime-identity.mjs`) with
+`scripts/release/collect-official-pi-closure.mjs`, so collection and the gate
+apply the same signature, certificate identity, repository, commit and subject
+checks.
+
+When Sigstore rotates its trusted root, a Pi release signed under the new root
+does not verify against the bundled one. Collection and the gate then fail
+closed with `provenance signature or certificate identity does not verify`.
+Recover by upgrading the pinned `sigstore` dependency to a release that bundles
+the new root, then re-run collection. Do not bypass the gate or fetch a trusted
+root at gate time.
+
 ## Migration and rollback boundary
 
 Follow the [0.24 Host upgrade/rollback order](../../docs/releases/v0.24.0.md#upgrade-order-for-hosts-on-0230)
