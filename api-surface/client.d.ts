@@ -14499,6 +14499,10 @@ export interface PreparedRuntimeOperation {
         env: Readonly<Record<string, string | undefined>>;
         scratch: ExecutionScratch;
     }): Promise<RuntimeLaunchResources>;
+    /**
+     * Must resolve without waiting on anything a first-turn tool call produces.
+     * An adapter that breaks this fails at the startup deadline (the existing bound).
+     */
     start(input: RuntimeOperationStartInput): Promise<Session>;
 }
 /**

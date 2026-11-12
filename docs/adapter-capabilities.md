@@ -6,6 +6,12 @@ upstream CLI might support. The production authority remains the immutable
 This document and the conformance expectations are evidence of that contract;
 they are not a second runtime-selection registry.
 
+## Startup contract
+
+`PreparedRuntimeOperation.start()` must resolve without waiting on anything a
+first-turn tool call produces; an adapter that breaks this fails at the startup
+deadline (the existing bound).
+
 ## Capability matrix
 
 Generated from each adapter's capability constant
