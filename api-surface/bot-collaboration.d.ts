@@ -1194,17 +1194,6 @@ import { HostLedger, type HostLedgerOptions } from '@byok-sdk/server/execution-c
  * returned ledger, so the fixture creates none. The daemon admits only the `policyRevision` of the vectors' `template`,
  * so both come from `./k4-fixtures.test-support` (#1845).
  */
-type DeviceRecord = Parameters<DeviceCredentialBackend['replace']>[0];
-type FirstPairingAttempt = Parameters<DeviceCredentialBackend['saveFirstPairingAttempt']>[0];
-/** Test-owned enrollment backend: the device record lives in memory for the life of one fixture. */
-export declare class InMemoryDeviceCredentials implements DeviceCredentialBackend {
-    #private;
-    read(): Promise<DeviceRecord | undefined>;
-    readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined>;
-    saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void>;
-    replace(record: DeviceRecord): Promise<void>;
-    clear(): Promise<boolean>;
-}
 type Event = Session['events'] extends AsyncIterable<infer E> ? E : never;
 /** A stub runtime session: the test ends it with `finish(document)`, which submits the result document. */
 export declare class ResultStubSession implements Session {
@@ -1252,6 +1241,7 @@ export declare class ResultStubAdapter implements RuntimeAdapter {
 }
 /** Starts an embedded SQLite server, pairs one daemon that runs `adapter`, and opens the Host ledger. */
 export declare function openLTestHost(options: {
+    deviceCredentials: DeviceCredentialBackend;
     consume: (wake: DueWake, signal: AbortSignal) => Promise<void>;
     ledgerOptions?: HostLedgerOptions;
     adapter?: ResultStubAdapter;
@@ -4659,7 +4649,7 @@ export declare function same(value: unknown, other: unknown): boolean;
 export { cardCallVectors, cardVectors, coalesceVectors, commitVectors, deviceVectors, homeVectors, replyVectors, roomVectors, seedCollaboration, seedRoom, settlementVectors, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CardCallSubject, type CardSubject, type CoalesceSubject, type CommitSubject, type DeviceSubject, type HomeCalls, type HomeSubject, type ReplySubject, type RoomSubject, type SeedTeam, type SettlementSubject, type SyncIntentRecord, type SyncSubject } from './commit-vectors.test-support.js';
 export { deliveryVectors, FINAL_BODY, replyToken, type DeliverySubject } from './delivery-vectors.test-support.js';
 export { policy, template } from './k4-fixtures.test-support.js';
-export { InMemoryDeviceCredentials, openLTestHost, ResultStubAdapter, ResultStubSession, type LTestHost } from './l-test-host.test-support.js';
+export { openLTestHost, ResultStubAdapter, ResultStubSession, type LTestHost } from './l-test-host.test-support.js';
 export { RETENTION_NOW, retentionVectors, type RetentionSubject } from './retention-vectors.test-support.js';
 export { routineVectors, type OccurrenceRow, type RoutineSubject } from './routine-vectors.test-support.js';
 // ==== @byok-sdk/bot-collaboration dist/topology.d.ts ====

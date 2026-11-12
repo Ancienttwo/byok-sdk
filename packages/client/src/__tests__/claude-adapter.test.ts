@@ -1,6 +1,6 @@
 import type { RuntimeTaskInput } from '../types';
 import { fileURLToPath } from 'node:url';
-import { spawn as realSpawn } from 'node:child_process';
+import { spawn as realSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,6 +15,7 @@ import { memoryClaude } from './fixtures/memory-claude';
 import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { observationOf } from './fixtures/mcp-observation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
+import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
@@ -481,6 +482,126 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     ]);
 
     expect(session.sessionRef).toBe('fake-claude-session-1');
+  });
+
+  it.each(['success', 'EPIPE', 'stdin error', 'close'] as const)('followUp() waits for its write callback and surfaces %s to the writer (#1941)', async outcome => {
+    let child!: ChildProcessWithoutNullStreams;
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: ((command: string, args: readonly string[], options: object) => {
+        child = realSpawn(command, args, options) as ChildProcessWithoutNullStreams;
+        return child;
+      }) as SpawnFn,
+    });
+    const session = await startAdapter(adapter, baseTask, await makeCtx());
+    openSessions.push(session);
+    await takeTurn(session);
+
+    let complete!: (error?: Error | null) => void;
+    let written!: () => void;
+    const writing = new Promise<void>(resolve => { written = resolve; });
+    vi.spyOn(child.stdin, '_write').mockImplementation((chunk, _encoding, callback) => {
+      expect(JSON.parse(chunk.toString()).message.content).toEqual([{ type: 'text', text: 'next' }]);
+      complete = callback;
+      written();
+    });
+    let settled = false;
+    const followUp = session.followUp({ instruction: 'next' });
+    void followUp.then(() => { settled = true; }, () => { settled = true; });
+    await writing;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(settled).toBe(false);
+
+    if (outcome === 'success') {
+      complete();
+      await expect(followUp).resolves.toBeUndefined();
+      return;
+    }
+    const events = session.events[Symbol.asyncIterator]().next();
+    const error = Object.assign(new Error('synthetic stdin EPIPE'), { code: 'EPIPE' });
+    const failedEvents = expect(events).rejects.toMatchObject({
+      phase: 'run', failure: { class: 'unknown' },
+      ...(outcome === 'close' ? {} : { cause: error }),
+    });
+    if (outcome === 'EPIPE') complete(error);
+    else if (outcome === 'stdin error') child.stdin.emit('error', error);
+    else await session.close();
+    await expect(followUp).rejects.toMatchObject({
+      phase: 'run',
+      cause: outcome === 'close' ? expect.objectContaining({ message: 'owned line process closed during write' }) : error,
+    });
+    await failedEvents;
+    if (outcome !== 'EPIPE') complete();
+  });
+
+  it('rejects an unwritable prompt in OAR before the exit callback runs (#1941)', async () => {
+    let native!: ChildProcessWithoutNullStreams;
+    const child = createOwnedLineProcessSpawn({ spawnFn: (command, args, options) => {
+      native = realSpawn(command, args, options) as ChildProcessWithoutNullStreams;
+      return native;
+    } })(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { env: {} });
+    const stream = new ClaudeStreamSession(child);
+    try {
+      await stream.open({ env: {}, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+      native.stdin.emit('error', new Error('stdin already failed'));
+      const control = await stream.prompt('must not be accepted');
+      expect(control.response.body).toMatchObject({ kind: 'rejected', code: 'error', reason: 'stdin already failed' });
+    } finally { await child.dispose(); }
+  });
+
+  it('classifies an exit during the initial prompt receipt as runtime_exited (#1941)', async () => {
+    let child!: ChildProcessWithoutNullStreams;
+    let written!: () => void;
+    const writing = new Promise<void>(resolve => { written = resolve; });
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: ((command: string, args: readonly string[], options: object) => {
+        child = realSpawn(command, args, options) as ChildProcessWithoutNullStreams;
+        vi.spyOn(child.stdin, '_write').mockImplementation(() => { written(); });
+        return child;
+      }) as SpawnFn,
+    });
+    const start = startAdapter(adapter, baseTask, await makeCtx());
+    const failed = expect(start).rejects.toMatchObject({
+      phase: 'start', message: 'claude exited before yielding an authoritative session id: owned line process closed during write', failure: { class: 'runtime_exited' },
+      cause: expect.objectContaining({ message: 'owned line process closed during write' }),
+    });
+    await writing;
+    child.kill(); // An exit outside owned disposal leaves the runtime_exited evidence intact.
+    await failed;
+  });
+
+  it('delivers stdout buffered before close to a handler registered after close (#1941)', async () => {
+    const child = createOwnedLineProcessSpawn()(process.execPath, ['-e', 'console.log("buffered before close")'], { env: {} });
+    try {
+      await child.spawned;
+      expect(await child.exited).toBe(0);
+      const lines: string[] = [];
+      child.onLine(line => { lines.push(line); });
+      expect(lines).toEqual(['buffered before close']);
+    } finally { await child.dispose(); }
+  });
+
+  it('delivers stdout before close and ignores a late stdout emission after onExit (#1941)', async () => {
+    let native!: ChildProcessWithoutNullStreams;
+    const child = createOwnedLineProcessSpawn({ spawnFn: (command, args, options) => {
+      native = realSpawn(command, args, options) as ChildProcessWithoutNullStreams;
+      return native;
+    } })(process.execPath, ['-e', 'console.log("ready"); setInterval(() => {}, 1000)'], { env: {} });
+    const lines: string[] = [];
+    const ready = new Promise<void>(resolve => child.onLine(line => { lines.push(line); resolve(); }));
+    try {
+      await child.spawned;
+      await ready;
+      expect(lines).toEqual(['ready']);
+      const exited = vi.fn();
+      child.onExit(exited);
+      await child.dispose();
+      await child.exited;
+      expect(exited).toHaveBeenCalledTimes(1);
+      native.stdout.emit('data', Buffer.from('late\n'));
+      expect(lines).toEqual(['ready']);
+    } finally { await child.dispose(); }
   });
 
   it('classifies a failed turn from the frames, per turn, with the reason unchanged (#869)', async () => {

@@ -1,6 +1,47 @@
 # Host upgrade to 0.42.0
 
-Checklist for a Host moving from 0.41.0 to the proposed 0.42.0 MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Reviewed against source base `bb88f920476472a09000925338061dd39877ce25`, including the release-notes audit (#1931). The version and publication remain subject to owner approval and the [release gates](https://github.com/Ancienttwo/byok-sdk/issues/1918); see the [release notes](v0.42.0.md). Review this guide again if the final train changes.
+Checklist for a Host moving from 0.41.0 to the proposed 0.42.0 MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Reviewed against source base `06a14462e0a0c6b30b9843d962072adff80a0d31`, including the release-notes audit (#1931). The version and publication remain subject to owner approval and the [release gates](https://github.com/Ancienttwo/byok-sdk/issues/1918); see the [release notes](v0.42.0.md). Review this guide again if the final train changes.
+
+## Service install requires a healthy start
+
+`ServiceInstallation.install()` now runs the same health check as `upgrade()`
+after installing and starting the service (#1966). A Host that relied on
+`install()` succeeding without a healthy start must now handle
+`ServiceInstallationError` code `install_health_check_failed` and allow for
+`healthTimeoutMs` (default 60000 ms). The error carries the start or health
+check failure as `cause`; `upgrade()` keeps its existing error behavior.
+Add the new code to exhaustive matches over `ServiceInstallationErrorCode`.
+
+For CLI installs before pairing, enable `serviceEnrollment: { enabled: true }`
+in the config; otherwise pair first. An embedded Host can instead pass its
+own `healthCheck`. An unpaired daemon without service enrollment halts on start,
+so the default check fails. With service enrollment, `awaiting-enrollment`
+is healthy even before pairing.
+
+If the service fails to install, activate, start or pass its health check,
+install removes the unit, launcher, `current`, installation record and the
+staged version directory, including on a same-id
+reinstall. No service remains after successful cleanup. Host stores, daemon
+stores and OS credentials are preserved. If removal fails, the error carries
+an `AggregateError` with both the original and removal failures as `cause`
+and names the remaining artifacts in its message. Install enforces the
+health-check deadline even if a custom check ignores abort or succeeds late.
+`upgrade()` and `restore()` retain their abort-only timeout behavior;
+[#1977](https://github.com/Ancienttwo/byok-sdk/issues/1977) tracks that follow-up.
+For install, the clock starts after start returns; unit writes, activation,
+start and cleanup stop are outside it. Platform commands have no time bound
+today; [#1971](https://github.com/Ancienttwo/byok-sdk/issues/1971) tracks that
+separate lifecycle change. Cleanup waits for an in-flight platform command
+to settle first. The CLI error
+includes the cause message and the before-pairing requirement.
+
+After an upgrade, a failed same-id reinstall leaves `previous`,
+`versions/<previous-id>`, `snapshots/` and `upgrade-receipt.json` intact,
+since they belong to other versions. With the installation record removed,
+CLI uninstall cannot discover the root. Construct the installation with the
+explicit `installRoot` and call `uninstall()`, or reinstall into the same
+root before using CLI uninstall.
+See [Versioned installs](../device-setup.md#versioned-installs).
 
 ## Clearing a device enrollment without a daemon
 
@@ -289,7 +330,7 @@ The hosted submitter now applies the local Host's device slot rule: per scope an
 
 ## Bot collaboration switch contract
 
-The owner switch records and errors are defined once, in `@byok-sdk/bot-collaboration` (#1667): `SwitchHeader`, `SwitchReceipt`, `SwitchExportMark`, `exportMarkOf`, `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError`. The roots of both packages still export the classes and `SwitchReceipt` (and the hosted root `SwitchExportMark`), but the local `./switch` and `./topology` modules and the hosted `./switch` and `./binding` modules no longer do; a deep import moves to `./migration`. `DeviceSwitchingError` takes `target: 'L' | 'H'`. The messages of `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError` changed and their `code` values did not, so match on `code`. The local `refuseImported` now throws `SwitchImportedError` (`switch_imported`) instead of a plain `Error`.
+The owner switch records and errors are defined once, in `@byok-sdk/bot-collaboration` (#1667), and are imported from `@byok-sdk/bot-collaboration/host-kit`: `SwitchHeader`, `SwitchReceipt`, `SwitchExportMark`, `exportMarkOf`, `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError`. The root of `@byok-sdk/bot-collaboration` does not export them. The hosted example root still exports the classes, `SwitchReceipt` and `SwitchExportMark`, but the hosted `./switch` and `./binding` modules no longer do. `DeviceSwitchingError` takes `target: 'L' | 'H'`. The messages of `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError` changed and their `code` values did not, so match on `code`. The local `refuseImported` now throws `SwitchImportedError` (`switch_imported`) instead of a plain `Error`.
 
 ## Bot collaboration legacy ledger branches
 
@@ -496,9 +537,8 @@ removed, with no alias and no stub:
 - `'hermes'` from `FakeRuntimeAdapterId` in `@byok-sdk/client/testing`.
 
 A Host that constructed `HermesAdapter` deletes that adapter and its imports,
-and retires its Hermes custody launcher process. The Hermes root it passed as
-`HermesAdapterOptions.home` holds only SDK-made profiles and caches; the Host
-may delete that directory. The device then no longer advertises the `hermes`
+and retires its Hermes custody launcher process. The SDK no longer creates or reads the directory
+it passed as `HermesAdapterOptions.home`; the Host may delete it. The device then no longer advertises the `hermes`
 harness, so enqueueing an offer with `harnessId: 'hermes'` throws
 `ByokCloudError` with code `agent_capability_missing`, like an offer for any
 harness the device does not advertise. `DaemonConfig` and

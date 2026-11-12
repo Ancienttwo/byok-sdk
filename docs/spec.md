@@ -360,7 +360,7 @@ on keys.
 0.42.0 is the proposed next MINOR under this policy. It keeps wire v6,
 removes the Hermes runtime adapter (#1876), introduces other breaking public
 API cuts, and adds the first `@byok-sdk/bot-collaboration` publication (#1910).
-The upgrade manifest from 0.41.0 has 13 breaking and 15 additive entries.
+The upgrade manifest from 0.41.0 has 14 breaking and 15 additive entries.
 Postgres adds migrations 0038/0039, embedded SQLite moves from v8 to v9, and
 keys profile stores require the explicit `migrateProviderProfileStore` for
 the widened `provider_kind` CHECK set. The owner approves the MINOR after

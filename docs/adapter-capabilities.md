@@ -1488,15 +1488,13 @@ were read from each adapter's constructor options and launch arguments on
 | dsh | no option | The adapter sets `DSH_HOME` to the Host-named `runtimes.dsh.home` and `DSH_AGENTS_HOME` to an empty `byok-agents-home` directory in it; the SDK projects no skill into either |
 | agy | no option | agy reads skills from `<home>/.gemini/config/skills/` below the Host-named `runtimes.agy.home`, and `ensureAgyHome` writes only its own `.gemini/antigravity-cli/settings.json` there |
 | Grok | no | `GrokAdapterOptions` has no skill option |
-| Hermes | no | Hermes reads skills from the per-execution `HERMES_HOME` the SDK creates fresh below `HermesAdapterOptions.home`; no option lets a Host seed it |
 | OpenCode | no | `OpenCodeAdapterOptions` has no skill option, and the adapter provides no home |
 
 Each `no` is a missing adapter option, not a runtime limitation. The positive
 controls of the [runtime contract suite](runtime-contract.md) show that a skill
 placed in the directory the SDK already uses does reach the model: one in
-`DSH_AGENTS_HOME` for dsh (`dsh.contract.ts`), `<HERMES_HOME>/skills/` for
-Hermes (`hermes.contract.ts`) and `<home>/.gemini/config/skills/` for agy
-(`agy.contract.ts`).
+`DSH_AGENTS_HOME` for dsh (`dsh.contract.ts`) and
+`<home>/.gemini/config/skills/` for agy (`agy.contract.ts`).
 
 A Host may still write files itself into a directory it names, such as
 `runtimes.dsh.home` or `runtimes.agy.home`. That is the Host's own file, not an

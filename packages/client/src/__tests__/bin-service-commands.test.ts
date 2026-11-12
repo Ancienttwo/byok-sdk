@@ -16,7 +16,7 @@ import {
 } from '../bin/commands/service';
 import { generateWinswXml } from '../lifecycle/winsw';
 import { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from '../lifecycle/agent-service';
-import type { ServiceInstallation, ServiceUpgradeReceipt } from '../lifecycle/service-installation';
+import { ServiceInstallationError, type ServiceInstallation, type ServiceUpgradeReceipt } from '../lifecycle/service-installation';
 import { runUpgradeInstallationCommand, runUpgradeStatusCommand } from '../bin/commands/upgrade';
 import { appendAuditRecord } from '../daemon/audit-log';
 import { formatHaltRemedy } from '../diagnostics/format';
@@ -295,6 +295,19 @@ describe('#1097 slice 2: payload installations through the CLI', () => {
     expect(installation.calls).toEqual([`install ${path.resolve('rel/payload')} {"replaceUnmarked":true}`]);
     expect(log).toHaveBeenCalledWith('service installed and started: acme-product version=2');
     await expect(runInstallCommand(baseConfig(), '/config/acme.json', ['--payload', 'p'], { installation })).rejects.toThrow('--payload requires --install-root <dir>');
+  });
+
+  it.each([false, true])('install --payload reports the underlying failure and pair-first remedy (cleanup failure=%s)', async (cleanupFailed) => {
+    const installation = fakeInstallation();
+    const healthError = new Error('the daemon is halted');
+    const cause = cleanupFailed ? new AggregateError([healthError, new Error('service removal failed')]) : healthError;
+    const error = new ServiceInstallationError('install_health_check_failed', undefined, { cause });
+    installation.install = async () => { throw error; };
+    await expect(runInstallCommand(baseConfig(), '/config/acme.json', ['--payload', 'p', '--install-root', '/opt/acme'], { installation })).rejects.toBe(error);
+    expect(error.message).toContain('the daemon is halted');
+    expect(error.message).toContain('enable serviceEnrollment in the config or pair first');
+    if (cleanupFailed) expect(error.message).toContain('service removal failed');
+    expect(error.cause).toBe(cause);
   });
 
   it('uninstall removes a recorded payload installation through it', async () => {

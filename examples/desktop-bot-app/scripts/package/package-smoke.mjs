@@ -33,7 +33,7 @@ import manifest from '../../package.json' with { type: 'json' };
 import { APP_FUSES } from '../../src/main/fuses.ts';
 import { hostEnvironment } from '../../src/main/packaged-host.ts';
 import { buildHostExecutable, hostFile, seaNodeLicense } from './bundle-host.mjs';
-import { codecFreeFfmpeg, packagedFfmpeg } from './ffmpeg.mjs';
+import { codecFreeFfmpeg, packagedFfmpeg, stockFfmpeg } from './ffmpeg.mjs';
 import { ELECTRON_NOTICES, NOTICES_FILE, nodeHeading, noticeHeading } from './notices.mjs';
 
 // The packaged Host pairs and keeps its device credential in this machine's OS store.
@@ -107,24 +107,33 @@ if (process.platform === 'darwin') {
   console.log('[package-smoke] codesign --verify --deep --strict passed');
 }
 
-// 3b. ffmpeg. macOS packaging re-signs the library, so there both sides lose their signature before the comparison.
+// 3b. ffmpeg. Signing changes Mach-O __LINKEDIT.vmsize even after signature removal.
+// Ad-hoc sign both temporary copies identically before removing their signatures.
 const digest = data => createHash('sha256').update(data).digest('hex');
-function withoutSignature(data) {
+function canonicalFfmpeg(data) {
   if (process.platform !== 'darwin') return data;
   const dir = mkdtempSync(path.join(tmpdir(), 'byok-desktop-ffmpeg-check-'));
   try {
     const file = path.join(dir, 'library');
     writeFileSync(file, data);
+    execFileSync('codesign', ['--force', '--sign', '-', file]);
     execFileSync('codesign', ['--remove-signature', file]);
     return readFileSync(file);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
-const ffmpeg = digest(withoutSignature(readFileSync(packagedFfmpeg(unpacked, process.platform))));
-const codecFree = digest(withoutSignature(await codecFreeFfmpeg({ version: manifest.devDependencies.electron, platform: process.platform, arch: process.arch })));
-assert.equal(ffmpeg, codecFree, "the packaged ffmpeg is not Electron's codec-free build");
-console.log(`[package-smoke] ffmpeg is the codec-free build (SHA-256 ${codecFree}${process.platform === 'darwin' ? ', unsigned' : ''})`);
+const ffmpegPath = packagedFfmpeg(unpacked, process.platform);
+const packagedSha256 = digest(canonicalFfmpeg(readFileSync(ffmpegPath)));
+const codecFreeSha256 = digest(canonicalFfmpeg(await codecFreeFfmpeg({ version: manifest.devDependencies.electron, platform: process.platform, arch: process.arch })));
+const stockSha256 = digest(canonicalFfmpeg(await stockFfmpeg({ version: manifest.devDependencies.electron, platform: process.platform, arch: process.arch })));
+console.log(`[package-smoke] ffmpeg comparison ${JSON.stringify({ electronVersion: manifest.devDependencies.electron,
+  platform: process.platform, arch: process.arch, packagedPath: ffmpegPath,
+  canonicalization: process.platform === 'darwin' ? 'codesign --force --sign -; codesign --remove-signature' : 'raw bytes',
+  packagedSha256, codecFreeSha256, stockSha256 })}`);
+assert.equal(packagedSha256, codecFreeSha256, "the packaged ffmpeg is not Electron's codec-free build");
+assert.notEqual(stockSha256, codecFreeSha256, 'the stock ffmpeg must fail the codec-free comparison');
+console.log('[package-smoke] ffmpeg is the codec-free build; stock ffmpeg rejected');
 
 // 3c. Linux: the deb depends on secret-tool.
 if (process.platform === 'linux') {

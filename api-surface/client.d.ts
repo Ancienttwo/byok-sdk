@@ -6514,7 +6514,10 @@ export declare function clearEnrollmentUnderLease(custody: EnrollmentCustody, re
  * enrollment succeeds. Unlike `Daemon.unpair()` it leaves the delivery cursor
  * file, which no later pairing reads because each pairing mints a new device
  * id. It reads the calling process's OS credential set, so it clears the
- * enrollment of the account it runs as.
+ * enrollment of the account it runs as. Clearing acts on the productId-wide
+ * OS credential entry; with more than one store under one productId, do not
+ * clear one store while another is pairing or has an unresolved first pairing
+ * (#1964).
  */
 export declare function clearDeviceEnrollment(options: DeviceEnrollmentStatusOptions & {
     readonly storeDir: string;
@@ -11236,7 +11239,12 @@ export interface ServiceInstallationOptions {
      * daemon that has not paired yet. `halted` or `crashed` fails at once.
      */
     healthCheck?(signal: AbortSignal): Promise<void>;
-    /** How long the health check may take. Default 60000. */
+    /**
+     * How long the health check may take. Default 60000. On install, this
+     * bounds only the health-check wait after start returns. Unit writes,
+     * activation, start and cleanup stop run outside it; platform commands
+     * have no time bound today (#1971).
+     */
     healthTimeoutMs?: number;
     /**
      * Every daemon store the service process owns, read after the service has
@@ -11296,7 +11304,14 @@ export interface ServiceUpgradeReceipt {
 export interface ServiceInstallation {
     /** The service lifecycle whose program runs `<installRoot>/current`. */
     readonly lifecycle: ServiceLifecycle;
-    /** Stages the payload as the first version, points `current` at it, installs and starts the service. */
+    /**
+     * Stages the payload as the first version, points `current` at it, installs
+     * and starts the service, then waits for its health check. A write,
+     * activation, start or health-check failure removes
+     * the unit, launcher, `current`, installation record and staged version,
+     * including on a same-id reinstall, and throws `install_health_check_failed`.
+     * Host stores, daemon stores and OS credentials are left intact.
+     */
     install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
     /**
      * Stages the payload, writes the pending receipt, stops the service, runs
@@ -11340,6 +11355,7 @@ declare const ERROR_MESSAGES: {
     readonly store_rejected: 'The candidate refuses a store. Nothing was switched; resolve the store first.';
     readonly store_migration_required: 'The candidate opens a store only after its migration, and no migrate program is configured. Nothing was switched and the store is unchanged.';
     readonly store_migration_failed: 'The candidate\'s store migration failed or left a store it does not accept. The store snapshot was restored and nothing was switched.';
+    readonly install_health_check_failed: 'The service failed to install, activate or pass its health check; the installation was removed.';
     readonly health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.';
     readonly rollback_unhealthy: 'The previous version was restored but failed its health check too.';
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
