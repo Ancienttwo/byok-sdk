@@ -578,6 +578,7 @@ await clearDeviceEnrollment({
   store with no enrollment clears successfully.
 - It clears the OS credential set of the account it runs as. A Windows
   `LocalSystem` service's enrollment is out of an interactive user's reach.
+- Clearing acts on the productId-wide OS credential entry; with more than one store under one productId, do not clear one store while another is pairing or has an unresolved first pairing (#1964).
 - Clear before deleting the data directory. The owner lease recreates
   `storeDir` if it is already gone.
 - `byok-agent unpair --yes --config <file>` runs `Daemon.unpair()`, which also
