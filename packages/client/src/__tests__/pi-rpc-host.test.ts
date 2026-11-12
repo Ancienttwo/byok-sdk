@@ -243,18 +243,29 @@ describe('SDK ordinary Pi RPC entry', () => {
     const settings = join(agent, 'settings.json'), before = JSON.stringify(mode === 'default' ? {} : { cacheWarming: mode === 'excluded' ? 'off' : mode });
     writeFileSync(settings, before);
     const runHeld = join(f.root, 'run-held'), releaseRun = join(f.root, 'release-run');
-    const decisionHeld = join(f.root, 'decision-held'), releaseDecision = join(f.root, 'release-decision'), decisionReturned = join(f.root, 'decision-returned');
+    const decisionHeld = join(f.root, 'decision-held'), releaseDecision = join(f.root, 'release-decision'), decisionFinished = join(f.root, 'decision-finished');
     writeFileSync(f.entry, `import {existsSync,writeFileSync} from 'node:fs';
       import {runPiSessionRuntime} from ${JSON.stringify(resolve(import.meta.dirname, '../bin/pi-session-runtime.ts'))};
       const wait=async path=>{while(!existsSync(path))await new Promise(resolve=>setTimeout(resolve,10));};
+      let session;
       runPiSessionRuntime({cwd:${JSON.stringify(f.cwd)},credentialSource:'pi-auth-store',provider:'probe',model:'probe',initialModel:'required',label:'warming-race',
+        configureSession:value=>{session=value;},
         ${mode === 'excluded' ? `resourceAgentDir:${JSON.stringify(join(f.root, 'resources'))},` : ''}
         resourceLoaderOptions:{noExtensions:true,noSkills:true,noThemes:true,noPromptTemplates:true,
           extensionFactories:[pi=>{
             pi.on('agent_before_settle',async()=>{writeFileSync(${JSON.stringify(runHeld)},'held');await wait(${JSON.stringify(releaseRun)});});
             pi.on('cache_warming_decision',async(_event,ctx)=>{
               writeFileSync(${JSON.stringify(decisionHeld)},JSON.stringify({idle:ctx.isIdle()}));
-              await wait(${JSON.stringify(releaseDecision)});writeFileSync(${JSON.stringify(decisionReturned)},'returned');return {action:'warm'};});
+              await wait(${JSON.stringify(releaseDecision)});
+              let observing=false;
+              return {get action(){
+                // The runner consumes action after awaiting this handler. Its microtasks finish before setImmediate.
+                if(!observing){observing=true;setImmediate(async()=>{
+                  while(session.cacheWarmingStatus?.state==='refreshing')await new Promise(resolve=>setTimeout(resolve,10));
+                  writeFileSync(${JSON.stringify(decisionFinished)},JSON.stringify(session.cacheWarmingStatus));
+                });}
+                return 'warm';
+              }};});
           }],
           // Put the SDK's old idle hook before the held decision, exposing its stale active answer.
           extensionsOverride:base=>({...base,extensions:[...base.extensions].reverse()})},
@@ -275,10 +286,9 @@ describe('SDK ordinary Pi RPC entry', () => {
       writeFileSync(releaseRun, 'release');
       await expect.poll(() => settled, { timeout: 5_000 }).toBe(true);
       writeFileSync(releaseDecision, 'release');
-      if (mode !== 'off') await expect.poll(() => existsSync(decisionReturned), { timeout: 5_000 }).toBe(true);
-      // Let the decision continuation dispatch if settlement failed to cancel it.
-      await new Promise(resolve => setTimeout(resolve, 250));
+      if (mode !== 'off') await expect.poll(() => existsSync(decisionFinished), { timeout: 5_000 }).toBe(true);
       expect(provider.requests).toHaveLength(1);
+      if (mode !== 'off') expect(JSON.parse(readFileSync(decisionFinished, 'utf8'))).toMatchObject({ state: 'inactive', reason: 'agent run settled' });
       expect(existsSync(decisionHeld)).toBe(mode !== 'off');
       expect(readFileSync(settings, 'utf8')).toBe(before);
     } finally {
