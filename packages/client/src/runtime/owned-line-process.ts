@@ -75,7 +75,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
       onOverflow: () => fail(new Error('owned line process frame exceeded its byte budget')),
     });
     const deliver = (line: string): void => {
-      if (failure !== undefined) return;
+      if (closed || failure !== undefined) return;
       if (!adopted || lineHandlers.length === 0) {
         const bytes = Buffer.byteLength(line);
         if (heldBytes + bytes > MAX_BUFFERED_BYTES) { fail(new Error('owned line process registration buffer exceeded its byte budget')); return; }

@@ -447,7 +447,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       // `--input-format stream-json` takes the first turn's instruction on
       // stdin, as every follow-up: one send path. Claude's `system/init`
       // after it carries the session id.
-      const prompted = await Promise.race([opened.raw.prompt(startInput.instruction), cancelled]);
+      const prompted = await Promise.race([opened.prompt(startInput.instruction), cancelled]);
       if (prompted.response.body.kind !== 'accepted') {
         throw new RuntimeExecutionFailure({
           phase: 'start', retry: 'retryable',
@@ -758,7 +758,7 @@ class ClaudeSession implements Session {
     let refusal: unknown;
     try {
       this.native?.beginTurn();
-      let prompted = await this.stream.raw.prompt(task.instruction);
+      let prompted = await this.stream.prompt(task.instruction);
       if (prompted.response.body.code === 'busy') prompted = await this.stream.queue(task.instruction);
       if (prompted.response.body.kind === 'accepted') return;
       refusal = prompted.response.body;
