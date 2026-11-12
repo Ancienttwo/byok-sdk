@@ -314,7 +314,7 @@ test('a platform family is selected only by a path it owns', () => {
   assert.ok(selectImpact(['examples/desktop-bot-app/assets/tray/trayTemplate@2x.png']).families.includes('desktop'));
   assert.throws(() => selectImpact(['examples/desktop-bot-app/assets/logo.png']), /mapping/i);
   // #1811: the packaging scripts and configuration select the desktop example.
-  for (const path of ['scripts/package/bundle-host.mjs', 'scripts/package/smoke-host.ts', 'scripts/package/entitlements-mac.plist', 'electron-builder.config.mjs']) {
+  for (const path of ['scripts/package/bundle-host.mjs', 'scripts/package/smoke-host.ts', 'scripts/package/entitlements-mac.plist', 'scripts/package/license-gate.test.mjs', 'electron-builder.config.mjs']) {
     assert.ok(selectImpact([`examples/desktop-bot-app/${path}`]).families.includes('desktop'), path);
   }
   for (const path of ['packages/client/src/bin/sdk-reserved-helper-runners.ts', 'packages/client/src/bin/byok-agent-result-mcp.ts', 'packages/client/src/lifecycle/sdk-reserved-helper-command.ts']) {

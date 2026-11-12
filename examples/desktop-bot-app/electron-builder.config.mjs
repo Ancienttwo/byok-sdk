@@ -12,10 +12,13 @@
 //   Windows: CSC_LINK + CSC_KEY_PASSWORD (or WIN_CSC_LINK + WIN_CSC_KEY_PASSWORD).
 // The update feed is BYOK_UPDATE_FEED_URL (a generic provider); unset, the app
 // ships without app-update.yml and its updater stays off.
+import { existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Arch } from 'electron-builder';
 import brand from './brand.config.ts';
 import manifest from './package.json' with { type: 'json' };
+import { codecFreeFfmpeg, packagedFfmpeg } from './scripts/package/ffmpeg.mjs';
 import { flipAppFuses } from './src/main/fuses.ts';
 
 // Absolute paths: scripts/package/build.mjs runs electron-builder with the staged
@@ -28,13 +31,20 @@ const macIdentity = env.CSC_LINK || env.CSC_NAME ? undefined : '-';
 const notarize = Boolean(env.APPLE_API_KEY || env.APPLE_ID);
 const feed = env.BYOK_UPDATE_FEED_URL;
 
-/** Flips the app fuses (src/main/fuses.ts) right after packing, before electron-builder signs. */
+/**
+ * Right after packing, before electron-builder signs: swaps in the codec-free
+ * ffmpeg (scripts/package/ffmpeg.mjs), then flips the app fuses (src/main/fuses.ts).
+ */
 async function afterPack(context) {
   const name = context.packager.appInfo.productFilename;
   const platform = context.electronPlatformName;
-  if (platform === 'darwin') return flipAppFuses(path.join(context.appOutDir, `${name}.app`, 'Contents', 'MacOS', name));
-  if (platform === 'win32') return flipAppFuses(path.join(context.appOutDir, `${name}.exe`));
-  if (platform === 'linux') return flipAppFuses(path.join(context.appOutDir, context.packager.executableName));
+  const app = platform === 'darwin' ? path.join(context.appOutDir, `${name}.app`) : context.appOutDir;
+  const ffmpeg = packagedFfmpeg(app, platform);
+  if (!existsSync(ffmpeg)) throw new Error(`Electron's ffmpeg is not at ${ffmpeg}`);
+  writeFileSync(ffmpeg, await codecFreeFfmpeg({ version: manifest.devDependencies.electron, platform, arch: Arch[context.arch] }));
+  if (platform === 'darwin') return flipAppFuses(path.join(app, 'Contents', 'MacOS', name));
+  if (platform === 'win32') return flipAppFuses(path.join(app, `${name}.exe`));
+  if (platform === 'linux') return flipAppFuses(path.join(app, context.packager.executableName));
   throw new Error(`No fuse target for ${platform}`);
 }
 
@@ -72,5 +82,11 @@ export default {
     category: 'Development',
     executableName: brand.productId,
     maintainer: brand.productName,
+  },
+  deb: {
+    // Replaces electron-builder's default list, so it repeats that list (app-builder-lib
+    // FpmTarget getDefaultDepends) and adds secret-tool, which the keys store and the
+    // device credential use on Linux (#1499 3.2); without it key entry fails closed.
+    depends: ['libgtk-3-0', 'libnotify4', 'libnss3', 'libxss1', 'libxtst6', 'xdg-utils', 'libatspi2.0-0', 'libuuid1', 'libsecret-1-0', 'libsecret-tools'],
   },
 };

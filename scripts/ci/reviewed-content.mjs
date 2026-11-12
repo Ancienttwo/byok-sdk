@@ -141,7 +141,7 @@ function admitHostedLock(before, after, cwd, example) {
 const REGISTERED_PRIVATE_ADDITIONS = Object.freeze({
   'examples/desktop-bot-app': Object.freeze({
     scripts: Object.freeze({
-      build: "tsc -p tsconfig.build.json && esbuild src/renderer/index.tsx --bundle --format=esm --platform=browser --target=es2022 --minify --log-level=warning --outdir=dist/src/renderer && node -e \"require('node:fs').cpSync('src/renderer/index.html', 'dist/src/renderer/index.html')\"",
+      build: "tsc -p tsconfig.build.json && esbuild src/renderer/index.tsx --bundle --format=esm --platform=browser --target=es2022 --minify --log-level=warning --outdir=dist/src/renderer --metafile=dist/renderer.meta.json && node -e \"require('node:fs').cpSync('src/renderer/index.html', 'dist/src/renderer/index.html')\"",
       // #1811: the one Host bundle (CommonJS under Node in dev, a SEA when packaged); dev runs it.
       'build:host': 'node scripts/package/bundle-host.mjs --format cjs',
       dev: 'bun run build && bun run build:host && electron dist/src/main/index.js',
@@ -152,6 +152,8 @@ const REGISTERED_PRIVATE_ADDITIONS = Object.freeze({
     devDependencies: Object.freeze({
       electron: '45.3.0', '@electron/fuses': '2.1.3', 'electron-builder': '26.18.0',
       react: '19.3.1', 'react-dom': '19.3.1', '@types/react': '19.3.0', '@types/react-dom': '19.3.0',
+      // #1916: the codec-free ffmpeg download (checked against electron's pinned checksums) and its unzip, as electron's own install uses them (#1499 D7).
+      '@electron/get': '5.1.0', '@electron-internal/extract-zip': '1.0.8',
     }),
   }),
 });
