@@ -18,14 +18,19 @@ own `healthCheck`. An unpaired daemon without service enrollment halts on start,
 so the default check fails. With service enrollment, `awaiting-enrollment`
 is healthy even before pairing.
 
-An installation write, activation, start or health-check failure removes the unit, launcher, `current`,
-installation record and the staged version directory, including on a same-id
+If the service fails to install, activate, start or pass its health check,
+install removes the unit, launcher, `current`, installation record and the
+staged version directory, including on a same-id
 reinstall. No service remains after successful cleanup. Host stores, daemon
 stores and OS credentials are preserved. If removal fails, the error carries
 an `AggregateError` with both the original and removal failures as `cause`
 and names the remaining artifacts in its message. Install enforces the
-health-check deadline even if a custom check ignores abort or succeeds late;
-cleanup waits for an in-flight platform start to settle first. The CLI error
+health-check deadline even if a custom check ignores abort or succeeds late.
+For install, the clock starts after start returns; unit writes, activation,
+start and cleanup stop are outside it. Platform commands have no time bound
+today; [#1971](https://github.com/Ancienttwo/byok-sdk/issues/1971) tracks that
+separate lifecycle change. Cleanup waits for an in-flight platform command
+to settle first. The CLI error
 includes the cause message and the before-pairing requirement.
 
 After an upgrade, a failed same-id reinstall leaves `previous`,

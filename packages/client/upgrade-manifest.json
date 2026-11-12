@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "8bc4b717c5fc42931715ab99b24738afdee4c1caaa1f7596ffb66e8390d227be"
+    "snapshotSha256": "bea0707126e0262c8428f02d9f55e14292709e4b340b8b2fcbf731289aa02f06"
   },
   "configFields": {
     "status": "tracked",
@@ -18,7 +18,7 @@
     {
       "id": "service-install-health-check",
       "impact": "breaking",
-      "summary": "ServiceInstallation.install now runs the upgrade health check after installing and starting, using healthTimeoutMs. A failed first install or same-id reinstall removes the unit, launcher, current pointer, installation record and staged version directory and throws the new ServiceInstallationErrorCode install_health_check_failed with the original error as cause. Installation write and activation failures take the same cleanup path. Install enforces the health deadline even for a check that ignores abort, waiting for an in-flight platform start before cleanup. Removal failures retain both errors in an AggregateError cause and name remaining artifacts. A failed reinstall after an upgrade leaves prior versions and rollback artifacts; use uninstall with an explicit installRoot or reinstall into the same root before CLI uninstall. Host and daemon stores and OS credentials are preserved. Before pairing, enable serviceEnrollment or supply a healthCheck; otherwise pair first. Upgrade error behavior is unchanged (#1966).",
+      "summary": "ServiceInstallation.install now runs the upgrade health check after installing and starting, using healthTimeoutMs. A failed first install or same-id reinstall removes the unit, launcher, current pointer, installation record and staged version directory and throws the new ServiceInstallationErrorCode install_health_check_failed with the original error as cause. Installation write and activation failures take the same cleanup path. Install enforces the health-check wait deadline even for a check that ignores abort. Its clock starts after start returns; unit writes, activation, start and cleanup stop are outside it and have no time bound today (#1971). Ownership and foreign-unit refusals happen before any installation write; later typed failures take the same cleanup path. Removal failures retain both errors in an AggregateError cause and name remaining artifacts. A failed reinstall after an upgrade leaves prior versions and rollback artifacts; use uninstall with an explicit installRoot or reinstall into the same root before CLI uninstall. Host and daemon stores and OS credentials are preserved. Before pairing, enable serviceEnrollment or supply a healthCheck; otherwise pair first. Upgrade error behavior is unchanged (#1966).",
       "migration": "docs/releases/host-upgrade-next-minor.md#service-install-requires-a-healthy-start",
       "items": [
         "export:@byok-sdk/client#ServiceInstallationErrorCode"

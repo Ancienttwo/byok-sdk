@@ -11236,7 +11236,12 @@ export interface ServiceInstallationOptions {
      * daemon that has not paired yet. `halted` or `crashed` fails at once.
      */
     healthCheck?(signal: AbortSignal): Promise<void>;
-    /** How long the health check may take. Default 60000. */
+    /**
+     * How long the health check may take. Default 60000. On install, this
+     * bounds only the health-check wait after start returns. Unit writes,
+     * activation, start and cleanup stop run outside it; platform commands
+     * have no time bound today (#1971).
+     */
     healthTimeoutMs?: number;
     /**
      * Every daemon store the service process owns, read after the service has
@@ -11347,7 +11352,7 @@ declare const ERROR_MESSAGES: {
     readonly store_rejected: 'The candidate refuses a store. Nothing was switched; resolve the store first.';
     readonly store_migration_required: 'The candidate opens a store only after its migration, and no migrate program is configured. Nothing was switched and the store is unchanged.';
     readonly store_migration_failed: 'The candidate\'s store migration failed or left a store it does not accept. The store snapshot was restored and nothing was switched.';
-    readonly install_health_check_failed: 'The installed version failed its health check; the installation was removed.';
+    readonly install_health_check_failed: 'The service failed to install, activate or pass its health check; the installation was removed.';
     readonly health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.';
     readonly rollback_unhealthy: 'The previous version was restored but failed its health check too.';
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';

@@ -90,7 +90,12 @@ export interface ServiceInstallationOptions {
    * daemon that has not paired yet. `halted` or `crashed` fails at once.
    */
   healthCheck?(signal: AbortSignal): Promise<void>;
-  /** How long the health check may take. Default 60000. */
+  /**
+   * How long the health check may take. Default 60000. On install, this
+   * bounds only the health-check wait after start returns. Unit writes,
+   * activation, start and cleanup stop run outside it; platform commands
+   * have no time bound today (#1971).
+   */
   healthTimeoutMs?: number;
   /**
    * Every daemon store the service process owns, read after the service has
@@ -204,7 +209,7 @@ const ERROR_MESSAGES = {
   store_rejected: 'The candidate refuses a store. Nothing was switched; resolve the store first.',
   store_migration_required: 'The candidate opens a store only after its migration, and no migrate program is configured. Nothing was switched and the store is unchanged.',
   store_migration_failed: 'The candidate\'s store migration failed or left a store it does not accept. The store snapshot was restored and nothing was switched.',
-  install_health_check_failed: 'The installed version failed its health check; the installation was removed.',
+  install_health_check_failed: 'The service failed to install, activate or pass its health check; the installation was removed.',
   health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.',
   rollback_unhealthy: 'The previous version was restored but failed its health check too.',
   no_rollback: 'There is no previous version with a store snapshot to roll back to.',
@@ -457,6 +462,12 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   function install(payloadDir: string, installOpts: ServiceInstallOptions = {}): Promise<void> {
     return lifecycle.owned(async (held) => {
       await refusePending();
+      // owned() has already checked the owner. Refuse foreign units before
+      // staging or writing any installation artifact, not by error class
+      // after activation may have written a unit and launcher.
+      if ((await lifecycle.inspect()).state === 'foreign' && installOpts.replaceUnmarked !== true) {
+        throw new ServiceUnitError('service_unit_unmarked');
+      }
       const installed = await currentVersion();
       const id = await stage(payloadDir);
       if (installed !== undefined && installed !== id) throw new ServiceInstallationError('installation_exists');
@@ -467,9 +478,6 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         await held.install(installOpts);
         health = await startHealthy(true);
       } catch (cause) {
-        // Ownership and foreign-unit refusals precede activation and remain
-        // refusals: never try to uninstall a service we do not own.
-        if (cause instanceof ServiceUnitError) throw cause;
         health = { ok: false, cause };
       }
       if (health.ok) return;
@@ -488,7 +496,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         } catch (cause) {
           const failure = new AggregateError([health.cause, cause], 'Service installation and removal both failed.');
           const error = new ServiceInstallationError('install_health_check_failed', undefined, { cause: failure });
-          error.message = `The installed version failed its health check; removal failed. Remaining: ${removals.slice(index).map((item) => item.name).join(', ')}.`;
+          error.message = `The service failed to install, activate or pass its health check; removal failed. Remaining: ${removals.slice(index).map((item) => item.name).join(', ')}.`;
           throw error;
         }
       }
@@ -566,16 +574,18 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   async function startHealthy(enforceDeadline = false): Promise<{ ok: true } | { ok: false; cause: unknown }> {
     const controller = new AbortController();
     const timeoutMs = opts.healthTimeoutMs ?? 60_000;
-    const deadline = Date.now() + timeoutMs;
     const timedOut = new Error(`the service health check timed out after ${timeoutMs} ms`);
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let timeout = enforceDeadline ? undefined : setTimeout(() => controller.abort(), timeoutMs);
     let onAbort: (() => void) | undefined;
     try {
-      // A platform start cannot be cancelled. Let it settle before cleanup
-      // can stop/unregister the service, so it cannot start after removal.
+      // Platform commands are outside install's health-check deadline and
+      // currently have no timeout. Await start before checking health or
+      // cleaning up; abandoning it could start a service after its removal.
       await lifecycle.start();
       const check = opts.healthCheck ?? defaultServiceHealthCheck({ storeDir, productId: opts.productId });
       if (enforceDeadline) {
+        const deadline = Date.now() + timeoutMs;
+        timeout = setTimeout(() => controller.abort(), timeoutMs);
         if (controller.signal.aborted || Date.now() >= deadline) throw timedOut;
         const expired = new Promise<never>((_resolve, reject) => {
           onAbort = () => reject(timedOut);

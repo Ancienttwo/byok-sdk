@@ -474,14 +474,17 @@ pairing must enable `serviceEnrollment: { enabled: true }` in its config;
 otherwise pair first. An embedded Host can instead pass its own
 `healthCheck`. An unpaired daemon without service enrollment halts on start
 and cannot pass the default check. Install enforces the health-check
-deadline even if a custom check ignores abort or succeeds late. It waits
-for an in-flight platform start to settle before cleanup, so the platform
-cannot restart the service after its removal.
+deadline even if a custom check ignores abort or succeeds late. For install,
+`healthTimeoutMs` bounds only the health-check wait after start returns. Unit
+writes, activation, start and the cleanup stop run outside that deadline;
+platform commands have no time bound today (follow-up: [#1971](https://github.com/Ancienttwo/byok-sdk/issues/1971)).
+Install awaits platform commands before proceeding, so cleanup cannot race
+a start that could restart the service after removal.
 
-An installation write, activation, start or health-check failure removes the unit and launcher, `current`, the
-installation record and the staged `versions/<id>` directory, then throws
-`ServiceInstallationError` with code `install_health_check_failed` and the
-start or health-check error as `cause`. This also applies when reinstalling
+If the service fails to install, activate, start or pass its health check,
+install removes the unit and launcher, `current`, the installation record and
+the staged `versions/<id>` directory, then throws `ServiceInstallationError`
+with code `install_health_check_failed` and the original error as `cause`. This also applies when reinstalling
 the same id: a failed repair leaves no service installed. Cleanup preserves
 Host stores, daemon stores and OS credentials. If removal itself fails, the
 same error code carries an `AggregateError` containing the original failure

@@ -13,7 +13,7 @@ import {
 } from '../lifecycle/service-installation';
 import { SERVICE_PAYLOAD_MANIFEST, writeServicePayloadManifest, type ServicePayloadManifest } from '../service-payload-manifest';
 import { createManagedLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
-import { SERVICE_UNIT_MARKER, withServiceOwnerGate } from '../lifecycle/service-unit';
+import { SERVICE_UNIT_MARKER, ServiceUnitError, withServiceOwnerGate } from '../lifecycle/service-unit';
 import * as daemonOwner from '../util/daemon-owner';
 import { acquireDaemonOwner } from '../util/daemon-owner';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
@@ -195,8 +195,10 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await expect(installation.install(await payload('2.0.0'))).rejects.toMatchObject({ code: 'installation_exists' });
   });
 
-  it.each(['first install', 'same-id reinstall', 'activation failure'])('%s removes installation artifacts when startup fails, preserving stores (#1966)', async (mode) => {
-    const healthError = new Error(mode === 'activation failure' ? 'service activation failed' : 'identity endpoint is unhealthy');
+  it.each(['first install', 'same-id reinstall', 'activation failure', 'typed activation failure'])('%s removes installation artifacts when startup fails, preserving stores (#1966)', async (mode) => {
+    const healthError = mode === 'typed activation failure'
+      ? new ServiceUnitError('service_unload_timeout')
+      : new Error(mode === 'activation failure' ? 'service activation failed' : 'identity endpoint is unhealthy');
     const unitPath = path.join(root, 'service.unit');
     const launcherPath = path.join(root, 'launcher');
     let running = false;
@@ -204,7 +206,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     const unit: PlatformUnit = {
       serviceName: 'svc', unitPath, launcherPath,
       files: () => [unitPath, launcherPath].map((file) => ({ path: file, content: SERVICE_UNIT_MARKER })),
-      activate: async () => { running = true; if (mode === 'activation failure') throw healthError; },
+      activate: async () => { running = true; if (mode.endsWith('activation failure')) throw healthError; },
       deactivate: async () => { running = false; },
       removeFiles: async () => { for (const file of [unitPath, launcherPath]) await fs.rm(file); },
       start: async () => { running = true; }, stop: async () => { running = false; },
@@ -235,44 +237,79 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(await fs.readFile(hostStore, 'utf8')).toBe('Host data');
   });
 
-  it.each(['ignores abort forever', 'succeeds after the deadline', 'start still in flight'])('install enforces its deadline when %s (#1966)', async (mode) => {
-    const base = fakeLifecycle();
+  it('refuses a foreign unit before staging or writing installation artifacts (#1966)', async () => {
+    const unitPath = path.join(root, 'foreign.unit');
+    const launcherPath = path.join(root, 'foreign.launcher');
+    await fs.writeFile(unitPath, 'operator unit');
+    await fs.writeFile(launcherPath, 'operator launcher');
+    installation = installationOver({
+      ...fakeLifecycle(),
+      inspect: async () => ({ state: 'foreign', unitPath, launcherPath }),
+    });
+    await expect(installation.install(await payload('1.0.0'))).rejects.toMatchObject({ code: 'service_unit_unmarked' });
+    await expect(fs.lstat(installRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
+    expect(await fs.readFile(unitPath, 'utf8')).toBe('operator unit');
+    expect(await fs.readFile(launcherPath, 'utf8')).toBe('operator launcher');
+    expect(events).toEqual([]);
+  });
+
+  it.each(['ignores abort forever', 'succeeds after the deadline before the timer fires'])('install enforces its health-check deadline when %s (#1966)', async (mode) => {
     let release!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });
     let entered!: () => void;
     const began = new Promise<void>((resolve) => { entered = resolve; });
-    const lifecycle = mode === 'start still in flight' ? {
-      ...base,
-      start: async () => { events.push('start'); entered(); await pending; },
-    } : base;
     let signal: AbortSignal | undefined;
-    installation = installationOver(lifecycle, {
+    installation = installationOver(fakeLifecycle(), {
       healthTimeoutMs: 50,
-      healthCheck: async (value) => { signal = value; entered(); await pending; },
+      healthCheck: async (value) => {
+        signal = value;
+        entered();
+        if (mode === 'ignores abort forever') await pending;
+        else vi.setSystemTime(Date.now() + 51);
+      },
     });
     const candidate = await payload('1.0.0');
     vi.useFakeTimers();
     try {
       const installing = installation.install(candidate).catch((caught: unknown) => caught);
       await began;
-      await vi.advanceTimersByTimeAsync(51);
-      if (mode === 'start still in flight') {
-        // Cleanup must not race a platform start that could restart after it.
-        expect(events).not.toContain('uninstall');
-        release();
-      }
+      // The late-success case advances only the wall clock inside the
+      // check, exercising the post-race deadline check before abort fires.
+      if (mode === 'ignores abort forever') await vi.advanceTimersByTimeAsync(51);
       const error = await installing;
       expect(error).toMatchObject({ code: 'install_health_check_failed', cause: { message: 'the service health check timed out after 50 ms' } });
       expect(await installation.currentVersion()).toBeUndefined();
       expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
       expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
       expect(events.at(-1)).toBe('uninstall');
-      if (mode !== 'start still in flight') expect(signal?.aborted).toBe(true);
-      if (mode === 'succeeds after the deadline') {
-        release();
-        await Promise.resolve();
-        expect(await installation.currentVersion()).toBeUndefined();
-      }
+      expect(signal?.aborted).toBe(mode === 'ignores abort forever');
+    } finally {
+      release();
+      vi.useRealTimers();
+    }
+  });
+
+  it('starts the install health-check deadline after an in-flight platform start settles (#1966)', async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void;
+    const began = new Promise<void>((resolve) => { entered = resolve; });
+    installation = installationOver({
+      ...fakeLifecycle(),
+      start: async () => { events.push('start'); entered(); await pending; },
+    }, { healthTimeoutMs: 50 });
+    const candidate = await payload('1.0.0');
+    vi.useFakeTimers();
+    try {
+      const installing = installation.install(candidate);
+      await began;
+      await vi.advanceTimersByTimeAsync(51);
+      expect(events).not.toContain('uninstall');
+      release();
+      await installing;
+      expect(await installation.currentVersion()).toBe('1.0.0');
+      expect(events).toEqual(['install', 'start', 'health 1.0.0']);
     } finally {
       release();
       vi.useRealTimers();
