@@ -1,12 +1,15 @@
 // The license gate of the packaged app (#1499 3.1): every npm package the app
 // ships declares a permissive license. What ships is every package esbuild
-// bundled (main, renderer, Host) and every package copied into resources/host/
-// (the Pi asset root). Electron's own LICENSE and Chromium's notices ship as
-// electron-builder writes them.
+// bundled (main, renderer, Host), Electron itself, and every package copied into
+// resources/host/ (the Pi asset root). A copied file outside those packages fails
+// the gate unless the caller names it as a reviewed file without a package
+// manifest; the report lists those as not checked. Chromium's third-party notices
+// ship as electron-builder writes them.
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const PERMISSIVE = new Set(['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', '0BSD', 'ISC']);
+const OPERATORS = new Set(['AND', 'OR', 'WITH', ')']);
 
 /** Whether an SPDX expression grants a permissive license: `OR` needs one permissive side, `AND` needs both. A malformed expression is not permissive. */
 export function permissive(expression) {
@@ -15,7 +18,8 @@ export function permissive(expression) {
   let at = 0;
   const atom = () => {
     const token = tokens[at++];
-    if (token !== '(') return token !== undefined && PERMISSIVE.has(token);
+    if (token === undefined || OPERATORS.has(token)) throw new SyntaxError(expression);
+    if (token !== '(') return PERMISSIVE.has(token);
     const inner = either();
     if (tokens[at++] !== ')') throw new SyntaxError(expression);
     return inner;
@@ -43,38 +47,53 @@ function owningPackage(file) {
   }
 }
 
-function packageFiles(dir) {
-  return readdirSync(dir, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? packageFiles(path.join(dir, entry.name))
-    : entry.name === 'package.json' ? [path.join(dir, entry.name)] : []);
+function files(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(path.join(dir, entry.name)) : [path.join(dir, entry.name)]);
 }
+
+const slashed = file => file.split(path.sep).join('/');
 
 /**
  * The shipped packages, by `name@version`: the owner of each input of the esbuild
- * metafiles (paths relative to `root`, the builds' working directory) and each
- * named package.json under `copiedRoots`.
+ * metafiles (paths relative to `root`, the builds' working directory), each of
+ * `manifests`, and each named package.json under `copiedRoots`. Every other file
+ * under `copiedRoots` must lie in one of those copied packages or be a key of
+ * `unpackaged` (`/`-separated, relative to `root`, mapped to its provenance);
+ * an `unpackaged` key wins over the package around it.
  */
-export function licenseInventory({ root, metafiles, copiedRoots }) {
+export function licenseInventory({ root, metafiles, manifests, copiedRoots, unpackaged }) {
   const inventory = new Map();
   const add = (pkg, where) => inventory.set(`${pkg.name}@${pkg.version}`, { name: pkg.name, version: pkg.version, license: pkg.license, where });
   for (const input of metafiles.flatMap(metafile => Object.keys(metafile.inputs))) {
     // esbuild lists a module that a package's `browser` field maps to false as `(disabled):<path>`; nothing of it ships.
     if (input.startsWith('(disabled):')) continue;
     const { pkg, dir } = owningPackage(path.resolve(root, input));
-    add(pkg, path.relative(root, dir) || '.');
+    add(pkg, slashed(path.relative(root, dir)) || '.');
   }
+  for (const manifest of manifests) add(readJson(manifest), slashed(path.relative(root, path.dirname(manifest))));
+  const reviewed = [];
   for (const copied of copiedRoots) {
-    for (const manifest of packageFiles(copied)) {
-      const pkg = readJson(manifest);
-      if (typeof pkg.name === 'string') add(pkg, path.relative(root, path.dirname(manifest)));
+    const copiedFiles = files(copied).map(file => slashed(path.relative(root, file)));
+    const packageDirs = copiedFiles.filter(file => file.endsWith('/package.json')).flatMap(file => {
+      const pkg = readJson(path.join(root, file));
+      if (typeof pkg.name !== 'string') return [];
+      add(pkg, path.posix.dirname(file));
+      return [`${path.posix.dirname(file)}/`];
+    });
+    for (const file of copiedFiles) {
+      if (Object.hasOwn(unpackaged, file)) reviewed.push({ file, provenance: unpackaged[file] });
+      else if (!packageDirs.some(dir => file.startsWith(dir))) throw new Error(`License gate: ${file} ships in no package and is not a reviewed file`);
     }
   }
-  return [...inventory.values()].sort((a, b) => a.name.localeCompare(b.name) || String(a.version).localeCompare(String(b.version)));
+  return { packages: [...inventory.values()].sort((a, b) => a.name.localeCompare(b.name) || String(a.version).localeCompare(String(b.version))), reviewed };
 }
 
-/** The inventory as a Markdown table, and the packages whose declared license is not permissive. */
-export function licenseReport(inventory) {
-  const refused = inventory.filter(entry => !permissive(entry.license));
+/** The inventory as Markdown, and the packages whose declared license is not permissive. */
+export function licenseReport({ packages, reviewed }) {
+  const refused = packages.filter(entry => !permissive(entry.license));
   const table = ['| Package | Version | License | Shipped from |', '| --- | --- | --- | --- |',
-    ...inventory.map(entry => `| ${entry.name} | ${entry.version} | ${JSON.stringify(entry.license ?? null)}${refused.includes(entry) ? ' **refused**' : ''} | ${entry.where} |`)].join('\n');
+    ...packages.map(entry => `| ${entry.name} | ${entry.version} | ${JSON.stringify(entry.license ?? null)}${refused.includes(entry) ? ' **refused**' : ''} | ${entry.where} |`),
+    '', 'Shipped without a package manifest, not checked by the gate:', '', '| File | Provenance |', '| --- | --- |',
+    ...reviewed.map(entry => `| ${entry.file} | ${entry.provenance} |`)].join('\n');
   return { table, refused };
 }
