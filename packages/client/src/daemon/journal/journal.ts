@@ -29,6 +29,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { decodeEnvelope } from '@byok-sdk/protocol';
 
 /**
  * The journal's one hash function, shared by every producer so a stored digest
@@ -38,6 +39,19 @@ import { createHash } from 'node:crypto';
  */
 export function journalHash(bytes: string): string {
   return `sha256:${createHash('sha256').update(bytes, 'utf8').digest('hex')}`;
+}
+
+/**
+ * Decode stored cancellation bytes and require a `task.cancel` for `taskId`
+ * sequenced after the offer at `offerSeq`; returns the envelope's own sequence.
+ * Recovery and journal pruning share this so they accept the same evidence.
+ */
+export function assertTaskCancellationBinding(bytes: string, taskId: string, offerSeq: number): number {
+  const envelope = decodeEnvelope(bytes);
+  if (envelope.type !== 'task.cancel' || envelope.task_id !== taskId || envelope.seq === undefined || envelope.seq <= offerSeq) {
+    throw new Error('invalid durable cancellation binding');
+  }
+  return envelope.seq;
 }
 
 /**
@@ -320,8 +334,16 @@ export interface LocalTaskJournal {
   measureUsage(): Promise<LocalStorageUsage>;
   /** Confirmed terminals older than cutoff, without recovery markers, oldest first. */
   listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
-  /** Transactionally rechecks confirmation and recovery protection before pruning. */
-  pruneConfirmedJournalTask(taskId: string): Promise<boolean>;
+  /**
+   * Transactionally rechecks confirmation and recovery protection before
+   * pruning, and returns `false` without deleting unless the task is still
+   * past `cutoff` under the write lock: a confirmed terminal last updated
+   * before `cutoff`, or a received offer whose stored `task.cancel` passes the
+   * cancellation binding (task id and a sequence above the offer's) and was
+   * committed before `cutoff`. The recheck guards a direct call and a task id
+   * replaced after listing; the SDK does not repeat it for an injected journal.
+   */
+  pruneConfirmedJournalTask(taskId: string, cutoff: Date): Promise<boolean>;
   /** Bounded WAL checkpoint + incremental vacuum. Maintenance only; never on the envelope path. */
   compact(options: CompactOptions): Promise<CompactResult>;
   /**

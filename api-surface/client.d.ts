@@ -6750,6 +6750,12 @@ export declare function resolveHostLayout(options: HostLayoutOptions): HostLayou
  */
 export declare function journalHash(bytes: string): string;
 /**
+ * Decode stored cancellation bytes and require a `task.cancel` for `taskId`
+ * sequenced after the offer at `offerSeq`; returns the envelope's own sequence.
+ * Recovery and journal pruning share this so they accept the same evidence.
+ */
+export declare function assertTaskCancellationBinding(bytes: string, taskId: string, offerSeq: number): number;
+/**
  * Who this daemon is, as recorded on every journal row (§12.7.2's minimum
  * fact set, first three entries). Carried explicitly rather than captured at
  * construction because `deviceId` is only known after `AuthManager`
@@ -7017,8 +7023,16 @@ export interface LocalTaskJournal {
     measureUsage(): Promise<LocalStorageUsage>;
     /** Confirmed terminals older than cutoff, without recovery markers, oldest first. */
     listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
-    /** Transactionally rechecks confirmation and recovery protection before pruning. */
-    pruneConfirmedJournalTask(taskId: string): Promise<boolean>;
+    /**
+     * Transactionally rechecks confirmation and recovery protection before
+     * pruning, and returns `false` without deleting unless the task is still
+     * past `cutoff` under the write lock: a confirmed terminal last updated
+     * before `cutoff`, or a received offer whose stored `task.cancel` passes the
+     * cancellation binding (task id and a sequence above the offer's) and was
+     * committed before `cutoff`. The recheck guards a direct call and a task id
+     * replaced after listing; the SDK does not repeat it for an injected journal.
+     */
+    pruneConfirmedJournalTask(taskId: string, cutoff: Date): Promise<boolean>;
     /** Bounded WAL checkpoint + incremental vacuum. Maintenance only; never on the envelope path. */
     compact(options: CompactOptions): Promise<CompactResult>;
     /**
@@ -7211,7 +7225,7 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
     /** Physical journal/quarantine footprint and confirmed-row inventory. */
     measureUsage(): Promise<LocalStorageUsage>;
     listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
-    pruneConfirmedJournalTask(taskId: string): Promise<boolean>;
+    pruneConfirmedJournalTask(taskId: string, cutoff: Date): Promise<boolean>;
     /**
      * WAL checkpoint plus a BOUNDED incremental vacuum. Maintenance only — it
      * goes through the same single-writer queue as everything else, so it can

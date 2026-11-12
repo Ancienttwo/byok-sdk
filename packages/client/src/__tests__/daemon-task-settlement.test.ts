@@ -384,8 +384,9 @@ describe('Daemon.whenTaskSettled', () => {
     await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, identity.deviceId)).toBe(cancellation.seq));
     await d.stop();
     const journal = new SqliteLocalTaskJournal({ storeDir });
-    await expect(journal.listPrunableConfirmedTasks(new Date(Date.now() + 60_000), 10)).resolves.toEqual([taskId]);
-    await expect(journal.pruneConfirmedJournalTask(taskId)).resolves.toBe(true);
+    const cutoff = new Date(Date.now() + 60_000);
+    await expect(journal.listPrunableConfirmedTasks(cutoff, 10)).resolves.toEqual([taskId]);
+    await expect(journal.pruneConfirmedJournalTask(taskId, cutoff)).resolves.toBe(true);
     await journal.close();
     await d.start();
     // A conforming mailbox never redelivers the cancelled offer; later traffic still flows.

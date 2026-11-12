@@ -134,7 +134,7 @@ it('default journal retention discovers old confirmed rows and protects unconfir
  await terminal(journal,'expired','confirmed');await terminal(journal,'pending','pending');await terminal(journal,'marked','confirmed');await journal.markRecovered('marked',{disposition:'interrupted'});
  await terminal(journal,'recent','confirmed','2026-10-13T00:00:00.000Z');const f=await fixture({store,journal});await f.sweeper.runPass('startup');
  expect(await journal.readTask('expired',identity)).toBeUndefined();for(const id of ['pending','marked','recent'])expect(await journal.readTask(id,identity)).toBeDefined();
- expect(await journal.pruneConfirmedJournalTask('marked')).toBe(false);
+ expect(await journal.pruneConfirmedJournalTask('marked',new Date())).toBe(false);
 });
 it('locked and unknown replicas survive; journal-terminal replicas require an exclusive lock before deletion',async()=>{
  const store=testScratchRoot(),journal=new SqliteLocalTaskJournal({storeDir:store});cleanups.push(()=>journal.close());await terminal(journal,'locked','pending');await terminal(journal,'closed','pending');

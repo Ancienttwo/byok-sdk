@@ -34,6 +34,7 @@ import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { SEALED_INLINE_MAX_PADDED_LENGTH, isSealedPayload } from '@byok-sdk/protocol';
 import {
+  assertTaskCancellationBinding,
   journalHash,
   type JournalIdentity,
   JournalClosedError,
@@ -839,11 +840,14 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
   }
 
   readTaskCancellation(taskId: string, identity: JournalIdentity, afterSeq: number) {
-    return this.#enqueue('readTaskCancellation', () => this.#taskCancellation(taskId, identity, afterSeq));
+    return this.#enqueue('readTaskCancellation', () => {
+      const row = this.#taskCancellation(taskId, identity, afterSeq);
+      return row && { identity: row.identity, bytes: row.bytes, bytesHash: row.bytesHash };
+    });
   }
 
   #taskCancellation(taskId: string, identity: JournalIdentity, afterSeq: number) {
-    const rows = this.#db.prepare(`SELECT tenant_id, product_id, device_id, seq, bytes, bytes_hash FROM journal_envelope
+    const rows = this.#db.prepare(`SELECT tenant_id, product_id, device_id, seq, bytes, bytes_hash, committed_at FROM journal_envelope
       WHERE task_id = ? AND withheld_bytes IS NULL
       ORDER BY seq, envelope_id`).all(taskId) as Record<string, unknown>[];
     // Validate every candidate before its content can exclude it, including
@@ -859,7 +863,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     if (!row) return undefined;
     return {
       identity: { tenantId: row.tenant_id as string, productId: row.product_id as string, deviceId: row.device_id as string },
-      bytes: row.bytes as string, bytesHash: row.bytes_hash as string,
+      bytes: row.bytes as string, bytesHash: row.bytes_hash as string, seq: Number(row.seq), committedAt: row.committed_at as string,
     };
   }
 
@@ -1047,7 +1051,9 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     });
   }
 
-  pruneConfirmedJournalTask(taskId: string): Promise<boolean> {
+  pruneConfirmedJournalTask(taskId: string, cutoff: Date): Promise<boolean> {
+    if (!Number.isFinite(cutoff.getTime())) return Promise.reject(new TypeError('invalid journal retention bounds'));
+    const before = cutoff.toISOString();
     return this.#enqueue('pruneConfirmedJournalTask', () =>
       this.#transaction(() => {
         const eligible = this.#db
@@ -1057,10 +1063,11 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
                JOIN journal_terminal term ON term.task_id = t.task_id
               WHERE t.task_id = ?
                 AND t.recovery_marker IS NULL
-                AND term.truth_state = 'confirmed'`,
+                AND term.truth_state = 'confirmed'
+                AND term.updated_at < ?`,
           )
-          .get(taskId);
-        if (!eligible && !this.#cancelledReceivedTask(taskId)) return false;
+          .get(taskId, before);
+        if (!eligible && !this.#cancelledReceivedTask(taskId, before)) return false;
 
         // Child-first, so `foreign_keys=ON` is satisfied at every statement
         // rather than deferred to the commit — a deletion order the database
@@ -1076,13 +1083,20 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     );
   }
 
-  /** Rechecks the cancelled-offer rule inside the prune transaction, verifying every stored envelope of the task first. */
-  #cancelledReceivedTask(taskId: string): boolean {
+  /** Rechecks the cancelled-offer rule and its cutoff inside the prune transaction, verifying every stored envelope of the task first. */
+  #cancelledReceivedTask(taskId: string, before: string): boolean {
     const task = this.#db.prepare(`SELECT t.tenant_id, t.product_id, t.device_id, t.seq FROM journal_task t
       WHERE t.task_id = ? AND ${CANCELLED_RECEIVED_TASK}`).get(taskId) as Record<string, unknown> | undefined;
     if (!task) return false;
     const identity = { tenantId: task.tenant_id as string, productId: task.product_id as string, deviceId: task.device_id as string };
-    return this.#taskCancellation(taskId, identity, Number(task.seq)) !== undefined;
+    const cancellation = this.#taskCancellation(taskId, identity, Number(task.seq));
+    if (cancellation === undefined) return false;
+    // The same decode and binding recovery applies, plus the row's own sequence.
+    if (assertTaskCancellationBinding(cancellation.bytes, taskId, Number(task.seq)) !== cancellation.seq) {
+      throw new Error('invalid durable cancellation binding');
+    }
+    // Fresh evidence under a reused task id, or a direct call, is not yet past retention.
+    return cancellation.committedAt < before;
   }
 
   /**
