@@ -688,6 +688,24 @@ test('setup documentation admits only exact additive generator commands and its 
   }
 });
 
+test('the client host-layout addition is exact and retains consumer and packed checks', t => {
+  const f = fixture(t), path = 'packages/client/package.json';
+  const root = { '.': { types: './dist/index.d.ts', import: './dist/index.js' } };
+  f.write(path, { ...f.manifest, exports: root }); rebase(f, 'client before host-layout');
+  const entry = { types: './dist/host-layout.d.ts', import: './dist/host-layout.js' };
+  const write = value => f.write(path, { ...f.manifest, exports: { ...root, './host-layout': value } });
+  write(entry);
+  const source = 'packages/client/src/host-layout.ts';
+  const plan = selectImpact([path, source], f);
+  assert.deepEqual(plan.dirs, selectImpact([source], f).dirs);
+  assert.deepEqual(plan.families, ['dataplane', 'npm-release-pack']);
+  for (const invalid of [{ ...entry, types: './dist/other.d.ts' }, { ...entry, import: './dist/other.js' },
+    { ...entry, require: './dist/host-layout.cjs' }]) {
+    write(invalid);
+    assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
+  }
+});
+
 // #1104: the packaging example's bundle test (script, runner and lock row) and the client packaging entry.
 test('#1104: the packaging example admits only its bundle test, and the client only the ./packaging entry', t => {
   const f = fixture(t);
