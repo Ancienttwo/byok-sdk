@@ -11381,7 +11381,8 @@ export interface ServiceInstallation {
      * before preparation and started again after preparation fails, once
      * leases/gates are released and the version directory this call created
      * is removed (one it reused, or any after `installation_exists`, is kept:
-     * another installation may use it). After a failed store
+     * another installation may use it; the next successful upgrade's prune or
+     * uninstall removes it). After a failed store
      * restore it is removed instead, and the next install writes it again.
      * OS credentials are never cleared. `precheck` is required.
      * The temporary snapshot `snapshots/.install-<uuid>` is removed after a
