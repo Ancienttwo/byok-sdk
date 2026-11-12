@@ -6,7 +6,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && esbuild src/renderer/index.tsx --bundle --format=esm --platform=browser --target=es2022 --minify --log-level=warning --outdir=dist/src/renderer && node -e \"require('node:fs').cpSync('src/renderer/index.html', 'dist/src/renderer/index.html')\"",
+    "build": "tsc -p tsconfig.build.json && esbuild src/renderer/index.tsx --bundle --format=esm --platform=browser --target=es2022 --minify --log-level=warning --outdir=dist/src/renderer --metafile=dist/renderer.meta.json && node -e \"require('node:fs').cpSync('src/renderer/index.html', 'dist/src/renderer/index.html')\"",
     "build:host": "node scripts/package/bundle-host.mjs --format cjs",
     "dev": "bun run build && bun run build:host && electron dist/src/main/index.js",
     "package": "bun run build && node scripts/package/build.mjs",
@@ -22,7 +22,9 @@
     "electron-updater": "6.8.11"
   },
   "devDependencies": {
+    "@electron-internal/extract-zip": "1.0.8",
     "@electron/fuses": "2.1.3",
+    "@electron/get": "5.1.0",
     "@types/node": "^24",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

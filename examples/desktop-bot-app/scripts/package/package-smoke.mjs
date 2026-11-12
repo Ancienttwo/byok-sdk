@@ -5,6 +5,8 @@
 //   on Windows stays the official addon (its SHA-256 equals the SDK manifest's pin);
 // - the app's Electron binary carries the app fuses (src/main/fuses.ts);
 // - macOS: the ad-hoc or Developer ID signature verifies deep and strict;
+// - the packaged ffmpeg is Electron's codec-free build (#1499 D7, ffmpeg.mjs);
+// - Linux: the deb depends on libsecret-tools (#1499 3.2);
 // - the packaged SEA Host answers the bridge (host-smoke.mjs). It keeps a device
 //   credential in the OS store, so the script refuses to run outside CI;
 // - a smoke Host SEA (smoke-host.ts) run from inside resources/host/ completes a Pi
@@ -17,15 +19,18 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, lstatSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { appendFileSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FuseState, getCurrentFuseWire } from '@electron/fuses';
 import { sdkNativeAssetTargets, sdkPackagingAssetLayout } from '@byok-sdk/client';
 import brand from '../../brand.config.ts';
+import manifest from '../../package.json' with { type: 'json' };
 import { APP_FUSES } from '../../src/main/fuses.ts';
 import { hostEnvironment } from '../../src/main/packaged-host.ts';
 import { buildHostExecutable, hostFile } from './bundle-host.mjs';
+import { codecFreeFfmpeg, packagedFfmpeg } from './ffmpeg.mjs';
 
 // The packaged Host pairs and keeps its device credential in this machine's OS store.
 if (process.env.CI !== 'true') throw new Error('package-smoke.mjs writes a device credential into the OS credential store: run it on CI only (CI=true)');
@@ -87,6 +92,34 @@ console.log('[package-smoke] fuses read back as APP_FUSES');
 if (process.platform === 'darwin') {
   execFileSync('codesign', ['--verify', '--deep', '--strict', unpacked], { stdio: 'inherit' });
   console.log('[package-smoke] codesign --verify --deep --strict passed');
+}
+
+// 3b. ffmpeg. macOS packaging re-signs the library, so there both sides lose their signature before the comparison.
+const digest = data => createHash('sha256').update(data).digest('hex');
+function withoutSignature(data) {
+  if (process.platform !== 'darwin') return data;
+  const dir = mkdtempSync(path.join(tmpdir(), 'byok-desktop-ffmpeg-check-'));
+  try {
+    const file = path.join(dir, 'library');
+    writeFileSync(file, data);
+    execFileSync('codesign', ['--remove-signature', file]);
+    return readFileSync(file);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+const ffmpeg = digest(withoutSignature(readFileSync(packagedFfmpeg(unpacked, process.platform))));
+const codecFree = digest(withoutSignature(await codecFreeFfmpeg({ version: manifest.devDependencies.electron, platform: process.platform, arch: process.arch })));
+assert.equal(ffmpeg, codecFree, "the packaged ffmpeg is not Electron's codec-free build");
+console.log(`[package-smoke] ffmpeg is the codec-free build (SHA-256 ${codecFree}${process.platform === 'darwin' ? ', unsigned' : ''})`);
+
+// 3c. Linux: the deb depends on secret-tool.
+if (process.platform === 'linux') {
+  const deb = readdirSync(out).find(file => file.endsWith('.deb'));
+  assert.ok(deb, 'no .deb in the package output');
+  const depends = execFileSync('dpkg-deb', ['--field', path.join(out, deb), 'Depends'], { encoding: 'utf8' }).split(',').map(item => item.trim());
+  assert.ok(depends.includes('libsecret-tools'), `the deb does not depend on libsecret-tools: ${depends.join(', ')}`);
+  console.log(`[package-smoke] ${deb} depends on libsecret-tools`);
 }
 
 // 4. The packaged SEA Host through the bridge.

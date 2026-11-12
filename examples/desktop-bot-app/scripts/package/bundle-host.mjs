@@ -25,24 +25,27 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 /** The Host executable a bundle of `format` runs as: the CommonJS file under Node, or the SEA itself. */
 export const hostFile = format => format === 'sea' ? (process.platform === 'win32' ? 'host.exe' : 'host') : 'host.cjs';
 
-/** Writes this platform's Host into the new or empty `outDir`: the SDK assets, then the app's Host beside them. */
+/** Writes this platform's Host into the new or empty `outDir`: the SDK assets, then the app's Host beside them. Returns the bundle's esbuild metafile. */
 export async function bundleHost({ format, outDir }) {
   if (format !== 'cjs' && format !== 'sea') throw new Error(`Host bundle format must be cjs or sea, not ${JSON.stringify(format)}`);
   await copySdkPackagingAssets({ outDir, platform: process.platform, arch: process.arch }).catch(error => {
     if (error.code !== 'ENOENT' || !String(error.path).includes('agent-memory-fs')) throw error;
     throw new Error('The Agent memory helper is not built: run `bun run --filter @byok-sdk/client build:agent-memory-helper` (needs Go) once, then build:host again', { cause: error });
   });
-  await buildHostExecutable({ entry: path.join(root, 'src', 'host', 'supervise.ts'), format, executable: path.join(outDir, hostFile(format)) });
+  return buildHostExecutable({ entry: path.join(root, 'src', 'host', 'supervise.ts'), format, executable: path.join(outDir, hostFile(format)) });
 }
 
-/** Bundles `entry` to `executable` (CommonJS, or that bundle inside a SEA); the executable's directory must hold the SDK assets. */
+/**
+ * Bundles `entry` to `executable` (CommonJS, or that bundle inside a SEA); the executable's directory must hold the SDK assets.
+ * Returns the esbuild metafile (input paths relative to the app root).
+ */
 export async function buildHostExecutable({ entry, format, executable }) {
   const work = mkdtempSync(path.join(tmpdir(), 'byok-desktop-host-'));
   try {
     const bundle = format === 'cjs' ? executable : path.join(work, 'host.cjs');
     // The entry is the bundle's main module; esbuild empties import.meta in CommonJS,
     // and the plugin refuses every empty import.meta outside its reviewed exemptions.
-    const result = await build({ entryPoints: [entry], bundle: true, platform: 'node',
+    const result = await build({ absWorkingDir: root, metafile: true, entryPoints: [entry], bundle: true, platform: 'node',
       format: 'cjs', target: 'node24', outfile: bundle, logLevel: 'silent', define: { 'import.meta.main': 'true' },
       plugins: [byokSdkPackaging({ format })] });
     for (const warning of result.warnings) {
@@ -51,6 +54,7 @@ export async function buildHostExecutable({ entry, format, executable }) {
       if (!exempt) throw new Error(`unexpected build warning: ${warning.id} ${file}: ${warning.text}`);
     }
     if (format === 'sea') await injectSea(bundle, work, executable);
+    return result.metafile;
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
