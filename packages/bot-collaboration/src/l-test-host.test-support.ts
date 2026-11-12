@@ -169,6 +169,7 @@ export async function openLTestHost(options: {
   adapter?: ResultStubAdapter;
   agentMessage?: CreateByokServerOptions['agentMessage'];
 }) {
+  if (options.deviceCredentials === undefined) throw new TypeError('openLTestHost requires deviceCredentials');
   const root = await mkdtemp(path.join(tmpdir(), 'lth-'));
   const productId = 'host-core-test';
   const ledgerPath = path.join(root, 'host.sqlite');
