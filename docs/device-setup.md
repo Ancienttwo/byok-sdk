@@ -623,7 +623,7 @@ the earlier one rollbackable. Only the latest switch keeps a snapshot, so one
 rollback is possible after it. After a healthy switch, `upgrade apply`
 removes the older snapshots as cleanup: when one cannot be removed (for
 example `EBUSY`), the upgrade still succeeds with its `switched` receipt and
-the next upgrade removes it. Nothing selects it meanwhile. There is no
+the next successful upgrade removes it. Nothing selects it meanwhile. There is no
 cleanup diagnostic hook.
 
 `upgrade-receipt.json` is what a Host UI reads: `switched`, `rolled-back`,

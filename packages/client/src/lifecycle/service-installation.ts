@@ -1032,7 +1032,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
     for (const name of await listDir(snapshotsDir)) {
       // The upgrade is committed: a snapshot that cannot be removed is left
-      // for the next prune. Nothing selects it meanwhile (rollback reads only
+      // for the prune of the next successful upgrade. Nothing selects it meanwhile (rollback reads only
       // the snapshot of `current`; upgrade removes snapshots/<to> first).
       if (name !== current && !name.startsWith(INSTALL_SNAPSHOT_PREFIX)) await fs.rm(path.join(snapshotsDir, name), { recursive: true, force: true }).catch(() => undefined);
     }

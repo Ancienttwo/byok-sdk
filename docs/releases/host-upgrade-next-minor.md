@@ -11,7 +11,7 @@ No configuration change is needed. Every SDK Pi RPC session now caps its setting
 After a healthy switch, `upgrade()` removes the snapshots of earlier
 switches. A removal that fails there (for example `EBUSY` or `EACCES`) no
 longer rejects the upgrade (#1986): it resolves with its `switched` receipt,
-and the next upgrade removes the leftover. Rollback still uses only the
+and the next successful upgrade removes the leftover. Rollback still uses only the
 snapshot of `current`. Other pruning errors still reject. There is no
 cleanup diagnostic hook; a Host that wants to see leftovers lists
 `<installRoot>/snapshots/`.
