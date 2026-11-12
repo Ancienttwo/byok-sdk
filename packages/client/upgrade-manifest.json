@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "bea0707126e0262c8428f02d9f55e14292709e4b340b8b2fcbf731289aa02f06"
+    "snapshotSha256": "484f8d47d6c18cce67ffbc5bc576b1e9e72b18c69a6af55b432b9df203212c03"
   },
   "configFields": {
     "status": "tracked",
@@ -681,7 +681,6 @@
         "export:@byok-sdk/bot-collaboration/testing#FINAL_BODY",
         "export:@byok-sdk/bot-collaboration/testing#HomeCalls",
         "export:@byok-sdk/bot-collaboration/testing#HomeSubject",
-        "export:@byok-sdk/bot-collaboration/testing#InMemoryDeviceCredentials",
         "export:@byok-sdk/bot-collaboration/testing#LTestHost",
         "export:@byok-sdk/bot-collaboration/testing#OccurrenceRow",
         "export:@byok-sdk/bot-collaboration/testing#RETENTION_NOW",
@@ -2139,11 +2138,6 @@
     },
     {
       "item": "export:@byok-sdk/bot-collaboration/testing#HomeSubject",
-      "change": "added",
-      "entry": "bot-collaboration-package"
-    },
-    {
-      "item": "export:@byok-sdk/bot-collaboration/testing#InMemoryDeviceCredentials",
       "change": "added",
       "entry": "bot-collaboration-package"
     },

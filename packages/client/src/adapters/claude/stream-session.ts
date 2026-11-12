@@ -48,6 +48,7 @@ export class ClaudeStreamSession {
   readonly sessionRef: Promise<string>;
   hooksApplied: boolean | undefined;
   #raw: RawClaudeSession | undefined;
+  #inputWrites: Promise<void>[] | undefined;
   #withdraw!: NonNullable<RawClaudeSession['withdraw']>;
   /** Input ids of the follow-ups OAR holds for after a Claude-own turn; an interrupt withdraws them first. */
   #held = new Set<string>();
@@ -73,7 +74,26 @@ export class ClaudeStreamSession {
     // A start halted during adoption writes nothing to the adopted process.
     if (this.#fatal !== undefined) throw this.#fatal;
     const mcpServers = Object.entries(options.mcpServers).map(([name, server]) => ({ name, ...server }));
-    this.#raw = await streamJsonSession(this.child, options.resume ?? randomUUID(), sessionCredentialRedactor({ env: options.env, mcpServers }), {
+    // OAR's void write is synchronous. Keep its turn/queue decisions, but retain
+    // the owned transport's receipt for the SDK input call that issued a write.
+    const owned = this.child;
+    const child: OwnedLineProcess = {
+      spawned: owned.spawned, exited: owned.exited,
+      kill: () => owned.kill(), dispose: () => owned.dispose(),
+      get exitedOnItsOwn() { return owned.exitedOnItsOwn; },
+      observeDescendants: () => owned.observeDescendants(), exitError: () => owned.exitError(),
+      onLine: handler => owned.onLine(handler), onExit: handler => owned.onExit(handler),
+      writeAcknowledged: text => owned.writeAcknowledged(text),
+      write: (text: string): void => {
+        // Keep the owned transport's synchronous writability refusal visible to OAR.
+        const written = owned.writeAcknowledged(text);
+        this.#inputWrites?.push(written);
+        // Held queue drains and interrupts have no input caller awaiting them;
+        // the owned transport still fails the process and event stream.
+        void written.catch(() => {});
+      },
+    };
+    this.#raw = await streamJsonSession(child, options.resume ?? randomUUID(), sessionCredentialRedactor({ env: options.env, mcpServers }), {
       projection: claudeProjectionProfile,
       initial: options.resume === undefined ? initialClaudeProjection : resumedClaudeProjection,
       capabilities: { queue: { durable: false }, attribution: 'attributed', images: false },
@@ -103,11 +123,25 @@ export class ClaudeStreamSession {
     this.#withdraw = this.#raw.withdraw.bind(this.#raw);
   }
 
+  /** An input returns only after the writes it issued complete; an OAR-held queue issues none. */
+  #input(control: () => Promise<ClaudeControl>): Promise<ClaudeControl> {
+    const writes: Promise<void>[] = [];
+    this.#inputWrites = writes;
+    let result: Promise<ClaudeControl>;
+    try { result = control(); }
+    finally { this.#inputWrites = undefined; }
+    return Promise.all([result, Promise.all(writes)]).then(([prompted]) => prompted);
+  }
+
+  prompt(input: string): Promise<ClaudeControl> {
+    return this.#input(() => this.raw.prompt(input));
+  }
+
   /** Input for after the turn Claude runs on its own, held by OAR under an input id the interrupt can withdraw. */
   async queue(input: string): Promise<ClaudeControl> {
     const inputId = randomUUID();
     this.#held.add(inputId);
-    const queued = await this.raw.queue(input, { inputId });
+    const queued = await this.#input(() => this.raw.queue(input, { inputId }));
     if (queued.response.body.kind !== 'accepted') this.#held.delete(inputId);
     return queued;
   }
@@ -230,7 +264,9 @@ export class ClaudeStreamSession {
         resolve(response);
       };
       this.#controls.set(id, { id, settle });
-      this.child.writeAcknowledged(`${JSON.stringify({ type: 'control_request', request_id: id, request })}\n`).catch(() => settle(undefined));
+      try {
+        this.child.writeAcknowledged(`${JSON.stringify({ type: 'control_request', request_id: id, request })}\n`).catch(() => settle(undefined));
+      } catch { settle(undefined); }
     });
   }
 

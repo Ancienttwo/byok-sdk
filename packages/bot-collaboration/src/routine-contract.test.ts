@@ -1,4 +1,5 @@
 import { afterEach, expect, vi } from 'vitest';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { hash, taskId } from '@byok-sdk/server/execution-core';
 import { template } from './k4-fixtures.test-support';
 import { openLTestHost, type LTestHost } from './l-test-host.test-support';
@@ -16,7 +17,8 @@ afterEach(async () => {
 
 async function ledgerSubject(): Promise<RoutineSubject> {
   let clock = Date.now(), bot: BotCollaboration | undefined;
-  const fixture = await openLTestHost({ ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
+  const fixture = await openLTestHost({ deviceCredentials: new InMemoryDeviceCredentialBackend(),
+    ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
   bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', execution: template(fixture.deviceId), connector: async () => null,
     now: () => clock });
   opened.push({ fixture, bot });
