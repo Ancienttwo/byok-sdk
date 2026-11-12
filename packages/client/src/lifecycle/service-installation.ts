@@ -219,15 +219,23 @@ export interface ServiceInstallation {
    * switched to, under a `pending` receipt written first. Store writes since
    * that switch are discarded.
    *
-   * When install, upgrade, rollback or recover is refused while it holds
-   * store leases (for example `store_busy`) and a lease or gate then fails
-   * to release, the error is still the `ServiceInstallationError` with the
-   * refusal's code; its `cause` is an `AggregateError` of the refusal and
-   * every release failure. A refusal that is not a
-   * `ServiceInstallationError` becomes such an `AggregateError` itself.
+   * The top-level code names the Host's next step, which follows where the
+   * receipt stops. When a release fails before the final receipt (after an
+   * upgrade's or a restore's pointer writes), the receipt stays `pending`
+   * and the error is `store_release_failed`: call recover(), after
+   * restarting the Host process if recover() reports `store_busy`, since a
+   * lease that failed to release stays held until its process exits. Its
+   * `cause` is an `AggregateError` of every release failure, after any
+   * earlier failure such as `health_check_failed`. When a refusal already
+   * wrote its final receipt (for example `store_busy`), its code stays and
+   * a later release, receipt or restart failure joins its `cause`, an
+   * `AggregateError` led by the refusal; a refusal that is not a
+   * `ServiceInstallationError` becomes such an `AggregateError` itself. A
+   * release failure after the final receipt would not reject a committed
+   * result; no path releases there today.
    */
   rollback(): Promise<ServiceUpgradeReceipt>;
-  /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. A lease release failure after a refusal is joined as on `rollback()`. */
+  /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. Release failures follow the same rule as on `rollback()`. */
   recover(): Promise<ServiceUpgradeReceipt | undefined>;
   /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
   uninstall(): Promise<void>;
@@ -245,6 +253,7 @@ const ERROR_MESSAGES = {
   version_conflict: 'A different payload with the same version id is already staged.',
   upgrade_pending: 'An earlier upgrade or rollback was interrupted. Run recover() (CLI: byok-agent upgrade recover) first.',
   store_busy: 'A daemon store still has a running owner after the stop. Stop every process that uses it and retry.',
+  store_release_failed: 'The store gates or leases could not be released before the final receipt was written; the receipt stays pending. Run recover() (CLI: byok-agent upgrade recover); if it reports store_busy, restart the Host process first.',
   daemon_stores_invalid: 'daemonStores() threw or listed an invalid store: each storeDir must be absolute and listed once, each productId not empty.',
   owned_process_residue: 'Processes from the previous daemon run survived; resolve them before upgrading.',
   precheck_failed: 'The candidate\'s store precheck did not produce a valid verdict.',
@@ -327,6 +336,9 @@ function startsNothing(error: unknown): boolean {
   return error instanceof StoreRestoreError || (error instanceof ServiceInstallationError && error.code === 'install_snapshot_leftover');
 }
 
+/** The causes joinFailure() built, so a second join extends them instead of nesting. */
+const joinedCauses = new WeakSet<AggregateError>();
+
 /** More than one store gate or lease failed to release; `errors` lists each failure. */
 class StoreReleaseError extends AggregateError {}
 
@@ -338,9 +350,12 @@ class StoreReleaseError extends AggregateError {}
  */
 function joinFailure(failure: unknown, later: readonly unknown[], note: string): Error {
   const message = `${failure instanceof Error ? failure.message : 'Store preparation failed.'} ${note}`;
-  const errors = [failure, ...later.flatMap((error) => error instanceof StoreReleaseError ? error.errors : [error])];
+  const joinedBefore = failure instanceof ServiceInstallationError && failure.cause instanceof AggregateError && joinedCauses.has(failure.cause);
+  const errors = [...(joinedBefore ? (failure.cause as AggregateError).errors : [failure]), ...later.flatMap((error) => error instanceof StoreReleaseError ? error.errors : [error])];
   if (failure instanceof ServiceInstallationError) {
-    const joined = new ServiceInstallationError(failure.code, failure.stores, { cause: new AggregateError(errors, message) });
+    const cause = new AggregateError(errors, message);
+    joinedCauses.add(cause);
+    const joined = new ServiceInstallationError(failure.code, failure.stores, { cause });
     joined.message = message;
     return joined;
   }
@@ -349,6 +364,16 @@ function joinFailure(failure: unknown, later: readonly unknown[], note: string):
 
 function withReleaseFailure(failure: unknown, releaseError: unknown): Error {
   return joinFailure(failure, [releaseError], 'The store leases could not be released either.');
+}
+
+/**
+ * A release that failed before the final receipt: the receipt stays
+ * `pending`, so the next step is recover(). `prior` is a failure that
+ * already happened, such as the health check a rollback followed.
+ */
+function storeReleaseFailed(releaseError: unknown, prior: readonly unknown[] = []): ServiceInstallationError {
+  const released = releaseError instanceof StoreReleaseError ? releaseError.errors : [releaseError];
+  return new ServiceInstallationError('store_release_failed', undefined, { cause: new AggregateError([...prior, ...released], 'The store gates or leases could not be released.') });
 }
 
 /** The version `<installRoot>/<name>` points at, or `undefined` when the pointer is absent. */
@@ -673,8 +698,11 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           // stores stay migrated: they match the artifact that remains, or,
           // when only the restore's leases could not be taken, the version
           // that was removed.
-          if (storesHeld) await prepared?.release().catch(() => undefined);
-          const failure = new AggregateError([health.cause, cause], 'Service installation and removal both failed.');
+          const later: unknown[] = [cause];
+          if (storesHeld && prepared !== undefined) {
+            await prepared.release().catch((releaseError: unknown) => { later.push(...(releaseError instanceof StoreReleaseError ? releaseError.errors : [releaseError])); });
+          }
+          const failure = new AggregateError([health.cause, ...later], 'Service installation and removal both failed.');
           const error = new ServiceInstallationError('install_health_check_failed', undefined, { cause: failure });
           // Every failure that stops this loop keeps the install snapshot: name it.
           const snapshotPath = path.join(snapshotsDir, snapshotId);
@@ -1042,7 +1070,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * snapshot is removed only after the final receipt is written, so until
    * then `recover()` can run every step again from what is on disk.
    */
-  async function restore(from: string, to: string, previous: string | undefined, code?: ServiceInstallationErrorCode): Promise<ServiceUpgradeReceipt> {
+  async function restore(from: string, to: string, previous: string | undefined, code?: ServiceInstallationErrorCode, prior: readonly unknown[] = []): Promise<ServiceUpgradeReceipt> {
     const release = await stopQuiescent();
     try {
       // The write-ahead pending receipt may predate the snapshot: nothing was
@@ -1051,10 +1079,19 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       await setPointer('current', from);
       await setPointer('previous', previous);
     } catch (error) {
-      await release().catch(() => undefined);
+      try {
+        await release();
+      } catch (releaseError) {
+        throw withReleaseFailure(error, releaseError);
+      }
       throw error;
     }
-    await release();
+    // Before the final receipt: the receipt stays pending for recover().
+    try {
+      await release();
+    } catch (releaseError) {
+      throw storeReleaseFailed(releaseError, prior);
+    }
     const kept = previous === undefined ? {} : { previous };
     const receipt = (await startHealthy()).ok
       ? await writeReceipt({ state: 'rolled-back', from, to, ...kept, ...(code === undefined ? {} : { code }) })
@@ -1100,14 +1137,16 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       try {
         ({ stores, release } = await prepareStores(to, to));
       } catch (error) {
-        // A lease release failure after a refusal keeps the refusal's code.
+        // The refusal keeps its code: a release, receipt or restart failure
+        // after it joins its cause.
+        const later: unknown[] = [];
         if (error instanceof ServiceInstallationError) {
-          await writeReceipt({ state: 'failed', from, to, code: error.code, ...(error.stores ? { stores: [...error.stores] } : {}) });
+          await writeReceipt({ state: 'failed', from, to, code: error.code, ...(error.stores ? { stores: [...error.stores] } : {}) }).catch((receiptError: unknown) => { later.push(receiptError); });
         }
         // Stores whose restore failed may be partial: `from` stays stopped
         // and the pending receipt leaves recover() to restore them.
-        if (!startsNothing(error)) await lifecycle.start();
-        throw error;
+        if (!startsNothing(error)) await lifecycle.start().catch((startError: unknown) => { later.push(startError); });
+        throw later.length === 0 ? error : joinFailure(error, later, 'Recording the refusal or restarting the previous version failed too.');
       }
 
       // From here a crash leaves the pending receipt, which recover() resolves.
@@ -1116,12 +1155,22 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         await setPointer('previous', from);
         await setPointer('current', to);
       } catch (error) {
-        await release().catch(() => undefined);
+        try {
+          await release();
+        } catch (releaseError) {
+          throw withReleaseFailure(error, releaseError);
+        }
         throw error;
       }
-      await release();
-      if (!(await startHealthy()).ok) {
-        const receipt = await restore(from, to, previous, 'health_check_failed');
+      // Before the switched receipt: the receipt stays pending for recover().
+      try {
+        await release();
+      } catch (releaseError) {
+        throw storeReleaseFailed(releaseError);
+      }
+      const health = await startHealthy();
+      if (!health.ok) {
+        const receipt = await restore(from, to, previous, 'health_check_failed', [new ServiceInstallationError('health_check_failed', undefined, { cause: health.cause })]);
         throw new ServiceInstallationError(receipt.state === 'rolled-back' ? 'health_check_failed' : 'rollback_unhealthy');
       }
       const receipt = await writeReceipt({ state: 'switched', from, to, stores });

@@ -1075,6 +1075,27 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await expectUninstalled();
     });
 
+    it('keeps a lease release failure beside a removal failure in install cleanup (#1991)', async () => {
+      installation = migrating();
+      await verdicts('migration-required');
+      const releaseError = new Error('injected release failure');
+      const removalError = new Error('injected record removal failure');
+      const original = daemonOwner.acquireDaemonOwner;
+      const leaseFault = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementationOnce(async (...args) => {
+        const lease = await original(...args);
+        return { release: async () => { await lease.release(); throw releaseError; } };
+      });
+      const record = path.join(storeDir, 'service', 'installation.json');
+      const rename = failRename((file) => file === record);
+      const originalRm = fs.rm.bind(fs);
+      const rm = vi.spyOn(fs, 'rm').mockImplementation(async (target, options) => {
+        if (String(target) === record) throw removalError;
+        return originalRm(target, options);
+      });
+      const error = await installation.install(await payload('2.0.0', { 'migrate.cjs': MIGRATE })).catch((caught: unknown) => caught).finally(() => { rename.restore(); rm.mockRestore(); leaseFault.mockRestore(); });
+      expect(error).toMatchObject({ code: 'install_health_check_failed', cause: { errors: [expect.objectContaining({ code: 'EIO' }), removalError, releaseError] } });
+    });
+
     it('removes the marked unit after a failed preparation restore, so no boot or login starts it on partial stores', async () => {
       const unitPath = path.join(root, 'service.unit');
       const launcherPath = path.join(root, 'service.launcher');
@@ -1451,8 +1472,9 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       research = path.join(root, 'research', 'device');
       await fs.mkdir(research, { recursive: true });
     });
-    const both = () => installationOver(fakeLifecycle(), {
+    const both = (extra: Partial<ServiceInstallationOptions> = {}) => installationOver(fakeLifecycle(), {
       daemonStores: async () => [{ storeDir, productId: 'svc' }, { storeDir: research, productId: 'research' }],
+      ...extra,
     });
 
     it('stops both stores and holds their leases and gates through the pointer switch', async () => {
@@ -1484,8 +1506,36 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         const lease = await original(...args);
         return { release: async () => { await lease.release(); throw new Error('injected release failure'); } };
       });
-      await expect(installation.upgrade(await payload('2.0.0'))).rejects.toThrow('injected release failure');
+      // Before the switched receipt: store_release_failed, the receipt stays pending (#1991).
+      const switched = await installation.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught);
+      expect(switched).toBeInstanceOf(ServiceInstallationError);
+      expect(switched).toMatchObject({ code: 'store_release_failed', cause: { errors: [expect.objectContaining({ message: 'injected release failure' })] } });
+      expect((switched as Error).message).toContain('recover()');
+      expect(await installation.receipt()).toMatchObject({ state: 'pending', from: '1.0.0', to: '2.0.0' });
       await expect(fs.access(path.join(research, 'daemon-owner.json'))).rejects.toThrow();
+
+      // recover() runs into the same release failure before its final receipt; the receipt stays pending.
+      const recoverFault = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementationOnce(async (...args) => {
+        const lease = await original(...args);
+        return { release: async () => { await lease.release(); throw new Error('injected recover release failure'); } };
+      });
+      await expect(installation.recover()).rejects.toMatchObject({ code: 'store_release_failed' });
+      recoverFault.mockRestore();
+      expect(await installation.receipt()).toMatchObject({ state: 'pending' });
+
+      // A lease that stays held after its release failed keeps this process store_busy: recover() cannot take it
+      // until that process exits, so the Host restarts before recover().
+      let stuck: daemonOwner.DaemonOwnerLease | undefined;
+      const holdFault = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementationOnce(async (...args) => {
+        stuck = await original(...args);
+        return { release: async () => { throw new Error('lease left held'); } };
+      });
+      const short = both({ stopTimeoutMs: 100 });
+      await expect(short.recover()).rejects.toMatchObject({ code: 'store_release_failed' });
+      holdFault.mockRestore();
+      await expect(short.recover()).rejects.toMatchObject({ code: 'store_busy' });
+      await stuck!.release();
+      await expect(short.recover()).resolves.toMatchObject({ state: 'rolled-back' });
 
       // A refusal after both leases whose leases both fail to release carries every release failure (#1991).
       await installation.recover();
@@ -1502,6 +1552,40 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       const error = await installation.upgrade(await payload('3.0.0')).catch((caught: unknown) => caught).finally(() => { leaseFault.mockRestore(); residue.mockRestore(); });
       expect(error).toBeInstanceOf(ServiceInstallationError);
       expect(error).toMatchObject({ code: 'owned_process_residue', cause: { errors: [expect.objectContaining({ code: 'owned_process_residue' }), ...releaseErrors] } });
+
+      // A failed health check whose rollback then fails to release: store_release_failed with the health failure in its cause.
+      unhealthy.add('4.0.0');
+      const rollbackRelease = new Error('rollback release failure');
+      let acquired = 0;
+      const rollbackFault = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementation(async (...args) => {
+        const lease = await real(...args);
+        // Leases 0 and 1 are the upgrade's own; lease 2 is the rollback's first.
+        return acquired++ === 2 ? { release: async () => { await lease.release(); throw rollbackRelease; } } : lease;
+      });
+      const unhealthyError = await installation.upgrade(await payload('4.0.0')).catch((caught: unknown) => caught).finally(() => rollbackFault.mockRestore());
+      expect(unhealthyError).toMatchObject({ code: 'store_release_failed', cause: { errors: [expect.objectContaining({ code: 'health_check_failed' }), rollbackRelease] } });
+      expect(await installation.receipt()).toMatchObject({ state: 'pending', to: '4.0.0' });
+    });
+
+    it('a pointer write that fails keeps the release failure beside it, on upgrade and rollback (#1991)', async () => {
+      installation = both();
+      await installation.install(await payload('1.0.0'));
+      const releaseError = new Error('injected release failure');
+      const original = daemonOwner.acquireDaemonOwner;
+      const faultOnce = () => vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementationOnce(async (...args) => {
+        const lease = await original(...args);
+        return { release: async () => { await lease.release(); throw releaseError; } };
+      });
+      faultOnce();
+      const upgradeRename = failRename((file) => file === path.join(installRoot, 'current'));
+      const upgradeError = await installation.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught).finally(() => upgradeRename.restore());
+      expect(upgradeError).toMatchObject({ errors: [expect.objectContaining({ code: 'EIO' }), releaseError] });
+      await installation.recover();
+      await installation.upgrade(await payload('2.0.0'));
+      faultOnce();
+      const rollbackRename = failRename((file) => file === path.join(installRoot, 'current'));
+      const rollbackError = await installation.rollback().catch((caught: unknown) => caught).finally(() => rollbackRename.restore());
+      expect(rollbackError).toMatchObject({ errors: [expect.objectContaining({ code: 'EIO' }), releaseError] });
     });
 
     it('a store with a live owner is store_busy and nothing is switched', async () => {
@@ -1527,6 +1611,17 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(error).toBeInstanceOf(ServiceInstallationError);
       expect(error).toMatchObject({ code: 'store_busy', cause: { errors: [expect.objectContaining({ code: 'store_busy' }), releaseError] } });
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_busy' });
+
+      // A restart that fails after the refusal joins it; the refusal keeps its class and code (#1991).
+      const startError = new Error('injected start failure');
+      const stillBusy = await acquireDaemonOwner(research, 'daemon');
+      const failingStart = installationOver({ ...fakeLifecycle(), start: async () => { throw startError; } }, {
+        daemonStores: async () => [{ storeDir, productId: 'svc' }, { storeDir: research, productId: 'research' }],
+        stopTimeoutMs: 100,
+      });
+      const restartFailed = await failingStart.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught).finally(() => stillBusy.release());
+      expect(restartFailed).toBeInstanceOf(ServiceInstallationError);
+      expect(restartFailed).toMatchObject({ code: 'store_busy', cause: { errors: [expect.objectContaining({ code: 'store_busy' }), startError] } });
     });
 
     it('reclaims what a crashed daemon left (a dead owner and a control.token) and upgrades', async () => {

@@ -11425,15 +11425,23 @@ export interface ServiceInstallation {
      * switched to, under a `pending` receipt written first. Store writes since
      * that switch are discarded.
      *
-     * When install, upgrade, rollback or recover is refused while it holds
-     * store leases (for example `store_busy`) and a lease or gate then fails
-     * to release, the error is still the `ServiceInstallationError` with the
-     * refusal's code; its `cause` is an `AggregateError` of the refusal and
-     * every release failure. A refusal that is not a
-     * `ServiceInstallationError` becomes such an `AggregateError` itself.
+     * The top-level code names the Host's next step, which follows where the
+     * receipt stops. When a release fails before the final receipt (after an
+     * upgrade's or a restore's pointer writes), the receipt stays `pending`
+     * and the error is `store_release_failed`: call recover(), after
+     * restarting the Host process if recover() reports `store_busy`, since a
+     * lease that failed to release stays held until its process exits. Its
+     * `cause` is an `AggregateError` of every release failure, after any
+     * earlier failure such as `health_check_failed`. When a refusal already
+     * wrote its final receipt (for example `store_busy`), its code stays and
+     * a later release, receipt or restart failure joins its `cause`, an
+     * `AggregateError` led by the refusal; a refusal that is not a
+     * `ServiceInstallationError` becomes such an `AggregateError` itself. A
+     * release failure after the final receipt would not reject a committed
+     * result; no path releases there today.
      */
     rollback(): Promise<ServiceUpgradeReceipt>;
-    /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. A lease release failure after a refusal is joined as on `rollback()`. */
+    /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. Release failures follow the same rule as on `rollback()`. */
     recover(): Promise<ServiceUpgradeReceipt | undefined>;
     /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
     uninstall(): Promise<void>;
@@ -11450,6 +11458,7 @@ declare const ERROR_MESSAGES: {
     readonly version_conflict: 'A different payload with the same version id is already staged.';
     readonly upgrade_pending: 'An earlier upgrade or rollback was interrupted. Run recover() (CLI: byok-agent upgrade recover) first.';
     readonly store_busy: 'A daemon store still has a running owner after the stop. Stop every process that uses it and retry.';
+    readonly store_release_failed: 'The store gates or leases could not be released before the final receipt was written; the receipt stays pending. Run recover() (CLI: byok-agent upgrade recover); if it reports store_busy, restart the Host process first.';
     readonly daemon_stores_invalid: 'daemonStores() threw or listed an invalid store: each storeDir must be absolute and listed once, each productId not empty.';
     readonly owned_process_residue: 'Processes from the previous daemon run survived; resolve them before upgrading.';
     readonly precheck_failed: 'The candidate\'s store precheck did not produce a valid verdict.';

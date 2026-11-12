@@ -640,6 +640,19 @@ until `byok-agent upgrade recover` finishes it: it restores the receipt's
 to). A snapshot is removed only after the receipt that ends the operation is
 written.
 
+The top-level error code names the next step, which follows where the
+receipt stops. When a store gate or lease fails to release after the version
+pointers were written and before the final receipt, the receipt stays
+`pending` and the error is `store_release_failed`, with every release failure
+(after any earlier one, such as `health_check_failed`) in its `cause`: run
+`byok-agent upgrade recover`. A lease that failed to release stays held until
+the process that took it exits, so a `recover` in that process can get
+`store_busy`; restart the Host process, then recover. A refusal that already
+wrote its final receipt keeps its code, with later release, receipt or
+restart failures in its `cause`. A release failure after the final receipt
+would not reject a committed result (the rule for prune failures); no path
+releases there today.
+
 Upgrade, rollback, recover, install and uninstall run only for the store's
 recorded lifecycle owner: another owner gets `lifecycle_owner_conflict`, and
 nothing changes.
