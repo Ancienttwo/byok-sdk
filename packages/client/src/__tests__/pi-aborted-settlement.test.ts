@@ -171,14 +171,13 @@ describe('Pi aborted settlement statistics', () => {
     expect((await iterator.next()).value).toEqual({ ...unavailable, contextTokens: 11, contextWindow: 128 });
     expect(await iterator.next()).toEqual({ done: false, value: { type: 'turn_end' } });
   });
-  it('retains the retryable statistics timeout for a normal settlement', async () => {
+  it('completes a normal settlement with unknown context usage when statistics time out', async () => {
     sandbox.stats = () => new Promise<PiRpcMessage>(() => {});
     const iterator = await events(false);
-    const failure = expect(iterator.next()).rejects.toMatchObject({
-      phase: 'run', retry: 'retryable', message: 'pi get_session_stats response timed out',
-    });
+    const usage = iterator.next();
     await vi.advanceTimersByTimeAsync(1000);
-    await failure;
+    expect(await usage).toEqual({ done: false, value: unavailable });
+    expect(await iterator.next()).toEqual({ done: false, value: { type: 'turn_end' } });
     expect(vi.getTimerCount()).toBe(0);
   });
 });

@@ -4342,7 +4342,7 @@ Codex reports `tokenUsage.last.totalTokens` against `modelContextWindow`;
 its cumulative `total` remains the provider cost authority. Claude reports
 `result.modelUsage`'s window using the init model identity. Official Pi 1.0.4
 reports `get_session_stats.contextUsage` as an estimate before task settlement;
-null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
+null occupancy stays unknown, and a statistics read that times out or fails after settlement leaves it unknown without failing the task. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.
 Older consumers ignore these optional fields.
 
