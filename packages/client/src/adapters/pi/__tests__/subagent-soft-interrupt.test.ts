@@ -15,9 +15,9 @@ const snapshot = (active: boolean) => ({ asyncSnapshot: {
 } });
 const proof = (state = 'observed', instance = 'instance') => ({
   version: 1, runId: 'run', runnerProcessInstanceId: instance, state, observedAt: 1,
-  instances: [{ kind: 'runner', processInstanceId: instance }],
+  instances: [{ kind: 'runner', processInstanceId: instance, closeObservedAt: 1, exitCode: 0, signal: null }],
 });
-async function controlFixture(native: (method: string, params?: { id: string }) => unknown, ready = true) {
+async function controlFixture(native: (method: string, params?: { id: string }) => unknown, ready = true, nativeAbort = async () => {}) {
   const bus = new EventEmitter(), handlers = new Map<string, (event: { toolName: string; toolCallId: string }) => void>();
   const boundary = createPiSubagentAbortBoundary();
   const events = {
@@ -29,7 +29,7 @@ async function controlFixture(native: (method: string, params?: { id: string }) 
     void Promise.resolve(native(method, params)).then(data => bus.emit(`subagents:rpc:v1:reply:${requestId}`, { version: 1, requestId, success: true, data }));
   });
   let aborts = 0;
-  const session = { abort: async () => { aborts += 1; } };
+  const session = { abort: async () => { aborts += 1; await nativeAbort(); } };
   boundary.bind(session as never);
   if (ready) events.emit('subagents:rpc:v1:ready', {});
   return { session, events, bus, handlers, get aborts() { return aborts; } };
@@ -83,14 +83,66 @@ it.each(['truncated', 'malformed', 'unknown-proof', 'foreign-proof', 'wrong-inst
   await expect(f.session.abort()).rejects.toThrow('pi_subagent_interrupt_unverified');
 });
 
-it.each(['observed', 'open-dispatch', 'pending-child', 'foreign-root', 'unknown'])('checks native workflow terminal evidence: %s', async scenario => {
+it.each(['observed', 'open-dispatch', 'pending-child', 'foreign-root', 'unknown', 'missing-time'])('checks native workflow terminal evidence: %s', async scenario => {
   const f = await controlFixture((_method, params) => params ? { details: { workflowTerminalProof: {
     version: 1, kind: 'workflow', runId: scenario === 'foreign-root' ? 'foreign' : 'run',
     state: scenario === 'unknown' ? 'unknown' : 'observed', dispatchClosed: scenario !== 'open-dispatch',
+    observedAt: scenario === 'missing-time' ? undefined : 1,
     children: [proof(scenario === 'pending-child' ? 'pending' : 'observed')],
   } } } : snapshot(true));
   if (scenario === 'observed') await expect(f.session.abort()).resolves.toBeUndefined();
   else await expect(f.session.abort()).rejects.toThrow('pi_subagent_interrupt_unverified');
+});
+
+it.each(['in-flight', 'completed-call', 'async-started'])('refuses an unavailable owner with observed work: %s', async phase => {
+  const f = await controlFixture(() => snapshot(false), false);
+  if (phase === 'async-started') f.events.emit('subagent:async-started', {});
+  else {
+    f.handlers.get('tool_execution_start')!({ toolName: 'subagent', toolCallId: 'launch' });
+    if (phase === 'completed-call') f.handlers.get('tool_execution_end')!({ toolName: 'subagent', toolCallId: 'launch' });
+  }
+  await expect(f.session.abort()).rejects.toThrow('pi_subagent_interrupt_unverified');
+});
+
+it.each(['closeObservedAt', 'exitCode', 'signal', 'writer-close', 'writer-attempt', 'writer-tree', 'unknown-tree'])('refuses an incomplete native receipt: %s', async field => {
+  const terminal = proof();
+  if (field.startsWith('writer') || field === 'unknown-tree') {
+    const writer: Record<string, unknown> = { kind: 'pi-writer', processInstanceId: 'writer', attempt: 1,
+      closeObservedAt: 1, exitCode: 0, signal: null,
+      processTree: { state: 'observed', mechanism: 'posix-process-group', processGroupId: 123, verifiedAt: 1 } };
+    if (field === 'writer-close') delete writer.closeObservedAt;
+    if (field === 'writer-attempt') delete writer.attempt;
+    if (field === 'writer-tree') delete writer.processTree;
+    if (field === 'unknown-tree') writer.processTree = { state: 'unknown', reason: 'verification-failed' };
+    terminal.instances.push(writer as never);
+  } else Reflect.deleteProperty(terminal.instances[0]!, field);
+  const f = await controlFixture((_method, params) => params ? { details: { lifecycleStatus: { processTerminal: terminal } } } : snapshot(true));
+  await expect(f.session.abort()).rejects.toThrow('pi_subagent_interrupt_unverified');
+});
+
+it.each(['posix-process-group', 'windows-taskkill'])('accepts complete native writer tree evidence: %s', async mechanism => {
+  const terminal = proof();
+  terminal.instances.push({ kind: 'pi-writer', processInstanceId: 'writer', attempt: 1, closeObservedAt: 1, exitCode: 0, signal: null,
+    processTree: { state: 'observed', mechanism, verifiedAt: 1, ...(mechanism === 'posix-process-group' ? { processGroupId: 123 } : { pid: 123 }) } } as never);
+  const f = await controlFixture((_method, params) => params ? { details: { lifecycleStatus: { processTerminal: terminal } } } : snapshot(true));
+  await expect(f.session.abort()).resolves.toBeUndefined();
+});
+
+it.each(['sequential-status', 'parent-abort'])('bounds the entire interrupt to 15 seconds: %s', async phase => {
+  vi.useFakeTimers();
+  try {
+    const f = await controlFixture(async (_method, params) => {
+      if (phase === 'parent-abort') return snapshot(false);
+      await new Promise(resolve => setTimeout(resolve, 6_000));
+      if (params) return { details: { lifecycleStatus: { processTerminal: { ...proof(), runId: params.id } } } };
+      const result = snapshot(true); result.asyncSnapshot.runs.push({ id: 'second', kind: 'subagent', state: 'running' }); return result;
+    }, true, () => phase === 'parent-abort' ? new Promise<void>(() => {}) : Promise.resolve());
+    let outcome: unknown;
+    void f.session.abort().then(() => { outcome = 'acknowledged'; }, error => { outcome = error; });
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(outcome).toBeInstanceOf(Error);
+    expect(String(outcome)).toContain('pi_subagent_interrupt_unverified');
+  } finally { vi.clearAllTimers(); vi.useRealTimers(); }
 });
 
 it.each(['missing', 'foreign', 'refused'])('rejects a %s control reply', async scenario => {
