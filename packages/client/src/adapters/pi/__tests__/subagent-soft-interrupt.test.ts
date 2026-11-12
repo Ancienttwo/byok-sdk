@@ -110,7 +110,7 @@ it.each(['failed', 'running'])('settles a not-started run only once its snapshot
     void f.session.abort().then(() => { outcome = 'settled'; }, error => { outcome = error; });
     await vi.advanceTimersByTimeAsync(state === 'failed' ? 0 : 15_000);
     if (state === 'failed') { expect(outcome).toBe('settled'); expect(stops).toBe(0); }
-    else expect(String(outcome)).toContain('pi_subagent_interrupt_unverified');
+    else { expect(String(outcome)).toContain('pi_subagent_interrupt_unverified'); expect(stops).toBe(1); }
   } finally { vi.clearAllTimers(); vi.useRealTimers(); }
 });
 
