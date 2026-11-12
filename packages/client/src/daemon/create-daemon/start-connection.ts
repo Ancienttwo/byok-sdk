@@ -129,7 +129,8 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
         const task = await activeJournal.readTask(envelope.task_id, journalIdentity);
         // Recovery deliberately left this unadmitted offer to cloud redelivery.
         // Recheck ownership after the read: its concurrent offer may now be admitted.
-        if (task?.localState === 'received' && !offerHasOwner.call(runner, envelope.task_id)
+        // A pre-cancel for a later offer must retain its ordinary decline path.
+        if (task?.localState === 'received' && task.seq < envelope.seq && !offerHasOwner.call(runner, envelope.task_id)
           && !terminalCommits.hasPending(envelope.task_id)) taskSettlement.cancelledBeforeAdmission(envelope.task_id);
       }
       if (envelope.type === 'task.cancel' && envelope.task_id !== undefined && resultReplyRecoveryTasks.has(envelope.task_id)) {

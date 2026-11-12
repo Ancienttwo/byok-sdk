@@ -206,6 +206,38 @@ describe('Daemon.whenTaskSettled', () => {
     }
   });
 
+  it('declines a pre-cancelled offer when cancellation precedes its durable offer sequence', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const { d } = await started(adapter);
+    const taskId = 'task-cancel-before-offer';
+    server.send(createEnvelope('task.cancel', { reason: 'cancel before offer' }, { taskId, seq: server.nextSeq() }));
+    offer(taskId);
+    const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
+    expect(decline.payload).toMatchObject({ reason: expect.stringMatching(/cancelled before claim/i) });
+    await expect(d.whenTaskSettled(taskId)).resolves.toEqual({ terminal: 'declined', delivery: 'accepted', disposal: 'none' });
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  it('does not settle a received offer when cancellation sequence equals its durable offer sequence', async () => {
+    const taskId = 'task-cancel-unproven-order';
+    const { d, adapter, original } = await recoveredOffer(taskId);
+    const controller = new AbortController();
+    const waiting = d.whenTaskSettled(taskId, { signal: controller.signal });
+    const tracked = track(waiting);
+    const routed = vi.spyOn(TaskRunner.prototype, 'handleEnvelope');
+    try {
+      server.send(createEnvelope('task.cancel', {}, { taskId, seq: original.seq! }));
+      await vi.waitFor(() => expect(routed).toHaveBeenCalledWith(expect.objectContaining({ type: 'task.cancel', task_id: taskId })));
+      expect(tracked.settled()).toBe(false);
+      controller.abort('stop waiting without a proven order');
+      await expect(waiting).rejects.toBe('stop waiting without a proven order');
+      expect(adapter.startCalls).toHaveLength(0);
+    } finally {
+      controller.abort('cleanup');
+      routed.mockRestore();
+    }
+  });
+
   it('fences redelivery of a cancelled offer within the same run', async () => {
     const taskId = 'task-cancelled-redelivery';
     const { d, adapter, storeDir, identity, original, cancel } = await recoveredOffer(taskId);
