@@ -301,12 +301,13 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
    * session, so a test can deterministically land a `task.cancel` in the
    * window between `task.claim` and `ActiveTask` registration — i.e. while
    * `start()` is still in flight — instead of depending on real timing.
-   * Returns the release function; `start()` resolves once it's called.
+   * Returns the release function; `start()` resolves once it's called, or
+   * rejects with the failure it's given.
    */
-  blockStart(): () => void {
-    let release!: () => void;
-    this.startGate = new Promise((resolve) => {
-      release = resolve;
+  blockStart(): (failure?: Error) => void {
+    let release!: (failure?: Error) => void;
+    this.startGate = new Promise((resolve, reject) => {
+      release = (failure) => (failure === undefined ? resolve() : reject(failure));
     });
     return release;
   }

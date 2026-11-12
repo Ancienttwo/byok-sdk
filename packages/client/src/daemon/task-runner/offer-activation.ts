@@ -15,6 +15,7 @@ import type { AcceptedOfferPayload } from './support.js';
 import type { OfferHeld, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer.js';
 import { hostFor } from './host.js';
 import { beginTerminal, drainApprovals } from './finish.js';
+import { endMemoryStartWait } from './agent-memory.js';
 
 export interface OfferActivationInput
   extends Pick<OfferRequest, 'readerAttempt'>,
@@ -184,6 +185,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     // Register the task first: the plan (and C6's effects) must find it.
     this['startupOwnership'].transferToActive(taskId);
     this['tasks'].set(taskId, active);
+    endMemoryStartWait.call(this, taskId);
     held.owner = 'active';
     const receipt = beginTerminal.call(this, active, {
       kind: 'cancelled',
@@ -222,6 +224,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   this['inFlightBlobAborts'].delete(taskId);
   this['startupOwnership'].transferToActive(taskId);
   this['tasks'].set(taskId, active);
+  endMemoryStartWait.call(this, taskId);
   held.owner = 'active';
   this['pendingMessageTasks'].delete(taskId);
   if (active.messageOutbox !== undefined && activatedMessageRecord !== undefined) {
