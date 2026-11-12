@@ -9,7 +9,8 @@ import { createEnvelope, encodeEnvelope, HOST_MCP_TASK_CONTEXT_CAPABILITY } from
 import { createDaemonWithAdapters, type Daemon, type DaemonOverrides } from '../daemon/create-daemon';
 import { DaemonTaskUnknownError, TaskSettlementRegistry, hasTaskCancellation, type DaemonTaskSettlement } from '../daemon/task-settlement';
 import { LocalStorageEmergencyError } from '../daemon/retention/pressure';
-import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
+import { SqliteLocalTaskJournal, JOURNAL_DB_FILENAME, DEFAULT_JOURNAL_BUSY_TIMEOUT_MS } from '../daemon/journal/sqlite-journal';
+import { openJournalDatabase } from '../util/sqlite-support';
 import { journalHash } from '../daemon/journal/journal';
 import { CursorStore } from '../daemon/cursor-store';
 import { SealedTasks } from '../daemon/sealed-task';
@@ -507,7 +508,7 @@ describe('Daemon.whenTaskSettled', () => {
       await expect(r.wait(taskId)).rejects.toThrow(/identity mismatch|hash mismatch|cancellation binding/);
     });
 
-    it('refuses startup on corrupt cancellation evidence without writing an interruption', async () => {
+    it('refuses startup on a real stored cancellation with corrupt bytes without writing an interruption', async () => {
       const first = await started(new StubRuntimeAdapter());
       await first.d.stop();
       const journal = new SqliteLocalTaskJournal({ storeDir: first.storeDir });
@@ -515,15 +516,24 @@ describe('Daemon.whenTaskSettled', () => {
       const offerBytes = encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), instruction: 'work', ...FRESH_OFFER }, { taskId, seq }));
       await journal.appendEnvelope({ identity, envelopeId: 'stored-offer', taskId, seq, bytes: offerBytes,
         bytesHash: journalHash(offerBytes), receivedAt: new Date().toISOString(), opensTask: true });
+      const cancellation = createEnvelope('task.cancel', { reason: 'cancelled' }, { taskId, seq: server.nextSeq() });
+      const cancelBytes = encodeEnvelope(cancellation);
+      await journal.appendEnvelope({ identity, envelopeId: cancellation.id, taskId, seq: cancellation.seq!, bytes: cancelBytes,
+        bytesHash: journalHash(cancelBytes), receivedAt: cancellation.ts, opensTask: false });
       await journal.close();
-      const read = vi.spyOn(SqliteLocalTaskJournal.prototype, 'readTaskCancellation').mockResolvedValue({ ...evidence, bytesHash: journalHash('corrupt') });
+      const db = openJournalDatabase(path.join(first.storeDir, JOURNAL_DB_FILENAME), DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
+      try {
+        db.prepare('UPDATE journal_envelope SET bytes = ? WHERE envelope_id = ?')
+          .run(cancelBytes.replace('task.cancel', 'task.started'), cancellation.id);
+      } finally {
+        db.close();
+      }
       const terminal = vi.spyOn(SqliteLocalTaskJournal.prototype, 'recordTerminal');
       try {
-        await expect(build(new StubRuntimeAdapter(), first.storeDir).start()).rejects.toThrow('durable cancellation bytes/hash mismatch');
+        await expect(build(new StubRuntimeAdapter(), first.storeDir).start()).rejects.toThrow('durable cancellation candidate bytes/hash mismatch');
         expect(terminal).not.toHaveBeenCalled();
         expect(server.received.filter((e) => e.task_id === taskId)).toEqual([]);
       } finally {
-        read.mockRestore();
         terminal.mockRestore();
       }
     });

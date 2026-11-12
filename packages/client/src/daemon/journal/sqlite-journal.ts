@@ -816,11 +816,19 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
 
   readTaskCancellation(taskId: string, identity: JournalIdentity) {
     return this.#enqueue('readTaskCancellation', () => {
-      const row = this.#db.prepare(`SELECT tenant_id, product_id, device_id, bytes, bytes_hash FROM journal_envelope
-        WHERE task_id = ? AND withheld_bytes IS NULL AND json_extract(bytes, '$.type') = 'task.cancel'
-        ORDER BY seq, envelope_id LIMIT 1`).get(taskId) as Record<string, unknown> | undefined;
+      const rows = this.#db.prepare(`SELECT tenant_id, product_id, device_id, bytes, bytes_hash FROM journal_envelope
+        WHERE task_id = ? AND withheld_bytes IS NULL
+        ORDER BY seq, envelope_id`).all(taskId) as Record<string, unknown>[];
+      // Validate every candidate before its content can exclude it, including
+      // candidates after the first valid cancellation.
+      for (const row of rows) {
+        this.#assertIdentity(row, identity);
+        if (typeof row.bytes !== 'string' || journalHash(row.bytes) !== row.bytes_hash) {
+          throw new Error('durable cancellation candidate bytes/hash mismatch');
+        }
+      }
+      const row = rows.find((candidate) => JSON.parse(candidate.bytes as string).type === 'task.cancel');
       if (!row) return undefined;
-      this.#assertIdentity(row, identity);
       return {
         identity: { tenantId: row.tenant_id as string, productId: row.product_id as string, deviceId: row.device_id as string },
         bytes: row.bytes as string, bytesHash: row.bytes_hash as string,
