@@ -687,7 +687,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       const error = await installation.install(await payload('2.0.0')).catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(AggregateError);
       for (const name of repairs) expect((error as Error).message).toContain(path.join(installRoot, 'snapshots', name));
-      expect(events).toEqual([]);
+      expect(events).toEqual(['uninstall']);
       expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
       expect((await snapshotNames()).sort()).toEqual(repairs.sort());
       expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
@@ -973,7 +973,38 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       return { restoreError, restore: () => spy.mockRestore() };
     };
 
-    it('keeps a failed preparation restore for repair, leaves the marked unit stopped, and the next first install restores it before its precheck', async () => {
+    it('removes the marked unit after a failed preparation restore, so no boot or login starts it on partial stores', async () => {
+      const unitPath = path.join(root, 'service.unit');
+      const launcherPath = path.join(root, 'service.launcher');
+      const unitEvents: string[] = [];
+      let running = true;
+      const def = { name: 'svc', storeDir, logDir: path.join(storeDir, 'service-logs'), owner: 'app', program: { command: process.execPath, args: [] } };
+      const unit: PlatformUnit = {
+        serviceName: 'svc', unitPath, launcherPath,
+        files: () => [unitPath, launcherPath].map((file) => ({ path: file, content: SERVICE_UNIT_MARKER })),
+        activate: async () => { unitEvents.push('activate'); }, deactivate: async () => { unitEvents.push('deactivate'); running = false; },
+        removeFiles: async () => { unitEvents.push('remove'); for (const file of [unitPath, launcherPath]) await fs.rm(file); },
+        start: async () => { unitEvents.push('start'); running = true; }, stop: async () => { unitEvents.push('stop'); running = false; },
+        query: async () => ({ running, determinate: true, detail: 'fake' }),
+      };
+      for (const file of [unitPath, launcherPath]) await fs.writeFile(file, SERVICE_UNIT_MARKER);
+      installation = installationOver(createManagedLifecycle(def, unit), {
+        migrate: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] }),
+      });
+      await verdicts('migration-required');
+      const fault = failRestore();
+      try {
+        await expect(installation.install(await payload('2.0.0', { 'migrate.cjs': `${MIGRATE}\nprocess.exit(1);` }))).rejects.toBeInstanceOf(AggregateError);
+      } finally {
+        fault.restore();
+      }
+      expect(unitEvents).not.toContain('start');
+      expect(unitEvents).toContain('remove');
+      expect(existsSync(unitPath) || existsSync(launcherPath)).toBe(false);
+      expect(await snapshotNames()).toEqual([expect.stringMatching(/^\.install-repair-/u)]);
+    });
+
+    it('keeps a failed preparation restore for repair, starts nothing, and the next first install restores it before its precheck', async () => {
       const migrate: ServiceInstallationOptions['migrate'] = (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] });
       installation = installationOver(fakeLifecycle(), { migrate });
       await verdicts('migration-required');
@@ -990,7 +1021,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(error).toBeInstanceOf(AggregateError);
       expect(error).toMatchObject({ errors: [expect.objectContaining({ code: 'store_migration_failed' }), fault.restoreError] });
       expect((error as Error).message).toContain(path.join(installRoot, 'snapshots', repair!));
-      expect(events).toEqual(['stop']);
+      expect(events).toEqual(['stop', 'uninstall']);
       expect(existsSync(db)).toBe(false);
       await expect(fs.lstat(path.join(installRoot, 'current'))).rejects.toMatchObject({ code: 'ENOENT' });
       expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
@@ -1002,7 +1033,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       const stopped = await installation.install(candidate).catch((caught: unknown) => caught);
       expect(stopped).toMatchObject({ errors: [stopError] });
       expect((stopped as Error).message).toContain(path.join(installRoot, 'snapshots', repair!));
-      expect(events).toEqual(['stop']);
+      expect(events).toEqual(['stop', 'uninstall']);
       expect(await snapshotNames()).toEqual([repair]);
       expect(existsSync(db)).toBe(false);
 
@@ -1018,7 +1049,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       }
       expect(retire.fired()).toBe(true);
       expect((unretired as Error).message).toContain(path.join(installRoot, 'snapshots', repair!));
-      expect(events).toEqual(['stop']);
+      expect(events).toEqual(['stop', 'uninstall']);
       expect(await snapshotNames()).toEqual([repair]);
 
       // A retry whose repair restore fails again changes nothing else and starts nothing.
@@ -1041,7 +1072,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         again.restore();
       }
       expect(seen).toEqual([]);
-      expect(events).toEqual(['stop']);
+      expect(events).toEqual(['stop', 'uninstall']);
       expect(await snapshotNames()).toEqual([repair]);
       expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
 

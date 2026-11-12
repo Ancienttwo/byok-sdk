@@ -481,9 +481,12 @@ recorded owner (including a payload-less CLI service) before taking the
 daemon-store leases and gates. On any preparation failure before writing
 `current`, it releases the leases/gates, removes staging, then starts that
 unit again, even if it was stopped before the call. The one exception is a
-failed store restore: the stores may then be partial, so the unit stays
-stopped. Failures after preparation succeeds use the installation cleanup
-below.
+failed store restore: the stores may then be partial, so the unit is not
+started and is removed, leaving only the repair snapshot, as after a failed
+health check; otherwise a boot or login could start it on those stores. The
+next install writes the unit again. When that removal fails, the error names
+both the unit and the snapshot. Failures after preparation succeeds use the
+installation cleanup below.
 
 Preparation does not stop an absent unit or an allowed unmarked unit. It
 leases and gates the daemon stores instead. With `replaceUnmarked`, a
@@ -565,7 +568,10 @@ including Host and daemon stores changed by migration or startup. A failed
 restore therefore always leaves nothing installed and one repair snapshot.
 When an artifact cannot be removed, the restore is not attempted: the stores
 stay migrated, matching what remains, the snapshot keeps its
-`.install-<uuid>` name, and the error names its path. Cleanup never clears OS credentials. If removal itself fails, the
+`.install-<uuid>` name, and the error names its path. When every artifact is
+gone but the store leases for the restore cannot be taken, nothing is
+installed and the stores stay migrated: consistent, but newer than the
+snapshot. The snapshot keeps its ordinary name and the error names it. Cleanup never clears OS credentials. If removal itself fails, the
 same error code carries an `AggregateError` containing the original failure
 and the removal error as `cause`; its message names the artifacts that remain.
 

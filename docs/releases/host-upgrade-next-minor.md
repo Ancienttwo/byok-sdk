@@ -17,8 +17,10 @@ An SDK-marked unit of the recorded owner with no current version, such as
 a payload-less CLI service, is stopped before preparation takes its store
 leases. On any preparation failure before writing `current`, leases/gates
 are released, staging is removed, then the unit is started again, even if
-it was previously stopped. After a failed store restore it stays stopped,
-because the stores may be partial. Later failures use #1966 cleanup.
+it was previously stopped. After a failed store restore it is not started
+and is removed instead, because the stores may be partial and a boot or
+login would otherwise start it; the next install writes it again. Later
+failures use #1966 cleanup.
 
 An absent unit and an unmarked unit allowed by `replaceUnmarked` are not
 stopped during preparation. The store leases establish quiescence. A
@@ -41,8 +43,8 @@ remain unchanged in both paths, after restoring the snapshot.
 After successful preparation, a failed installation or health check
 removes the unit, `current`, the installation record and the staged
 version, and restores the prepared stores last. When an artifact cannot be
-removed, the stores stay migrated and are not restored; the error names the
-kept snapshot. OS credentials are
+removed, or the store leases for the restore cannot be taken, the stores
+stay migrated and are not restored; the error names the kept snapshot. OS credentials are
 never cleared. After health succeeds, installation is committed: failure to
 remove its temporary `<installRoot>/snapshots/.install-<uuid>` does not
 reject the install, and after a completed restore it does not replace the

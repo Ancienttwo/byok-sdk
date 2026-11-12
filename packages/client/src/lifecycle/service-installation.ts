@@ -173,8 +173,9 @@ export interface ServiceInstallation {
    * is untouched until preparation succeeds; its live store owner causes
    * `store_busy`. An owned marked unit without a current version is stopped
    * before preparation and started again after preparation fails, once
-   * leases/gates are released and staging removed, unless a store restore
-   * failed. OS credentials are never cleared. `precheck` is required.
+   * leases/gates are released and staging removed. After a failed store
+   * restore it is removed instead, and the next install writes it again.
+   * OS credentials are never cleared. `precheck` is required.
    * The temporary snapshot `snapshots/.install-<uuid>` is removed after a
    * healthy start or a completed restore; a removal failure does not change
    * the outcome, and a leftover is kept, never restored automatically. A
@@ -522,7 +523,17 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           } catch (cleanup) {
             failure = new AggregateError([error, cleanup], `${error instanceof Error ? error.message : 'Store preparation failed.'} The staged version could not be removed: ${path.join(versionsDir, id)}.`);
           }
-          // A failed restore may have left partial stores: the unit stays stopped.
+          // A failed restore may have left partial stores. The unit stays
+          // stopped, and our marked unit is removed, as after a failed health
+          // check: a boot or login must not start it on those stores. The
+          // next install writes it again.
+          if (stopMarked && error instanceof StoreRestoreError) {
+            try {
+              await held.uninstall();
+            } catch (removal) {
+              throw new AggregateError([failure, removal], `${failure instanceof Error ? failure.message : 'Store preparation failed.'} The marked service unit could not be removed: ${inspection.unitPath}.`);
+            }
+          }
           if (stopMarked && !(error instanceof StoreRestoreError)) {
             try {
               await lifecycle.start();
@@ -573,7 +584,14 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         ...(prepared === undefined ? [] : [{ name: 'prepared store snapshot restoration', remove: async () => {
           const release = storesHeld ? prepared.release : await stopQuiescent(false);
           storesHeld = false;
-          try { await restoreInstallSnapshot(snapshotId); } finally { await release(); }
+          try {
+            await restoreInstallSnapshot(snapshotId);
+          } catch (error) {
+            // The restore error names where the snapshot is kept; a release failure must not replace it.
+            await release().catch(() => undefined);
+            throw error;
+          }
+          await release();
         } }, { name: 'install snapshot directory', remove: () => fs.rm(path.join(snapshotsDir, snapshotId), { recursive: true, force: true }) }]),
       ];
       for (const [index, removal] of removals.entries()) {
@@ -581,7 +599,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           await removal.remove();
         } catch (cause) {
           // Release the leases a pre-activation failure still holds. The
-          // stores stay migrated: they match the artifact that remains.
+          // stores stay migrated: they match the artifact that remains, or,
+          // when only the restore's leases could not be taken, the version
+          // that was removed.
           if (storesHeld) await prepared?.release().catch(() => undefined);
           const failure = new AggregateError([health.cause, cause], 'Service installation and removal both failed.');
           const error = new ServiceInstallationError('install_health_check_failed', undefined, { cause: failure });

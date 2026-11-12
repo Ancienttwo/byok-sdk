@@ -11320,8 +11320,9 @@ export interface ServiceInstallation {
      * is untouched until preparation succeeds; its live store owner causes
      * `store_busy`. An owned marked unit without a current version is stopped
      * before preparation and started again after preparation fails, once
-     * leases/gates are released and staging removed, unless a store restore
-     * failed. OS credentials are never cleared. `precheck` is required.
+     * leases/gates are released and staging removed. After a failed store
+     * restore it is removed instead, and the next install writes it again.
+     * OS credentials are never cleared. `precheck` is required.
      * The temporary snapshot `snapshots/.install-<uuid>` is removed after a
      * healthy start or a completed restore; a removal failure does not change
      * the outcome, and a leftover is kept, never restored automatically. A
