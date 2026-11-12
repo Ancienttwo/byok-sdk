@@ -362,8 +362,8 @@ describe('Agent memory MCP local authority', () => {
     } finally { consoleError.mockRestore(); }
   });
 
-  itWithMemoryMcp.each(['bind', 'handoff', 'unexpected'] as const)(
-    'releases memory waiters before startup disposal after %s activation failure', async failure => {
+  itWithMemoryMcp.each(['bind', 'handoff', 'unexpected', 'aborted start'] as const)(
+    'releases memory waiters before startup disposal after %s failure', async failure => {
       const acquire = AgentHomeManager.prototype.acquireExecution;
       const acquireSpy = vi.spyOn(AgentHomeManager.prototype, 'acquireExecution').mockImplementation(async function (this: AgentHomeManager, ...args: Parameters<typeof acquire>) {
         const binding = await acquire.apply(this, args);
@@ -380,6 +380,13 @@ describe('Agent memory MCP local authority', () => {
       if (failure === 'unexpected') send.mockImplementation(envelope => {
         if (envelope.type === 'task.started') throw new Error('fixture activation send failure');
       });
+      // The aborted start returns during failure IO, before the offer's disposal check.
+      const failClaimed = runner['failClaimedAgent'].bind(runner);
+      const failSpy = vi.spyOn(runner as unknown as { failClaimedAgent: typeof failClaimed }, 'failClaimedAgent')
+        .mockImplementation(async (...args) => {
+          if (failure === 'aborted start') { releaseStart(); await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1)); }
+          return failClaimed(...args);
+        });
       let releaseClose!: () => void;
       const closeGate = new Promise<void>(resolve => { releaseClose = resolve; });
       let closeEntered!: () => void;
@@ -394,7 +401,9 @@ describe('Agent memory MCP local authority', () => {
         });
       };
       try {
-        releaseStart();
+        // The startup deadline aborts this signal.
+        if (failure === 'aborted start') runner['inFlightBlobAborts'].get('task-memory-start')!.abort(new Error('fixture deadline'));
+        else releaseStart();
         await closing;
         expect(runner['memoryStartWaits'].size).toBe(0);
         await expect(recall).rejects.toThrow('invalid, expired, or quiescing Agent memory task context');
@@ -408,7 +417,7 @@ describe('Agent memory MCP local authority', () => {
       } finally {
         releaseClose();
         await offer;
-        handoff.mockRestore(); send.mockRestore();
+        handoff.mockRestore(); send.mockRestore(); failSpy.mockRestore();
       }
     },
   );

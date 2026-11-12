@@ -46,10 +46,6 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   } = input;
   const failActivation = (reason: string): Promise<boolean> => {
     hostFor(this).dispatchSync({ type: 'runtime.activation_failed', taskId, atMs: Date.now(), reason });
-    // A startup session may drain its pending memory calls in close(). Revoke
-    // their authority and wake them before failure IO or disposal can await them.
-    this['revokeAgentMemoryContext'](taskId);
-    endMemoryStartWait.call(this, taskId);
     return this['failClaimedAgent'](taskId, reason, false, {
       binding: agentBinding, runtimeId: pick.descriptor.id, sessionRef: session.sessionRef,
     });
