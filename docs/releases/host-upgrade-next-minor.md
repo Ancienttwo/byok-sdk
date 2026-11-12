@@ -18,7 +18,8 @@ now starts after start returns, as on install; platform commands still have
 no time bound (#1971). A Host whose check is slower than `healthTimeoutMs`
 raises it. `healthTimeoutMs` must now be an integer from 1 to 2147483647
 (2^31-1): any other value makes `createServiceInstallation()` throw a
-`TypeError`, the error it already throws for other invalid options. Before,
+`TypeError`, the error it already throws for `daemonStores` without
+`healthCheck`. Before,
 0 or less still ran the check once, and a larger value made the timer fire
 at once.
 
