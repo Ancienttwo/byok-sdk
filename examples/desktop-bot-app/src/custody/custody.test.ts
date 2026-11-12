@@ -14,7 +14,8 @@ import { catalogEntryFor, ProviderProfiles } from '../host/keys/catalog.ts';
 import { refusalReceipt, runCustody } from './child.ts';
 import { keysMainHandlers } from './main-handlers.ts';
 import { CustodyError } from './protocol.ts';
-import { listFromCustody, submitToCustody, type CustodyChild } from './submit.ts';
+import type { CommandChild } from '../main/host-command.ts';
+import { listFromCustody, submitToCustody } from './submit.ts';
 
 const SECRET = 'sk-custody-test-secret-0123456789';
 const CONFIGURATION: ProviderConfiguration = {
@@ -33,7 +34,7 @@ beforeEach(async () => {
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 /** The custody child in process: its stdin, stdout and exit, around `runCustody` with an injected store. */
-function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: string[]): CustodyChild {
+function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: string[]): CommandChild {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const events = new EventEmitter();
@@ -43,7 +44,7 @@ function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: s
     stdout.end(line);
     events.emit('exit', receipt.ok ? 0 : 1);
   });
-  const child: CustodyChild = { stdin, stdout, once: (event, listener) => { events.once(event, listener); return child; } };
+  const child: CommandChild = { stdin, stdout, once: (event, listener) => { events.once(event, listener); return child; } };
   return child;
 }
 
@@ -81,6 +82,15 @@ describe('custody child', () => {
     expect([rotated.profile_revision, rotated.profile_hash]).toEqual([status.profile_revision, status.profile_hash]);
     await profiles.changed();
     expect(seen).toEqual(['writer']);
+  });
+
+  it('refuses a new profile without its secret even when the OS store still holds one under its ref', async () => {
+    // As after start fresh: the keys store moved aside, its secret stayed in the OS store.
+    const secrets = new InMemorySecretStore<ModelProviderSecretName>();
+    await secrets.set(modelProviderSecretName('writer'), SECRET);
+    await expect(submitToCustody(custodyChild(secrets, []), { op: 'configure', configuration: CONFIGURATION }))
+      .rejects.toMatchObject({ code: 'custody_request_invalid' });
+    expect(await listFromCustody(custodyChild(secrets, []))).toEqual([]);
   });
 
   it('lists every stored profile with the registry\'s own secret and pending state, and no secret', async () => {
@@ -135,7 +145,7 @@ describe('custody child', () => {
   it('rejects the submission when the custody child died before reading stdin', async () => {
     const events = new EventEmitter();
     const stdin = new PassThrough();
-    const child: CustodyChild = { stdin, stdout: new PassThrough(),
+    const child: CommandChild = { stdin, stdout: new PassThrough(),
       once: (event, listener) => { events.once(event, listener); return child; } };
     const submitted = submitToCustody(child, { op: 'replace_secret', profileRef: 'writer', secret: SECRET });
     stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));

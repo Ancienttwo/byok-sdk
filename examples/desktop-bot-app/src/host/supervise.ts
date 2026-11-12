@@ -6,14 +6,17 @@
  */
 import path from 'node:path';
 import type { Readable, Writable } from 'node:stream';
-import { bundledSdkHelperHost, resolveHostLayout, runSdkReservedHelperCommand } from '@byok-sdk/client';
+import { bundledSdkHelperHost, resolveHostLayout, resolveSdkHosting, runSdkReservedHelperCommand, type SdkHostingOptions } from '@byok-sdk/client';
 import brand from '../../brand.config.ts';
 import manifest from '../../package.json' with { type: 'json' };
 import { joinHandlers } from '../bridge/domain.ts';
 import { encodeMessage, type HostState } from '../bridge/protocol.ts';
 import { serveBridge, type BridgeHandlers } from '../bridge/server.ts';
-import { composeHost, HostStoppedError, type ComposedHost, type HostCompositionOptions } from './compose.ts';
+import { composeHost, HostStoppedError, stoppedDaemonConfig, type ComposedHost, type HostCompositionOptions } from './compose.ts';
+import { exportDiagnostics } from './settings/device.ts';
 import { runKeysCommand } from './keys/commands.ts';
+import { runStartFreshCommand } from './recovery.ts';
+import { START_FRESH_COMMAND } from '../recovery/protocol.ts';
 import { HostStoreRefusedError } from './precheck.ts';
 
 /**
@@ -57,13 +60,15 @@ export async function superviseHost(
       host = await composeHost({ ...options, onChanged: () => push(state) });
     } catch (error) {
       if (!(error instanceof HostStoreRefusedError || error instanceof HostStoppedError)) throw error;
-      push({ state: 'stopped', pid: process.pid, reason: error.message });
+      // A stopped Host still exports diagnostics, with the config it would have run its daemon with.
+      if (!closing) methods = { status, 'settings.exportDiagnostics': track(async () => exportDiagnostics(options.hostStorageRoot, await stoppedDaemonConfig(options))) };
+      push({ state: 'stopped', pid: process.pid, reason: error.message, storeRefused: error instanceof HostStoreRefusedError });
       return undefined;
     }
     const observe = () => {
       const status = host.daemon.status();
       const next: HostState = status.lifecycle.phase === 'halted'
-        ? { state: 'stopped', pid: process.pid, reason: `Daemon halted: ${status.lifecycle.reason}` }
+        ? { state: 'stopped', pid: process.pid, reason: `Daemon halted: ${status.lifecycle.reason}`, storeRefused: false }
         : { state: 'running', pid: process.pid, activeWork: status.activeTaskCount };
       if (JSON.stringify(next) !== JSON.stringify(state)) push(next);
     };
@@ -104,7 +109,7 @@ export async function superviseHost(
 }
 
 /** bundle-host.mjs writes the SDK assets beside the Host executable: the CommonJS bundle in dev, the SEA in a package. */
-function hostedBesideExecutable(): HostCompositionOptions['sdkHosting'] {
+function hostedBesideExecutable(): SdkHostingOptions {
   const helperHost = bundledSdkHelperHost();
   return { assetRoot: path.dirname(helperHost.entry ?? helperHost.executable), helperHost };
 }
@@ -113,9 +118,15 @@ function hostedBesideExecutable(): HostCompositionOptions['sdkHosting'] {
 async function main(exit: (code: number) => void): Promise<void> {
   if (await runSdkReservedHelperCommand()) return;
   const layout = resolveHostLayout({ productId: brand.productId, productName: brand.productName });
-  const keysExit = await runKeysCommand(process.argv.slice(2), layout.hostStorageRoot);
+  const args = process.argv.slice(2);
+  const keysExit = await runKeysCommand(args, layout.hostStorageRoot);
   if (keysExit !== undefined) {
     exit(keysExit);
+    return;
+  }
+  if (args[0] === START_FRESH_COMMAND) {
+    const nativeAssetRoot = resolveSdkHosting(hostedBesideExecutable()).daemon.nativeAssetRoot;
+    exit(await runStartFreshCommand(args, { layout, productId: brand.productId, ...(nativeAssetRoot === undefined ? {} : { nativeAssetRoot }) }));
     return;
   }
   await superviseHost({

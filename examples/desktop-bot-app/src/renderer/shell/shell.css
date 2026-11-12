@@ -52,6 +52,32 @@ body {
   color: var(--color-danger);
 }
 
+.shell-recovery {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.shell-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.shell-action p {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.shell-error {
+  color: var(--color-danger);
+}
+
 .shell-section {
   overflow: auto;
   padding: var(--space-4);

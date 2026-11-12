@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,12 +6,14 @@ import { createInterface } from 'node:readline';
 import { DatabaseSync } from 'node:sqlite';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { DeviceCredentialBackend } from '@byok-sdk/client';
 import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { inspectProviderProfileStore, parseModelProviderProfile, SqliteProviderProfileStore } from '@byok-sdk/keys';
 import { createByokServer } from '@byok-sdk/server';
 import { BRIDGE_VERSION, encodeMessage, type HostState } from '../bridge/protocol.ts';
 import { composeHost, lateServerConsumers, type HostCompositionOptions } from './compose.ts';
 import { precheckHostStores } from './precheck.ts';
+import { startFresh } from './recovery.ts';
 import { superviseHost } from './supervise.ts';
 
 let root: string;
@@ -121,6 +123,8 @@ describe('desktop Host composition', () => {
     const serverDb = path.join(root, 'home', 'host', 'server.sqlite');
     await mkdir(path.dirname(serverDb), { recursive: true });
     await writeFile(serverDb, 'not a database');
+    // A Host that ran before: it kept its loopback port beside the stores.
+    await writeFile(path.join(root, 'home', 'host', 'loopback-port'), '45678');
     await createKeysStore041(keysDb());
     const input = new PassThrough();
     const output = new PassThrough();
@@ -135,13 +139,60 @@ describe('desktop Host composition', () => {
 
     input.write(encodeMessage({ id: 1, method: 'hello', params: { bridgeVersion: BRIDGE_VERSION } }));
     await stopped;
-    expect(states.at(-1)).toMatchObject({ state: 'stopped', reason: expect.stringMatching(/^Store server-sqlite at .* is rejected/) });
+    expect(states.at(-1)).toMatchObject({ state: 'stopped', storeRefused: true, reason: expect.stringMatching(/^Store server-sqlite at .* is rejected/) });
     expect((await inspectProviderProfileStore(keysDb())).verdict).toBe('migration-required');
     await expect(stat(path.join(root, 'store'))).rejects.toMatchObject({ code: 'ENOENT' });
 
-    const reply = once(createInterface({ input: output }), 'line');
-    input.write(encodeMessage({ id: 2, method: 'shutdown' }));
-    expect(JSON.parse((await reply)[0] as string)).toEqual({ id: 2, result: null });
+    // The stopped Host still writes the SDK support bundle.
+    const lines = createInterface({ input: output });
+    const exported = once(lines, 'line');
+    input.write(encodeMessage({ id: 2, method: 'settings.exportDiagnostics' }));
+    const bundle = JSON.parse((await exported)[0] as string) as { id: number; result: { path: string } };
+    expect(bundle.id).toBe(2);
+    expect((await stat(bundle.result.path)).isFile()).toBe(true);
+
+    const reply = once(lines, 'line');
+    input.write(encodeMessage({ id: 3, method: 'shutdown' }));
+    expect(JSON.parse((await reply)[0] as string)).toEqual({ id: 3, result: null });
     await host;
+  });
+
+  it('starts fresh: moves the stores aside, clears the enrollment last, and moves everything back when the clear is refused', { timeout: 120_000 }, async () => {
+    await makeRoot();
+    const config = options();
+    const backend = config.deviceCredentials as InMemoryDeviceCredentialBackend;
+    const first = await composeHost(config);
+    const firstDevice = first.daemon.status().deviceId;
+    await first.close();
+    const layout = { storeDir: config.storeDir, scratchRoot: { path: path.join(config.storeDir, 'tmp') }, hostStorageRoot: config.hostStorageRoot };
+    const fresh = (stamp: string, deviceCredentials: DeviceCredentialBackend) => startFresh({ layout, productId: config.productId, stamp, deviceCredentials });
+
+    const lockedKeychain = new Proxy(backend, {
+      get: (target, key) => (key === 'clear' ? async () => { throw new Error('keychain locked'); }
+        : (Reflect.get(target, key) as (...args: unknown[]) => unknown).bind(target)),
+    });
+    await expect(fresh('a', lockedKeychain)).rejects.toMatchObject({ code: 'clear_failed' });
+    expect((await readdir(root)).sort()).toEqual(['home', 'store']);
+    expect((await readdir(config.hostStorageRoot)).filter(name => name.includes('.aside-'))).toEqual([]);
+    expect(await backend.read()).toBeDefined();
+
+    const moved = await fresh('b', backend);
+    expect(moved.map(move => path.relative(root, move.to)).sort()).toContain('store.aside-b');
+    expect(moved.map(move => path.relative(root, move.to))).toContain(path.join('home', 'host.aside-b'));
+    expect(await backend.read()).toBeUndefined();
+    await expect(stat(config.storeDir)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const second = await composeHost(config);
+    expect(second.daemon.status().deviceId).not.toBe(firstDevice);
+    await second.close();
+  });
+
+  it('starts fresh without an SDK store: the Host stores move aside and nothing is cleared', async () => {
+    await makeRoot();
+    await mkdir(path.join(root, 'home', 'host'), { recursive: true });
+    await writeFile(path.join(root, 'home', 'host', 'settings.json'), '{}');
+    const layout = { storeDir: path.join(root, 'store'), scratchRoot: { path: path.join(root, 'store', 'tmp') }, hostStorageRoot: path.join(root, 'home') };
+    const moved = await startFresh({ layout, productId: 'byok-desktop-test', stamp: 'c', deviceCredentials: new InMemoryDeviceCredentialBackend() });
+    expect(moved.map(move => path.relative(root, move.to))).toEqual([path.join('home', 'host.aside-c')]);
   });
 });

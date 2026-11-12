@@ -67,15 +67,15 @@ Each SDK release has a Host upgrade guide in `docs/releases/host-upgrade-<versio
 4. If you change the bridge, raise `BRIDGE_VERSION` in `src/bridge/protocol.ts`. A shell and a Host of different versions refuse each other on purpose.
 5. Run the app's typecheck and tests, then the package smoke on macOS, Windows and Linux before you release.
 
-A refused store stops the Host with its reason. The app never repairs a store on its own, so an upgrade that changes a store contract needs its migration step in that release.
+A refused store stops the Host with its reason. The app never repairs a store on its own, so an upgrade that changes a store contract needs its migration step in that release. The window shows the reason and offers diagnostics export, the restore below, and start fresh. Start fresh moves the stores aside, clears the old device enrollment, and restarts as a new device.
 
 ## 5. Shipping updates
 
 The template ships the update client (`electron-updater`, `src/main/updater.ts`) and no update server.
 
 - **Feed.** Set `BYOK_UPDATE_FEED_URL` when you package (`bun run package`). electron-builder then writes `app-update.yml` into the app. Without it the build has no updater. Upload the contents of `dist/package/out` to that URL on any static HTTPS host: the installers, their `.blockmap` files and the `latest*.yml` files. Upload the `latest*.yml` files last, because a client reads them to find the installer.
-- **Install.** The app checks the feed at start. When an update is downloaded, it asks the user, stops the Host, copies the current stores to `<hostStorageRoot>/host/snapshots/<version>/` (only the latest is kept), and only then installs. If the snapshot fails, nothing installs and the app restarts on the current version.
-- **Rollback.** Install the previous version and restore its snapshot by hand. The snapshot is the only rollback; there is no automatic downgrade.
+- **Install.** The app checks the feed at start. When an update is downloaded, it asks the user, stops the Host, copies the current stores to `<hostStorageRoot>/host/snapshots/<version>/`, writes a completion marker last (only the latest complete snapshot is kept), and only then installs. If the snapshot fails, nothing installs and the app restarts on the current version.
+- **Rollback.** Install the previous version again. When its Host stops on the newer data, the window offers "Restore data of version …" from that version's complete snapshot. The restore stops the Host, moves the current stores aside, copies the snapshot back and restarts. A Host that runs on the current data gets no restore offer. The snapshot is the only rollback; there is no automatic downgrade, and a partial snapshot is never offered.
 - **Signing.** Signing reads the environment only, as listed in `electron-builder.config.mjs`: macOS `CSC_LINK`/`CSC_KEY_PASSWORD` or `CSC_NAME`, with notarization through `APPLE_API_KEY`/`APPLE_API_KEY_ID`/`APPLE_API_ISSUER` or `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID`; Windows `CSC_LINK`/`CSC_KEY_PASSWORD`. Unset, macOS signs ad hoc and Windows stays unsigned, which is enough for CI but not for users. macOS updates install only on a signed build. Keep `koffi.node` out of every signing pass (`signExts: ['!.node']`), because the SDK refuses a modified addon.
 
 ## Known limits

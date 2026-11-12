@@ -140,6 +140,39 @@ function hostingOf(options: SdkHostingOptions | undefined): SdkHosting | undefin
   }
 }
 
+const launcherOf = (hosting: SdkHosting | undefined, hostStorageRoot: string) =>
+  (hosting ? { piByokLauncher: piByokLauncher(hosting.daemon.sdkHelperHost, hostStorageRoot) } : {});
+
+/** The DaemonConfig the Host runs its daemon with; `serverUrl` is the embedded server's loopback URL. */
+function hostDaemonConfig(options: Pick<HostCompositionOptions, 'productId' | 'productName' | 'storeDir' | 'hostStorageRoot' | 'releaseVersion'>,
+  hosting: SdkHosting | undefined, serverUrl: string): DaemonConfig {
+  return {
+    productId: options.productId,
+    productName: options.productName,
+    serverUrl,
+    storeDir: options.storeDir,
+    // K8 projects each Bot's persona into its Agent home; without it no Bot becomes ready.
+    agentHome: { hostStorageRoot: options.hostStorageRoot, projection: createBotPersonaProjection() },
+    agentEgress: { policy: AGENT_EGRESS_POLICY },
+    localAgentRelease: { version: options.releaseVersion },
+    ...hosting?.daemon,
+    ...launcherOf(hosting, options.hostStorageRoot),
+  };
+}
+
+/**
+ * The same DaemonConfig for a Host that stopped before its daemon ran, for the SDK
+ * support bundle: the server URL is the loopback address of the port the Host keeps
+ * beside its stores, where `listenLoopback` serves it. A Host that never claimed a
+ * port has no device to diagnose.
+ */
+export async function stoppedDaemonConfig(options: Omit<HostCompositionOptions, 'onChanged'>): Promise<DaemonConfig> {
+  const file = path.join(options.hostStorageRoot, 'host', 'loopback-port');
+  const port = await filePortStore(file).read();
+  if (port === null) throw new Error(`No loopback port at ${file}: this Host never ran, so there is no device to diagnose`);
+  return hostDaemonConfig(options, hostingOf(options.sdkHosting), `http://127.0.0.1:${port}`);
+}
+
 /**
  * Resolves the SDK assets, prechecks the stores, then composes the embedded server on loopback and the daemon paired
  * to it (#1499 s1.4). Pairing is the daemon's own reconciliation with this server (`pairEmbedded`): a fresh store pairs
@@ -183,7 +216,7 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
     }
   };
   try {
-    const launcher = hosting ? { piByokLauncher: piByokLauncher(hosting.daemon.sdkHelperHost, options.hostStorageRoot) } : {};
+    const launcher = launcherOf(hosting, options.hostStorageRoot);
     const adapters = createRuntimeAdapters({
       ...hosting?.adapters,
       ...launcher,
@@ -193,18 +226,7 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
         codex: { runtimeEnvironment: LOGIN_SHELL },
       },
     });
-    const daemonConfig: DaemonConfig = {
-      productId: options.productId,
-      productName: options.productName,
-      serverUrl: listener.serverUrl,
-      storeDir: options.storeDir,
-      // K8 projects each Bot's persona into its Agent home; without it no Bot becomes ready.
-      agentHome: { hostStorageRoot: options.hostStorageRoot, projection: createBotPersonaProjection() },
-      agentEgress: { policy: AGENT_EGRESS_POLICY },
-      localAgentRelease: { version: options.releaseVersion },
-      ...hosting?.daemon,
-      ...launcher,
-    };
+    const daemonConfig = hostDaemonConfig(options, hosting, listener.serverUrl);
     daemon = createDaemonWithAdapters(daemonConfig, adapters, options.deviceCredentials ? { deviceCredentials: options.deviceCredentials } : {});
     const started = daemon;
     await started.pairEmbedded(server);

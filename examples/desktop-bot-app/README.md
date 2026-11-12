@@ -102,7 +102,20 @@ bridge and composes the Host after main's hello (`src/host/compose.ts`):
   the keys store at Host start and rebuilt after every custody receipt; a profile edited
   since is refused by the Pi launcher until then.
 
-A stopped Host keeps answering `status` with its reason and is not restarted. A Host
+A stopped Host keeps answering `status` with its reason and is not restarted. It still
+answers `settings.exportDiagnostics`, with the daemon config it would have run with.
+The window reads main's view of the Host (`shell.state`): starting, running,
+restarting with its reason, stopped or failed. While the Host is stopped, the window
+offers the recovery actions that `src/main/recovery.ts` answers (#1499 D3, D4):
+- diagnostics export;
+- restoring the complete update snapshot of this version (only while the Host is stopped);
+- start fresh, after a store the precheck refused. Start fresh moves the SDK store,
+  the Host stores with their snapshots, and the Agent homes aside. It then clears the
+  old device enrollment through the Host executable (`src/host/recovery.ts`). A
+  refused clear moves everything back.
+
+Main runs one action at a time. Each action stops the Host first and relaunches the app
+afterwards, after a failure too. Nothing deletes a store. A Host
 that exits unasked is restarted with backoff (1 s, doubling to 30 s; back to 1 s after
 a minute of running). While the Host reports active work, main holds
 `powerSaveBlocker.start('prevent-app-suspension')`.

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { HostStatus } from './host-status.tsx';
+import { HostStatus, RecoveryPanel, useShellView } from './host-status.tsx';
 import { SECTIONS } from './sections.ts';
 import './shell.css';
 
@@ -10,6 +10,7 @@ import './shell.css';
  */
 export function Shell() {
   const [active, setActive] = useState(SECTIONS[0]!.id);
+  const shell = useShellView();
   return (
     <div className="shell">
       <nav className="shell-nav">
@@ -18,8 +19,9 @@ export function Shell() {
             {label}
           </button>
         ))}
-        <HostStatus />
+        <HostStatus {...shell} />
       </nav>
+      {shell.view && <RecoveryPanel view={shell.view} />}
       {SECTIONS.map(({ id, Component }) => (
         <main key={id} className="shell-section" data-section={id} hidden={id !== active}>
           <Component />
