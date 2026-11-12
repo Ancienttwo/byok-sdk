@@ -4956,7 +4956,7 @@ may pass a `toolAuthorization` function instead, and
 ### Recommended host layout
 
 `resolveHostLayout({ productId, productName, platform?, homeDir?, env? })`
-returns the recommended local directories of a Host product. It is pure (no
+from `@byok-sdk/client/host-layout` returns the recommended local directories of a Host product. It is pure (no
 file is read or created), so an installer can call it for any of `darwin`,
 `linux` and `win32`. It is the only definition of these paths:
 `DeviceStore.resolveDir`, `byok-agent service install` and

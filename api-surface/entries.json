@@ -758,6 +758,46 @@
       ]
     }
   },
+  "@byok-sdk/client/host-layout": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Pure Host directory layout for shells and installers; no client daemon or runtime SDKs",
+      "budgetBytes": 4171,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/client/dist/host-layout.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/client/dist/host-layout.d.ts"
+      ],
+      "bareImports": [
+        "node:crypto",
+        "node:os",
+        "node:path"
+      ],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "node:crypto",
+          "node:os",
+          "node:path"
+        ],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
   "@byok-sdk/client/mcp-server": {
     "kind": "exports",
     "policy": {
@@ -832,7 +872,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 4618,
+      "budgetBytes": 4730,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {

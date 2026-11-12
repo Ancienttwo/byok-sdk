@@ -41,6 +41,17 @@ explicit `installRoot` and call `uninstall()`, or reinstall into the same
 root before using CLI uninstall.
 See [Versioned installs](../device-setup.md#versioned-installs).
 
+## Host layout import moves to a subpath
+
+**Breaking (#1925).** Import `resolveHostLayout`, `HostLayoutInputError`, `HostLayout`, `HostLayoutOptions` and `HostLayoutPlatform` from `@byok-sdk/client/host-layout`. They leave the client root; each symbol has one public import path. This pure entry lets an installer or Electron main process compute directories without loading the client daemon, Pi or provider SDKs. The returned paths and error codes are unchanged, and existing stores stay in place.
+
+Apply this import codemod (including type-only imports); split a mixed root import so its other symbols still come from `@byok-sdk/client`:
+
+```diff
+-import { resolveHostLayout, HostLayoutInputError, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform } from '@byok-sdk/client';
++import { resolveHostLayout, HostLayoutInputError, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform } from '@byok-sdk/client/host-layout';
+```
+
 ## Clearing a device enrollment without a daemon
 
 An uninstaller that built a daemon per store only to call `daemon.unpair()` can call `clearDeviceEnrollment({ productId, storeDir, nativeAssetRoot })` instead (#1841); it needs no `productName`, `serverUrl` or `localAgentRelease`. It refuses with `DeviceEnrollmentClearError` `store_owned` while a daemon, doctor or installer holds the store, so call it after the service has stopped, and before deleting the store directory. It clears only the SDK device enrollment of the account it runs as, never Host secrets, and leaves the delivery cursor file. A Host that matched the text of `unpair()`'s credential-deletion error reads `DeviceEnrollmentClearError.code === 'clear_failed'` instead. See [Clearing an enrollment without running the daemon](../device-setup.md#clearing-an-enrollment-without-running-the-daemon).

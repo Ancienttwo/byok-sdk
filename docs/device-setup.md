@@ -743,7 +743,7 @@ A Bun-compiled Host accepts the same call, but it has no effect on Bun's own
 | Runtime login/settings directories | User | Authenticate as the daemon's OS user; SDK-built adapters inherit by default |
 | Scratch root | SDK, with optional `storage.scratchRoot` input | Use the effective report; do not infer it from store path length |
 
-Call `resolveHostLayout({ productId, productName })` from `@byok-sdk/client`
+Call `resolveHostLayout({ productId, productName })` from `@byok-sdk/client/host-layout`
 for the [recommended per-platform layout](spec.md#recommended-host-layout).
 Pass its `storeDir` as `DaemonConfig.storeDir` and its `hostStorageRoot` as
 `agentHome.hostStorageRoot`; the SDK composes `agentHomes`. The pure helper

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "484f8d47d6c18cce67ffbc5bc576b1e9e72b18c69a6af55b432b9df203212c03"
+    "snapshotSha256": "4beec9991fe77046c621964faf647e671345ca3cc6becb1b8b373f4a688626bf"
   },
   "configFields": {
     "status": "tracked",
@@ -22,6 +22,25 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#service-install-requires-a-healthy-start",
       "items": [
         "export:@byok-sdk/client#ServiceInstallationErrorCode"
+      ]
+    },
+    {
+      "id": "host-layout-subpath",
+      "impact": "breaking",
+      "summary": "Move resolveHostLayout, HostLayoutInputError, HostLayout, HostLayoutOptions and HostLayoutPlatform imports from @byok-sdk/client to @byok-sdk/client/host-layout, including type-only imports. Split mixed imports and leave other symbols at the root. The new pure entry avoids loading Pi and provider SDKs in a shell or installer; paths, error codes and existing stores are unchanged (#1925).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-layout-import-moves-to-a-subpath",
+      "items": [
+        "entry:@byok-sdk/client/host-layout",
+        "export:@byok-sdk/client#HostLayout",
+        "export:@byok-sdk/client/host-layout#HostLayout",
+        "export:@byok-sdk/client#HostLayoutInputError",
+        "export:@byok-sdk/client/host-layout#HostLayoutInputError",
+        "export:@byok-sdk/client#HostLayoutOptions",
+        "export:@byok-sdk/client/host-layout#HostLayoutOptions",
+        "export:@byok-sdk/client#HostLayoutPlatform",
+        "export:@byok-sdk/client/host-layout#HostLayoutPlatform",
+        "export:@byok-sdk/client#resolveHostLayout",
+        "export:@byok-sdk/client/host-layout#resolveHostLayout"
       ]
     },
     {
@@ -757,6 +776,11 @@
       "item": "entry:@byok-sdk/bot-collaboration/testing",
       "change": "added",
       "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "entry:@byok-sdk/client/host-layout",
+      "change": "added",
+      "entry": "host-layout-subpath"
     },
     {
       "item": "example:bot-collaboration",
@@ -2467,6 +2491,26 @@
       "entry": "hermes-runtime-adapter-removed"
     },
     {
+      "item": "export:@byok-sdk/client#HostLayout",
+      "change": "removed",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayoutInputError",
+      "change": "removed",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayoutOptions",
+      "change": "removed",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayoutPlatform",
+      "change": "removed",
+      "entry": "host-layout-subpath"
+    },
+    {
       "item": "export:@byok-sdk/client#OpenCodeAdapter",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
@@ -2555,6 +2599,11 @@
       "item": "export:@byok-sdk/client#clearDeviceEnrollment",
       "change": "added",
       "entry": "clear-device-enrollment"
+    },
+    {
+      "item": "export:@byok-sdk/client#resolveHostLayout",
+      "change": "removed",
+      "entry": "host-layout-subpath"
     },
     {
       "item": "export:@byok-sdk/client#resolveSdkHosting",
@@ -2720,6 +2769,31 @@
       "item": "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper",
       "change": "changed",
       "entry": "agent-memory-helper-protocol-4"
+    },
+    {
+      "item": "export:@byok-sdk/client/host-layout#HostLayout",
+      "change": "added",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client/host-layout#HostLayoutInputError",
+      "change": "added",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client/host-layout#HostLayoutOptions",
+      "change": "added",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client/host-layout#HostLayoutPlatform",
+      "change": "added",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client/host-layout#resolveHostLayout",
+      "change": "added",
+      "entry": "host-layout-subpath"
     },
     {
       "item": "export:@byok-sdk/client/packaging#writeServicePayloadManifest",

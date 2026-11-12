@@ -5776,20 +5776,6 @@ export declare class DaemonConfigFieldRemovedError extends Error {
     /** Repo-relative `.md#anchor` of the migration note (#1094). */
     migration: string);
 }
-/**
- * `resolveHostLayout` got an input it cannot build a layout from: a product
- * identifier that is not one portable path segment, a home directory that is
- * not absolute, or a platform without a layout. Fix the named `field` and
- * call it again; the call has no side effects.
- */
-export declare class HostLayoutInputError extends Error {
-    /** The `HostLayoutOptions` field: `productId`, `productName`, `homeDir` or `platform`. */
-    readonly field: 'productId' | 'productName' | 'homeDir' | 'platform';
-    readonly code: 'host_layout_input_invalid';
-    constructor(
-    /** The `HostLayoutOptions` field: `productId`, `productName`, `homeDir` or `platform`. */
-    field: 'productId' | 'productName' | 'homeDir' | 'platform', message: string);
-}
 export type DaemonJournalProtocolRecord = 'recovery-offer' | 'pending-terminal';
 /**
  * The local journal holds envelope bytes of another wire major. This daemon
@@ -6616,6 +6602,20 @@ export declare class ExecutionRecordAccumulator {
     private answerCall;
 }
 // ==== @byok-sdk/client dist/daemon/host-layout.d.ts ====
+/**
+ * `resolveHostLayout` got an input it cannot build a layout from: a product
+ * identifier that is not one portable path segment, a home directory that is
+ * not absolute, or a platform without a layout. Fix the named `field` and
+ * call it again; the call has no side effects.
+ */
+export declare class HostLayoutInputError extends Error {
+    /** The `HostLayoutOptions` field: `productId`, `productName`, `homeDir` or `platform`. */
+    readonly field: 'productId' | 'productName' | 'homeDir' | 'platform';
+    readonly code: 'host_layout_input_invalid';
+    constructor(
+    /** The `HostLayoutOptions` field: `productId`, `productName`, `homeDir` or `platform`. */
+    field: 'productId' | 'productName' | 'homeDir' | 'platform', message: string);
+}
 /** Platforms `resolveHostLayout` has a layout for. */
 export type HostLayoutPlatform = 'darwin' | 'linux' | 'win32';
 export interface HostLayoutOptions {
@@ -9674,6 +9674,9 @@ export type FileScopeGuardCode = 'file_scope_denied' | 'file_scope_unavailable' 
 /** Closed values the deny-audit channel may carry; anything else is rejected. */
 export declare const FILE_SCOPE_GUARD_REASONS: readonly FileScopeGuardReason[];
 export declare const FILE_SCOPE_GUARD_CODES: readonly FileScopeGuardCode[];
+// ==== @byok-sdk/client dist/host-layout.d.ts ====
+/** Pure Host directory layout without loading the client daemon or runtimes. */
+export { HostLayoutInputError, resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout.js';
 // ==== @byok-sdk/client dist/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types.js';
 export type { AgentRef } from './agent-home.js';
@@ -9694,8 +9697,7 @@ export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartu
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure.js';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon.js';
 export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema/index.js';
-export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, HostLayoutInputError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
-export { resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout.js';
+export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals.js';
 export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals.js';
