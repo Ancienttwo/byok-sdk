@@ -169,16 +169,12 @@ function RouteForm({ stored, busy, run }: { stored: ProviderStatus | null; busy:
   const view = modelRouteView(draft, context);
   const onChange: Change = change => setDraft(current => applyModelRouteChange(current, change, context));
 
-  const submit = () => run(async () => {
-    const result = await submitModelRoute(draft, context, stored, change => window.byok.call('keys.submit', change));
-    setDraft(result.draft);
-    return result.outcome;
-  });
+  const submit = () => run(() => submitModelRoute(draft, context, stored, change => window.byok.call('keys.submit', change), setDraft));
 
   return (
     <form className="keys-form" onSubmit={event => { event.preventDefault(); if (view.valid && !busy) void submit(); }}>
       <h1>{stored === null ? 'Add a model provider' : `Edit ${stored.display_name}`}</h1>
-      {/* Disabled while a submission is in flight: its result replaces the draft. */}
+      {/* Disabled while a submission is in flight under the section lock. */}
       <fieldset className="keys-fields" disabled={busy}>
         {view.fields.filter(field => field.visible).map(field => {
           const body = (

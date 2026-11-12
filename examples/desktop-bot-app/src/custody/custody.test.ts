@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   InMemorySecretStore, LinuxSecretServiceSecretStore, modelProviderSecretName, SqliteProviderProfileStore,
   type ModelProviderSecretName, type ProviderConfiguration, type SecretStore,
@@ -14,8 +14,7 @@ import { catalogEntryFor, ProviderProfiles } from '../host/keys/catalog.ts';
 import { refusalReceipt, runCustody } from './child.ts';
 import { keysMainHandlers } from './main-handlers.ts';
 import { CustodyError } from './protocol.ts';
-import type { CommandChild } from '../main/host-command.ts';
-import { listFromCustody, submitToCustody } from './submit.ts';
+import { CUSTODY_DEADLINE_MS, listFromCustody, submitToCustody, type CustodyChild } from './submit.ts';
 
 const SECRET = 'sk-custody-test-secret-0123456789';
 const CONFIGURATION: ProviderConfiguration = {
@@ -31,10 +30,10 @@ beforeEach(async () => {
   root = await mkdtemp(path.join(os.tmpdir(), 'byok-custody-'));
   keysDb = path.join(root, 'host', 'keys.db');
 });
-afterEach(async () => { await rm(root, { recursive: true, force: true }); });
+afterEach(async () => { vi.useRealTimers(); await rm(root, { recursive: true, force: true }); });
 
 /** The custody child in process: its stdin, stdout and exit, around `runCustody` with an injected store. */
-function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: string[]): CommandChild {
+function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: string[]): CustodyChild {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const events = new EventEmitter();
@@ -44,7 +43,7 @@ function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: s
     stdout.end(line);
     events.emit('exit', receipt.ok ? 0 : 1);
   });
-  const child: CommandChild = { stdin, stdout, once: (event, listener) => { events.once(event, listener); return child; } };
+  const child: CustodyChild = { stdin, stdout, kill: vi.fn(() => true), once: (event, listener) => { events.once(event, listener); return child; } };
   return child;
 }
 
@@ -142,10 +141,37 @@ describe('custody child', () => {
     expect(reloads).toEqual([]);
   });
 
+  it.each(['submit', 'list'] as const)('bounds a hung %s before exit and while waiting for stdout', async operation => {
+    vi.useFakeTimers();
+    for (const exited of [false, true]) {
+      const events = new EventEmitter();
+      const child: CustodyChild = { stdin: new PassThrough(), stdout: new PassThrough(), kill: vi.fn(() => true),
+        once: (event, listener) => { events.once(event, listener); return child; } };
+      const request = operation === 'list' ? listFromCustody(child)
+        : submitToCustody(child, { op: 'replace_secret', profileRef: 'writer', secret: SECRET });
+      const refused = expect(request).rejects.toMatchObject({ code: 'custody_timeout', message: expect.stringContaining('reload stored providers') });
+      if (exited) { events.emit('exit', 0); await Promise.resolve(); }
+      await vi.advanceTimersByTimeAsync(CUSTODY_DEADLINE_MS);
+      await refused;
+      expect(child.kill).toHaveBeenCalledExactlyOnceWith('SIGKILL');
+      expect(child.stdin.destroyed && child.stdout.destroyed).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  });
+
+  it('cancels the deadline after a successful custody call', async () => {
+    vi.useFakeTimers();
+    const child = custodyChild(new InMemorySecretStore(), []);
+    await expect(listFromCustody(child)).resolves.toEqual([]);
+    await vi.advanceTimersByTimeAsync(CUSTODY_DEADLINE_MS);
+    expect(child.kill).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('rejects the submission when the custody child died before reading stdin', async () => {
     const events = new EventEmitter();
     const stdin = new PassThrough();
-    const child: CommandChild = { stdin, stdout: new PassThrough(),
+    const child: CustodyChild = { stdin, stdout: new PassThrough(), kill: vi.fn(() => true),
       once: (event, listener) => { events.once(event, listener); return child; } };
     const submitted = submitToCustody(child, { op: 'replace_secret', profileRef: 'writer', secret: SECRET });
     stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
