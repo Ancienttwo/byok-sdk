@@ -96,6 +96,17 @@ function failRename(step: number | ((destination: string) => boolean)): { fired:
   return { fired: () => fired, restore: () => spy.mockRestore() };
 }
 
+/** Fails every copy out of a snapshot while `active()` holds: the restore removes the store files, then cannot put them back. */
+function failRestore(active: () => boolean = () => true): { restoreError: Error; restore: () => void } {
+  const originalCopy = fs.copyFile.bind(fs);
+  const restoreError = Object.assign(new Error('restore copy denied'), { code: 'EACCES' });
+  const spy = vi.spyOn(fs, 'copyFile').mockImplementation(async (from, to, mode) => {
+    if (active() && String(from).startsWith(`${path.join(installRoot, 'snapshots')}${path.sep}`)) throw restoreError;
+    return originalCopy(from, to, mode);
+  });
+  return { restoreError, restore: () => spy.mockRestore() };
+}
+
 /**
  * A real managed lifecycle for owner `cli` over this store, with `app`
  * recorded as the store's lifecycle owner and an exact marked unit.
@@ -1048,17 +1059,6 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await expectUninstalled();
     });
 
-    /** Fails every copy out of a snapshot while `active()` holds: the restore removes the store files, then cannot put them back. */
-    const failRestore = (active: () => boolean = () => true) => {
-      const originalCopy = fs.copyFile.bind(fs);
-      const restoreError = Object.assign(new Error('restore copy denied'), { code: 'EACCES' });
-      const spy = vi.spyOn(fs, 'copyFile').mockImplementation(async (from, to, mode) => {
-        if (active() && String(from).startsWith(`${path.join(installRoot, 'snapshots')}${path.sep}`)) throw restoreError;
-        return originalCopy(from, to, mode);
-      });
-      return { restoreError, restore: () => spy.mockRestore() };
-    };
-
     it('removes the marked unit after a failed preparation restore, so no boot or login starts it on partial stores', async () => {
       const unitPath = path.join(root, 'service.unit');
       const launcherPath = path.join(root, 'service.launcher');
@@ -1272,6 +1272,18 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect([await fs.readFile(db, 'utf8'), await fs.readFile(`${db}-wal`, 'utf8')]).toEqual(['v1 data', 'v1 wal']);
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_migration_failed' });
       await expectRetryLeavesNoSnapshot();
+
+      // A restore that fails may leave partial stores (#1987): nothing starts, the receipt stays pending for recover().
+      await verdicts('migration-required');
+      events = [];
+      const fault = failRestore();
+      const error = await installation.upgrade(await payload('2.0.0', { 'migrate.cjs': MIGRATE })).catch((cause: unknown) => cause).finally(() => fault.restore());
+      expect(error).toMatchObject({ errors: [expect.objectContaining({ code: 'store_migration_failed' }), fault.restoreError] });
+      expect((error as Error).message).toContain('recover()');
+      expect(events).toEqual(['stop']);
+      expect(await installation.receipt()).toMatchObject({ state: 'pending', from: '1.0.0', to: '2.0.0' });
+      expect(await installation.recover()).toMatchObject({ state: 'rolled-back', from: '1.0.0', code: 'upgrade_pending' });
+      expect([await fs.readFile(db, 'utf8'), await fs.readFile(`${db}-wal`, 'utf8')]).toEqual(['v1 data', 'v1 wal']);
     });
 
     it('a death after the migration and before the switch leaves recover() the snapshot to restore', async () => {

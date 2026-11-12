@@ -11406,7 +11406,11 @@ export interface ServiceInstallation {
      * health. A store refusal stops before the switch and restarts the old
      * version; a failed migration restores the snapshot first; a failed health
      * check restores the old version and its snapshot together; a death after
-     * the receipt leaves `recover()` that work.
+     * the receipt leaves `recover()` that work. When that restore fails, the
+     * stores may be partial: the old version is not restarted, the receipt
+     * stays `pending`, and the error names the kept snapshot. Call `recover()`
+     * as soon as possible: the unit stays installed, so a reboot or login
+     * before it starts the old version on those stores.
      */
     upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt>;
     /**

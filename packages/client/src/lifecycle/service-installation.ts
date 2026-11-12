@@ -200,7 +200,11 @@ export interface ServiceInstallation {
    * health. A store refusal stops before the switch and restarts the old
    * version; a failed migration restores the snapshot first; a failed health
    * check restores the old version and its snapshot together; a death after
-   * the receipt leaves `recover()` that work.
+   * the receipt leaves `recover()` that work. When that restore fails, the
+   * stores may be partial: the old version is not restarted, the receipt
+   * stays `pending`, and the error names the kept snapshot. Call `recover()`
+   * as soon as possible: the unit stays installed, so a reboot or login
+   * before it starts the old version on those stores.
    */
   upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt>;
   /**
@@ -803,7 +807,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       try {
         if (restoreOnFailure) {
           if (installing) await restoreInstallSnapshot(snapshotId, error);
-          else await restoreSnapshot(snapshotId);
+          else await restoreUpgradeSnapshot(snapshotId, error);
         }
         // A leftover is kept and never restored; its removal error must not replace the store code.
         if (installing) await fs.rm(path.join(snapshotsDir, snapshotId), { recursive: true, force: true }).catch(() => undefined);
@@ -957,6 +961,15 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * install. Without it, a retry would read half-restored stores as absent.
    * A failure is the same restore error and changes nothing else.
    */
+  /** Restores an upgrade's snapshot after a failed preparation; a failure keeps the snapshot and the pending receipt for recover(). */
+  async function restoreUpgradeSnapshot(to: string, failure: unknown): Promise<void> {
+    try {
+      await restoreSnapshot(to);
+    } catch (restoreError) {
+      throw new StoreRestoreError([failure, restoreError], `Store preparation failed and its stores could not be restored; the snapshot is retained at ${path.join(snapshotsDir, to)}. The service was not restarted and the upgrade stays pending: call recover() before anything restarts the service.`);
+    }
+  }
+
   async function restoreRepairSnapshots(names: readonly string[]): Promise<void> {
     for (const name of names) {
       const repair = path.join(snapshotsDir, name);
@@ -1044,7 +1057,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         if (error instanceof ServiceInstallationError) {
           await writeReceipt({ state: 'failed', from, to, code: error.code, ...(error.stores ? { stores: [...error.stores] } : {}) });
         }
-        await lifecycle.start();
+        // Stores whose restore failed may be partial: `from` stays stopped
+        // and the pending receipt leaves recover() to restore them.
+        if (!startsNothing(error)) await lifecycle.start();
         throw error;
       }
 

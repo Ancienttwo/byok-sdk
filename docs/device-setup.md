@@ -608,6 +608,14 @@ reinstall into the same root to record it again before CLI uninstall.
 6. if that health check fails, restores the old version and its store
    snapshot together and fails with `health_check_failed`.
 
+When a migration fails and its snapshot restore fails too, the stores may be
+partial. `upgrade apply` then leaves the old version stopped, keeps the
+`pending` receipt and `snapshots/<id>`, and the error names the snapshot path
+and says to run `recover()` (CLI: `upgrade recover`). Run it as soon as
+possible, before restarting the machine: the service unit stays installed,
+so a reboot or login before `recover()` starts the old version on those
+partial stores.
+
 `upgrade rollback` writes a `pending` receipt, then restores `previous` and the
 snapshot taken when `current` was switched to; store writes since then are
 discarded. A failed upgrade keeps
