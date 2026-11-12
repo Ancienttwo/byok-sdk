@@ -93,7 +93,10 @@ export async function clearEnrollmentUnderLease(
  * enrollment succeeds. Unlike `Daemon.unpair()` it leaves the delivery cursor
  * file, which no later pairing reads because each pairing mints a new device
  * id. It reads the calling process's OS credential set, so it clears the
- * enrollment of the account it runs as.
+ * enrollment of the account it runs as. Clearing acts on the productId-wide
+ * OS credential entry; with more than one store under one productId, do not
+ * clear one store while another is pairing or has an unresolved first pairing
+ * (#1964).
  */
 export async function clearDeviceEnrollment(
   options: DeviceEnrollmentStatusOptions & { readonly storeDir: string },

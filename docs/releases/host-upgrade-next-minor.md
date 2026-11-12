@@ -533,9 +533,8 @@ removed, with no alias and no stub:
 - `'hermes'` from `FakeRuntimeAdapterId` in `@byok-sdk/client/testing`.
 
 A Host that constructed `HermesAdapter` deletes that adapter and its imports,
-and retires its Hermes custody launcher process. The Hermes root it passed as
-`HermesAdapterOptions.home` holds only SDK-made profiles and caches; the Host
-may delete that directory. The device then no longer advertises the `hermes`
+and retires its Hermes custody launcher process. The SDK no longer creates or reads the directory
+it passed as `HermesAdapterOptions.home`; the Host may delete it. The device then no longer advertises the `hermes`
 harness, so enqueueing an offer with `harnessId: 'hermes'` throws
 `ByokCloudError` with code `agent_capability_missing`, like an offer for any
 harness the device does not advertise. `DaemonConfig` and

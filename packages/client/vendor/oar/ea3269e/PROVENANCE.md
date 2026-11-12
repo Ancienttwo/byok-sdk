@@ -16,7 +16,7 @@ The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a 
 
 This directory is a projection of that branch. `scripts/ci/oar-sync.mjs` writes every file the manifest lists, and the manifest's `packageVersion`, `commit`, `fork` and hash columns; nobody edits them by hand. The manifest's path list, `release` binding, `delta` texts and `upstreamCommit` fields, and this file, stay hand-authored. A row with `upstreamCommit` takes its upstream hash from that commit instead of the base (a file carried from an upstream PR). Required CI fetches nothing: it checks the vendor bytes against the manifest hashes (`src/__tests__/oar-app-server-client.test.ts`). That the script's output equals this tree is the operator's check during a bump. A published `byok/*` branch is never force-pushed, so an older pin stays reproducible.
 
-When to bump. One bump per SDK release cycle, to the latest upstream release tag at dispatch. It merges before the code freeze, so that a nightly full matrix with the real runtime legs runs on it. No bump between the freeze and the publish, and one bump PR at a time. An out-of-cycle bump needs one of three reasons: upstream fixed a delta this fork carries, the SDK hit a defect that upstream fixed, or a security advisory.
+When to bump. One bump per SDK release cycle, to the latest upstream release tag at dispatch. It merges before the code freeze, so that a nightly full matrix with the real runtime legs runs on it. No bump between the freeze and the publish, and one bump PR at a time. Out of cycle, a bump is also dispatched when upstream releases a fix for a carried delta or for a defect the SDK hit, or for a security advisory on the pinned release. The target tag does not move while a bump PR is open. A bump PR is written by a Claude seat at high tier.
 
 Bump to upstream tag `vX.Y.Z`:
 
@@ -960,6 +960,8 @@ Same base commit. Four commits appended to `byok/0.99.0` of https://github.com/A
 - `52ef2313` The caller bounds the stream-json session's retained records
 
 `6f5879d9` restores upstream bytes in `runtimes/claude/failure.ts`: the SDK Claude adapter takes its failure class from structured frame fields only (`src/adapters/claude/failure-evidence.ts`) and never reads the fold's `FailedTurn`. The next bump drops `97598dee` and `6f5879d9` together.
+
+`52ef2313` is the tip of `byok/0.99.0`. It changes `shared/stream-json/session.ts` only, under the same maintained-delta entry as the stream-json caller-owned process commit (`66124527`): `streamJsonSession` takes an optional `retainedBytes` and passes it to the upstream kernel's record retention. Its route is not `none`: its `Upstream:` line names the draft "Expose a raw session factory with redaction, record-observer and request hooks" (text in the PR for #1852). It is `a5252f14` on `byok/0.101.0`.
 
 Newly selected: `shared/stream-json/{compaction,content,input-lifecycle,profile,projection,session,state,task-control}.ts` and `runtimes/claude/{context-usage,failure,projection,service-tier,tasks,token-usage}.ts`, 14 files; all but `session.ts`, `state.ts`, `task-control.ts` and `compaction.ts` keep upstream bytes. Every other import of the closure was already selected. These files are byte-identical between `45488e7` and `ac7fde4`. The selection is 142 files: 141 sources plus LICENSE, 115 with upstream bytes and 26 maintained.
 

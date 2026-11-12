@@ -104,7 +104,7 @@ owner 定在今天做，只用 mac-pro；win-ci 的那几行改到下次部署�
   - #1730：#1814 合入后关闭。
 - **上游阻塞**：每轮查一次。
   - #1619 等 deepseek-harness discussion 12515，11-07 起没有回应。
-  - #1620 等 NousResearch/hermes-agent#149876，11-07 起没有回应。
+  - #1620 已关闭（Hermes 封存，#1876）；原先等 NousResearch/hermes-agent#149876。
 
 ## 8. 常设规则
 
