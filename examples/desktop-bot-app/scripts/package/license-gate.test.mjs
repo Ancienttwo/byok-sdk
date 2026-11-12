@@ -13,8 +13,8 @@ function write(root, file, content) {
 }
 
 describe('license gate', () => {
-  it('accepts an SPDX expression only when it grants MIT, Apache-2.0, BSD or ISC', () => {
-    expect(['MIT', '(MIT OR GPL-3.0-only)', 'Apache-2.0 AND (BSD-3-Clause OR LGPL-2.1)', '0BSD', 'ISC'].map(permissive)).toEqual([true, true, true, true, true]);
+  it('accepts an SPDX expression only when it grants a listed permissive license', () => {
+    expect(['MIT', '(MIT OR GPL-3.0-only)', 'Apache-2.0 AND (BSD-3-Clause OR LGPL-2.1)', '0BSD', 'ISC', 'BlueOak-1.0.0', 'Unlicense'].map(permissive)).toEqual([true, true, true, true, true, true, true]);
     expect(['MIT AND GPL-3.0-only', 'LGPL-2.1', 'Apache-2.0 WITH LLVM-exception', '(MIT', 'MIT OR )', 'SEE LICENSE IN LICENSE', undefined, { type: 'MIT' }].map(permissive))
       .toEqual([false, false, false, false, false, false, false, false]);
   });

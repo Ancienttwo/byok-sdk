@@ -57,7 +57,7 @@ const { table, refused } = licenseReport(licenseInventory({ root, metafiles: [ma
 console.log(table);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Desktop package licenses ${process.platform}-${process.arch}\n\n${table}\n\n`);
 if (refused.length > 0) {
-  throw new Error(`License gate: not MIT, Apache-2.0, BSD or ISC: ${refused.map(entry => `${entry.name}@${entry.version} ${JSON.stringify(entry.license ?? null)}`).join(', ')}`);
+  throw new Error(`License gate: not a listed permissive license: ${refused.map(entry => `${entry.name}@${entry.version} ${JSON.stringify(entry.license ?? null)}`).join(', ')}`);
 }
 
 await build({ projectDir: app, config, publish: 'never' });

@@ -8,7 +8,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-const PERMISSIVE = new Set(['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', '0BSD', 'ISC']);
+// #1499 3.1's list, plus BlueOak-1.0.0 and Unlicense for the packages Pi and electron-updater ship (joint decision on #1916).
+// A further permissive OSI-approved id enters by joint decision on the PR that needs it; anything else goes to the owner.
+const PERMISSIVE = new Set(['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', '0BSD', 'ISC', 'BlueOak-1.0.0', 'Unlicense']);
 const OPERATORS = new Set(['AND', 'OR', 'WITH', ')']);
 
 /** Whether an SPDX expression grants a permissive license: `OR` needs one permissive side, `AND` needs both. A malformed expression is not permissive. */
