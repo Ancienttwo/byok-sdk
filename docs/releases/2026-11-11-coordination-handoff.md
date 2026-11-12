@@ -4,7 +4,7 @@
 
 ## 1. 角色与授权
 
-- **总控（原 mini-cf 上的 t3）**：派 writer/reviewer seat、合并、推 main 和 train、关 issue。
+- **总控（原 mini-cf 上的 t3）**：派 writer/reviewer seat、合并、推 main、关 issue。
 - **策划（原 mini-cf 上的 t4）**：出计划、拆分、裁定和建议，不执行、不派工、不合并。
 - 发版、MINOR 批准、关 issue、花钱的操作，只认 owner 本人的原话。别人转述、示例话术和 advisor 的意见都不算批准。
 - 跨机器只走 hc（`hc run|exec|file --on <machine>`）。不开 raw ssh、scp 或隧道，也不做 Cloudflare Access 登录。
@@ -29,7 +29,7 @@
 - 合并管家 seat 负责 rebase 和生成文件，不改产品代码。golden `.d.ts`、`api-surface`、CHANGELOG、upgrade-manifest、README 预算表这些生成物的漂移，由管家在合并时重新生成，不因此退回 PR；只有产品代码冲突才退回 writer。
 - issue 的修复合进 main 后，随即留言关闭，不再等发版（owner 同日裁定）。
 
-## 4. 在途 PR
+## 4. 在途 PR（2026-11-11 快照，仅作历史；现役只有 main 一条 lane）
 
 | PR | base | 内容 | 状态 |
 |---|---|---|---|

@@ -1,6 +1,6 @@
 # Host upgrade to 0.42.0
 
-Checklist for a Host moving from 0.41.0 to the proposed 0.42.0 MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Reviewed against source base `77c38cb5983bbeb1292bda7f1f69d9d9d33bb2f1`, including the release-notes audit (#1931). The version and publication remain subject to owner approval and the [release gates](https://github.com/Ancienttwo/byok-sdk/issues/1918); see the [release notes](v0.42.0.md). Review this guide again if the final train changes.
+Checklist for a Host moving from 0.41.0 to the proposed 0.42.0 MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Reviewed against source base `bb88f920476472a09000925338061dd39877ce25`, including the release-notes audit (#1931). The version and publication remain subject to owner approval and the [release gates](https://github.com/Ancienttwo/byok-sdk/issues/1918); see the [release notes](v0.42.0.md). Review this guide again if the final train changes.
 
 ## Clearing a device enrollment without a daemon
 
@@ -31,7 +31,9 @@ A Host on 0.41.0 reads these as `unknown` with `reportedClass` until it upgrades
 
 `checkAgentMemoryHome(home, { commit?: { filesystem? } })` in `@byok-sdk/client/agent-memory` is additive: nothing existing changes. It returns `{ ok: true }` or `{ ok: false, code, reason }` with the class and reason the device would send for the same home. It throws when it cannot decide (missing `MEMORY.md`, a changed home identity, an I/O error, no secure memory filesystem; on macOS and Windows pass the helper's filesystem as `commit.filesystem` and close it yourself), and it is advisory because it holds no lease and has no task id. Its verdict is about the home: the device applies the resident refusals only to a task that carries `MEMORY.md` into its prompt and the snapshot refusals only to a task with `agentMemoryCommit`; the repair task (`agentMemory:"none"`, no commit) is never refused, so do not gate it on the verdict. Unlike the failure class, the check is not hidden on a task that seals its output. A Host that copied the device's limits (AiphaBee's `residentMemoryBreach` and `memoryBreach`) can replace that copy with this call.
 
-## OAR 0.99.0 driver base (#1863)
+## OAR driver base (#1863, #1945, #1956)
+
+The release uses OAR 0.101.0 (`ea3269e`, fork branch `byok/0.101.0`). The move from 0.99.0 adds no Host-visible behavior change; the runtime changes below entered the train with 0.99.0 (#1863).
 
 A Grok follow-up sent while Grok runs a turn of its own is held until that turn closes; budget the task deadline for that wait. Grok 429s that name a spending limit now fail as `quota` or `billing` (non-retryable) instead of retryable `rate_limited`. A Codex older than OAR needs, or with an unreadable `config.toml`, fails the start as non-retryable `invalid_request`. Confirm that the Host does not retry those classes as transient.
 

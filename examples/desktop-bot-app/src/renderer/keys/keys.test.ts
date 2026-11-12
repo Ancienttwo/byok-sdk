@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CustodyChange } from '../../custody/protocol.ts';
 import { BridgeCallError } from '../bridge.ts';
 import { Receipt } from './keys-section.tsx';
-import { storedProfile, submitModelRoute, submitReplaceSecret } from './submit.ts';
+import { runLocked, storedProfile, submitModelRoute, submitReplaceSecret } from './submit.ts';
 
 const context = modelRouteContext();
 const changes: ModelRouteChange[] = [
@@ -63,5 +63,20 @@ describe('keys form submission', () => {
     const outcome = await submitReplaceSecret('zai-main', 'new-provider-key', submit);
     expect(submit).toHaveBeenCalledWith({ op: 'replace_secret', profileRef: 'zai-main', secret: 'new-provider-key' });
     expect(outcome).toEqual({ receipt: { profile_ref: 'zai-main', secret_configured: true } });
+  });
+
+  it('holds the section lock through the reload after a receipt and releases it after a refusal or a thrown error', async () => {
+    const receipt = { receipt: { profile_ref: 'a' } as ProviderStatus };
+    const trace: string[] = [];
+    const setBusy = (busy: boolean) => trace.push(`busy:${busy}`);
+    const reload = async () => { trace.push('reload'); };
+    await runLocked(setBusy, async () => receipt, () => trace.push('outcome'), reload);
+    expect(trace).toEqual(['busy:true', 'outcome', 'reload', 'busy:false']);
+    trace.length = 0;
+    await runLocked(setBusy, async () => ({ refusal: { message: 'no' } }), () => trace.push('outcome'), reload);
+    expect(trace).toEqual(['busy:true', 'outcome', 'busy:false']);
+    trace.length = 0;
+    await expect(runLocked(setBusy, async () => { throw new Error('bridge'); }, () => trace.push('outcome'), reload)).rejects.toThrow('bridge');
+    expect(trace).toEqual(['busy:true', 'busy:false']);
   });
 });

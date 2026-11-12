@@ -7,7 +7,7 @@ import {
 } from '@byok-sdk/keys/model-route';
 import { useConversation } from '../conversation/use-conversation.ts';
 import './keys.css';
-import { refusalOf, storedProfile, submitModelRoute, submitReplaceSecret, type Refusal, type SubmitOutcome } from './submit.ts';
+import { refusalOf, runLocked, storedProfile, submitModelRoute, submitReplaceSecret, type Refusal, type SubmitOutcome } from './submit.ts';
 
 const ERROR_COPY: Readonly<Record<ModelRouteErrorCode, string>> = {
   required: 'Required.',
@@ -31,6 +31,8 @@ const LABELS: Readonly<Record<ModelRouteFieldView['field'], string>> = {
 };
 
 type Change = (change: ModelRouteChange) => void;
+/** Runs one submission under the section's single lock. */
+type Run = (run: () => Promise<SubmitOutcome>) => Promise<void>;
 
 function FieldError({ view }: { view: ModelRouteFieldView }) {
   if (view.error === null) return null;
@@ -147,37 +149,31 @@ function RefusalNote({ refusal }: { refusal: Refusal }) {
 
 type Listed = { readonly statuses: readonly ProviderStatus[]; readonly refusal?: undefined } | { readonly statuses?: undefined; readonly refusal: Refusal };
 
-/** The stored profiles from `keys.list`, read when the section opens, after each receipt and on demand; each read is one custody child. */
-function useKeysList(): { listed: Listed | undefined; reload: () => void } {
+/** The stored profiles from `keys.list`; each read is one custody child. `load` never rejects: a refusal is shown as listed. */
+function useKeysList(): { listed: Listed | undefined; load: () => Promise<void> } {
   const [listed, setListed] = useState<Listed>();
-  const [generation, setGeneration] = useState(0);
-  const reload = useCallback(() => setGeneration(value => value + 1), []);
-  useEffect(() => {
-    let stopped = false;
-    window.byok.call('keys.list', undefined).then(
-      statuses => { if (!stopped) setListed({ statuses }); },
-      (error: unknown) => { if (!stopped) setListed({ refusal: refusalOf(error) }); },
-    );
-    return () => { stopped = true; };
-  }, [generation]);
-  return { listed, reload };
+  const load = useCallback(async () => {
+    try {
+      setListed({ statuses: await window.byok.call('keys.list', undefined) });
+    } catch (error) {
+      setListed({ refusal: refusalOf(error) });
+    }
+  }, []);
+  return { listed, load };
 }
 
 /** A new model route, or the edit of a stored one. A stored key starts as kept, and a kept key is never sent. */
-function RouteForm({ stored, onOutcome }: { stored: ProviderStatus | null; onOutcome: (outcome: SubmitOutcome) => void }) {
+function RouteForm({ stored, busy, run }: { stored: ProviderStatus | null; busy: boolean; run: Run }) {
   const context: ModelRouteContext = useMemo(() => modelRouteContext({ stored: stored === null ? null : storedProfile(stored) }), [stored]);
   const [draft, setDraft] = useState(() => createModelRouteDraft(context));
-  const [busy, setBusy] = useState(false);
   const view = modelRouteView(draft, context);
   const onChange: Change = change => setDraft(current => applyModelRouteChange(current, change, context));
 
-  const submit = async () => {
-    setBusy(true);
+  const submit = () => run(async () => {
     const result = await submitModelRoute(draft, context, stored, change => window.byok.call('keys.submit', change));
     setDraft(result.draft);
-    setBusy(false);
-    onOutcome(result.outcome);
-  };
+    return result.outcome;
+  });
 
   return (
     <form className="keys-form" onSubmit={event => { event.preventDefault(); if (view.valid && !busy) void submit(); }}>
@@ -202,16 +198,12 @@ function RouteForm({ stored, onOutcome }: { stored: ProviderStatus | null; onOut
 }
 
 /** Replaces the stored key of a profile and changes nothing else; the only way out of an unfinished credential change. */
-function ReplaceKeyForm({ stored, onOutcome }: { stored: ProviderStatus; onOutcome: (outcome: SubmitOutcome) => void }) {
+function ReplaceKeyForm({ stored, busy, run }: { stored: ProviderStatus; busy: boolean; run: Run }) {
   const [secret, setSecret] = useState('');
-  const [busy, setBusy] = useState(false);
-  const submit = async () => {
-    setBusy(true);
+  const submit = () => {
     const typed = secret;
     setSecret('');
-    const outcome = await submitReplaceSecret(stored.profile_ref, typed, change => window.byok.call('keys.submit', change));
-    setBusy(false);
-    onOutcome(outcome);
+    return run(() => submitReplaceSecret(stored.profile_ref, typed, change => window.byok.call('keys.submit', change)));
   };
   return (
     <form className="keys-form" onSubmit={event => { event.preventDefault(); if (secret !== '' && !busy) void submit(); }}>
@@ -224,8 +216,8 @@ function ReplaceKeyForm({ stored, onOutcome }: { stored: ProviderStatus; onOutco
   );
 }
 
-function StoredList({ listed, editing, onEdit, onReload }: {
-  listed: Listed | undefined; editing: string | null; onEdit: (status: ProviderStatus | null) => void; onReload: () => void;
+function StoredList({ listed, editing, busy, onEdit, onReload }: {
+  listed: Listed | undefined; editing: string | null; busy: boolean; onEdit: (status: ProviderStatus | null) => void; onReload: () => void;
 }) {
   return (
     <section className="keys-stored">
@@ -236,7 +228,7 @@ function StoredList({ listed, editing, onEdit, onReload }: {
         <ul>
           {listed.statuses.map(status => (
             <li key={status.profile_ref}>
-              <button type="button" aria-current={status.profile_ref === editing} onClick={() => onEdit(status)}>
+              <button type="button" disabled={busy} aria-current={status.profile_ref === editing} onClick={() => onEdit(status)}>
                 {status.display_name} ({status.profile_ref}) · {status.provider_kind} {status.model}
                 {' · '}{status.auth_mode === 'none' ? 'no key needed' : status.secret_configured ? 'key stored' : 'no key stored'}
                 {status.configuration_pending && ' · unfinished key change: replace the key'}
@@ -245,8 +237,8 @@ function StoredList({ listed, editing, onEdit, onReload }: {
           ))}
         </ul>
       )}
-      <button type="button" onClick={() => onEdit(null)}>New provider</button>
-      <button type="button" onClick={onReload}>Reload</button>
+      <button type="button" disabled={busy} onClick={() => onEdit(null)}>New provider</button>
+      <button type="button" disabled={busy} onClick={onReload}>Reload</button>
     </section>
   );
 }
@@ -257,10 +249,13 @@ function StoredList({ listed, editing, onEdit, onReload }: {
  * saved profile's entry through the Host's view-change hint.
  */
 export function KeysSection() {
-  const { listed, reload } = useKeysList();
+  const { listed, load } = useKeysList();
   const [editing, setEditing] = useState<ProviderStatus | null>(null);
   const [formKey, setFormKey] = useState(0);
   const [outcome, setOutcome] = useState<SubmitOutcome>();
+  // One lock for every keys call of the section (list read, submission, the read after a receipt): no two are in flight,
+  // so no response is stale and the list on screen is current whenever the section is interactive. Held from the first read.
+  const [busy, setBusy] = useState(true);
   const { loaded } = useConversation(null);
 
   const edit = (status: ProviderStatus | null) => {
@@ -273,15 +268,20 @@ export function KeysSection() {
     if ('receipt' in next) {
       setEditing(null);
       setFormKey(value => value + 1);
-      reload();
     }
   };
+  const run: Run = work => runLocked(setBusy, work, onOutcome, load);
+  const reload = async () => {
+    setBusy(true);
+    try { await load(); } finally { setBusy(false); }
+  };
+  useEffect(() => { void reload(); }, []);
 
   return (
     <div className="keys">
-      <StoredList listed={listed} editing={editing?.profile_ref ?? null} onEdit={edit} onReload={reload} />
-      <RouteForm key={`route-${formKey}`} stored={editing} onOutcome={onOutcome} />
-      {editing !== null && editing.auth_mode !== 'none' && <ReplaceKeyForm key={`key-${formKey}`} stored={editing} onOutcome={onOutcome} />}
+      <StoredList listed={listed} editing={editing?.profile_ref ?? null} busy={busy} onEdit={edit} onReload={() => void reload()} />
+      <RouteForm key={`route-${formKey}`} stored={editing} busy={busy} run={run} />
+      {editing !== null && editing.auth_mode !== 'none' && <ReplaceKeyForm key={`key-${formKey}`} stored={editing} busy={busy} run={run} />}
       {outcome && ('receipt' in outcome ? <Receipt status={outcome.receipt} /> : <RefusalNote refusal={outcome.refusal} />)}
       <section className="keys-models">
         <h2>Models Bots can use</h2>
