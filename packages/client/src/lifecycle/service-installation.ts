@@ -173,7 +173,9 @@ export interface ServiceInstallation {
    * is untouched until preparation succeeds; its live store owner causes
    * `store_busy`. An owned marked unit without a current version is stopped
    * before preparation and started again after preparation fails, once
-   * leases/gates are released and staging removed. After a failed store
+   * leases/gates are released and the version directory this call created
+   * is removed (one it reused, or any after `installation_exists`, is kept:
+   * another installation may use it). After a failed store
    * restore it is removed instead, and the next install writes it again.
    * OS credentials are never cleared. `precheck` is required.
    * The temporary snapshot `snapshots/.install-<uuid>` is removed after a
@@ -215,9 +217,16 @@ export interface ServiceInstallation {
    * Restores `previous` and the store snapshot taken when `current` was
    * switched to, under a `pending` receipt written first. Store writes since
    * that switch are discarded.
+   *
+   * When install, upgrade, rollback or recover is refused while it holds
+   * store leases (for example `store_busy`) and a lease or gate then fails
+   * to release, the error is still the `ServiceInstallationError` with the
+   * refusal's code; its `cause` is an `AggregateError` of the refusal and
+   * every release failure. A refusal that is not a
+   * `ServiceInstallationError` becomes such an `AggregateError` itself.
    */
   rollback(): Promise<ServiceUpgradeReceipt>;
-  /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. */
+  /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. A lease release failure after a refusal is joined as on `rollback()`. */
   recover(): Promise<ServiceUpgradeReceipt | undefined>;
   /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
   uninstall(): Promise<void>;
@@ -317,17 +326,28 @@ function startsNothing(error: unknown): boolean {
   return error instanceof StoreRestoreError || (error instanceof ServiceInstallationError && error.code === 'install_snapshot_leftover');
 }
 
-/** Joins a lease release failure to the error it followed, keeping whether that error starts nothing. */
-/** A preparation error whose store leases then failed to release; `failure` still decides the receipt. */
-class ReleaseFailedError extends AggregateError {
-  constructor(readonly failure: unknown, releaseError: unknown, message: string) {
-    super([failure, releaseError], message);
+/** More than one store gate or lease failed to release; `errors` lists each failure. */
+class StoreReleaseError extends AggregateError {}
+
+/**
+ * Joins later failures to the error they followed. A ServiceInstallationError
+ * keeps its class, code and stores, with every error in its `cause`; any
+ * other error becomes an AggregateError, a StoreRestoreError when it starts
+ * nothing.
+ */
+function joinFailure(failure: unknown, later: readonly unknown[], note: string): Error {
+  const message = `${failure instanceof Error ? failure.message : 'Store preparation failed.'} ${note}`;
+  const errors = [failure, ...later.flatMap((error) => error instanceof StoreReleaseError ? error.errors : [error])];
+  if (failure instanceof ServiceInstallationError) {
+    const joined = new ServiceInstallationError(failure.code, failure.stores, { cause: new AggregateError(errors, message) });
+    joined.message = message;
+    return joined;
   }
+  return startsNothing(failure) ? new StoreRestoreError(errors, message) : new AggregateError(errors, message);
 }
 
-function withReleaseFailure(failure: unknown, releaseError: unknown): AggregateError {
-  const message = `${failure instanceof Error ? failure.message : 'Store preparation failed.'} The store leases could not be released either.`;
-  return startsNothing(failure) ? new StoreRestoreError([failure, releaseError], message) : new ReleaseFailedError(failure, releaseError, message);
+function withReleaseFailure(failure: unknown, releaseError: unknown): Error {
+  return joinFailure(failure, [releaseError], 'The store leases could not be released either.');
 }
 
 /** The version `<installRoot>/<name>` points at, or `undefined` when the pointer is absent. */
@@ -477,13 +497,14 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   /** Copies the payload into `versions/<id>`, checking every file against the manifest. Returns the id. */
-  async function stage(payloadDir: string, { manifest, bytes }: Awaited<ReturnType<typeof readPayload>>): Promise<string> {
+  /** `created` is true only when this call renamed its staging into `versions/<id>`. */
+  async function stage(payloadDir: string, { manifest, bytes }: Awaited<ReturnType<typeof readPayload>>): Promise<{ id: string; created: boolean }> {
     const id = manifest.id;
     const target = path.join(versionsDir, id);
     if (await exists(target)) {
       if (!(await matchesManifest(target, manifest, bytes))) throw new ServiceInstallationError('version_conflict');
       await verifyStaged(target, manifest);
-      return id;
+      return { id, created: false };
     }
     const staging = path.join(versionsDir, `.staging-${randomUUID()}`);
     await fs.mkdir(staging, { recursive: true });
@@ -504,7 +525,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       await fs.rm(staging, { recursive: true, force: true });
       throw error;
     }
-    return id;
+    return { id, created: true };
   }
 
   async function verifyStaged(dir: string, manifest: ServicePayloadManifest): Promise<void> {
@@ -537,7 +558,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       const installed = await currentVersion();
       const payload = await readPayload(payloadDir);
       if (installed !== undefined && installed !== payload.manifest.id) throw new ServiceInstallationError('installation_exists');
-      const id = await stage(payloadDir, payload);
+      const { id, created } = await stage(payloadDir, payload);
       // An install snapshot must not replace a same-id reinstall's earlier
       // upgrade snapshot, which still belongs to its previous version.
       const snapshotId = `${INSTALL_SNAPSHOT_PREFIX}${randomUUID()}`;
@@ -551,15 +572,16 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           // restarting an owned marked unit, as upgrade does on refusal.
           // After installation_exists every version directory stays: the
           // other installation may use it. A later prune or uninstall
-          // removes what is left.
+          // removes what is left. Otherwise only a directory this call
+          // created is removed: another installation may have staged it.
           // withReleaseFailure() puts the refusal first.
           let failure = error;
           const original = error instanceof AggregateError ? error.errors[0] : error;
-          if (!(original instanceof ServiceInstallationError && original.code === 'installation_exists')) {
+          if (created && !(original instanceof ServiceInstallationError && original.code === 'installation_exists')) {
             try {
               await fs.rm(path.join(versionsDir, id), { recursive: true, force: true });
             } catch (cleanup) {
-              failure = new AggregateError([error, cleanup], `${error instanceof Error ? error.message : 'Store preparation failed.'} The staged version could not be removed: ${path.join(versionsDir, id)}.`);
+              failure = joinFailure(error, [cleanup], `The staged version could not be removed: ${path.join(versionsDir, id)}.`);
             }
           }
           // A failed restore may have left partial stores. The unit stays
@@ -570,14 +592,14 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
             try {
               await held.uninstall();
             } catch (removal) {
-              throw new AggregateError([failure, removal], `${failure instanceof Error ? failure.message : 'Store preparation failed.'} The marked service unit could not be removed: ${inspection.unitPath}.`);
+              throw joinFailure(failure, [removal], `The marked service unit could not be removed: ${inspection.unitPath}.`);
             }
           }
           if (stopMarked && !startsNothing(error)) {
             try {
               await lifecycle.start();
             } catch (restart) {
-              throw new AggregateError([failure, restart], `${failure instanceof Error ? failure.message : 'Store preparation failed.'} The marked service could not be restarted.`);
+              throw joinFailure(failure, [restart], 'The marked service could not be restarted.');
             }
           }
           throw failure;
@@ -612,6 +634,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       // left: a failed restore then always ends with nothing installed and
       // one repair snapshot. The credential store is never touched.
       let releaseRestored: (() => Promise<void>) | undefined;
+      let leasesReleased = false;
       const removals = [
         { name: 'service unit and launcher', remove: async () => {
           // A first install that failed before activation has not touched
@@ -634,6 +657,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
             } catch (releaseError) {
               throw withReleaseFailure(error, releaseError);
             }
+            leasesReleased = true;
             throw error;
           }
           releaseRestored = release;
@@ -659,7 +683,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
               : releaseRestored === undefined ? ` The install snapshot is retained at ${snapshotPath}.`
                 // Restored stores: the snapshot is an ordinary leftover the next install refuses until it is removed.
                 : ` The stores were restored; remove the install snapshot at ${snapshotPath} before the next install.`;
-          error.message = `The service failed to install, activate or pass its health check; removal failed. Remaining: ${removals.slice(index).map((item) => item.name).join(', ')}.${kept}`;
+          error.message = `The service failed to install, activate or pass its health check; removal failed. Remaining: ${removals.slice(index).filter((item) => !(leasesReleased && item.name === 'store lease release')).map((item) => item.name).join(', ')}.${kept}`;
           throw error;
         }
       }
@@ -697,8 +721,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * after the service gate, the documented order, and sorted) and ends
    * whatever the stopped runs left in their owned-process ledgers. The
    * returned release frees every gate, then every lease (a lease's own
-   * release takes its store gate), and throws the first failure only after
-   * all of them were tried.
+   * release takes its store gate), and throws only after all of them were
+   * tried: the one failure, or a StoreReleaseError listing each.
    */
   async function stopQuiescent(stopService = true): Promise<() => Promise<void>> {
     if (stopService) await lifecycle.stop();
@@ -709,7 +733,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       const failures: unknown[] = [];
       for (const gate of gates) await gate.release().catch((error: unknown) => { failures.push(error); });
       for (const lease of leases) await lease.release().catch((error: unknown) => { failures.push(error); });
-      if (failures.length > 0) throw failures[0];
+      if (failures.length === 1) throw failures[0];
+      if (failures.length > 1) throw new StoreReleaseError(failures, 'More than one store gate or lease could not be released.');
     };
     try {
       const stores = await readDaemonStores();
@@ -1055,7 +1080,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       await refusePending();
       const from = await currentVersion();
       if (from === undefined) throw new ServiceInstallationError('installation_absent');
-      const to = await stage(payloadDir, await readPayload(payloadDir));
+      const { id: to } = await stage(payloadDir, await readPayload(payloadDir));
       if (to === from) throw new ServiceInstallationError('version_current');
       const previous = await readPointer('previous');
       const kept = previous === undefined ? {} : { previous };
@@ -1074,10 +1099,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       try {
         ({ stores, release } = await prepareStores(to, to));
       } catch (error) {
-        // The receipt records the code of the preparation error itself, also when a lease release failed after it.
-        const coded = error instanceof ReleaseFailedError ? error.failure : error;
-        if (coded instanceof ServiceInstallationError) {
-          await writeReceipt({ state: 'failed', from, to, code: coded.code, ...(coded.stores ? { stores: [...coded.stores] } : {}) });
+        // A lease release failure after a refusal keeps the refusal's code.
+        if (error instanceof ServiceInstallationError) {
+          await writeReceipt({ state: 'failed', from, to, code: error.code, ...(error.stores ? { stores: [...error.stores] } : {}) });
         }
         // Stores whose restore failed may be partial: `from` stays stopped
         // and the pending receipt leaves recover() to restore them.

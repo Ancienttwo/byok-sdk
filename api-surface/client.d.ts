@@ -11379,7 +11379,9 @@ export interface ServiceInstallation {
      * is untouched until preparation succeeds; its live store owner causes
      * `store_busy`. An owned marked unit without a current version is stopped
      * before preparation and started again after preparation fails, once
-     * leases/gates are released and staging removed. After a failed store
+     * leases/gates are released and the version directory this call created
+     * is removed (one it reused, or any after `installation_exists`, is kept:
+     * another installation may use it). After a failed store
      * restore it is removed instead, and the next install writes it again.
      * OS credentials are never cleared. `precheck` is required.
      * The temporary snapshot `snapshots/.install-<uuid>` is removed after a
@@ -11421,9 +11423,16 @@ export interface ServiceInstallation {
      * Restores `previous` and the store snapshot taken when `current` was
      * switched to, under a `pending` receipt written first. Store writes since
      * that switch are discarded.
+     *
+     * When install, upgrade, rollback or recover is refused while it holds
+     * store leases (for example `store_busy`) and a lease or gate then fails
+     * to release, the error is still the `ServiceInstallationError` with the
+     * refusal's code; its `cause` is an `AggregateError` of the refusal and
+     * every release failure. A refusal that is not a
+     * `ServiceInstallationError` becomes such an `AggregateError` itself.
      */
     rollback(): Promise<ServiceUpgradeReceipt>;
-    /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. */
+    /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. A lease release failure after a refusal is joined as on `rollback()`. */
     recover(): Promise<ServiceUpgradeReceipt | undefined>;
     /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
     uninstall(): Promise<void>;

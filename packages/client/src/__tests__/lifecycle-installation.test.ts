@@ -17,6 +17,7 @@ import { SERVICE_UNIT_MARKER, ServiceUnitError, withServiceOwnerGate } from '../
 import * as daemonOwner from '../util/daemon-owner';
 import { acquireDaemonOwner } from '../util/daemon-owner';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
+import { OwnedProcessLedger, OwnedProcessResidueError, type OwnedProcessReconciliation } from '../daemon/owned-process-ledger';
 import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';
 
 useInProcessServiceLifecycleGate();
@@ -639,10 +640,10 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       },
     });
     const snapshotNames = async () => fs.readdir(path.join(installRoot, 'snapshots'));
-    const expectUninstalled = async () => {
+    const expectUninstalled = async (versions: string[] = []) => {
       expect(await pointer('current')).toBeUndefined();
       expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
-      expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
+      expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual(versions);
       expect(events).not.toContain('install');
       expect(Object.keys(await tree(installRoot)).some((file) => file.startsWith(path.join('snapshots', '.install-')))).toBe(false);
     };
@@ -758,7 +759,8 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
           return ours === theirs && taken++ === 1 ? { release: async () => { await lease.release(); throw new Error('injected release failure'); } } : lease;
         });
         const refused = await installation.install(await payload(ours)).catch((caught: unknown) => caught).finally(() => leaseFault.mockRestore());
-        expect(ours === theirs ? (refused as AggregateError).errors[0] : refused).toMatchObject({ code: 'installation_exists' });
+        // The refusal keeps its class and code; the release failure joins its cause (#1991).
+        expect(refused).toMatchObject({ code: 'installation_exists' });
         expect(prechecked).toBe(false);
         expect(await pointer('current')).toBe(theirs);
         expect(await fs.readFile(path.join(installRoot, 'versions', theirs, 'host.js'), 'utf8')).toBe(`// ${theirs}`);
@@ -818,7 +820,8 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       const candidate = await payload('2.0.0');
       if (reused) await fs.cp(candidate, path.join(installRoot, 'versions', '2.0.0'), { recursive: true });
       await expect(installation.install(candidate)).rejects.toMatchObject({ code: verdict === 'rejected' ? 'store_rejected' : 'store_repair_required' });
-      await expectUninstalled();
+      // A version directory this call did not create may belong to another installation: it stays (#1991).
+      await expectUninstalled(reused ? ['2.0.0'] : []);
       await expect(fs.lstat(path.join(installRoot, 'snapshots'))).rejects.toMatchObject({ code: 'ENOENT' });
       expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
       expect(events).toEqual(['stop', 'precheck', 'start']);
@@ -843,8 +846,8 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       });
       try {
         const error = await installation.install(await payload('2.0.0', { 'migrate.cjs': script })).catch((caught: unknown) => caught);
-        expect(error).toBeInstanceOf(AggregateError);
-        expect((error as AggregateError).errors).toEqual([expect.objectContaining({ code: 'store_migration_failed' }), releaseError]);
+        expect(error).toBeInstanceOf(ServiceInstallationError);
+        expect(error).toMatchObject({ code: 'store_migration_failed', cause: { errors: [expect.objectContaining({ code: 'store_migration_failed' }), releaseError] } });
       } finally {
         leaseFault.mockRestore();
       }
@@ -1097,12 +1100,14 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       try {
         // A removal that fails too names both the unit and the kept snapshot (#1991).
         const failed = await installation.install(await payload('2.0.0', { 'migrate.cjs': `${MIGRATE}\nprocess.exit(1);` })).catch((caught: unknown) => caught);
-        expect((failed as AggregateError).errors).toEqual([expect.any(AggregateError), expect.anything()]);
+        expect((failed as AggregateError).errors).toEqual([expect.any(AggregateError), removalError]);
         expect((failed as Error).message).toContain(unitPath);
         expect((failed as Error).message).toContain(path.join(installRoot, 'snapshots', '.install-repair-'));
         expect(existsSync(unitPath)).toBe(true);
+        expect(unitEvents).toContain('remove');
+        // The retry refuses on the kept repair snapshot (its restore still fails) and removes the unit then.
         removalFails = false;
-        await expect(installation.install(await payload('2.0.0', { 'migrate.cjs': `${MIGRATE}\nprocess.exit(1);` }))).rejects.toBeInstanceOf(AggregateError);
+        await expect(installation.install(await payload('2.0.0', { 'migrate.cjs': `${MIGRATE}\nprocess.exit(1);` }))).rejects.toThrow('The stores of an earlier failed install were not restored');
       } finally {
         fault.restore();
       }
@@ -1229,7 +1234,13 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
       expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
 
-      // The retry restores the repair; its own cleanup restore succeeds and only the release fails (#1991).
+      // The retry restores the repair; its cleanup restore fails again but its leases are released: not remaining (#1991).
+      healthFailed = false;
+      const again = failRestore(() => healthFailed);
+      const restoreOnly = await installation.install(await payload('2.0.0', { 'migrate.cjs': MIGRATE })).catch((caught: unknown) => caught).finally(() => again.restore());
+      expect((restoreOnly as Error).message).toContain('Remaining: prepared store snapshot restoration, install snapshot directory.');
+
+      // The next retry restores the repair; its own cleanup restore succeeds and only the release fails (#1991).
       healthFailed = false;
       const retry = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementation(faulty);
       const released = await installation.install(await payload('2.0.0', { 'migrate.cjs': MIGRATE })).catch((caught: unknown) => caught).finally(() => retry.mockRestore());
@@ -1314,7 +1325,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         return { release: async () => { await lease.release(); throw releaseError; } };
       });
       const released = await installation.upgrade(await payload('2.0.0', { 'migrate.cjs': MIGRATE })).catch((caught: unknown) => caught);
-      expect(released).toMatchObject({ errors: [expect.objectContaining({ code: 'store_migration_failed' }), releaseError] });
+      expect(released).toMatchObject({ code: 'store_migration_failed', cause: { errors: [expect.objectContaining({ code: 'store_migration_failed' }), releaseError] } });
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_migration_failed' });
 
       // A restore that fails may leave partial stores (#1987): nothing starts, the receipt stays pending for recover().
@@ -1475,6 +1486,22 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       });
       await expect(installation.upgrade(await payload('2.0.0'))).rejects.toThrow('injected release failure');
       await expect(fs.access(path.join(research, 'daemon-owner.json'))).rejects.toThrow();
+
+      // A refusal after both leases whose leases both fail to release carries every release failure (#1991).
+      await installation.recover();
+      const releaseErrors = [new Error('first release failure'), new Error('second release failure')];
+      vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockRestore();
+      const real = daemonOwner.acquireDaemonOwner;
+      let taken = 0;
+      const leaseFault = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementation(async (...args) => {
+        const lease = await real(...args);
+        const releaseError = releaseErrors[taken++];
+        return { release: async () => { await lease.release(); throw releaseError; } };
+      });
+      const residue = vi.spyOn(OwnedProcessLedger.prototype, 'reconcile').mockRejectedValueOnce(new OwnedProcessResidueError({ survived: 1 } as OwnedProcessReconciliation, ['record']));
+      const error = await installation.upgrade(await payload('3.0.0')).catch((caught: unknown) => caught).finally(() => { leaseFault.mockRestore(); residue.mockRestore(); });
+      expect(error).toBeInstanceOf(ServiceInstallationError);
+      expect(error).toMatchObject({ code: 'owned_process_residue', cause: { errors: [expect.objectContaining({ code: 'owned_process_residue' }), ...releaseErrors] } });
     });
 
     it('a store with a live owner is store_busy and nothing is switched', async () => {
@@ -1497,7 +1524,8 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         return { release: async () => { await lease.release(); throw releaseError; } };
       });
       const error = await installation.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught).finally(() => busy.release());
-      expect(error).toMatchObject({ errors: [expect.objectContaining({ code: 'store_busy' }), releaseError] });
+      expect(error).toBeInstanceOf(ServiceInstallationError);
+      expect(error).toMatchObject({ code: 'store_busy', cause: { errors: [expect.objectContaining({ code: 'store_busy' }), releaseError] } });
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_busy' });
     });
 
