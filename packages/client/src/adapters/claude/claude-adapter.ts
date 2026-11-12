@@ -447,13 +447,22 @@ export class ClaudeAdapter implements RuntimeAdapter {
       // `--input-format stream-json` takes the first turn's instruction on
       // stdin, as every follow-up: one send path. Claude's `system/init`
       // after it carries the session id.
-      const prompted = await Promise.race([opened.prompt(startInput.instruction), cancelled]);
-      if (prompted.response.body.kind !== 'accepted') {
+      try {
+        const prompted = await Promise.race([opened.prompt(startInput.instruction), cancelled]);
+        if (prompted.response.body.kind !== 'accepted') {
+          throw new RuntimeExecutionFailure({
+            phase: 'start', retry: 'retryable',
+            reason: `claude initial instruction transport failed: ${prompted.response.body.reason ?? prompted.response.body.kind}`,
+            failure: opened.startupExit(),
+          });
+        }
+      } catch (cause) {
+        if (isRuntimeStartupDisposalFailure(cause) || isRuntimeExecutionFailure(cause)) throw cause;
         throw new RuntimeExecutionFailure({
           phase: 'start', retry: 'retryable',
-          reason: `claude initial instruction transport failed: ${prompted.response.body.reason ?? prompted.response.body.kind}`,
+          reason: 'claude initial instruction transport failed',
           failure: opened.startupExit(),
-        });
+        }, { cause });
       }
 
       let sessionRef: string;

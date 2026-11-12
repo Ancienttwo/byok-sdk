@@ -75,7 +75,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
       onOverflow: () => fail(new Error('owned line process frame exceeded its byte budget')),
     });
     const deliver = (line: string): void => {
-      if (closed || failure !== undefined) return;
+      if (failure !== undefined) return;
       if (!adopted || lineHandlers.length === 0) {
         const bytes = Buffer.byteLength(line);
         if (heldBytes + bytes > MAX_BUFFERED_BYTES) { fail(new Error('owned line process registration buffer exceeded its byte budget')); return; }
@@ -96,7 +96,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
       const ready = held.splice(0); heldBytes = 0;
       for (const line of ready) deliver(line);
     };
-    child.stdout.on('data', (chunk: Buffer) => { if (failure === undefined) lines.push(chunk); });
+    child.stdout.on('data', (chunk: Buffer) => { if (!closed && failure === undefined) lines.push(chunk); });
     // Drain stderr without retaining unbounded output or inheriting daemon stdio.
     child.stderr.on('data', (chunk: Buffer) => { stderrTail = Buffer.concat([stderrTail,chunk]).subarray(-64*1024); });
     child.stdin.on('error', fail);
@@ -139,7 +139,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
       },
       /** Native replies have no RPC ACK; expose the stdin completion receipt to their deadline owner. */
       writeAcknowledged(text: string): Promise<void> {
-        if (!adopted || closed || failure !== undefined) return Promise.reject(failure ?? new Error('owned line process is not writable'));
+        if (!adopted || closed || failure !== undefined) throw failure ?? new Error('owned line process is not writable');
         return new Promise<void>((resolve, reject) => {
           const rejectWrite = (error: Error) => { pendingWrites.delete(rejectWrite); reject(error); };
           pendingWrites.add(rejectWrite);

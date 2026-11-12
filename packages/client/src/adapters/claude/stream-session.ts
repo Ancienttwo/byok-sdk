@@ -76,13 +76,23 @@ export class ClaudeStreamSession {
     const mcpServers = Object.entries(options.mcpServers).map(([name, server]) => ({ name, ...server }));
     // OAR's void write is synchronous. Keep its turn/queue decisions, but retain
     // the owned transport's receipt for the SDK input call that issued a write.
-    const child = { ...this.child, write: (text: string): void => {
-      const written = this.child.writeAcknowledged(text);
-      this.#inputWrites?.push(written);
-      // Held queue drains and interrupts have no input caller awaiting them;
-      // the owned transport still fails the process and event stream.
-      void written.catch(() => {});
-    } };
+    const owned = this.child;
+    const child: OwnedLineProcess = {
+      spawned: owned.spawned, exited: owned.exited,
+      kill: () => owned.kill(), dispose: () => owned.dispose(),
+      get exitedOnItsOwn() { return owned.exitedOnItsOwn; },
+      observeDescendants: () => owned.observeDescendants(), exitError: () => owned.exitError(),
+      onLine: handler => owned.onLine(handler), onExit: handler => owned.onExit(handler),
+      writeAcknowledged: text => owned.writeAcknowledged(text),
+      write: (text: string): void => {
+        // Keep the owned transport's synchronous writability refusal visible to OAR.
+        const written = owned.writeAcknowledged(text);
+        this.#inputWrites?.push(written);
+        // Held queue drains and interrupts have no input caller awaiting them;
+        // the owned transport still fails the process and event stream.
+        void written.catch(() => {});
+      },
+    };
     this.#raw = await streamJsonSession(child, options.resume ?? randomUUID(), sessionCredentialRedactor({ env: options.env, mcpServers }), {
       projection: claudeProjectionProfile,
       initial: options.resume === undefined ? initialClaudeProjection : resumedClaudeProjection,
@@ -254,7 +264,9 @@ export class ClaudeStreamSession {
         resolve(response);
       };
       this.#controls.set(id, { id, settle });
-      this.child.writeAcknowledged(`${JSON.stringify({ type: 'control_request', request_id: id, request })}\n`).catch(() => settle(undefined));
+      try {
+        this.child.writeAcknowledged(`${JSON.stringify({ type: 'control_request', request_id: id, request })}\n`).catch(() => settle(undefined));
+      } catch { settle(undefined); }
     });
   }
 

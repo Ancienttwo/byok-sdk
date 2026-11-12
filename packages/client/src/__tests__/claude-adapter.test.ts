@@ -534,6 +534,54 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     if (outcome !== 'EPIPE') complete();
   });
 
+  it('rejects an unwritable prompt in OAR before the exit callback runs (#1941)', async () => {
+    let native!: ChildProcessWithoutNullStreams;
+    const child = createOwnedLineProcessSpawn({ spawnFn: (command, args, options) => {
+      native = realSpawn(command, args, options) as ChildProcessWithoutNullStreams;
+      return native;
+    } })(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { env: {} });
+    const stream = new ClaudeStreamSession(child);
+    try {
+      await stream.open({ env: {}, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+      native.stdin.emit('error', new Error('stdin already failed'));
+      const control = await stream.prompt('must not be accepted');
+      expect(control.response.body).toMatchObject({ kind: 'rejected', code: 'error', reason: 'stdin already failed' });
+    } finally { await child.dispose(); }
+  });
+
+  it('classifies an exit during the initial prompt receipt as runtime_exited (#1941)', async () => {
+    let child!: ChildProcessWithoutNullStreams;
+    let written!: () => void;
+    const writing = new Promise<void>(resolve => { written = resolve; });
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: ((command: string, args: readonly string[], options: object) => {
+        child = realSpawn(command, args, options) as ChildProcessWithoutNullStreams;
+        vi.spyOn(child.stdin, '_write').mockImplementation(() => { written(); });
+        return child;
+      }) as SpawnFn,
+    });
+    const start = startAdapter(adapter, baseTask, await makeCtx());
+    const failed = expect(start).rejects.toMatchObject({
+      phase: 'start', message: 'claude initial instruction transport failed', failure: { class: 'runtime_exited' },
+      cause: expect.objectContaining({ message: 'owned line process closed during write' }),
+    });
+    await writing;
+    child.kill(); // An exit outside owned disposal leaves the runtime_exited evidence intact.
+    await failed;
+  });
+
+  it('delivers stdout buffered before close to a handler registered after close (#1941)', async () => {
+    const child = createOwnedLineProcessSpawn()(process.execPath, ['-e', 'console.log("buffered before close")'], { env: {} });
+    try {
+      await child.spawned;
+      expect(await child.exited).toBe(0);
+      const lines: string[] = [];
+      child.onLine(line => { lines.push(line); });
+      expect(lines).toEqual(['buffered before close']);
+    } finally { await child.dispose(); }
+  });
+
   it('delivers stdout before close and ignores a late stdout emission after onExit (#1941)', async () => {
     let native!: ChildProcessWithoutNullStreams;
     const child = createOwnedLineProcessSpawn({ spawnFn: (command, args, options) => {
