@@ -563,7 +563,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     });
     const start = startAdapter(adapter, baseTask, await makeCtx());
     const failed = expect(start).rejects.toMatchObject({
-      phase: 'start', message: 'claude initial instruction transport failed', failure: { class: 'runtime_exited' },
+      phase: 'start', message: 'claude exited before yielding an authoritative session id: owned line process closed during write', failure: { class: 'runtime_exited' },
       cause: expect.objectContaining({ message: 'owned line process closed during write' }),
     });
     await writing;
