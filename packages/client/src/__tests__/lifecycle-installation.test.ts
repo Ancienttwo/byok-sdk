@@ -310,17 +310,41 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     }
   });
 
-  it('upgrade and its rollback enforce the health-check deadline against a check that ignores abort (#1977)', async () => {
+  it('upgrade, rollback and recover enforce the health-check deadline against a check that ignores abort or succeeds late (#1977)', async () => {
     await installation.install(await payload('1.0.0'));
     const signals: AbortSignal[] = [];
+    let mode: 'hang' | 'late' | 'ok' = 'hang';
     installation = installationOver(fakeLifecycle(), {
       healthTimeoutMs: 50,
-      healthCheck: (signal) => { signals.push(signal); return new Promise<void>(() => undefined); },
+      healthCheck: async (signal) => {
+        signals.push(signal);
+        if (mode === 'hang') await new Promise<void>(() => undefined);
+        if (mode === 'late') { mode = 'ok'; await new Promise((resolve) => setTimeout(resolve, 100)); }
+      },
     });
     await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'rollback_unhealthy' });
     expect(signals.map((signal) => signal.aborted)).toEqual([true, true]);
     expect(await installation.receipt()).toMatchObject({ state: 'failed', from: '1.0.0', to: '2.0.0', code: 'rollback_unhealthy' });
     expect(await pointer('current')).toBe('1.0.0');
+
+    // A candidate check that succeeds after the deadline fails; the restored version passes.
+    mode = 'late';
+    await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'health_check_failed' });
+    expect(await installation.receipt()).toMatchObject({ state: 'rolled-back', code: 'health_check_failed' });
+
+    // rollback() and recover() called directly.
+    await installation.upgrade(await payload('2.0.0'));
+    mode = 'hang';
+    await expect(installation.rollback()).resolves.toMatchObject({ state: 'failed', code: 'rollback_unhealthy' });
+    const killed = new Error('process killed');
+    const doomed = installationOver({ ...fakeLifecycle(), stop: async () => { throw killed; }, start: async () => { throw killed; } });
+    await expect(doomed.upgrade(await payload('3.0.0'))).rejects.toThrow('process killed');
+    await expect(installation.recover()).resolves.toMatchObject({ state: 'failed', code: 'rollback_unhealthy' });
+  });
+
+  it.each([0, -1, 1.5, 2 ** 31, Number.NaN])('healthTimeoutMs %s is a TypeError (#1977)', (healthTimeoutMs) => {
+    expect(() => installationOver(fakeLifecycle(), { healthTimeoutMs })).toThrow(TypeError);
+    expect(() => installationOver(fakeLifecycle(), { healthTimeoutMs: 2 ** 31 - 1 })).not.toThrow();
   });
 
   it('starts the install health-check deadline after an in-flight platform start settles (#1966)', async () => {

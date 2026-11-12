@@ -565,8 +565,10 @@ otherwise pair first. An embedded Host can instead pass its own
 and cannot pass the default check. Install, upgrade, rollback and recover
 enforce the health-check deadline even if a custom check ignores abort or
 succeeds late: a late upgrade check restores the previous version, and a late
-check of a restored version is `rollback_unhealthy`. `healthTimeoutMs` bounds
-only the health-check wait after start returns. Unit
+check of a restored version is `rollback_unhealthy`. `healthTimeoutMs` is an
+integer from 1 to 2147483647 ms (another value is a `TypeError` when the
+installation is created) and bounds only the health-check wait after start
+returns. Unit
 writes, activation, start and the cleanup stop run outside that deadline;
 platform commands have no time bound today (follow-up: [#1971](https://github.com/Ancienttwo/byok-sdk/issues/1971)).
 Install awaits platform commands before proceeding, so cleanup cannot race

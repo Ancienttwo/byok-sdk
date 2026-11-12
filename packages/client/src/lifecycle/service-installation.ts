@@ -93,7 +93,9 @@ export interface ServiceInstallationOptions {
    */
   healthCheck?(signal: AbortSignal): Promise<void>;
   /**
-   * How long the health check may take. Default 60000. On install, upgrade,
+   * How long the health check may take: an integer from 1 to 2147483647
+   * (2^31-1) ms, or a TypeError when the installation is created. Default
+   * 60000. On install, upgrade,
    * rollback and recover, this bounds only the health-check wait after start
    * returns, also against a check that ignores its abort signal. Unit writes,
    * activation, start and cleanup stop run outside it; platform commands
@@ -483,6 +485,10 @@ export function defaultServiceHealthCheck(options: { storeDir: string; productId
 export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecycle: ManagedServiceLifecycle): ServiceInstallation {
   if (opts.daemonStores !== undefined && opts.healthCheck === undefined) {
     throw new TypeError('ServiceInstallationOptions.daemonStores requires healthCheck: the default health check reaches only productId\'s daemon');
+  }
+  // setTimeout takes at most 2^31-1 ms; a larger delay fires at once.
+  if (opts.healthTimeoutMs !== undefined && !(Number.isInteger(opts.healthTimeoutMs) && opts.healthTimeoutMs > 0 && opts.healthTimeoutMs <= 2 ** 31 - 1)) {
+    throw new TypeError('ServiceInstallationOptions.healthTimeoutMs must be an integer from 1 to 2147483647');
   }
   const root = path.resolve(opts.installRoot);
   const storeDir = opts.service.storeDir;
