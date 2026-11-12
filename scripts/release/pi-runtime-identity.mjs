@@ -191,6 +191,49 @@ export function readLockedPiClosure(lockText, identity, label = 'bun.lock') {
   return locked;
 }
 
+/** Bind the collected provenance subject to the recorded SRI and the installation lock authority. */
+export function assertRecordedPiClosureIntegrity(record, locked, identity) {
+  const fail = (name, reason) => { throw new Error(`official Pi closure: ${name}: ${reason}`); };
+  if (record?.format !== 'byok.official-pi-closure' || record.version !== 1
+    || !Array.isArray(record.packages) || record.packages.length !== PI_RUNTIME_CLOSURE.length) {
+    fail('record', 'expected the complete official Pi closure record');
+  }
+  const seen = new Set();
+  for (const entry of record.packages) {
+    if (!entry || !PI_RUNTIME_CLOSURE.includes(entry.name) || seen.has(entry.name) || entry.version !== identity.version) {
+      fail(entry?.name ?? 'record', 'unexpected, duplicate, or wrongly versioned package');
+    }
+    seen.add(entry.name);
+    if (entry.tarballIntegrity !== locked.get(entry.name)) fail(entry.name, 'recorded integrity differs from bun.lock');
+    const integrity = entry.tarballIntegrity;
+    if (typeof integrity !== 'string' || !/^sha512-[A-Za-z0-9+/]{86}==$/.test(integrity)) fail(entry.name, 'expected canonical SHA-512 integrity');
+    const bytes = Buffer.from(integrity.slice(7), 'base64');
+    if (bytes.length !== 64 || `sha512-${bytes.toString('base64')}` !== integrity) fail(entry.name, 'expected canonical SHA-512 integrity');
+    const bundle = entry.provenanceBundle;
+    if (!bundle || createHash('sha256').update(JSON.stringify(bundle)).digest('hex') !== entry.provenanceDigest) {
+      fail(entry.name, 'provenance bundle digest mismatch');
+    }
+    const envelope = bundle.dsseEnvelope;
+    if (envelope?.payloadType !== 'application/vnd.in-toto+json' || typeof envelope.payload !== 'string' || !envelope.payload) {
+      fail(entry.name, 'missing or malformed provenance envelope');
+    }
+    const payload = Buffer.from(envelope.payload, 'base64');
+    if (payload.toString('base64') !== envelope.payload) fail(entry.name, 'malformed provenance payload');
+    let statement;
+    try { statement = JSON.parse(payload.toString('utf8')); }
+    catch { fail(entry.name, 'malformed provenance payload'); }
+    if (statement?._type !== 'https://in-toto.io/Statement/v1' || statement.predicateType !== 'https://slsa.dev/provenance/v1'
+      || !Array.isArray(statement.subject) || statement.subject.length !== 1
+      || statement.subject[0]?.name !== `pkg:npm/${entry.name.replace('@', '%40')}@${entry.version}`) {
+      fail(entry.name, 'provenance subject does not identify exactly this package');
+    }
+    const subjectDigest = statement.subject[0].digest?.sha512;
+    if (typeof subjectDigest !== 'string' || !/^[0-9a-f]{128}$/.test(subjectDigest) || subjectDigest !== bytes.toString('hex')) {
+      fail(entry.name, 'provenance subject SHA-512 differs from recorded integrity');
+    }
+  }
+}
+
 function readManifest(file) {
   try {
     return JSON.parse(readFileSync(file, 'utf8'));

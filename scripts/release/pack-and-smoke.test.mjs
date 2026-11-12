@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync,
@@ -9,7 +10,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   parseBunLock, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, PI_DIRECT_CLOSURE, PI_RUNTIME_CLOSURE, readInstalledPiClosure,
-  readLockedPiClosure,
+  assertRecordedPiClosureIntegrity, readLockedPiClosure,
 } from './pi-runtime-identity.mjs';
 import { assertNoStorePaths } from './published-store-paths.mjs';
 import { assertWorkerConsumerImports } from './cloud-do-consumer-smoke.mjs';
@@ -71,7 +72,7 @@ test('release graph requires keys to carry the release train version', (t) => {
   const releaseVersion = manifestOf('packages/core').version;
   const keysRecord = /("packages\/keys": \{\r?\n\s+"name": "@byok-sdk\/keys",\r?\n\s+"version": ")[^"]+(")/;
   assert.match(lockText, keysRecord);
-  const runGraph = (keysVersion) => {
+  const runGraph = (keysVersion, mutatePiRecord) => {
     const root = mkdtempSync(path.join(os.tmpdir(), 'byok-release-graph-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const copy = (relative) => {
@@ -83,6 +84,12 @@ test('release graph requires keys to carry the release train version', (t) => {
     }
     copy('scripts/architecture/dependency-graph.mjs');
     for (const name of ['official-pi-installation.mjs', 'official-pi-closure.json']) copy(`packages/client/src/adapters/pi/${name}`);
+    if (mutatePiRecord) {
+      const recordPath = path.join(root, 'packages/client/src/adapters/pi/official-pi-closure.json');
+      const record = JSON.parse(readFileSync(recordPath, 'utf8'));
+      mutatePiRecord(record);
+      writeFileSync(recordPath, JSON.stringify(record));
+    }
     for (const relative of ['LICENSE', 'packages/client/tsup.config.ts']) copy(relative);
     for (const directory of workspaces) copy(`${directory}/package.json`);
     for (const directory of publicDirectories) for (const name of ['README.md', 'LICENSE']) copy(`${directory}/${name}`);
@@ -111,6 +118,11 @@ test('release graph requires keys to carry the release train version', (t) => {
   assert.deepEqual(split.stderr.trim().split(/\r?\n/), [
     `[release-graph] packages/keys/package.json: expected version ${releaseVersion}, got 0.13.1`,
   ]);
+  const forgedPi = runGraph(releaseVersion, record => {
+    record.packages.find(entry => entry.name === '@earendil-works/pi-mcp').tarballIntegrity = `sha512-${Buffer.alloc(64, 1).toString('base64')}`;
+  });
+  assert.equal(forgedPi.status, 1, 'release graph must reject recorded Pi integrity drift');
+  assert.match(forgedPi.stderr, /pi-mcp.*recorded integrity differs from bun\.lock/);
 });
 
 test('release pack accepts exact prerelease versions while Pi remains a stable pin', () => {
@@ -205,6 +217,67 @@ test('the repo pins the official Pi closure the release gates verify', () => {
   const locked = readLockedPiClosure(readFileSync(fileURLToPath(new URL('../../bun.lock', import.meta.url)), 'utf8'), identity);
   assert.equal(locked.get(PI_DEPENDENCY_SPECIFIER), 'sha512-mUWI04rqF1Vd/m1q+Ps1XeWsTXEVvRUnsmRa83I3Dzua0Tx5bYS93imeqtIfrXf7PkkaR6ERz+AuQhIJlom5yA==');
   assert.equal(clientManifest.optionalDependencies?.[PI_DEPENDENCY_SPECIFIER], undefined);
+});
+
+function piIntegrityFixture() {
+  const root = fileURLToPath(new URL('../..', import.meta.url));
+  const record = JSON.parse(readFileSync(path.join(root, 'packages/client/src/adapters/pi/official-pi-closure.json'), 'utf8'));
+  const identity = parsePiRuntimeIdentity(JSON.parse(readFileSync(path.join(root, 'packages/client/package.json'), 'utf8')));
+  return { record, identity, locked: readLockedPiClosure(readFileSync(path.join(root, 'bun.lock'), 'utf8'), identity) };
+}
+const checkPiIntegrity = ({ record, locked, identity }) => assertRecordedPiClosureIntegrity(record, locked, identity);
+const rehashPiBundle = entry => { entry.provenanceDigest = createHash('sha256').update(JSON.stringify(entry.provenanceBundle)).digest('hex'); };
+test('recorded Pi integrity matches the complete real lock and provenance subjects', () => {
+  assert.doesNotThrow(() => checkPiIntegrity(piIntegrityFixture()));
+});
+for (const name of PI_RUNTIME_CLOSURE) for (const changed of ['record', 'lock', 'both']) {
+  test(`${name}: rejects ${changed} integrity drift`, () => {
+    const f = piIntegrityFixture(), wrong = `sha512-${Buffer.alloc(64, 1).toString('base64')}`;
+    if (changed !== 'lock') f.record.packages.find(entry => entry.name === name).tarballIntegrity = wrong;
+    if (changed !== 'record') f.locked.set(name, wrong);
+    assert.throws(() => checkPiIntegrity(f), changed === 'both' ? /provenance subject SHA-512/ : /recorded integrity differs from bun\.lock/);
+  });
+}
+for (const [label, mutate] of [
+  ['subject name', statement => { statement.subject[0].name = 'pkg:npm/foreign@1.5.2'; }],
+  ['subject version', statement => { statement.subject[0].name = statement.subject[0].name.replace('@1.5.2', '@9.0.0'); }],
+  ['subject digest', statement => { statement.subject[0].digest.sha512 = '0'.repeat(128); }],
+  ['missing digest', statement => { delete statement.subject[0].digest.sha512; }],
+  ['malformed digest', statement => { statement.subject[0].digest.sha512 = 'not-a-digest'; }],
+  ['missing subject', statement => { statement.subject = []; }],
+  ['ambiguous subject', statement => { statement.subject.push(statement.subject[0]); }],
+  ['statement type', statement => { statement._type = 'wrong'; }],
+  ['predicate type', statement => { statement.predicateType = 'wrong'; }],
+]) test(`rejects altered Pi ${label} even with a recomputed bundle digest`, () => {
+  const f = piIntegrityFixture(), entry = f.record.packages[0], envelope = entry.provenanceBundle.dsseEnvelope;
+  const statement = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf8'));
+  mutate(statement); envelope.payload = Buffer.from(JSON.stringify(statement)).toString('base64'); rehashPiBundle(entry);
+  assert.throws(() => checkPiIntegrity(f), /provenance subject/);
+});
+for (const [label, mutate] of [
+  ['missing package', f => { f.record.packages.pop(); }],
+  ['extra package', f => { f.record.packages.push(f.record.packages[0]); }],
+  ['duplicate package', f => { f.record.packages[1] = f.record.packages[0]; }],
+  ['foreign package', f => { f.record.packages[0].name = '@foreign/pi'; }],
+  ['wrong version', f => { f.record.packages[0].version = '9.0.0'; }],
+  ['wrong format', f => { f.record.format = 'wrong'; }],
+  ['wrong record version', f => { f.record.version = 2; }],
+  ['missing bundle', f => { delete f.record.packages[0].provenanceBundle; }],
+  ['wrong bundle digest', f => { f.record.packages[0].provenanceDigest = '0'.repeat(64); }],
+  ['invalid integrity', f => { const e = f.record.packages[0]; e.tarballIntegrity = 'sha512-AA=='; f.locked.set(e.name, e.tarballIntegrity); }],
+  ['noncanonical integrity', f => { const e = f.record.packages[0]; e.tarballIntegrity = `${e.tarballIntegrity.slice(0, -3)}B==`; f.locked.set(e.name, e.tarballIntegrity); }],
+]) test(`rejects malformed Pi closure evidence: ${label}`, () => {
+  const f = piIntegrityFixture(); mutate(f);
+  assert.throws(() => checkPiIntegrity(f), /official Pi closure/);
+});
+for (const [label, mutate] of [
+  ['missing payload', envelope => { delete envelope.payload; }],
+  ['wrong payload type', envelope => { envelope.payloadType = 'wrong'; }],
+  ['malformed base64', envelope => { envelope.payload += '!'; }],
+  ['invalid JSON', envelope => { envelope.payload = Buffer.from('{').toString('base64'); }],
+]) test(`rejects Pi ${label} with a recomputed bundle digest`, () => {
+  const f = piIntegrityFixture(), entry = f.record.packages[0]; mutate(entry.provenanceBundle.dsseEnvelope); rehashPiBundle(entry);
+  assert.throws(() => checkPiIntegrity(f), /provenance (?:envelope|payload)/);
 });
 
 /**
