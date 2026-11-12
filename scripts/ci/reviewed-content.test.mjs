@@ -808,6 +808,23 @@ test('root CI composition admits only the exact helper and prefix, retaining the
   }
 });
 
+test('the desktop browser command is admitted exactly and an altered command is refused', t => {
+  const f = fixture(t), dir = 'examples/desktop-bot-app', path = `${dir}/package.json`;
+  const app = JSON.parse(readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8'));
+  const { 'test:keys-browser': browser, ...scripts } = app.scripts;
+  assert.equal(browser, 'node --test scripts/keys-submit.browser.mjs');
+  for (const name of Object.keys(app.dependencies).filter(name => name.startsWith('@byok-sdk/'))) {
+    f.write(`packages/${name.slice('@byok-sdk/'.length)}/package.json`, { name, version: '0.41.0' });
+  }
+  f.write(path, { ...app, scripts }); rebase(f, 'desktop before browser command');
+  f.write(path, app);
+  const plan = selectImpact([path], f);
+  assert.ok(plan.dirs.includes(dir));
+  assert.ok(plan.families.includes('desktop'));
+  f.write(path, { ...app, scripts: { ...app.scripts, 'test:keys-browser': 'node --test scripts/other.browser.mjs' } });
+  assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
+});
+
 test('new graph-registered private workspaces and matching lock rows are admitted; unregistered additions fail', t => {
   const f = fixture(t);
   // #1808: the desktop example's ui-runtime edge needs ui-runtime declared in the base.
