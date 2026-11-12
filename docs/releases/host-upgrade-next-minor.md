@@ -41,7 +41,8 @@ remain unchanged in both paths, after restoring the snapshot.
 After successful preparation, a failed installation or health check
 removes the unit, `current`, the installation record and the staged
 version, and restores the prepared stores last. When an artifact cannot be
-removed, the stores stay migrated and are not restored. OS credentials are
+removed, the stores stay migrated and are not restored; the error names the
+kept snapshot. OS credentials are
 never cleared. After health succeeds, installation is committed: failure to
 remove its temporary `<installRoot>/snapshots/.install-<uuid>` does not
 reject the install, and after a completed restore it does not replace the
@@ -51,14 +52,16 @@ Rollback/recover never select `.install-*`.
 A restore that fails renames the snapshot to
 `<installRoot>/snapshots/.install-repair-<uuid>` and names it in the error.
 The next first install restores it under the store leases, before its
-precheck, then removes it and continues. If it cannot stop the service,
-take the leases or restore, the install fails, changes nothing else and
-starts nothing. Anything written to the stores
+precheck, then retires it and continues. If it cannot stop the service,
+take the leases, restore or retire the repair name, the install fails,
+changes nothing else and starts nothing. With more than one repair snapshot
+it restores none and lists them all for an operator to choose. Anything written to the stores
 between the two installs is replaced.
 
-Two Host-visible changes follow. `upgrade()` pruning no longer removes any
+Host-visible changes follow. `upgrade()` pruning no longer removes any
 `.install-*` directory, and `uninstall()` keeps them too: it does not
-remove `snapshots/` while one exists. A leftover `.install-<uuid>` is never
+remove `snapshots/` while one exists, and it refuses a symlinked
+`snapshots/` before changing anything. A leftover `.install-<uuid>` is never
 restored automatically; an operator compares its `snapshot.json` with the
 current stores and removes it once it is not needed. Install has no write-ahead receipt
 for process death during migration: the next install prechecks the stores

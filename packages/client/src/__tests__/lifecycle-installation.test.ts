@@ -614,6 +614,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         return { command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, verdict] };
       },
     });
+    const snapshotNames = async () => fs.readdir(path.join(installRoot, 'snapshots'));
     const expectUninstalled = async () => {
       expect(await pointer('current')).toBeUndefined();
       expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
@@ -678,6 +679,32 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await fs.readFile(db, 'utf8')).toBe('migrated data');
       expect(await fs.readFile(path.join(leftover!, '0'), 'utf8')).toBe('v1 data');
       expect(await installation.receipt()).toBeUndefined();
+    });
+
+    it('refuses to choose between two repair snapshots and starts nothing', async () => {
+      const repairs = [`.install-repair-${randomUUID()}`, `.install-repair-${randomUUID()}`];
+      for (const name of repairs) await fs.mkdir(path.join(installRoot, 'snapshots', name), { recursive: true });
+      const error = await installation.install(await payload('2.0.0')).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(AggregateError);
+      for (const name of repairs) expect((error as Error).message).toContain(path.join(installRoot, 'snapshots', name));
+      expect(events).toEqual([]);
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+      expect((await snapshotNames()).sort()).toEqual(repairs.sort());
+      expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
+    });
+
+    it('uninstall refuses a symlinked snapshots/ and changes nothing behind it', async () => {
+      await installation.install(await payload('1.0.0'));
+      const outside = path.join(root, 'outside');
+      await fs.mkdir(path.join(outside, `.install-${randomUUID()}`), { recursive: true });
+      await fs.writeFile(path.join(outside, 'unrelated'), 'unrelated data');
+      await fs.rm(path.join(installRoot, 'snapshots'), { recursive: true, force: true });
+      await fs.symlink(outside, path.join(installRoot, 'snapshots'));
+      const before = await tree(outside);
+      await expect(installation.uninstall()).rejects.toThrow(path.join(installRoot, 'snapshots'));
+      expect(await tree(outside)).toEqual(before);
+      expect(events).not.toContain('uninstall');
+      expect(await pointer('current')).toBe('1.0.0');
     });
 
     it('a later upgrade and uninstall keep install and repair snapshots, and snapshots/ around them', async () => {
@@ -746,7 +773,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await expect(fs.lstat(`${db}-journal`)).rejects.toMatchObject({ code: 'ENOENT' });
     });
 
-    it('keeps the unrestored migration snapshot when the failed service cannot be removed', async () => {
+    it.each(['after', 'before'] as const)('keeps and names the unrestored migration snapshot when the failed service cannot be removed %s activation', async (when) => {
       const base = fakeLifecycle();
       const removal = new Error('service is still running');
       installation = installationOver({
@@ -760,14 +787,51 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await verdicts('migration-required');
       unhealthy.add('2.0.0');
       onHealth = async () => { await fs.writeFile(db, 'live candidate data'); };
-      const error = await installation.install(await payload('2.0.0', { 'migrate.cjs': MIGRATE })).catch((caught: unknown) => caught);
-      expect(error).toMatchObject({ code: 'install_health_check_failed', cause: { errors: [expect.objectContaining({ message: 'unhealthy' }), removal] } });
+      const fault = when === 'before' ? failRename((file) => file === path.join(installRoot, 'current')) : undefined;
+      let error: unknown;
+      try {
+        error = await installation.install(await payload('2.0.0', { 'migrate.cjs': MIGRATE })).catch((caught: unknown) => caught);
+      } finally {
+        fault?.restore();
+      }
+      expect(error).toMatchObject({ code: 'install_health_check_failed', cause: { errors: [expect.anything(), removal] } });
       expect((error as Error).message).toContain('prepared store snapshot restoration');
-      expect(await fs.readFile(db, 'utf8')).toBe('live candidate data');
-      const snapshots = await fs.readdir(path.join(installRoot, 'snapshots'));
+      expect(await fs.readFile(db, 'utf8')).toBe(when === 'after' ? 'live candidate data' : 'migrated data');
+      const snapshots = await snapshotNames();
       expect(snapshots).toEqual([expect.not.stringMatching(/^\.install-repair-/u)]);
-      expect(await pointer('current')).toBe('2.0.0');
+      expect((error as Error).message).toContain(path.join(installRoot, 'snapshots', snapshots[0]!));
+      expect(await pointer('current')).toBe(when === 'after' ? '2.0.0' : undefined);
       expect(await fs.readFile(path.join(installRoot, 'snapshots', snapshots[0]!, '0'), 'utf8')).toBe('v1 data');
+      // Nothing of the failed call still holds the stores.
+      await (await acquireDaemonOwner(storeDir, 'daemon')).release();
+      await (await acquirePathMutationGate({ scope: 'store', targetPath: storeDir })).release();
+    });
+
+    it('keeps a completed restore\'s store code when its snapshot cannot be removed, and never restores the leftover', async () => {
+      installation = migrating();
+      await verdicts('migration-required');
+      const originalRm = fs.rm.bind(fs);
+      const fault = vi.spyOn(fs, 'rm').mockImplementation(async (file, options) => {
+        if (path.basename(String(file)).startsWith('.install-') && existsSync(path.join(String(file), 'snapshot.json'))) {
+          throw Object.assign(new Error('snapshot cleanup denied'), { code: 'EACCES' });
+        }
+        return originalRm(file, options);
+      });
+      const candidate = await payload('2.0.0', { 'migrate.cjs': `${MIGRATE}\nprocess.exit(1);` });
+      try {
+        await expect(installation.install(candidate)).rejects.toMatchObject({ code: 'store_migration_failed' });
+      } finally {
+        fault.mockRestore();
+      }
+      expect(events.at(-1)).toBe('start');
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+      const leftover = await snapshotNames();
+      expect(leftover).toEqual([expect.not.stringMatching(/^\.install-repair-/u)]);
+      await fs.writeFile(db, 'later data');
+      await verdicts('accepted');
+      await installation.install(candidate);
+      expect(await fs.readFile(db, 'utf8')).toBe('later data');
+      expect(await snapshotNames()).toEqual(leftover);
     });
 
     it('with no stores prepares an empty list and installs without migration', async () => {
@@ -894,7 +958,6 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       });
       return { restoreError, restore: () => spy.mockRestore() };
     };
-    const snapshotNames = async () => fs.readdir(path.join(installRoot, 'snapshots'));
 
     it('keeps a failed preparation restore for repair, leaves the marked unit stopped, and the next first install restores it before its precheck', async () => {
       const migrate: ServiceInstallationOptions['migrate'] = (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] });
@@ -928,6 +991,21 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(events).toEqual(['stop']);
       expect(await snapshotNames()).toEqual([repair]);
       expect(existsSync(db)).toBe(false);
+
+      // A restore whose repair name cannot be retired starts nothing either.
+      installation = installationOver(fakeLifecycle(), { migrate });
+      events = [];
+      const retire = failRename((file) => path.dirname(file) === path.join(installRoot, 'snapshots'));
+      let unretired: unknown;
+      try {
+        unretired = await installation.install(candidate).catch((caught: unknown) => caught);
+      } finally {
+        retire.restore();
+      }
+      expect(retire.fired()).toBe(true);
+      expect((unretired as Error).message).toContain(path.join(installRoot, 'snapshots', repair!));
+      expect(events).toEqual(['stop']);
+      expect(await snapshotNames()).toEqual([repair]);
 
       // A retry whose repair restore fails again changes nothing else and starts nothing.
       await verdicts('accepted');

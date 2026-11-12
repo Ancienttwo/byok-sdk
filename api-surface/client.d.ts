@@ -11328,7 +11328,9 @@ export interface ServiceInstallation {
      * failed restore renames it `snapshots/.install-repair-<uuid>` and the
      * error names it: the next first install restores it, under the store
      * leases and before its precheck. When it cannot stop the service, take
-     * the leases or restore, it fails without other changes and starts nothing.
+     * the leases, restore or retire the repair name, or when more than one
+     * repair snapshot exists, it fails without other changes, names the
+     * snapshots and starts nothing.
      */
     install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
     /**
@@ -11350,7 +11352,7 @@ export interface ServiceInstallation {
     rollback(): Promise<ServiceUpgradeReceipt>;
     /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. */
     recover(): Promise<ServiceUpgradeReceipt | undefined>;
-    /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. The store is not touched. */
+    /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused before anything changes. The store is not touched. */
     uninstall(): Promise<void>;
     /** The last receipt, or `undefined`. */
     receipt(): Promise<ServiceUpgradeReceipt | undefined>;

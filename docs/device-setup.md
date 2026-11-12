@@ -519,13 +519,17 @@ A restore that fails renames the snapshot to
 path. The next first install restores it before anything else, under the
 store leases and before its precheck: the stores return to how they were
 before the failed install, and anything written to them since is replaced.
-It then removes the repair snapshot and continues. When that install cannot
-stop the service, take the store leases or restore the snapshot, it throws
-the same kind of error, changes nothing else and starts nothing.
+It then retires the repair name and continues. When that install cannot
+stop the service, take the store leases, restore the snapshot or retire its
+name, it throws the same kind of error, changes nothing else and starts
+nothing. When more than one repair snapshot exists it restores none of them
+and lists them all: their names do not order them in time, so an operator
+keeps the one to restore and removes the others.
 
 Later upgrades never prune `.install-*` directories, and `uninstall()` keeps
 them: it removes every other snapshot but leaves `snapshots/` in place while
-one exists. A leftover `.install-<uuid>` (a removal that failed, a rename
+one exists. `uninstall()` refuses a `snapshots/` that is a symbolic link
+before it changes anything. A leftover `.install-<uuid>` (a removal that failed, a rename
 that failed, an installer that was killed) is never restored automatically,
 because nothing shows whether it is still needed. An operator recognizes it
 by that name, compares its `snapshot.json` entries with the current stores,
@@ -559,8 +563,8 @@ once the unit, `current`, the record and the staged directory are gone,
 including Host and daemon stores changed by migration or startup. A failed
 restore therefore always leaves nothing installed and one repair snapshot.
 When an artifact cannot be removed, the restore is not attempted: the stores
-stay migrated, matching what remains, and the snapshot keeps its
-`.install-<uuid>` name. Cleanup never clears OS credentials. If removal itself fails, the
+stay migrated, matching what remains, the snapshot keeps its
+`.install-<uuid>` name, and the error names its path. Cleanup never clears OS credentials. If removal itself fails, the
 same error code carries an `AggregateError` containing the original failure
 and the removal error as `cause`; its message names the artifacts that remain.
 
