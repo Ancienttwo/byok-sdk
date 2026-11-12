@@ -310,6 +310,19 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     }
   });
 
+  it('upgrade and its rollback enforce the health-check deadline against a check that ignores abort (#1977)', async () => {
+    await installation.install(await payload('1.0.0'));
+    const signals: AbortSignal[] = [];
+    installation = installationOver(fakeLifecycle(), {
+      healthTimeoutMs: 50,
+      healthCheck: (signal) => { signals.push(signal); return new Promise<void>(() => undefined); },
+    });
+    await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'rollback_unhealthy' });
+    expect(signals.map((signal) => signal.aborted)).toEqual([true, true]);
+    expect(await installation.receipt()).toMatchObject({ state: 'failed', from: '1.0.0', to: '2.0.0', code: 'rollback_unhealthy' });
+    expect(await pointer('current')).toBe('1.0.0');
+  });
+
   it('starts the install health-check deadline after an in-flight platform start settles (#1966)', async () => {
     let release!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });

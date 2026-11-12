@@ -562,9 +562,11 @@ or crashed run fails immediately. For the CLI, a service installed before
 pairing must enable `serviceEnrollment: { enabled: true }` in its config;
 otherwise pair first. An embedded Host can instead pass its own
 `healthCheck`. An unpaired daemon without service enrollment halts on start
-and cannot pass the default check. Install enforces the health-check
-deadline even if a custom check ignores abort or succeeds late. For install,
-`healthTimeoutMs` bounds only the health-check wait after start returns. Unit
+and cannot pass the default check. Install, upgrade, rollback and recover
+enforce the health-check deadline even if a custom check ignores abort or
+succeeds late: a late upgrade check restores the previous version, and a late
+check of a restored version is `rollback_unhealthy`. `healthTimeoutMs` bounds
+only the health-check wait after start returns. Unit
 writes, activation, start and the cleanup stop run outside that deadline;
 platform commands have no time bound today (follow-up: [#1971](https://github.com/Ancienttwo/byok-sdk/issues/1971)).
 Install awaits platform commands before proceeding, so cleanup cannot race

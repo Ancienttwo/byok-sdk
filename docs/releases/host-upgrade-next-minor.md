@@ -6,6 +6,18 @@ Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts m
 
 No configuration change is needed. Every SDK Pi RPC session now caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings, instead of answering each idle `cache_warming_decision` with `stop`. Pi cancels the warmer at settlement and revalidates pending decisions before dispatch, so a late `"warm"` answer cannot send a refresh after settlement. Under `agentUserContext: 'inherit'` a device setting of `"off"` still turns warming off; under `excluded` the session's settings are in memory and do not read the device file.
 
+## Upgrade and rollback enforce the health-check deadline
+
+`upgrade()`, `rollback()` and `recover()` now enforce `healthTimeoutMs` as
+`install()` does (#1977). A custom `healthCheck` that ignores its abort signal
+no longer keeps the operation pending with the lifecycle owner gate held, and
+a check that succeeds after the deadline fails. A late upgrade check restores
+the previous version (`health_check_failed`), and a late check of the
+restored version is `rollback_unhealthy`, as for any failed check. The clock
+now starts after start returns, as on install; platform commands still have
+no time bound (#1971). A Host whose check is slower than `healthTimeoutMs`
+raises it.
+
 ## Upgrade resolves when an old snapshot cannot be pruned
 
 After a healthy switch, `upgrade()` removes the snapshots of earlier

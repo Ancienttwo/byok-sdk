@@ -11301,8 +11301,9 @@ export interface ServiceInstallationOptions {
      */
     healthCheck?(signal: AbortSignal): Promise<void>;
     /**
-     * How long the health check may take. Default 60000. On install, this
-     * bounds only the health-check wait after start returns. Unit writes,
+     * How long the health check may take. Default 60000. On install, upgrade,
+     * rollback and recover, this bounds only the health-check wait after start
+     * returns, also against a check that ignores its abort signal. Unit writes,
      * activation, start and cleanup stop run outside it; platform commands
      * have no time bound today (#1971).
      */

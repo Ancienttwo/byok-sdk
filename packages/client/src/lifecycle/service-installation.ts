@@ -93,8 +93,9 @@ export interface ServiceInstallationOptions {
    */
   healthCheck?(signal: AbortSignal): Promise<void>;
   /**
-   * How long the health check may take. Default 60000. On install, this
-   * bounds only the health-check wait after start returns. Unit writes,
+   * How long the health check may take. Default 60000. On install, upgrade,
+   * rollback and recover, this bounds only the health-check wait after start
+   * returns, also against a check that ignores its abort signal. Unit writes,
    * activation, start and cleanup stop run outside it; platform commands
    * have no time bound today (#1971).
    */
@@ -663,7 +664,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         }
         activationAttempted = true;
         await held.install(installOpts);
-        health = await startHealthy(true);
+        health = await startHealthy();
       } catch (cause) {
         health = { ok: false, cause };
       }
@@ -810,32 +811,31 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     return release;
   }
 
-  /** Install enforces the deadline even for a non-cooperative check; upgrade retains its existing abort-only behavior. */
-  async function startHealthy(enforceDeadline = false): Promise<{ ok: true } | { ok: false; cause: unknown }> {
+  /**
+   * Starts the service and runs its health check against `healthTimeoutMs`,
+   * counted from when start settles. A check that ignores its abort signal
+   * or succeeds after the deadline fails.
+   */
+  async function startHealthy(): Promise<{ ok: true } | { ok: false; cause: unknown }> {
     const controller = new AbortController();
     const timeoutMs = opts.healthTimeoutMs ?? 60_000;
     const timedOut = new Error(`the service health check timed out after ${timeoutMs} ms`);
-    let timeout = enforceDeadline ? undefined : setTimeout(() => controller.abort(), timeoutMs);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     let onAbort: (() => void) | undefined;
     try {
-      // Platform commands are outside install's health-check deadline and
+      // Platform commands are outside the health-check deadline and
       // currently have no timeout. Await start before checking health or
       // cleaning up; abandoning it could start a service after its removal.
       await lifecycle.start();
       const check = opts.healthCheck ?? defaultServiceHealthCheck({ storeDir, productId: opts.productId });
-      if (enforceDeadline) {
-        const deadline = Date.now() + timeoutMs;
-        timeout = setTimeout(() => controller.abort(), timeoutMs);
-        if (controller.signal.aborted || Date.now() >= deadline) throw timedOut;
-        const expired = new Promise<never>((_resolve, reject) => {
-          onAbort = () => reject(timedOut);
-          controller.signal.addEventListener('abort', onAbort, { once: true });
-        });
-        await Promise.race([check(controller.signal), expired]);
-        if (Date.now() >= deadline) throw timedOut;
-      } else {
-        await check(controller.signal);
-      }
+      const deadline = Date.now() + timeoutMs;
+      timeout = setTimeout(() => controller.abort(), timeoutMs);
+      const expired = new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(timedOut);
+        controller.signal.addEventListener('abort', onAbort, { once: true });
+      });
+      await Promise.race([check(controller.signal), expired]);
+      if (Date.now() >= deadline) throw timedOut;
       return { ok: true };
     } catch (cause) {
       return { ok: false, cause };
