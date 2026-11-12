@@ -146,15 +146,8 @@ export {
   DaemonJournalProtocolUnsupportedError,
   DeviceStoreBindingMismatchError,
   EmbeddedPairingError,
-  HostLayoutInputError,
   type DaemonJournalProtocolRecord,
 } from './daemon/daemon-errors.js';
-export {
-  resolveHostLayout,
-  type HostLayout,
-  type HostLayoutOptions,
-  type HostLayoutPlatform,
-} from './daemon/host-layout.js';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals.js';
 export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals.js';

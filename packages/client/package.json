@@ -38,6 +38,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./host-layout": {
+      "types": "./dist/host-layout.d.ts",
+      "import": "./dist/host-layout.js"
+    },
     "./adapters": {
       "types": "./dist/adapters/index.d.ts",
       "import": "./dist/adapters/index.js"
