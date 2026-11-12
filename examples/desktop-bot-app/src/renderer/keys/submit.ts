@@ -16,15 +16,20 @@ export interface Refusal { readonly code?: string; readonly message: string }
 export type SubmitOutcome = { readonly receipt: ProviderStatus } | { readonly refusal: Refusal };
 
 /**
- * What the section does with a settled submission. The list refresh follows every receipt; showing the outcome and
- * resetting the forms only follow a submission from the form generation still mounted, so a result that settles after
- * the selection changed never touches the new form.
+ * Runs one submission under the section lock. The lock is held until the list reload that follows a receipt has
+ * landed, so whenever the section is interactive the list on screen is current; it is released on every settle path.
  */
-export function settleEffects(outcome: SubmitOutcome, submittedGeneration: number, currentGeneration: number):
-  { readonly show: boolean; readonly resetForms: boolean; readonly reload: boolean } {
-  const receipt = 'receipt' in outcome;
-  const current = submittedGeneration === currentGeneration;
-  return { show: current, resetForms: current && receipt, reload: receipt };
+export async function runLocked(
+  setBusy: (busy: boolean) => void, run: () => Promise<SubmitOutcome>, onOutcome: (outcome: SubmitOutcome) => void, reload: () => Promise<void>,
+): Promise<void> {
+  setBusy(true);
+  try {
+    const outcome = await run();
+    onOutcome(outcome);
+    if ('receipt' in outcome) await reload();
+  } finally {
+    setBusy(false);
+  }
 }
 
 export function refusalOf(error: unknown): Refusal {

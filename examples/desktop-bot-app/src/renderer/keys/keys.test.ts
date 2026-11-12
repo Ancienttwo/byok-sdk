@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CustodyChange } from '../../custody/protocol.ts';
 import { BridgeCallError } from '../bridge.ts';
 import { Receipt } from './keys-section.tsx';
-import { settleEffects, storedProfile, submitModelRoute, submitReplaceSecret } from './submit.ts';
+import { runLocked, storedProfile, submitModelRoute, submitReplaceSecret } from './submit.ts';
 
 const context = modelRouteContext();
 const changes: ModelRouteChange[] = [
@@ -65,10 +65,18 @@ describe('keys form submission', () => {
     expect(outcome).toEqual({ receipt: { profile_ref: 'zai-main', secret_configured: true } });
   });
 
-  it('drops the form effects of a submission that settles after the selection changed, but still refreshes the list', () => {
+  it('holds the section lock through the reload after a receipt and releases it after a refusal or a thrown error', async () => {
     const receipt = { receipt: { profile_ref: 'a' } as ProviderStatus };
-    expect(settleEffects(receipt, 3, 3)).toEqual({ show: true, resetForms: true, reload: true });
-    expect(settleEffects(receipt, 3, 4)).toEqual({ show: false, resetForms: false, reload: true });
-    expect(settleEffects({ refusal: { message: 'no' } }, 3, 4)).toEqual({ show: false, resetForms: false, reload: false });
+    const trace: string[] = [];
+    const setBusy = (busy: boolean) => trace.push(`busy:${busy}`);
+    const reload = async () => { trace.push('reload'); };
+    await runLocked(setBusy, async () => receipt, () => trace.push('outcome'), reload);
+    expect(trace).toEqual(['busy:true', 'outcome', 'reload', 'busy:false']);
+    trace.length = 0;
+    await runLocked(setBusy, async () => ({ refusal: { message: 'no' } }), () => trace.push('outcome'), reload);
+    expect(trace).toEqual(['busy:true', 'outcome', 'busy:false']);
+    trace.length = 0;
+    await expect(runLocked(setBusy, async () => { throw new Error('bridge'); }, () => trace.push('outcome'), reload)).rejects.toThrow('bridge');
+    expect(trace).toEqual(['busy:true', 'busy:false']);
   });
 });
