@@ -525,6 +525,11 @@ const reviewedBuildConfigOwners = Object.freeze({
 const archContextFiles = new Set(['.archcontext/manifest.yaml', '.archcontext/product.yaml', '.archcontext/policies/review.yaml',
   '.archcontext/projections/targets.json', 'docs/architecture/.projection-manifest.json', 'docs/architecture/archimap.html',
   'docs/architecture/requests/.gitkeep']);
+// #1619: retained probe source and captures are research evidence, never CI inputs.
+const dshWakeEvidenceFiles = new Set([
+  'background-job.jsonl', 'background-subagent.jsonl', 'job-kill.jsonl',
+  'job-output-wait.jsonl', 'two-background-jobs.jsonl', 'summary.json', 'probe.ts',
+].map(name => `docs/researches/2026-11-12-1619-dsh-wake-probe/${name}`));
 const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'packages/AGENTS.md', 'packages/CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
 // #605 W5: w5-runner-probe.yml is workflow_dispatch only and reads no repo
 // file, so it selects only the CI script checks.
@@ -782,6 +787,7 @@ export function selectImpact(paths, context = {}) {
     // generated file still fails here.
     if (archContextFiles.has(path)
       || /^\.archcontext\/model\/(?:nodes\/(?:capability|component|module)|relations\/relation|flows\/flow)\.sdk\.[a-z0-9-]+\.yaml$/.test(path)) continue;
+    if (dshWakeEvidenceFiles.has(path)) continue;
     if (path === '.gitignore' || rootDocs.has(path) || /^(docs|tasks|deploy\/runbooks)\/.+\.md$/.test(path)) continue;
     // W7: a ci.yml change can change any family job, so it selects every
     // routine family. The client suite also runs: two of its tests read this
