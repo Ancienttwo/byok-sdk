@@ -376,7 +376,7 @@ describe('Daemon.whenTaskSettled', () => {
     expect(server.received.filter((e) => e.task_id === taskId)).toEqual([]);
   });
 
-  it('keeps the pre-cancel decline for a stored offer that followed its cancellation after restart', async () => {
+  it('leaves a stored offer after its acknowledged pre-cancel to the mailbox suppression contract after restart', async () => {
     const taskId = 'task-pre-cancel-restart';
     const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-settlement-recovery-'));
     const adapter = new StubRuntimeAdapter();
@@ -386,7 +386,7 @@ describe('Daemon.whenTaskSettled', () => {
     const cancellation = createEnvelope('task.cancel', { reason: 'operator cancelled first' }, { taskId, seq: server.nextSeq() });
     const original = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), instruction: 'work', ...FRESH_OFFER },
       { taskId, seq: server.nextSeq() });
-    // Crash window: both rows are durable, but the pre-cancel decline was never committed.
+    // Crash window: the pre-cancel is acknowledged and the offer is durable, but its decline was never committed.
     const journal = new SqliteLocalTaskJournal({ storeDir });
     for (const [envelope, opensTask] of [[cancellation, false], [original, true]] as const) {
       const bytes = encodeEnvelope(envelope);
@@ -394,14 +394,18 @@ describe('Daemon.whenTaskSettled', () => {
         bytesHash: journalHash(bytes), receivedAt: envelope.ts, opensTask });
     }
     await journal.close();
+    await new CursorStore(storeDir).save(server.url, identity.deviceId, cancellation.seq!);
     await d.start();
-    server.send(cancellation);
-    server.send(original);
-    const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
-    expect((decline.payload as { reason: string }).reason).toMatch(/cancelled before claim/i);
-    await expect(d.whenTaskSettled(taskId, { signal: AbortSignal.timeout(2_000) }))
-      .resolves.toEqual({ terminal: 'declined', delivery: 'accepted', disposal: 'none' });
+    const settlement = d.whenTaskSettled(taskId, { signal: AbortSignal.timeout(2_000) });
+    const tracked = track(settlement);
+    // A conforming mailbox resumes after the cursor and suppresses the cancelled task's offer, so
+    // only later traffic arrives. The earlier cancellation is not authority over this offer.
+    offer('task-after-pre-cancel', { harnessId: 'acme-harness', runtime: 'claude' });
+    await server.waitFor((e) => e.type === 'task.decline' && e.task_id === 'task-after-pre-cancel');
+    expect(tracked.settled()).toBe(false);
     expect(adapter.startCalls).toHaveLength(0);
+    expect(server.received.filter((e) => e.task_id === taskId)).toEqual([]);
+    await expect(settlement).rejects.toMatchObject({ name: 'TimeoutError' });
   });
 
   it('keeps the runtime settlement when an offer gains an owner during the cancellation journal read', async () => {

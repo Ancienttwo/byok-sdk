@@ -5566,7 +5566,11 @@ export interface Daemon {
      * cancellation sequenced after the offer preserves
      * `cancelled`/`not-required`/`none` after restart,
      * including with the cursor past the cancellation; recovery sends no
-     * `daemon_interrupted` failure for that received offer.
+     * `daemon_interrupted` failure for that received offer. A stored offer
+     * whose only cancellation preceded it awaits mailbox redelivery: restart
+     * relies on the server contract that mailbox replay suppresses a cancelled
+     * task's offer (spec "Hosted task cancellation authority"). A custom Host
+     * whose server does not honor that contract is outside this guarantee.
      * Rejects with {@link DaemonTaskUnknownError} for an unknown task, before
      * `start()` the way `approve()` does, and with `signal.reason` on abort;
      * the task is untouched. Revocation and replay expiry carry no per-task

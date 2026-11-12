@@ -174,7 +174,9 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
     }
     // No execution commitment and no local ack: let the authoritative cloud
     // mailbox redeliver (or suppress a cancelled offer). Never replay a cached
-    // offer independently of cancellation/placement authority.
+    // offer independently of cancellation/placement authority. An offer whose
+    // acknowledged cancellation preceded it depends on that server suppression
+    // contract; a non-conforming custom server is outside the restart guarantee.
     if (task.localState === 'received' && task.seq > durableCursor) continue;
     const offer = decodeEnvelope(task.envelopeBytes);
     if (offer.type !== 'task.offer' || offer.task_id !== task.taskId) throw new Error('invalid durable recovery offer binding');
