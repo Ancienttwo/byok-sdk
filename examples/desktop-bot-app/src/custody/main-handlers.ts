@@ -1,7 +1,7 @@
 /** Main's answers to `keys.submit` (the one place the secret passes through main) and `keys.list`. */
 import type { MethodHandlers } from '../bridge/domain.ts';
 import type { KeysMethods } from '../bridge/domains/keys.ts';
-import { BridgeError } from '../bridge/protocol.ts';
+import { BridgeError, type BridgeErrorCode } from '../bridge/protocol.ts';
 import { CUSTODY_COMMAND, CustodyError, type CustodyChange } from './protocol.ts';
 import { CUSTODY_DEADLINE_MS, listFromCustody, submitToCustody, type CustodyChild } from './submit.ts';
 
@@ -10,6 +10,8 @@ export interface KeysMainDependencies {
   readonly spawnHostCommand: (args: readonly string[]) => CustodyChild;
   readonly callHost: (method: 'keys.profilesChanged', params: undefined) => Promise<null>;
 }
+
+const HOST_NOT_SERVING: ReadonlySet<BridgeErrorCode> = new Set(['host_exited', 'unknown_method']);
 
 /** Reapplying the persisted catalog is idempotent; only the wait is bounded, never the saved key write retried. */
 async function refreshProfiles(deps: KeysMainDependencies, saved: boolean): Promise<void> {
@@ -47,11 +49,16 @@ export function keysMainHandlers(deps: KeysMainDependencies): MethodHandlers<Pic
       await refreshProfiles(deps, true);
       return status;
     },
-    // A read also reconciles the Host after an uncertain submission, without repeating its write.
+    // A read also reconciles a running Host after an uncertain submission, without repeating its write.
     'keys.list': async params => {
       if (params !== undefined) throw new BridgeError('invalid_params', 'keys.list takes no params');
       const statuses = await listFromCustody(deps.spawnHostCommand([CUSTODY_COMMAND]));
-      await refreshProfiles(deps, false);
+      try {
+        await refreshProfiles(deps, false);
+      } catch (error) {
+        // No running Host to reconcile: a stopped Host serves no keys domain, and the next start loads the catalog from the store.
+        if (!(error instanceof BridgeError && HOST_NOT_SERVING.has(error.code))) throw error;
+      }
       return statuses;
     },
   };

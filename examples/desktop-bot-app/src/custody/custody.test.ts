@@ -13,6 +13,7 @@ import { executionCatalog } from '../host/conversation/catalog.ts';
 import { catalogEntryFor, ProviderProfiles } from '../host/keys/catalog.ts';
 import { refusalReceipt, runCustody } from './child.ts';
 import { keysMainHandlers } from './main-handlers.ts';
+import { BridgeError } from '../bridge/protocol.ts';
 import { CustodyError } from './protocol.ts';
 import { CUSTODY_DEADLINE_MS, listFromCustody, submitToCustody, type CustodyChild } from './submit.ts';
 
@@ -161,6 +162,17 @@ describe('custody child', () => {
       message: expect.stringContaining(operation === 'submit' ? 'The key change was saved' : 'Stored providers were read') } });
     expect(write).toHaveBeenCalledTimes(operation === 'submit' ? 1 : 0);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    ['stopped', new BridgeError('unknown_method', 'Unknown bridge method keys.profilesChanged')],
+    ['not running', new BridgeError('host_exited', 'No Host is running')],
+  ])('lists stored providers while the Host is %s', async (_state, refusal) => {
+    const secrets = new InMemorySecretStore<ModelProviderSecretName>();
+    const handlers = keysMainHandlers({ spawnHostCommand: () => custodyChild(secrets, []), callHost: () => Promise.reject(refusal) });
+    await expect(Promise.resolve(handlers['keys.submit']({ op: 'configure', configuration: CONFIGURATION, secret: SECRET }))).rejects.toBe(refusal);
+    const statuses = await handlers['keys.list'](undefined);
+    expect(statuses.map(status => status.profile_ref)).toEqual(['writer']);
   });
 
   it('rebuilds the catalog on Reload after a committed change loses its receipt, without writing the key again', async () => {

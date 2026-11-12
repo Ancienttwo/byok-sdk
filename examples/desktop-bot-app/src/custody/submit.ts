@@ -30,7 +30,7 @@ export async function listFromCustody(child: CustodyChild): Promise<readonly Pro
 async function askCustody(child: CustodyChild, request: CustodyRequest): Promise<CustodyAnswer> {
   const controller = new AbortController();
   const deadline = setTimeout(() => {
-    controller.abort(new CustodyError('custody_timeout', 'Key storage did not answer within 30 seconds. A change may have been saved; reload stored providers before trying again.'));
+    controller.abort(new CustodyError('custody_timeout', `Key storage did not answer within ${CUSTODY_DEADLINE_MS / 1000} seconds. A change may have been saved; reload stored providers before trying again. A provider shown with an unfinished key change needs its key entered again.`));
     child.kill('SIGKILL');
     child.stdin.destroy();
     child.stdout.destroy();

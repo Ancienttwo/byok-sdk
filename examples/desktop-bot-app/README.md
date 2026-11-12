@@ -106,10 +106,14 @@ bridge and composes the Host after main's hello (`src/host/compose.ts`):
   per keys profile that has `pi_model`, pinned to that profile (`catalogEntryFor`, lane
   `byok-profile`). The enabled profile is not read as a default. The catalog is built from
   the keys store at Host start and rebuilt after each custody receipt and provider-list
-  Reload. Reconciliation reads persisted profiles without repeating a key write. Both
+  Reload. Reconciliation reads persisted profiles without repeating a key write; while
+  no Host is running, Reload only lists them and the next start loads the catalog. Both
   custody and the following Host refresh have 30-second deadlines. A custody timeout
   may have saved the change; `catalog_refresh_timeout` after a receipt confirms the
-  save but leaves Host application unconfirmed. Reload reconciles either case.
+  save but leaves Host application unconfirmed. Reload rebuilds the catalog from
+  whatever was committed. A timeout during the key write itself can leave the provider
+  marked as an unfinished key change, which stays unusable until its key is entered
+  again.
 
 A stopped Host keeps answering `status` with its reason and is not restarted. It still
 answers `settings.exportDiagnostics`, with the daemon config it would have run with.
