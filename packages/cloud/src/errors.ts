@@ -111,7 +111,7 @@ export const CLOUD_ERROR_CODES = {
   /**
    * A stored task attempt has no Agent identity: the Postgres store has not run
    * `retireAgentlessTasks` and migration 0039. The read fails closed; the
-   * operator runs them (docs/releases/host-upgrade-next-minor.md).
+   * operator runs them (docs/releases/host-upgrade-0.42.0.md).
    */
   task_attempt_agent_ref_missing: 'task_attempt_agent_ref_missing',
   /**

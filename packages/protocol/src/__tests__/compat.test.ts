@@ -56,7 +56,7 @@ import {
  * 5. v6 self-consistency. `golden/v6.envelopes.ndjson` and
  *    `golden/v6.http.ndjson` are append-only and the current decoder reads
  *    them exactly. `golden/v6.releases.json` registers 0.41.0, the first v6
- *    release, and has no floor yet.
+ *    release, and the proposed 0.42.0 candidate, and has no floor yet.
  * 6. Published rejection oracle. `byok-protocol-previous` (0.40.0, the
  *    last v5 release) rejects every v6 corpus line and a v6
  *    `conn.hello`: a v5 peer cannot read v6 bytes. None of its bytes is v6

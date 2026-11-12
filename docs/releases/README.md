@@ -23,7 +23,9 @@ capability `isolation.userContext` into one bit per source
 ([wire v6 migration](../migrations/wire-v6-isolation-sources.md)). 0.40.0 is
 the last v5 release, and `golden/v6.releases.json` registers the published 0.41.0
 release ([release notes](v0.41.0.md)), the first v6 release, and has no floor. The
-published 0.41.0 decoder is the cross-release baseline.
+published 0.41.0 decoder is the cross-release baseline. The proposed 0.42.0
+source candidate is registered separately with its current corpus prefixes
+([candidate release notes](v0.42.0.md)); its registration does not establish publication.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
 and the v2 registry `golden/releases.json` (floor 0.25.0; 0.25.0, 0.26.0 and

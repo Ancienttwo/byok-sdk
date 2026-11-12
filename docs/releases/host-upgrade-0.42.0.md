@@ -1,6 +1,6 @@
-# Host upgrade to the next MINOR
+# Host upgrade to 0.42.0
 
-Draft checklist for a Host moving from the current release to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
+Checklist for a Host moving from 0.41.0 to the proposed 0.42.0 MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Reviewed against source base `77c38cb5983bbeb1292bda7f1f69d9d9d33bb2f1`, including the release-notes audit (#1931). The version and publication remain subject to owner approval and the [release gates](https://github.com/Ancienttwo/byok-sdk/issues/1918); see the [release notes](v0.42.0.md). Review this guide again if the final train changes.
 
 ## Clearing a device enrollment without a daemon
 

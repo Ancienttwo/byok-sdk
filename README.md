@@ -7,6 +7,12 @@ composition over Postgres and R2.
 
 ## Release status
 
+The proposed source candidate is **0.42.0** for all ten packages, a MINOR
+with breaking changes and the first publication of `@byok-sdk/bot-collaboration`.
+See the [release notes](docs/releases/v0.42.0.md) and
+[Host upgrade checklist](docs/releases/host-upgrade-0.42.0.md). Owner approval,
+release validation and publication remain pending ([release gates](https://github.com/Ancienttwo/byok-sdk/issues/1918)).
+
 The current stable release is **0.41.0** for all nine packages, a MINOR
 with breaking changes, published on 2026-11-09, and the first wire v6 release: a v5 peer cannot read v6.
 See the [release notes](docs/releases/v0.41.0.md) and
@@ -114,7 +120,7 @@ changes server, cloud, client and keys APIs.
 [Release notes](docs/releases/v0.27.0.md) describe the changes since 0.26.1
 and the Host upgrade and migration steps.
 
-Versioned install examples below name the current stable release, 0.41.0.
+Versioned install examples below name the proposed 0.42.0 source candidate; publication remains pending.
 The historical `rc` publication is **0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
 [publication record](docs/releases/v0.27.0-rc.2-publication.md).
 
@@ -230,7 +236,7 @@ Hono/HTTP façade over the shared `cloud` kernel, `client` is the local
 daemon, and `keys` keeps provider credentials on the device.
 
 ```sh
-npm install @byok-sdk/client@0.41.0 @byok-sdk/server@0.41.0 @byok-sdk/keys@0.41.0
+npm install @byok-sdk/client@0.42.0 @byok-sdk/server@0.42.0 @byok-sdk/keys@0.42.0
 ```
 
 Also installed: `@byok-sdk/cloud`, `@byok-sdk/core`, `@byok-sdk/protocol`.
@@ -248,7 +254,7 @@ Durable Objects, and `ui-runtime` for the Live Activity Timeline. On a
 Node/VPS host without Durable Objects, leave out `@byok-sdk/cloud-do`.
 
 ```sh
-npm install @byok-sdk/cloud@0.41.0 @byok-sdk/cloud-dataplane@0.41.0 @byok-sdk/cloud-do@0.41.0 @byok-sdk/ui-runtime@0.41.0
+npm install @byok-sdk/cloud@0.42.0 @byok-sdk/cloud-dataplane@0.42.0 @byok-sdk/cloud-do@0.42.0 @byok-sdk/ui-runtime@0.42.0
 ```
 
 Also installed: `@byok-sdk/core`, `@byok-sdk/protocol`.
@@ -261,7 +267,7 @@ Objects (no `nodejs_compat`): `cloud-do` for the session runtime and
 [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ```sh
-npm install @byok-sdk/cloud-do@0.41.0 @byok-sdk/protocol@0.41.0
+npm install @byok-sdk/cloud-do@0.42.0 @byok-sdk/protocol@0.42.0
 npm install --save-dev @cloudflare/workers-types
 ```
 
@@ -272,7 +278,7 @@ Also installed: none.
 The public dispatch packages are `@byok-sdk/client`, `@byok-sdk/server`,
 `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`, `@byok-sdk/core`,
 `@byok-sdk/protocol`, `@byok-sdk/ui-runtime` and `@byok-sdk/bot-collaboration`
-(K8 Bot collaboration, from the next MINOR), all on the same train.
+(K8 Bot collaboration, first publication proposed for 0.42.0), all on the same train.
 `@byok-sdk/implementation-identity` is retired and no later train publishes it.
 Starting with 0.21.0, the `byok-sdk` namespace
 umbrella and `@byok-sdk/testkit` are no longer published. Their existing
@@ -432,7 +438,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.41.0
+npm install @byok-sdk/keys@0.42.0
 ```
 
 ## Host connector composition
@@ -448,7 +454,7 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.41.0`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.42.0`
 require Node.js 24.22.1 or newer. MIT licensed.
 
 ## Entry dependencies

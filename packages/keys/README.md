@@ -208,7 +208,7 @@ and call `migrateProviderProfileStore(path)` before opening it. The migration
 keeps profiles and their credential-store key references; keys need no re-entry.
 For Pi execution also declare `pi_model.api: 'openai-completions'` and
 `pi_model.providerId: 'opencode-go'` explicitly; the provider kind does not infer
-Pi's identity. See the [next-MINOR Host upgrade checklist](../../docs/releases/host-upgrade-next-minor.md#opencode-go-key-checks-and-profile-stores)
+Pi's identity. See the [0.42.0 Host upgrade checklist](../../docs/releases/host-upgrade-0.42.0.md#opencode-go-key-checks-and-profile-stores)
 and [offline preparation evidence](../../docs/researches/2026-11-10-opencode-go-key-check-preparation.md).
 
 Status: **P5 + Pi provider launcher done** — the pure-function layer (K0), the `SecretStore` layer

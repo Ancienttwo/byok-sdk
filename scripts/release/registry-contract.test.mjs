@@ -93,7 +93,7 @@ function mutateResponse(fixture, selector, change) {
   fixture.responses.set(selector, good(value));
 }
 
-// Independently pin the public registry baseline reviewed for the 0.41.0 release.
+// Independently pin the public registry baseline reviewed for the proposed 0.42.0 release.
 // Do not derive expected versions from the file under test.
 test('the reviewed plan enumerates all ten packages with their prior stable latest', () => {
   assert.equal(names.length, 10);
@@ -103,7 +103,7 @@ test('the reviewed plan enumerates all ten packages with their prior stable late
     // #1845: @byok-sdk/bot-collaboration is published for the first time.
     assert.deepEqual(reviewed.packages[name], name === '@byok-sdk/bot-collaboration'
       ? { priorPublication: 'none', previousLatest: null }
-      : { priorPublication: 'existing', previousLatest: '0.40.0' });
+      : { priorPublication: 'existing', previousLatest: '0.41.0' });
   }
 });
 

@@ -77,8 +77,11 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
-The current release is 0.41.0 for all nine packages, keys included.
-See the [release notes](../../docs/releases/v0.41.0.md).
+The proposed source candidate is 0.42.0 for all ten packages, keys included.
+Owner version approval and publication remain pending; see the
+[candidate release notes](../../docs/releases/v0.42.0.md).
+The current published release is 0.41.0 for the previous nine-package set.
+See its [release notes](../../docs/releases/v0.41.0.md).
 The registry read of 2026-11-09 (UTC) reports `latest` 0.41.0 for all nine packages.
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
@@ -92,14 +95,15 @@ manifests, lock workspace records, version documents and packed internal
 dependencies consistent.
 
 A release set contains nine aligned packages plus keys: ten packages, since
-`@byok-sdk/bot-collaboration` joins with the next MINOR (#1845). From 0.28.2 all
+`@byok-sdk/bot-collaboration` is proposed for first publication in 0.42.0 (#1845, #1910). From 0.28.2 all
 of them carry one version; `check:release-graph` fails when keys
 differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
 the dist-tag `latest`, observed at 0.41.0 for all nine packages on 2026-11-09 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records the prior `latest` for all nine packages. It still records 0.40.0, the baseline for this publication, not the current registry.
-This train has no first publication.
+records the prior `latest` 0.41.0 for the nine existing packages and explicit
+package absence for `@byok-sdk/bot-collaboration`. Its first npm publication
+requires the owner's separate authorization; source preparation does not grant it.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
 package-document absence before a declared first publication, then exact-version
 readback and the declared absent `latest` after an RC. Missing tags/versions or
