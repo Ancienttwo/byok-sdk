@@ -194,6 +194,8 @@
 
 ### Known issues
 
+**Enrollment clearing with multiple stores (#1964).** `clearDeviceEnrollment` and `Daemon.unpair` act on the productId-wide OS credential entry. With more than one store under one `productId` on one machine, clearing one store while another is pairing, or has an unresolved first pairing, can delete the other store's credential or staged pairing key. Do not clear one store in that state. The fix is deferred to the next release cycle.
+
 - **Claude session memory (#1940):** On a long-lived session, permission and hook request/reply records and session bookkeeping grow outside the retained-frame limit, so that limit does not bound total session memory.
 - **Claude follow-up delivery (#1941):** A follow-up can be reported accepted while the process is already exiting, before the input write completes; acceptance alone does not prove delivery.
 - **Grok turn attribution and interrupt (#1942):** A Grok-own turn that starts while an SDK turn's answer is being published can have its text and usage attributed to that SDK turn, and an interrupt in that window cancels the Grok-own turn.
@@ -206,6 +208,9 @@
 - **Pi warming and background children (#1949):** A cache-warming stop can act on a stale idle check, so a refresh can still reach the provider after a run settled. A soft interrupt leaves a running pi-subagents background child active until the task closes.
 
 - **ACP interrupt retry (#1957):** On Grok, agy and OpenCode, after a refused cancel notification, a second interrupt reports accepted without sending a cancel; acceptance does not prove cancellation was sent.
+
+- **Service payload installation (#1962):** Case-colliding paths on a case-insensitive volume, or a file swapped for a symlink while the manifest writer runs, can defeat the digests. A `verifyPayload` hook that modifies an already installed version and then throws leaves that version modified.
+- **Enrollment clear result (#1965):** A clear can report `clear_failed` after the credential was already deleted.
 
 ## 0.41.0 — 2026-11-09 (published)
 
