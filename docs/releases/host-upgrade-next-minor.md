@@ -6,6 +6,18 @@ Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts m
 
 No configuration change is needed. Every SDK Pi RPC session now caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings, instead of answering each idle `cache_warming_decision` with `stop`. Pi cancels the warmer at settlement and revalidates pending decisions before dispatch, so a late `"warm"` answer cannot send a refresh after settlement. Under `agentUserContext: 'inherit'` a device setting of `"off"` still turns warming off; under `excluded` the session's settings are in memory and do not read the device file.
 
+## Store migration failures are store_migration_failed
+
+Every failure after the store snapshot now throws `store_migration_failed`
+on both `install()` and `upgrade()`, after restoring the snapshot (#1984). A
+`migrate` callback that throws used to surface its raw error, and a
+post-migration precheck that failed or printed malformed output surfaced
+`precheck_failed`; both are now the `cause` of `store_migration_failed`. On
+`upgrade()` the receipt records `failed` with `store_migration_failed`, where
+a thrown `migrate` callback used to leave it `pending` until `recover()`. A
+Host that matched `precheck_failed` after a migration matches
+`store_migration_failed` and reads `cause`.
+
 ## Upgrade and rollback enforce the health-check deadline
 
 `upgrade()`, `rollback()` and `recover()` now enforce `healthTimeoutMs` as

@@ -864,11 +864,18 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(events).toEqual(['stop', 'precheck', 'start']);
     });
 
-    it.each(['migration exits nonzero', 'postcheck still requires migration'])('restores kept stores and removes staging when %s', async (mode) => {
-      installation = migrating(mode === 'postcheck still requires migration' ? 'migration-required' : 'accepted');
+    it.each(['migration exits nonzero', 'postcheck still requires migration', 'migration setup throws', 'postcheck output is malformed'])('restores kept stores and removes staging when %s', async (mode) => {
+      const setupError = new Error('no migration program');
+      installation = mode === 'migration setup throws'
+        ? installationOver(fakeLifecycle(), { migrate: () => { throw setupError; } })
+        : migrating(mode === 'postcheck still requires migration' ? 'migration-required' : 'accepted');
       await verdicts('migration-required');
-      const script = mode === 'migration exits nonzero' ? `${MIGRATE}\nprocess.exit(1);` : MIGRATE;
-      await expect(installation.install(await payload('2.0.0', { 'migrate.cjs': script }))).rejects.toMatchObject({ code: 'store_migration_failed' });
+      const script = { 'migration exits nonzero': `${MIGRATE}\nprocess.exit(1);`, 'postcheck output is malformed': `${MIGRATE}\nfs.writeFileSync(verdictsPath, '{');` }[mode] ?? MIGRATE;
+      // Every failure after the snapshot is store_migration_failed; a setup or precheck error is its cause (#1984).
+      const failed = await installation.install(await payload('2.0.0', { 'migrate.cjs': script })).catch((caught: unknown) => caught);
+      expect(failed).toMatchObject({ code: 'store_migration_failed' });
+      if (mode === 'migration setup throws') expect((failed as Error).cause).toBe(setupError);
+      if (mode === 'postcheck output is malformed') expect((failed as Error).cause).toMatchObject({ code: 'precheck_failed' });
       await expectUninstalled();
       expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
       expect(await fs.readFile(`${db}-wal`, 'utf8')).toBe('v1 wal');

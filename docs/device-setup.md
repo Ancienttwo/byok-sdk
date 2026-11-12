@@ -507,9 +507,10 @@ that are already accepted need no migration. A busy daemon store is
 writing a pointer, record or unit. Without `migrate`, a required migration
 is `store_migration_required`. A migration that exits unsuccessfully or
 leaves non-accepting verdicts restores the snapshot and throws
-`store_migration_failed`. Launch failures or malformed post-migration
-precheck output retain upgrade's existing raw error or `precheck_failed`
-behavior after restoring the snapshot.
+`store_migration_failed`. So does every other failure after the snapshot:
+a `migrate` callback that throws, or a post-migration precheck that cannot
+run or prints malformed output, is `store_migration_failed` with that error
+as `cause`.
 
 The temporary snapshot lives at
 `<installRoot>/snapshots/.install-<uuid>`. The call that took it removes it

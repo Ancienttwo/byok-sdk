@@ -80,7 +80,10 @@ export interface ServiceInstallationOptions {
    * the snapshot when the precheck reports a store as `migration-required`;
    * exit 0 is success. The precheck then runs again and must report every
    * store `accepted` or `absent`. Without it, a `migration-required` store is
-   * `store_migration_required` and nothing is switched. The Host must make
+   * `store_migration_required` and nothing is switched. Any failure after the
+   * snapshot (a throw here, an exit other than 0, a failed or non-accepting
+   * second precheck) restores the snapshot and is `store_migration_failed`,
+   * with a thrown or precheck error as `cause`. The Host must make
    * this program safe to run again after interruption: install has no
    * write-ahead receipt for a process death during migration.
    */
@@ -927,12 +930,21 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * Runs the Host's migration of the candidate's stores, after the snapshot
    * and while every writer is stopped, then the precheck again. The shared
    * preparation restores the snapshot before propagating a migration error.
+   * Every failure here is `store_migration_failed`; a setup, launch or
+   * precheck error is its cause.
    */
   async function migrateStores(to: string, stores: readonly ServiceStoreVerdict[]): Promise<ServiceStoreVerdict[]> {
     if (opts.migrate === undefined) throw new ServiceInstallationError('store_migration_required', stores);
-    const { code } = await runProgram(opts.migrate(path.join(versionsDir, to)));
-    if (code !== 0) throw new ServiceInstallationError('store_migration_failed', stores);
-    const migrated = await precheck(to);
+    let code: number | null;
+    let migrated: ServiceStoreVerdict[];
+    try {
+      ({ code } = await runProgram(opts.migrate(path.join(versionsDir, to))));
+      if (code !== 0) throw new ServiceInstallationError('store_migration_failed', stores);
+      migrated = await precheck(to);
+    } catch (error) {
+      if (error instanceof ServiceInstallationError && error.code === 'store_migration_failed') throw error;
+      throw new ServiceInstallationError('store_migration_failed', stores, { cause: error });
+    }
     if (!migrated.every((store) => store.verdict === 'accepted' || store.verdict === 'absent')) {
       throw new ServiceInstallationError('store_migration_failed', migrated);
     }

@@ -11288,7 +11288,10 @@ export interface ServiceInstallationOptions {
      * the snapshot when the precheck reports a store as `migration-required`;
      * exit 0 is success. The precheck then runs again and must report every
      * store `accepted` or `absent`. Without it, a `migration-required` store is
-     * `store_migration_required` and nothing is switched. The Host must make
+     * `store_migration_required` and nothing is switched. Any failure after the
+     * snapshot (a throw here, an exit other than 0, a failed or non-accepting
+     * second precheck) restores the snapshot and is `store_migration_failed`,
+     * with a thrown or precheck error as `cause`. The Host must make
      * this program safe to run again after interruption: install has no
      * write-ahead receipt for a process death during migration.
      */
