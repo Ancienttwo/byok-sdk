@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ProviderStatus } from '@byok-sdk/keys';
 import {
   applyModelRouteChange, createModelRouteDraft, modelRouteContext, modelRouteView,
@@ -149,26 +149,17 @@ function RefusalNote({ refusal }: { refusal: Refusal }) {
 
 type Listed = { readonly statuses: readonly ProviderStatus[]; readonly refusal?: undefined } | { readonly statuses?: undefined; readonly refusal: Refusal };
 
-/** The stored profiles from `keys.list`, read when the section opens, after each receipt and on demand; each read is one custody child. */
-function useKeysList(): { listed: Listed | undefined; reload: () => Promise<void> } {
+/** The stored profiles from `keys.list`; each read is one custody child. `load` never rejects: a refusal is shown as listed. */
+function useKeysList(): { listed: Listed | undefined; load: () => Promise<void> } {
   const [listed, setListed] = useState<Listed>();
-  const [generation, setGeneration] = useState(0);
-  const waiting = useRef<Array<() => void>>([]);
-  /** Settles when the load this call starts (or a later one that supersedes it) settles, with a refusal shown as listed. */
-  const reload = useCallback(() => new Promise<void>(resolve => {
-    waiting.current.push(resolve);
-    setGeneration(value => value + 1);
-  }), []);
-  useEffect(() => {
-    let stopped = false;
-    const settled = () => { if (!stopped) waiting.current.splice(0).forEach(resolve => resolve()); };
-    window.byok.call('keys.list', undefined).then(
-      statuses => { if (!stopped) setListed({ statuses }); settled(); },
-      (error: unknown) => { if (!stopped) setListed({ refusal: refusalOf(error) }); settled(); },
-    );
-    return () => { stopped = true; };
-  }, [generation]);
-  return { listed, reload };
+  const load = useCallback(async () => {
+    try {
+      setListed({ statuses: await window.byok.call('keys.list', undefined) });
+    } catch (error) {
+      setListed({ refusal: refusalOf(error) });
+    }
+  }, []);
+  return { listed, load };
 }
 
 /** A new model route, or the edit of a stored one. A stored key starts as kept, and a kept key is never sent. */
@@ -258,12 +249,13 @@ function StoredList({ listed, editing, busy, onEdit, onReload }: {
  * saved profile's entry through the Host's view-change hint.
  */
 export function KeysSection() {
-  const { listed, reload } = useKeysList();
+  const { listed, load } = useKeysList();
   const [editing, setEditing] = useState<ProviderStatus | null>(null);
   const [formKey, setFormKey] = useState(0);
   const [outcome, setOutcome] = useState<SubmitOutcome>();
-  // One lock for the whole section: while a submission or the reload after its receipt is pending, nothing can be selected.
-  const [busy, setBusy] = useState(false);
+  // One lock for every keys call of the section (list read, submission, the read after a receipt): no two are in flight,
+  // so no response is stale and the list on screen is current whenever the section is interactive. Held from the first read.
+  const [busy, setBusy] = useState(true);
   const { loaded } = useConversation(null);
 
   const edit = (status: ProviderStatus | null) => {
@@ -278,7 +270,12 @@ export function KeysSection() {
       setFormKey(value => value + 1);
     }
   };
-  const run: Run = work => runLocked(setBusy, work, onOutcome, reload);
+  const run: Run = work => runLocked(setBusy, work, onOutcome, load);
+  const reload = async () => {
+    setBusy(true);
+    try { await load(); } finally { setBusy(false); }
+  };
+  useEffect(() => { void reload(); }, []);
 
   return (
     <div className="keys">
