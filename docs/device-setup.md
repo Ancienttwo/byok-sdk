@@ -463,7 +463,41 @@ The install root is yours and lies outside the store. The SDK owns
 `versions/<id>`, the `current` and `previous` pointers (symlinks; directory
 junctions on Windows), `snapshots/` and `upgrade-receipt.json` in it, and
 records the root in `<storeDir>/service/installation.json`. The unit runs
-`current`, so it never changes across upgrades. `upgrade apply`:
+`current`, so it never changes across upgrades.
+
+`install()` (CLI: `install --payload`) installs and starts the service, then
+runs `healthCheck`, using `healthTimeoutMs` (default 60000 ms), as `upgrade()`
+does. The default check waits for a live daemon lifecycle on its control
+endpoint: `running` (connecting or open) or `awaiting-enrollment`; a halted
+or crashed run fails immediately. For the CLI, a service installed before
+pairing must enable `serviceEnrollment: { enabled: true }` in its config;
+otherwise pair first. An embedded Host can instead pass its own
+`healthCheck`. An unpaired daemon without service enrollment halts on start
+and cannot pass the default check. Install enforces the health-check
+deadline even if a custom check ignores abort or succeeds late. For install,
+`healthTimeoutMs` bounds only the health-check wait after start returns. Unit
+writes, activation, start and the cleanup stop run outside that deadline;
+platform commands have no time bound today (follow-up: [#1971](https://github.com/Ancienttwo/byok-sdk/issues/1971)).
+Install awaits platform commands before proceeding, so cleanup cannot race
+a start that could restart the service after removal.
+
+If the service fails to install, activate, start or pass its health check,
+install removes the unit and launcher, `current`, the installation record and
+the staged `versions/<id>` directory, then throws `ServiceInstallationError`
+with code `install_health_check_failed` and the original error as `cause`. This also applies when reinstalling
+the same id: a failed repair leaves no service installed. Cleanup preserves
+Host stores, daemon stores and OS credentials. If removal itself fails, the
+same error code carries an `AggregateError` containing the original failure
+and the removal error as `cause`; its message names the artifacts that remain.
+
+A failed same-id reinstall after an upgrade preserves artifacts belonging to
+other versions: `previous`, `versions/<previous-id>`, `snapshots/` and
+`upgrade-receipt.json` remain. The installation record is gone, so CLI
+`uninstall` can no longer discover this root. To clean it, construct the
+installation with that explicit `installRoot` and call `uninstall()`, or
+reinstall into the same root to record it again before CLI uninstall.
+
+`upgrade apply`:
 
 1. stages and checks the payload in `versions/<id>`;
 2. stops the service, waits until no daemon owns the store, and ends what the
@@ -474,8 +508,8 @@ records the root in `<storeDir>/service/installation.json`. The unit runs
    each store's verdict;
 4. copies every store the precheck listed to `snapshots/<id>`;
 5. points `previous` at the old version and `current` at the new one, starts
-   it and waits until the daemon reports `running` on its control socket
-   (the cloud connection is not required);
+   it and waits for the same live daemon lifecycle on its control endpoint
+   (`running` or `awaiting-enrollment`; the cloud connection is not required);
 6. if that health check fails, restores the old version and its store
    snapshot together and fails with `health_check_failed`.
 

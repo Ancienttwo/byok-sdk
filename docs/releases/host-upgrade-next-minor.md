@@ -2,6 +2,45 @@
 
 Draft checklist for a Host moving from the current release to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Service install requires a healthy start
+
+`ServiceInstallation.install()` now runs the same health check as `upgrade()`
+after installing and starting the service (#1966). A Host that relied on
+`install()` succeeding without a healthy start must now handle
+`ServiceInstallationError` code `install_health_check_failed` and allow for
+`healthTimeoutMs` (default 60000 ms). The error carries the start or health
+check failure as `cause`; `upgrade()` keeps its existing error behavior.
+Add the new code to exhaustive matches over `ServiceInstallationErrorCode`.
+
+For CLI installs before pairing, enable `serviceEnrollment: { enabled: true }`
+in the config; otherwise pair first. An embedded Host can instead pass its
+own `healthCheck`. An unpaired daemon without service enrollment halts on start,
+so the default check fails. With service enrollment, `awaiting-enrollment`
+is healthy even before pairing.
+
+If the service fails to install, activate, start or pass its health check,
+install removes the unit, launcher, `current`, installation record and the
+staged version directory, including on a same-id
+reinstall. No service remains after successful cleanup. Host stores, daemon
+stores and OS credentials are preserved. If removal fails, the error carries
+an `AggregateError` with both the original and removal failures as `cause`
+and names the remaining artifacts in its message. Install enforces the
+health-check deadline even if a custom check ignores abort or succeeds late.
+For install, the clock starts after start returns; unit writes, activation,
+start and cleanup stop are outside it. Platform commands have no time bound
+today; [#1971](https://github.com/Ancienttwo/byok-sdk/issues/1971) tracks that
+separate lifecycle change. Cleanup waits for an in-flight platform command
+to settle first. The CLI error
+includes the cause message and the before-pairing requirement.
+
+After an upgrade, a failed same-id reinstall leaves `previous`,
+`versions/<previous-id>`, `snapshots/` and `upgrade-receipt.json` intact,
+since they belong to other versions. With the installation record removed,
+CLI uninstall cannot discover the root. Construct the installation with the
+explicit `installRoot` and call `uninstall()`, or reinstall into the same
+root before using CLI uninstall.
+See [Versioned installs](../device-setup.md#versioned-installs).
+
 ## Clearing a device enrollment without a daemon
 
 An uninstaller that built a daemon per store only to call `daemon.unpair()` can call `clearDeviceEnrollment({ productId, storeDir, nativeAssetRoot })` instead (#1841); it needs no `productName`, `serverUrl` or `localAgentRelease`. It refuses with `DeviceEnrollmentClearError` `store_owned` while a daemon, doctor or installer holds the store, so call it after the service has stopped, and before deleting the store directory. It clears only the SDK device enrollment of the account it runs as, never Host secrets, and leaves the delivery cursor file. A Host that matched the text of `unpair()`'s credential-deletion error reads `DeviceEnrollmentClearError.code === 'clear_failed'` instead. See [Clearing an enrollment without running the daemon](../device-setup.md#clearing-an-enrollment-without-running-the-daemon).
