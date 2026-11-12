@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { ProviderStatus } from '@byok-sdk/keys';
 import {
   applyModelRouteChange, createModelRouteDraft, modelRouteContext, modelRouteView,
@@ -169,7 +170,8 @@ function RouteForm({ stored, busy, run }: { stored: ProviderStatus | null; busy:
   const view = modelRouteView(draft, context);
   const onChange: Change = change => setDraft(current => applyModelRouteChange(current, change, context));
 
-  const submit = () => run(() => submitModelRoute(draft, context, stored, change => window.byok.call('keys.submit', change), setDraft));
+  const submit = () => run(() => submitModelRoute(draft, context, stored, change => window.byok.call('keys.submit', change),
+    next => flushSync(() => setDraft(next))));
 
   return (
     <form className="keys-form" onSubmit={event => { event.preventDefault(); if (view.valid && !busy) void submit(); }}>
@@ -198,7 +200,7 @@ function ReplaceKeyForm({ stored, busy, run }: { stored: ProviderStatus; busy: b
   const [secret, setSecret] = useState('');
   const submit = () => {
     const typed = secret;
-    setSecret('');
+    flushSync(() => setSecret(''));
     return run(() => submitReplaceSecret(stored.profile_ref, typed, change => window.byok.call('keys.submit', change)));
   };
   return (

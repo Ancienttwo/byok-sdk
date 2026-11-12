@@ -11,9 +11,9 @@ import type { BridgeDomain } from '../domain.ts';
 export interface KeysMethods {
   /** Main only: one custody child writes the profile and key; the result is the registry's secret-free status. */
   'keys.submit': { params: CustodyChange; result: ProviderStatus };
-  /** Main only: one custody child reads every stored profile's secret-free status, `secret_configured` and `configuration_pending` included. */
+  /** Main only: one custody child reads statuses, then the Host reconciles its catalog from the persisted profiles. */
   'keys.list': { params: undefined; result: readonly ProviderStatus[] };
-  /** Main to Host after a custody receipt: the Host rereads the keys store. Not callable from the renderer. */
+  /** Main to Host after a custody receipt or list: the Host rereads the keys store. Not callable from the renderer. */
   'keys.profilesChanged': { params: undefined; result: null };
 }
 

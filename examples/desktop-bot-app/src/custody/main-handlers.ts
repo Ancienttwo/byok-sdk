@@ -3,12 +3,28 @@ import type { MethodHandlers } from '../bridge/domain.ts';
 import type { KeysMethods } from '../bridge/domains/keys.ts';
 import { BridgeError } from '../bridge/protocol.ts';
 import { CUSTODY_COMMAND, CustodyError, type CustodyChange } from './protocol.ts';
-import { listFromCustody, submitToCustody, type CustodyChild } from './submit.ts';
+import { CUSTODY_DEADLINE_MS, listFromCustody, submitToCustody, type CustodyChild } from './submit.ts';
 
 export interface KeysMainDependencies {
   /** Spawns the Host executable with these arguments: dev runs the Host bundle under Node, a package runs the SEA. */
   readonly spawnHostCommand: (args: readonly string[]) => CustodyChild;
   readonly callHost: (method: 'keys.profilesChanged', params: undefined) => Promise<null>;
+}
+
+/** Reapplying the persisted catalog is idempotent; only the wait is bounded, never the saved key write retried. */
+async function refreshProfiles(deps: KeysMainDependencies, saved: boolean): Promise<void> {
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      deps.callHost('keys.profilesChanged', undefined),
+      new Promise<never>((_resolve, reject) => {
+        deadline = setTimeout(() => reject(new CustodyError('catalog_refresh_timeout',
+          `${saved ? 'The key change was saved' : 'Stored providers were read'}, but the Host has not confirmed its catalog update. Reload stored providers; do not repeat the save.`)), CUSTODY_DEADLINE_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(deadline);
+  }
 }
 
 /**
@@ -28,13 +44,15 @@ export function keysMainHandlers(deps: KeysMainDependencies): MethodHandlers<Pic
         if (error instanceof CustodyError && error.code === 'custody_request_invalid') throw new BridgeError('invalid_params', error.message);
         throw error;
       }
-      await deps.callHost('keys.profilesChanged', undefined);
+      await refreshProfiles(deps, true);
       return status;
     },
-    // A read: one custody child per call, no copy kept in main or the Host.
+    // A read also reconciles the Host after an uncertain submission, without repeating its write.
     'keys.list': async params => {
       if (params !== undefined) throw new BridgeError('invalid_params', 'keys.list takes no params');
-      return listFromCustody(deps.spawnHostCommand([CUSTODY_COMMAND]));
+      const statuses = await listFromCustody(deps.spawnHostCommand([CUSTODY_COMMAND]));
+      await refreshProfiles(deps, false);
+      return statuses;
     },
   };
 }

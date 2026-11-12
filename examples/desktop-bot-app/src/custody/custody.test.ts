@@ -141,6 +141,59 @@ describe('custody child', () => {
     expect(reloads).toEqual([]);
   });
 
+  it.each(['submit', 'list'] as const)('bounds a hung Host catalog refresh after %s without repeating a write', async operation => {
+    vi.useFakeTimers();
+    const secrets = new InMemorySecretStore<ModelProviderSecretName>();
+    const write = vi.spyOn(secrets, 'set');
+    let notify!: () => void;
+    const refreshing = new Promise<void>(resolve => { notify = resolve; });
+    const handlers = keysMainHandlers({
+      spawnHostCommand: () => custodyChild(secrets, []),
+      callHost: () => { notify(); return new Promise<null>(() => {}); },
+    });
+    const request = operation === 'submit'
+      ? handlers['keys.submit']({ op: 'configure', configuration: CONFIGURATION, secret: SECRET })
+      : handlers['keys.list'](undefined);
+    const settled = Promise.resolve(request).then(value => ({ value }), (error: unknown) => ({ error }));
+    await Promise.race([refreshing, settled]);
+    await vi.advanceTimersByTimeAsync(CUSTODY_DEADLINE_MS);
+    expect(await settled).toMatchObject({ error: { code: 'catalog_refresh_timeout',
+      message: expect.stringContaining(operation === 'submit' ? 'The key change was saved' : 'Stored providers were read') } });
+    expect(write).toHaveBeenCalledTimes(operation === 'submit' ? 1 : 0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('rebuilds the catalog on Reload after a committed change loses its receipt, without writing the key again', async () => {
+    vi.useFakeTimers();
+    const secrets = new InMemorySecretStore<ModelProviderSecretName>();
+    const write = vi.spyOn(secrets, 'set');
+    const profiles = new ProviderProfiles(keysDb);
+    const brand = { instruction: 'reply', models: { pi: { label: 'Pi', runtime: 'pi' as const } } };
+    let catalog = executionCatalog(brand, 'device', await profiles.load());
+    profiles.subscribe(next => { catalog = executionCatalog(brand, 'device', next); });
+    const lost = custodyChild(secrets, []);
+    vi.spyOn(lost.stdout as PassThrough, 'end').mockReturnValue(lost.stdout as PassThrough);
+    const committed = new Promise<void>(resolve => lost.once('exit', () => resolve()));
+    const callHost = vi.fn(async () => { await profiles.changed(); return null; });
+    let spawned = 0;
+    const handlers = keysMainHandlers({ spawnHostCommand: () => (++spawned === 1 ? lost : custodyChild(secrets, [])), callHost });
+    const request = handlers['keys.submit']({ op: 'configure', configuration: CONFIGURATION, secret: SECRET });
+    const refused = expect(request).rejects.toMatchObject({ code: 'custody_timeout' });
+    await committed;
+    await vi.advanceTimersByTimeAsync(CUSTODY_DEADLINE_MS);
+    await refused;
+    expect(callHost).not.toHaveBeenCalled();
+    expect(catalog.choices.map(choice => choice.id)).toEqual(['pi']);
+    const statuses = await handlers['keys.list'](undefined);
+    expect(statuses.map(status => status.profile_ref)).toEqual(['writer']);
+    expect(catalog.choices.map(choice => choice.id)).toEqual(['pi', 'pi:writer']);
+    expect(callHost).toHaveBeenCalledOnce();
+    await expect(handlers['keys.list'](undefined)).resolves.toEqual(statuses);
+    expect(callHost).toHaveBeenCalledTimes(2);
+    expect(write).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it.each(['submit', 'list'] as const)('bounds a hung %s before exit and while waiting for stdout', async operation => {
     vi.useFakeTimers();
     for (const exited of [false, true]) {

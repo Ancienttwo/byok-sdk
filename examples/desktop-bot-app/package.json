@@ -11,7 +11,8 @@
     "dev": "bun run build && bun run build:host && electron dist/src/main/index.js",
     "package": "bun run build && node scripts/package/build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:keys-browser": "node --test scripts/keys-submit.browser.mjs"
   },
   "dependencies": {
     "@byok-sdk/client": "workspace:*",
