@@ -18,7 +18,7 @@ import { refusalReceipt, runCustody } from './child.ts';
 import { keysMainHandlers } from './main-handlers.ts';
 import { BridgeError } from '../bridge/protocol.ts';
 import { CustodyError } from './protocol.ts';
-import { CUSTODY_DEADLINE_MS, listFromCustody, submitToCustody, } from './submit.ts';
+import { CUSTODY_DEADLINE_MS, listFromCustody, submitToCustody, type CustodyChild } from './submit.ts';
 import type { CommandChild } from '../main/host-command.ts';
 
 const SECRET = 'sk-custody-test-secret-0123456789';
@@ -38,7 +38,7 @@ beforeEach(async () => {
 afterEach(async () => { vi.useRealTimers(); await rm(root, { recursive: true, force: true }); });
 
 /** The custody child in process: its stdin, stdout and exit, around `runCustody` with an injected store. */
-function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: string[]): CommandChild {
+function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: string[]): CustodyChild {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const events = new EventEmitter();
@@ -48,7 +48,7 @@ function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: s
     stdout.end(line);
     events.emit('exit', receipt.ok ? 0 : 1);
   });
-  const child: CommandChild = { stdin, stdout, once: (event, listener) => { events.once(event, listener); return child; } };
+  const child: CustodyChild = { stdin, stdout, kill: vi.fn(() => true), once: (event, listener) => { events.once(event, listener); return child; } };
   return child;
 }
 
@@ -214,16 +214,18 @@ describe('custody child', () => {
     vi.useFakeTimers();
     for (const exited of [false, true]) {
       const events = new EventEmitter();
-      const child: CommandChild = { stdin: new PassThrough(), stdout: new PassThrough(),
+      const child: CustodyChild = { stdin: new PassThrough(), stdout: new PassThrough(), kill: vi.fn(() => true),
         once: (event, listener) => { events.once(event, listener); return child; } };
       const request = operation === 'list' ? listFromCustody(child)
         : submitToCustody(child, { op: 'replace_secret', profileRef: 'writer', secret: SECRET });
-      const refused = expect(request).rejects.toMatchObject({ code: 'custody_timeout', message: expect.stringContaining('reload stored providers') });
+      const refused = expect(request).rejects.toMatchObject({ code: 'custody_timeout',
+        message: expect.stringMatching(operation === 'list' ? /^(?!.*may still be saved).*Nothing was changed/ : /may still be saved.*reload stored providers/) });
       if (exited) { events.emit('exit', 0); await Promise.resolve(); }
       await vi.advanceTimersByTimeAsync(CUSTODY_DEADLINE_MS);
       await refused;
-      // The child keeps running and holding the configuration lock; only the wait ends.
-      expect(child.stdout.destroyed).toBe(false);
+      // A list holds no configuration lock and is killed; a change keeps running and holding the lock, only the wait ends.
+      if (operation === 'list') expect(child.kill).toHaveBeenCalledExactlyOnceWith('SIGKILL');
+      else expect(child.kill).not.toHaveBeenCalled();
       expect(vi.getTimerCount()).toBe(0);
     }
   });

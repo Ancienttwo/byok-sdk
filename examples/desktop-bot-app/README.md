@@ -114,7 +114,8 @@ bridge and composes the Host after main's hello (`src/host/compose.ts`):
   `secret-tool` on Linux run as its child processes; Windows writes in process), so a
   late write cannot land after a newer change commits. Until then another key change is
   refused as busy, with a hint to answer a pending system unlock prompt or restart the
-  computer. Quitting the app does not kill it. A custody timeout may have saved the change; `catalog_refresh_timeout` after a receipt confirms the
+  computer. Quitting the app does not kill it. A provider list takes no lock and
+  writes nothing, so a list that times out is killed and reports that nothing changed. A custody timeout may have saved the change; `catalog_refresh_timeout` after a receipt confirms the
   save but leaves Host application unconfirmed. Reload rebuilds the catalog from
   whatever was committed. A timeout during the key write itself can leave the provider
   marked as an unfinished key change, which stays unusable until its key is entered
