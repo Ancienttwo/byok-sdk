@@ -75,7 +75,14 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
   readonly #offersSeen = new Set<string>();
   #journal: TaskSettlementJournal | undefined;
 
-  bindJournal(journal: TaskSettlementJournal): void { this.#journal = journal; }
+  bindJournal(journal: TaskSettlementJournal): void {
+    // A new run must read recovery's durable answer, including on the same Daemon.
+    // These cancellations have no terminal row; their cached answer is run-local.
+    for (const [taskId, entry] of this.#entries) {
+      if (entry.result?.delivery === 'not-required') this.#entries.delete(taskId);
+    }
+    this.#journal = journal;
+  }
 
   offerSeen(taskId: string): void {
     if (!this.#entries.get(taskId)?.result) this.#offersSeen.add(taskId);
@@ -125,7 +132,7 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
     this.terminalSettled(taskId, 'cancelled', 'not-required');
   }
 
-  /** A redelivery in this daemon cannot reopen an offer the cloud already cancelled. */
+  /** A redelivery in this run cannot reopen an offer the cloud already cancelled. */
   isCancelledBeforeAdmission(taskId: string): boolean {
     return this.#entries.get(taskId)?.result?.delivery === 'not-required';
   }

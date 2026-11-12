@@ -750,14 +750,17 @@ export interface Daemon {
    * its first disposal outcome. A received offer with no execution owner
    * resolves as `cancelled`/`not-required`/`none` once its cloud cancellation
    * is journaled; no local terminal is required. Redelivery of that task id
-   * in this daemon keeps that result and cannot start a runtime. An offer
+   * in this run keeps that result and cannot start a runtime. An offer
    * that was never claimed is not final by itself: it may be redelivered.
    * A task this daemon has not seen is read from the journal: after a restart
    * the result reflects the journal's current truth, so a refused terminal
    * that was replaced reads as its replacement, never the reverse. Known
-   * limit (#1955): a new daemon cannot read a consumed cancellation through
-   * the journal interface; with the cursor past it, the received offer is
-   * recovered as `failed` (`daemon_interrupted`), `accepted`, `none`.
+   * limit (#1955): after restart, including stop/start of the same Daemon,
+   * the journal interface cannot expose a consumed cancellation. Run-local
+   * cancellation results expire when the new run binds its journal, so
+   * recovery and waits agree: with the cursor past the cancellation, the
+   * received offer is recovered as `failed` (`daemon_interrupted`),
+   * `accepted`, `none`.
    * Rejects with {@link DaemonTaskUnknownError} for an unknown task, before
    * `start()` the way `approve()` does, and with `signal.reason` on abort;
    * the task is untouched. Revocation and replay expiry carry no per-task

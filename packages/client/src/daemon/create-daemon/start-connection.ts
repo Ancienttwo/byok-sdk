@@ -4,6 +4,7 @@ import { JournalRecordTooLargeError, journalHash } from '../journal/journal.js';
 import { createEnvelope, decodeEnvelope, encodeEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { terminalIdentity } from '../terminal-identity.js';
 import { hostFor } from '../task-runner/host.js';
+import { offerHasOwner } from '../task-runner/offer-admission.js';
 import type { DaemonScope } from './scope.js';
 import type { StartRun } from './start-run.js';
 import type { StartLanes } from './start-lanes.js';
@@ -124,13 +125,12 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
         }
       }
       const runner = daemonState.runner;
-      if (envelope.type === 'task.cancel' && envelope.task_id !== undefined && runner !== undefined
-        && hostFor(runner).current(envelope.task_id) === undefined
-        && !terminalCommits.hasPending(envelope.task_id)) {
+      if (envelope.type === 'task.cancel' && envelope.task_id !== undefined && runner !== undefined) {
         const task = await activeJournal.readTask(envelope.task_id, journalIdentity);
         // Recovery deliberately left this unadmitted offer to cloud redelivery.
-        // The durable cancellation is authoritative even when its offer is suppressed.
-        if (task?.localState === 'received') taskSettlement.cancelledBeforeAdmission(envelope.task_id);
+        // Recheck ownership after the read: its concurrent offer may now be admitted.
+        if (task?.localState === 'received' && !offerHasOwner.call(runner, envelope.task_id)
+          && !terminalCommits.hasPending(envelope.task_id)) taskSettlement.cancelledBeforeAdmission(envelope.task_id);
       }
       if (envelope.type === 'task.cancel' && envelope.task_id !== undefined && resultReplyRecoveryTasks.has(envelope.task_id)) {
         const taskId = envelope.task_id;
