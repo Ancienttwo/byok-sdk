@@ -11325,7 +11325,10 @@ export interface ServiceInstallation {
      * OS credentials are never cleared. `precheck` is required.
      * The temporary snapshot `snapshots/.install-<uuid>` is removed after a
      * healthy start or a completed restore; a removal failure does not change
-     * the outcome, and a leftover is kept, never restored automatically. A
+     * the outcome, and a leftover is kept, never restored automatically: the
+     * next first install refuses with `install_snapshot_leftover`, listing it,
+     * and starts nothing until an operator removes it. Every check uses the
+     * snapshots listed under the store leases. A
      * failed restore renames it `snapshots/.install-repair-<uuid>` and the
      * error names it: the next first install restores it, under the store
      * leases and before its precheck. When it cannot stop the service, take
@@ -11380,6 +11383,7 @@ declare const ERROR_MESSAGES: {
     readonly health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.';
     readonly rollback_unhealthy: 'The previous version was restored but failed its health check too.';
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
+    readonly install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.';
     readonly snapshots_symlinked: 'The install root\'s snapshots/ is a symbolic link. Uninstall does not follow it and changed nothing; replace it with a directory or remove the link, then retry.';
 };
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;

@@ -178,7 +178,10 @@ export interface ServiceInstallation {
    * OS credentials are never cleared. `precheck` is required.
    * The temporary snapshot `snapshots/.install-<uuid>` is removed after a
    * healthy start or a completed restore; a removal failure does not change
-   * the outcome, and a leftover is kept, never restored automatically. A
+   * the outcome, and a leftover is kept, never restored automatically: the
+   * next first install refuses with `install_snapshot_leftover`, listing it,
+   * and starts nothing until an operator removes it. Every check uses the
+   * snapshots listed under the store leases. A
    * failed restore renames it `snapshots/.install-repair-<uuid>` and the
    * error names it: the next first install restores it, under the store
    * leases and before its precheck. When it cannot stop the service, take
@@ -234,6 +237,7 @@ const ERROR_MESSAGES = {
   health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.',
   rollback_unhealthy: 'The previous version was restored but failed its health check too.',
   no_rollback: 'There is no previous version with a store snapshot to roll back to.',
+  install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.',
   snapshots_symlinked: 'The install root\'s snapshots/ is a symbolic link. Uninstall does not follow it and changed nothing; replace it with a directory or remove the link, then retry.',
 } as const;
 
@@ -297,6 +301,17 @@ const REPAIR_SNAPSHOT_PREFIX = '.install-repair-';
 
 /** A store restore that failed: the stores may be partial, so no service may start on them. */
 class StoreRestoreError extends AggregateError {}
+
+/** Failures after which the stores may be partial or their only copy is in a snapshot: nothing starts. */
+function startsNothing(error: unknown): boolean {
+  return error instanceof StoreRestoreError || (error instanceof ServiceInstallationError && error.code === 'install_snapshot_leftover');
+}
+
+/** Joins a lease release failure to the error it followed, keeping whether that error starts nothing. */
+function withReleaseFailure(failure: unknown, releaseError: unknown): AggregateError {
+  const message = `${failure instanceof Error ? failure.message : 'Store preparation failed.'} The store leases could not be released either.`;
+  return startsNothing(failure) ? new StoreRestoreError([failure, releaseError], message) : new AggregateError([failure, releaseError], message);
+}
 
 /** The version `<installRoot>/<name>` points at, or `undefined` when the pointer is absent. */
 async function readInstallPointer(installRoot: string, name: Pointer): Promise<string | undefined> {
@@ -534,7 +549,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
               throw new AggregateError([failure, removal], `${failure instanceof Error ? failure.message : 'Store preparation failed.'} The marked service unit could not be removed: ${inspection.unitPath}.`);
             }
           }
-          if (stopMarked && !(error instanceof StoreRestoreError)) {
+          if (stopMarked && !startsNothing(error)) {
             try {
               await lifecycle.start();
             } catch (restart) {
@@ -592,7 +607,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
             try {
               await release();
             } catch (releaseError) {
-              throw new StoreRestoreError([error, releaseError], `${(error as Error).message} The store leases could not be released either.`);
+              throw withReleaseFailure(error, releaseError);
             }
             throw error;
           }
@@ -741,22 +756,25 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
 
   /** One candidate store preparation sequence for install and upgrade, retaining the quiescent leases until the caller switches. */
   async function prepareStores(candidate: string, snapshotId: string, installing = false, stopService = !installing): Promise<{ stores: ServiceStoreVerdict[]; release: () => Promise<void> }> {
-    // Listed under the owner gate, before quiescence: until every repair
-    // snapshot is restored the stores may be partial, so a failure on the
-    // way there is a restore failure and starts nothing.
-    const repairs = installing ? await listRepairSnapshots() : [];
+    // Listed before quiescence only to decide what a failed stop or lease
+    // means: with an install snapshot pending the stores may be partial, so
+    // that failure starts nothing.
+    const pending = installing ? await listInstallSnapshots() : [];
     // A first install stops only a marked unit of our owner. Absent and
     // allowed-unmarked units rely on the store lease alone.
     let release: () => Promise<void>;
     try {
       release = await stopQuiescent(stopService);
     } catch (error) {
-      if (repairs.length > 0) throw unrestoredRepair(repairs, error);
+      if (pending.length > 0) throw unrestoredRepair(pending, error);
       throw error;
     }
     let restoreOnFailure = false;
     try {
-      await restoreRepairSnapshots(repairs);
+      // Every decision uses the inventory taken under the leases: until
+      // then another installation (an owner gate under another gate root)
+      // can still change snapshots/.
+      if (installing) await restoreRepairSnapshots(checkInstallSnapshots(await listInstallSnapshots()));
       let stores = await precheck(candidate);
       const refused = stores.find(isRefused);
       if (refused !== undefined) {
@@ -769,6 +787,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       }
       return { stores, release };
     } catch (error) {
+      let failure = error;
       try {
         if (restoreOnFailure) {
           if (installing) await restoreInstallSnapshot(snapshotId, error);
@@ -776,10 +795,20 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         }
         // A leftover is kept and never restored; its removal error must not replace the store code.
         if (installing) await fs.rm(path.join(snapshotsDir, snapshotId), { recursive: true, force: true }).catch(() => undefined);
-      } finally {
-        await release().catch(() => undefined);
+      } catch (restoreError) {
+        failure = restoreError;
       }
-      throw error;
+      if (!installing) {
+        // Upgrade's receipt records the code of the preparation error itself.
+        await release().catch(() => undefined);
+        throw failure;
+      }
+      try {
+        await release();
+      } catch (releaseError) {
+        throw withReleaseFailure(failure, releaseError);
+      }
+      throw failure;
     }
   }
 
@@ -875,14 +904,28 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
   }
 
-  /** The repair snapshots a first install restores. A listing failure cannot rule one out, so it counts as a failed restore. */
-  async function listRepairSnapshots(): Promise<string[]> {
-    let repairs: string[];
+  /** The install snapshots under snapshots/. A listing failure cannot rule a repair snapshot out, so it counts as a failed restore. */
+  async function listInstallSnapshots(): Promise<string[]> {
     try {
-      repairs = (await listDir(snapshotsDir)).filter((entry) => entry.startsWith(REPAIR_SNAPSHOT_PREFIX));
+      return (await listDir(snapshotsDir)).filter((entry) => entry.startsWith(INSTALL_SNAPSHOT_PREFIX));
     } catch (error) {
-      throw new StoreRestoreError([error], `The repair snapshots under ${snapshotsDir} could not be listed; the stores may be partial.`);
+      throw new StoreRestoreError([error], `The install snapshots under ${snapshotsDir} could not be listed; the stores may be partial.`);
     }
+  }
+
+  /**
+   * Returns the repair snapshot a first install restores. Any other install
+   * snapshot left by an earlier call refuses the install: it may hold the
+   * only copy of the stores, and nothing tells whether it is still needed.
+   */
+  function checkInstallSnapshots(names: readonly string[]): string[] {
+    const leftovers = names.filter((name) => !name.startsWith(REPAIR_SNAPSHOT_PREFIX));
+    if (leftovers.length > 0) {
+      const error = new ServiceInstallationError('install_snapshot_leftover');
+      error.message = `${error.message} ${leftovers.map((name) => path.join(snapshotsDir, name)).join(', ')}`;
+      throw error;
+    }
+    const repairs = names.filter((name) => name.startsWith(REPAIR_SNAPSHOT_PREFIX));
     // A uuid does not order them in time, so restoring each in turn could
     // leave an older state last. An operator chooses.
     if (repairs.length > 1) {

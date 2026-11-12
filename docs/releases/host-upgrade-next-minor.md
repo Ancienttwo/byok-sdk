@@ -65,8 +65,16 @@ Host-visible changes follow. `upgrade()` pruning no longer removes any
 remove `snapshots/` while one exists, and it refuses a symlinked
 `snapshots/` with the new `ServiceInstallationErrorCode`
 `snapshots_symlinked` before changing anything. A leftover `.install-<uuid>` is never
-restored automatically; an operator compares its `snapshot.json` with the
-current stores and removes it once it is not needed. Install has no write-ahead receipt
+restored automatically. The next first install, deciding from the snapshots
+it lists while holding the store leases, refuses with the new
+`ServiceInstallationErrorCode` `install_snapshot_leftover`, lists every
+leftover path and starts nothing; an operator compares its `snapshot.json`
+with the current stores, removes it once it is not needed, and retries.
+This also blocks an install after `uninstall()` when a successful install
+could not remove its own snapshot, until that directory is removed by hand.
+When a lease release fails after a refused first install, the error is an
+`AggregateError` carrying the refusal (with its code) and the release
+error. Install has no write-ahead receipt
 for process death during migration: the next install prechecks the stores
 as they remain, and the Host must make `migrate` safe to run again. Adding
 an install receipt is outside this change.

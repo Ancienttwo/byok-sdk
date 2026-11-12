@@ -535,9 +535,19 @@ one exists. `uninstall()` refuses a `snapshots/` that is a symbolic link
 with `ServiceInstallationError` `snapshots_symlinked` before it changes
 anything. A leftover `.install-<uuid>` (a removal that failed, a rename
 that failed, an installer that was killed) is never restored automatically,
-because nothing shows whether it is still needed. An operator recognizes it
-by that name, compares its `snapshot.json` entries with the current stores,
-and removes the directory once it is not needed.
+because nothing shows whether it is still needed. It may hold the only copy
+of the stores, so the next first install refuses with
+`ServiceInstallationError` `install_snapshot_leftover`, lists every leftover
+path, and installs and starts nothing. An operator recognizes it by that
+name, compares its `snapshot.json` entries with the current stores, and
+removes the directory once it is not needed; then the install can be
+retried. The cost: when a successful install could not remove its own
+snapshot, an install after `uninstall()` is refused until that directory is
+removed by hand.
+
+A first install decides from the snapshots it lists after it holds the
+store leases, so a repair snapshot or leftover written by another
+installation before that point is seen.
 Unlike upgrade, install has no write-ahead receipt: if the process dies
 during migration, `recover()` does not complete that install. The next
 install prechecks the stores as migration left them. The Host must make

@@ -681,16 +681,37 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await installation.receipt()).toBeUndefined();
     });
 
-    it('refuses to choose between two repair snapshots and starts nothing', async () => {
+    it('takes the repair inventory under the store lease and refuses to choose between two repair snapshots', async () => {
       const repairs = [`.install-repair-${randomUUID()}`, `.install-repair-${randomUUID()}`];
       for (const name of repairs) await fs.mkdir(path.join(installRoot, 'snapshots', name), { recursive: true });
       const error = await installation.install(await payload('2.0.0')).catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(AggregateError);
       for (const name of repairs) expect((error as Error).message).toContain(path.join(installRoot, 'snapshots', name));
-      expect(events).toEqual(['uninstall']);
+      expect(events).toEqual(['stop', 'uninstall']);
       expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
       expect((await snapshotNames()).sort()).toEqual(repairs.sort());
       expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
+      for (const name of repairs) await fs.rm(path.join(installRoot, 'snapshots', name), { recursive: true });
+
+      // Owner gates under different gate roots do not exclude each other; owned() without the gate models
+      // that. B's restore fails and leaves a repair snapshot after A listed and before A takes the lease.
+      const ungated = (base: ManagedServiceLifecycle): ManagedServiceLifecycle => ({ ...base, owned: (operation) => operation({ install: base.install, uninstall: base.uninstall }) });
+      const migrate: ServiceInstallationOptions['migrate'] = (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] });
+      const b = installationOver(ungated(fakeLifecycle()), { migrate });
+      installation = installationOver({ ...ungated(fakeLifecycle()), stop: async () => {
+        await verdicts('migration-required');
+        const fault = failRestore();
+        try {
+          await expect(b.install(await payload('2.0.0', { 'migrate.cjs': `${MIGRATE}\nprocess.exit(1);` }))).rejects.toBeInstanceOf(AggregateError);
+        } finally {
+          fault.restore();
+        }
+        await verdicts('accepted');
+      } });
+      await installation.install(await payload('3.0.0'));
+      expect(await pointer('current')).toBe('3.0.0');
+      expect(await snapshotNames()).toEqual([]);
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
     });
 
     it('uninstall refuses a symlinked snapshots/ and changes nothing behind it', async () => {
@@ -759,6 +780,23 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await expectUninstalled();
       expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
       expect(await fs.readFile(`${db}-wal`, 'utf8')).toBe('v1 wal');
+
+      // A lease that then fails to release joins the store error instead of being dropped.
+      await verdicts('migration-required');
+      const releaseError = new Error('injected release failure');
+      const original = daemonOwner.acquireDaemonOwner;
+      const leaseFault = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementation(async (...args) => {
+        const lease = await original(...args);
+        return { release: async () => { await lease.release(); throw releaseError; } };
+      });
+      try {
+        const error = await installation.install(await payload('2.0.0', { 'migrate.cjs': script })).catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(AggregateError);
+        expect((error as AggregateError).errors).toEqual([expect.objectContaining({ code: 'store_migration_failed' }), releaseError]);
+      } finally {
+        leaseFault.mockRestore();
+      }
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
     });
 
     it('without migrate refuses migration-required and keeps the stores intact', async () => {
@@ -821,31 +859,51 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await (await acquirePathMutationGate({ scope: 'store', targetPath: storeDir })).release();
     });
 
-    it('keeps a completed restore\'s store code when its snapshot cannot be removed, and never restores the leftover', async () => {
-      installation = migrating();
+    it.each(['its removal failed after a completed restore', 'its restore and its repair rename failed'] as const)('refuses the next first install over an install snapshot leftover: %s', async (mode) => {
+      installation = installationOver(fakeLifecycle(), {
+        migrate: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] }),
+      });
       await verdicts('migration-required');
+      const candidate = await payload('2.0.0', { 'migrate.cjs': `${MIGRATE}\nprocess.exit(1);` });
       const originalRm = fs.rm.bind(fs);
-      const fault = vi.spyOn(fs, 'rm').mockImplementation(async (file, options) => {
-        if (path.basename(String(file)).startsWith('.install-') && existsSync(path.join(String(file), 'snapshot.json'))) {
+      const removal = vi.spyOn(fs, 'rm').mockImplementation(async (file, options) => {
+        if (mode === 'its removal failed after a completed restore' && path.basename(String(file)).startsWith('.install-') && existsSync(path.join(String(file), 'snapshot.json'))) {
           throw Object.assign(new Error('snapshot cleanup denied'), { code: 'EACCES' });
         }
         return originalRm(file, options);
       });
-      const candidate = await payload('2.0.0', { 'migrate.cjs': `${MIGRATE}\nprocess.exit(1);` });
+      const restore = mode === 'its restore and its repair rename failed' ? failRestore() : undefined;
+      const rename = mode === 'its restore and its repair rename failed' ? failRename((to) => path.basename(to).startsWith('.install-repair-')) : undefined;
       try {
-        await expect(installation.install(candidate)).rejects.toMatchObject({ code: 'store_migration_failed' });
+        const first = await installation.install(candidate).catch((caught: unknown) => caught);
+        if (mode === 'its removal failed after a completed restore') {
+          expect(first).toMatchObject({ code: 'store_migration_failed' });
+          expect(events.at(-1)).toBe('start');
+          expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+        } else {
+          expect(rename!.fired()).toBe(true);
+          expect(first).toBeInstanceOf(AggregateError);
+          expect(events).not.toContain('start');
+          expect(existsSync(db)).toBe(false);
+        }
       } finally {
-        fault.mockRestore();
+        removal.mockRestore();
+        restore?.restore();
+        rename?.restore();
       }
-      expect(events.at(-1)).toBe('start');
-      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
       const leftover = await snapshotNames();
       expect(leftover).toEqual([expect.not.stringMatching(/^\.install-repair-/u)]);
-      await fs.writeFile(db, 'later data');
-      await verdicts('accepted');
-      await installation.install(candidate);
-      expect(await fs.readFile(db, 'utf8')).toBe('later data');
+      // Whatever the stores hold now, the leftover may be their only copy: the next install refuses and starts nothing.
+      if (existsSync(db)) await fs.writeFile(db, 'later data');
+      await verdicts(existsSync(db) ? 'accepted' : 'absent');
+      events = [];
+      const blocked = await installation.install(candidate).catch((caught: unknown) => caught);
+      expect(blocked).toBeInstanceOf(ServiceInstallationError);
+      expect(blocked).toMatchObject({ code: 'install_snapshot_leftover', message: expect.stringContaining(path.join(installRoot, 'snapshots', leftover[0]!)) });
+      expect(events).not.toContain('start');
+      expect(await pointer('current')).toBeUndefined();
       expect(await snapshotNames()).toEqual(leftover);
+      if (mode === 'its removal failed after a completed restore') expect(await fs.readFile(db, 'utf8')).toBe('later data');
     });
 
     it('with no stores prepares an empty list and installs without migration', async () => {
