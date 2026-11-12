@@ -34,22 +34,23 @@ describe('license gate', () => {
     write(root, 'stage/host/pi/image.wasm', '');
     write(root, 'stage/host/pi/node_modules/copyleft/package.json', { name: 'copyleft', version: '4.0.0', license: 'GPL-3.0-only' });
     write(root, 'stage/host/host', '');
+    write(root, 'node_modules/img/package.json', { name: 'img', version: '6.0.0', license: 'Apache-2.0' });
     const options = { root, metafiles: [{ inputs: { 'src/main.ts': {}, 'node_modules/lib/esm/index.js': {}, '(disabled):fs': {} } }],
       manifests: [path.join(root, 'node_modules/shell/package.json')], copiedRoots: [path.join(root, 'stage/host')],
-      unpackaged: { 'stage/host/host': 'the Host', 'stage/host/pi/image.wasm': 'another package' } };
+      unpackaged: { 'stage/host/host': { provenance: 'the Host' }, 'stage/host/pi/image.wasm': { provenance: 'from img', source: path.join(root, 'node_modules/img/package.json') } } };
 
     const inventory = licenseInventory(options);
     expect(inventory.packages.map(entry => `${entry.name}@${entry.version} ${entry.license} ${entry.where}`)).toEqual([
-      'app@1.0.0 MIT .', 'copyleft@4.0.0 GPL-3.0-only stage/host/pi/node_modules/copyleft', 'lib@2.0.0 ISC node_modules/lib',
-      'pi@3.0.0 MIT stage/host/pi', 'shell@5.0.0 MIT node_modules/shell',
+      'app@1.0.0 MIT .', 'copyleft@4.0.0 GPL-3.0-only stage/host/pi/node_modules/copyleft', 'img@6.0.0 Apache-2.0 node_modules/img',
+      'lib@2.0.0 ISC node_modules/lib', 'pi@3.0.0 MIT stage/host/pi', 'shell@5.0.0 MIT node_modules/shell',
     ]);
-    expect(inventory.reviewed.map(entry => entry.file).sort()).toEqual(['stage/host/host', 'stage/host/pi/image.wasm']);
+    expect(inventory.reviewed.map(entry => `${entry.file} ${entry.package}`).sort()).toEqual(['stage/host/host undefined', 'stage/host/pi/image.wasm img@6.0.0']);
     expect(licenseReport(inventory).refused.map(entry => entry.name)).toEqual(['copyleft']);
     write(root, 'stage/host/native/addon.node', '');
     expect(() => licenseInventory(options)).toThrow('stage/host/native/addon.node ships in no package');
   });
 
-  it('writes each package\'s license files and NOTICE, holds the MIT text for a package without one, and fails for any other license without one', () => {
+  it('writes each package\'s license files and NOTICE, holds the MIT text for a package without one, lists first-party files, and fails for any other license without one', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'byok-notices-'));
     roots.push(root);
     write(root, 'a/package.json', { name: 'a', version: '1.0.0', license: 'Apache-2.0' });
@@ -59,14 +60,15 @@ describe('license gate', () => {
     write(root, 'c/package.json', { name: 'c', version: '3.0.0', license: 'BlueOak-1.0.0' });
     const packages = [{ name: 'a', version: '1.0.0', license: 'Apache-2.0', where: 'a' }, { name: 'b', version: '2.0.0', license: 'MIT', where: 'b' }];
 
-    const text = noticesText({ root, packages });
+    const text = noticesText({ root, packages, firstParty: ['host'] });
     expect(text).toContain('\na@1.0.0\n');
     expect(text).toContain('--- LICENSE ---\nApache text');
     expect(text).toContain('--- NOTICE ---\na notice');
     expect(text).toContain('\nb@2.0.0\n');
     expect(text).toContain('Author (package.json): B Author');
     expect(text).toContain('Permission is hereby granted, free of charge');
-    expect(() => noticesText({ root, packages: [...packages, { name: 'c', version: '3.0.0', license: 'BlueOak-1.0.0', where: 'c' }] }))
+    expect(text).toMatch(/First-party files in resources\/host\/.*\n=+\nhost\n/);
+    expect(() => noticesText({ root, firstParty: [], packages: [...packages, { name: 'c', version: '3.0.0', license: 'BlueOak-1.0.0', where: 'c' }] }))
       .toThrow('c@3.0.0 "BlueOak-1.0.0"');
   });
 });

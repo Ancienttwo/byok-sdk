@@ -33,8 +33,11 @@ function authorOf(pkg) {
   return typeof author === 'string' ? author : undefined;
 }
 
-/** One section per inventoried package (`licenseInventory(...).packages`, `where` relative to `root`); throws naming each package that has no license text. */
-export function noticesText({ root, packages }) {
+/**
+ * One section per inventoried package (`licenseInventory(...).packages`, `where` relative to `root`), then the
+ * first-party files of resources/host/ that need none; throws naming each package that has no license text.
+ */
+export function noticesText({ root, packages, firstParty }) {
   const missing = [];
   const sections = packages.map(entry => {
     const dir = path.join(root, entry.where);
@@ -53,5 +56,6 @@ export function noticesText({ root, packages }) {
     return [RULE, noticeHeading(entry), `License: ${entry.license}`, RULE, ...licenses, ...names.filter(name => NOTICE_FILE.test(name)).map(read), ''].join('\n');
   });
   if (missing.length > 0) throw new Error(`Third-party notices: no license file and no held text for ${missing.join(', ')}`);
-  return `Third-party notices for the npm packages this app ships. Electron's license and Chromium's notices ship with the app as Electron packages them.\n\n${sections.join('\n')}`;
+  const own = [RULE, 'First-party files in resources/host/ (this repository, no third-party notice):', RULE, ...firstParty, ''].join('\n');
+  return `Third-party notices for the npm packages this app ships. Electron's license and Chromium's notices ship with the app as Electron packages them.\n\n${sections.join('\n')}\n${own}`;
 }

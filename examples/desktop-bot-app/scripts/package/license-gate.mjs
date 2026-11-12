@@ -3,7 +3,8 @@
 // bundled (main, renderer, Host), Electron itself, and every package copied into
 // resources/host/ (the Pi asset root). A copied file outside those packages fails
 // the gate unless the caller names it as a reviewed file without a package
-// manifest; the report lists those as not checked. Chromium's third-party notices
+// manifest. A reviewed file that carries third-party code names the package it
+// comes from, which joins the inventory; the others are first-party. Chromium's notices
 // ship as electron-builder writes them.
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -60,8 +61,9 @@ const slashed = file => file.split(path.sep).join('/');
  * metafiles (paths relative to `root`, the builds' working directory), each of
  * `manifests`, and each named package.json under `copiedRoots`. Every other file
  * under `copiedRoots` must lie in one of those copied packages or be a key of
- * `unpackaged` (`/`-separated, relative to `root`, mapped to its provenance);
- * an `unpackaged` key wins over the package around it.
+ * `unpackaged` (`/`-separated, relative to `root`, mapped to `{ provenance, source? }`);
+ * an `unpackaged` key wins over the package around it. `source`, the package.json
+ * of the package a reviewed file comes from, adds that package to the inventory.
  */
 export function licenseInventory({ root, metafiles, manifests, copiedRoots, unpackaged }) {
   const inventory = new Map();
@@ -83,7 +85,12 @@ export function licenseInventory({ root, metafiles, manifests, copiedRoots, unpa
       return [`${path.posix.dirname(file)}/`];
     });
     for (const file of copiedFiles) {
-      if (Object.hasOwn(unpackaged, file)) reviewed.push({ file, provenance: unpackaged[file] });
+      if (Object.hasOwn(unpackaged, file)) {
+        const { provenance, source } = unpackaged[file];
+        const pkg = source === undefined ? undefined : readJson(source);
+        if (pkg) add(pkg, slashed(path.relative(root, path.dirname(source))));
+        reviewed.push({ file, provenance, package: pkg && `${pkg.name}@${pkg.version}` });
+      }
       else if (!packageDirs.some(dir => file.startsWith(dir))) throw new Error(`License gate: ${file} ships in no package and is not a reviewed file`);
     }
   }
@@ -95,7 +102,7 @@ export function licenseReport({ packages, reviewed }) {
   const refused = packages.filter(entry => !permissive(entry.license));
   const table = ['| Package | Version | License | Shipped from |', '| --- | --- | --- | --- |',
     ...packages.map(entry => `| ${entry.name} | ${entry.version} | ${JSON.stringify(entry.license ?? null)}${refused.includes(entry) ? ' **refused**' : ''} | ${entry.where} |`),
-    '', 'Shipped without a package manifest, not checked by the gate:', '', '| File | Provenance |', '| --- | --- |',
-    ...reviewed.map(entry => `| ${entry.file} | ${entry.provenance} |`)].join('\n');
+    '', 'Shipped without a package manifest:', '', '| File | Provenance | Licensed as |', '| --- | --- | --- |',
+    ...reviewed.map(entry => `| ${entry.file} | ${entry.provenance} | ${entry.package ?? 'first-party, not checked'} |`)].join('\n');
   return { table, refused };
 }
