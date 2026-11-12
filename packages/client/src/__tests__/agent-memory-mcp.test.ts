@@ -354,10 +354,12 @@ describe('Agent memory MCP local authority', () => {
 
   itWithMemoryMcp('fails a memory call made during start closed when the start fails', async () => {
     const { offer, recall, releaseStart } = await memoryCallDuringBlockedStart();
-    vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    releaseStart(new Error('runtime start failed'));
-    await offer;
-    await expect(recall).rejects.toThrow('invalid, expired, or quiescing Agent memory task context');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      releaseStart(new Error('runtime start failed'));
+      await offer;
+      await expect(recall).rejects.toThrow('invalid, expired, or quiescing Agent memory task context');
+    } finally { consoleError.mockRestore(); }
   });
 
   it('does zero capture, audit, or network work when projection authority is incomplete', async () => {

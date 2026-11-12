@@ -1365,10 +1365,9 @@ class PiSession implements Session {
                       reason: 'pi get_session_stats response timed out',
                     })), 1000); }),
                   ]);
-                } catch (cause) {
-                  if (!terminalFailure) throw cause;
-                  // Deliver unavailable usage, then the already-recorded failure.
-                  // TaskRunner continues to own requested cancellation during teardown.
+                } catch {
+                  // Statistics are telemetry: a timeout or transport error leaves context usage
+                  // unknown and never decides the settled run's outcome.
                 } finally { if (timer !== undefined) clearTimeout(timer); }
                 if (!terminalFailure) session.pendingTurnEnd = true;
                 return { value: mapPiContextUsage(stats?.success === false ? undefined : stats?.data, hostContextWindow), done: false };
