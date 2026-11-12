@@ -55,6 +55,8 @@ function files(dir) {
 }
 
 const slashed = file => file.split(path.sep).join('/');
+// Code-point order, so the inventory and the notices read the same on every machine.
+const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * The shipped packages, by `name@version`: the owner of each input of the esbuild
@@ -94,7 +96,7 @@ export function licenseInventory({ root, metafiles, manifests, copiedRoots, unpa
       else if (!packageDirs.some(dir => file.startsWith(dir))) throw new Error(`License gate: ${file} ships in no package and is not a reviewed file`);
     }
   }
-  return { packages: [...inventory.values()].sort((a, b) => a.name.localeCompare(b.name) || String(a.version).localeCompare(String(b.version))), reviewed };
+  return { packages: [...inventory.values()].sort((a, b) => compare(a.name, b.name) || compare(String(a.version), String(b.version))), reviewed };
 }
 
 /** The inventory as Markdown, and the packages whose declared license is not permissive. */

@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { licenseInventory, licenseReport, permissive } from './license-gate.mjs';
+import { nodeLicenseFile } from './bundle-host.mjs';
 import { noticesText } from './notices.mjs';
 
 const roots = [];
@@ -74,5 +75,17 @@ describe('license gate', () => {
     expect(text).toMatch(/First-party files in resources\/host\/.*\n=+\nhost\n/);
     expect(() => noticesText({ root, node, firstParty: [], packages: [...packages, { name: 'c', version: '3.0.0', license: 'BlueOak-1.0.0', where: 'c' }] }))
       .toThrow('c@3.0.0 "BlueOak-1.0.0"');
+  });
+
+  it('takes Node\'s LICENSE from the release layout of the real binary and refuses a missing or foreign one', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'byok-node-license-'));
+    roots.push(root);
+    write(root, 'node-v24/bin/node', '');
+    expect(() => nodeLicenseFile(path.join(root, 'node-v24/bin/node'))).toThrow('No LICENSE beside');
+    write(root, 'node-v24/LICENSE', 'MIT License');
+    expect(() => nodeLicenseFile(path.join(root, 'node-v24/bin/node'))).toThrow("is not Node's LICENSE");
+    write(root, 'node-v24/LICENSE', 'Node.js is licensed for use as follows:\n...');
+    symlinkSync(path.join(root, 'node-v24/bin/node'), path.join(root, 'node'));
+    expect(nodeLicenseFile(path.join(root, 'node'))).toBe(realpathSync(path.join(root, 'node-v24/LICENSE')));
   });
 });

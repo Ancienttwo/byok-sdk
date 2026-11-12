@@ -9,6 +9,9 @@ import path from 'node:path';
 /** The file name in the app's resources directory. */
 export const NOTICES_FILE = 'THIRD_PARTY_NOTICES.txt';
 
+/** Electron's license and Chromium's notices, where electron-builder puts them (app-builder-lib retainElectronLicenseFiles); package-smoke.mjs checks them. */
+export const ELECTRON_NOTICES = Object.freeze(['LICENSE.electron.txt', 'LICENSES.chromium.html']);
+
 const RULE = '='.repeat(80);
 const LICENSE_FILE = /^(?:licen[cs]e|copying)(?:[.-].*)?$/i;
 const NOTICE_FILE = /^notice(?:\..*)?$/i;
@@ -62,6 +65,6 @@ export function noticesText({ root, packages, node, firstParty }) {
   if (missing.length > 0) throw new Error(`Third-party notices: no license file and no held text for ${missing.join(', ')}`);
   const runtime = [RULE, nodeHeading(node.version), 'The runtime inside the Host executable (resources/host/). Its LICENSE includes the licenses of the code Node bundles.', RULE,
     `--- LICENSE ---\n${readFileSync(node.licenseFile, 'utf8').trimEnd()}`, ''].join('\n');
-  const own = [RULE, 'First-party files in resources/host/ (this repository, no third-party notice):', RULE, ...firstParty, ''].join('\n');
-  return `Third-party notices for the npm packages and the Node.js runtime this app ships. Electron and Chromium are covered by the files electron-builder ships with the app: Electron's LICENSE and Chromium's LICENSES.chromium.html.\n\n${sections.join('\n')}\n${runtime}\n${own}`;
+  const own = [RULE, 'First-party files in resources/host/ (this repository, no third-party notice):', RULE, ...[...firstParty].sort(), ''].join('\n');
+  return `Third-party notices for the npm packages and the Node.js runtime this app ships. Electron and Chromium are covered by ${ELECTRON_NOTICES.join(' and ')}, which electron-builder ships beside the app executable (macOS: in Contents/Resources).\n\n${sections.join('\n')}\n${runtime}\n${own}`;
 }

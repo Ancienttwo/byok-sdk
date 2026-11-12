@@ -4,7 +4,8 @@
 //   binaries packaging may re-sign (the SEA and the Agent memory helper); koffi.node
 //   on Windows stays the official addon (its SHA-256 equals the SDK manifest's pin);
 // - resources/THIRD_PARTY_NOTICES.txt has a section for every package of the
-//   license gate's inventory and for the Host SEA's Node runtime (#1923, notices.mjs);
+//   license gate's inventory and for the Host SEA's Node runtime, and Electron's
+//   LICENSE.electron.txt and LICENSES.chromium.html ship (#1923, notices.mjs);
 // - the app's Electron binary carries the app fuses (src/main/fuses.ts);
 // - macOS: the ad-hoc or Developer ID signature verifies deep and strict;
 // - the packaged ffmpeg is Electron's codec-free build (#1499 D7, ffmpeg.mjs);
@@ -21,7 +22,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,7 +34,7 @@ import { APP_FUSES } from '../../src/main/fuses.ts';
 import { hostEnvironment } from '../../src/main/packaged-host.ts';
 import { buildHostExecutable, hostFile, seaNodeLicense } from './bundle-host.mjs';
 import { codecFreeFfmpeg, packagedFfmpeg } from './ffmpeg.mjs';
-import { NOTICES_FILE, nodeHeading, noticeHeading } from './notices.mjs';
+import { ELECTRON_NOTICES, NOTICES_FILE, nodeHeading, noticeHeading } from './notices.mjs';
 
 // The packaged Host pairs and keeps its device credential in this machine's OS store.
 if (process.env.CI !== 'true') throw new Error('package-smoke.mjs writes a device credential into the OS credential store: run it on CI only (CI=true)');
@@ -88,7 +89,9 @@ const notices = readFileSync(path.join(resources, NOTICES_FILE), 'utf8');
 const inventory = JSON.parse(readFileSync(path.join(root, 'dist', 'package', 'stage', 'license-inventory.json'), 'utf8'));
 const unlisted = [...inventory.map(noticeHeading), nodeHeading(seaNodeLicense().version)].filter(heading => !notices.includes(`\n${heading}\n`));
 assert.deepEqual(unlisted, [], `${NOTICES_FILE} has no section for these inventoried packages or the Host's Node runtime`);
-console.log(`[package-smoke] ${NOTICES_FILE}: ${inventory.length} packages`);
+const electronNotices = process.platform === 'darwin' ? resources : unpacked;
+for (const file of ELECTRON_NOTICES) assert.ok(existsSync(path.join(electronNotices, file)), `${file} is not in ${electronNotices}`);
+console.log(`[package-smoke] ${NOTICES_FILE}: ${inventory.length} packages and Node; ${ELECTRON_NOTICES.join(', ')} present`);
 
 // 2. Fuses, read back from the packaged binary.
 const wire = await getCurrentFuseWire(electron);
