@@ -180,8 +180,8 @@ export interface ServiceInstallation {
    * the outcome, and a leftover is kept, never restored automatically. A
    * failed restore renames it `snapshots/.install-repair-<uuid>` and the
    * error names it: the next first install restores it, under the store
-   * leases and before its precheck, and fails without other changes when
-   * that restore fails.
+   * leases and before its precheck. When it cannot stop the service, take
+   * the leases or restore, it fails without other changes and starts nothing.
    */
   install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
   /**
@@ -710,12 +710,22 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
 
   /** One candidate store preparation sequence for install and upgrade, retaining the quiescent leases until the caller switches. */
   async function prepareStores(candidate: string, snapshotId: string, installing = false, stopService = !installing): Promise<{ stores: ServiceStoreVerdict[]; release: () => Promise<void> }> {
+    // Listed under the owner gate, before quiescence: until every repair
+    // snapshot is restored the stores may be partial, so a failure on the
+    // way there is a restore failure and starts nothing.
+    const repairs = installing ? await listRepairSnapshots() : [];
     // A first install stops only a marked unit of our owner. Absent and
     // allowed-unmarked units rely on the store lease alone.
-    const release = await stopQuiescent(stopService);
+    let release: () => Promise<void>;
+    try {
+      release = await stopQuiescent(stopService);
+    } catch (error) {
+      if (repairs.length > 0) throw unrestoredRepair(repairs, error);
+      throw error;
+    }
     let restoreOnFailure = false;
     try {
-      if (installing) await restoreRepairSnapshots();
+      await restoreRepairSnapshots(repairs);
       let stores = await precheck(candidate);
       const refused = stores.find(isRefused);
       if (refused !== undefined) {
@@ -834,19 +844,33 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
   }
 
+  /** The repair snapshots a first install restores. A listing failure cannot rule one out, so it counts as a failed restore. */
+  async function listRepairSnapshots(): Promise<string[]> {
+    try {
+      return (await listDir(snapshotsDir)).filter((entry) => entry.startsWith(REPAIR_SNAPSHOT_PREFIX)).sort();
+    } catch (error) {
+      throw new StoreRestoreError([error], `The repair snapshots under ${snapshotsDir} could not be listed; the stores may be partial.`);
+    }
+  }
+
+  function unrestoredRepair(names: readonly string[], error: unknown): StoreRestoreError {
+    const kept = names.map((name) => path.join(snapshotsDir, name)).join(', ');
+    return new StoreRestoreError([error], `The stores of an earlier failed install were not restored; the snapshot is retained at ${kept}.`);
+  }
+
   /**
    * Run by a first install under the store leases, before its precheck:
    * restores the stores a failed restore left, as they were before that
    * install. Without it, a retry would read half-restored stores as absent.
    * A failure is the same restore error and changes nothing else.
    */
-  async function restoreRepairSnapshots(): Promise<void> {
-    for (const name of (await listDir(snapshotsDir)).filter((entry) => entry.startsWith(REPAIR_SNAPSHOT_PREFIX)).sort()) {
+  async function restoreRepairSnapshots(names: readonly string[]): Promise<void> {
+    for (const name of names) {
       const repair = path.join(snapshotsDir, name);
       try {
         await restoreSnapshot(name);
       } catch (error) {
-        throw new StoreRestoreError([error], `The stores of an earlier failed install could not be restored; the snapshot is retained at ${repair}.`);
+        throw unrestoredRepair([name], error);
       }
       // One rename retires the repair name, so this install never runs
       // beside it; removing the renamed copy is best effort.

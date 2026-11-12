@@ -11327,8 +11327,8 @@ export interface ServiceInstallation {
      * the outcome, and a leftover is kept, never restored automatically. A
      * failed restore renames it `snapshots/.install-repair-<uuid>` and the
      * error names it: the next first install restores it, under the store
-     * leases and before its precheck, and fails without other changes when
-     * that restore fails.
+     * leases and before its precheck. When it cannot stop the service, take
+     * the leases or restore, it fails without other changes and starts nothing.
      */
     install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
     /**

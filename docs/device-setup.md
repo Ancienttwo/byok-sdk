@@ -519,8 +519,9 @@ A restore that fails renames the snapshot to
 path. The next first install restores it before anything else, under the
 store leases and before its precheck: the stores return to how they were
 before the failed install, and anything written to them since is replaced.
-It then removes the repair snapshot and continues. When that restore fails
-again, install throws the same kind of error and changes nothing else.
+It then removes the repair snapshot and continues. When that install cannot
+stop the service, take the store leases or restore the snapshot, it throws
+the same kind of error, changes nothing else and starts nothing.
 
 Later upgrades never prune `.install-*` directories, and `uninstall()` keeps
 them: it removes every other snapshot but leaves `snapshots/` in place while

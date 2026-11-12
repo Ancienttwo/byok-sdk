@@ -51,8 +51,9 @@ Rollback/recover never select `.install-*`.
 A restore that fails renames the snapshot to
 `<installRoot>/snapshots/.install-repair-<uuid>` and names it in the error.
 The next first install restores it under the store leases, before its
-precheck, then removes it and continues; if that restore fails again, the
-install fails and changes nothing else. Anything written to the stores
+precheck, then removes it and continues. If it cannot stop the service,
+take the leases or restore, the install fails, changes nothing else and
+starts nothing. Anything written to the stores
 between the two installs is replaced.
 
 Two Host-visible changes follow. `upgrade()` pruning no longer removes any

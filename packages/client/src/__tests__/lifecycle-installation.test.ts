@@ -918,6 +918,17 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await expect(fs.lstat(path.join(installRoot, 'current'))).rejects.toMatchObject({ code: 'ENOENT' });
       expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
 
+      // A retry that cannot quiesce before the repair restore starts nothing either.
+      const stopError = new Error('marked service stop failed');
+      installation = installationOver({ ...fakeLifecycle(), stop: async () => { events.push('stop'); throw stopError; } }, { migrate });
+      events = [];
+      const stopped = await installation.install(candidate).catch((caught: unknown) => caught);
+      expect(stopped).toMatchObject({ errors: [stopError] });
+      expect((stopped as Error).message).toContain(path.join(installRoot, 'snapshots', repair!));
+      expect(events).toEqual(['stop']);
+      expect(await snapshotNames()).toEqual([repair]);
+      expect(existsSync(db)).toBe(false);
+
       // A retry whose repair restore fails again changes nothing else and starts nothing.
       await verdicts('accepted');
       const seen: boolean[] = [];
