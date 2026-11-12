@@ -930,8 +930,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * Runs the Host's migration of the candidate's stores, after the snapshot
    * and while every writer is stopped, then the precheck again. The shared
    * preparation restores the snapshot before propagating a migration error.
-   * Every failure here is `store_migration_failed`; a setup, launch or
-   * precheck error is its cause.
+   * Every failure here is `store_migration_failed`. A throwing `migrate`
+   * callback or a failed precheck is its cause; a program that cannot be
+   * spawned exits with code null and has no cause, like a nonzero exit.
    */
   async function migrateStores(to: string, stores: readonly ServiceStoreVerdict[]): Promise<ServiceStoreVerdict[]> {
     if (opts.migrate === undefined) throw new ServiceInstallationError('store_migration_required', stores);
