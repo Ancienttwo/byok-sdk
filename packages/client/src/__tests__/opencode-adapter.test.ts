@@ -20,7 +20,7 @@ import { createRuntimeAdapters } from '../adapters/runtime-adapters';
 import { resolveRuntimeInvocation } from '../adapters/runtime-invocation';
 import { npmNodeShim } from './fixtures/npm-node-shim';
 import { check, defineRuntimeCases } from './runtime-contract/contract';
-import { opencodeSession, opencodeV2RefusedSessionOptions } from '../../vendor/oar/ac7fde4/runtimes/opencode/session';
+import { opencodeSession, opencodeV2RefusedSessionOptions } from '../../vendor/oar/ea3269e/runtimes/opencode/session';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { startPreparedOperation } from './fixtures/prepared-operation';
