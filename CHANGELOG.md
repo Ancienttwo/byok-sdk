@@ -203,6 +203,7 @@
 - **Failed key replacement (#1946):** A refused OS credential-store write or another replacement failure leaves the profile marked as having an unfinished key change until a replacement succeeds.
 - **Desktop key form (#1947):** A typed key remains in renderer state while the configure form's save is pending.
 - **Desktop start fresh (#1948):** An inaccessible store is treated as absent, and the operation can report success without proving the store was cleared.
+- **Pi warming and background children (#1949):** A cache-warming stop can act on a stale idle check, so a refresh can still reach the provider after a run settled. A soft interrupt leaves a running pi-subagents background child active until the task closes.
 
 ## 0.41.0 — 2026-11-09 (published)
 
