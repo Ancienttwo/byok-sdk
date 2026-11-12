@@ -83,15 +83,35 @@ it.each(['truncated', 'malformed', 'unknown-proof', 'foreign-proof', 'wrong-inst
   await expect(f.session.abort()).rejects.toThrow('pi_subagent_interrupt_unverified');
 });
 
-it.each(['observed', 'open-dispatch', 'pending-child', 'foreign-root', 'unknown', 'missing-time'])('checks native workflow terminal evidence: %s', async scenario => {
+// Pi records a runner that failed before startup as `not-started`, with no process to stop.
+const notStarted = { version: 1, runId: 'run', runnerProcessInstanceId: 'instance', state: 'not-started' };
+
+it.each(['observed', 'not-started-child', 'open-dispatch', 'pending-child', 'foreign-root', 'unknown', 'missing-time'])('checks native workflow terminal evidence: %s', async scenario => {
   const f = await controlFixture((_method, params) => params ? { details: { workflowTerminalProof: {
     version: 1, kind: 'workflow', runId: scenario === 'foreign-root' ? 'foreign' : 'run',
     state: scenario === 'unknown' ? 'unknown' : 'observed', dispatchClosed: scenario !== 'open-dispatch',
     observedAt: scenario === 'missing-time' ? undefined : 1,
-    children: [proof(scenario === 'pending-child' ? 'pending' : 'observed')],
+    children: [proof(scenario === 'pending-child' ? 'pending' : 'observed'), ...(scenario === 'not-started-child' ? [notStarted] : [])],
   } } } : snapshot(true));
-  if (scenario === 'observed') await expect(f.session.abort()).resolves.toBeUndefined();
+  if (scenario === 'observed' || scenario === 'not-started-child') await expect(f.session.abort()).resolves.toBeUndefined();
   else await expect(f.session.abort()).rejects.toThrow('pi_subagent_interrupt_unverified');
+});
+
+it.each(['failed', 'running'])('settles a not-started run only once its snapshot is terminal: %s', async state => {
+  vi.useFakeTimers();
+  try {
+    let stops = 0;
+    const f = await controlFixture((method, params) => {
+      if (method === 'stop') { stops += 1; return { runId: 'run', state: 'stopping' }; }
+      if (params) return { details: { lifecycleStatus: { processTerminal: notStarted } } };
+      const result = snapshot(true); result.asyncSnapshot.runs[0]!.state = state; return result;
+    });
+    let outcome: unknown;
+    void f.session.abort().then(() => { outcome = 'settled'; }, error => { outcome = error; });
+    await vi.advanceTimersByTimeAsync(state === 'failed' ? 0 : 15_000);
+    if (state === 'failed') { expect(outcome).toBe('settled'); expect(stops).toBe(0); }
+    else expect(String(outcome)).toContain('pi_subagent_interrupt_unverified');
+  } finally { vi.clearAllTimers(); vi.useRealTimers(); }
 });
 
 it.each(['in-flight', 'completed-call', 'async-started'])('refuses an unavailable owner with observed work: %s', async phase => {

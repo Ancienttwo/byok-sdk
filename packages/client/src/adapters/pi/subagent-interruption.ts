@@ -114,13 +114,18 @@ export function createPiSubagentAbortBoundary(): {
         if (workflow) {
           if (workflow.runId !== id || workflow.state === 'unknown') throw refusal();
           if (workflow.state === 'observed') {
-            if (!workflow.dispatchClosed || !workflow.children || workflow.children.some(child => child.state !== 'observed')) throw refusal();
+            // Pi documents `not-started` as terminal: the runner failed before any process existed.
+            if (!workflow.dispatchClosed || !workflow.children
+              || workflow.children.some(child => child.state !== 'observed' && child.state !== 'not-started')) throw refusal();
             targets.delete(id); continue;
           }
         } else if (proof) {
           if (proof.runId !== id || proof.state === 'unknown' || (target.instance !== undefined && proof.runnerProcessInstanceId !== target.instance)) throw refusal();
           target.instance = proof.runnerProcessInstanceId;
           if (proof.state === 'observed') { targets.delete(id); continue; }
+          // `not-started` is Pi's terminal record for a runner that failed before startup; it settles
+          // only once the snapshot also reports the run as terminal.
+          if (proof.state === 'not-started' && !target.active) { targets.delete(id); continue; }
         }
         if (target.active && !stopped.has(id)) {
           const reply = await request('stop', signal, { id });
