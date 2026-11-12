@@ -89,7 +89,7 @@ test('release evidence makes a commit-pinned vendor query the authoritative npm 
   });
   const input = JSON.parse(readFileSync(join(options.output, 'vendor-osv-scanner.json')));
   assert.deepEqual(input.results[0].packages[0].package, { name: '@botiverse/oar', version: '0.101.0', ecosystem: 'npm' });
-  assert.match(readFileSync(join(options.output, 'summary.md'), 'utf8'), /AUTHORITATIVE COVERAGE: .*@botiverse\/oar@0\.99\.0 from npm release \(provenance commit ea3269e/);
+  assert.match(readFileSync(join(options.output, 'summary.md'), 'utf8'), /AUTHORITATIVE COVERAGE: .*@botiverse\/oar@0\.101\.0 from npm release \(provenance commit ea3269e/);
 });
 
 test('release evidence that disagrees with the vendored identity fails closed', t => {
