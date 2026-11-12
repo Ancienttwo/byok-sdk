@@ -16,6 +16,8 @@ The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a 
 
 This directory is a projection of that branch. `scripts/ci/oar-sync.mjs` writes every file the manifest lists, and the manifest's `packageVersion`, `commit`, `fork` and hash columns; nobody edits them by hand. The manifest's path list, `release` binding, `delta` texts and `upstreamCommit` fields, and this file, stay hand-authored. A row with `upstreamCommit` takes its upstream hash from that commit instead of the base (a file carried from an upstream PR). Required CI fetches nothing: it checks the vendor bytes against the manifest hashes (`src/__tests__/oar-app-server-client.test.ts`). That the script's output equals this tree is the operator's check during a bump. A published `byok/*` branch is never force-pushed, so an older pin stays reproducible.
 
+When to bump. One bump per SDK release cycle, to the latest upstream release tag at dispatch. It merges before the code freeze, so that a nightly full matrix with the real runtime legs runs on it. No bump between the freeze and the publish, and one bump PR at a time. An out-of-cycle bump needs one of three reasons: upstream fixed a delta this fork carries, the SDK hit a defect that upstream fixed, or a security advisory.
+
 Bump to upstream tag `vX.Y.Z`:
 
 1. In a clone of the fork with an `upstream` remote for botiverse/oar, copy the current branch and rebase the copy: `git checkout -b byok/X.Y.Z byok/<current>`, then `git rebase vX.Y.Z`. Drop the commit of each delta upstream has fixed, and delete its entry from "Maintained deltas" and its `delta` text from the manifest. Resolve a conflict within the invariant its commit names; a commit that no longer protects an invariant is dropped, not rewritten into another one. Where the owner has filed the upstream issue for a draft, reword the commit's `Upstream:` line to the issue link in this rebase.
@@ -24,6 +26,8 @@ Bump to upstream tag `vX.Y.Z`:
 4. Run `node scripts/ci/oar-sync.mjs --repo <fork clone> --fork byok/X.Y.Z --base vX.Y.Z`. It refuses, and writes nothing, when the fork commit does not descend from the base, the `release` binding names another commit, a listed path is missing from the fork or from its upstream commit, or a file's difference from upstream does not match whether it has a `delta`. A second run gives no diff.
 5. Rename the snapshot where current code and docs name it (`git grep -l <old short sha> -- ':!docs/researches'`; earlier History sections stay historical), then pass the gates: `packages/client/src/__tests__/runtime-contract/`, `packages/client/src/__tests__/adapter-capability-conformance.test.ts`, `scripts/api-surface/check-oar-bridge.test.mjs` and `scripts/ci/reviewed-oar-scope.test.mjs`.
 6. Add a History section: the rebased commit list (`git log --format='%h %s' vX.Y.Z..byok/X.Y.Z`), the dropped commits, and each conflict with the invariant it belongs to.
+7. List every Host-visible change in the PR description and in CHANGELOG.
+8. A runtime path that has fixture evidence only, with no live run, gets a follow-up issue, recorded as a precondition of the next release.
 
 ## Authoritative release binding
 
