@@ -318,9 +318,16 @@ function startsNothing(error: unknown): boolean {
 }
 
 /** Joins a lease release failure to the error it followed, keeping whether that error starts nothing. */
+/** A preparation error whose store leases then failed to release; `failure` still decides the receipt. */
+class ReleaseFailedError extends AggregateError {
+  constructor(readonly failure: unknown, releaseError: unknown, message: string) {
+    super([failure, releaseError], message);
+  }
+}
+
 function withReleaseFailure(failure: unknown, releaseError: unknown): AggregateError {
   const message = `${failure instanceof Error ? failure.message : 'Store preparation failed.'} The store leases could not be released either.`;
-  return startsNothing(failure) ? new StoreRestoreError([failure, releaseError], message) : new AggregateError([failure, releaseError], message);
+  return startsNothing(failure) ? new StoreRestoreError([failure, releaseError], message) : new ReleaseFailedError(failure, releaseError, message);
 }
 
 /** The version `<installRoot>/<name>` points at, or `undefined` when the pointer is absent. */
@@ -712,10 +719,14 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       }
       for (const store of stores) await new OwnedProcessLedger(store.storeDir).reconcile();
     } catch (error) {
-      // The stop's own error decides the receipt; a release failure must not replace it.
-      await release().catch(() => undefined);
-      if (error instanceof OwnedProcessResidueError) throw new ServiceInstallationError('owned_process_residue');
-      throw error;
+      // The stop's own error decides the receipt; a release failure joins it.
+      const failure = error instanceof OwnedProcessResidueError ? new ServiceInstallationError('owned_process_residue') : error;
+      try {
+        await release();
+      } catch (releaseError) {
+        throw withReleaseFailure(failure, releaseError);
+      }
+      throw failure;
     }
     return release;
   }
@@ -817,11 +828,6 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         if (installing) await fs.rm(path.join(snapshotsDir, snapshotId), { recursive: true, force: true }).catch(() => undefined);
       } catch (restoreError) {
         failure = restoreError;
-      }
-      if (!installing) {
-        // Upgrade's receipt records the code of the preparation error itself.
-        await release().catch(() => undefined);
-        throw failure;
       }
       try {
         await release();
@@ -1062,8 +1068,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       try {
         ({ stores, release } = await prepareStores(to, to));
       } catch (error) {
-        if (error instanceof ServiceInstallationError) {
-          await writeReceipt({ state: 'failed', from, to, code: error.code, ...(error.stores ? { stores: [...error.stores] } : {}) });
+        // The receipt records the code of the preparation error itself, also when a lease release failed after it.
+        const coded = error instanceof ReleaseFailedError ? error.failure : error;
+        if (coded instanceof ServiceInstallationError) {
+          await writeReceipt({ state: 'failed', from, to, code: coded.code, ...(coded.stores ? { stores: [...coded.stores] } : {}) });
         }
         // Stores whose restore failed may be partial: `from` stays stopped
         // and the pending receipt leaves recover() to restore them.

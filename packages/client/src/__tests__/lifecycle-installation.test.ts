@@ -1286,6 +1286,18 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_migration_failed' });
       await expectRetryLeavesNoSnapshot();
 
+      // A lease release that fails after the restore joins the store error; the receipt keeps its code (#1991).
+      await verdicts('migration-required');
+      const releaseError = new Error('injected release failure');
+      const original = daemonOwner.acquireDaemonOwner;
+      vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementationOnce(async (...args) => {
+        const lease = await original(...args);
+        return { release: async () => { await lease.release(); throw releaseError; } };
+      });
+      const released = await installation.upgrade(await payload('2.0.0', { 'migrate.cjs': MIGRATE })).catch((caught: unknown) => caught);
+      expect(released).toMatchObject({ errors: [expect.objectContaining({ code: 'store_migration_failed' }), releaseError] });
+      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_migration_failed' });
+
       // A restore that fails may leave partial stores (#1987): nothing starts, the receipt stays pending for recover().
       await verdicts('migration-required');
       events = [];
@@ -1455,6 +1467,18 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       finally { await live.release(); }
       expect(events).toEqual(['stop', 'start']);
       expect(await pointer('current')).toBe('1.0.0');
+      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_busy' });
+
+      // The lease already taken that then fails to release joins store_busy; the receipt keeps its code (#1991).
+      const busy = await acquireDaemonOwner(research, 'daemon');
+      const releaseError = new Error('injected release failure');
+      const original = daemonOwner.acquireDaemonOwner;
+      vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementationOnce(async (...args) => {
+        const lease = await original(...args);
+        return { release: async () => { await lease.release(); throw releaseError; } };
+      });
+      const error = await installation.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught).finally(() => busy.release());
+      expect(error).toMatchObject({ errors: [expect.objectContaining({ code: 'store_busy' }), releaseError] });
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_busy' });
     });
 
