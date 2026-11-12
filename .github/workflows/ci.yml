@@ -2210,6 +2210,8 @@ jobs:
     name: desktop app (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      CSC_FOR_PULL_REQUEST: 'true'
     strategy:
       fail-fast: false
       matrix:
