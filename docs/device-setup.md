@@ -480,8 +480,10 @@ With no current version, preparation stops an SDK-marked unit of the
 recorded owner (including a payload-less CLI service) before taking the
 daemon-store leases and gates. On any preparation failure before writing
 `current`, it releases the leases/gates, removes staging, then starts that
-unit again unconditionally, even if it was stopped before the call.
-Failures after preparation succeeds use the installation cleanup below.
+unit again, even if it was stopped before the call. The one exception is a
+failed store restore: the stores may then be partial, so the unit stays
+stopped. Failures after preparation succeeds use the installation cleanup
+below.
 
 Preparation does not stop an absent unit or an allowed unmarked unit. It
 leases and gates the daemon stores instead. With `replaceUnmarked`, a
@@ -504,18 +506,29 @@ precheck output retain upgrade's existing raw error or `precheck_failed`
 behavior after restoring the snapshot.
 
 The temporary snapshot lives at
-`<installRoot>/snapshots/.install-<uuid>`. Once health passes, the install is
-committed and resolves even if removing this snapshot fails; a complete or
-partial directory may remain. There is no cleanup diagnostic/event hook.
-Rollback and recover select version-named snapshots, never `.install-*`
-(version ids must start with a letter or digit). Later upgrades retry
-removal of these temporary leftovers as best-effort pruning; version
-snapshots retain their strict removal errors. `uninstall()` removes the
-snapshot tree, but can still fail while access remains denied.
+`<installRoot>/snapshots/.install-<uuid>`. The call that took it removes it
+after a healthy start or after a restore that completed. Once health passes,
+the install is committed and resolves even if that removal fails; after a
+completed restore, a removal failure does not replace the store error.
+There is no cleanup diagnostic/event hook. Rollback and recover select
+version-named snapshots, never `.install-*` (version ids must start with a
+letter or digit).
 
-A successful failure restore removes its temporary snapshot. A failed stop
-or restore retains it for repair; a failed migration restore names the
-retained snapshot path in the error.
+A restore that fails renames the snapshot to
+`<installRoot>/snapshots/.install-repair-<uuid>` and the error names that
+path. The next first install restores it before anything else, under the
+store leases and before its precheck: the stores return to how they were
+before the failed install, and anything written to them since is replaced.
+It then removes the repair snapshot and continues. When that restore fails
+again, install throws the same kind of error and changes nothing else.
+
+Later upgrades never prune `.install-*` directories, and `uninstall()` keeps
+them: it removes every other snapshot but leaves `snapshots/` in place while
+one exists. A leftover `.install-<uuid>` (a removal that failed, a rename
+that failed, an installer that was killed) is never restored automatically,
+because nothing shows whether it is still needed. An operator recognizes it
+by that name, compares its `snapshot.json` entries with the current stores,
+and removes the directory once it is not needed.
 Unlike upgrade, install has no write-ahead receipt: if the process dies
 during migration, `recover()` does not complete that install. The next
 install prechecks the stores as migration left them. The Host must make
@@ -539,10 +552,14 @@ If the service fails to install, activate, start or pass its health check,
 install removes the unit and launcher, `current`, the installation record and
 the staged `versions/<id>` directory, then throws `ServiceInstallationError`
 with code `install_health_check_failed` and the original error as `cause`. This also applies when reinstalling
-the same id: a failed repair leaves no service installed. Once the service
-is stopped, cleanup restores the prepared snapshot, including Host and
-daemon stores changed by migration or startup. It never clears OS
-credentials. A failed stop or restore retains the snapshot for repair. If removal itself fails, the
+the same id: a failed repair leaves no service installed. After a first
+install that prepared stores, cleanup restores the prepared snapshot last,
+once the unit, `current`, the record and the staged directory are gone,
+including Host and daemon stores changed by migration or startup. A failed
+restore therefore always leaves nothing installed and one repair snapshot.
+When an artifact cannot be removed, the restore is not attempted: the stores
+stay migrated, matching what remains, and the snapshot keeps its
+`.install-<uuid>` name. Cleanup never clears OS credentials. If removal itself fails, the
 same error code carries an `AggregateError` containing the original failure
 and the removal error as `cause`; its message names the artifacts that remain.
 

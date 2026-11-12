@@ -16,8 +16,9 @@ snapshot or migrate, preserving earlier rollback snapshots.
 An SDK-marked unit of the recorded owner with no current version, such as
 a payload-less CLI service, is stopped before preparation takes its store
 leases. On any preparation failure before writing `current`, leases/gates
-are released, staging is removed, then the unit is started unconditionally,
-even if it was previously stopped. Later failures use #1966 cleanup.
+are released, staging is removed, then the unit is started again, even if
+it was previously stopped. After a failed store restore it stays stopped,
+because the stores may be partial. Later failures use #1966 cleanup.
 
 An absent unit and an unmarked unit allowed by `replaceUnmarked` are not
 stopped during preparation. The store leases establish quiescence. A
@@ -38,17 +39,27 @@ launch errors and `precheck_failed` for malformed post-migration output
 remain unchanged in both paths, after restoring the snapshot.
 
 After successful preparation, a failed installation or health check
-removes its installation artifacts and restores the prepared stores. OS
-credentials are never cleared. After health succeeds, installation is
-committed: failure to remove its temporary
-`<installRoot>/snapshots/.install-<uuid>` does not reject the install. No
-existing diagnostic/event hook reports cleanup, so inspect that path if
-cleanup matters. Rollback/recover never select `.install-*`; later upgrade
-pruning retries these directories best effort while keeping version
-snapshot cleanup strict. Uninstall still reports failure if denied access
-prevents removal. A successful failure restore removes its temporary
-snapshot; a failed stop or restore retains it for repair. Failed migration
-restoration names that retained path in the error. Install has no write-ahead receipt
+removes the unit, `current`, the installation record and the staged
+version, and restores the prepared stores last. When an artifact cannot be
+removed, the stores stay migrated and are not restored. OS credentials are
+never cleared. After health succeeds, installation is committed: failure to
+remove its temporary `<installRoot>/snapshots/.install-<uuid>` does not
+reject the install, and after a completed restore it does not replace the
+store error. No existing diagnostic/event hook reports cleanup.
+Rollback/recover never select `.install-*`.
+
+A restore that fails renames the snapshot to
+`<installRoot>/snapshots/.install-repair-<uuid>` and names it in the error.
+The next first install restores it under the store leases, before its
+precheck, then removes it and continues; if that restore fails again, the
+install fails and changes nothing else. Anything written to the stores
+between the two installs is replaced.
+
+Two Host-visible changes follow. `upgrade()` pruning no longer removes any
+`.install-*` directory, and `uninstall()` keeps them too: it does not
+remove `snapshots/` while one exists. A leftover `.install-<uuid>` is never
+restored automatically; an operator compares its `snapshot.json` with the
+current stores and removes it once it is not needed. Install has no write-ahead receipt
 for process death during migration: the next install prechecks the stores
 as they remain, and the Host must make `migrate` safe to run again. Adding
 an install receipt is outside this change.

@@ -11319,11 +11319,16 @@ export interface ServiceInstallation {
      * stores or change earlier rollback snapshots. An allowed unmarked unit
      * is untouched until preparation succeeds; its live store owner causes
      * `store_busy`. An owned marked unit without a current version is stopped
-     * before preparation and started unconditionally after preparation fails,
-     * once leases/gates are released and staging removed. OS credentials are
-     * never cleared. `precheck` is required.
-     * Once health succeeds, temporary snapshot cleanup is best effort; failure
-     * may leave `snapshots/.install-<uuid>` without rejecting the installation.
+     * before preparation and started again after preparation fails, once
+     * leases/gates are released and staging removed, unless a store restore
+     * failed. OS credentials are never cleared. `precheck` is required.
+     * The temporary snapshot `snapshots/.install-<uuid>` is removed after a
+     * healthy start or a completed restore; a removal failure does not change
+     * the outcome, and a leftover is kept, never restored automatically. A
+     * failed restore renames it `snapshots/.install-repair-<uuid>` and the
+     * error names it: the next first install restores it, under the store
+     * leases and before its precheck, and fails without other changes when
+     * that restore fails.
      */
     install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
     /**
@@ -11345,7 +11350,7 @@ export interface ServiceInstallation {
     rollback(): Promise<ServiceUpgradeReceipt>;
     /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. */
     recover(): Promise<ServiceUpgradeReceipt | undefined>;
-    /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. The store is not touched. */
+    /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. The store is not touched. */
     uninstall(): Promise<void>;
     /** The last receipt, or `undefined`. */
     receipt(): Promise<ServiceUpgradeReceipt | undefined>;
