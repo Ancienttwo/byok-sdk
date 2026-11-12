@@ -864,18 +864,18 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(events).toEqual(['stop', 'precheck', 'start']);
     });
 
-    it.each(['migration exits nonzero', 'postcheck still requires migration', 'migration setup throws', 'postcheck output is malformed'])('restores kept stores and removes staging when %s', async (mode) => {
+    it.each(['migration exits nonzero', 'postcheck still requires migration', 'migration setup throws', 'postcheck fails'])('restores kept stores and removes staging when %s', async (mode) => {
       const setupError = new Error('no migration program');
       installation = mode === 'migration setup throws'
         ? installationOver(fakeLifecycle(), { migrate: () => { throw setupError; } })
         : migrating(mode === 'postcheck still requires migration' ? 'migration-required' : 'accepted');
       await verdicts('migration-required');
-      const script = { 'migration exits nonzero': `${MIGRATE}\nprocess.exit(1);`, 'postcheck output is malformed': `${MIGRATE}\nfs.writeFileSync(verdictsPath, '{');` }[mode] ?? MIGRATE;
+      const script = { 'migration exits nonzero': `${MIGRATE}\nprocess.exit(1);`, 'postcheck fails': `${MIGRATE}\nfs.writeFileSync(verdictsPath, '{');` }[mode] ?? MIGRATE;
       // Every failure after the snapshot is store_migration_failed; a setup or precheck error is its cause (#1984).
       const failed = await installation.install(await payload('2.0.0', { 'migrate.cjs': script })).catch((caught: unknown) => caught);
       expect(failed).toMatchObject({ code: 'store_migration_failed' });
       if (mode === 'migration setup throws') expect((failed as Error).cause).toBe(setupError);
-      if (mode === 'postcheck output is malformed') expect((failed as Error).cause).toMatchObject({ code: 'precheck_failed' });
+      if (mode === 'postcheck fails') expect((failed as Error).cause).toMatchObject({ code: 'precheck_failed' });
       await expectUninstalled();
       expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
       expect(await fs.readFile(`${db}-wal`, 'utf8')).toBe('v1 wal');
@@ -1390,6 +1390,15 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       });
       const released = await installation.upgrade(await payload('2.0.0', { 'migrate.cjs': MIGRATE })).catch((caught: unknown) => caught);
       expect(released).toMatchObject({ code: 'store_migration_failed', cause: { errors: [expect.objectContaining({ code: 'store_migration_failed' }), releaseError] } });
+      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_migration_failed' });
+
+      // A migrate callback that throws is store_migration_failed with that cause: a failed receipt, the old version restarted (#1984).
+      await verdicts('migration-required');
+      events = [];
+      const setupError = new Error('no migration program');
+      const throwing = installationOver(fakeLifecycle(), { migrate: () => { throw setupError; } });
+      await expect(throwing.upgrade(await payload('2.0.0', { 'migrate.cjs': MIGRATE }))).rejects.toMatchObject({ code: 'store_migration_failed', cause: setupError });
+      expect(events).toEqual(['stop', 'start']);
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_migration_failed' });
 
       // A restore that fails may leave partial stores (#1987): nothing starts, the receipt stays pending for recover().

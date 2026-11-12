@@ -10,13 +10,16 @@ No configuration change is needed. Every SDK Pi RPC session now caps its setting
 
 Every failure after the store snapshot now throws `store_migration_failed`
 on both `install()` and `upgrade()`, after restoring the snapshot (#1984). A
-`migrate` callback that throws used to surface its raw error, and a
-post-migration precheck that failed or printed malformed output surfaced
-`precheck_failed`; both are now the `cause` of `store_migration_failed`. On
-`upgrade()` the receipt records `failed` with `store_migration_failed`, where
-a thrown `migrate` callback used to leave it `pending` until `recover()`. A
-Host that matched `precheck_failed` after a migration matches
-`store_migration_failed` and reads `cause`.
+`migrate` callback that throws used to surface its raw error (the raw launch
+error of earlier notes), and a post-migration precheck that failed or printed
+malformed output surfaced `precheck_failed`; both are now the `cause` of
+`store_migration_failed`. On `upgrade()` the receipt records `failed` with
+`store_migration_failed`, where a thrown `migrate` callback used to leave it
+`pending` until `recover()`. A Host that matched a raw launch error or
+`precheck_failed` after a migration matches `store_migration_failed` and
+reads `cause`; one that ran `recover()` after a thrown callback no longer
+needs to, since the receipt is already `failed` and the old version
+restarted.
 
 ## Upgrade and rollback enforce the health-check deadline
 

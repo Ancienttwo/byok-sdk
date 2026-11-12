@@ -236,8 +236,9 @@ the staged candidate after the snapshot, then the precheck again, which must
 report every store `accepted` or `absent` (#1577). Without `migrate` the
 upgrade is `store_migration_required`, the store is unchanged, the receipt is
 `failed` and the old version is started again. A `migrate`
-that exits non-zero, or a second precheck that still refuses a store, restores
-the snapshot and is `store_migration_failed`. When that restore succeeds the
+that exits non-zero or throws, or a second precheck that fails or still
+refuses a store, restores the snapshot and is `store_migration_failed`, with
+a thrown or precheck error as its `cause` (#1984). When that restore succeeds the
 receipt is `failed` and the old version is started again. When the restore
 fails too, the stores may be partial: the old version stays stopped, the
 receipt stays `pending`, the snapshot is kept, and the error says to run
