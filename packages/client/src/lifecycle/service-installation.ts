@@ -152,7 +152,13 @@ export interface ServiceUpgradeReceipt {
 export interface ServiceInstallation {
   /** The service lifecycle whose program runs `<installRoot>/current`. */
   readonly lifecycle: ServiceLifecycle;
-  /** Stages the payload as the first version, points `current` at it, installs and starts the service. */
+  /**
+   * Stages the payload as the first version, points `current` at it, installs
+   * and starts the service, then waits for its health check. Failure removes
+   * the unit, launcher, `current`, installation record and staged version,
+   * including on a same-id reinstall, and throws `install_health_check_failed`.
+   * Host stores, daemon stores and OS credentials are left intact.
+   */
   install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
   /**
    * Stages the payload, writes the pending receipt, stops the service, runs
@@ -197,6 +203,7 @@ const ERROR_MESSAGES = {
   store_rejected: 'The candidate refuses a store. Nothing was switched; resolve the store first.',
   store_migration_required: 'The candidate opens a store only after its migration, and no migrate program is configured. Nothing was switched and the store is unchanged.',
   store_migration_failed: 'The candidate\'s store migration failed or left a store it does not accept. The store snapshot was restored and nothing was switched.',
+  install_health_check_failed: 'The installed version failed its health check; the installation was removed.',
   health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.',
   rollback_unhealthy: 'The previous version was restored but failed its health check too.',
   no_rollback: 'There is no previous version with a store snapshot to roll back to.',
@@ -445,7 +452,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     await writeFileAtomic(serviceInstallationRecordPath(storeDir), `${JSON.stringify(record, null, 2)}\n`);
   }
 
-  /** Running it again with the installed payload rewrites the unit and launcher, as `lifecycle.install` does. */
+  /** A same-id reinstall rewrites the unit and launcher and must pass the same health check as a first install. */
   function install(payloadDir: string, installOpts: ServiceInstallOptions = {}): Promise<void> {
     return lifecycle.owned(async (held) => {
       await refusePending();
@@ -455,6 +462,27 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       await setPointer('current', id);
       await writeRecord();
       await held.install(installOpts);
+      const health = await startHealthy();
+      if (health.ok) return;
+
+      // Stop and unregister before removing anything the service runs. This
+      // cleanup owns installation artifacts only, never daemon or Host data.
+      const removals = [
+        { name: 'service unit and launcher', remove: () => held.uninstall() },
+        { name: 'current pointer', remove: () => setPointer('current', undefined) },
+        { name: 'installation record', remove: () => fs.rm(serviceInstallationRecordPath(storeDir), { force: true }) },
+        { name: 'staged version directory', remove: () => fs.rm(path.join(versionsDir, id), { recursive: true, force: true }) },
+      ];
+      for (const [index, removal] of removals.entries()) {
+        try {
+          await removal.remove();
+        } catch (cause) {
+          const error = new ServiceInstallationError('install_health_check_failed', undefined, { cause });
+          error.message = `The installed version failed its health check; removal failed. Remaining: ${removals.slice(index).map((item) => item.name).join(', ')}.`;
+          throw error;
+        }
+      }
+      throw new ServiceInstallationError('install_health_check_failed', undefined, { cause: health.cause });
     });
   }
 
@@ -524,16 +552,16 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     return release;
   }
 
-  /** Starts the installed `current` and reports whether it became healthy in time. A start the manager refuses is unhealthy. */
-  async function startHealthy(): Promise<boolean> {
+  /** Starts `current` and retains the start or health-check failure for installation errors. */
+  async function startHealthy(): Promise<{ ok: true } | { ok: false; cause: unknown }> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), opts.healthTimeoutMs ?? 60_000);
     try {
       await lifecycle.start();
       await (opts.healthCheck ?? defaultServiceHealthCheck({ storeDir, productId: opts.productId }))(controller.signal);
-      return true;
-    } catch {
-      return false;
+      return { ok: true };
+    } catch (cause) {
+      return { ok: false, cause };
     } finally {
       clearTimeout(timeout);
     }
@@ -654,7 +682,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
     await release();
     const kept = previous === undefined ? {} : { previous };
-    const receipt = (await startHealthy())
+    const receipt = (await startHealthy()).ok
       ? await writeReceipt({ state: 'rolled-back', from, to, ...kept, ...(code === undefined ? {} : { code }) })
       : await writeReceipt({ state: 'failed', from, to, ...kept, code: 'rollback_unhealthy' });
     await fs.rm(path.join(snapshotsDir, to), { recursive: true, force: true });
@@ -724,7 +752,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         throw error;
       }
       await release();
-      if (!(await startHealthy())) {
+      if (!(await startHealthy()).ok) {
         const receipt = await restore(from, to, previous, 'health_check_failed');
         throw new ServiceInstallationError(receipt.state === 'rolled-back' ? 'health_check_failed' : 'rollback_unhealthy');
       }

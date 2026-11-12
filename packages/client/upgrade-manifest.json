@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "b18b69628849689a6d3298654f033a83e4e4f371bf53bbd8a5ccf6f36a277772"
+    "snapshotSha256": "8bc4b717c5fc42931715ab99b24738afdee4c1caaa1f7596ffb66e8390d227be"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,15 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "service-install-health-check",
+      "impact": "breaking",
+      "summary": "ServiceInstallation.install now runs the upgrade health check after installing and starting, using healthTimeoutMs. A failed first install or same-id reinstall removes the unit, launcher, current pointer, installation record and staged version directory and throws the new ServiceInstallationErrorCode install_health_check_failed with the original error as cause. Removal failures become the cause and name remaining artifacts. Host and daemon stores and OS credentials are preserved. Before pairing, enable serviceEnrollment or supply a healthCheck; otherwise pair first. Upgrade error behavior is unchanged (#1966).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#service-install-requires-a-healthy-start",
+      "items": [
+        "export:@byok-sdk/client#ServiceInstallationErrorCode"
+      ]
+    },
     {
       "id": "opencode-go-keys-store",
       "impact": "breaking",
@@ -2532,6 +2541,11 @@
       "item": "export:@byok-sdk/client#SdkHostingOptions",
       "change": "added",
       "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
+      "change": "changed",
+      "entry": "service-install-health-check"
     },
     {
       "item": "export:@byok-sdk/client#ServiceInstallationOptions",

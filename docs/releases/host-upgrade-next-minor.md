@@ -2,6 +2,29 @@
 
 Draft checklist for a Host moving from the current release to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Service install requires a healthy start
+
+`ServiceInstallation.install()` now runs the same health check as `upgrade()`
+after installing and starting the service (#1966). A Host that relied on
+`install()` succeeding without a healthy start must now handle
+`ServiceInstallationError` code `install_health_check_failed` and allow for
+`healthTimeoutMs` (default 60000 ms). The error carries the start or health
+check failure as `cause`; `upgrade()` keeps its existing error behavior.
+Add the new code to exhaustive matches over `ServiceInstallationErrorCode`.
+
+A service installed before pairing must either enable
+`serviceEnrollment: { enabled: true }` or pass its own `healthCheck`; otherwise
+pair first. An unpaired daemon without service enrollment halts on start,
+so the default check fails. With service enrollment, `awaiting-enrollment`
+is healthy even before pairing.
+
+A failed install health check removes the unit, launcher, `current`,
+installation record and the staged version directory, including on a same-id
+reinstall. No service remains after successful cleanup. Host stores, daemon
+stores and OS credentials are preserved. If removal fails, the error carries
+that failure as `cause` and names the remaining artifacts in its message.
+See [Versioned installs](../device-setup.md#versioned-installs).
+
 ## Clearing a device enrollment without a daemon
 
 An uninstaller that built a daemon per store only to call `daemon.unpair()` can call `clearDeviceEnrollment({ productId, storeDir, nativeAssetRoot })` instead (#1841); it needs no `productName`, `serverUrl` or `localAgentRelease`. It refuses with `DeviceEnrollmentClearError` `store_owned` while a daemon, doctor or installer holds the store, so call it after the service has stopped, and before deleting the store directory. It clears only the SDK device enrollment of the account it runs as, never Host secrets, and leaves the delivery cursor file. A Host that matched the text of `unpair()`'s credential-deletion error reads `DeviceEnrollmentClearError.code === 'clear_failed'` instead. See [Clearing an enrollment without running the daemon](../device-setup.md#clearing-an-enrollment-without-running-the-daemon).

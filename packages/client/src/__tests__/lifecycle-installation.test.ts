@@ -188,10 +188,71 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(await pointer('current')).toBe('1.0.0');
     expect(await fs.readFile(path.join(installRoot, 'versions', '1.0.0', 'host.js'), 'utf8')).toBe('// 1.0.0');
     expect(await readServiceInstallationRecord(storeDir)).toEqual({ format: 'byok-service-installation', version: 1, installRoot });
-    expect(events).toEqual(['install']);
-    // Installing the same payload again only reinstalls the unit; another version must be upgraded.
+    expect(events).toEqual(['install', 'start', 'health 1.0.0']);
+    // A same-id reinstall must confirm health too; another version must be upgraded.
     await installation.install(await payload('1.0.0'));
+    expect(events).toEqual(['install', 'start', 'health 1.0.0', 'install', 'start', 'health 1.0.0']);
     await expect(installation.install(await payload('2.0.0'))).rejects.toMatchObject({ code: 'installation_exists' });
+  });
+
+  it.each(['first install', 'same-id reinstall'])('%s removes installation artifacts when health fails, preserving stores (#1966)', async (mode) => {
+    const unitPath = path.join(root, 'service.unit');
+    const launcherPath = path.join(root, 'launcher');
+    let running = false;
+    const def = { name: 'svc', storeDir, logDir: path.join(storeDir, 'service-logs'), owner: 'app', program: { command: process.execPath, args: [] } };
+    const unit: PlatformUnit = {
+      serviceName: 'svc', unitPath, launcherPath,
+      files: () => [unitPath, launcherPath].map((file) => ({ path: file, content: SERVICE_UNIT_MARKER })),
+      activate: async () => { running = true; },
+      deactivate: async () => { running = false; },
+      removeFiles: async () => { for (const file of [unitPath, launcherPath]) await fs.rm(file); },
+      start: async () => { running = true; }, stop: async () => { running = false; },
+      query: async () => ({ running, determinate: true, detail: 'fake' }),
+    };
+    installation = installationOver(createManagedLifecycle(def, unit));
+    const candidate = await payload('1.0.0');
+    if (mode === 'same-id reinstall') await installation.install(candidate);
+    const healthError = new Error('identity endpoint is unhealthy');
+    onHealth = async () => { throw healthError; };
+    const hostStore = path.join(root, 'host-store.json');
+    await fs.writeFile(hostStore, 'Host data');
+    const daemonData = await fs.readFile(db);
+    const daemonWal = await fs.readFile(`${db}-wal`);
+
+    const error = await installation.install(candidate).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ServiceInstallationError);
+    expect(error).toMatchObject({ code: 'install_health_check_failed', cause: healthError });
+    expect((error as Error).cause).toBe(healthError);
+    expect(await installation.lifecycle.inspect()).toMatchObject({ state: 'absent' });
+    expect(await installation.lifecycle.status()).toMatchObject({ installed: false, running: false });
+    for (const file of [unitPath, launcherPath, path.join(installRoot, 'current'), path.join(storeDir, 'service', 'installation.json'), path.join(storeDir, 'service', 'lifecycle-owner.json'), path.join(installRoot, 'versions', '1.0.0')]) {
+      await expect(fs.lstat(file)).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+    expect(await installation.currentVersion()).toBeUndefined();
+    expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
+    expect(await fs.readFile(db)).toEqual(daemonData);
+    expect(await fs.readFile(`${db}-wal`)).toEqual(daemonWal);
+    expect(await fs.readFile(hostStore, 'utf8')).toBe('Host data');
+  });
+
+  it('reports an install removal failure as the cause and names the remaining artifacts (#1966)', async () => {
+    const removalError = new Error('service manager refused removal');
+    const base = fakeLifecycle();
+    installation = installationOver({
+      ...base,
+      owned: (operation) => withServiceOwnerGate(() => operation({
+        install: base.install,
+        uninstall: async () => { throw removalError; },
+      })),
+    });
+    unhealthy.add('1.0.0');
+    const error = await installation.install(await payload('1.0.0')).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ServiceInstallationError);
+    expect(error).toMatchObject({ code: 'install_health_check_failed', cause: removalError });
+    expect((error as Error).message).toContain('Remaining: service unit and launcher, current pointer, installation record, staged version directory');
+    expect(await pointer('current')).toBe('1.0.0');
+    expect(await readServiceInstallationRecord(storeDir)).toBeDefined();
+    expect(await fs.readFile(path.join(installRoot, 'versions', '1.0.0', 'host.js'), 'utf8')).toBe('// 1.0.0');
   });
 
   it('refuses a payload whose files do not match its manifest', async () => {

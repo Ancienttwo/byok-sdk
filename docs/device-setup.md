@@ -463,7 +463,27 @@ The install root is yours and lies outside the store. The SDK owns
 `versions/<id>`, the `current` and `previous` pointers (symlinks; directory
 junctions on Windows), `snapshots/` and `upgrade-receipt.json` in it, and
 records the root in `<storeDir>/service/installation.json`. The unit runs
-`current`, so it never changes across upgrades. `upgrade apply`:
+`current`, so it never changes across upgrades.
+
+`install()` (CLI: `install --payload`) installs and starts the service, then
+runs `healthCheck`, using `healthTimeoutMs` (default 60000 ms), as `upgrade()`
+does. The default check waits for a live daemon lifecycle on its control
+endpoint: `running` (connecting or open) or `awaiting-enrollment`; a halted
+or crashed run fails immediately. A service installed before pairing must
+either enable `serviceEnrollment: { enabled: true }` or pass its own
+`healthCheck`; otherwise pair first. An unpaired daemon without service
+enrollment halts on start and cannot pass the default check.
+
+A failed install health check removes the unit and launcher, `current`, the
+installation record and the staged `versions/<id>` directory, then throws
+`ServiceInstallationError` with code `install_health_check_failed` and the
+start or health-check error as `cause`. This also applies when reinstalling
+the same id: a failed repair leaves no service installed. Cleanup preserves
+Host stores, daemon stores and OS credentials. If removal itself fails, the
+same error code carries the removal error as `cause` and its message names
+the artifacts that remain.
+
+`upgrade apply`:
 
 1. stages and checks the payload in `versions/<id>`;
 2. stops the service, waits until no daemon owns the store, and ends what the
@@ -474,8 +494,8 @@ records the root in `<storeDir>/service/installation.json`. The unit runs
    each store's verdict;
 4. copies every store the precheck listed to `snapshots/<id>`;
 5. points `previous` at the old version and `current` at the new one, starts
-   it and waits until the daemon reports `running` on its control socket
-   (the cloud connection is not required);
+   it and waits for the same live daemon lifecycle on its control endpoint
+   (`running` or `awaiting-enrollment`; the cloud connection is not required);
 6. if that health check fails, restores the old version and its store
    snapshot together and fails with `health_check_failed`.
 

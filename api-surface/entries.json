@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2724898,
+      "budgetBytes": 2725898,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -284,7 +284,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3181638,
+      "budgetBytes": 3182638,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -458,7 +458,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2398753,
+      "budgetBytes": 2399753,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2585,7 +2585,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2390070,
+      "budgetBytes": 2391070,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

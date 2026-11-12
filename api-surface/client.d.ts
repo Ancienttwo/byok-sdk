@@ -11296,7 +11296,13 @@ export interface ServiceUpgradeReceipt {
 export interface ServiceInstallation {
     /** The service lifecycle whose program runs `<installRoot>/current`. */
     readonly lifecycle: ServiceLifecycle;
-    /** Stages the payload as the first version, points `current` at it, installs and starts the service. */
+    /**
+     * Stages the payload as the first version, points `current` at it, installs
+     * and starts the service, then waits for its health check. Failure removes
+     * the unit, launcher, `current`, installation record and staged version,
+     * including on a same-id reinstall, and throws `install_health_check_failed`.
+     * Host stores, daemon stores and OS credentials are left intact.
+     */
     install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
     /**
      * Stages the payload, writes the pending receipt, stops the service, runs
@@ -11340,6 +11346,7 @@ declare const ERROR_MESSAGES: {
     readonly store_rejected: 'The candidate refuses a store. Nothing was switched; resolve the store first.';
     readonly store_migration_required: 'The candidate opens a store only after its migration, and no migrate program is configured. Nothing was switched and the store is unchanged.';
     readonly store_migration_failed: 'The candidate\'s store migration failed or left a store it does not accept. The store snapshot was restored and nothing was switched.';
+    readonly install_health_check_failed: 'The installed version failed its health check; the installation was removed.';
     readonly health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.';
     readonly rollback_unhealthy: 'The previous version was restored but failed its health check too.';
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
