@@ -469,19 +469,30 @@ records the root in `<storeDir>/service/installation.json`. The unit runs
 runs `healthCheck`, using `healthTimeoutMs` (default 60000 ms), as `upgrade()`
 does. The default check waits for a live daemon lifecycle on its control
 endpoint: `running` (connecting or open) or `awaiting-enrollment`; a halted
-or crashed run fails immediately. A service installed before pairing must
-either enable `serviceEnrollment: { enabled: true }` or pass its own
-`healthCheck`; otherwise pair first. An unpaired daemon without service
-enrollment halts on start and cannot pass the default check.
+or crashed run fails immediately. For the CLI, a service installed before
+pairing must enable `serviceEnrollment: { enabled: true }` in its config;
+otherwise pair first. An embedded Host can instead pass its own
+`healthCheck`. An unpaired daemon without service enrollment halts on start
+and cannot pass the default check. Install enforces the health-check
+deadline even if a custom check ignores abort or succeeds late. It waits
+for an in-flight platform start to settle before cleanup, so the platform
+cannot restart the service after its removal.
 
-A failed install health check removes the unit and launcher, `current`, the
+An installation write, activation, start or health-check failure removes the unit and launcher, `current`, the
 installation record and the staged `versions/<id>` directory, then throws
 `ServiceInstallationError` with code `install_health_check_failed` and the
 start or health-check error as `cause`. This also applies when reinstalling
 the same id: a failed repair leaves no service installed. Cleanup preserves
 Host stores, daemon stores and OS credentials. If removal itself fails, the
-same error code carries the removal error as `cause` and its message names
-the artifacts that remain.
+same error code carries an `AggregateError` containing the original failure
+and the removal error as `cause`; its message names the artifacts that remain.
+
+A failed same-id reinstall after an upgrade preserves artifacts belonging to
+other versions: `previous`, `versions/<previous-id>`, `snapshots/` and
+`upgrade-receipt.json` remain. The installation record is gone, so CLI
+`uninstall` can no longer discover this root. To clean it, construct the
+installation with that explicit `installRoot` and call `uninstall()`, or
+reinstall into the same root to record it again before CLI uninstall.
 
 `upgrade apply`:
 

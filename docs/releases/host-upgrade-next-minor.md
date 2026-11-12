@@ -12,17 +12,28 @@ after installing and starting the service (#1966). A Host that relied on
 check failure as `cause`; `upgrade()` keeps its existing error behavior.
 Add the new code to exhaustive matches over `ServiceInstallationErrorCode`.
 
-A service installed before pairing must either enable
-`serviceEnrollment: { enabled: true }` or pass its own `healthCheck`; otherwise
-pair first. An unpaired daemon without service enrollment halts on start,
+For CLI installs before pairing, enable `serviceEnrollment: { enabled: true }`
+in the config; otherwise pair first. An embedded Host can instead pass its
+own `healthCheck`. An unpaired daemon without service enrollment halts on start,
 so the default check fails. With service enrollment, `awaiting-enrollment`
 is healthy even before pairing.
 
-A failed install health check removes the unit, launcher, `current`,
+An installation write, activation, start or health-check failure removes the unit, launcher, `current`,
 installation record and the staged version directory, including on a same-id
 reinstall. No service remains after successful cleanup. Host stores, daemon
 stores and OS credentials are preserved. If removal fails, the error carries
-that failure as `cause` and names the remaining artifacts in its message.
+an `AggregateError` with both the original and removal failures as `cause`
+and names the remaining artifacts in its message. Install enforces the
+health-check deadline even if a custom check ignores abort or succeeds late;
+cleanup waits for an in-flight platform start to settle first. The CLI error
+includes the cause message and the before-pairing requirement.
+
+After an upgrade, a failed same-id reinstall leaves `previous`,
+`versions/<previous-id>`, `snapshots/` and `upgrade-receipt.json` intact,
+since they belong to other versions. With the installation record removed,
+CLI uninstall cannot discover the root. Construct the installation with the
+explicit `installRoot` and call `uninstall()`, or reinstall into the same
+root before using CLI uninstall.
 See [Versioned installs](../device-setup.md#versioned-installs).
 
 ## Clearing a device enrollment without a daemon

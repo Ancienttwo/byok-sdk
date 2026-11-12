@@ -15,7 +15,7 @@ import type { ManagedServiceLifecycle } from './managed-lifecycle.js';
 import {
   isJsonObject, isPayloadPath, listPayloadFiles, SERVICE_PAYLOAD_MANIFEST, sha256File, SHA256_HEX, VERSION_ID, type ServicePayloadManifest,
 } from '../service-payload-manifest.js';
-import { serviceStateDir } from './service-unit.js';
+import { serviceStateDir, ServiceUnitError } from './service-unit.js';
 import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types.js';
 
 /**
@@ -154,7 +154,8 @@ export interface ServiceInstallation {
   readonly lifecycle: ServiceLifecycle;
   /**
    * Stages the payload as the first version, points `current` at it, installs
-   * and starts the service, then waits for its health check. Failure removes
+   * and starts the service, then waits for its health check. A write,
+   * activation, start or health-check failure removes
    * the unit, launcher, `current`, installation record and staged version,
    * including on a same-id reinstall, and throws `install_health_check_failed`.
    * Host stores, daemon stores and OS credentials are left intact.
@@ -459,10 +460,18 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       const installed = await currentVersion();
       const id = await stage(payloadDir);
       if (installed !== undefined && installed !== id) throw new ServiceInstallationError('installation_exists');
-      await setPointer('current', id);
-      await writeRecord();
-      await held.install(installOpts);
-      const health = await startHealthy();
+      let health: Awaited<ReturnType<typeof startHealthy>>;
+      try {
+        await setPointer('current', id);
+        await writeRecord();
+        await held.install(installOpts);
+        health = await startHealthy(true);
+      } catch (cause) {
+        // Ownership and foreign-unit refusals precede activation and remain
+        // refusals: never try to uninstall a service we do not own.
+        if (cause instanceof ServiceUnitError) throw cause;
+        health = { ok: false, cause };
+      }
       if (health.ok) return;
 
       // Stop and unregister before removing anything the service runs. This
@@ -477,7 +486,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         try {
           await removal.remove();
         } catch (cause) {
-          const error = new ServiceInstallationError('install_health_check_failed', undefined, { cause });
+          const failure = new AggregateError([health.cause, cause], 'Service installation and removal both failed.');
+          const error = new ServiceInstallationError('install_health_check_failed', undefined, { cause: failure });
           error.message = `The installed version failed its health check; removal failed. Remaining: ${removals.slice(index).map((item) => item.name).join(', ')}.`;
           throw error;
         }
@@ -552,18 +562,36 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     return release;
   }
 
-  /** Starts `current` and retains the start or health-check failure for installation errors. */
-  async function startHealthy(): Promise<{ ok: true } | { ok: false; cause: unknown }> {
+  /** Install enforces the deadline even for a non-cooperative check; upgrade retains its existing abort-only behavior. */
+  async function startHealthy(enforceDeadline = false): Promise<{ ok: true } | { ok: false; cause: unknown }> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), opts.healthTimeoutMs ?? 60_000);
+    const timeoutMs = opts.healthTimeoutMs ?? 60_000;
+    const deadline = Date.now() + timeoutMs;
+    const timedOut = new Error(`the service health check timed out after ${timeoutMs} ms`);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let onAbort: (() => void) | undefined;
     try {
+      // A platform start cannot be cancelled. Let it settle before cleanup
+      // can stop/unregister the service, so it cannot start after removal.
       await lifecycle.start();
-      await (opts.healthCheck ?? defaultServiceHealthCheck({ storeDir, productId: opts.productId }))(controller.signal);
+      const check = opts.healthCheck ?? defaultServiceHealthCheck({ storeDir, productId: opts.productId });
+      if (enforceDeadline) {
+        if (controller.signal.aborted || Date.now() >= deadline) throw timedOut;
+        const expired = new Promise<never>((_resolve, reject) => {
+          onAbort = () => reject(timedOut);
+          controller.signal.addEventListener('abort', onAbort, { once: true });
+        });
+        await Promise.race([check(controller.signal), expired]);
+        if (Date.now() >= deadline) throw timedOut;
+      } else {
+        await check(controller.signal);
+      }
       return { ok: true };
     } catch (cause) {
       return { ok: false, cause };
     } finally {
       clearTimeout(timeout);
+      if (onAbort !== undefined) controller.signal.removeEventListener('abort', onAbort);
     }
   }
 

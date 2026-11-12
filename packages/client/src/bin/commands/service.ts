@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { createServiceLifecycle, type DaemonConfig, type ServiceDefinition, type ServiceLifecycle } from '../../index.js';
 import { agentServiceDefinition, agentServiceInstallation } from '../../lifecycle/agent-service.js';
-import { createServiceInstallation, readServiceInstallationRecord, type ServiceInstallation } from '../../lifecycle/service-installation.js';
+import { createServiceInstallation, readServiceInstallationRecord, ServiceInstallationError, type ServiceInstallation } from '../../lifecycle/service-installation.js';
 import { readLastLifecycleRecord } from '../../daemon/audit-log.js';
 import { argValue, hasFlag, resolveStoreDir } from '../config.js';
 import { formatLifecycle, formatLifecycleRemedy } from '../../diagnostics/format.js';
@@ -96,7 +96,15 @@ export async function runInstallCommand(config: DaemonConfig, configPath: string
     const installRoot = argValue(rest, INSTALL_ROOT_FLAG);
     if (installRoot === undefined) throw new Error(`${PAYLOAD_FLAG} requires ${INSTALL_ROOT_FLAG} <dir>`);
     const installation = (await cliServiceInstallation(config, configPath, rest, deps, installRoot))!;
-    await installation.install(path.resolve(payload), installOpts);
+    try {
+      await installation.install(path.resolve(payload), installOpts);
+    } catch (error) {
+      if (error instanceof ServiceInstallationError && error.code === 'install_health_check_failed') {
+        const causes: unknown[] = error.cause instanceof AggregateError ? error.cause.errors : [error.cause];
+        error.message += ` Cause: ${causes.map((cause) => cause instanceof Error ? cause.message : String(cause)).join('; ')}. For an unpaired daemon, enable serviceEnrollment in the config or pair first.`;
+      }
+      throw error;
+    }
     log(`service installed and started: ${serviceNameFor(config, rest)} version=${await installation.currentVersion()}`);
     return;
   }

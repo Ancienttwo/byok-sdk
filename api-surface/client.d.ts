@@ -11298,7 +11298,8 @@ export interface ServiceInstallation {
     readonly lifecycle: ServiceLifecycle;
     /**
      * Stages the payload as the first version, points `current` at it, installs
-     * and starts the service, then waits for its health check. Failure removes
+     * and starts the service, then waits for its health check. A write,
+     * activation, start or health-check failure removes
      * the unit, launcher, `current`, installation record and staged version,
      * including on a same-id reinstall, and throws `install_health_check_failed`.
      * Host stores, daemon stores and OS credentials are left intact.

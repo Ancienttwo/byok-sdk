@@ -195,7 +195,8 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await expect(installation.install(await payload('2.0.0'))).rejects.toMatchObject({ code: 'installation_exists' });
   });
 
-  it.each(['first install', 'same-id reinstall'])('%s removes installation artifacts when health fails, preserving stores (#1966)', async (mode) => {
+  it.each(['first install', 'same-id reinstall', 'activation failure'])('%s removes installation artifacts when startup fails, preserving stores (#1966)', async (mode) => {
+    const healthError = new Error(mode === 'activation failure' ? 'service activation failed' : 'identity endpoint is unhealthy');
     const unitPath = path.join(root, 'service.unit');
     const launcherPath = path.join(root, 'launcher');
     let running = false;
@@ -203,7 +204,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     const unit: PlatformUnit = {
       serviceName: 'svc', unitPath, launcherPath,
       files: () => [unitPath, launcherPath].map((file) => ({ path: file, content: SERVICE_UNIT_MARKER })),
-      activate: async () => { running = true; },
+      activate: async () => { running = true; if (mode === 'activation failure') throw healthError; },
       deactivate: async () => { running = false; },
       removeFiles: async () => { for (const file of [unitPath, launcherPath]) await fs.rm(file); },
       start: async () => { running = true; }, stop: async () => { running = false; },
@@ -212,7 +213,6 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     installation = installationOver(createManagedLifecycle(def, unit));
     const candidate = await payload('1.0.0');
     if (mode === 'same-id reinstall') await installation.install(candidate);
-    const healthError = new Error('identity endpoint is unhealthy');
     onHealth = async () => { throw healthError; };
     const hostStore = path.join(root, 'host-store.json');
     await fs.writeFile(hostStore, 'Host data');
@@ -235,7 +235,67 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(await fs.readFile(hostStore, 'utf8')).toBe('Host data');
   });
 
-  it('reports an install removal failure as the cause and names the remaining artifacts (#1966)', async () => {
+  it.each(['ignores abort forever', 'succeeds after the deadline', 'start still in flight'])('install enforces its deadline when %s (#1966)', async (mode) => {
+    const base = fakeLifecycle();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void;
+    const began = new Promise<void>((resolve) => { entered = resolve; });
+    const lifecycle = mode === 'start still in flight' ? {
+      ...base,
+      start: async () => { events.push('start'); entered(); await pending; },
+    } : base;
+    let signal: AbortSignal | undefined;
+    installation = installationOver(lifecycle, {
+      healthTimeoutMs: 50,
+      healthCheck: async (value) => { signal = value; entered(); await pending; },
+    });
+    const candidate = await payload('1.0.0');
+    vi.useFakeTimers();
+    try {
+      const installing = installation.install(candidate).catch((caught: unknown) => caught);
+      await began;
+      await vi.advanceTimersByTimeAsync(51);
+      if (mode === 'start still in flight') {
+        // Cleanup must not race a platform start that could restart after it.
+        expect(events).not.toContain('uninstall');
+        release();
+      }
+      const error = await installing;
+      expect(error).toMatchObject({ code: 'install_health_check_failed', cause: { message: 'the service health check timed out after 50 ms' } });
+      expect(await installation.currentVersion()).toBeUndefined();
+      expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
+      expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
+      expect(events.at(-1)).toBe('uninstall');
+      if (mode !== 'start still in flight') expect(signal?.aborted).toBe(true);
+      if (mode === 'succeeds after the deadline') {
+        release();
+        await Promise.resolve();
+        expect(await installation.currentVersion()).toBeUndefined();
+      }
+    } finally {
+      release();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['current', 'installation.json'])('install removes its artifacts after a failed %s write (#1966)', async (target) => {
+    const candidate = await payload('1.0.0');
+    const destination = target === 'current' ? path.join(installRoot, target) : path.join(storeDir, 'service', target);
+    const fault = failRename((file) => file === destination);
+    try {
+      const error = await installation.install(candidate).catch((caught: unknown) => caught);
+      expect(fault.fired()).toBe(true);
+      expect(error).toMatchObject({ code: 'install_health_check_failed', cause: { code: 'EIO' } });
+      expect(await installation.currentVersion()).toBeUndefined();
+      expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
+      expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
+    } finally {
+      fault.restore();
+    }
+  });
+
+  it('reports an install removal failure with both errors and names the remaining artifacts (#1966)', async () => {
     const removalError = new Error('service manager refused removal');
     const base = fakeLifecycle();
     installation = installationOver({
@@ -248,7 +308,8 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     unhealthy.add('1.0.0');
     const error = await installation.install(await payload('1.0.0')).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ServiceInstallationError);
-    expect(error).toMatchObject({ code: 'install_health_check_failed', cause: removalError });
+    expect(error).toMatchObject({ code: 'install_health_check_failed', cause: { errors: [expect.objectContaining({ message: 'unhealthy' }), removalError] } });
+    expect((error as Error).cause).toBeInstanceOf(AggregateError);
     expect((error as Error).message).toContain('Remaining: service unit and launcher, current pointer, installation record, staged version directory');
     expect(await pointer('current')).toBe('1.0.0');
     expect(await readServiceInstallationRecord(storeDir)).toBeDefined();
