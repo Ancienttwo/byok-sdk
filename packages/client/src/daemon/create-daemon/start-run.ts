@@ -130,8 +130,8 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
   // cancellation evidence restores this run's redelivery fence.
   taskSettlement.bindJournal({
     readTask: (taskId) => activeJournal.readTask(taskId, journalIdentity),
-    hasTaskCancellation: async (taskId) => {
-      const cancelled = await hasTaskCancellation(activeJournal, taskId, journalIdentity);
+    hasTaskCancellation: async (taskId, offerSeq) => {
+      const cancelled = await hasTaskCancellation(activeJournal, taskId, offerSeq, journalIdentity);
       // Admission can acquire an owner while the journal read is in flight.
       return cancelled && !terminalCommits.hasPending(taskId)
         && (daemonState.runner === undefined || !offerHasOwner.call(daemonState.runner, taskId));
@@ -168,7 +168,7 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
     // A failed stop may still hold the real terminal in this process's commit
     // queue. Preserve that decision even if its journal row is still received.
     if (terminalCommits.hasPending(task.taskId)) continue;
-    if (task.localState === 'received' && await hasTaskCancellation(activeJournal, task.taskId, journalIdentity)) {
+    if (task.localState === 'received' && await hasTaskCancellation(activeJournal, task.taskId, task.seq, journalIdentity)) {
       taskSettlement.cancelledBeforeAdmission(task.taskId);
       continue;
     }

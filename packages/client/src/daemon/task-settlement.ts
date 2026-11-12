@@ -1,16 +1,22 @@
 import { decodeEnvelope } from '@byok-sdk/protocol';
 import { journalHash, type JournalIdentity, type LocalTaskJournal, type TerminalTruthState } from './journal/journal.js';
 
-/** Validate raw journal evidence in SDK code, including for Host-injected backends. */
-export async function hasTaskCancellation(journal: Pick<LocalTaskJournal, 'readTaskCancellation'>, taskId: string, identity: JournalIdentity): Promise<boolean> {
-  const record = await journal.readTaskCancellation(taskId, identity);
+/**
+ * Validate raw journal evidence in SDK code, including for Host-injected
+ * backends. Only a cancellation sequenced after the stored offer settles it;
+ * an earlier one is a pre-cancel whose offer still needs its decline.
+ */
+export async function hasTaskCancellation(journal: Pick<LocalTaskJournal, 'readTaskCancellation'>, taskId: string, offerSeq: number, identity: JournalIdentity): Promise<boolean> {
+  const record = await journal.readTaskCancellation(taskId, identity, offerSeq);
   if (record === undefined) return false;
   if (record.identity.tenantId !== identity.tenantId || record.identity.productId !== identity.productId || record.identity.deviceId !== identity.deviceId) {
     throw new Error('journal cancellation enrollment identity mismatch');
   }
   if (journalHash(record.bytes) !== record.bytesHash) throw new Error('durable cancellation bytes/hash mismatch');
   const envelope = decodeEnvelope(record.bytes);
-  if (envelope.type !== 'task.cancel' || envelope.task_id !== taskId) throw new Error('invalid durable cancellation binding');
+  if (envelope.type !== 'task.cancel' || envelope.task_id !== taskId || envelope.seq === undefined || envelope.seq <= offerSeq) {
+    throw new Error('invalid durable cancellation binding');
+  }
   return true;
 }
 
@@ -48,9 +54,9 @@ export class DaemonTaskUnknownError extends Error {
 
 /** The durable facts one daemon run reads for a task it has not seen. */
 export interface TaskSettlementJournal {
-  readTask(taskId: string): Promise<{ readonly localState: string } | undefined>;
-  /** SDK-validated inbound cancellation evidence for a received offer. */
-  hasTaskCancellation(taskId: string): Promise<boolean>;
+  readTask(taskId: string): Promise<{ readonly localState: string; readonly seq: number } | undefined>;
+  /** SDK-validated inbound cancellation sequenced after the received offer at `offerSeq`. */
+  hasTaskCancellation(taskId: string, offerSeq: number): Promise<boolean>;
   /** Truth state of an unconfirmed terminal; `undefined` once confirmed or when there is none. */
   unconfirmedTerminal(taskId: string): Promise<TerminalTruthState | undefined>;
 }
@@ -208,7 +214,7 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
 async function durableSettlement(journal: TaskSettlementJournal, taskId: string): Promise<DaemonTaskSettlement | 'pending' | 'unknown'> {
   const task = await journal.readTask(taskId);
   if (task === undefined) return 'unknown';
-  if (task.localState === 'received' && await journal.hasTaskCancellation(taskId)) {
+  if (task.localState === 'received' && await journal.hasTaskCancellation(taskId, task.seq)) {
     return { terminal: 'cancelled', delivery: 'not-required', disposal: 'none' };
   }
   if (!task.localState.startsWith(TERMINAL_STATE_PREFIX)) return 'pending';

@@ -5563,7 +5563,8 @@ export interface Daemon {
      * A task this daemon has not seen is read from the journal: after a restart
      * the result reflects the journal's current truth, so a refused terminal
      * that was replaced reads as its replacement, never the reverse. A stored
-     * cancellation preserves `cancelled`/`not-required`/`none` after restart,
+     * cancellation sequenced after the offer preserves
+     * `cancelled`/`not-required`/`none` after restart,
      * including with the cursor past the cancellation; recovery sends no
      * `daemon_interrupted` failure for that received offer.
      * Rejects with {@link DaemonTaskUnknownError} for an unknown task, before
@@ -6990,14 +6991,16 @@ export interface LocalTaskJournal {
     readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined>;
     /**
      * Read the stored inbound `task.cancel` with the lowest mailbox sequence
-     * for this task and exact enrollment, or `undefined` when none exists.
+     * strictly above `afterSeq` (the stored offer's sequence) for this task and
+     * exact enrollment, or `undefined` when none exists. A cancellation at or
+     * below the offer sequence preceded that offer and is not returned.
      * Fail closed by rejecting on a candidate from another enrollment or with
      * a mismatched hash; verify candidate hashes before filtering by content.
      * Return the original canonical bytes and stored hash, not a derived
      * cancellation flag. The SDK also validates the returned identity, hash
      * and envelope binding before using it as cancellation authority.
      */
-    readTaskCancellation(taskId: string, identity: JournalIdentity): Promise<{
+    readTaskCancellation(taskId: string, identity: JournalIdentity, afterSeq: number): Promise<{
         readonly identity: JournalIdentity;
         readonly bytes: string;
         readonly bytesHash: string;
@@ -7169,7 +7172,7 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
      */
     recordTerminal(record: LocalTerminalRecord): Promise<void>;
     readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined>;
-    readTaskCancellation(taskId: string, identity: JournalIdentity): Promise<{
+    readTaskCancellation(taskId: string, identity: JournalIdentity, afterSeq: number): Promise<{
         identity: {
             tenantId: string;
             productId: string;
@@ -8709,8 +8712,12 @@ export declare const RESULT_NOT_SUBMITTED_REASON_PREFIX = "result_not_submitted"
 export declare const RESULT_UNREADABLE_REASON_PREFIX = "result_unreadable";
 // ==== @byok-sdk/client dist/daemon/task-settlement.d.ts ====
 import { type JournalIdentity, type LocalTaskJournal, type TerminalTruthState } from './journal/journal.js';
-/** Validate raw journal evidence in SDK code, including for Host-injected backends. */
-export declare function hasTaskCancellation(journal: Pick<LocalTaskJournal, 'readTaskCancellation'>, taskId: string, identity: JournalIdentity): Promise<boolean>;
+/**
+ * Validate raw journal evidence in SDK code, including for Host-injected
+ * backends. Only a cancellation sequenced after the stored offer settles it;
+ * an earlier one is a pre-cancel whose offer still needs its decline.
+ */
+export declare function hasTaskCancellation(journal: Pick<LocalTaskJournal, 'readTaskCancellation'>, taskId: string, offerSeq: number, identity: JournalIdentity): Promise<boolean>;
 /** {@link DaemonTaskSettlement.terminal}: the terminal kind, including a cloud cancellation before admission. */
 export type DaemonTaskTerminal = 'complete' | 'failed' | 'cancelled' | 'declined';
 /** What `Daemon.whenTaskSettled` resolves with. */
@@ -8742,9 +8749,10 @@ export declare class DaemonTaskUnknownError extends Error {
 export interface TaskSettlementJournal {
     readTask(taskId: string): Promise<{
         readonly localState: string;
+        readonly seq: number;
     } | undefined>;
-    /** SDK-validated inbound cancellation evidence for a received offer. */
-    hasTaskCancellation(taskId: string): Promise<boolean>;
+    /** SDK-validated inbound cancellation sequenced after the received offer at `offerSeq`. */
+    hasTaskCancellation(taskId: string, offerSeq: number): Promise<boolean>;
     /** Truth state of an unconfirmed terminal; `undefined` once confirmed or when there is none. */
     unconfirmedTerminal(taskId: string): Promise<TerminalTruthState | undefined>;
 }

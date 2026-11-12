@@ -148,8 +148,8 @@ class RecordingJournal implements LocalTaskJournal {
     if (task && (task.identity.tenantId !== identity.tenantId || task.identity.productId !== identity.productId || task.identity.deviceId !== identity.deviceId)) throw new Error('journal enrollment identity mismatch');
     return task;
   }
-  async readTaskCancellation(taskId: string, identity: JournalIdentity) {
-    return this.appended.find((record) => record.taskId === taskId && record.identity.tenantId === identity.tenantId
+  async readTaskCancellation(taskId: string, identity: JournalIdentity, afterSeq: number) {
+    return this.appended.find((record) => record.taskId === taskId && record.seq > afterSeq && record.identity.tenantId === identity.tenantId
       && record.identity.productId === identity.productId && record.identity.deviceId === identity.deviceId
       && JSON.parse(record.bytes).type === 'task.cancel');
   }

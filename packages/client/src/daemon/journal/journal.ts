@@ -298,14 +298,16 @@ export interface LocalTaskJournal {
   readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined>;
   /**
    * Read the stored inbound `task.cancel` with the lowest mailbox sequence
-   * for this task and exact enrollment, or `undefined` when none exists.
+   * strictly above `afterSeq` (the stored offer's sequence) for this task and
+   * exact enrollment, or `undefined` when none exists. A cancellation at or
+   * below the offer sequence preceded that offer and is not returned.
    * Fail closed by rejecting on a candidate from another enrollment or with
    * a mismatched hash; verify candidate hashes before filtering by content.
    * Return the original canonical bytes and stored hash, not a derived
    * cancellation flag. The SDK also validates the returned identity, hash
    * and envelope binding before using it as cancellation authority.
    */
-  readTaskCancellation(taskId: string, identity: JournalIdentity): Promise<{
+  readTaskCancellation(taskId: string, identity: JournalIdentity, afterSeq: number): Promise<{
     readonly identity: JournalIdentity;
     readonly bytes: string;
     readonly bytesHash: string;

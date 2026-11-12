@@ -130,7 +130,7 @@ describe('SqliteLocalTaskJournal', () => {
       const storeDir = await tmpStore();
       const journal = build(storeDir);
       await journal.appendEnvelope(envelopeRecord());
-      await expect(journal.readTaskCancellation('task-1', IDENTITY)).resolves.toBeUndefined();
+      await expect(journal.readTaskCancellation('task-1', IDENTITY, 1)).resolves.toBeUndefined();
       const bytes = JSON.stringify({ v: 1, id: 'cancel-1', type: 'task.cancel', task_id: 'task-1' });
       const later = JSON.stringify({ v: 1, id: 'cancel-later', type: 'task.cancel', task_id: 'task-1' });
       await journal.appendEnvelope(envelopeRecord({ envelopeId: 'cancel-later', seq: 4, bytes: later, bytesHash: journalHash(later), opensTask: false }));
@@ -139,8 +139,10 @@ describe('SqliteLocalTaskJournal', () => {
       await journal.appendEnvelope(envelopeRecord({ envelopeId: 'cancel-2', taskId: 'task-2', seq: 3, bytes: otherBytes, bytesHash: journalHash(otherBytes), opensTask: false }));
       await journal.close();
       const reopened = build(storeDir);
-      await expect(reopened.readTaskCancellation('task-1', IDENTITY)).resolves.toEqual({ identity: IDENTITY, bytes, bytesHash: journalHash(bytes) });
-      await expect(reopened.readTaskCancellation('unknown', IDENTITY)).resolves.toBeUndefined();
+      await expect(reopened.readTaskCancellation('task-1', IDENTITY, 1)).resolves.toEqual({ identity: IDENTITY, bytes, bytesHash: journalHash(bytes) });
+      await expect(reopened.readTaskCancellation('task-1', IDENTITY, 2)).resolves.toEqual({ identity: IDENTITY, bytes: later, bytesHash: journalHash(later) });
+      await expect(reopened.readTaskCancellation('task-1', IDENTITY, 4)).resolves.toBeUndefined();
+      await expect(reopened.readTaskCancellation('unknown', IDENTITY, 1)).resolves.toBeUndefined();
       expect((await reopened.readTask('task-1', IDENTITY))?.localState).toBe('received');
       expect(await reopened.listPendingTerminals(IDENTITY)).toEqual([]);
     });
@@ -162,7 +164,7 @@ describe('SqliteLocalTaskJournal', () => {
       } finally {
         db.close();
       }
-      await expect(journal.readTaskCancellation('task-1', IDENTITY)).rejects.toThrow('durable cancellation candidate bytes/hash mismatch');
+      await expect(journal.readTaskCancellation('task-1', IDENTITY, 1)).rejects.toThrow('durable cancellation candidate bytes/hash mismatch');
       expect(readRows(storeDir, "SELECT bytes_hash FROM journal_envelope WHERE envelope_id = 'cancel-corrupt'"))
         .toEqual([{ bytes_hash: journalHash(bytes) }]);
       expect((await journal.readTask('task-1', IDENTITY))?.localState).toBe('received');
@@ -173,7 +175,7 @@ describe('SqliteLocalTaskJournal', () => {
       const journal = build(await tmpStore());
       const bytes = JSON.stringify({ v: 1, id: 'cancel-1', type: 'task.cancel', task_id: 'task-1' });
       await journal.appendEnvelope(envelopeRecord({ envelopeId: 'cancel-1', bytes, bytesHash: journalHash(bytes), opensTask: false }));
-      await expect(journal.readTaskCancellation('task-1', { ...IDENTITY, [field]: 'other' })).rejects.toThrow('journal enrollment identity mismatch');
+      await expect(journal.readTaskCancellation('task-1', { ...IDENTITY, [field]: 'other' }, 1)).rejects.toThrow('journal enrollment identity mismatch');
     });
   });
 

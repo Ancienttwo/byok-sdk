@@ -755,7 +755,8 @@ export interface Daemon {
    * A task this daemon has not seen is read from the journal: after a restart
    * the result reflects the journal's current truth, so a refused terminal
    * that was replaced reads as its replacement, never the reverse. A stored
-   * cancellation preserves `cancelled`/`not-required`/`none` after restart,
+   * cancellation sequenced after the offer preserves
+   * `cancelled`/`not-required`/`none` after restart,
    * including with the cursor past the cancellation; recovery sends no
    * `daemon_interrupted` failure for that received offer.
    * Rejects with {@link DaemonTaskUnknownError} for an unknown task, before

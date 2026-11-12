@@ -376,6 +376,34 @@ describe('Daemon.whenTaskSettled', () => {
     expect(server.received.filter((e) => e.task_id === taskId)).toEqual([]);
   });
 
+  it('keeps the pre-cancel decline for a stored offer that followed its cancellation after restart', async () => {
+    const taskId = 'task-pre-cancel-restart';
+    const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-settlement-recovery-'));
+    const adapter = new StubRuntimeAdapter();
+    const d = build(adapter, storeDir);
+    await d.pair('pairing-code');
+    const identity = { tenantId: 'tenant-test', productId: 'test-product-settlement', deviceId: 'device-1' };
+    const cancellation = createEnvelope('task.cancel', { reason: 'operator cancelled first' }, { taskId, seq: server.nextSeq() });
+    const original = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), instruction: 'work', ...FRESH_OFFER },
+      { taskId, seq: server.nextSeq() });
+    // Crash window: both rows are durable, but the pre-cancel decline was never committed.
+    const journal = new SqliteLocalTaskJournal({ storeDir });
+    for (const [envelope, opensTask] of [[cancellation, false], [original, true]] as const) {
+      const bytes = encodeEnvelope(envelope);
+      await journal.appendEnvelope({ identity, envelopeId: envelope.id, taskId, seq: envelope.seq!, bytes,
+        bytesHash: journalHash(bytes), receivedAt: envelope.ts, opensTask });
+    }
+    await journal.close();
+    await d.start();
+    server.send(cancellation);
+    server.send(original);
+    const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
+    expect((decline.payload as { reason: string }).reason).toMatch(/cancelled before claim/i);
+    await expect(d.whenTaskSettled(taskId, { signal: AbortSignal.timeout(2_000) }))
+      .resolves.toEqual({ terminal: 'declined', delivery: 'accepted', disposal: 'none' });
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
   it('keeps the runtime settlement when an offer gains an owner during the cancellation journal read', async () => {
     const taskId = 'task-cancel-admission-race';
     const { d, adapter, original } = await recoveredOffer(taskId);
@@ -482,8 +510,8 @@ describe('Daemon.whenTaskSettled', () => {
     it('settles a received journal row without an in-memory cancellation event', async () => {
       const r = new TaskSettlementRegistry();
       r.bindJournal({
-        readTask: async () => ({ localState: 'received' }),
-        hasTaskCancellation: (id) => hasTaskCancellation({ readTaskCancellation: async () => evidence }, id, identity),
+        readTask: async () => ({ localState: 'received', seq: 1 }),
+        hasTaskCancellation: (id, offerSeq) => hasTaskCancellation({ readTaskCancellation: async () => evidence }, id, offerSeq, identity),
         unconfirmedTerminal: async () => undefined,
       });
       await expect(r.wait(taskId)).resolves.toEqual({ terminal: 'cancelled', delivery: 'not-required', disposal: 'none' });
@@ -497,12 +525,14 @@ describe('Daemon.whenTaskSettled', () => {
       ...[
         encodeEnvelope(createEnvelope('task.cancel', { reason: 'cancelled' }, { taskId: 'other', seq: 2 })),
         encodeEnvelope(createEnvelope('task.started', {}, { taskId })),
+        // A pre-cancel at or below the offer sequence is not cancellation authority for that offer.
+        encodeEnvelope(createEnvelope('task.cancel', { reason: 'cancelled' }, { taskId, seq: 1 })),
       ].map((wrongBytes) => ['binding', { ...evidence, bytes: wrongBytes, bytesHash: journalHash(wrongBytes) }] as const),
     ] as const)('rejects invalid %s evidence from an injected journal', async (_kind, record) => {
       const r = new TaskSettlementRegistry();
       r.bindJournal({
-        readTask: async () => ({ localState: 'received' }),
-        hasTaskCancellation: (id) => hasTaskCancellation({ readTaskCancellation: async () => record }, id, identity),
+        readTask: async () => ({ localState: 'received', seq: 1 }),
+        hasTaskCancellation: (id, offerSeq) => hasTaskCancellation({ readTaskCancellation: async () => record }, id, offerSeq, identity),
         unconfirmedTerminal: async () => undefined,
       });
       await expect(r.wait(taskId)).rejects.toThrow(/identity mismatch|hash mismatch|cancellation binding/);
@@ -544,7 +574,7 @@ describe('Daemon.whenTaskSettled', () => {
       let reads = 0;
       const r = new TaskSettlementRegistry();
       r.bindJournal({
-        readTask: async () => { reads += 1; return localState === undefined ? undefined : { localState }; },
+        readTask: async () => { reads += 1; return localState === undefined ? undefined : { localState, seq: 1 }; },
         hasTaskCancellation: async () => false,
         unconfirmedTerminal: async () => undefined,
       });
