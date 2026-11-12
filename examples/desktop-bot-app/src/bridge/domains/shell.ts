@@ -11,23 +11,26 @@ import type { Move } from '../../recovery/stores.ts';
 export interface ShellView {
   /** Main's last view of the Host; null until the first Host state arrived. */
   readonly host: SupervisedHostState | null;
-  /** The complete snapshot this app version wrote before an update, which restore puts back; null when there is none. */
+  /** The complete snapshot this app version wrote before an update, which restore puts back while the Host is stopped; null when there is none. */
   readonly restore: { readonly version: string } | null;
+  /** Why the snapshot could not be read; the Host state above still holds. */
+  readonly restoreError: string | null;
 }
 
 export interface ShellMethods {
   'shell.state': { params: undefined; result: ShellView };
   /**
-   * Stops the Host, moves the current stores aside (never deleting them), copies the
-   * snapshot of this app version back and relaunches the app. Refused without a
-   * complete snapshot of this version.
+   * Offered only while the Host is stopped: stops it, moves the current stores aside
+   * (never deleting them), copies the snapshot of this app version back and relaunches
+   * the app. Refused without a complete snapshot of this version, or while another
+   * recovery action runs.
    */
   'shell.restore': { params: undefined; result: { asidePath: string } };
   /**
    * Offered only while the Host is stopped on a refused store: stops the Host, moves
    * the SDK store, the Host stores (with their snapshots) and the Agent homes aside,
    * clears the old device enrollment, and relaunches the app, which pairs a new
-   * device. A refusal moves everything back.
+   * device. A refusal moves everything back. Refused while another recovery action runs.
    */
   'shell.startFresh': { params: undefined; result: { moved: readonly Move[] } };
 }

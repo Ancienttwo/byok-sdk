@@ -77,4 +77,17 @@ describe('snapshotStores', () => {
     expect(await readFile(path.join(root, 'store', 'device.json'), 'utf8')).toBe('newer');
     expect(await readdir(root)).toEqual(['app', 'store']);
   });
+
+  it('moves everything back when the last rename fails after the staged copies took their places', async () => {
+    const target = await snapshotStores('2.0.0');
+    // A snapshot whose host copy holds a non-empty snapshots directory blocks moving the real snapshots back in.
+    await write(path.join(target, 'host', 'snapshots', 'stray'), 'x');
+    await write(path.join(root, 'store', 'device.json'), 'newer');
+    await expect(restoreSnapshot(layout(), '2.0.0', 's')).rejects.toThrow();
+    expect(await readFile(path.join(root, 'store', 'device.json'), 'utf8')).toBe('newer');
+    expect(await readFile(path.join(root, 'app', 'host', 'settings.json'), 'utf8')).toBe('host');
+    expect(await completeSnapshot(layout(), '2.0.0')).toBe(target);
+    expect((await readdir(root)).sort()).toEqual(['app', 'store']);
+    expect((await readdir(path.join(root, 'app'))).sort()).toEqual(['host']);
+  });
 });

@@ -186,4 +186,13 @@ describe('desktop Host composition', () => {
     expect(second.daemon.status().deviceId).not.toBe(firstDevice);
     await second.close();
   });
+
+  it('starts fresh without an SDK store: the Host stores move aside and nothing is cleared', async () => {
+    await makeRoot();
+    await mkdir(path.join(root, 'home', 'host'), { recursive: true });
+    await writeFile(path.join(root, 'home', 'host', 'settings.json'), '{}');
+    const layout = { storeDir: path.join(root, 'store'), scratchRoot: { path: path.join(root, 'store', 'tmp') }, hostStorageRoot: path.join(root, 'home') };
+    const moved = await startFresh({ layout, productId: 'byok-desktop-test', stamp: 'c', deviceCredentials: new InMemoryDeviceCredentialBackend() });
+    expect(moved.map(move => path.relative(root, move.to))).toEqual([path.join('home', 'host.aside-c')]);
+  });
 });

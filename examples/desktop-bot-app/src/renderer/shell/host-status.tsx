@@ -38,90 +38,62 @@ export function HostStatus(props: { view?: ShellView; error?: string }) {
   return <p className="shell-host" data-error={state === 'stopped' || state === 'failed' || undefined}>{props.view ? describe(props.view.host) : 'Host …'}</p>;
 }
 
-/** Puts the snapshot this version wrote before an update back; the app restarts afterwards. */
-function RestoreAction(props: { version: string }) {
+/** One recovery action at a time in the panel: while one runs, every action button is disabled. */
+interface ActionProps { readonly busy: boolean; readonly setBusy: (busy: boolean) => void }
+
+/** An action that asks first, runs one bridge call, and shows its failure; on success the app restarts. */
+function ConfirmedAction(props: ActionProps & { label: string; confirm: string; explanation: string; method: 'shell.restore' | 'shell.startFresh'; failure: string }) {
   const [confirming, setConfirming] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const run = async () => {
-    setBusy(true);
+    props.setBusy(true);
     try {
-      await window.byok.call('shell.restore', undefined);
+      await window.byok.call(props.method, undefined);
     } catch (failure) {
       setError((failure as Error).message);
-      setBusy(false);
+      props.setBusy(false);
     }
   };
   return (
     <div className="shell-action">
-      {!confirming && <button type="button" onClick={() => setConfirming(true)}>Restore data of version {props.version}</button>}
+      {!confirming && <button type="button" disabled={props.busy} onClick={() => setConfirming(true)}>{props.label}</button>}
       {confirming && (
         <>
-          <p>The app stops, moves the current data aside (nothing is deleted), puts back the copy version {props.version} kept before its update, and restarts.</p>
-          <button type="button" disabled={busy} onClick={() => void run()}>Restore and restart</button>
-          <button type="button" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
+          <p>{props.explanation}</p>
+          <button type="button" disabled={props.busy} onClick={() => void run()}>{props.confirm}</button>
+          <button type="button" disabled={props.busy} onClick={() => setConfirming(false)}>Cancel</button>
         </>
       )}
-      {error !== undefined && <p className="shell-error" role="alert">Restore failed: {error}</p>}
+      {error !== undefined && <p className="shell-error" role="alert">{props.failure}: {error}</p>}
     </div>
   );
 }
 
-/** Start fresh after a refused store: the stores move aside, the old device enrollment is cleared, the app restarts as a new device. */
-function StartFreshAction() {
-  const [confirming, setConfirming] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const run = async () => {
-    setBusy(true);
-    try {
-      await window.byok.call('shell.startFresh', undefined);
-    } catch (failure) {
-      setError((failure as Error).message);
-      setBusy(false);
-    }
-  };
-  return (
-    <div className="shell-action">
-      {!confirming && <button type="button" onClick={() => setConfirming(true)}>Start fresh</button>}
-      {confirming && (
-        <>
-          <p>
-            The app stops and moves its data aside, next to where it was (nothing is deleted). It removes this device&apos;s
-            enrollment and restarts as a new device with no Bots and no provider profiles. The moved data stays on disk, but it
-            cannot run again as this device.
-          </p>
-          <button type="button" disabled={busy} onClick={() => void run()}>Move the data aside and start fresh</button>
-          <button type="button" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
-        </>
-      )}
-      {error !== undefined && <p className="shell-error" role="alert">Start fresh failed: {error}</p>}
-    </div>
-  );
-}
-
-/**
- * While the Host is stopped: its reason and what the user can do from here (#1499 D4). While it runs on data
- * this version can restore from, the restore offer alone (#1499 D3: the build was reinstalled after an update).
- */
+/** Shown while the Host is stopped: its reason and what the user can do from here (#1499 D3, D4). */
 export function RecoveryPanel(props: { view: ShellView }) {
-  const { host, restore } = props.view;
-  if (host?.state === 'stopped') {
-    return (
-      <section className="shell-recovery" role="alert">
-        <h2>The Host stopped</h2>
-        <p>{host.reason}</p>
-        <DiagnosticsExport />
-        {restore && <RestoreAction version={restore.version} />}
-        {host.storeRefused && <StartFreshAction />}
-      </section>
-    );
-  }
-  if (host?.state !== 'running' || !restore) return null;
+  const [busy, setBusy] = useState(false);
+  const { host, restore, restoreError } = props.view;
+  if (host?.state !== 'stopped') return null;
   return (
-    <section className="shell-recovery">
-      <p>Version {restore.version} kept a copy of its data before it was updated.</p>
-      <RestoreAction version={restore.version} />
+    <section className="shell-recovery" role="alert">
+      <h2>The Host stopped</h2>
+      <p>{host.reason}</p>
+      <DiagnosticsExport />
+      {restoreError !== null && <p className="shell-error">Restore unavailable: {restoreError}</p>}
+      {restore && (
+        <ConfirmedAction busy={busy} setBusy={setBusy} method="shell.restore" label={`Restore data of version ${restore.version}`}
+          confirm="Restore and restart" failure="Restore failed"
+          explanation={`The app stops, renames the current data to *.aside-<time> next to where it was (nothing is deleted), puts back the copy version ${restore.version} kept before its update, and restarts.`} />
+      )}
+      {host.storeRefused && (
+        <ConfirmedAction busy={busy} setBusy={setBusy} method="shell.startFresh" label="Start fresh"
+          confirm="Move the data aside and start fresh" failure="Start fresh failed"
+          explanation={
+            'The app stops and renames its data folders to *.aside-<time> next to where they were; nothing is deleted. It removes '
+            + 'this device\'s enrollment and restarts as a new device with no Bots and no provider profiles. The app never opens the '
+            + 'moved data again by itself. Provider keys stay in the OS credential store; a new profile still needs its key entered.'
+          } />
+      )}
     </section>
   );
 }

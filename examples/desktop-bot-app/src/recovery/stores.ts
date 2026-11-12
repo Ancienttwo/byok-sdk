@@ -98,9 +98,10 @@ export async function restoreSnapshot(layout: StoreLayout, version: string, stam
   const host = hostStoresDir(layout);
   const staged = { store: `${layout.storeDir}.restore-${stamp}`, host: `${host}.restore-${stamp}` };
   // The staged directories are this action's own copies of the snapshot, never a store: a failure removes them.
+  // Retried, because Windows reports EBUSY while a scanner still holds a file just copied.
   const dropStaged = async () => {
-    await rm(staged.store, { recursive: true, force: true });
-    await rm(staged.host, { recursive: true, force: true });
+    await rm(staged.store, { recursive: true, force: true, maxRetries: 5 });
+    await rm(staged.host, { recursive: true, force: true, maxRetries: 5 });
   };
   const hostAside = `${host}.aside-${stamp}`;
   for (const dir of Object.values(staged)) if (existsSync(dir)) throw new Error(`${dir} already exists`);
@@ -117,7 +118,12 @@ export async function restoreSnapshot(layout: StoreLayout, version: string, stam
       await moveBack(done, error);
     }
   } catch (error) {
-    await dropStaged();
+    // The action's own failure (and any store still aside) is what the user needs; a leftover staged copy is appended.
+    try {
+      await dropStaged();
+    } catch (cleanup) {
+      throw new Error(`${(error as Error).message}; the staged copy could not be removed: ${(cleanup as Error).message}`, { cause: error });
+    }
     throw error;
   }
   return hostAside;

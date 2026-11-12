@@ -197,15 +197,16 @@ describe('desktop bridge', () => {
       child.stdin.on('finish', () => { stdout.end(`${line}\n`); events.emit('exit', 1); });
       return child as never;
     };
-    const handlers = shellHandlers({
+    const deps: Parameters<typeof shellHandlers>[0] = {
       layout: { storeDir: '/nowhere/store', scratchRoot: { path: '/nowhere/store/tmp' }, hostStorageRoot: '/nowhere/home' },
       version: '1.0.0', hostState: () => state, now: () => new Date(0),
       stopHost: async () => { calls.push('stop'); },
       spawnHostCommand: args => { calls.push(args.join(' ')); return receipt(JSON.stringify({ ok: false, code: 'store_not_bound', message: 'not bound', movedBack: true })); },
       relaunch: failure => { calls.push(`relaunch ${failure?.message ?? ''}`); },
-    });
+    };
+    const handlers = shellHandlers(deps);
 
-    expect(await handlers['shell.state'](undefined)).toEqual({ host: state, restore: null });
+    expect(await handlers['shell.state'](undefined)).toEqual({ host: state, restore: null, restoreError: null });
     await expect(handlers['shell.startFresh'](undefined)).rejects.toThrow('only while the Host is stopped on a refused store');
     state = { state: 'stopped', pid: 1, reason: 'halted', storeRefused: false };
     await expect(handlers['shell.startFresh'](undefined)).rejects.toThrow('only while the Host is stopped on a refused store');
@@ -216,5 +217,15 @@ describe('desktop bridge', () => {
     expect(calls[0]).toBe('stop');
     expect(calls[1]).toBe('byok-desktop-start-fresh 1970-01-01T00-00-00.000Z');
     expect(calls[2]).toMatch(/^relaunch Start fresh refused \(store_not_bound\)/);
+
+    // One recovery action at a time: a second one while the first still stops the Host is refused.
+    calls.length = 0;
+    let release: () => void = () => {};
+    const slow = shellHandlers({ ...deps, stopHost: () => new Promise<void>(resolve => { release = resolve; }) });
+    const first = slow['shell.startFresh'](undefined);
+    await expect(slow['shell.restore'](undefined)).rejects.toThrow('Another recovery action is running');
+    await expect(slow['shell.startFresh'](undefined)).rejects.toThrow('Another recovery action is running');
+    release();
+    await expect(first).rejects.toThrow('store_not_bound');
   });
 });
