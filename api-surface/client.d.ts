@@ -11318,7 +11318,12 @@ export interface ServiceInstallation {
      * repairs the service and checks health, as before; it does not prepare
      * stores or change earlier rollback snapshots. An allowed unmarked unit
      * is untouched until preparation succeeds; its live store owner causes
-     * `store_busy`. OS credentials are never cleared. `precheck` is required.
+     * `store_busy`. An owned marked unit without a current version is stopped
+     * before preparation and started unconditionally after preparation fails,
+     * once leases/gates are released and staging removed. OS credentials are
+     * never cleared. `precheck` is required.
+     * Once health succeeds, temporary snapshot cleanup is best effort; failure
+     * may leave `snapshots/.install-<uuid>` without rejecting the installation.
      */
     install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
     /**

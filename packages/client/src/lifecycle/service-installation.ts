@@ -171,7 +171,12 @@ export interface ServiceInstallation {
    * repairs the service and checks health, as before; it does not prepare
    * stores or change earlier rollback snapshots. An allowed unmarked unit
    * is untouched until preparation succeeds; its live store owner causes
-   * `store_busy`. OS credentials are never cleared. `precheck` is required.
+   * `store_busy`. An owned marked unit without a current version is stopped
+   * before preparation and started unconditionally after preparation fails,
+   * once leases/gates are released and staging removed. OS credentials are
+   * never cleared. `precheck` is required.
+   * Once health succeeds, temporary snapshot cleanup is best effort; failure
+   * may leave `snapshots/.install-<uuid>` without rejecting the installation.
    */
   install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
   /**
@@ -483,18 +488,28 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       // An install snapshot must not replace a same-id reinstall's earlier
       // upgrade snapshot, which still belongs to its previous version.
       const snapshotId = `.install-${randomUUID()}`;
+      const stopMarked = inspection.state === 'exact' || inspection.state === 'repairable';
       let prepared: Awaited<ReturnType<typeof prepareStores>> | undefined;
       if (installed === undefined) {
         try {
-          prepared = await prepareStores(id, snapshotId, true);
+          prepared = await prepareStores(id, snapshotId, true, stopMarked);
         } catch (error) {
-          // Nothing points at this version, even if stage reused its bytes.
+          // Preparation released its leases. Remove staging before
+          // restarting an owned marked unit, as upgrade does on refusal.
+          let failure = error;
           try {
             await fs.rm(path.join(versionsDir, id), { recursive: true, force: true });
           } catch (cleanup) {
-            throw new AggregateError([error, cleanup], 'Store preparation failed and the staged version could not be removed.');
+            failure = new AggregateError([error, cleanup], `${error instanceof Error ? error.message : 'Store preparation failed.'} The staged version could not be removed: ${path.join(versionsDir, id)}.`);
           }
-          throw error;
+          if (stopMarked) {
+            try {
+              await lifecycle.start();
+            } catch (restart) {
+              throw new AggregateError([failure, restart], `${failure instanceof Error ? failure.message : 'Store preparation failed.'} The marked service could not be restarted.`);
+            }
+          }
+          throw failure;
         }
       }
       let storesHeld = prepared !== undefined;
@@ -515,7 +530,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         health = { ok: false, cause };
       }
       if (health.ok) {
-        if (prepared !== undefined) await fs.rm(path.join(snapshotsDir, snapshotId), { recursive: true, force: true });
+        // Health commits the installation. Garbage collection cannot turn
+        // that success into a rejection with migrated stores still live.
+        if (prepared !== undefined) await fs.rm(path.join(snapshotsDir, snapshotId), { recursive: true, force: true }).catch(() => undefined);
         return;
       }
 
@@ -525,7 +542,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         { name: 'service unit and launcher', remove: async () => {
           // A first install that failed before activation has not touched
           // the allowed foreign unit. Never try to uninstall that unit.
-          if (activationAttempted || installed !== undefined) await held.uninstall();
+          if (activationAttempted || installed !== undefined || stopMarked) await held.uninstall();
         } },
         ...(prepared === undefined ? [] : [{ name: 'prepared store snapshot restoration', remove: async () => {
           const release = storesHeld ? prepared.release : await stopQuiescent(false);
@@ -668,10 +685,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   /** One candidate store preparation sequence for install and upgrade, retaining the quiescent leases until the caller switches. */
-  async function prepareStores(candidate: string, snapshotId: string, installing = false): Promise<{ stores: ServiceStoreVerdict[]; release: () => Promise<void> }> {
-    // A first install does not stop an absent or allowed-unmarked unit.
-    // A running older daemon must relinquish the same store lease instead.
-    const release = await stopQuiescent(!installing);
+  async function prepareStores(candidate: string, snapshotId: string, installing = false, stopService = !installing): Promise<{ stores: ServiceStoreVerdict[]; release: () => Promise<void> }> {
+    // A first install stops only a marked unit of our owner. Absent and
+    // allowed-unmarked units rely on the store lease alone.
+    const release = await stopQuiescent(stopService);
     let restoreOnFailure = false;
     try {
       let stores = await precheck(candidate);
@@ -687,7 +704,14 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       return { stores, release };
     } catch (error) {
       try {
-        if (restoreOnFailure) await restoreSnapshot(snapshotId);
+        if (restoreOnFailure) {
+          try {
+            await restoreSnapshot(snapshotId);
+          } catch (restoreError) {
+            if (installing) throw new AggregateError([error, restoreError], `Store preparation failed and its snapshot could not be restored; retained at ${path.join(snapshotsDir, snapshotId)}.`);
+            throw restoreError;
+          }
+        }
         if (installing) await fs.rm(path.join(snapshotsDir, snapshotId), { recursive: true, force: true });
       } finally {
         await release().catch(() => undefined);
@@ -802,7 +826,13 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       if (name !== current && name !== previous) await fs.rm(path.join(versionsDir, name), { recursive: true, force: true });
     }
     for (const name of await listDir(snapshotsDir)) {
-      if (name !== current) await fs.rm(path.join(snapshotsDir, name), { recursive: true, force: true });
+      if (name !== current) {
+        const removal = fs.rm(path.join(snapshotsDir, name), { recursive: true, force: true });
+        // Install garbage never participates in rollback; a persistent
+        // cleanup error must not reject a committed upgrade either.
+        if (name.startsWith('.install-')) await removal.catch(() => undefined);
+        else await removal;
+      }
     }
   }
 

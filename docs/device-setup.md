@@ -476,6 +476,13 @@ only when no version is current. A same-id reinstall remains a unit/launcher
 repair with its existing health check: it runs no precheck, snapshot or
 migration and preserves earlier upgrade rollback snapshots.
 
+With no current version, preparation stops an SDK-marked unit of the
+recorded owner (including a payload-less CLI service) before taking the
+daemon-store leases and gates. On any preparation failure before writing
+`current`, it releases the leases/gates, removes staging, then starts that
+unit again unconditionally, even if it was stopped before the call.
+Failures after preparation succeeds use the installation cleanup below.
+
 Preparation does not stop an absent unit or an allowed unmarked unit. It
 leases and gates the daemon stores instead. With `replaceUnmarked`, a
 running legacy agent that owns the same stores now causes `store_busy`;
@@ -496,9 +503,19 @@ leaves non-accepting verdicts restores the snapshot and throws
 precheck output retain upgrade's existing raw error or `precheck_failed`
 behavior after restoring the snapshot.
 
-Install uses a temporary snapshot and removes it after a healthy start or
-a successful failure restore. A failed stop or restore retains the snapshot
-for repair; `uninstall()` with the explicit root removes those artifacts.
+The temporary snapshot lives at
+`<installRoot>/snapshots/.install-<uuid>`. Once health passes, the install is
+committed and resolves even if removing this snapshot fails; a complete or
+partial directory may remain. There is no cleanup diagnostic/event hook.
+Rollback and recover select version-named snapshots, never `.install-*`
+(version ids must start with a letter or digit). Later upgrades retry
+removal of these temporary leftovers as best-effort pruning; version
+snapshots retain their strict removal errors. `uninstall()` removes the
+snapshot tree, but can still fail while access remains denied.
+
+A successful failure restore removes its temporary snapshot. A failed stop
+or restore retains it for repair; a failed migration restore names the
+retained snapshot path in the error.
 Unlike upgrade, install has no write-ahead receipt: if the process dies
 during migration, `recover()` does not complete that install. The next
 install prechecks the stores as migration left them. The Host must make

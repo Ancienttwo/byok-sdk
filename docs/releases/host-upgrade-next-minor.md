@@ -13,6 +13,12 @@ succeeds. Preparation runs only without a current version; same-id
 reinstall remains the #1966 repair/health path and does not precheck,
 snapshot or migrate, preserving earlier rollback snapshots.
 
+An SDK-marked unit of the recorded owner with no current version, such as
+a payload-less CLI service, is stopped before preparation takes its store
+leases. On any preparation failure before writing `current`, leases/gates
+are released, staging is removed, then the unit is started unconditionally,
+even if it was previously stopped. Later failures use #1966 cleanup.
+
 An absent unit and an unmarked unit allowed by `replaceUnmarked` are not
 stopped during preparation. The store leases establish quiescence. A
 running legacy agent on those stores now makes `install(..., {
@@ -33,10 +39,16 @@ remain unchanged in both paths, after restoring the snapshot.
 
 After successful preparation, a failed installation or health check
 removes its installation artifacts and restores the prepared stores. OS
-credentials are never cleared. The temporary install snapshot is removed
-after a healthy start or successful failure restore. A failed stop or
-restore retains it for repair; an installation constructed with the explicit
-root can remove it through `uninstall()`. Install has no write-ahead receipt
+credentials are never cleared. After health succeeds, installation is
+committed: failure to remove its temporary
+`<installRoot>/snapshots/.install-<uuid>` does not reject the install. No
+existing diagnostic/event hook reports cleanup, so inspect that path if
+cleanup matters. Rollback/recover never select `.install-*`; later upgrade
+pruning retries these directories best effort while keeping version
+snapshot cleanup strict. Uninstall still reports failure if denied access
+prevents removal. A successful failure restore removes its temporary
+snapshot; a failed stop or restore retains it for repair. Failed migration
+restoration names that retained path in the error. Install has no write-ahead receipt
 for process death during migration: the next install prechecks the stores
 as they remain, and the Host must make `migrate` safe to run again. Adding
 an install receipt is outside this change.
