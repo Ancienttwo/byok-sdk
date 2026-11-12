@@ -447,17 +447,16 @@ export class ClaudeAdapter implements RuntimeAdapter {
       // `--input-format stream-json` takes the first turn's instruction on
       // stdin, as every follow-up: one send path. Claude's `system/init`
       // after it carries the session id.
-      const prompted = await Promise.race([opened.raw.prompt(startInput.instruction), cancelled]);
-      if (prompted.response.body.kind !== 'accepted') {
-        throw new RuntimeExecutionFailure({
-          phase: 'start', retry: 'retryable',
-          reason: `claude initial instruction transport failed: ${prompted.response.body.reason ?? prompted.response.body.kind}`,
-          failure: opened.startupExit(),
-        });
-      }
-
       let sessionRef: string;
       try {
+        const prompted = await Promise.race([opened.prompt(startInput.instruction), cancelled]);
+        if (prompted.response.body.kind !== 'accepted') {
+          throw new RuntimeExecutionFailure({
+            phase: 'start', retry: 'retryable',
+            reason: `claude initial instruction transport failed: ${prompted.response.body.reason ?? prompted.response.body.kind}`,
+            failure: opened.startupExit(),
+          });
+        }
         // Claude reports its real `session_id` on the first `system/init`,
         // resume or fresh alike. An unresolvable `--resume` target never
         // emits one and exits: fail closed, never a fabricated sessionRef.
@@ -758,7 +757,7 @@ class ClaudeSession implements Session {
     let refusal: unknown;
     try {
       this.native?.beginTurn();
-      let prompted = await this.stream.raw.prompt(task.instruction);
+      let prompted = await this.stream.prompt(task.instruction);
       if (prompted.response.body.code === 'busy') prompted = await this.stream.queue(task.instruction);
       if (prompted.response.body.kind === 'accepted') return;
       refusal = prompted.response.body;

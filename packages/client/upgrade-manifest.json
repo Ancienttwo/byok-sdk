@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "b18b69628849689a6d3298654f033a83e4e4f371bf53bbd8a5ccf6f36a277772"
+    "snapshotSha256": "484f8d47d6c18cce67ffbc5bc576b1e9e72b18c69a6af55b432b9df203212c03"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,15 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "service-install-health-check",
+      "impact": "breaking",
+      "summary": "ServiceInstallation.install now runs the upgrade health check after installing and starting, using healthTimeoutMs. A failed first install or same-id reinstall removes the unit, launcher, current pointer, installation record and staged version directory and throws the new ServiceInstallationErrorCode install_health_check_failed with the original error as cause. Installation write and activation failures take the same cleanup path. Install enforces the health-check wait deadline even for a check that ignores abort. Its clock starts after start returns; unit writes, activation, start and cleanup stop are outside it and have no time bound today (#1971). Ownership and foreign-unit refusals happen before any installation write; later typed failures take the same cleanup path. Removal failures retain both errors in an AggregateError cause and name remaining artifacts. A failed reinstall after an upgrade leaves prior versions and rollback artifacts; use uninstall with an explicit installRoot or reinstall into the same root before CLI uninstall. Host and daemon stores and OS credentials are preserved. Before pairing, enable serviceEnrollment or supply a healthCheck; otherwise pair first. Upgrade error behavior is unchanged (#1966).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#service-install-requires-a-healthy-start",
+      "items": [
+        "export:@byok-sdk/client#ServiceInstallationErrorCode"
+      ]
+    },
     {
       "id": "opencode-go-keys-store",
       "impact": "breaking",
@@ -672,7 +681,6 @@
         "export:@byok-sdk/bot-collaboration/testing#FINAL_BODY",
         "export:@byok-sdk/bot-collaboration/testing#HomeCalls",
         "export:@byok-sdk/bot-collaboration/testing#HomeSubject",
-        "export:@byok-sdk/bot-collaboration/testing#InMemoryDeviceCredentials",
         "export:@byok-sdk/bot-collaboration/testing#LTestHost",
         "export:@byok-sdk/bot-collaboration/testing#OccurrenceRow",
         "export:@byok-sdk/bot-collaboration/testing#RETENTION_NOW",
@@ -2134,11 +2142,6 @@
       "entry": "bot-collaboration-package"
     },
     {
-      "item": "export:@byok-sdk/bot-collaboration/testing#InMemoryDeviceCredentials",
-      "change": "added",
-      "entry": "bot-collaboration-package"
-    },
-    {
       "item": "export:@byok-sdk/bot-collaboration/testing#LTestHost",
       "change": "added",
       "entry": "bot-collaboration-package"
@@ -2532,6 +2535,11 @@
       "item": "export:@byok-sdk/client#SdkHostingOptions",
       "change": "added",
       "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
+      "change": "changed",
+      "entry": "service-install-health-check"
     },
     {
       "item": "export:@byok-sdk/client#ServiceInstallationOptions",

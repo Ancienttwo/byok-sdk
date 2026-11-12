@@ -16,7 +16,7 @@ K8 is a dependency, not code you copy: you take its fixes by bumping the version
 
 - `@byok-sdk/bot-collaboration`: `BotCollaboration`, `teamSnapshot` and `TeamModeError`, `createBotPersonaProjection`, `botCompactVeto`, and the message types.
 - `./host-kit`: Host adapter types and `historyRowFromTurn`, `RetentionRefused`.
-- `./testing`: tests only. The synthetic `ResultStubAdapter` and the in-memory `InMemoryDeviceCredentials`.
+- `./testing`: tests only. The synthetic `ResultStubAdapter`. Import `InMemoryDeviceCredentialBackend` from `@byok-sdk/client/testing` and inject it as `deviceCredentials` into the daemon. A test using `openLTestHost` must also pass `deviceCredentials: new InMemoryDeviceCredentialBackend()`; that fixture supplies no default.
 - `./rules`: the app does not import it.
 
 Import only from these entries: a deep import into the package's files is not part of its contract.
