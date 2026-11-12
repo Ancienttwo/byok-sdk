@@ -2088,14 +2088,17 @@ registry façade, with no copied parser or session-state mutation. Private
 imports, upstream patches, copied provider serializers or Session core, and
 global monkey-patches remain forbidden.
 
-Every SDK Pi RPC session answers Pi's `cache_warming_decision` with `stop`
-while the session is idle. Pi 1.5.1 defaults `cacheWarming` to `"idle"`,
-which re-sends the last request for up to 30 minutes after a run settled;
-that spend is invisible to the Host, so an SDK session warms its prompt
-cache at most during an active run. Under `agentUserContext: 'inherit'` a
-device `"off"` keeps warming off; under `excluded` the settings are in memory
-and do not read the device file. A pi-subagents child is disposed when its
-run ends, and `AgentSession.dispose()` cancels its warmer.
+Every SDK Pi RPC session caps its settings getter at Pi's native `"streaming"`
+cache-warming mode, preserving `"off"` without rewriting device settings. Pi
+cancels the warmer at settlement and revalidates pending decisions before
+dispatch, so a late `"warm"` answer cannot send a refresh after settlement.
+Pi 1.5.1 defaults `cacheWarming` to `"idle"`, which re-sends the last request
+for up to 30 minutes after a run settled; that spend is invisible to the Host,
+so an SDK session warms its prompt cache at most during an active run. Under
+`agentUserContext: 'inherit'` a device `"off"` keeps warming off; under
+`excluded` the settings are in memory and do not read the device file. A
+pi-subagents child is disposed when its run ends, and
+`AgentSession.dispose()` cancels its warmer.
 
 Upstream RAFT also embeds the Pi SDK and inherits the user's agent directory.
 It does not run the user's installed pi CLI (RAFT mirror commit
@@ -4080,7 +4083,7 @@ Pi 1.4.0 ruling (2026-10-24, requested by the owner: 「你来并行开一个PR�
 
 Pi 1.5.0 ruling (2026-11-03, requested by the owner, who ruled E1–E7 as recommended in `docs/researches/2026-11-03-pi-1.5.0-upgrade.md`): all ten official packages are pinned at exactly 1.5.0 (upstream commit `f9a26365568127461c47a07a37dcb42c140a3ac5`, closureDigest `9c94eaec01a9b7054843c0780a553d0c670a03f38d2b7d91fb6702835cbcf4b8`); the change is breaking and ships in a MINOR. E1: pi-durable 1.5.0 removed its event stream, so both durable lanes read `Conversation.watch()` and the `pi.live` document; the Host event contract is unchanged. E2: opening a replica migrates `pi.live` to v3, `pi.tool` to v3 and `pi.generation` to v2, which a 0.36.0 build cannot open, so a deployment cannot roll back past this release. E3: a model request in flight when the host stopped is not sent again; with retry off the run ends unanswered with reason `interrupted`, which the client durable lane reports as `runtime_exited` (`durable runtime was interrupted during a model request`) and cloud-do as `CLOUD_EXECUTION_INTERRUPTED`. E4: progress reaches Storage at the upstream default `progress.persistWithinMs` of 1,000 ms; watches see it at once. E5: tool arguments are validated by pi-schema, which coerces them first and words its messages differently; `CloudToolDefinition.parameters` is pi-schema-typed, and pi-ai no longer exports `Type`, so a Host builds schemas with `Type` from `typebox` or with pi-schema. E6: pi-schema joins the provenance record and `PI_RUNTIME_CLOSURE` as an indirect package, like pi-telemetry. E7: rpiv-todo's `tool/types.ts` defines `StringEnum` locally with pi-ai 1.4.0's TypeBox implementation (same schema), recorded in its PROVENANCE and source manifest. The closureDigest change makes a preparation compiled for 1.4.0 decline with `preparation_runtime_identity_mismatch`; prepare it again. The pinned keys catalog follows pi-ai 1.5.0, and 30 entries it admitted before return `not_in_catalog`.
 
-Pi 1.5.2 ruling (2026-11-11, joint decision of the orchestrator and the advisor on [#1864](https://github.com/Ancienttwo/byok-sdk/issues/1864)): all ten official packages are pinned at exactly 1.5.2 (upstream commit `b4afdddf44e059c67ccf5097e5317d913521b470`, closureDigest `5b49e488317320fd0fbaf2a452b2d6f1455e40a2522c16e3e87b85d43daca603`). pi-durable 1.5.2 keeps persisted state compatible in both directions: `storage/sqlite/migrations.js` and `schema.js` are byte-identical to 1.5.0, `documents.js` changes only its `copyJson` import (chord root to `chord/json`), the SQLite row encoding is the same, and the document versions are unchanged (`pi.live` v3). The only new persisted field, `agent.compaction` (per-conversation compaction settings from `configure({ compaction })`), is optional and the SDK never sets it. Chord 1.5.1 moved v1 off the package root; the SDK imports only `chord/context` and `chord/json`. Every SDK Pi RPC session answers `cache_warming_decision` with `stop` while idle (Pi 1.5.1 defaults `cacheWarming` to `"idle"`).
+Pi 1.5.2 ruling (2026-11-11, joint decision of the orchestrator and the advisor on [#1864](https://github.com/Ancienttwo/byok-sdk/issues/1864)): all ten official packages are pinned at exactly 1.5.2 (upstream commit `b4afdddf44e059c67ccf5097e5317d913521b470`, closureDigest `5b49e488317320fd0fbaf2a452b2d6f1455e40a2522c16e3e87b85d43daca603`). pi-durable 1.5.2 keeps persisted state compatible in both directions: `storage/sqlite/migrations.js` and `schema.js` are byte-identical to 1.5.0, `documents.js` changes only its `copyJson` import (chord root to `chord/json`), the SQLite row encoding is the same, and the document versions are unchanged (`pi.live` v3). The only new persisted field, `agent.compaction` (per-conversation compaction settings from `configure({ compaction })`), is optional and the SDK never sets it. Chord 1.5.1 moved v1 off the package root; the SDK imports only `chord/context` and `chord/json`. Every SDK Pi RPC session caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings (Pi 1.5.1 defaults `cacheWarming` to `"idle"`). Pi cancels the warmer at settlement and revalidates pending decisions before dispatch.
 
 Exactness of the direct pins has three independent checks: bun.lock exact versions and sha512 integrity under frozen install (the root `overrides` also hold the repo's own install of the indirect packages at the pin); the build entry check that each installed direct package is at the pin; release-pack and registry-readback isolated installs, which require the direct pins with the locked integrities and prove the coding agent against its official tarball. The indirect packages are read, not gated: the release gates log their installed version, and input preparation does not read them. The SDK does not attest the Pi executable at launch (ADR-037).
 
