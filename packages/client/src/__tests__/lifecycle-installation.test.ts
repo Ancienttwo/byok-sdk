@@ -192,7 +192,15 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     // A same-id reinstall must confirm health too; another version must be upgraded.
     await installation.install(await payload('1.0.0'));
     expect(events).toEqual(['install', 'start', 'health 1.0.0', 'install', 'start', 'health 1.0.0']);
-    await expect(installation.install(await payload('2.0.0'))).rejects.toMatchObject({ code: 'installation_exists' });
+    const refused = await payload('2.0.0');
+    await expect(installation.install(refused)).rejects.toMatchObject({ code: 'installation_exists' });
+    expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual(['1.0.0']);
+    expect(await pointer('current')).toBe('1.0.0');
+    expect(await readServiceInstallationRecord(storeDir)).toEqual({ format: 'byok-service-installation', version: 1, installRoot });
+    // A corrected payload with the refused id can still be upgraded later.
+    await installation.upgrade(await payload('2.0.0', { 'host.js': '// corrected 2.0.0' }));
+    expect(await pointer('current')).toBe('2.0.0');
+    expect(await fs.readFile(path.join(installRoot, 'versions', '2.0.0', 'host.js'), 'utf8')).toBe('// corrected 2.0.0');
   });
 
   it.each(['first install', 'same-id reinstall', 'activation failure', 'typed activation failure'])('%s removes installation artifacts when startup fails, preserving stores (#1966)', async (mode) => {

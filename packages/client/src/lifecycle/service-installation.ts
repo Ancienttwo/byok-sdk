@@ -411,8 +411,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   /** Copies the payload into `versions/<id>`, checking every file against the manifest. Returns the id. */
-  async function stage(payloadDir: string): Promise<string> {
-    const { manifest, bytes } = await readPayload(payloadDir);
+  async function stage(payloadDir: string, { manifest, bytes }: Awaited<ReturnType<typeof readPayload>>): Promise<string> {
     const id = manifest.id;
     const target = path.join(versionsDir, id);
     if (await exists(target)) {
@@ -469,8 +468,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         throw new ServiceUnitError('service_unit_unmarked');
       }
       const installed = await currentVersion();
-      const id = await stage(payloadDir);
-      if (installed !== undefined && installed !== id) throw new ServiceInstallationError('installation_exists');
+      const payload = await readPayload(payloadDir);
+      if (installed !== undefined && installed !== payload.manifest.id) throw new ServiceInstallationError('installation_exists');
+      const id = await stage(payloadDir, payload);
       let health: Awaited<ReturnType<typeof startHealthy>>;
       try {
         await setPointer('current', id);
@@ -742,7 +742,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       await refusePending();
       const from = await currentVersion();
       if (from === undefined) throw new ServiceInstallationError('installation_absent');
-      const to = await stage(payloadDir);
+      const to = await stage(payloadDir, await readPayload(payloadDir));
       if (to === from) throw new ServiceInstallationError('version_current');
       const previous = await readPointer('previous');
       const kept = previous === undefined ? {} : { previous };
