@@ -74,7 +74,15 @@ export async function runCustody(input: Readable, keysDb: string, secretStore: S
   try {
     switch (request.op) {
       case 'list': return { statuses: await registry.list() };
-      case 'configure': return { status: await registry.configure(request.configuration, request.secret) };
+      case 'configure': {
+        // A profile the store does not hold brings its own secret. The OS store may still hold one under the same ref,
+        // left by stores that start fresh moved aside, and that secret belongs to the old profile, not this one.
+        const ref = ProviderProfileRefSchema.safeParse(request.configuration.profile_ref);
+        if (request.secret === undefined && request.configuration.auth_mode !== 'none' && ref.success && await registry.get(ref.data) === undefined) {
+          throw new CustodyError('custody_request_invalid', 'A new provider profile needs its secret');
+        }
+        return { status: await registry.configure(request.configuration, request.secret) };
+      }
       case 'replace_secret': return { status: await registry.replaceSecret(request.profileRef, request.secret) };
     }
   } finally {

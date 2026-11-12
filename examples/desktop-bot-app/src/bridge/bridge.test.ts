@@ -4,11 +4,12 @@ import { createInterface } from 'node:readline';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { HostProcess, type SupervisedHostState } from '../main/host-process.ts';
+import { HostProcess } from '../main/host-process.ts';
+import { shellHandlers } from '../main/recovery.ts';
 import { coalesceStateHints } from '../main/state-hint.ts';
 import { BridgeClient, type HostChild } from './client.ts';
 import { rendererBridge } from '../renderer/bridge.ts';
-import { BRIDGE_VERSION, BridgeError, encodeMessage, type BridgeIpc } from './protocol.ts';
+import { BRIDGE_VERSION, BridgeError, encodeMessage, type BridgeIpc, type SupervisedHostState } from './protocol.ts';
 import { CustodyError } from '../custody/protocol.ts';
 import { createRendererRouter, isAppRefusal, settleCall } from './route.ts';
 import { serveBridge } from './server.ts';
@@ -184,5 +185,36 @@ describe('desktop bridge', () => {
     expect(hints).toBe(1);
     expect(await host.call('status', undefined)).toEqual({ state: 'running', pid: child.pid, activeWork: 2 });
     await host.stop();
+  });
+
+  it('offers start fresh only on a refused store, and relaunches after a refused clear with the stores back', async () => {
+    const calls: string[] = [];
+    let state: SupervisedHostState = { state: 'running', pid: 1, activeWork: 0 };
+    const receipt = (line: string) => {
+      const stdout = new PassThrough();
+      const events = new PassThrough();
+      const child = { stdin: new PassThrough(), stdout, once: (event: string, listener: (...args: unknown[]) => void) => { events.once(event, listener); return child; } };
+      child.stdin.on('finish', () => { stdout.end(`${line}\n`); events.emit('exit', 1); });
+      return child as never;
+    };
+    const handlers = shellHandlers({
+      layout: { storeDir: '/nowhere/store', scratchRoot: { path: '/nowhere/store/tmp' }, hostStorageRoot: '/nowhere/home' },
+      version: '1.0.0', hostState: () => state, now: () => new Date(0),
+      stopHost: async () => { calls.push('stop'); },
+      spawnHostCommand: args => { calls.push(args.join(' ')); return receipt(JSON.stringify({ ok: false, code: 'store_not_bound', message: 'not bound', movedBack: true })); },
+      relaunch: failure => { calls.push(`relaunch ${failure?.message ?? ''}`); },
+    });
+
+    expect(await handlers['shell.state'](undefined)).toEqual({ host: state, restore: null });
+    await expect(handlers['shell.startFresh'](undefined)).rejects.toThrow('only while the Host is stopped on a refused store');
+    state = { state: 'stopped', pid: 1, reason: 'halted', storeRefused: false };
+    await expect(handlers['shell.startFresh'](undefined)).rejects.toThrow('only while the Host is stopped on a refused store');
+    expect(calls).toEqual([]);
+
+    state = { state: 'stopped', pid: 1, reason: 'refused', storeRefused: true };
+    await expect(handlers['shell.startFresh'](undefined)).rejects.toThrow(/store_not_bound.*back where they were.*byok-agent doctor/);
+    expect(calls[0]).toBe('stop');
+    expect(calls[1]).toBe('byok-desktop-start-fresh 1970-01-01T00-00-00.000Z');
+    expect(calls[2]).toMatch(/^relaunch Start fresh refused \(store_not_bound\)/);
   });
 });

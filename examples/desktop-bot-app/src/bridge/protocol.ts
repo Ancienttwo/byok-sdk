@@ -10,8 +10,9 @@ import { ACTIVITY_DOMAIN, type ActivityMethods } from './domains/activity.ts';
 import { K8_DOMAIN, type K8Methods } from './domains/k8.ts';
 import { KEYS_DOMAIN, type KeysMethods } from './domains/keys.ts';
 import { SETTINGS_DOMAIN, type SettingsMethods } from './domains/settings.ts';
+import { SHELL_DOMAIN, type ShellMethods } from './domains/shell.ts';
 
-export const BRIDGE_VERSION = 1;
+export const BRIDGE_VERSION = 2;
 
 /** The ipcRenderer.invoke channel the preload forwards renderer calls on. */
 export const BRIDGE_IPC_CHANNEL = 'byok:bridge';
@@ -25,11 +26,19 @@ export const STATE_HINT_CHANNEL = 'byok:state-changed';
 /**
  * What the Host is doing. `stopped` is final for this Host process: a store
  * refused at start or a daemon halt, with its reason; main does not restart it.
+ * `storeRefused` marks a store the Host's precheck refused, the one stop the
+ * window offers to start fresh from.
  */
 export type HostState =
   | { readonly state: 'starting'; readonly pid: number }
   | { readonly state: 'running'; readonly pid: number; readonly activeWork: number }
-  | { readonly state: 'stopped'; readonly pid: number; readonly reason: string };
+  | { readonly state: 'stopped'; readonly pid: number; readonly reason: string; readonly storeRefused: boolean };
+
+/** The Host's own state, or main's view while no Host answers: restarting after a crash, or failed for good. */
+export type SupervisedHostState =
+  | HostState
+  | { readonly state: 'restarting'; readonly inMs: number; readonly reason: string }
+  | { readonly state: 'failed'; readonly reason: string };
 
 /** The one Host-to-main push: the Host's state after every change. */
 export interface HostStateEvent { readonly event: 'state'; readonly state: HostState }
@@ -47,10 +56,10 @@ export interface CoreMethods {
  * fails to compile, so no two modules can declare one name.
  */
 export interface BridgeMethods extends CoreMethods, Prefixed<K8Methods, 'k8'>, Prefixed<ActivityMethods, 'activity'>,
-  Prefixed<SettingsMethods, 'settings'>, Prefixed<KeysMethods, 'keys'> {}
+  Prefixed<SettingsMethods, 'settings'>, Prefixed<KeysMethods, 'keys'>, Prefixed<ShellMethods, 'shell'> {}
 export type BridgeMethod = keyof BridgeMethods;
 
-const DOMAINS = [K8_DOMAIN, ACTIVITY_DOMAIN, SETTINGS_DOMAIN, KEYS_DOMAIN] as const;
+const DOMAINS = [K8_DOMAIN, ACTIVITY_DOMAIN, SETTINGS_DOMAIN, KEYS_DOMAIN, SHELL_DOMAIN] as const;
 
 /** The methods the renderer may call. Main answers {@link MAIN_METHODS} itself and forwards the rest to the Host. */
 export const RENDERER_METHODS = ['status', ...DOMAINS.flatMap(domain => domain.renderer), ...DOMAINS.flatMap(domain => domain.main)] as const satisfies readonly BridgeMethod[];

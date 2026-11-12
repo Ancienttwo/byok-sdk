@@ -117,7 +117,7 @@ function LoginItemSwitch(props: { state: Read<LoginItemView> | undefined; onChan
 }
 
 /** Writes the SDK's support bundle; the Host names the file and the renderer only shows where it went. */
-function DiagnosticsExport() {
+export function DiagnosticsExport() {
   const [result, setResult] = useState<Read<{ path: string }>>();
   const [busy, setBusy] = useState(false);
   const run = async () => {

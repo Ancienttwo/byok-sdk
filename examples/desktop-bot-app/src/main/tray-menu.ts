@@ -1,4 +1,4 @@
-import type { SupervisedHostState } from './host-process.ts';
+import type { SupervisedHostState } from '../bridge/protocol.ts';
 
 export interface TrayActions { readonly showWindow: () => void; readonly quit: () => void }
 

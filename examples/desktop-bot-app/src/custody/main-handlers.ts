@@ -3,11 +3,12 @@ import type { MethodHandlers } from '../bridge/domain.ts';
 import type { KeysMethods } from '../bridge/domains/keys.ts';
 import { BridgeError } from '../bridge/protocol.ts';
 import { CUSTODY_COMMAND, CustodyError, type CustodyChange } from './protocol.ts';
-import { listFromCustody, submitToCustody, type CustodyChild } from './submit.ts';
+import type { CommandChild } from '../main/host-command.ts';
+import { listFromCustody, submitToCustody } from './submit.ts';
 
 export interface KeysMainDependencies {
   /** Spawns the Host executable with these arguments: dev runs the Host bundle under Node, a package runs the SEA. */
-  readonly spawnHostCommand: (args: readonly string[]) => CustodyChild;
+  readonly spawnHostCommand: (args: readonly string[]) => CommandChild;
   readonly callHost: (method: 'keys.profilesChanged', params: undefined) => Promise<null>;
 }
 

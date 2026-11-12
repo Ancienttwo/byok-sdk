@@ -1,13 +1,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { BridgeClient, type HostChild } from '../bridge/client.ts';
-import { BridgeError, type BridgeMethod, type BridgeMethods, type HostState } from '../bridge/protocol.ts';
-
-/** The Host's own state, or main's view while no Host answers: restarting after a crash, or failed for good. */
-export type SupervisedHostState =
-  | HostState
-  | { readonly state: 'restarting'; readonly inMs: number; readonly reason: string }
-  | { readonly state: 'failed'; readonly reason: string };
+import { BridgeError, type BridgeMethod, type BridgeMethods, type SupervisedHostState } from '../bridge/protocol.ts';
 
 export interface HostProcessOptions {
   /** Spawns one Host child with piped stdin and stdout. */

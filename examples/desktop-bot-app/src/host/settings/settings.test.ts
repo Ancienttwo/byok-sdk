@@ -60,7 +60,7 @@ describe('tray menu', () => {
     running[2]!.click!();
     expect(actions.showWindow).toHaveBeenCalledOnce();
     expect(actions.quit).toHaveBeenCalledOnce();
-    expect(trayMenu({ state: 'stopped', pid: 1, reason: 'store refused' }, actions, 'App')[1]!.label).toBe('Host stopped: store refused');
+    expect(trayMenu({ state: 'stopped', pid: 1, reason: 'store refused', storeRefused: true }, actions, 'App')[1]!.label).toBe('Host stopped: store refused');
     expect(trayMenu(undefined, actions, 'App')[1]!.label).toBe('Host starting');
     expect(trayMenu({ state: 'restarting', inMs: 1000, reason: 'Host exited with code 1' }, actions, 'App')[1]!.label).toBe('Host restarting: Host exited with code 1');
   });

@@ -1,12 +1,12 @@
 import { join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveHostLayout } from '@byok-sdk/client';
-import { app, BrowserWindow, ipcMain, net, powerSaveBlocker, protocol, session, shell, type IpcMainInvokeEvent, type WebFrameMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, net, powerSaveBlocker, protocol, session, shell, type IpcMainInvokeEvent, type WebFrameMain } from 'electron';
 import brand from '../../brand.config.ts';
-import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, STATE_HINT_CHANNEL, type BridgeMethods, type BridgeOutcome, type MainMethod } from '../bridge/protocol.ts';
+import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, STATE_HINT_CHANNEL, type BridgeMethods, type BridgeOutcome, type MainMethod, type SupervisedHostState } from '../bridge/protocol.ts';
 import { createRendererRouter, isAppRefusal, settleCall } from '../bridge/route.ts';
 import { createMainHandlers } from './domains.ts';
-import { HostProcess, spawnDevHost, spawnDevHostCommand, type SupervisedHostState } from './host-process.ts';
+import { HostProcess, spawnDevHost, spawnDevHostCommand } from './host-process.ts';
 import { spawnPackagedHost, spawnPackagedHostCommand } from './packaged-host.ts';
 import { coalesceStateHints } from './state-hint.ts';
 import { createAppTray } from './tray.ts';
@@ -65,9 +65,22 @@ const host = new HostProcess({
   },
 });
 
+const layout = resolveHostLayout({ productId: brand.productId, productName: brand.productName });
+
+/** After a recovery action the app restarts, so the new Host prechecks what the action left; a failure is shown first. */
+function relaunch(failure?: Error): void {
+  if (failure) dialog.showErrorBox('Recovery failed', `${failure.message}\n\nThe app restarts. Stores that were moved aside keep their data beside their directories (*.aside-*).`);
+  app.relaunch();
+  app.exit(0);
+}
+
 const route = createRendererRouter<BridgeMethods, MainMethod>({
   allowed: RENDERER_METHODS,
-  main: createMainHandlers({ callHost: (method, params) => host.call(method, params), spawnHostCommand: app.isPackaged ? spawnPackagedHostCommand : spawnDevHostCommand }),
+  main: createMainHandlers({
+    callHost: (method, params) => host.call(method, params),
+    spawnHostCommand: app.isPackaged ? spawnPackagedHostCommand : spawnDevHostCommand,
+    layout, version: app.getVersion(), hostState: () => lastState, stopHost: () => host.stop(), relaunch, now: () => new Date(),
+  }),
   host: (method, params) => host.call(method, params as never),
 });
 
@@ -129,7 +142,7 @@ app.on('web-contents-created', (_event, contents) => {
 
 // Chromium's own state moves under the host storage root, apart from the Host's stores in `<root>/host`.
 // It is set before the single-instance lock and before 'ready', which fix the userData directory.
-app.setPath('userData', join(resolveHostLayout({ productId: brand.productId, productName: brand.productName }).hostStorageRoot, 'shell'));
+app.setPath('userData', join(layout.hostStorageRoot, 'shell'));
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();

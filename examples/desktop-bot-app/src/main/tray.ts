@@ -1,6 +1,6 @@
 import { app, Menu, Tray, nativeImage } from 'electron';
 import type { LoginItemView } from '../bridge/domains/settings.ts';
-import type { SupervisedHostState } from './host-process.ts';
+import type { SupervisedHostState } from '../bridge/protocol.ts';
 import { trayMenu, type TrayActions } from './tray-menu.ts';
 
 /**

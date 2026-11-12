@@ -1,10 +1,8 @@
 /** The Host side of the settings bridge domain (`src/bridge/domains/settings.ts`). Owned by A5 #1809. */
-import { mkdir } from 'node:fs/promises';
-import path from 'node:path';
 import { BridgeError } from '../../bridge/protocol.ts';
 import type { SettingsMethods } from '../../bridge/domains/settings.ts';
 import type { HostDomain, HostContext } from '../domains.ts';
-import { deviceSettings } from './device.ts';
+import { deviceSettings, exportDiagnostics } from './device.ts';
 import { settingsFile, settingsStore, type DreamingSetting } from './store.ts';
 
 /** The renderer's params are the untrusted boundary: validate once here and pass the typed value on. */
@@ -19,7 +17,6 @@ function dreamingParams(params: unknown): DreamingSetting {
 }
 
 export async function createSettingsDomain(context: HostContext): Promise<HostDomain<SettingsMethods>> {
-  const hostDir = path.join(context.hostStorageRoot, 'host');
   const store = settingsStore(settingsFile(context.hostStorageRoot));
   // A damaged settings file stops the Host at start, not at the first read.
   await store.read();
@@ -29,13 +26,7 @@ export async function createSettingsDomain(context: HostContext): Promise<HostDo
       'settings.device': () => device.device(),
       'settings.get': () => store.read(),
       'settings.setDreaming': async params => store.setDreaming(dreamingParams(params)),
-      'settings.exportDiagnostics': async () => {
-        const directory = path.join(hostDir, 'diagnostics');
-        await mkdir(directory, { recursive: true, mode: 0o700 });
-        const file = path.join(directory, `support-bundle-${new Date().toISOString().replaceAll(':', '-')}.json`);
-        await device.exportDiagnostics(file);
-        return { path: file };
-      },
+      'settings.exportDiagnostics': () => exportDiagnostics(context.hostStorageRoot, context.daemonConfig),
     },
   };
 }

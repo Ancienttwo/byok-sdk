@@ -5,6 +5,7 @@ import { resolveHostLayout } from '@byok-sdk/client';
 import { app, dialog } from 'electron';
 import electronUpdater from 'electron-updater';
 import brand from '../../brand.config.ts';
+import { hostStoresDir, markSnapshotComplete, snapshotsDir } from '../recovery/stores.ts';
 
 export interface UpdaterOptions {
   /** Stops the Host; resolves once it has closed its stores. */
@@ -16,13 +17,15 @@ export interface UpdaterOptions {
  * can go back to this version with the data it wrote: the SDK store directory
  * (without its scratch root) and the Host's own stores (`<hostStorageRoot>/host`,
  * where src/host/compose.ts keeps them). Snapshots live in
- * `<hostStorageRoot>/host/snapshots/<version>`; only the latest is kept, and
- * older ones are removed after this one completed. Returns the snapshot directory.
+ * `<hostStorageRoot>/host/snapshots/<version>`. The completion marker is written
+ * last, so a failed copy stays partial and restore never offers it; only the
+ * latest complete snapshot is kept, and older ones are removed after the marker.
+ * Returns the snapshot directory.
  */
 export async function snapshotStores(version: string): Promise<string> {
   const layout = resolveHostLayout({ productId: brand.productId, productName: brand.productName });
-  const hostDir = path.join(layout.hostStorageRoot, 'host');
-  const snapshots = path.join(hostDir, 'snapshots');
+  const hostDir = hostStoresDir(layout);
+  const snapshots = snapshotsDir(layout);
   const target = path.join(snapshots, version);
   await rm(target, { recursive: true, force: true });
   await mkdir(target, { recursive: true, mode: 0o700 });
@@ -32,6 +35,7 @@ export async function snapshotStores(version: string): Promise<string> {
   for (const entry of await readdir(hostDir)) {
     if (entry !== 'snapshots') await cp(path.join(hostDir, entry), path.join(target, 'host', entry), { recursive: true });
   }
+  await markSnapshotComplete(target, version);
   for (const entry of await readdir(snapshots)) {
     if (entry !== version) await rm(path.join(snapshots, entry), { recursive: true, force: true });
   }
