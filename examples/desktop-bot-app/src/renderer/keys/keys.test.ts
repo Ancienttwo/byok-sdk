@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CustodyChange } from '../../custody/protocol.ts';
 import { BridgeCallError } from '../bridge.ts';
 import { Receipt } from './keys-section.tsx';
-import { storedProfile, submitModelRoute, submitReplaceSecret } from './submit.ts';
+import { settleEffects, storedProfile, submitModelRoute, submitReplaceSecret } from './submit.ts';
 
 const context = modelRouteContext();
 const changes: ModelRouteChange[] = [
@@ -63,5 +63,12 @@ describe('keys form submission', () => {
     const outcome = await submitReplaceSecret('zai-main', 'new-provider-key', submit);
     expect(submit).toHaveBeenCalledWith({ op: 'replace_secret', profileRef: 'zai-main', secret: 'new-provider-key' });
     expect(outcome).toEqual({ receipt: { profile_ref: 'zai-main', secret_configured: true } });
+  });
+
+  it('drops the form effects of a submission that settles after the selection changed, but still refreshes the list', () => {
+    const receipt = { receipt: { profile_ref: 'a' } as ProviderStatus };
+    expect(settleEffects(receipt, 3, 3)).toEqual({ show: true, resetForms: true, reload: true });
+    expect(settleEffects(receipt, 3, 4)).toEqual({ show: false, resetForms: false, reload: true });
+    expect(settleEffects({ refusal: { message: 'no' } }, 3, 4)).toEqual({ show: false, resetForms: false, reload: false });
   });
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ProviderStatus } from '@byok-sdk/keys';
 import {
   applyModelRouteChange, createModelRouteDraft, modelRouteContext, modelRouteView,
@@ -7,7 +7,7 @@ import {
 } from '@byok-sdk/keys/model-route';
 import { useConversation } from '../conversation/use-conversation.ts';
 import './keys.css';
-import { refusalOf, storedProfile, submitModelRoute, submitReplaceSecret, type Refusal, type SubmitOutcome } from './submit.ts';
+import { refusalOf, settleEffects, storedProfile, submitModelRoute, submitReplaceSecret, type Refusal, type SubmitOutcome } from './submit.ts';
 
 const ERROR_COPY: Readonly<Record<ModelRouteErrorCode, string>> = {
   required: 'Required.',
@@ -268,20 +268,24 @@ export function KeysSection() {
     setOutcome(undefined);
     setFormKey(value => value + 1);
   };
-  const onOutcome = (next: SubmitOutcome) => {
-    setOutcome(next);
-    if ('receipt' in next) {
+  const currentKey = useRef(formKey);
+  currentKey.current = formKey;
+  // `submittedKey` is the generation the submitting form was mounted with; its result may settle after the selection moved on.
+  const onOutcome = (next: SubmitOutcome, submittedKey: number) => {
+    const effects = settleEffects(next, submittedKey, currentKey.current);
+    if (effects.show) setOutcome(next);
+    if (effects.resetForms) {
       setEditing(null);
       setFormKey(value => value + 1);
-      reload();
     }
+    if (effects.reload) reload();
   };
 
   return (
     <div className="keys">
       <StoredList listed={listed} editing={editing?.profile_ref ?? null} onEdit={edit} onReload={reload} />
-      <RouteForm key={`route-${formKey}`} stored={editing} onOutcome={onOutcome} />
-      {editing !== null && editing.auth_mode !== 'none' && <ReplaceKeyForm key={`key-${formKey}`} stored={editing} onOutcome={onOutcome} />}
+      <RouteForm key={`route-${formKey}`} stored={editing} onOutcome={next => onOutcome(next, formKey)} />
+      {editing !== null && editing.auth_mode !== 'none' && <ReplaceKeyForm key={`key-${formKey}`} stored={editing} onOutcome={next => onOutcome(next, formKey)} />}
       {outcome && ('receipt' in outcome ? <Receipt status={outcome.receipt} /> : <RefusalNote refusal={outcome.refusal} />)}
       <section className="keys-models">
         <h2>Models Bots can use</h2>

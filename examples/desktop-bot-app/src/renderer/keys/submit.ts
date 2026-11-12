@@ -15,6 +15,18 @@ export interface Refusal { readonly code?: string; readonly message: string }
 /** What one submission shows: the custody receipt, or the refusal. */
 export type SubmitOutcome = { readonly receipt: ProviderStatus } | { readonly refusal: Refusal };
 
+/**
+ * What the section does with a settled submission. The list refresh follows every receipt; showing the outcome and
+ * resetting the forms only follow a submission from the form generation still mounted, so a result that settles after
+ * the selection changed never touches the new form.
+ */
+export function settleEffects(outcome: SubmitOutcome, submittedGeneration: number, currentGeneration: number):
+  { readonly show: boolean; readonly resetForms: boolean; readonly reload: boolean } {
+  const receipt = 'receipt' in outcome;
+  const current = submittedGeneration === currentGeneration;
+  return { show: current, resetForms: current && receipt, reload: receipt };
+}
+
 export function refusalOf(error: unknown): Refusal {
   if (error instanceof BridgeCallError) return { code: error.code, message: error.message };
   return { message: error instanceof Error ? error.message : String(error) };
