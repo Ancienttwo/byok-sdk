@@ -19,6 +19,7 @@ import { Arch } from 'electron-builder';
 import brand from './brand.config.ts';
 import manifest from './package.json' with { type: 'json' };
 import { codecFreeFfmpeg, packagedFfmpeg } from './scripts/package/ffmpeg.mjs';
+import { NOTICES_FILE } from './scripts/package/notices.mjs';
 import { flipAppFuses } from './src/main/fuses.ts';
 
 // Absolute paths: scripts/package/build.mjs runs electron-builder with the staged
@@ -58,7 +59,7 @@ export default {
   directories: { app: at('dist/package/stage/app'), output: at('dist/package/out'), buildResources: at('scripts/package') },
   asar: true,
   npmRebuild: false,
-  extraResources: [{ from: at('dist/package/stage/host'), to: 'host' }],
+  extraResources: [{ from: at('dist/package/stage/host'), to: 'host' }, { from: at('dist/package/stage', NOTICES_FILE), to: NOTICES_FILE }],
   afterPack,
   publish: feed ? [{ provider: 'generic', url: feed }] : null,
   mac: {

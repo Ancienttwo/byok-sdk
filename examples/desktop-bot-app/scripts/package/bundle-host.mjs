@@ -11,7 +11,7 @@
 // names the official Node binary a SEA is made from (default: this Node); some
 // package-manager builds omit the SEA fuse.
 import { execFileSync } from 'node:child_process';
-import { chmodSync, copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -60,8 +60,32 @@ export async function buildHostExecutable({ entry, format, executable }) {
   }
 }
 
+/** The Node binary a SEA is made from: SEA_NODE, or this Node. */
+export const seaNode = () => process.env.SEA_NODE ?? process.execPath;
+
+const NODE_LICENSE_START = 'Node.js is licensed for use as follows:';
+
+/**
+ * The LICENSE of the Node install that `binary` belongs to: beside the real binary
+ * (Windows) or one level up (Unix release layout). It must be Node's own LICENSE,
+ * which also carries the licenses of the code Node bundles.
+ */
+export function nodeLicenseFile(binary) {
+  const node = realpathSync(binary);
+  const licenseFile = [path.dirname(node), path.dirname(path.dirname(node))].map(dir => path.join(dir, 'LICENSE')).find(file => existsSync(file));
+  if (!licenseFile) throw new Error(`No LICENSE beside the SEA's Node ${node}; use an official Node release (SEA_NODE)`);
+  if (!readFileSync(licenseFile, 'utf8').startsWith(NODE_LICENSE_START)) throw new Error(`${licenseFile} is not Node's LICENSE`);
+  return licenseFile;
+}
+
+/** The SEA's Node runtime for the notices: its version and its install's LICENSE. */
+export function seaNodeLicense() {
+  const node = seaNode();
+  return { version: execFileSync(node, ['--version'], { encoding: 'utf8' }).trim(), licenseFile: nodeLicenseFile(node) };
+}
+
 async function injectSea(bundle, work, executable) {
-  const node = process.env.SEA_NODE ?? process.execPath;
+  const node = seaNode();
   if (!readFileSync(node).includes(SEA_FUSE)) throw new Error(`${node} has no SEA fuse; set SEA_NODE to an official Node binary`);
   const config = path.join(work, 'sea-config.json'), blob = path.join(work, 'sea.blob');
   writeFileSync(config, JSON.stringify({ main: bundle, output: blob, disableExperimentalSEAWarning: true }));
