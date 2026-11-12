@@ -671,7 +671,8 @@ export interface PreparedRuntimeOperation {
   }): Promise<RuntimeLaunchResources>;
   /**
    * Must resolve without waiting on anything a first-turn tool call produces.
-   * An adapter that breaks this fails at the startup deadline (the existing bound).
+   * The startup deadline bounds the normal start path. Incomplete-session close
+   * and memory-lane abort disposal (which awaits start) have no bound today.
    */
   start(input: RuntimeOperationStartInput): Promise<Session>;
 }

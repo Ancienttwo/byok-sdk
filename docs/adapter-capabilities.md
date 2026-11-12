@@ -9,8 +9,9 @@ they are not a second runtime-selection registry.
 ## Startup contract
 
 `PreparedRuntimeOperation.start()` must resolve without waiting on anything a
-first-turn tool call produces; an adapter that breaks this fails at the startup
-deadline (the existing bound).
+first-turn tool call produces. The startup deadline bounds the normal start
+path. Two disposal paths have no bound today: closing an incomplete session,
+and memory-lane abort disposal, which waits for start to return before disposal.
 
 ## Capability matrix
 
