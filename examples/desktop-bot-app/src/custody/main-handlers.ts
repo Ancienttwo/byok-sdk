@@ -13,7 +13,11 @@ export interface KeysMainDependencies {
 
 const HOST_NOT_SERVING: ReadonlySet<BridgeErrorCode> = new Set(['host_exited', 'unknown_method']);
 
-/** Reapplying the persisted catalog is idempotent; only the wait is bounded, never the saved key write retried. */
+/**
+ * Reapplying the persisted catalog is idempotent; only the wait is bounded, never the saved key write retried.
+ * A stopped Host serves no keys domain and loads the catalog from the store on its next start, so there is
+ * nothing to refresh; a running Host that fails the refresh still rejects.
+ */
 async function refreshProfiles(deps: KeysMainDependencies, saved: boolean): Promise<void> {
   let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -24,6 +28,8 @@ async function refreshProfiles(deps: KeysMainDependencies, saved: boolean): Prom
           `${saved ? 'The key change was saved' : 'Stored providers were read'}, but the Host has not confirmed its catalog update. Reload stored providers; do not repeat the save.`)), CUSTODY_DEADLINE_MS);
       }),
     ]);
+  } catch (error) {
+    if (!(error instanceof BridgeError && HOST_NOT_SERVING.has(error.code))) throw error;
   } finally {
     clearTimeout(deadline);
   }
@@ -57,12 +63,7 @@ export function keysMainHandlers(deps: KeysMainDependencies): MethodHandlers<Pic
     'keys.list': async params => {
       if (params !== undefined) throw new BridgeError('invalid_params', 'keys.list takes no params');
       const statuses = await listFromCustody(deps.spawnHostCommand([CUSTODY_COMMAND]));
-      try {
-        await refreshProfiles(deps, false);
-      } catch (error) {
-        // No running Host to reconcile: a stopped Host serves no keys domain, and the next start loads the catalog from the store.
-        if (!(error instanceof BridgeError && HOST_NOT_SERVING.has(error.code))) throw error;
-      }
+      await refreshProfiles(deps, false);
       return statuses;
     },
   };

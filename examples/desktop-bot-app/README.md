@@ -107,7 +107,8 @@ bridge and composes the Host after main's hello (`src/host/compose.ts`):
   `byok-profile`). The enabled profile is not read as a default. The catalog is built from
   the keys store at Host start and rebuilt after each custody receipt and provider-list
   Reload. Reconciliation reads persisted profiles without repeating a key write; while
-  no Host is running, Reload only lists them and the next start loads the catalog. Both
+  no Host is running, a key change returns its receipt, Reload only lists them, and the
+  next start loads the catalog. Both
   custody and the following Host refresh have 30-second deadlines. A custody timeout
   ends only the window's wait: the custody child keeps running and holds the
   configuration lock until its OS credential write has settled (`security` on macOS and
