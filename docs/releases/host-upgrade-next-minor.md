@@ -463,6 +463,10 @@ Before this release such a Host got untyped (`any`) SDK imports with
 Bundler resolution see no change. A NodeNext Host may now see type errors in
 code that compiled against `any`; fix them against the real types.
 
+## Runtime isolation bits follow adapter options
+
+The `isolation` bits that hello, presence and `task.claim` report for Claude, Codex, Pi and Grok now follow the options each adapter was constructed with (#1633, #1637); before, they always reported the best case. A Host that routes or admits work on those bits, for example `userMcpServers` or `userMemory`, now sees `false` for a source its device inherits (the default `agentUserContext`, or `agentUserMcpServers` other than `'excluded'`). Construct the adapter with the excluded option where the Host needs that source excluded; code that reads `*_RUNTIME_CAPABILITIES` still gets the best case.
+
 ## Pi 1.5.2 closure
 
 The official Pi closure moves from 1.5.0 to 1.5.2 (#1864). Prepare again every preparation compiled for 1.5.0: its runtime identity names the old closureDigest, so it declines with `preparation_runtime_identity_mismatch`. Check stored provider profiles against `piModelConfigFromPinnedCatalog` before the upgrade; 12 OpenRouter and Vercel AI Gateway entries that pi-ai 1.5.2 dropped return `not_in_catalog`. pi-durable replicas keep their document and schema versions, so this release and 0.41.0 open each other's replicas.
