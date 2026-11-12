@@ -1,4 +1,4 @@
-import { testScratchOwner } from "./fixtures/execution-scratch";
+import { reservedMcpToken, testScratchOwner } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -305,6 +305,59 @@ describe('Agent memory MCP local authority', () => {
 
     supported.sessions[0]?.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+  });
+
+  // #1861: the token exists before start() returns, the task is active only after it.
+  async function memoryCallDuringBlockedStart() {
+    const hostStorageRoot = await root();
+    const adapter = new StubRuntimeAdapter('codex', { kind: 'available' }, { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true });
+    const releaseStart = adapter.blockStart();
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
+      adapters: [adapter],
+      agentHome: new AgentHomeManager({ hostStorageRoot }),
+      agentSessionHandoffs: new AgentSessionHandoffStore(),
+      deviceId: 'device-memory-start',
+      send: () => {},
+      blobClient: {
+        resolveInstruction: async () => { throw new Error('not used'); },
+        uploadArtifact: async () => { throw new Error('not used'); },
+      },
+      approvalRegistry: new ApprovalRegistry(),
+      storeDir: await root(),
+      productId: 'memory-start',
+      tenantId: 'tenant-memory-start',
+      agentMemoryMcpBin: { command: 'node', args: ['memory-mcp.js'] },
+      ...(process.platform === 'darwin' ? { resolveAgentMemoryFilesystemHelperBin: () => '/opt/byok-agent-memory-fs' } : {}),
+    });
+    const offer = runner.handleEnvelope(createEnvelope('task.offer', {
+      ...FRESH_OFFER, instruction: 'recall memory in the first turn', runtime: 'codex',
+      agentRef: { agentId: 'agent-memory-start', profileRevision: 'profile-1' },
+    }, { taskId: 'task-memory-start', seq: 1 }));
+    await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
+    await fs.writeFile(path.join(hostStorageRoot, 'agents', 'agent-memory-start', 'MEMORY.md'), 'first turn', 'utf8');
+    let settled = false;
+    const recall = runner.recallAgentMemory({ contextToken: reservedMcpToken(adapter.startCalls[0]?.ctx.mcpServers?.byokagentmemory), path: 'MEMORY.md' });
+    void recall.then(() => { settled = true; }, () => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    return { adapter, runner, offer, recall, releaseStart };
+  }
+
+  itWithSecureDescriptors('answers a memory call made during start once the task is active', async () => {
+    const { adapter, runner, offer, recall, releaseStart } = await memoryCallDuringBlockedStart();
+    releaseStart();
+    await offer;
+    await expect(recall).resolves.toMatchObject({ content: 'first turn' });
+    adapter.sessions[0]?.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+  });
+
+  itWithMemoryMcp('fails a memory call made during start closed when the start fails', async () => {
+    const { offer, recall, releaseStart } = await memoryCallDuringBlockedStart();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    releaseStart(new Error('runtime start failed'));
+    await offer;
+    await expect(recall).rejects.toThrow('invalid, expired, or quiescing Agent memory task context');
   });
 
   it('does zero capture, audit, or network work when projection authority is incomplete', async () => {

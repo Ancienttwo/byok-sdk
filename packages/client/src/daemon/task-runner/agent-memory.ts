@@ -46,7 +46,39 @@ export function activeMemoryContext(this: TaskRunner, contextToken: string): Age
   });
 }
 
+/**
+ * A runtime may call memory before its `start()` returns (#1861): the context
+ * token is registered before the start, the task enters `tasks` only at
+ * activation. A call for a valid token whose offer is still in flight waits
+ * for that offer's own outcome, activation or the end of the offer, and then
+ * meets the unchanged identity check. No timer: the offer's startup deadline
+ * already bounds the window.
+ */
+async function awaitMemoryTaskStart(this: TaskRunner, contextToken: string): Promise<void> {
+  const registered = this['memoryContextByToken'].get(contextToken);
+  if (registered === undefined || this['memoryContextByTask'].get(registered.taskId) !== contextToken) return;
+  const { taskId } = registered;
+  if (this['tasks'].has(taskId) || !this['inFlightOffers'].has(taskId)) return;
+  let wait = this['memoryStartWaits'].get(taskId);
+  if (wait === undefined) {
+    let settle!: () => void;
+    const started = new Promise<void>((resolve) => { settle = resolve; });
+    wait = { started, settle };
+    this['memoryStartWaits'].set(taskId, wait);
+  }
+  await wait.started;
+}
+
+/** Ends the start window of `taskId`: called where it enters `tasks` and where its offer leaves `inFlightOffers`. */
+export function endMemoryStartWait(this: TaskRunner, taskId: string): void {
+  const wait = this['memoryStartWaits'].get(taskId);
+  if (wait === undefined) return;
+  this['memoryStartWaits'].delete(taskId);
+  wait.settle();
+}
+
 export async function runMemoryOperation<T>(this: TaskRunner, contextToken: string, required: 'read'|'write', operation: (context: AgentMemoryTaskContext) => Promise<T>): Promise<T> {
+  await awaitMemoryTaskStart.call(this, contextToken);
   let context = this['activeMemoryContext'](contextToken);
   if (required === 'write' && this['memoryContextByToken'].get(contextToken)?.mode !== 'read-write') throw new AgentMemoryError('agent_memory_operation_denied: write denied by sealed capability');
   context = await this['bindAgentMemoryFilesystem'](context);

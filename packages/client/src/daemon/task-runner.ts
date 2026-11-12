@@ -522,6 +522,8 @@ export class TaskRunner {
   private readonly memoryContextByToken = new Map<string, { readonly taskId: string; readonly agentRef: AgentRef; readonly mode: 'read' | 'read-write' }>();
   private readonly memoryContextByTask = new Map<string, string>();
   private readonly memoryInFlightByTask = new Map<string, Set<Promise<unknown>>>();
+  // Memory calls that arrived during their task's start window; see task-runner/agent-memory.ts.
+  private readonly memoryStartWaits = new Map<string, { readonly started: Promise<void>; readonly settle: () => void }>();
   private readonly memoryClosingTasks = new Set<string>();
   private readonly memoryFilesystemByTask = new Map<string, Promise<AgentMemoryFilesystem>>();
   /**

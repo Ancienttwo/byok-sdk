@@ -5,7 +5,7 @@ import { offerSelectionViolation, type PreparedAgentMemoryMode, type TaskDecline
 import { type AgentHomeExecutionBinding, type AgentRef } from '../../agent-home.js';
 import type { OfferPhaseContext } from './support.js';
 import { outboundErrorMessage } from '../outbound-error.js';
-import { settleAgentMemoryCommitCopy } from './agent-memory.js';
+import { endMemoryStartWait, settleAgentMemoryCommitCopy } from './agent-memory.js';
 import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable.js';
 import { hostDeclineSender, offeredPreparation, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage } from './support.js';
 import type { TaskRunner } from '../task-runner.js';
@@ -180,6 +180,7 @@ export async function handleOffer(
       return;
     } finally {
       this['inFlightOffers'].delete(taskId);
+      endMemoryStartWait.call(this, taskId);
     }
     if (preparationLane.store.get(preparation.reference) === undefined) {
       decline('preparation_not_found: no preparation record under this reference on this device', false);
@@ -372,6 +373,7 @@ export async function handleOffer(
     } finally {
       this['inFlightBlobAborts'].delete(taskId);
       this['inFlightOffers'].delete(taskId);
+      endMemoryStartWait.call(this, taskId);
       this['deviceTaskReservations'].delete(taskId);
       this['claimedHarnesses'].delete(taskId);
     }
