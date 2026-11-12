@@ -529,7 +529,8 @@ keeps the one to restore and removes the others.
 Later upgrades never prune `.install-*` directories, and `uninstall()` keeps
 them: it removes every other snapshot but leaves `snapshots/` in place while
 one exists. `uninstall()` refuses a `snapshots/` that is a symbolic link
-before it changes anything. A leftover `.install-<uuid>` (a removal that failed, a rename
+with `ServiceInstallationError` `snapshots_symlinked` before it changes
+anything. A leftover `.install-<uuid>` (a removal that failed, a rename
 that failed, an installer that was killed) is never restored automatically,
 because nothing shows whether it is still needed. An operator recognizes it
 by that name, compares its `snapshot.json` entries with the current stores,

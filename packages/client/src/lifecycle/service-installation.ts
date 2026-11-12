@@ -205,7 +205,7 @@ export interface ServiceInstallation {
   rollback(): Promise<ServiceUpgradeReceipt>;
   /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. */
   recover(): Promise<ServiceUpgradeReceipt | undefined>;
-  /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused before anything changes. The store is not touched. */
+  /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
   uninstall(): Promise<void>;
   /** The last receipt, or `undefined`. */
   receipt(): Promise<ServiceUpgradeReceipt | undefined>;
@@ -233,6 +233,7 @@ const ERROR_MESSAGES = {
   health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.',
   rollback_unhealthy: 'The previous version was restored but failed its health check too.',
   no_rollback: 'There is no previous version with a store snapshot to roll back to.',
+  snapshots_symlinked: 'The install root\'s snapshots/ is a symbolic link. Uninstall does not follow it and changed nothing; replace it with a directory or remove the link, then retry.',
 } as const;
 
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
@@ -1012,8 +1013,14 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     return lifecycle.owned(async (held) => {
       await refusePending();
       // snapshots/ is listed below; a link would lead the removal outside the root.
-      if ((await fs.lstat(snapshotsDir).catch(() => undefined))?.isSymbolicLink()) {
-        throw new Error(`${snapshotsDir} is a symbolic link; uninstall does not follow it. Replace it with a directory or remove it, then retry.`);
+      try {
+        if ((await fs.lstat(snapshotsDir)).isSymbolicLink()) {
+          const error = new ServiceInstallationError('snapshots_symlinked');
+          error.message = `${error.message} (${snapshotsDir})`;
+          throw error;
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
       await held.uninstall();
       for (const name of POINTERS) await setPointer(name, undefined);

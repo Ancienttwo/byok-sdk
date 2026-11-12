@@ -61,7 +61,8 @@ between the two installs is replaced.
 Host-visible changes follow. `upgrade()` pruning no longer removes any
 `.install-*` directory, and `uninstall()` keeps them too: it does not
 remove `snapshots/` while one exists, and it refuses a symlinked
-`snapshots/` before changing anything. A leftover `.install-<uuid>` is never
+`snapshots/` with the new `ServiceInstallationErrorCode`
+`snapshots_symlinked` before changing anything. A leftover `.install-<uuid>` is never
 restored automatically; an operator compares its `snapshot.json` with the
 current stores and removes it once it is not needed. Install has no write-ahead receipt
 for process death during migration: the next install prechecks the stores

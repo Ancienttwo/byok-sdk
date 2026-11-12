@@ -11352,7 +11352,7 @@ export interface ServiceInstallation {
     rollback(): Promise<ServiceUpgradeReceipt>;
     /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. */
     recover(): Promise<ServiceUpgradeReceipt | undefined>;
-    /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused before anything changes. The store is not touched. */
+    /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
     uninstall(): Promise<void>;
     /** The last receipt, or `undefined`. */
     receipt(): Promise<ServiceUpgradeReceipt | undefined>;
@@ -11379,6 +11379,7 @@ declare const ERROR_MESSAGES: {
     readonly health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.';
     readonly rollback_unhealthy: 'The previous version was restored but failed its health check too.';
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
+    readonly snapshots_symlinked: 'The install root\'s snapshots/ is a symbolic link. Uninstall does not follow it and changed nothing; replace it with a directory or remove the link, then retry.';
 };
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
 /** Closed codes; a store refusal carries the precheck verdicts, and `snapshot_failed` the copy error as `cause`. */

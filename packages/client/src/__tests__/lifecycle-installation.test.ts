@@ -701,7 +701,21 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await fs.rm(path.join(installRoot, 'snapshots'), { recursive: true, force: true });
       await fs.symlink(outside, path.join(installRoot, 'snapshots'));
       const before = await tree(outside);
-      await expect(installation.uninstall()).rejects.toThrow(path.join(installRoot, 'snapshots'));
+      const symlinked = await installation.uninstall().catch((caught: unknown) => caught);
+      expect(symlinked).toBeInstanceOf(ServiceInstallationError);
+      expect(symlinked).toMatchObject({ code: 'snapshots_symlinked', message: expect.stringContaining(path.join(installRoot, 'snapshots')) });
+      // Only an absent snapshots/ passes the check; any other lstat error is the caller's.
+      const originalLstat = fs.lstat.bind(fs);
+      const denied = Object.assign(new Error('lstat denied'), { code: 'EACCES' });
+      const fault = vi.spyOn(fs, 'lstat').mockImplementation(async (file, options) => {
+        if (String(file) === path.join(installRoot, 'snapshots')) throw denied;
+        return originalLstat(file, options);
+      });
+      try {
+        await expect(installation.uninstall()).rejects.toBe(denied);
+      } finally {
+        fault.mockRestore();
+      }
       expect(await tree(outside)).toEqual(before);
       expect(events).not.toContain('uninstall');
       expect(await pointer('current')).toBe('1.0.0');
