@@ -2,6 +2,46 @@
 
 Draft checklist for a Host moving from the current release to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Service install prepares kept stores
+
+A Host that preserves stores on uninstall can now reinstall a candidate
+that needs a store migration without a separate Host migration sequence
+(#1983). `install()` and `upgrade()` share quiescence, staged candidate
+precheck, store snapshot, migration and the second precheck. Install writes
+`current`, the installation record and service unit only after preparation
+succeeds. Preparation runs only without a current version; same-id
+reinstall remains the #1966 repair/health path and does not precheck,
+snapshot or migrate, preserving earlier rollback snapshots.
+
+An absent unit and an unmarked unit allowed by `replaceUnmarked` are not
+stopped during preparation. The store leases establish quiescence. A
+running legacy agent on those stores now makes `install(..., {
+replaceUnmarked: true })` return `store_busy`, leaving its unit untouched.
+Stop the legacy agent before retrying; replacement happens only after
+preparation succeeds.
+
+`precheck` is already required by `ServiceInstallationOptions`; no option
+was added and there is no skip when it is omitted. The CLI supplies the SDK
+store precheck; embedded Hosts must list their own stores too. An empty
+list or already accepted stores need no migration. First-install refusals
+remove the staged version and use the same `store_busy`, `store_rejected`,
+`store_repair_required` and `store_migration_required` errors as upgrade.
+A failed migration or a second precheck with non-accepting verdicts
+restores the snapshot and throws `store_migration_failed`. Existing raw
+launch errors and `precheck_failed` for malformed post-migration output
+remain unchanged in both paths, after restoring the snapshot.
+
+After successful preparation, a failed installation or health check
+removes its installation artifacts and restores the prepared stores. OS
+credentials are never cleared. The temporary install snapshot is removed
+after a healthy start or successful failure restore. A failed stop or
+restore retains it for repair; an installation constructed with the explicit
+root can remove it through `uninstall()`. Install has no write-ahead receipt
+for process death during migration: the next install prechecks the stores
+as they remain, and the Host must make `migrate` safe to run again. Adding
+an install receipt is outside this change.
+See [Versioned installs](../device-setup.md#versioned-installs).
+
 ## Service install requires a healthy start
 
 `ServiceInstallation.install()` now runs the same health check as `upgrade()`
@@ -21,8 +61,9 @@ is healthy even before pairing.
 If the service fails to install, activate, start or pass its health check,
 install removes the unit, launcher, `current`, installation record and the
 staged version directory, including on a same-id
-reinstall. No service remains after successful cleanup. Host stores, daemon
-stores and OS credentials are preserved. If removal fails, the error carries
+reinstall. No service remains after successful cleanup. Prepared Host and
+daemon stores are restored from the install snapshot; OS credentials are
+never cleared. If removal fails, the error carries
 an `AggregateError` with both the original and removal failures as `cause`
 and names the remaining artifacts in its message. Install enforces the
 health-check deadline even if a custom check ignores abort or succeeds late.

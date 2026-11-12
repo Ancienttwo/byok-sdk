@@ -355,7 +355,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(error).toBeInstanceOf(ServiceInstallationError);
     expect(error).toMatchObject({ code: 'install_health_check_failed', cause: { errors: [expect.objectContaining({ message: 'unhealthy' }), removalError] } });
     expect((error as Error).cause).toBeInstanceOf(AggregateError);
-    expect((error as Error).message).toContain('Remaining: service unit and launcher, current pointer, installation record, staged version directory');
+    expect((error as Error).message).toContain('Remaining: service unit and launcher, prepared store snapshot restoration, current pointer, installation record, staged version directory, install snapshot directory');
     expect(await pointer('current')).toBe('1.0.0');
     expect(await readServiceInstallationRecord(storeDir)).toBeDefined();
     expect(await fs.readFile(path.join(installRoot, 'versions', '1.0.0', 'host.js'), 'utf8')).toBe('// 1.0.0');
@@ -602,6 +602,216 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
     expect(events.at(-1)).toBe('uninstall');
   });
+  describe('install store preparation (#1983)', () => {
+    const migrating = (verdict = 'accepted') => installationOver(fakeLifecycle(), {
+      precheck: (versionDir) => {
+        events.push('precheck');
+        return { command: process.execPath, args: [path.join(versionDir, 'precheck.cjs'), path.join(root, 'verdicts.json')] };
+      },
+      migrate: (versionDir) => {
+        events.push('migrate');
+        return { command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, verdict] };
+      },
+    });
+    const expectUninstalled = async () => {
+      expect(await pointer('current')).toBeUndefined();
+      expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
+      expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
+      expect(events).not.toContain('install');
+      expect(Object.keys(await tree(installRoot)).some((file) => file.startsWith(path.join('snapshots', '.install-')))).toBe(false);
+    };
+
+    it('snapshots and migrates kept stores before installing, then confirms health', async () => {
+      installation = migrating();
+      await verdicts('migration-required');
+      onHealth = async () => {
+        expect(await fs.readFile(db, 'utf8')).toBe('migrated data');
+        const snapshots = await fs.readdir(path.join(installRoot, 'snapshots'));
+        expect(snapshots).toHaveLength(1);
+        expect(await fs.readFile(path.join(installRoot, 'snapshots', snapshots[0]!, '0'), 'utf8')).toBe('v1 data');
+      };
+      await installation.install(await payload('2.0.0', { 'migrate.cjs': MIGRATE }));
+      expect(events).toEqual(['precheck', 'migrate', 'precheck', 'install', 'start', 'health 2.0.0']);
+      expect(await pointer('current')).toBe('2.0.0');
+      expect(await fs.readdir(path.join(installRoot, 'snapshots'))).toEqual([]);
+      expect(await installation.receipt()).toBeUndefined();
+    });
+
+    it.each([
+      { verdict: 'rejected', reused: false }, { verdict: 'new-path-repair', reused: false },
+      { verdict: 'rejected', reused: true }, { verdict: 'new-path-repair', reused: true },
+    ])('refuses $verdict before writing a pointer, record or unit (reused staging: $reused)', async ({ verdict, reused }) => {
+      installation = migrating();
+      await verdicts(verdict);
+      const candidate = await payload('2.0.0');
+      if (reused) await fs.cp(candidate, path.join(installRoot, 'versions', '2.0.0'), { recursive: true });
+      await expect(installation.install(candidate)).rejects.toMatchObject({ code: verdict === 'rejected' ? 'store_rejected' : 'store_repair_required' });
+      await expectUninstalled();
+      await expect(fs.lstat(path.join(installRoot, 'snapshots'))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+      expect(events).toEqual(['precheck']);
+    });
+
+    it.each(['migration exits nonzero', 'postcheck still requires migration'])('restores kept stores and removes staging when %s', async (mode) => {
+      installation = migrating(mode === 'postcheck still requires migration' ? 'migration-required' : 'accepted');
+      await verdicts('migration-required');
+      const script = mode === 'migration exits nonzero' ? `${MIGRATE}\nprocess.exit(1);` : MIGRATE;
+      await expect(installation.install(await payload('2.0.0', { 'migrate.cjs': script }))).rejects.toMatchObject({ code: 'store_migration_failed' });
+      await expectUninstalled();
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+      expect(await fs.readFile(`${db}-wal`, 'utf8')).toBe('v1 wal');
+    });
+
+    it('without migrate refuses migration-required and keeps the stores intact', async () => {
+      await verdicts('migration-required');
+      await expect(installation.install(await payload('2.0.0'))).rejects.toMatchObject({ code: 'store_migration_required' });
+      await expectUninstalled();
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+    });
+
+    it('removes the failed installation and restores stores after migration then health failure', async () => {
+      installation = migrating();
+      await verdicts('migration-required');
+      unhealthy.add('2.0.0');
+      onHealth = async () => {
+        await fs.writeFile(db, 'candidate data');
+        await fs.rm(`${db}-wal`);
+        await fs.writeFile(`${db}-journal`, 'candidate journal');
+      };
+      await expect(installation.install(await payload('2.0.0', { 'migrate.cjs': MIGRATE }))).rejects.toMatchObject({ code: 'install_health_check_failed' });
+      expect(events).toContain('uninstall');
+      expect(await pointer('current')).toBeUndefined();
+      expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
+      expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+      expect(await fs.readFile(`${db}-wal`, 'utf8')).toBe('v1 wal');
+      await expect(fs.lstat(`${db}-journal`)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('keeps the unrestored migration snapshot when the failed service cannot be removed', async () => {
+      const base = fakeLifecycle();
+      const removal = new Error('service is still running');
+      installation = installationOver({
+        ...base,
+        owned: (operation) => withServiceOwnerGate(() => operation({
+          install: base.install, uninstall: async () => { throw removal; },
+        })),
+      }, {
+        migrate: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] }),
+      });
+      await verdicts('migration-required');
+      unhealthy.add('2.0.0');
+      onHealth = async () => { await fs.writeFile(db, 'live candidate data'); };
+      const error = await installation.install(await payload('2.0.0', { 'migrate.cjs': MIGRATE })).catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'install_health_check_failed', cause: { errors: [expect.objectContaining({ message: 'unhealthy' }), removal] } });
+      expect((error as Error).message).toContain('prepared store snapshot restoration');
+      expect(await fs.readFile(db, 'utf8')).toBe('live candidate data');
+      const snapshots = await fs.readdir(path.join(installRoot, 'snapshots'));
+      expect(snapshots).toHaveLength(1);
+      expect(await fs.readFile(path.join(installRoot, 'snapshots', snapshots[0]!, '0'), 'utf8')).toBe('v1 data');
+    });
+
+    it('with no stores prepares an empty list and installs without migration', async () => {
+      installation = migrating();
+      await fs.writeFile(path.join(root, 'verdicts.json'), '[]');
+      await installation.install(await payload('2.0.0'));
+      expect(events).toEqual(['precheck', 'install', 'start', 'health 2.0.0']);
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+    });
+
+    it.each(['absent', 'foreign'] as const)('refuses a busy daemon store without stopping the %s unit', async (state) => {
+      const unitPath = path.join(root, 'unit');
+      await fs.writeFile(unitPath, 'operator unit');
+      installation = installationOver({
+        ...fakeLifecycle(), inspect: async () => ({ state, unitPath, launcherPath: unitPath }),
+      }, { stopTimeoutMs: 25 });
+      const owner = await acquireDaemonOwner(storeDir, 'daemon');
+      try {
+        await expect(installation.install(await payload('2.0.0'), { replaceUnmarked: state === 'foreign' })).rejects.toMatchObject({ code: 'store_busy' });
+      } finally {
+        await owner.release();
+      }
+      await expectUninstalled();
+      expect(events).toEqual([]);
+      expect(await fs.readFile(unitPath, 'utf8')).toBe('operator unit');
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+    });
+
+    it('replaces an allowed unmarked unit only after its stores are prepared', async () => {
+      const unitPath = path.join(root, 'legacy.unit');
+      const launcherPath = path.join(root, 'legacy.launcher');
+      await fs.writeFile(unitPath, 'operator unit');
+      const def = { name: 'svc', storeDir, logDir: path.join(storeDir, 'service-logs'), owner: 'app', program: { command: process.execPath, args: [] } };
+      const unit: PlatformUnit = {
+        serviceName: 'svc', unitPath, launcherPath,
+        files: () => [unitPath, launcherPath].map((file) => ({ path: file, content: SERVICE_UNIT_MARKER })),
+        activate: async () => { events.push('activate'); },
+        deactivate: async () => { throw new Error('must not stop the unmarked unit during preparation'); },
+        removeFiles: async () => undefined,
+        start: async () => { events.push('start'); }, stop: async () => { throw new Error('must not stop the unmarked unit during preparation'); },
+        query: async () => ({ running: true, determinate: true, detail: 'fake' }),
+      };
+      installation = installationOver(createManagedLifecycle(def, unit), {
+        precheck: (versionDir) => {
+          events.push('precheck');
+          return { command: process.execPath, args: [path.join(versionDir, 'precheck.cjs'), path.join(root, 'verdicts.json')] };
+        },
+      });
+      await installation.install(await payload('2.0.0'), { replaceUnmarked: true });
+      expect(events).toEqual(['precheck', 'activate', 'start', 'health 2.0.0']);
+      expect(await fs.readFile(unitPath, 'utf8')).toBe(SERVICE_UNIT_MARKER);
+    });
+
+    it.each(['current', 'installation.json'])('restores migrated stores after a failed %s write without touching an allowed foreign unit', async (target) => {
+      const unitPath = path.join(root, 'foreign.unit');
+      await fs.writeFile(unitPath, 'operator unit');
+      const base = fakeLifecycle();
+      const uninstall = vi.fn(async () => { throw new ServiceUnitError('service_unit_unmarked'); });
+      installation = installationOver({
+        ...base,
+        inspect: async () => ({ state: 'foreign', unitPath, launcherPath: unitPath }),
+        owned: (operation) => withServiceOwnerGate(() => operation({ install: base.install, uninstall })),
+      }, {
+        migrate: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] }),
+      });
+      await verdicts('migration-required');
+      const candidate = await payload('2.0.0', { 'migrate.cjs': MIGRATE });
+      const destination = target === 'current' ? path.join(installRoot, target) : path.join(storeDir, 'service', target);
+      const fault = failRename((file) => file === destination);
+      try {
+        await expect(installation.install(candidate, { replaceUnmarked: true })).rejects.toMatchObject({ code: 'install_health_check_failed', cause: { code: 'EIO' } });
+      } finally {
+        fault.restore();
+      }
+      expect(uninstall).not.toHaveBeenCalled();
+      expect(await fs.readFile(unitPath, 'utf8')).toBe('operator unit');
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+      expect(await fs.readFile(`${db}-wal`, 'utf8')).toBe('v1 wal');
+      await expectUninstalled();
+    });
+
+    it('does not skip the required precheck when a runtime caller omits it', async () => {
+      installation = installationOver(fakeLifecycle(), { precheck: undefined as never });
+      await expect(installation.install(await payload('2.0.0'))).rejects.toBeInstanceOf(TypeError);
+      await expectUninstalled();
+    });
+
+    it('same-id install skips preparation and preserves an earlier upgrade snapshot and rollback', async () => {
+      await installation.install(await payload('1.0.0'));
+      await installation.upgrade(await payload('2.0.0'));
+      const before = await tree(path.join(installRoot, 'snapshots', '2.0.0'));
+      await fs.writeFile(db, 'v2 data');
+      installation = installationOver(fakeLifecycle(), {
+        precheck: () => { throw new Error('same-id repair must not prepare stores'); },
+        migrate: () => { throw new Error('same-id repair must not migrate stores'); },
+      });
+      await installation.install(await payload('2.0.0'));
+      expect(await tree(path.join(installRoot, 'snapshots', '2.0.0'))).toEqual(before);
+      expect(await installation.rollback()).toMatchObject({ state: 'rolled-back', from: '1.0.0' });
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+    });
+  });
+
   describe('store migration (#1577): migrate runs after the snapshot, and every failure restores it', () => {
     const migrating = (verdict: string) => installationOver(fakeLifecycle(), {
       migrate: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, verdict] }),

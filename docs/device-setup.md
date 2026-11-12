@@ -465,9 +465,46 @@ junctions on Windows), `snapshots/` and `upgrade-receipt.json` in it, and
 records the root in `<storeDir>/service/installation.json`. The unit runs
 `current`, so it never changes across upgrades.
 
-`install()` (CLI: `install --payload`) installs and starts the service, then
-runs `healthCheck`, using `healthTimeoutMs` (default 60000 ms), as `upgrade()`
-does. The default check waits for a live daemon lifecycle on its control
+`install()` (CLI: `install --payload`) first stages the candidate and runs
+the same store preparation as `upgrade()`: quiesce daemon stores, run the
+candidate `precheck`, snapshot every listed store, run `migrate` for
+`migration-required`, then precheck again. Only after preparation succeeds
+does it write `current` and the installation record, install/start the
+service and run `healthCheck` with `healthTimeoutMs` (default 60000 ms).
+This includes stores kept by an earlier uninstall. This preparation runs
+only when no version is current. A same-id reinstall remains a unit/launcher
+repair with its existing health check: it runs no precheck, snapshot or
+migration and preserves earlier upgrade rollback snapshots.
+
+Preparation does not stop an absent unit or an allowed unmarked unit. It
+leases and gates the daemon stores instead. With `replaceUnmarked`, a
+running legacy agent that owns the same stores now causes `store_busy`;
+its unit is left running and unchanged. Stop that agent before retrying.
+Only after preparation succeeds does installation replace the unmarked unit.
+
+`precheck` is required by `ServiceInstallationOptions`, including for first
+install; there is no no-precheck mode or new option. The CLI supplies its
+`upgrade check --store --json` program. An embedded Host lists every store
+the candidate can rewrite, including Host stores. An empty list or stores
+that are already accepted need no migration. A busy daemon store is
+`store_busy`. `rejected` and `new-path-repair` use `store_rejected` and
+`store_repair_required`; for a first install they remove staging without
+writing a pointer, record or unit. Without `migrate`, a required migration
+is `store_migration_required`. A migration that exits unsuccessfully or
+leaves non-accepting verdicts restores the snapshot and throws
+`store_migration_failed`. Launch failures or malformed post-migration
+precheck output retain upgrade's existing raw error or `precheck_failed`
+behavior after restoring the snapshot.
+
+Install uses a temporary snapshot and removes it after a healthy start or
+a successful failure restore. A failed stop or restore retains the snapshot
+for repair; `uninstall()` with the explicit root removes those artifacts.
+Unlike upgrade, install has no write-ahead receipt: if the process dies
+during migration, `recover()` does not complete that install. The next
+install prechecks the stores as migration left them. The Host must make
+`migrate` safe to run again after an interruption.
+
+After preparation, install starts and health-checks the service as before. The default check waits for a live daemon lifecycle on its control
 endpoint: `running` (connecting or open) or `awaiting-enrollment`; a halted
 or crashed run fails immediately. For the CLI, a service installed before
 pairing must enable `serviceEnrollment: { enabled: true }` in its config;
@@ -485,8 +522,10 @@ If the service fails to install, activate, start or pass its health check,
 install removes the unit and launcher, `current`, the installation record and
 the staged `versions/<id>` directory, then throws `ServiceInstallationError`
 with code `install_health_check_failed` and the original error as `cause`. This also applies when reinstalling
-the same id: a failed repair leaves no service installed. Cleanup preserves
-Host stores, daemon stores and OS credentials. If removal itself fails, the
+the same id: a failed repair leaves no service installed. Once the service
+is stopped, cleanup restores the prepared snapshot, including Host and
+daemon stores changed by migration or startup. It never clears OS
+credentials. A failed stop or restore retains the snapshot for repair. If removal itself fails, the
 same error code carries an `AggregateError` containing the original failure
 and the removal error as `cause`; its message names the artifacts that remain.
 

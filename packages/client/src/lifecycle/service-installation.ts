@@ -80,7 +80,9 @@ export interface ServiceInstallationOptions {
    * the snapshot when the precheck reports a store as `migration-required`;
    * exit 0 is success. The precheck then runs again and must report every
    * store `accepted` or `absent`. Without it, a `migration-required` store is
-   * `store_migration_required` and nothing is switched.
+   * `store_migration_required` and nothing is switched. The Host must make
+   * this program safe to run again after interruption: install has no
+   * write-ahead receipt for a process death during migration.
    */
   migrate?(versionDir: string): ServiceProgram;
   /**
@@ -98,8 +100,9 @@ export interface ServiceInstallationOptions {
    */
   healthTimeoutMs?: number;
   /**
-   * Every daemon store the service process owns, read after the service has
-   * stopped, on every upgrade, rollback and recover (#1328). Each `storeDir`
+   * Every daemon store the service process owns, leased on a first install
+   * and read after stopping the service on upgrade, rollback and recover
+   * (#1328, #1983). Each `storeDir`
    * is absolute and listed once; `productId` is not empty; an empty list is
    * valid. An invalid list or a throw is `daemon_stores_invalid`. Default:
    * `[{ storeDir: service.storeDir, productId }]`. Requires `healthCheck`,
@@ -158,12 +161,17 @@ export interface ServiceInstallation {
   /** The service lifecycle whose program runs `<installRoot>/current`. */
   readonly lifecycle: ServiceLifecycle;
   /**
-   * Stages the payload as the first version, points `current` at it, installs
-   * and starts the service, then waits for its health check. A write,
-   * activation, start or health-check failure removes
-   * the unit, launcher, `current`, installation record and staged version,
-   * including on a same-id reinstall, and throws `install_health_check_failed`.
-   * Host stores, daemon stores and OS credentials are left intact.
+   * With no current version, stages the payload, leases daemon stores, runs
+   * the candidate precheck, snapshots listed stores and migrates when
+   * required, then points
+   * `current` at it, records, installs, starts and checks health. Preparation
+   * failures remove staging and use upgrade's store errors. A later failure
+   * removes the installation and restores the prepared store snapshot,
+   * then throws `install_health_check_failed`. A same-id reinstall only
+   * repairs the service and checks health, as before; it does not prepare
+   * stores or change earlier rollback snapshots. An allowed unmarked unit
+   * is untouched until preparation succeeds; its live store owner causes
+   * `store_busy`. OS credentials are never cleared. `precheck` is required.
    */
   install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
   /**
@@ -464,31 +472,69 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       // owned() has already checked the owner. Refuse foreign units before
       // staging or writing any installation artifact, not by error class
       // after activation may have written a unit and launcher.
-      if ((await lifecycle.inspect()).state === 'foreign' && installOpts.replaceUnmarked !== true) {
+      const inspection = await lifecycle.inspect();
+      if (inspection.state === 'foreign' && installOpts.replaceUnmarked !== true) {
         throw new ServiceUnitError('service_unit_unmarked');
       }
       const installed = await currentVersion();
       const payload = await readPayload(payloadDir);
       if (installed !== undefined && installed !== payload.manifest.id) throw new ServiceInstallationError('installation_exists');
       const id = await stage(payloadDir, payload);
+      // An install snapshot must not replace a same-id reinstall's earlier
+      // upgrade snapshot, which still belongs to its previous version.
+      const snapshotId = `.install-${randomUUID()}`;
+      let prepared: Awaited<ReturnType<typeof prepareStores>> | undefined;
+      if (installed === undefined) {
+        try {
+          prepared = await prepareStores(id, snapshotId, true);
+        } catch (error) {
+          // Nothing points at this version, even if stage reused its bytes.
+          try {
+            await fs.rm(path.join(versionsDir, id), { recursive: true, force: true });
+          } catch (cleanup) {
+            throw new AggregateError([error, cleanup], 'Store preparation failed and the staged version could not be removed.');
+          }
+          throw error;
+        }
+      }
+      let storesHeld = prepared !== undefined;
+      let activationAttempted = false;
       let health: Awaited<ReturnType<typeof startHealthy>>;
       try {
         await setPointer('current', id);
         await writeRecord();
+        if (prepared !== undefined) {
+          // A failed release cannot prove the stores are still all held.
+          storesHeld = false;
+          await prepared.release();
+        }
+        activationAttempted = true;
         await held.install(installOpts);
         health = await startHealthy(true);
       } catch (cause) {
         health = { ok: false, cause };
       }
-      if (health.ok) return;
+      if (health.ok) {
+        if (prepared !== undefined) await fs.rm(path.join(snapshotsDir, snapshotId), { recursive: true, force: true });
+        return;
+      }
 
-      // Stop and unregister before removing anything the service runs. This
-      // cleanup owns installation artifacts only, never daemon or Host data.
+      // Stop and unregister before restoring prepared stores or removing
+      // anything the service runs. The credential store is never touched.
       const removals = [
-        { name: 'service unit and launcher', remove: () => held.uninstall() },
+        { name: 'service unit and launcher', remove: async () => {
+          // A first install that failed before activation has not touched
+          // the allowed foreign unit. Never try to uninstall that unit.
+          if (activationAttempted || installed !== undefined) await held.uninstall();
+        } },
+        ...(prepared === undefined ? [] : [{ name: 'prepared store snapshot restoration', remove: async () => {
+          const release = storesHeld ? prepared.release : await stopQuiescent(false);
+          try { await restoreSnapshot(snapshotId); } finally { await release(); }
+        } }]),
         { name: 'current pointer', remove: () => setPointer('current', undefined) },
         { name: 'installation record', remove: () => fs.rm(serviceInstallationRecordPath(storeDir), { force: true }) },
         { name: 'staged version directory', remove: () => fs.rm(path.join(versionsDir, id), { recursive: true, force: true }) },
+        ...(prepared === undefined ? [] : [{ name: 'install snapshot directory', remove: () => fs.rm(path.join(snapshotsDir, snapshotId), { recursive: true, force: true }) }]),
       ];
       for (const [index, removal] of removals.entries()) {
         try {
@@ -537,8 +583,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * release takes its store gate), and throws the first failure only after
    * all of them were tried.
    */
-  async function stopQuiescent(): Promise<() => Promise<void>> {
-    await lifecycle.stop();
+  async function stopQuiescent(stopService = true): Promise<() => Promise<void>> {
+    if (stopService) await lifecycle.stop();
     const deadline = Date.now() + (opts.stopTimeoutMs ?? 30_000);
     const leases: DaemonOwnerLease[] = [];
     let gates: readonly PathMutationGate[] = [];
@@ -621,26 +667,49 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path) } : store);
   }
 
+  /** One candidate store preparation sequence for install and upgrade, retaining the quiescent leases until the caller switches. */
+  async function prepareStores(candidate: string, snapshotId: string, installing = false): Promise<{ stores: ServiceStoreVerdict[]; release: () => Promise<void> }> {
+    // A first install does not stop an absent or allowed-unmarked unit.
+    // A running older daemon must relinquish the same store lease instead.
+    const release = await stopQuiescent(!installing);
+    let restoreOnFailure = false;
+    try {
+      let stores = await precheck(candidate);
+      const refused = stores.find(isRefused);
+      if (refused !== undefined) {
+        throw new ServiceInstallationError(refused.verdict === 'new-path-repair' ? 'store_repair_required' : 'store_rejected', stores);
+      }
+      await snapshot(snapshotId, stores);
+      if (stores.some((store) => store.verdict === 'migration-required')) {
+        restoreOnFailure = opts.migrate !== undefined;
+        stores = await migrateStores(candidate, stores);
+      }
+      return { stores, release };
+    } catch (error) {
+      try {
+        if (restoreOnFailure) await restoreSnapshot(snapshotId);
+        if (installing) await fs.rm(path.join(snapshotsDir, snapshotId), { recursive: true, force: true });
+      } finally {
+        await release().catch(() => undefined);
+      }
+      throw error;
+    }
+  }
+
   /**
    * Runs the Host's migration of the candidate's stores, after the snapshot
-   * and while every writer is stopped, then the precheck again. Any failure
-   * restores the snapshot before it is thrown, so the old version restarts
-   * on the store it left.
+   * and while every writer is stopped, then the precheck again. The shared
+   * preparation restores the snapshot before propagating a migration error.
    */
   async function migrateStores(to: string, stores: readonly ServiceStoreVerdict[]): Promise<ServiceStoreVerdict[]> {
     if (opts.migrate === undefined) throw new ServiceInstallationError('store_migration_required', stores);
-    try {
-      const { code } = await runProgram(opts.migrate(path.join(versionsDir, to)));
-      if (code !== 0) throw new ServiceInstallationError('store_migration_failed', stores);
-      const migrated = await precheck(to);
-      if (!migrated.every((store) => store.verdict === 'accepted' || store.verdict === 'absent')) {
-        throw new ServiceInstallationError('store_migration_failed', migrated);
-      }
-      return migrated;
-    } catch (error) {
-      await restoreSnapshot(to);
-      throw error;
+    const { code } = await runProgram(opts.migrate(path.join(versionsDir, to)));
+    if (code !== 0) throw new ServiceInstallationError('store_migration_failed', stores);
+    const migrated = await precheck(to);
+    if (!migrated.every((store) => store.verdict === 'accepted' || store.verdict === 'absent')) {
+      throw new ServiceInstallationError('store_migration_failed', migrated);
     }
+    return migrated;
   }
 
   /**
@@ -759,19 +828,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       let stores: ServiceStoreVerdict[];
       let release: () => Promise<void>;
       try {
-        release = await stopQuiescent();
-        try {
-          stores = await precheck(to);
-          const refused = stores.find(isRefused);
-          if (refused !== undefined) {
-            throw new ServiceInstallationError(refused.verdict === 'new-path-repair' ? 'store_repair_required' : 'store_rejected', stores);
-          }
-          await snapshot(to, stores);
-          if (stores.some((store) => store.verdict === 'migration-required')) stores = await migrateStores(to, stores);
-        } catch (error) {
-          await release().catch(() => undefined);
-          throw error;
-        }
+        ({ stores, release } = await prepareStores(to, to));
       } catch (error) {
         if (error instanceof ServiceInstallationError) {
           await writeReceipt({ state: 'failed', from, to, code: error.code, ...(error.stores ? { stores: [...error.stores] } : {}) });

@@ -11229,7 +11229,9 @@ export interface ServiceInstallationOptions {
      * the snapshot when the precheck reports a store as `migration-required`;
      * exit 0 is success. The precheck then runs again and must report every
      * store `accepted` or `absent`. Without it, a `migration-required` store is
-     * `store_migration_required` and nothing is switched.
+     * `store_migration_required` and nothing is switched. The Host must make
+     * this program safe to run again after interruption: install has no
+     * write-ahead receipt for a process death during migration.
      */
     migrate?(versionDir: string): ServiceProgram;
     /**
@@ -11247,8 +11249,9 @@ export interface ServiceInstallationOptions {
      */
     healthTimeoutMs?: number;
     /**
-     * Every daemon store the service process owns, read after the service has
-     * stopped, on every upgrade, rollback and recover (#1328). Each `storeDir`
+     * Every daemon store the service process owns, leased on a first install
+     * and read after stopping the service on upgrade, rollback and recover
+     * (#1328, #1983). Each `storeDir`
      * is absolute and listed once; `productId` is not empty; an empty list is
      * valid. An invalid list or a throw is `daemon_stores_invalid`. Default:
      * `[{ storeDir: service.storeDir, productId }]`. Requires `healthCheck`,
@@ -11305,12 +11308,17 @@ export interface ServiceInstallation {
     /** The service lifecycle whose program runs `<installRoot>/current`. */
     readonly lifecycle: ServiceLifecycle;
     /**
-     * Stages the payload as the first version, points `current` at it, installs
-     * and starts the service, then waits for its health check. A write,
-     * activation, start or health-check failure removes
-     * the unit, launcher, `current`, installation record and staged version,
-     * including on a same-id reinstall, and throws `install_health_check_failed`.
-     * Host stores, daemon stores and OS credentials are left intact.
+     * With no current version, stages the payload, leases daemon stores, runs
+     * the candidate precheck, snapshots listed stores and migrates when
+     * required, then points
+     * `current` at it, records, installs, starts and checks health. Preparation
+     * failures remove staging and use upgrade's store errors. A later failure
+     * removes the installation and restores the prepared store snapshot,
+     * then throws `install_health_check_failed`. A same-id reinstall only
+     * repairs the service and checks health, as before; it does not prepare
+     * stores or change earlier rollback snapshots. An allowed unmarked unit
+     * is untouched until preparation succeeds; its live store owner causes
+     * `store_busy`. OS credentials are never cleared. `precheck` is required.
      */
     install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
     /**
