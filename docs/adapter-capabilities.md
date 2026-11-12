@@ -10,11 +10,11 @@ they are not a second runtime-selection registry.
 
 `PreparedRuntimeOperation.start()` must resolve without waiting on anything a
 first-turn tool call produces. The startup deadline bounds the normal start
-path. Startup disposal calls the runtime's `close()` with no bound: for an
-incomplete session, for a start that returns after the deadline or a cancel but
-before its disposal check, and in memory-lane abort disposal, which waits for
-start to return. Memory calls still pending when startup fails are rejected
-before disposal begins, so `close()` may drain them.
+path. Every `close()` during startup disposal has no bound. Memory calls still
+pending when startup fails are rejected before the offer disposes its startup
+owner, so that `close()` may drain them. Two closes run earlier, inside the
+start path, and do not get that release: closing an incomplete session, and
+memory-lane abort disposal, which waits for start to return.
 
 ## Capability matrix
 

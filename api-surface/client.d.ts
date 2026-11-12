@@ -14501,11 +14501,11 @@ export interface PreparedRuntimeOperation {
     }): Promise<RuntimeLaunchResources>;
     /**
      * Must resolve without waiting on anything a first-turn tool call produces.
-     * The startup deadline bounds the normal start path. Startup disposal awaits
-     * `close()` with no bound: for an incomplete session, for a start that returns
-     * after the deadline or a cancel but before its disposal check, and in
-     * memory-lane abort disposal (which awaits start). Memory calls pending at a
-     * startup failure are rejected before disposal, so `close()` may drain them.
+     * The startup deadline bounds the normal start path. Every `close()` during
+     * startup disposal has no bound. Memory calls pending at a startup failure are
+     * rejected before the offer disposes its startup owner, except for the closes
+     * that run inside the start path: incomplete-session close and memory-lane
+     * abort disposal (which awaits start).
      */
     start(input: RuntimeOperationStartInput): Promise<Session>;
 }
