@@ -367,7 +367,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(error).toBeInstanceOf(ServiceInstallationError);
     expect(error).toMatchObject({ code: 'install_health_check_failed', cause: { errors: [expect.objectContaining({ message: 'unhealthy' }), removalError] } });
     expect((error as Error).cause).toBeInstanceOf(AggregateError);
-    expect((error as Error).message).toContain('Remaining: service unit and launcher, current pointer, installation record, staged version directory, prepared store snapshot restoration, install snapshot directory');
+    expect((error as Error).message).toContain('Remaining: service unit and launcher, current pointer, installation record, staged version directory, prepared store snapshot restoration, store lease release, install snapshot directory');
     expect(await pointer('current')).toBe('1.0.0');
     expect(await readServiceInstallationRecord(storeDir)).toBeDefined();
     expect(await fs.readFile(path.join(installRoot, 'versions', '1.0.0', 'host.js'), 'utf8')).toBe('// 1.0.0');
@@ -1077,12 +1077,14 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       const launcherPath = path.join(root, 'service.launcher');
       const unitEvents: string[] = [];
       let running = true;
+      const removalError = new Error('injected unit removal failure');
+      let removalFails = true;
       const def = { name: 'svc', storeDir, logDir: path.join(storeDir, 'service-logs'), owner: 'app', program: { command: process.execPath, args: [] } };
       const unit: PlatformUnit = {
         serviceName: 'svc', unitPath, launcherPath,
         files: () => [unitPath, launcherPath].map((file) => ({ path: file, content: SERVICE_UNIT_MARKER })),
         activate: async () => { unitEvents.push('activate'); }, deactivate: async () => { unitEvents.push('deactivate'); running = false; },
-        removeFiles: async () => { unitEvents.push('remove'); for (const file of [unitPath, launcherPath]) await fs.rm(file); },
+        removeFiles: async () => { unitEvents.push('remove'); if (removalFails) throw removalError; for (const file of [unitPath, launcherPath]) await fs.rm(file); },
         start: async () => { unitEvents.push('start'); running = true; }, stop: async () => { unitEvents.push('stop'); running = false; },
         query: async () => ({ running, determinate: true, detail: 'fake' }),
       };
@@ -1093,6 +1095,13 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await verdicts('migration-required');
       const fault = failRestore();
       try {
+        // A removal that fails too names both the unit and the kept snapshot (#1991).
+        const failed = await installation.install(await payload('2.0.0', { 'migrate.cjs': `${MIGRATE}\nprocess.exit(1);` })).catch((caught: unknown) => caught);
+        expect((failed as AggregateError).errors).toEqual([expect.any(AggregateError), expect.anything()]);
+        expect((failed as Error).message).toContain(unitPath);
+        expect((failed as Error).message).toContain(path.join(installRoot, 'snapshots', '.install-repair-'));
+        expect(existsSync(unitPath)).toBe(true);
+        removalFails = false;
         await expect(installation.install(await payload('2.0.0', { 'migrate.cjs': `${MIGRATE}\nprocess.exit(1);` }))).rejects.toBeInstanceOf(AggregateError);
       } finally {
         fault.restore();
@@ -1195,10 +1204,11 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       // The restore's own lease then fails to release too: neither error may hide the other.
       const releaseError = new Error('injected release failure');
       const original = daemonOwner.acquireDaemonOwner;
-      const leaseFault = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementation(async (...args) => {
+      const faulty: typeof original = async (...args) => {
         const lease = await original(...args);
         return healthFailed ? { release: async () => { await lease.release(); throw releaseError; } } : lease;
-      });
+      };
+      const leaseFault = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementation(faulty);
       let error: unknown;
       try {
         error = await installation.install(await payload('2.0.0', { 'migrate.cjs': MIGRATE })).catch((caught: unknown) => caught);
@@ -1212,12 +1222,21 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       const removal = ((error as Error).cause as AggregateError).errors[1] as AggregateError;
       expect(removal).toBeInstanceOf(AggregateError);
       expect(removal.errors).toEqual([expect.objectContaining({ errors: [fault.restoreError] }), releaseError]);
-      expect((error as Error).message).toContain('Remaining: prepared store snapshot restoration, install snapshot directory.');
+      expect((error as Error).message).toContain('Remaining: prepared store snapshot restoration, store lease release, install snapshot directory.');
       expect((error as Error).message).toContain(path.join(installRoot, 'snapshots', repair!));
       expect(events.slice(-2)).toEqual(['health 2.0.0', 'uninstall']);
       expect(await pointer('current')).toBeUndefined();
       expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
       expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
+
+      // The retry restores the repair; its own cleanup restore succeeds and only the release fails (#1991).
+      healthFailed = false;
+      const retry = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementation(faulty);
+      const released = await installation.install(await payload('2.0.0', { 'migrate.cjs': MIGRATE })).catch((caught: unknown) => caught).finally(() => retry.mockRestore());
+      const [leftover] = await snapshotNames();
+      expect((released as Error).message).toContain('Remaining: store lease release, install snapshot directory.');
+      expect((released as Error).message).toContain(`The stores were restored; remove the install snapshot at ${path.join(installRoot, 'snapshots', leftover!)}`);
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
     });
 
     it('same-id install skips preparation and preserves an earlier upgrade snapshot and rollback', async () => {

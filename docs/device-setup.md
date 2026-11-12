@@ -524,8 +524,8 @@ store leases and before its precheck: the stores return to how they were
 before the failed install, and anything written to them since is replaced.
 It then retires the repair name and continues. When that install cannot
 stop the service, take the store leases, restore the snapshot or retire its
-name, it throws the same kind of error, changes nothing else and starts
-nothing. When more than one repair snapshot exists it restores none of them
+name, it throws the same kind of error, starts nothing and removes a marked
+unit; nothing else changes. When more than one repair snapshot exists it restores none of them
 and lists them all: their names do not order them in time, so an operator
 keeps the one to restore and removes the others.
 

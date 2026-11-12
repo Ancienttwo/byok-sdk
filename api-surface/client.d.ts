@@ -11394,8 +11394,8 @@ export interface ServiceInstallation {
      * error names it: the next first install restores it, under the store
      * leases and before its precheck. When it cannot stop the service, take
      * the leases, restore or retire the repair name, or when more than one
-     * repair snapshot exists, it fails without other changes, names the
-     * snapshots and starts nothing.
+     * repair snapshot exists, it fails, names the snapshots, starts nothing
+     * and removes a marked unit.
      */
     install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
     /**

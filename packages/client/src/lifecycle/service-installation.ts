@@ -188,8 +188,8 @@ export interface ServiceInstallation {
    * error names it: the next first install restores it, under the store
    * leases and before its precheck. When it cannot stop the service, take
    * the leases, restore or retire the repair name, or when more than one
-   * repair snapshot exists, it fails without other changes, names the
-   * snapshots and starts nothing.
+   * repair snapshot exists, it fails, names the snapshots, starts nothing
+   * and removes a marked unit.
    */
   install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
   /**
@@ -611,6 +611,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       // stores are restored last, only once no installation artifact is
       // left: a failed restore then always ends with nothing installed and
       // one repair snapshot. The credential store is never touched.
+      let releaseRestored: (() => Promise<void>) | undefined;
       const removals = [
         { name: 'service unit and launcher', remove: async () => {
           // A first install that failed before activation has not touched
@@ -635,8 +636,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
             }
             throw error;
           }
-          await release();
-        } }, { name: 'install snapshot directory', remove: () => fs.rm(path.join(snapshotsDir, snapshotId), { recursive: true, force: true }) }]),
+          releaseRestored = release;
+        } }, { name: 'store lease release', remove: () => releaseRestored!() },
+        { name: 'install snapshot directory', remove: () => fs.rm(path.join(snapshotsDir, snapshotId), { recursive: true, force: true }) }]),
       ];
       for (const [index, removal] of removals.entries()) {
         try {
@@ -650,9 +652,13 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           const failure = new AggregateError([health.cause, cause], 'Service installation and removal both failed.');
           const error = new ServiceInstallationError('install_health_check_failed', undefined, { cause: failure });
           // Every failure that stops this loop keeps the install snapshot: name it.
+          const snapshotPath = path.join(snapshotsDir, snapshotId);
           const kept = cause instanceof StoreRestoreError
             ? ` ${cause.message}`
-            : prepared === undefined ? '' : ` The install snapshot is retained at ${path.join(snapshotsDir, snapshotId)}.`;
+            : prepared === undefined ? ''
+              : releaseRestored === undefined ? ` The install snapshot is retained at ${snapshotPath}.`
+                // Restored stores: the snapshot is an ordinary leftover the next install refuses until it is removed.
+                : ` The stores were restored; remove the install snapshot at ${snapshotPath} before the next install.`;
           error.message = `The service failed to install, activate or pass its health check; removal failed. Remaining: ${removals.slice(index).map((item) => item.name).join(', ')}.${kept}`;
           throw error;
         }
