@@ -6,10 +6,13 @@ import { QUALIFIED_CLAUDE_VERSION } from '../../adapters/claude/claude-version';
 import { CLAUDE_ABSENT_ISOLATION_SOURCES } from '../../adapters/claude/claude-capabilities';
 import { createAutoToolAuthorizationGate } from '../../tool-authorization';
 import {
-  baseEnv, check, contractTarget, createSandbox, defineRuntimeContract, detectWith, draftText, egressCheck, expectAuth,
-  expectDetectedVersion, fileEgress, once, readReceipt, runTurn, skip, spawned, writeSubmitResultServer,
+  baseEnv, check, contractTarget, createSandbox, defineRuntimeCases, defineRuntimeContract, detectWith, draftText, egressCheck, expectAuth,
+  expectDetectedVersion, fileEgress, once, readReceipt, runTurn, skip, spawned, writeSubmitResultServer, type TurnEvent,
 } from './contract';
-import { CONTRACT_REPLY_CHUNKS, callOnceThenReply, mcpTool, startLoopbackProvider, type ProviderScript, type ProviderTool } from './loopback';
+import {
+  CONTRACT_REPLY_CHUNKS, callOnceThenReply, mcpTool, startLoopbackProvider, type ProviderRequest, type ProviderScript, type ProviderStep, type ProviderTool,
+} from './loopback';
+import { startPreparedOperation } from '../fixtures/prepared-operation';
 
 const target = contractTarget('claude', QUALIFIED_CLAUDE_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
@@ -200,3 +203,85 @@ defineRuntimeContract(`claude runtime contract (${target.mode} ${target.expected
     { phase: 'detect', target: 'api.anthropic.com:443', reason: '`claude auth status` checks an ANTHROPIC_API_KEY with Anthropic' },
   ]),
 }, CLAUDE_ABSENT_ISOLATION_SOURCES);
+
+const FOLLOW_UP = 'BYOK-CONTRACT-CLAUDE-FOLLOW-UP-6d18';
+/** Claude's closing text arrives as progress; with partial messages, also as draft deltas. */
+const said = (events: readonly TurnEvent[], text: string) =>
+  events.some(event => (event.type === 'progress' || event.type === 'message_draft_delta') && event.text.includes(text));
+const lastMessage = (request: ProviderRequest): { role?: string; toolResult: boolean; text: string } => {
+  const message = (JSON.parse(request.text) as { messages?: Array<{ role?: string; content?: unknown }> }).messages?.at(-1);
+  const blocks = Array.isArray(message?.content) ? message.content as Array<{ type?: unknown }> : [];
+  return { role: message?.role, toolResult: blocks.some(block => block.type === 'tool_result'), text: JSON.stringify(message?.content ?? '') };
+};
+
+/**
+ * Claude's own turn (#1899): the task turn starts a background command; when
+ * it completes while the session is idle, Claude wakes itself with a root
+ * `system/init` and runs a turn the SDK never prompted. That turn runs a
+ * blocking command, and the follow-up the SDK sends while it runs must wait
+ * for it (#1892: OAR refuses the prompt busy and holds it).
+ */
+async function ownTurn() {
+  const box = await createSandbox('claude-own-turn');
+  const recorder = await fileEgress();
+  const bash = (command: string, background: boolean): ProviderStep =>
+    ({ kind: 'tool', tool: { name: 'Bash' }, args: { command, description: 'runtime contract', ...(background ? { run_in_background: true } : {}) } });
+  const provider = await startLoopbackProvider('anthropic-messages', request => {
+    const last = lastMessage(request);
+    const prompt = request.tools.some(tool => tool.name === 'Bash') && last.role === 'user' && !last.toolResult;
+    if (prompt && request.toolResults === 0 && last.text.includes('Start the background command')) return bash('sleep 3', true);
+    // The background command's completion: a user message the SDK never sent.
+    if (prompt && request.toolResults === 1) return bash('sleep 4; echo own-turn-done', false);
+    return { kind: 'text', chunks: [last.text.includes(FOLLOW_UP) ? 'follow-up reply' : last.text.includes('own-turn-done') ? 'own turn reply' : 'runtime contract reply'] };
+  });
+  try {
+    const config = path.join(box.home, '.claude');
+    await fs.mkdir(config);
+    const session = await startPreparedOperation(adapter(), { instruction: 'Start the background command, then finish.' }, {
+      workspaceDir: box.workspace, agentHome: box.workspace, env: runtimeEnv(box.home, config, provider.origin, recorder.env),
+    });
+    const events: TurnEvent[] = [];
+    let followUp: Promise<void> | undefined;
+    let followUpAt = -1;
+    const deadline = setTimeout(() => void session.close(), 120_000);
+    try {
+      // Each read of `events` ends at a turn end; read turns until the follow-up's reply has ended one.
+      for (let turnStart = 0; followUp === undefined || !said(events.slice(turnStart), 'follow-up reply');) {
+        turnStart = events.length;
+        for await (const event of session.events) {
+          events.push(event);
+          // Claude's own turn is running its blocking command: the task turn already ended.
+          if (followUp === undefined && event.type === 'tool_use' && JSON.stringify(event.input).includes('own-turn-done')) {
+            followUpAt = events.length;
+            followUp = session.followUp({ instruction: `${FOLLOW_UP}: reply.` });
+          }
+        }
+      }
+      await followUp;
+    } finally {
+      clearTimeout(deadline);
+      await session.close();
+    }
+    return { events, followUpAt, requests: provider.requests.filter(request => request.model).map(request => ({ ...lastMessage(request), body: request.text })) };
+  } finally {
+    await provider.close();
+  }
+}
+
+defineRuntimeCases(`claude runtime contract: claude cases (${target.mode} ${target.expectedVersion})`, {
+  ownTurn: ['a follow-up sent during a turn Claude runs on its own is held until that turn ends, and adds no turn end of its own', check(async () => {
+    const { events, followUpAt, requests } = await ownTurn();
+    const ends = events.flatMap((event, index) => event.type === 'turn_end' ? [index] : []);
+    // One turn end per root result: the task turn, Claude's own turn and the follow-up turn.
+    expect(ends).toHaveLength(3);
+    expect(followUpAt).toBeGreaterThan(ends[0]!);
+    expect(followUpAt).toBeLessThan(ends[1]!);
+    expect(events.slice(ends[0], ends[1]).some(event => event.type === 'tool_result' && JSON.stringify(event.output).includes('own-turn-done'))).toBe(true);
+    expect(said(events.slice(ends[1]), 'follow-up reply')).toBe(true);
+    // Claude received the follow-up only after its own turn's command result, never inside that turn.
+    const ownTurnClosed = requests.findIndex(request => request.toolResult && request.text.includes('own-turn-done'));
+    const followUpSent = requests.findIndex(request => request.body.includes(FOLLOW_UP));
+    expect(ownTurnClosed).toBeGreaterThan(-1);
+    expect(followUpSent).toBeGreaterThan(ownTurnClosed);
+  })],
+});

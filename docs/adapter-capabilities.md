@@ -170,6 +170,15 @@ second registry.
   bridge. A `followUp` after an idle turn stays in the same native session or
   thread on Claude, Codex, Grok and Pi. agy and dsh refuse it and a later
   turn resumes in a new process; Pi's durable lane refuses it too.
+- Claude's own turns: when a background task ends while the session is idle,
+  Claude starts a turn with a root `system/init` and no SDK prompt. A
+  `followUp` sent during it is held by OAR and written when that turn ends
+  (#1892). The own turn's `result` is a `turn_end` of its own, unlike Grok's;
+  the held follow-up adds none. The runtime contract `ownTurn` case runs this
+  on the qualified Claude: a background command's completion wakes Claude, the
+  follow-up sent while that turn runs a blocking command reaches the model
+  only after the turn's last tool result, and the session reports exactly
+  three turn ends (task, own turn, follow-up).
 - Codex steering targets the exact active `expectedTurnId`. An adapter without
   `steer` returns a typed rejection.
 - A Codex release older than a method the vendored OAR needs (for example
