@@ -1,0 +1,61 @@
+{
+  "version": "0.2.2-rc.1",
+  "summaries": [
+    {
+      "case": "background-job",
+      "rootId": "4d9f9a5c-e557-43e7-bacf-524aae16acf2",
+      "rootEnds": 2,
+      "settled": 1,
+      "untaggedTurnActive": 0,
+      "completionTurnActive": 1,
+      "records": 61,
+      "observationEndSeq": 60,
+      "providerRequests": 3
+    },
+    {
+      "case": "background-subagent",
+      "rootId": "06a5ce73-6839-4f4f-9e31-9f1313fd114f",
+      "rootEnds": 2,
+      "settled": 1,
+      "untaggedTurnActive": 0,
+      "completionTurnActive": 1,
+      "records": 103,
+      "observationEndSeq": 102,
+      "providerRequests": 5
+    },
+    {
+      "case": "job-kill",
+      "rootId": "29743126-9a35-40c5-81a9-e3bb2d958efd",
+      "rootEnds": 1,
+      "settled": 1,
+      "untaggedTurnActive": 0,
+      "completionTurnActive": 0,
+      "records": 56,
+      "observationEndSeq": 55,
+      "providerRequests": 3
+    },
+    {
+      "case": "job-output-wait",
+      "rootId": "014468af-95fe-469c-a4c3-7c5a27eb1710",
+      "rootEnds": 1,
+      "settled": 1,
+      "untaggedTurnActive": 0,
+      "completionTurnActive": 0,
+      "records": 56,
+      "observationEndSeq": 55,
+      "providerRequests": 3
+    },
+    {
+      "case": "two-background-jobs",
+      "rootId": "3d18e80c-c7e1-42a4-b6d3-27f749aed6ec",
+      "rootEnds": 2,
+      "settled": 2,
+      "untaggedTurnActive": 0,
+      "completionTurnActive": 1,
+      "records": 88,
+      "observationEndSeq": 87,
+      "providerRequests": 5
+    }
+  ],
+  "egress": []
+}
