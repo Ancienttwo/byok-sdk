@@ -15,6 +15,23 @@ export interface Refusal { readonly code?: string; readonly message: string }
 /** What one submission shows: the custody receipt, or the refusal. */
 export type SubmitOutcome = { readonly receipt: ProviderStatus } | { readonly refusal: Refusal };
 
+/**
+ * Runs one submission under the section lock. The lock is held until the list reload that follows a receipt has
+ * landed, so whenever the section is interactive the list on screen is current; it is released on every settle path.
+ */
+export async function runLocked(
+  setBusy: (busy: boolean) => void, run: () => Promise<SubmitOutcome>, onOutcome: (outcome: SubmitOutcome) => void, reload: () => Promise<void>,
+): Promise<void> {
+  setBusy(true);
+  try {
+    const outcome = await run();
+    onOutcome(outcome);
+    if ('receipt' in outcome) await reload();
+  } finally {
+    setBusy(false);
+  }
+}
+
 export function refusalOf(error: unknown): Refusal {
   if (error instanceof BridgeCallError) return { code: error.code, message: error.message };
   return { message: error instanceof Error ? error.message : String(error) };
