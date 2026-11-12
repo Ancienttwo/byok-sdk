@@ -3,11 +3,12 @@ import type { MethodHandlers } from '../bridge/domain.ts';
 import type { KeysMethods } from '../bridge/domains/keys.ts';
 import { BridgeError, type BridgeErrorCode } from '../bridge/protocol.ts';
 import { CUSTODY_COMMAND, CustodyError, type CustodyChange } from './protocol.ts';
-import { CUSTODY_DEADLINE_MS, listFromCustody, submitToCustody, type CustodyChild } from './submit.ts';
+import { CUSTODY_DEADLINE_MS, listFromCustody, submitToCustody, } from './submit.ts';
+import type { CommandChild } from '../main/host-command.ts';
 
 export interface KeysMainDependencies {
   /** Spawns the Host executable with these arguments: dev runs the Host bundle under Node, a package runs the SEA. */
-  readonly spawnHostCommand: (args: readonly string[]) => CustodyChild;
+  readonly spawnHostCommand: (args: readonly string[]) => CommandChild;
   readonly callHost: (method: 'keys.profilesChanged', params: undefined) => Promise<null>;
 }
 
@@ -44,6 +45,10 @@ export function keysMainHandlers(deps: KeysMainDependencies): MethodHandlers<Pic
         status = await submitToCustody(deps.spawnHostCommand([CUSTODY_COMMAND]), params as CustodyChange);
       } catch (error) {
         if (error instanceof CustodyError && error.code === 'custody_request_invalid') throw new BridgeError('invalid_params', error.message);
+        if (error instanceof CustodyError && error.code === 'PROVIDER_CONFIGURATION_BUSY') {
+          throw new CustodyError(error.code, 'An earlier key change is still in progress, perhaps waiting for a system unlock prompt. Answer that prompt, '
+            + 'then reload stored providers. If no prompt is showing, restart the computer, then reload and enter the key again if asked.');
+        }
         throw error;
       }
       await refreshProfiles(deps, true);

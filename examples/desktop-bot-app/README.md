@@ -109,11 +109,18 @@ bridge and composes the Host after main's hello (`src/host/compose.ts`):
   Reload. Reconciliation reads persisted profiles without repeating a key write; while
   no Host is running, Reload only lists them and the next start loads the catalog. Both
   custody and the following Host refresh have 30-second deadlines. A custody timeout
-  may have saved the change; `catalog_refresh_timeout` after a receipt confirms the
+  ends only the window's wait: the custody child keeps running and holds the
+  configuration lock until its OS credential write has settled (`security` on macOS and
+  `secret-tool` on Linux run as its child processes; Windows writes in process), so a
+  late write cannot land after a newer change commits. Until then another key change is
+  refused as busy, with a hint to answer a pending system unlock prompt or restart the
+  computer. Quitting the app does not kill it. A custody timeout may have saved the change; `catalog_refresh_timeout` after a receipt confirms the
   save but leaves Host application unconfirmed. Reload rebuilds the catalog from
   whatever was committed. A timeout during the key write itself can leave the provider
   marked as an unfinished key change, which stays unusable until its key is entered
-  again.
+  again. Residual risk: if something outside the app kills only the custody child while
+  its `security` or `secret-tool` process keeps running, the lock is released early and
+  that process's write can still land after a newer change.
 
 A stopped Host keeps answering `status` with its reason and is not restarted. It still
 answers `settings.exportDiagnostics`, with the daemon config it would have run with.

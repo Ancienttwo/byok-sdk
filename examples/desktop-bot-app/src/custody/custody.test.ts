@@ -1,11 +1,14 @@
+import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  InMemorySecretStore, LinuxSecretServiceSecretStore, modelProviderSecretName, SqliteProviderProfileStore,
+  InMemorySecretStore, LinuxSecretServiceSecretStore, ProviderRegistry, modelProviderSecretName, SqliteProviderProfileStore,
   type ModelProviderSecretName, type ProviderConfiguration, type SecretStore,
 } from '@byok-sdk/keys';
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
@@ -15,7 +18,8 @@ import { refusalReceipt, runCustody } from './child.ts';
 import { keysMainHandlers } from './main-handlers.ts';
 import { BridgeError } from '../bridge/protocol.ts';
 import { CustodyError } from './protocol.ts';
-import { CUSTODY_DEADLINE_MS, listFromCustody, submitToCustody, type CustodyChild } from './submit.ts';
+import { CUSTODY_DEADLINE_MS, listFromCustody, submitToCustody, } from './submit.ts';
+import type { CommandChild } from '../main/host-command.ts';
 
 const SECRET = 'sk-custody-test-secret-0123456789';
 const CONFIGURATION: ProviderConfiguration = {
@@ -34,7 +38,7 @@ beforeEach(async () => {
 afterEach(async () => { vi.useRealTimers(); await rm(root, { recursive: true, force: true }); });
 
 /** The custody child in process: its stdin, stdout and exit, around `runCustody` with an injected store. */
-function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: string[]): CustodyChild {
+function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: string[]): CommandChild {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const events = new EventEmitter();
@@ -44,7 +48,7 @@ function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: s
     stdout.end(line);
     events.emit('exit', receipt.ok ? 0 : 1);
   });
-  const child: CustodyChild = { stdin, stdout, kill: vi.fn(() => true), once: (event, listener) => { events.once(event, listener); return child; } };
+  const child: CommandChild = { stdin, stdout, once: (event, listener) => { events.once(event, listener); return child; } };
   return child;
 }
 
@@ -210,7 +214,7 @@ describe('custody child', () => {
     vi.useFakeTimers();
     for (const exited of [false, true]) {
       const events = new EventEmitter();
-      const child: CustodyChild = { stdin: new PassThrough(), stdout: new PassThrough(), kill: vi.fn(() => true),
+      const child: CommandChild = { stdin: new PassThrough(), stdout: new PassThrough(),
         once: (event, listener) => { events.once(event, listener); return child; } };
       const request = operation === 'list' ? listFromCustody(child)
         : submitToCustody(child, { op: 'replace_secret', profileRef: 'writer', secret: SECRET });
@@ -218,8 +222,8 @@ describe('custody child', () => {
       if (exited) { events.emit('exit', 0); await Promise.resolve(); }
       await vi.advanceTimersByTimeAsync(CUSTODY_DEADLINE_MS);
       await refused;
-      expect(child.kill).toHaveBeenCalledExactlyOnceWith('SIGKILL');
-      expect(child.stdin.destroyed && child.stdout.destroyed).toBe(true);
+      // The child keeps running and holding the configuration lock; only the wait ends.
+      expect(child.stdout.destroyed).toBe(false);
       expect(vi.getTimerCount()).toBe(0);
     }
   });
@@ -229,17 +233,58 @@ describe('custody child', () => {
     const child = custodyChild(new InMemorySecretStore(), []);
     await expect(listFromCustody(child)).resolves.toEqual([]);
     await vi.advanceTimersByTimeAsync(CUSTODY_DEADLINE_MS);
-    expect(child.kill).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   });
 
   it('rejects the submission when the custody child died before reading stdin', async () => {
     const events = new EventEmitter();
     const stdin = new PassThrough();
-    const child: CustodyChild = { stdin, stdout: new PassThrough(), kill: vi.fn(() => true),
+    const child: CommandChild = { stdin, stdout: new PassThrough(),
       once: (event, listener) => { events.once(event, listener); return child; } };
     const submitted = submitToCustody(child, { op: 'replace_secret', profileRef: 'writer', secret: SECRET });
     stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
     await expect(submitted).rejects.toMatchObject({ code: 'custody_exited' });
+  });
+
+  it('holds the configuration lock past a timed-out wait until the OS-store helper has written', { timeout: 30_000 }, async () => {
+    // A real custody process whose OS store writes through a slow helper process, as `security` and `secret-tool` do.
+    const osStore = path.join(root, 'os-store');
+    const helper = `process.stdin.setEncoding('utf8'); let v = ''; process.stdin.on('data', c => { v += c; });
+      process.stdin.on('end', () => setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(osStore)}, v), 1500));`;
+    const script = `import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+      import { runCommand } from '@byok-sdk/keys';
+      import { runCustodyCommand } from ${JSON.stringify(path.resolve('src/custody/child.ts'))};
+      const store = { providerLabel: 'test', available: async () => true, delete: async () => false,
+        get: async () => (existsSync(${JSON.stringify(osStore)}) ? readFileSync(${JSON.stringify(osStore)}, 'utf8') : undefined),
+        has: async () => existsSync(${JSON.stringify(osStore)}), scope() { return store; },
+        set: async (_name, secret) => { writeFileSync(${JSON.stringify(`${osStore}.started`)}, ''); await runCommand(process.execPath, ['-e', ${JSON.stringify(helper)}], secret); } };
+      process.exitCode = await runCustodyCommand(${JSON.stringify(keysDb)}, () => store);`;
+    await new ProviderProfiles(keysDb).load();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let custody!: ChildProcess;
+    const handlers = keysMainHandlers({
+      spawnHostCommand: () => (custody = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['pipe', 'pipe', 'inherit'] })),
+      callHost: async () => null,
+    });
+    const first = Promise.resolve(handlers['keys.submit']({ op: 'configure', configuration: CONFIGURATION, secret: 'sk-first-synthetic' }));
+    const refused = expect(first).rejects.toMatchObject({ code: 'custody_timeout' });
+    while (!existsSync(`${osStore}.started`)) await sleep(20);
+    await vi.advanceTimersByTimeAsync(CUSTODY_DEADLINE_MS);
+    await refused;
+    vi.useRealTimers();
+    const exited = new Promise(resolve => custody.once('exit', resolve));
+    const later = new ProviderRegistry({ profileStore: new SqliteProviderProfileStore({ path: keysDb, configurationLockWaitMs: 0 }), secretStore: {
+      providerLabel: 'test', available: async () => true, delete: async () => false, has: async () => existsSync(osStore), scope() { return this; },
+      get: async () => (existsSync(osStore) ? readFileSync(osStore, 'utf8') : undefined), set: async (_name, secret) => writeFileSync(osStore, secret) } });
+    try {
+      await expect(later.configure(CONFIGURATION, 'sk-later-synthetic')).rejects.toMatchObject({ code: 'PROVIDER_CONFIGURATION_BUSY' });
+      await exited;
+      expect(readFileSync(osStore, 'utf8')).toBe('sk-first-synthetic');
+      await later.configure(CONFIGURATION, 'sk-later-synthetic');
+      await sleep(2000);
+      expect(readFileSync(osStore, 'utf8')).toBe('sk-later-synthetic');
+    } finally {
+      await later.close();
+    }
   });
 });

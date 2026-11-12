@@ -29,7 +29,7 @@ function parseReceipt(text: string): Receipt | undefined {
  * Writes `input` and ends stdin, then resolves to the receipt and exit code once
  * the child exited and stdout ended. `exited(message)` builds the error for a
  * broken pipe or a child that printed no receipt. An owner-supplied signal cancels
- * both waits with its reason; the owner terminates the child.
+ * both waits with its reason and leaves the child running.
  */
 export async function askHostCommand(child: CommandChild, input: string, exited: (message: string) => Error, signal?: AbortSignal): Promise<{ receipt: Receipt; code: number | null }> {
   let abort: Disposable | undefined;
