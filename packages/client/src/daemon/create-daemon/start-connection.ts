@@ -85,16 +85,30 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
       // so the mailbox keeps the row and redelivers it later. The task
       // is not lost; it is left in the one place that still has room
       // for it. Nothing is deleted to make space.
-      activePressureEngine?.assertAckCriticalAllowed();
-      const record = toJournalEnvelopeRecord(envelope, journalIdentity);
       try {
-        await activeJournal.appendEnvelope(record);
+        activePressureEngine?.assertAckCriticalAllowed();
+        const record = toJournalEnvelopeRecord(envelope, journalIdentity);
+        try {
+          await activeJournal.appendEnvelope(record);
+        } catch (error: unknown) {
+          if (!(error instanceof JournalRecordTooLargeError)) throw error;
+          await refuseOverBoundEnvelope(envelope, record, error.actualBytes);
+          if (envelope.type === 'task.offer' && envelope.task_id !== undefined) taskSettlement.offerJournaled(envelope.task_id);
+          return;
+        }
       } catch (error: unknown) {
-        if (!(error instanceof JournalRecordTooLargeError)) throw error;
-        await refuseOverBoundEnvelope(envelope, record, error.actualBytes);
-        return;
+        // An offer with no journal row never reaches a terminal in this run unless
+        // the mailbox redelivers it; its waiters fail with this error instead of waiting.
+        if (envelope.type === 'task.offer' && envelope.task_id !== undefined) {
+          // An unreadable journal leaves no row to trust: the waiters still fail with the original error.
+          const row = await activeJournal.readTask(envelope.task_id, journalIdentity).catch(() => undefined);
+          if (row === undefined) taskSettlement.offerRefused(envelope.task_id, error);
+          else taskSettlement.offerJournaled(envelope.task_id);
+        }
+        throw error;
       }
       if (envelope.type === 'task.offer' && envelope.task_id !== undefined) {
+        taskSettlement.offerJournaled(envelope.task_id);
         // A selected terminal fences admission even if its transaction rolled
         // back to received. Check before reading a possibly stale task row.
         if (terminalCommits.hasPending(envelope.task_id)) {
