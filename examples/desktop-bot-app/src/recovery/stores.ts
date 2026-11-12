@@ -5,7 +5,6 @@
  * store that gives way is renamed beside itself, and a failed action renames
  * every store it moved back.
  */
-import { existsSync } from 'node:fs';
 import { cp, lstat, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -119,7 +118,7 @@ export async function restoreSnapshot(layout: StoreLayout, version: string, stam
     await rm(staged.host, { recursive: true, force: true, maxRetries: 5 });
   };
   const hostAside = `${host}.aside-${stamp}`;
-  for (const dir of Object.values(staged)) if (existsSync(dir)) throw new Error(`${dir} already exists`);
+  for (const dir of Object.values(staged)) if (await present(dir)) throw new Error(`${dir} already exists`);
   try {
     await cp(path.join(snapshot, 'store'), staged.store, { recursive: true, errorOnExist: true, force: false });
     await cp(path.join(snapshot, 'host'), staged.host, { recursive: true, errorOnExist: true, force: false });

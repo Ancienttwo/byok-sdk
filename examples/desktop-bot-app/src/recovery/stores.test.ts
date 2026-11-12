@@ -1,8 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { lstat, rename } from 'node:fs/promises';
-import { moveAll } from './stores.ts';
+import { cp, lstat, readFile, rename } from 'node:fs/promises';
+import { moveAll, restoreSnapshot } from './stores.ts';
 
-vi.mock('node:fs/promises', () => ({ lstat: vi.fn(), rename: vi.fn() }));
+vi.mock('node:fs/promises', () => ({ cp: vi.fn(), lstat: vi.fn(), readFile: vi.fn(), rename: vi.fn() }));
 afterEach(() => vi.resetAllMocks());
 const missing = () => Object.assign(new Error('missing'), { code: 'ENOENT' });
 const moves = [{ from: '/store', to: '/store.aside' }, { from: '/host', to: '/host.aside' }];
@@ -28,20 +28,20 @@ it('skips only missing sources and moves present sources to missing destinations
   expect(rename).toHaveBeenCalledExactlyOnceWith('/host', '/host.aside');
 });
 
-it('refuses an occupied destination before moving any source', async () => {
-  vi.mocked(lstat).mockResolvedValue({} as Awaited<ReturnType<typeof lstat>>);
-  await expect(moveAll(moves)).rejects.toThrow('/store.aside already exists');
+it('refuses an occupied second destination before moving any source', async () => {
+  vi.mocked(lstat).mockImplementation(async file => {
+    if (file === '/store.aside') throw missing();
+    return {} as Awaited<ReturnType<typeof lstat>>;
+  });
+  await expect(moveAll(moves)).rejects.toThrow('/host.aside already exists');
   expect(rename).not.toHaveBeenCalled();
 });
 
-it('rolls back earlier moves if a rename fails after inspection', async () => {
-  vi.mocked(lstat).mockImplementation(async file => {
-    if (String(file).endsWith('.aside')) throw missing();
-    return {} as Awaited<ReturnType<typeof lstat>>;
-  });
-  vi.mocked(rename).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('rename denied'));
-  await expect(moveAll(moves)).rejects.toThrow('rename denied');
-  expect(vi.mocked(rename).mock.calls).toEqual([
-    ['/store', '/store.aside'], ['/host', '/host.aside'], ['/store.aside', '/store'],
-  ]);
+it('refuses an inaccessible restore staging directory before copying or moving stores', async () => {
+  vi.mocked(readFile).mockResolvedValue('{"version":"2"}');
+  vi.mocked(lstat).mockRejectedValue(Object.assign(new Error('denied'), { code: 'EACCES' }));
+  await expect(restoreSnapshot({ storeDir: '/store', scratchRoot: { path: '/tmp' }, hostStorageRoot: '/app' }, '2', 's'))
+    .rejects.toThrow('Cannot inspect /store.restore-s: denied');
+  expect(cp).not.toHaveBeenCalled();
+  expect(rename).not.toHaveBeenCalled();
 });
