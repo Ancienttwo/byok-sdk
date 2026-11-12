@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { cp, mkdir, rm } from 'node:fs/promises';
+import { cp, mkdir, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { resolveHostLayout } from '@byok-sdk/client';
 import { app, dialog } from 'electron';
@@ -15,15 +15,26 @@ export interface UpdaterOptions {
  * Copies the stores of the running version, after the Host stopped, so a user
  * can go back to this version with the data it wrote: the SDK store directory
  * (without its scratch root) and the Host's own stores (`<hostStorageRoot>/host`,
- * where src/host/compose.ts keeps them). Returns the snapshot directory.
+ * where src/host/compose.ts keeps them). Snapshots live in
+ * `<hostStorageRoot>/host/snapshots/<version>`; only the latest is kept, and
+ * older ones are removed after this one completed. Returns the snapshot directory.
  */
-async function snapshotStores(version: string): Promise<string> {
+export async function snapshotStores(version: string): Promise<string> {
   const layout = resolveHostLayout({ productId: brand.productId, productName: brand.productName });
-  const target = path.join(path.dirname(layout.storeDir), `${brand.productId}.update-snapshots`, version);
+  const hostDir = path.join(layout.hostStorageRoot, 'host');
+  const snapshots = path.join(hostDir, 'snapshots');
+  const target = path.join(snapshots, version);
   await rm(target, { recursive: true, force: true });
   await mkdir(target, { recursive: true, mode: 0o700 });
   await cp(layout.storeDir, path.join(target, 'store'), { recursive: true, filter: source => source !== layout.scratchRoot.path });
-  await cp(path.join(layout.hostStorageRoot, 'host'), path.join(target, 'host'), { recursive: true });
+  // The snapshot directory is inside the directory it copies, so its entries are copied one by one, never `snapshots` itself.
+  await mkdir(path.join(target, 'host'), { mode: 0o700 });
+  for (const entry of await readdir(hostDir)) {
+    if (entry !== 'snapshots') await cp(path.join(hostDir, entry), path.join(target, 'host', entry), { recursive: true });
+  }
+  for (const entry of await readdir(snapshots)) {
+    if (entry !== version) await rm(path.join(snapshots, entry), { recursive: true, force: true });
+  }
   return target;
 }
 

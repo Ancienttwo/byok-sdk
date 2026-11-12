@@ -1,5 +1,6 @@
-import { resolve, sep } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { resolveHostLayout } from '@byok-sdk/client';
 import { app, BrowserWindow, ipcMain, net, powerSaveBlocker, protocol, session, shell, type IpcMainInvokeEvent, type WebFrameMain } from 'electron';
 import brand from '../../brand.config.ts';
 import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, STATE_HINT_CHANNEL, type BridgeMethods, type BridgeOutcome, type MainMethod } from '../bridge/protocol.ts';
@@ -125,6 +126,10 @@ app.on('web-contents-created', (_event, contents) => {
     return { action: 'deny' };
   });
 });
+
+// Chromium's own state moves under the host storage root, apart from the Host's stores in `<root>/host`.
+// It is set before the single-instance lock and before 'ready', which fix the userData directory.
+app.setPath('userData', join(resolveHostLayout({ productId: brand.productId, productName: brand.productName }).hostStorageRoot, 'shell'));
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
