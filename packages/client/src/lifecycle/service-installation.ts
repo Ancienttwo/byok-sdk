@@ -587,8 +587,13 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           try {
             await restoreInstallSnapshot(snapshotId);
           } catch (error) {
-            // The restore error names where the snapshot is kept; a release failure must not replace it.
-            await release().catch(() => undefined);
+            // The restore error names where the snapshot is kept: a release
+            // failure joins it rather than replacing it.
+            try {
+              await release();
+            } catch (releaseError) {
+              throw new StoreRestoreError([error, releaseError], `${(error as Error).message} The store leases could not be released either.`);
+            }
             throw error;
           }
           await release();

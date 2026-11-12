@@ -1093,15 +1093,26 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       let healthFailed = false;
       onHealth = async () => { healthFailed = true; };
       const fault = failRestore(() => healthFailed);
+      // The restore's own lease then fails to release too: neither error may hide the other.
+      const releaseError = new Error('injected release failure');
+      const original = daemonOwner.acquireDaemonOwner;
+      const leaseFault = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementation(async (...args) => {
+        const lease = await original(...args);
+        return healthFailed ? { release: async () => { await lease.release(); throw releaseError; } } : lease;
+      });
       let error: unknown;
       try {
         error = await installation.install(await payload('2.0.0', { 'migrate.cjs': MIGRATE })).catch((caught: unknown) => caught);
       } finally {
         fault.restore();
+        leaseFault.mockRestore();
       }
       const [repair] = await snapshotNames();
       expect(await snapshotNames()).toEqual([expect.stringMatching(/^\.install-repair-/u)]);
       expect(error).toMatchObject({ code: 'install_health_check_failed' });
+      const removal = ((error as Error).cause as AggregateError).errors[1] as AggregateError;
+      expect(removal).toBeInstanceOf(AggregateError);
+      expect(removal.errors).toEqual([expect.objectContaining({ errors: [fault.restoreError] }), releaseError]);
       expect((error as Error).message).toContain('Remaining: prepared store snapshot restoration, install snapshot directory.');
       expect((error as Error).message).toContain(path.join(installRoot, 'snapshots', repair!));
       expect(events.slice(-2)).toEqual(['health 2.0.0', 'uninstall']);
