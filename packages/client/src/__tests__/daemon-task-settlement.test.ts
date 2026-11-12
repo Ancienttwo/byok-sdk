@@ -376,6 +376,26 @@ describe('Daemon.whenTaskSettled', () => {
     expect(server.received.filter((e) => e.task_id === taskId)).toEqual([]);
   });
 
+  it('does not run a cancelled offer after retention pruned its evidence and the mailbox suppresses it', async () => {
+    const taskId = 'task-cancelled-pruned';
+    const { d, adapter, storeDir, identity, cancel } = await recoveredOffer(taskId);
+    const cancellation = cancel();
+    await expect(d.whenTaskSettled(taskId, { signal: AbortSignal.timeout(2_000) })).resolves.toEqual(suppressed);
+    await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, identity.deviceId)).toBe(cancellation.seq));
+    await d.stop();
+    const journal = new SqliteLocalTaskJournal({ storeDir });
+    await expect(journal.listPrunableConfirmedTasks(new Date(Date.now() + 60_000), 10)).resolves.toEqual([taskId]);
+    await expect(journal.pruneConfirmedJournalTask(taskId)).resolves.toBe(true);
+    await journal.close();
+    await d.start();
+    // A conforming mailbox never redelivers the cancelled offer; later traffic still flows.
+    offer('task-after-prune', { harnessId: 'acme-harness', runtime: 'claude' });
+    await server.waitFor((e) => e.type === 'task.decline' && e.task_id === 'task-after-prune');
+    await expect(d.whenTaskSettled(taskId)).rejects.toBeInstanceOf(DaemonTaskUnknownError);
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(server.received.filter((e) => e.task_id === taskId)).toEqual([]);
+  });
+
   it('leaves a stored offer after its acknowledged pre-cancel to the mailbox suppression contract after restart', async () => {
     const taskId = 'task-pre-cancel-restart';
     const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-settlement-recovery-'));
