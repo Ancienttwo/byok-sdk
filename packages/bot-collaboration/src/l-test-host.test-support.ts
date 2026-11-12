@@ -21,39 +21,6 @@ import { policy } from './k4-fixtures.test-support.js';
  * so both come from `./k4-fixtures.test-support` (#1845).
  */
 
-type DeviceRecord = Parameters<DeviceCredentialBackend['replace']>[0];
-type FirstPairingAttempt = Parameters<DeviceCredentialBackend['saveFirstPairingAttempt']>[0];
-type Authority = { kind: 'record'; record: DeviceRecord } | { kind: 'attempt'; attempt: FirstPairingAttempt }
-  | { kind: 'replacement'; record: DeviceRecord; attempt: FirstPairingAttempt };
-
-/** Test-owned enrollment backend: the device record lives in memory for the life of one fixture. */
-export class InMemoryDeviceCredentials implements DeviceCredentialBackend {
-  #authority: Authority | undefined;
-  async read(): Promise<DeviceRecord | undefined> {
-    const authority = this.#authority;
-    if (authority === undefined || authority.kind === 'attempt') return undefined;
-    return Object.freeze({ ...authority.record });
-  }
-  async readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined> {
-    const authority = this.#authority;
-    if (authority === undefined || authority.kind === 'record') return undefined;
-    return Object.freeze({ ...authority.attempt });
-  }
-  async saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void> {
-    const record = await this.read();
-    this.#authority = record === undefined ? { kind: 'attempt', attempt: Object.freeze({ ...attempt }) }
-      : { kind: 'replacement', record, attempt: Object.freeze({ ...attempt }) };
-  }
-  async replace(record: DeviceRecord): Promise<void> {
-    const prior = this.#authority;
-    this.#authority = prior?.kind === 'replacement' && prior.record.deviceId === record.deviceId &&
-      prior.record.tenantId === record.tenantId && prior.record.devicePublicKey === record.devicePublicKey
-      ? { kind: 'replacement', record: Object.freeze({ ...record }), attempt: prior.attempt }
-      : { kind: 'record', record: Object.freeze({ ...record }) };
-  }
-  async clear(): Promise<boolean> { const existed = this.#authority !== undefined; this.#authority = undefined; return existed; }
-}
-
 type Event = Session['events'] extends AsyncIterable<infer E> ? E : never;
 /** Calls `submit_result` on the run's `byokagentresult` MCP server, as a real runtime would. */
 async function submitResult(input: RuntimeOperationStartInput, outcome: unknown, signal: AbortSignal): Promise<unknown> {
@@ -196,6 +163,7 @@ async function waitForReady(daemon: Pick<Daemon, 'status'>, timeoutMs = 5_000): 
 
 /** Starts an embedded SQLite server, pairs one daemon that runs `adapter`, and opens the Host ledger. */
 export async function openLTestHost(options: {
+  deviceCredentials: DeviceCredentialBackend;
   consume: (wake: DueWake, signal: AbortSignal) => Promise<void>;
   ledgerOptions?: HostLedgerOptions;
   adapter?: ResultStubAdapter;
@@ -220,7 +188,7 @@ export async function openLTestHost(options: {
     serverUrl: `http://127.0.0.1:${address.port}`, storeDir: path.join(root, 'sdk'),
     agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy },
   };
-  const daemon = createDaemonWithAdapters(config, [adapter], { deviceCredentials: new InMemoryDeviceCredentials() });
+  const daemon = createDaemonWithAdapters(config, [adapter], { deviceCredentials: options.deviceCredentials });
   const pairing = await server.pairing.createPairingCode({ productId });
   const { deviceId } = await daemon.pair(pairing.code);
   await daemon.start(); await waitForReady(daemon);

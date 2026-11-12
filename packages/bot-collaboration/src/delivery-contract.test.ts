@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect } from 'vitest';
 import { freezeRuntimeAdapterDescriptor } from '@byok-sdk/client';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { HostLedger } from '@byok-sdk/server/execution-core';
 import { template } from './k4-fixtures.test-support';
 import type { ChannelPort, InboundMessage } from './channel';
@@ -60,7 +61,8 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
     return result;
   };
   const adapter = new DraftAdapter();
-  const fixture: LTestHost = await openLTestHost({ ledgerOptions: { compactVeto: botCompactVeto }, adapter,
+  const fixture: LTestHost = await openLTestHost({ deviceCredentials: new InMemoryDeviceCredentialBackend(),
+    ledgerOptions: { compactVeto: botCompactVeto }, adapter,
     consume: (wake, signal) => bot.consume(wake, signal), agentMessage: { consume: input => bot.consumeMessage(input) } });
   const ledger = () => reopened ?? fixture.ledger;
   // The crash boundary: the claim is committed, and this copy of the database is what a restarted Host opens.

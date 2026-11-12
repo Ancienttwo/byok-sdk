@@ -4,10 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type AgentEgressPolicy, type Daemon } from '@byok-sdk/client';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { createByokServer, listenLoopback, type ByokServer, type LoopbackListener } from '@byok-sdk/server';
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { createBotPersonaProjection, type AgentMessageInput } from '@byok-sdk/bot-collaboration';
-import { InMemoryDeviceCredentials, ResultStubAdapter } from '@byok-sdk/bot-collaboration/testing';
+import { ResultStubAdapter } from '@byok-sdk/bot-collaboration/testing';
 import { ConversationService } from '../conversation/service.ts';
 import { botViews, conversationItems, turnEnd } from '../conversation/view.ts';
 import { HostStore } from '../store/store.ts';
@@ -23,7 +24,7 @@ const WRITER = { id: 'writer', name: 'Writer', role: 'Writes drafts', persona: '
 
 interface Fixture {
   root: string; server: ByokServer; listener: LoopbackListener; daemon: Daemon; adapter: ResultStubAdapter; store: HostStore;
-  conversation: Conversation; execution: ExecutionTemplate; deviceCredentials: InMemoryDeviceCredentials;
+  conversation: Conversation; execution: ExecutionTemplate; deviceCredentials: InMemoryDeviceCredentialBackend;
 }
 let f: Fixture | undefined;
 afterEach(async () => {
@@ -58,7 +59,7 @@ async function open(): Promise<Fixture> {
   let port: number | null = null;
   const listener = await listenLoopback({ portStore: { read: async () => port, claim: async candidate => (port = candidate) },
     createHandler: () => request => server.hono.fetch(request) });
-  const adapter = new ResultStubAdapter(), deviceCredentials = new InMemoryDeviceCredentials();
+  const adapter = new ResultStubAdapter(), deviceCredentials = new InMemoryDeviceCredentialBackend();
   const daemon = newDaemon({ root, listener, adapter, deviceCredentials });
   const { deviceId } = await daemon.pair((await server.pairing.createPairingCode({ productId })).code);
   await daemon.start(); await ready(daemon);

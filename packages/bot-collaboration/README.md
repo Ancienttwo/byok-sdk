@@ -18,6 +18,11 @@ Each symbol has one entry (#1845). K4 needs Node 24.22.1 or later, because its l
 | `./rules` | The pure rules that the two entries above do not export | Anywhere. It loads only `@byok-sdk/protocol` and `@byok-sdk/server/execution-core/canonical`, so no `node:sqlite`. |
 | `./testing` | The shared vectors, the L test Host, and the K4 test data `policy` and `template` | Tests on Node. It needs the optional peers `vitest` and `@hono/node-server`. |
 
+`openLTestHost` requires a `deviceCredentials` backend from the caller. In tests,
+import `InMemoryDeviceCredentialBackend` from `@byok-sdk/client/testing` and pass
+`deviceCredentials: new InMemoryDeviceCredentialBackend()` along with `consume`.
+The fixture passes that backend to its daemon; it supplies no default.
+
 ## Run
 
 Use Node 24.15 or later and Bun. From the repository root:
