@@ -284,7 +284,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3180665,
+      "budgetBytes": 3180681,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

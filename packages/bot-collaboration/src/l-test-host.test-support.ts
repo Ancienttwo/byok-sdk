@@ -169,7 +169,8 @@ export async function openLTestHost(options: {
   adapter?: ResultStubAdapter;
   agentMessage?: CreateByokServerOptions['agentMessage'];
 }) {
-  if (options.deviceCredentials === undefined) throw new TypeError('openLTestHost requires deviceCredentials');
+  const deviceCredentials = options.deviceCredentials;
+  if (deviceCredentials === undefined) throw new TypeError('openLTestHost requires deviceCredentials');
   const root = await mkdtemp(path.join(tmpdir(), 'lth-'));
   const productId = 'host-core-test';
   const ledgerPath = path.join(root, 'host.sqlite');
@@ -189,7 +190,7 @@ export async function openLTestHost(options: {
     serverUrl: `http://127.0.0.1:${address.port}`, storeDir: path.join(root, 'sdk'),
     agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy },
   };
-  const daemon = createDaemonWithAdapters(config, [adapter], { deviceCredentials: options.deviceCredentials });
+  const daemon = createDaemonWithAdapters(config, [adapter], { deviceCredentials });
   const pairing = await server.pairing.createPairingCode({ productId });
   const { deviceId } = await daemon.pair(pairing.code);
   await daemon.start(); await waitForReady(daemon);
