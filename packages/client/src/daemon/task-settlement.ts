@@ -1,13 +1,17 @@
 import type { TerminalTruthState } from './journal/journal.js';
 
-/** {@link DaemonTaskSettlement.terminal}: the kind of the task's terminal envelope. */
+/** {@link DaemonTaskSettlement.terminal}: the terminal kind, including a cloud cancellation before admission. */
 export type DaemonTaskTerminal = 'complete' | 'failed' | 'cancelled' | 'declined';
 
 /** What `Daemon.whenTaskSettled` resolves with. */
 export interface DaemonTaskSettlement {
   readonly terminal: DaemonTaskTerminal;
-  /** The first settlement of the terminal; `accepted` includes a duplicate. */
-  readonly delivery: 'accepted' | 'rejected';
+  /**
+   * The first settlement of the terminal; `accepted` includes a duplicate.
+   * `not-required`: a durable cloud cancellation suppressed a received offer
+   * before admission; no local terminal envelope or runtime was required.
+   */
+  readonly delivery: 'accepted' | 'rejected' | 'not-required';
   /**
    * `failed` exactly when `runtime-disposal-failed` was emitted for the task's
    * runtime; a failed release of an offer-owned scratch (`runtimeId: 'scratch'`)
@@ -114,6 +118,16 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
     const entry = this.#entry(taskId);
     entry.delivered ??= { terminal, delivery };
     this.#settle(entry);
+  }
+
+  /** Only for a received offer with no execution owner, after its cloud cancel is durable. */
+  cancelledBeforeAdmission(taskId: string): void {
+    this.terminalSettled(taskId, 'cancelled', 'not-required');
+  }
+
+  /** A redelivery in this daemon cannot reopen an offer the cloud already cancelled. */
+  isCancelledBeforeAdmission(taskId: string): boolean {
+    return this.#entries.get(taskId)?.result?.delivery === 'not-required';
   }
 
   async wait(taskId: string, signal?: AbortSignal): Promise<DaemonTaskSettlement> {

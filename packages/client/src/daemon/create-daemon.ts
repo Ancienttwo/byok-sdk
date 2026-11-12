@@ -747,14 +747,23 @@ export interface Daemon {
   /**
    * Resolves once the task's terminal had its first outbound settlement (no
    * earlier than its local terminal event) and the runtime owner reported
-   * its first disposal outcome. A task this daemon has not seen is read from
-   * the journal: after a restart the result reflects the journal's current
-   * truth, so a refused terminal that was replaced reads as its replacement,
-   * never the reverse. Rejects with {@link DaemonTaskUnknownError} for a task
-   * with neither, before `start()` the way `approve()` does, and with
-   * `signal.reason` on abort; the task is untouched. `stop()` rejects no
-   * pending wait, so pass a signal if one can span it; after `stop()` an
-   * unseen id rejects with the closed journal's error.
+   * its first disposal outcome. A received offer with no execution owner
+   * resolves as `cancelled`/`not-required`/`none` once its cloud cancellation
+   * is journaled; no local terminal is required. Redelivery of that task id
+   * in this daemon keeps that result and cannot start a runtime. An offer
+   * that was never claimed is not final by itself: it may be redelivered.
+   * A task this daemon has not seen is read from the journal: after a restart
+   * the result reflects the journal's current truth, so a refused terminal
+   * that was replaced reads as its replacement, never the reverse. Known
+   * limit (#1955): a new daemon cannot read a consumed cancellation through
+   * the journal interface; with the cursor past it, the received offer is
+   * recovered as `failed` (`daemon_interrupted`), `accepted`, `none`.
+   * Rejects with {@link DaemonTaskUnknownError} for an unknown task, before
+   * `start()` the way `approve()` does, and with `signal.reason` on abort;
+   * the task is untouched. Revocation and replay expiry carry no per-task
+   * cancellation authority. `stop()` and halt reject no pending wait, so
+   * pass an AbortSignal if one can span either; after `stop()` an unseen id
+   * rejects with the closed journal's error.
    */
   whenTaskSettled(taskId: string, options?: { readonly signal?: AbortSignal }): Promise<DaemonTaskSettlement>;
   status(): DaemonStatus;

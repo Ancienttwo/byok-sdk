@@ -117,10 +117,20 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
         }
         const task = await activeJournal.readTask(envelope.task_id, journalIdentity);
         if (!task) throw new Error('durable offer has no execution record');
+        if (taskSettlement.isCancelledBeforeAdmission(envelope.task_id)) return;
         if (task.localState !== 'received') {
           await terminalCommits.retry(envelope.task_id);
           return;
         }
+      }
+      const runner = daemonState.runner;
+      if (envelope.type === 'task.cancel' && envelope.task_id !== undefined && runner !== undefined
+        && hostFor(runner).current(envelope.task_id) === undefined
+        && !terminalCommits.hasPending(envelope.task_id)) {
+        const task = await activeJournal.readTask(envelope.task_id, journalIdentity);
+        // Recovery deliberately left this unadmitted offer to cloud redelivery.
+        // The durable cancellation is authoritative even when its offer is suppressed.
+        if (task?.localState === 'received') taskSettlement.cancelledBeforeAdmission(envelope.task_id);
       }
       if (envelope.type === 'task.cancel' && envelope.task_id !== undefined && resultReplyRecoveryTasks.has(envelope.task_id)) {
         const taskId = envelope.task_id;

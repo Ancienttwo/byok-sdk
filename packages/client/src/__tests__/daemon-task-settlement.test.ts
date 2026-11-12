@@ -5,11 +5,13 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope } from '@byok-sdk/protocol';
+import { createEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DaemonTaskUnknownError, TaskSettlementRegistry, type DaemonTaskSettlement } from '../daemon/task-settlement';
 import { LocalStorageEmergencyError } from '../daemon/retention/pressure';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
+import { journalHash } from '../daemon/journal/journal';
+import { CursorStore } from '../daemon/cursor-store';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -155,6 +157,62 @@ describe('Daemon.whenTaskSettled', () => {
     await expect(restarted.whenTaskSettled('no-such-task')).rejects.toMatchObject({
       constructor: DaemonTaskUnknownError, code: 'daemon_task_unknown', taskId: 'no-such-task',
     });
+  });
+
+  it('settles a suppressed offer for waiting and late reads, fences redelivery, and reads the recovery failure after restart', async () => {
+    const first = await started(new StubRuntimeAdapter());
+    await first.d.stop();
+    const taskId = 'task-suppressed-offer';
+    const identity = { tenantId: 'tenant-test', productId: 'test-product-settlement', deviceId: 'device-1' };
+    const original = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), instruction: 'work', ...FRESH_OFFER },
+      { taskId, seq: server.nextSeq() });
+    const bytes = encodeEnvelope(original);
+    // Crash window: the offer is durable, but its cursor and admission are not.
+    const journal = new SqliteLocalTaskJournal({ storeDir: first.storeDir });
+    await journal.appendEnvelope({ identity, envelopeId: original.id, taskId, seq: original.seq!, bytes,
+      bytesHash: journalHash(bytes), receivedAt: original.ts, opensTask: true });
+    await journal.close();
+
+    const adapter = new StubRuntimeAdapter();
+    const d = build(adapter, first.storeDir);
+    await d.start();
+    const read = vi.spyOn(SqliteLocalTaskJournal.prototype, 'readTask');
+    try {
+      const waiting = d.whenTaskSettled(taskId, { signal: AbortSignal.timeout(2_000) });
+      const tracked = track(waiting);
+      await vi.waitFor(() => expect(read).toHaveBeenCalledWith(taskId, identity));
+      expect(tracked.settled()).toBe(false);
+      // Cloud suppression means only the authoritative cancellation is delivered.
+      server.send(createEnvelope('task.cancel', { reason: 'cancelled while daemon was down' },
+        { taskId, seq: server.nextSeq() }));
+      const expected = { terminal: 'cancelled', delivery: 'not-required', disposal: 'none' };
+      await expect(waiting).resolves.toEqual(expected);
+      await expect(d.whenTaskSettled(taskId)).resolves.toEqual(expected);
+
+      // A later delivery of the same execution contract cannot reopen admission.
+      const redelivery = createEnvelope('task.offer', original.payload, { taskId, seq: server.nextSeq() });
+      server.send(redelivery);
+      const cursor = new CursorStore(first.storeDir);
+      await vi.waitFor(async () => expect(await cursor.load(server.url, identity.deviceId)).toBe(redelivery.seq));
+      await expect(d.whenTaskSettled(taskId)).resolves.toEqual(expected);
+      expect(adapter.startCalls).toHaveLength(0);
+      expect(server.received.filter((e) => e.task_id === taskId)).toEqual([]);
+      await d.stop();
+
+      // Known limit (#1955): the journal reader exposes no inbound cancel.
+      // With the cursor now past it, ordinary received-task recovery fails it.
+      const restartedAdapter = new StubRuntimeAdapter();
+      const restarted = build(restartedAdapter, first.storeDir);
+      await restarted.start();
+      await expect(restarted.whenTaskSettled(taskId, { signal: AbortSignal.timeout(2_000) }))
+        .resolves.toEqual({ terminal: 'failed', delivery: 'accepted', disposal: 'none' });
+      expect(restartedAdapter.startCalls).toHaveLength(0);
+      expect(server.received.filter((e) => e.task_id === taskId)).toEqual([
+        expect.objectContaining({ type: 'task.fail', payload: expect.objectContaining({ reason: 'daemon_interrupted' }) }),
+      ]);
+    } finally {
+      read.mockRestore();
+    }
   });
 
   it('rejects the waiter of an offer whose journal append failed with that error', async () => {
