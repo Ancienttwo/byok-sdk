@@ -10,7 +10,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   parseBunLock, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, PI_DIRECT_CLOSURE, PI_RUNTIME_CLOSURE, readInstalledPiClosure,
-  assertRecordedPiClosureIntegrity, readLockedPiClosure,
+  assertRecordedPiClosureIntegrity, piCertificateIdentityPattern, readLockedPiClosure,
 } from './pi-runtime-identity.mjs';
 import { assertNoStorePaths } from './published-store-paths.mjs';
 import { assertWorkerConsumerImports } from './cloud-do-consumer-smoke.mjs';
@@ -236,6 +236,13 @@ for (const name of PI_RUNTIME_CLOSURE) for (const changed of ['record', 'lock', 
     if (changed !== 'lock') f.record.packages.find(entry => entry.name === name).tarballIntegrity = wrong;
     if (changed !== 'record') f.locked.set(name, wrong);
     assert.throws(() => checkPiIntegrity(f), changed === 'both' ? /provenance subject SHA-512/ : /recorded integrity differs from bun\.lock/);
+  });
+}
+// @sigstore/verify tests the certificate SAN with String#match against this pattern.
+for (const [ref, accepted] of [['v1.5.2', true], ['v1.5.20', false], ['v1.5.2-rc.1', false], ['v1x5x2', false]]) {
+  test(`Pi certificate identity for 1.5.2 ${accepted ? 'accepts' : 'rejects'} refs/tags/${ref}`, () => {
+    const san = `https://github.com/earendil-works/pi/.github/workflows/build-binaries.yml@refs/tags/${ref}`;
+    assert.equal(san.match(piCertificateIdentityPattern('1.5.2')) !== null, accepted);
   });
 }
 // Review forgeries: each keeps the bundle well formed and its digest recomputed, so only signature verification can refuse it.

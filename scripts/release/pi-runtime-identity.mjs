@@ -232,6 +232,15 @@ function loadSigstore() {
 }
 
 /**
+ * The certificate identity policy for Pi's release workflow at exactly
+ * `refs/tags/v<version>`. @sigstore/verify matches `subjectAlternativeName` as
+ * an unanchored regular expression, so the identity is escaped and anchored.
+ */
+export function piCertificateIdentityPattern(version) {
+  return `^${RegExp.escape(`${PI_REPOSITORY}/.github/workflows/build-binaries.yml@refs/tags/v${version}`)}$`;
+}
+
+/**
  * The one provenance verification the collector and the release graph share:
  * the statement names exactly `name@version` with `integrity` as its SHA-512
  * subject and the upstream repository and commit, and its Sigstore bundle
@@ -260,7 +269,7 @@ export function verifyPiProvenance({ name, version, integrity, upstreamCommit, b
   const { bundleFromJSON, toSignedEntity, verifier } = loadSigstore();
   try {
     verifier.verify(toSignedEntity(bundleFromJSON(bundle)), {
-      subjectAlternativeName: `${PI_REPOSITORY}/.github/workflows/build-binaries.yml@refs/tags/v${version}`,
+      subjectAlternativeName: piCertificateIdentityPattern(version),
       extensions: { issuer: PI_CERTIFICATE_ISSUER },
     });
   } catch (error) {
