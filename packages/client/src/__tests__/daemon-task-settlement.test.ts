@@ -7,7 +7,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, encodeEnvelope, HOST_MCP_TASK_CONTEXT_CAPABILITY } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonOverrides } from '../daemon/create-daemon';
-import { DaemonTaskUnknownError, TaskSettlementRegistry, type DaemonTaskSettlement } from '../daemon/task-settlement';
+import { DaemonTaskUnknownError, TaskSettlementRegistry, hasTaskCancellation, type DaemonTaskSettlement } from '../daemon/task-settlement';
 import { LocalStorageEmergencyError } from '../daemon/retention/pressure';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { journalHash } from '../daemon/journal/journal';
@@ -140,6 +140,45 @@ describe('Daemon.whenTaskSettled', () => {
     release();
     await expect(settlement).resolves.toEqual({ terminal: 'cancelled', delivery: 'accepted', disposal: 'disposed' });
     expect(server.received.some((e) => e.task_id === 'task-cancel-in-start' && e.type === 'task.started')).toBe(false);
+  });
+
+  it('keeps a live pre-claim cancellation pending until its selected terminal is committed', async () => {
+    const adapter = new StubRuntimeAdapter();
+    let releasePrepare!: () => void;
+    const prepareGate = new Promise<void>((resolve) => { releasePrepare = resolve; });
+    const prepare = adapter.prepare.bind(adapter);
+    const preparing = vi.spyOn(adapter, 'prepare').mockImplementation(async (input) => {
+      await prepareGate;
+      return prepare(input);
+    });
+    const { d } = await started(adapter);
+    const taskId = 'task-cancel-pre-claim';
+    let releaseTerminal!: () => void;
+    const terminalGate = new Promise<void>((resolve) => { releaseTerminal = resolve; });
+    const recordTerminal = SqliteLocalTaskJournal.prototype.recordTerminal;
+    const terminal = vi.spyOn(SqliteLocalTaskJournal.prototype, 'recordTerminal').mockImplementation(async function (this: SqliteLocalTaskJournal, record) {
+      if (record.taskId === taskId) await terminalGate;
+      return recordTerminal.call(this, record);
+    });
+    try {
+      offer(taskId);
+      await vi.waitFor(() => expect(preparing).toHaveBeenCalled());
+      server.send(createEnvelope('task.cancel', { reason: 'cancel preparation' }, { taskId, seq: server.nextSeq() }));
+      await vi.waitFor(() => expect(terminal).toHaveBeenCalledWith(expect.objectContaining({ taskId })));
+      const settlement = d.whenTaskSettled(taskId, { signal: AbortSignal.timeout(2_000) });
+      const tracked = track(settlement);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(tracked.settled()).toBe(false);
+      releaseTerminal();
+      releasePrepare();
+      await expect(settlement).resolves.toEqual({ terminal: 'declined', delivery: 'accepted', disposal: 'none' });
+      expect(adapter.startCalls).toHaveLength(0);
+    } finally {
+      releaseTerminal();
+      releasePrepare();
+      terminal.mockRestore();
+      preparing.mockRestore();
+    }
   });
 
   it('reads a task settled before a restart from the journal, and rejects unknown, aborted and not-started calls', async () => {
@@ -312,24 +351,28 @@ describe('Daemon.whenTaskSettled', () => {
     expect(server.received.filter((e) => e.task_id === taskId)).toEqual([]);
   });
 
-  it.each(['new', 'same'] as const)('reads the recovery failure after %s-instance restart consumed a suppressed cancellation', async (instance) => {
+  it.each(['new', 'same'] as const)('preserves stored cancellation after %s-instance restart and fences redelivery', async (instance) => {
     const taskId = 'task-cancelled-restart';
-    const { d, adapter, storeDir, identity, cancel } = await recoveredOffer(taskId);
+    const { d, adapter, storeDir, identity, original, cancel } = await recoveredOffer(taskId);
     const cancellation = cancel();
     await expect(d.whenTaskSettled(taskId, { signal: AbortSignal.timeout(2_000) })).resolves.toEqual(suppressed);
     const cursor = new CursorStore(storeDir);
     await vi.waitFor(async () => expect(await cursor.load(server.url, identity.deviceId)).toBe(cancellation.seq));
     await d.stop();
-    // Known limit (#1955): the journal reader exposes no inbound cancel.
+    // The stored cancellation is authoritative after the run-local cache expires.
     const restartedAdapter = instance === 'same' ? adapter : new StubRuntimeAdapter();
     const restarted = instance === 'same' ? d : build(restartedAdapter, storeDir);
     await restarted.start();
     await expect(restarted.whenTaskSettled(taskId, { signal: AbortSignal.timeout(2_000) }))
-      .resolves.toEqual({ terminal: 'failed', delivery: 'accepted', disposal: 'none' });
+      .resolves.toEqual(suppressed);
     expect(restartedAdapter.startCalls).toHaveLength(0);
-    expect(server.received.filter((e) => e.task_id === taskId)).toEqual([
-      expect.objectContaining({ type: 'task.fail', payload: expect.objectContaining({ reason: 'daemon_interrupted' }) }),
-    ]);
+    expect(server.received.filter((e) => e.task_id === taskId)).toEqual([]);
+    const redelivery = createEnvelope('task.offer', original.payload, { taskId, seq: server.nextSeq() });
+    server.send(redelivery);
+    await vi.waitFor(async () => expect(await cursor.load(server.url, identity.deviceId)).toBe(redelivery.seq));
+    await expect(restarted.whenTaskSettled(taskId)).resolves.toEqual(suppressed);
+    expect(restartedAdapter.startCalls).toHaveLength(0);
+    expect(server.received.filter((e) => e.task_id === taskId)).toEqual([]);
   });
 
   it('keeps the runtime settlement when an offer gains an owner during the cancellation journal read', async () => {
@@ -429,12 +472,70 @@ describe('Daemon.whenTaskSettled', () => {
     }
   });
 
+  describe('stored cancellation authority', () => {
+    const taskId = 'stored-cancel';
+    const identity = { tenantId: 'tenant-test', productId: 'test-product-settlement', deviceId: 'device-1' };
+    const bytes = encodeEnvelope(createEnvelope('task.cancel', { reason: 'cancelled' }, { taskId, seq: 2 }));
+    const evidence = { identity, bytes, bytesHash: journalHash(bytes) };
+
+    it('settles a received journal row without an in-memory cancellation event', async () => {
+      const r = new TaskSettlementRegistry();
+      r.bindJournal({
+        readTask: async () => ({ localState: 'received' }),
+        hasTaskCancellation: (id) => hasTaskCancellation({ readTaskCancellation: async () => evidence }, id, identity),
+        unconfirmedTerminal: async () => undefined,
+      });
+      await expect(r.wait(taskId)).resolves.toEqual({ terminal: 'cancelled', delivery: 'not-required', disposal: 'none' });
+    });
+
+    it.each([
+      ['tenant', { ...evidence, identity: { ...identity, tenantId: 'other' } }],
+      ['product', { ...evidence, identity: { ...identity, productId: 'other' } }],
+      ['device', { ...evidence, identity: { ...identity, deviceId: 'other' } }],
+      ['hash', { ...evidence, bytesHash: journalHash('other') }],
+      ...[
+        encodeEnvelope(createEnvelope('task.cancel', { reason: 'cancelled' }, { taskId: 'other', seq: 2 })),
+        encodeEnvelope(createEnvelope('task.started', {}, { taskId })),
+      ].map((wrongBytes) => ['binding', { ...evidence, bytes: wrongBytes, bytesHash: journalHash(wrongBytes) }] as const),
+    ] as const)('rejects invalid %s evidence from an injected journal', async (_kind, record) => {
+      const r = new TaskSettlementRegistry();
+      r.bindJournal({
+        readTask: async () => ({ localState: 'received' }),
+        hasTaskCancellation: (id) => hasTaskCancellation({ readTaskCancellation: async () => record }, id, identity),
+        unconfirmedTerminal: async () => undefined,
+      });
+      await expect(r.wait(taskId)).rejects.toThrow(/identity mismatch|hash mismatch|cancellation binding/);
+    });
+
+    it('refuses startup on corrupt cancellation evidence without writing an interruption', async () => {
+      const first = await started(new StubRuntimeAdapter());
+      await first.d.stop();
+      const journal = new SqliteLocalTaskJournal({ storeDir: first.storeDir });
+      const seq = server.nextSeq();
+      const offerBytes = encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), instruction: 'work', ...FRESH_OFFER }, { taskId, seq }));
+      await journal.appendEnvelope({ identity, envelopeId: 'stored-offer', taskId, seq, bytes: offerBytes,
+        bytesHash: journalHash(offerBytes), receivedAt: new Date().toISOString(), opensTask: true });
+      await journal.close();
+      const read = vi.spyOn(SqliteLocalTaskJournal.prototype, 'readTaskCancellation').mockResolvedValue({ ...evidence, bytesHash: journalHash('corrupt') });
+      const terminal = vi.spyOn(SqliteLocalTaskJournal.prototype, 'recordTerminal');
+      try {
+        await expect(build(new StubRuntimeAdapter(), first.storeDir).start()).rejects.toThrow('durable cancellation bytes/hash mismatch');
+        expect(terminal).not.toHaveBeenCalled();
+        expect(server.received.filter((e) => e.task_id === taskId)).toEqual([]);
+      } finally {
+        read.mockRestore();
+        terminal.mockRestore();
+      }
+    });
+  });
+
   describe('TaskSettlementRegistry waiters', () => {
     function registry(localState?: string): { registry: TaskSettlementRegistry; reads: () => number } {
       let reads = 0;
       const r = new TaskSettlementRegistry();
       r.bindJournal({
         readTask: async () => { reads += 1; return localState === undefined ? undefined : { localState }; },
+        hasTaskCancellation: async () => false,
         unconfirmedTerminal: async () => undefined,
       });
       return { registry: r, reads: () => reads };

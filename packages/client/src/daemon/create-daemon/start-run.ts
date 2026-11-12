@@ -10,6 +10,8 @@ import type { AgentRef } from '../../agent-home.js';
 import type { SealedRunState } from './state.js';
 import { decodeEnvelope, createEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
 import { DAEMON_TASK_FAILURE } from '../task-failure.js';
+import { hasTaskCancellation } from '../task-settlement.js';
+import { offerHasOwner } from '../task-runner/offer-admission.js';
 import { terminalIdentity } from '../terminal-identity.js';
 import { assertJournalEnvelopeProtocol } from '../daemon-errors.js';
 import { resultReplyFailureFromState } from '../result-reply-failure.js';
@@ -31,7 +33,7 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
     ownedProcessLedger, scratchRoot, storeDir, daemonState, initializeInputPreparation, config,
     retentionSweeper, replaceControlServer, setLifecycle, initializeOwnedHostedStorage,
     storagePressure, egressPolicy, agentHomeManager, cursorStore, terminalCommits, operationalHealth,
-    observer, adapters, provenAgentMemoryBackend,
+    observer, adapters, provenAgentMemoryBackend, taskSettlement,
   } = daemonScope;
   // #384 item 3 / #393: on POSIX a SIGKILLed or OOM-killed daemon leaves its
   // owned runtime groups running, and a tool process in one could still be
@@ -124,6 +126,19 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
   daemonState.fleetJitter = createFleetJitter(config.productId, record.deviceId);
 
   const journalIdentity: JournalIdentity = { tenantId: record.tenantId, productId: config.productId, deviceId: record.deviceId };
+  // Rebind before recovery so run-local results expire before durable
+  // cancellation evidence restores this run's redelivery fence.
+  taskSettlement.bindJournal({
+    readTask: (taskId) => activeJournal.readTask(taskId, journalIdentity),
+    hasTaskCancellation: async (taskId) => {
+      const cancelled = await hasTaskCancellation(activeJournal, taskId, journalIdentity);
+      // Admission can acquire an owner while the journal read is in flight.
+      return cancelled && !terminalCommits.hasPending(taskId)
+        && (daemonState.runner === undefined || !offerHasOwner.call(daemonState.runner, taskId));
+    },
+    unconfirmedTerminal: async (taskId) => (await activeJournal.listPendingTerminals(journalIdentity))
+      .find((row) => row.taskId === taskId)?.truthState,
+  });
   const resultReplyRecoveryTasks = new Map<string, { agentRef: AgentRef; contract: string }>();
   const sealedRun: SealedRunState = { sealedTasks: undefined, sealedMember: undefined, ownSealIdentity: undefined };
   const recordRecoveryFailure = async (task: import('../journal/journal.js').RecoverableTask, reason: string, interrupted = false) => {
@@ -150,6 +165,13 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
     assertJournalEnvelopeProtocol(terminal.bytes, terminal.taskId, 'pending-terminal');
   }
   for (const task of recoveryTasks) {
+    // A failed stop may still hold the real terminal in this process's commit
+    // queue. Preserve that decision even if its journal row is still received.
+    if (terminalCommits.hasPending(task.taskId)) continue;
+    if (task.localState === 'received' && await hasTaskCancellation(activeJournal, task.taskId, journalIdentity)) {
+      taskSettlement.cancelledBeforeAdmission(task.taskId);
+      continue;
+    }
     // No execution commitment and no local ack: let the authoritative cloud
     // mailbox redeliver (or suppress a cancelled offer). Never replay a cached
     // offer independently of cancellation/placement authority.
@@ -162,11 +184,6 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
       || payload.terminalProjection?.mode !== 'result-document' || typeof payload.terminalProjection.contract !== 'string')) {
       throw new Error('durable result-reply failure does not match its original offer');
     }
-    // A start after a failed stop in this process: the commit queue still
-    // holds this task's real terminal and `resume()` above retries it. The
-    // journal keeps the first terminal it records, so a recovery terminal
-    // here would replace that result.
-    if (terminalCommits.hasPending(task.taskId)) continue;
     if (resultFailure) { resultReplyRecoveryTasks.set(task.taskId, { agentRef: payload.agentRef!, contract: payload.messageEgress!.contract! }); continue; }
     await recordRecoveryFailure(task, 'daemon_interrupted', true);
   }

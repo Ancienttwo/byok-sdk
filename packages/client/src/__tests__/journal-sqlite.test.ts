@@ -125,6 +125,32 @@ describe('SqliteLocalTaskJournal', () => {
     }
   });
 
+  describe('stored task cancellation', () => {
+    it('returns original cancellation bytes and hash after reopen, ignoring other task envelopes', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      await journal.appendEnvelope(envelopeRecord());
+      await expect(journal.readTaskCancellation('task-1', IDENTITY)).resolves.toBeUndefined();
+      const bytes = JSON.stringify({ v: 1, id: 'cancel-1', type: 'task.cancel', task_id: 'task-1' });
+      await journal.appendEnvelope(envelopeRecord({ envelopeId: 'cancel-1', seq: 2, bytes, bytesHash: journalHash(bytes), opensTask: false }));
+      const otherBytes = JSON.stringify({ v: 1, id: 'cancel-2', type: 'task.cancel', task_id: 'task-2' });
+      await journal.appendEnvelope(envelopeRecord({ envelopeId: 'cancel-2', taskId: 'task-2', seq: 3, bytes: otherBytes, bytesHash: journalHash(otherBytes), opensTask: false }));
+      await journal.close();
+      const reopened = build(storeDir);
+      await expect(reopened.readTaskCancellation('task-1', IDENTITY)).resolves.toEqual({ identity: IDENTITY, bytes, bytesHash: journalHash(bytes) });
+      await expect(reopened.readTaskCancellation('unknown', IDENTITY)).resolves.toBeUndefined();
+      expect((await reopened.readTask('task-1', IDENTITY))?.localState).toBe('received');
+      expect(await reopened.listPendingTerminals(IDENTITY)).toEqual([]);
+    });
+
+    it.each(['tenantId', 'productId', 'deviceId'] as const)('refuses a cancellation read with another %s', async (field) => {
+      const journal = build(await tmpStore());
+      const bytes = JSON.stringify({ v: 1, id: 'cancel-1', type: 'task.cancel', task_id: 'task-1' });
+      await journal.appendEnvelope(envelopeRecord({ envelopeId: 'cancel-1', bytes, bytesHash: journalHash(bytes), opensTask: false }));
+      await expect(journal.readTaskCancellation('task-1', { ...IDENTITY, [field]: 'other' })).rejects.toThrow('journal enrollment identity mismatch');
+    });
+  });
+
   describe('durability settings', () => {
     it.each(OPEN_STEPS)('closes the native handle when initialization fails at %s', async (step) => {
       const storeDir = await tmpStore(`byok-journal-open-fault-${step}-`);

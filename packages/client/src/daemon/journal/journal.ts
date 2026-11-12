@@ -296,6 +296,17 @@ export interface LocalTaskJournal {
   /** Includes old interruption markers without reports; they must not hide pending work. */
   listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]>;
   readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined>;
+  /**
+   * Read a stored inbound `task.cancel` for this task and exact enrollment,
+   * or `undefined` when none exists. Return the original canonical bytes and
+   * stored hash, not a derived cancellation flag. The SDK validates the
+   * identity, hash and envelope binding before using it as cancellation authority.
+   */
+  readTaskCancellation(taskId: string, identity: JournalIdentity): Promise<{
+    readonly identity: JournalIdentity;
+    readonly bytes: string;
+    readonly bytesHash: string;
+  } | undefined>;
   /** Tasks with no terminal and no recovery marker — what this daemon was in the middle of when it last stopped. */
   listRecoverable(): Promise<RecoverableTask[]>;
   /** Close out one recoverable task by writing its recovery marker. Never deletes; a marked row is on §12.7.2.1's never-auto-delete list. */

@@ -5562,13 +5562,10 @@ export interface Daemon {
      * that was never claimed is not final by itself: it may be redelivered.
      * A task this daemon has not seen is read from the journal: after a restart
      * the result reflects the journal's current truth, so a refused terminal
-     * that was replaced reads as its replacement, never the reverse. Known
-     * limit (#1955): after restart, including stop/start of the same Daemon,
-     * the journal interface cannot expose a consumed cancellation. Run-local
-     * cancellation results expire when the new run binds its journal, so
-     * recovery and waits agree: with the cursor past the cancellation, the
-     * received offer is recovered as `failed` (`daemon_interrupted`),
-     * `accepted`, `none`.
+     * that was replaced reads as its replacement, never the reverse. A stored
+     * cancellation preserves `cancelled`/`not-required`/`none` after restart,
+     * including with the cursor past the cancellation; recovery sends no
+     * `daemon_interrupted` failure for that received offer.
      * Rejects with {@link DaemonTaskUnknownError} for an unknown task, before
      * `start()` the way `approve()` does, and with `signal.reason` on abort;
      * the task is untouched. Revocation and replay expiry carry no per-task
@@ -6991,6 +6988,17 @@ export interface LocalTaskJournal {
     /** Includes old interruption markers without reports; they must not hide pending work. */
     listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]>;
     readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined>;
+    /**
+     * Read a stored inbound `task.cancel` for this task and exact enrollment,
+     * or `undefined` when none exists. Return the original canonical bytes and
+     * stored hash, not a derived cancellation flag. The SDK validates the
+     * identity, hash and envelope binding before using it as cancellation authority.
+     */
+    readTaskCancellation(taskId: string, identity: JournalIdentity): Promise<{
+        readonly identity: JournalIdentity;
+        readonly bytes: string;
+        readonly bytesHash: string;
+    } | undefined>;
     /** Tasks with no terminal and no recovery marker — what this daemon was in the middle of when it last stopped. */
     listRecoverable(): Promise<RecoverableTask[]>;
     /** Close out one recoverable task by writing its recovery marker. Never deletes; a marked row is on §12.7.2.1's never-auto-delete list. */
@@ -7158,6 +7166,15 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
      */
     recordTerminal(record: LocalTerminalRecord): Promise<void>;
     readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined>;
+    readTaskCancellation(taskId: string, identity: JournalIdentity): Promise<{
+        identity: {
+            tenantId: string;
+            productId: string;
+            deviceId: string;
+        };
+        bytes: string;
+        bytesHash: string;
+    } | undefined>;
     listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]>;
     listPendingTerminals(identity: JournalIdentity): Promise<LocalTerminalRecord[]>;
     confirmTerminal(taskId: string, payloadHash: string): Promise<void>;
@@ -8688,7 +8705,9 @@ export declare const RESULT_NOT_SUBMITTED_REASON_PREFIX = "result_not_submitted"
  */
 export declare const RESULT_UNREADABLE_REASON_PREFIX = "result_unreadable";
 // ==== @byok-sdk/client dist/daemon/task-settlement.d.ts ====
-import type { TerminalTruthState } from './journal/journal.js';
+import { type JournalIdentity, type LocalTaskJournal, type TerminalTruthState } from './journal/journal.js';
+/** Validate raw journal evidence in SDK code, including for Host-injected backends. */
+export declare function hasTaskCancellation(journal: Pick<LocalTaskJournal, 'readTaskCancellation'>, taskId: string, identity: JournalIdentity): Promise<boolean>;
 /** {@link DaemonTaskSettlement.terminal}: the terminal kind, including a cloud cancellation before admission. */
 export type DaemonTaskTerminal = 'complete' | 'failed' | 'cancelled' | 'declined';
 /** What `Daemon.whenTaskSettled` resolves with. */
@@ -8721,6 +8740,8 @@ export interface TaskSettlementJournal {
     readTask(taskId: string): Promise<{
         readonly localState: string;
     } | undefined>;
+    /** SDK-validated inbound cancellation evidence for a received offer. */
+    hasTaskCancellation(taskId: string): Promise<boolean>;
     /** Truth state of an unconfirmed terminal; `undefined` once confirmed or when there is none. */
     unconfirmedTerminal(taskId: string): Promise<TerminalTruthState | undefined>;
 }

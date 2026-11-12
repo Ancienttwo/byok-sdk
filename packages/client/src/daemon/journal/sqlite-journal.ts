@@ -814,6 +814,20 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     });
   }
 
+  readTaskCancellation(taskId: string, identity: JournalIdentity) {
+    return this.#enqueue('readTaskCancellation', () => {
+      const row = this.#db.prepare(`SELECT tenant_id, product_id, device_id, bytes, bytes_hash FROM journal_envelope
+        WHERE task_id = ? AND withheld_bytes IS NULL AND json_extract(bytes, '$.type') = 'task.cancel'
+        ORDER BY seq, envelope_id LIMIT 1`).get(taskId) as Record<string, unknown> | undefined;
+      if (!row) return undefined;
+      this.#assertIdentity(row, identity);
+      return {
+        identity: { tenantId: row.tenant_id as string, productId: row.product_id as string, deviceId: row.device_id as string },
+        bytes: row.bytes as string, bytesHash: row.bytes_hash as string,
+      };
+    });
+  }
+
   listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]> {
     return this.#enqueue('listRecoveryTasks', () => {
       const rows = this.#db.prepare(`SELECT t.*, e.bytes AS envelope_bytes, e.bytes_hash AS envelope_hash FROM journal_task t

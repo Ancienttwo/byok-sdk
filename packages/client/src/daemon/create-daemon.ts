@@ -754,13 +754,10 @@ export interface Daemon {
    * that was never claimed is not final by itself: it may be redelivered.
    * A task this daemon has not seen is read from the journal: after a restart
    * the result reflects the journal's current truth, so a refused terminal
-   * that was replaced reads as its replacement, never the reverse. Known
-   * limit (#1955): after restart, including stop/start of the same Daemon,
-   * the journal interface cannot expose a consumed cancellation. Run-local
-   * cancellation results expire when the new run binds its journal, so
-   * recovery and waits agree: with the cursor past the cancellation, the
-   * received offer is recovered as `failed` (`daemon_interrupted`),
-   * `accepted`, `none`.
+   * that was replaced reads as its replacement, never the reverse. A stored
+   * cancellation preserves `cancelled`/`not-required`/`none` after restart,
+   * including with the cursor past the cancellation; recovery sends no
+   * `daemon_interrupted` failure for that received offer.
    * Rejects with {@link DaemonTaskUnknownError} for an unknown task, before
    * `start()` the way `approve()` does, and with `signal.reason` on abort;
    * the task is untouched. Revocation and replay expiry carry no per-task

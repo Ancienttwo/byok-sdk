@@ -1,4 +1,18 @@
-import type { TerminalTruthState } from './journal/journal.js';
+import { decodeEnvelope } from '@byok-sdk/protocol';
+import { journalHash, type JournalIdentity, type LocalTaskJournal, type TerminalTruthState } from './journal/journal.js';
+
+/** Validate raw journal evidence in SDK code, including for Host-injected backends. */
+export async function hasTaskCancellation(journal: Pick<LocalTaskJournal, 'readTaskCancellation'>, taskId: string, identity: JournalIdentity): Promise<boolean> {
+  const record = await journal.readTaskCancellation(taskId, identity);
+  if (record === undefined) return false;
+  if (record.identity.tenantId !== identity.tenantId || record.identity.productId !== identity.productId || record.identity.deviceId !== identity.deviceId) {
+    throw new Error('journal cancellation enrollment identity mismatch');
+  }
+  if (journalHash(record.bytes) !== record.bytesHash) throw new Error('durable cancellation bytes/hash mismatch');
+  const envelope = decodeEnvelope(record.bytes);
+  if (envelope.type !== 'task.cancel' || envelope.task_id !== taskId) throw new Error('invalid durable cancellation binding');
+  return true;
+}
 
 /** {@link DaemonTaskSettlement.terminal}: the terminal kind, including a cloud cancellation before admission. */
 export type DaemonTaskTerminal = 'complete' | 'failed' | 'cancelled' | 'declined';
@@ -35,6 +49,8 @@ export class DaemonTaskUnknownError extends Error {
 /** The durable facts one daemon run reads for a task it has not seen. */
 export interface TaskSettlementJournal {
   readTask(taskId: string): Promise<{ readonly localState: string } | undefined>;
+  /** SDK-validated inbound cancellation evidence for a received offer. */
+  hasTaskCancellation(taskId: string): Promise<boolean>;
   /** Truth state of an unconfirmed terminal; `undefined` once confirmed or when there is none. */
   unconfirmedTerminal(taskId: string): Promise<TerminalTruthState | undefined>;
 }
@@ -192,6 +208,9 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
 async function durableSettlement(journal: TaskSettlementJournal, taskId: string): Promise<DaemonTaskSettlement | 'pending' | 'unknown'> {
   const task = await journal.readTask(taskId);
   if (task === undefined) return 'unknown';
+  if (task.localState === 'received' && await journal.hasTaskCancellation(taskId)) {
+    return { terminal: 'cancelled', delivery: 'not-required', disposal: 'none' };
+  }
   if (!task.localState.startsWith(TERMINAL_STATE_PREFIX)) return 'pending';
   const terminal = task.localState.slice(TERMINAL_STATE_PREFIX.length);
   if (!TERMINALS.has(terminal)) throw new Error(`journal task ${taskId} has an unknown terminal state`);
