@@ -479,7 +479,8 @@ migration and preserves earlier upgrade rollback snapshots.
 With no current version, preparation stops an SDK-marked unit of the
 recorded owner (including a payload-less CLI service) before taking the
 daemon-store leases and gates. On any preparation failure before writing
-`current`, it releases the leases/gates, removes staging, then starts that
+`current`, it releases the leases/gates, removes the version directory it
+created (none after `installation_exists`), then starts that
 unit again, even if it was stopped before the call. The one exception is a
 failed store restore: the stores may then be partial, so the unit is not
 started and is removed, leaving only the repair snapshot, as after a failed
