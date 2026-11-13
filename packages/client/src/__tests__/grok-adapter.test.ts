@@ -302,6 +302,29 @@ describe('GrokAdapter sessions', () => {
     expect(await turn(s)).toEqual([{ type: 'progress', text: 'echo:hello' }, { ...usage, contextTokens: 1002 }, { type: 'turn_end' }]);
   });
 
+  it('sends no cancel once Grok runs another prompt, and ends the task turn with its own answer (#1942)', async () => {
+    const gate = path.join(await tempDir(), 'gate');
+    const resources = await ctx({ FAKE_ACP_OWN_TURN_GATE: gate });
+    const s = await open(adapter(), { instruction: 'own-turn-switch' }, resources);
+    const projection = (s as unknown as { projection: { sdkPromptSuperseded: boolean } }).projection;
+    await vi.waitFor(() => expect(projection.sdkPromptSuperseded).toBe(true));
+    const interrupted = s.interrupt();
+    await fs.writeFile(gate, '');
+    await interrupted;
+    expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(false);
+    expect((await turn(s)).at(-1)).toEqual({ type: 'turn_end' });
+  });
+
+  it('a replayed queue report naming another prompt does not stop the interrupt cancel (#1942)', async () => {
+    const resources = await ctx();
+    const s = await open(adapter(), { instruction: 'replayed-queue' }, resources);
+    const projection = (s as unknown as { projection: { sdkPromptSuperseded: boolean; text: string } }).projection;
+    // The text frame follows the replayed report, so the projection has read the report.
+    await vi.waitFor(() => expect(projection.text).toContain('first'));
+    expect(projection.sdkPromptSuperseded).toBe(false);
+    await s.interrupt();
+    expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(true);
+  });
   it('cancels a held follow-up that the drain already sent', async () => {
     const gate = path.join(await tempDir(), 'gate');
     const resources = await ctx({ FAKE_ACP_OWN_TURN_GATE: gate });

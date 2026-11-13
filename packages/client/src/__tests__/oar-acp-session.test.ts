@@ -92,6 +92,125 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     expect(request).toHaveBeenCalledTimes(1);
     expect(kernel.records().flatMap(record => record.kind === 'frame' ? record.body.events : []).filter(event => event.kind === 'turn_ended')).toHaveLength(1);
   });
+  function cancelHarness(notify: ReturnType<typeof vi.fn>, abortTimeoutMs = 60_000) {
+    const reply = Promise.withResolvers<{ stopReason: string }>();
+    const runtime = {
+      spawned: Promise.resolve(), closed: false, exitCode: null,
+      connection: { agent: { request: vi.fn(() => reply.promise), notify } },
+      observeDescendants: () => {}, kill: vi.fn(),
+    } as unknown as AcpProcess;
+    const kernel = createSessionKernel('cancel-write');
+    const usageGate = createUsageUpdateGate();
+    const settle = vi.spyOn(usageGate, 'settleAfterPrompt');
+    const turns = createAcpTurns({ kernel, runtime, profile: { ...antigravityAcpProfile, abortTimeoutMs },
+      usageGate, capabilities: { images: false }, promptUsage: () => null });
+    expect(turns.begin(null, 'first').kind).toBe('accepted');
+    const state = turns.active()!;
+    const ended = async () => {
+      await vi.waitFor(() => expect(turns.active()).toBeNull());
+      const event = kernel.records().flatMap(record => record.kind === 'frame' ? record.body.events : []).find(e => e.kind === 'turn_ended');
+      return event?.kind === 'turn_ended' ? event.outcome.kind : undefined;
+    };
+    // Handshake: the answer is decoded, and promptAcp's one event-loop turn (and the failure branch's) has run,
+    // so the prompt's end is parked on the pending cancel write.
+    const atWriteWait = async () => {
+      await vi.waitFor(() => expect(state.answered.size).toBe(1));
+      await new Promise(resolve => setImmediate(resolve));
+      expect(turns.active()).toBe(state);
+      expect(settle).not.toHaveBeenCalled();
+    };
+    return { reply, runtime, turns, state, ended, atWriteWait };
+  }
+  const writeRejected = { kind: 'rejected', code: 'error', reason: 'cancel write failed' };
+  it('leaves the turn as it was when the cancel write rejects (#1957)', async () => {
+    const write = Promise.withResolvers<void>();
+    const notify = vi.fn().mockReturnValueOnce(write.promise).mockResolvedValue(undefined);
+    const { reply, turns, state, ended } = cancelHarness(notify);
+    const first = turns.abort(state);
+    const during = turns.abort(state);
+    write.reject(new Error('cancel write failed'));
+    expect([await first, await during]).toEqual([writeRejected, writeRejected]);
+    expect(state.abortRequested).toBe(false);
+    reply.reject(new Error('unrelated prompt error'));
+    expect(await ended()).toBe('failed');
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+  it('publishes a prompt failure that precedes a failing cancel write as that failure (#1957)', async () => {
+    const write = Promise.withResolvers<void>();
+    const { reply, turns, state, ended, atWriteWait } = cancelHarness(vi.fn(() => write.promise));
+    const abort = turns.abort(state);
+    reply.reject(new Error('unrelated prompt error'));
+    await atWriteWait();
+    write.reject(new Error('cancel write failed'));
+    expect(await abort).toEqual(writeRejected);
+    expect(await ended()).toBe('failed');
+  });
+  it('ends a prompt that answers during the cancel write with its answer, and the fallback stops nothing (#1957)', async () => {
+    const write = Promise.withResolvers<void>();
+    const { reply, runtime, turns, state, ended, atWriteWait } = cancelHarness(vi.fn(() => write.promise));
+    const abort = turns.abort(state);
+    reply.resolve({ stopReason: 'end_turn' });
+    await atWriteWait();
+    write.resolve();
+    expect(await abort).toEqual({ kind: 'accepted' });
+    expect(await ended()).toBe('completed');
+    expect(state.fallback).toBeNull();
+    expect(runtime.kill).not.toHaveBeenCalled();
+  });
+  it('counts a cancel write that never settles as failed at the abort bound and writes no second one (#1957)', async () => {
+    const notify = vi.fn(() => new Promise<void>(() => {}));
+    const { reply, turns, state, ended } = cancelHarness(notify, 50);
+    const timedOut = { kind: 'rejected', code: 'error', reason: 'session/cancel write did not complete within 50 ms' };
+    expect(await turns.abort(state)).toEqual(timedOut);
+    expect(state.abortRequested).toBe(false);
+    expect((await turns.abort(state)).kind).toBe('rejected');
+    expect(notify).toHaveBeenCalledTimes(1);
+    reply.reject(new Error('unrelated prompt error'));
+    expect(await ended()).toBe('failed');
+  });
+  it('ends a prompt that answered first with its answer when the cancel write never settles (#1957)', async () => {
+    // A bound the handshake's poll fits inside: the prompt end must be seen parked before the bound fails the write.
+    const { reply, turns, state, ended, atWriteWait } = cancelHarness(vi.fn(() => new Promise<void>(() => {})), 1_000);
+    const abort = turns.abort(state);
+    reply.resolve({ stopReason: 'end_turn' });
+    await atWriteWait();
+    expect((await abort).kind).toBe('rejected');
+    expect(await ended()).toBe('completed');
+  });
+  it('retries a cancel whose first write rejected (#1957)', async () => {
+    const notify = vi.fn().mockRejectedValueOnce(new Error('cancel write failed')).mockResolvedValue(undefined);
+    const { turns, state } = cancelHarness(notify);
+    expect(await turns.abort(state)).toEqual(writeRejected);
+    expect(await turns.abort(state)).toEqual({ kind: 'accepted' });
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(state.fallback).not.toBeNull();
+    clearTimeout(state.fallback!);
+  });
+  it('sends no cancel once the prompt answer is decoded, and answers after the turn closes with its real outcome (#1942)', async () => {
+    const reply = Promise.withResolvers<{ stopReason: string }>();
+    const notify = vi.fn(async () => {});
+    const runtime = {
+      spawned: Promise.resolve(), closed: false, exitCode: null,
+      connection: { agent: { request: vi.fn(() => reply.promise), notify } },
+      observeDescendants: () => {}, kill: vi.fn(),
+    } as unknown as AcpProcess;
+    const kernel = createSessionKernel('answered');
+    const turns = createAcpTurns({ kernel, runtime, profile: antigravityAcpProfile,
+      usageGate: createUsageUpdateGate(), capabilities: { images: false }, promptUsage: () => null });
+    expect(turns.begin(null, 'first').kind).toBe('accepted');
+    const state = turns.active()!;
+    await vi.waitFor(() => expect(state.pending.size).toBe(1));
+    reply.resolve({ stopReason: 'end_turn' });
+    // The answer is decoded; promptAcp still waits one event-loop turn before the turn closes.
+    while (state.answered.size === 0) await Promise.resolve();
+    expect(turns.active()).toBe(state);
+    expect(await turns.abort(state)).toEqual({ kind: 'rejected', code: 'no_active_turn', reason: 'turn ended before cancellation was sent' });
+    expect(turns.active()).toBeNull();
+    expect(notify).not.toHaveBeenCalled();
+    expect(state.abortRequested).toBe(false);
+    const ended = kernel.records().flatMap(record => record.kind === 'frame' ? record.body.events : []).find(event => event.kind === 'turn_ended');
+    expect(ended).toEqual({ kind: 'turn_ended', outcome: { kind: 'completed' } });
+  });
   it('passes exactly the explicit env to the agent and to hosted terminals', async () => {
     vi.stubEnv('BYOK_ACP_AMBIENT_SECRET', 'must not inherit');
     const { dir, log } = workspace();
@@ -121,6 +240,21 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     expect(records.some(record => record.kind === 'response' && record.requestId === request!.id && record.body.kind === 'answered')).toBe(true);
   });
 
+  it('disposes a session whose cancel write never settles (#1957)', async () => {
+    const { dir, log } = workspace();
+    const stalling: typeof spawnOwnedLineProcess = (...args) => {
+      const child = spawnOwnedLineProcess(...args);
+      const write = child.writeAcknowledged.bind(child);
+      child.writeAcknowledged = text => text.includes('"session/cancel"') ? new Promise<void>(() => {}) : write(text);
+      return child;
+    };
+    const session = await start(stalling, spawnOwnedTerminalProcess, { kind: 'available', via: 'executable', command: FAKE }, { cwd: dir, env: { PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log } }, {});
+    live.push(session);
+    expect((await session.prompt('hold')).response.body.kind).toBe('accepted');
+    await vi.waitFor(() => expect(facts(log).some(fact => fact.kind === 'prompt')).toBe(true));
+    await session.dispose();
+    expect(facts(log).some(fact => fact.kind === 'cancel')).toBe(false);
+  });
   it('reaps a hosted terminal tree when the session is disposed mid-turn', async () => {
     const { dir, log } = workspace();
     const records: RawEvent[] = [];
