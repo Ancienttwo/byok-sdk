@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (keys; #2100, #2096)** — `runPiProviderLauncher()` now returns a fixed `spawn failed: <code>` error with only the spawn code when Pi cannot start, and routes credential-store reads through the fixed-message secret-store error boundary. Original errors, paths, arguments and causes are no longer exposed; known store codes remain available.
+
 - **Fixed (client; #1944)** — A failed release of an offer-owned scratch (an offer that declines or fails before any runtime starts) no longer sets `disposal: 'failed'` on `whenTaskSettled`. It still emits `runtime-disposal-failed` with `runtimeId: 'scratch'`, but `disposal` stays `none` whether the failure lands before or after the decline or failure settles. The daemon classifies the failure by the owner that reported it, not by the id, so a custom harness whose id is `scratch` still sets `disposal: 'failed'`. This resolves the 0.42.0 known issue.
 
 - **Docs (client; #2067)** — `DaemonTaskUnknownError` documents its condition: an earlier journal read returned no row, and once it finished this `Daemon` had no in-memory record or held runtime for the task and no offer marked as seen. The read and those checks are not atomic (#2097), and a refused offer append also ends the mark. Unknown does not prove the task is over or will never start, so a Host keeps its attach record or settles it from its own server. The Host note lists every other rejection by source: abort (`signal.reason`, not observed during the journal read, #2097), not started, journal read failure, an SDK check of stored evidence, and a refused offer append. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#when-whentasksettled-reports-an-unknown-task-2067).

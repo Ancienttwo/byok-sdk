@@ -17,6 +17,8 @@ import {
 } from './index';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
+import { ByokKeysError } from './errors';
+import { InMemorySecretStore } from './secret-store';
 
 /**
  * The public launcher entry (#323) and the keyless launch (#325), through a
@@ -133,6 +135,32 @@ function hostKeychain(prefix: string) {
 }
 
 describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('runPiProviderLauncher with a host-built store', () => {
+  it('sanitizes a failed child spawn', async () => {
+    const f = await fixture({ auth_mode: 'none' });
+    const options = { ...f.launch(), piBin: path.join(f.root, CANARY, 'missing'), piFixedArgs: [CANARY] };
+    const error = await runPiProviderLauncher(options, { createSecretStore: () => new InMemorySecretStore() }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toMatchObject({ code: 'ENOENT', message: 'spawn failed: ENOENT' });
+    expect((error as Error).cause).toBeUndefined();
+    for (const value of Object.values(Object.getOwnPropertyDescriptors(error))) {
+      expect(JSON.stringify(value)).not.toContain(CANARY);
+    }
+    expect(await fs.readdir(f.projection)).toEqual([]);
+  });
+
+  it('sanitizes credential store read errors', async () => {
+    const f = await fixture();
+    const store = new InMemorySecretStore();
+    vi.spyOn(store, 'get').mockRejectedValue(new ByokKeysError('KEYCHAIN_UNAVAILABLE', CANARY, { cause: new Error(CANARY) }));
+    const error = await runPiProviderLauncher(f.launch(), { createSecretStore: () => store }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toMatchObject({ code: 'KEYCHAIN_UNAVAILABLE' });
+    expect((error as Error).cause).toBeUndefined();
+    for (const value of Object.values(Object.getOwnPropertyDescriptors(error))) {
+      expect(JSON.stringify(value)).not.toContain(CANARY);
+    }
+    expect(await fs.readdir(f.projection)).toEqual([]);
+  });
   it('launches Pi with the key read from the host store under its own storage marker', async () => {
     const f = await fixture();
     const host = hostKeychain(HOST_PREFIX);
