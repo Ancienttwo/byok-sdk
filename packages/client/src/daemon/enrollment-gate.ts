@@ -1,7 +1,20 @@
 import os from 'node:os';
 import { acquirePathMutationGate, type PathMutationGate } from '../util/path-mutation-gate.js';
 
-/** Bound on waiting for another store's clear, pairing or renewal; a timeout is a busy gate. */
+/**
+ * Bound on waiting for another store's clear, pairing or renewal; a timeout
+ * is a busy gate (`PathMutationGateBusyError`), never revocation. 30 s is the
+ * largest wait the path-mutation gate accepts. It covers a holder's
+ * validate-and-write, which is two to four OS credential commands of at most
+ * 15 s each, in the usual case; a holder stuck past it fails the waiter as
+ * busy instead of blocking it. A renewal waits only after its token exchange
+ * and starts 60 s before expiry. A busy timeout writes nothing, and the next
+ * call renews again, because the 30 s renewal floor counts only successful
+ * renewals; if a slow exchange plus a full wait outlasts the 60 s margin, the
+ * cached token expires first and the next request's 401 renews reactively.
+ * The wait never delays shutdown: `stop()` aborts it at once through the
+ * mutation signal.
+ */
 const ENROLLMENT_GATE_WAIT_MS = 30_000;
 
 /**
