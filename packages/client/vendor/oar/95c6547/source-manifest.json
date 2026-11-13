@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.103.0",
-    "commit": "39cab8135162d0b93766ddc667b2b6c6086b91c7"
+    "commit": "82c7872a65a0d9efa0b2d78b07e999b20feb0cf8"
   },
   "release": {
     "ecosystem": "npm",
@@ -872,7 +872,7 @@
       "path": "shared/stream-json/session.ts",
       "sourcePath": "packages/oar/src/shared/stream-json/session.ts",
       "upstreamSha256": "8c396d0a7908891f0f7746f4ba5600092382b5ccc4c002f5ef49fadf4c495694",
-      "vendoredSha256": "c1cd06d4f8b17ffc87ed7d6cd7887cd026ee71aa6de7c16890d4a65364bb423c",
+      "vendoredSha256": "91e44e4cf2cf39ac94b02ce4d1bee54f3a1ada94afe4888b2fbaff58e468ec78",
       "delta": "Caller-owned process: streamJsonSession takes the injected Codex LineProcess and a CredentialRedactor built with sessionCredentialRedactor, creates the upstream kernel with it as the redact hook and returns the raw AdapterSession without sealSession; open and control errors go through the same redaction guard. hooks.onRecord is a kernel observer registered before any record is appended. Every toApp request, whatever its type, is recorded and passed to hooks.onAppRequest, whose respond writes the native reply through the acknowledged stdin write and records it; profile.permissionResponse is not read, and a request no hook answers stays unanswered. An optional retainedBytes goes to the upstream kernel's record retention, which elides the oldest native payloads past it after every observer has the complete record. No diagnostics(), resources or cleanup reason. The synchronous hooks.beforeInterrupt replaces the upstream cancellation observation window: it runs before the interrupt is written, and a throw rejects the abort with code error and writes nothing. A refused or unwritten interrupt withdraws its abort mark and kill fallback: a write that throws rejects the abort with code error, and the mark stands only while another interrupt of the turn is pending or accepted."
     },
     {
