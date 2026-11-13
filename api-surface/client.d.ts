@@ -11426,18 +11426,20 @@ export interface ServiceInstallation {
      * that switch are discarded.
      *
      * The top-level code names the Host's next step, which follows where the
-     * receipt stops. When a release fails before the final receipt (after an
-     * upgrade's or a restore's pointer writes), the receipt stays `pending`
-     * and the error is `store_release_failed`: call recover(), after
-     * restarting the Host process if recover() reports `store_busy`, since a
-     * lease that failed to release stays held until its process exits. Its
-     * `cause` is an `AggregateError` of every release failure, after any
-     * earlier failure such as `health_check_failed`. When a refusal already
-     * wrote its final receipt (for example `store_busy`), its code stays and
-     * a later release, receipt or restart failure joins its `cause`, an
-     * `AggregateError` led by the refusal; a refusal that is not a
-     * `ServiceInstallationError` becomes such an `AggregateError` itself. A
-     * release failure after the final receipt would not reject a committed
+     * receipt stops. On every exit where a store gate or lease failed to
+     * release and the receipt stays `pending` (a refusal whose `failed`
+     * receipt was not written, including one that is not a
+     * `ServiceInstallationError`; a failed pointer write or snapshot restore;
+     * the release after the pointer writes; a rollback after a failed health
+     * check), the error is `store_release_failed`. Its `cause` is one flat
+     * `AggregateError`: the failure that came first (such as
+     * `health_check_failed`, a preparation error or `store_busy`), every
+     * release failure, then a failed receipt write or restart. Call
+     * recover(); a lease that failed to release stays held until its process
+     * exits, so restart the Host process first when recover() reports
+     * `store_busy`. A refusal whose final receipt was written keeps its code,
+     * and a later release or restart failure joins its `cause` the same way.
+     * A release failure after the final receipt would not reject a committed
      * result; no path releases there today.
      */
     rollback(): Promise<ServiceUpgradeReceipt>;

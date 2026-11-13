@@ -1245,9 +1245,8 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       const [repair] = await snapshotNames();
       expect(await snapshotNames()).toEqual([expect.stringMatching(/^\.install-repair-/u)]);
       expect(error).toMatchObject({ code: 'install_health_check_failed' });
-      const removal = ((error as Error).cause as AggregateError).errors[1] as AggregateError;
-      expect(removal).toBeInstanceOf(AggregateError);
-      expect(removal.errors).toEqual([expect.objectContaining({ errors: [fault.restoreError] }), releaseError]);
+      // One flat cause: the health failure, the restore error, then the release failure (#1991).
+      expect(((error as Error).cause as AggregateError).errors).toEqual([expect.anything(), expect.objectContaining({ errors: [fault.restoreError] }), releaseError]);
       expect((error as Error).message).toContain('Remaining: prepared store snapshot restoration, store lease release, install snapshot directory.');
       expect((error as Error).message).toContain(path.join(installRoot, 'snapshots', repair!));
       expect(events.slice(-2)).toEqual(['health 2.0.0', 'uninstall']);
@@ -1567,25 +1566,52 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await installation.receipt()).toMatchObject({ state: 'pending', to: '4.0.0' });
     });
 
-    it('a pointer write that fails keeps the release failure beside it, on upgrade and rollback (#1991)', async () => {
+    it('a release failure while the receipt stays pending is store_release_failed with one flat cause (#1991)', async () => {
       installation = both();
       await installation.install(await payload('1.0.0'));
       const releaseError = new Error('injected release failure');
-      const original = daemonOwner.acquireDaemonOwner;
-      const faultOnce = () => vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementationOnce(async (...args) => {
-        const lease = await original(...args);
-        return { release: async () => { await lease.release(); throw releaseError; } };
-      });
-      faultOnce();
-      const upgradeRename = failRename((file) => file === path.join(installRoot, 'current'));
-      const upgradeError = await installation.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught).finally(() => upgradeRename.restore());
-      expect(upgradeError).toMatchObject({ errors: [expect.objectContaining({ code: 'EIO' }), releaseError] });
-      await installation.recover();
+      vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockRestore();
+      const real = daemonOwner.acquireDaemonOwner;
+      /** Fails the release of the lease taken `at` (0-based) from now on. */
+      const faultAt = (at: number) => {
+        let taken = 0;
+        return vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementation(async (...args) => {
+          const lease = await real(...args);
+          return taken++ === at ? { release: async () => { await lease.release(); throw releaseError; } } : lease;
+        });
+      };
+      const current = path.join(installRoot, 'current');
+      const expectPendingRelease = async (error: unknown, first: object[]) => {
+        expect(error).toBeInstanceOf(ServiceInstallationError);
+        expect(error).toMatchObject({ code: 'store_release_failed', cause: { errors: [...first.map((item) => expect.objectContaining(item)), releaseError] } });
+        expect(await installation.receipt()).toMatchObject({ state: 'pending' });
+        await installation.recover();
+      };
+
+      // (a) A pointer write fails on upgrade, then on rollback.
+      let leases = faultAt(0);
+      let rename = failRename((file) => file === current);
+      await expectPendingRelease(await installation.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught).finally(() => { rename.restore(); leases.mockRestore(); }), [{ code: 'EIO' }]);
       await installation.upgrade(await payload('2.0.0'));
-      faultOnce();
-      const rollbackRename = failRename((file) => file === path.join(installRoot, 'current'));
-      const rollbackError = await installation.rollback().catch((caught: unknown) => caught).finally(() => rollbackRename.restore());
-      expect(rollbackError).toMatchObject({ errors: [expect.objectContaining({ code: 'EIO' }), releaseError] });
+      leases = faultAt(0);
+      rename = failRename((file) => file === current);
+      await expectPendingRelease(await installation.rollback().catch((caught: unknown) => caught).finally(() => { rename.restore(); leases.mockRestore(); }), [{ code: 'EIO' }]);
+
+      // The rollback after a failed health check: health_check_failed first, then its pointer write, then the release.
+      unhealthy.add('3.0.0');
+      let writes = 0;
+      leases = faultAt(2);
+      rename = failRename((file) => file === current && ++writes === 2);
+      await expectPendingRelease(await installation.upgrade(await payload('3.0.0')).catch((caught: unknown) => caught).finally(() => { rename.restore(); leases.mockRestore(); }), [{ code: 'health_check_failed' }, { code: 'EIO' }]);
+
+      // (b) A preparation error that is not a ServiceInstallationError writes no failed receipt.
+      const precheckError = new Error('injected precheck setup failure');
+      const raw = installationOver(fakeLifecycle(), {
+        daemonStores: async () => [{ storeDir, productId: 'svc' }, { storeDir: research, productId: 'research' }],
+        precheck: () => { throw precheckError; },
+      });
+      leases = faultAt(0);
+      await expectPendingRelease(await raw.upgrade(await payload('4.0.0')).catch((caught: unknown) => caught).finally(() => leases.mockRestore()), [{ message: precheckError.message }]);
     });
 
     it('a store with a live owner is store_busy and nothing is switched', async () => {
@@ -1622,6 +1648,20 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       const restartFailed = await failingStart.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught).finally(() => stillBusy.release());
       expect(restartFailed).toBeInstanceOf(ServiceInstallationError);
       expect(restartFailed).toMatchObject({ code: 'store_busy', cause: { errors: [expect.objectContaining({ code: 'store_busy' }), startError] } });
+
+      // (c) store_busy, its lease release fails, then the failed receipt cannot be written: the receipt stays pending.
+      const stuckBusy = await acquireDaemonOwner(research, 'daemon');
+      vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementationOnce(async (...args) => {
+        const lease = await original(...args);
+        return { release: async () => { await lease.release(); throw releaseError; } };
+      });
+      const receiptPath = path.join(installRoot, 'upgrade-receipt.json');
+      let receiptWrites = 0;
+      const receiptFault = failRename((file) => file === receiptPath && ++receiptWrites === 2);
+      const pendingBusy = await installation.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught).finally(() => { receiptFault.restore(); return stuckBusy.release(); });
+      expect(pendingBusy).toBeInstanceOf(ServiceInstallationError);
+      expect(pendingBusy).toMatchObject({ code: 'store_release_failed', cause: { errors: [expect.objectContaining({ code: 'store_busy' }), releaseError, expect.objectContaining({ code: 'EIO' })] } });
+      expect(await installation.receipt()).toMatchObject({ state: 'pending' });
     });
 
     it('reclaims what a crashed daemon left (a dead owner and a control.token) and upgrades', async () => {

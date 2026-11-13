@@ -641,17 +641,21 @@ to). A snapshot is removed only after the receipt that ends the operation is
 written.
 
 The top-level error code names the next step, which follows where the
-receipt stops. When a store gate or lease fails to release after the version
-pointers were written and before the final receipt, the receipt stays
-`pending` and the error is `store_release_failed`, with every release failure
-(after any earlier one, such as `health_check_failed`) in its `cause`: run
-`byok-agent upgrade recover`. A lease that failed to release stays held until
-the process that took it exits, so a `recover` in that process can get
-`store_busy`; restart the Host process, then recover. A refusal that already
-wrote its final receipt keeps its code, with later release, receipt or
-restart failures in its `cause`. A release failure after the final receipt
-would not reject a committed result (the rule for prune failures); no path
-releases there today.
+receipt stops. Whenever a store gate or lease fails to release and the
+receipt stays `pending` (a refusal whose `failed` receipt could not be
+written, a failed pointer write or snapshot restore, the release after the
+pointer writes, a rollback after a failed health check), the error is
+`store_release_failed`. Its `cause` is one flat list: the failure that came
+first (such as `health_check_failed` or `store_busy`), every release failure,
+then a failed receipt write or restart. Run `byok-agent upgrade recover`. A
+lease that failed to release stays held until the process that took it
+exits, so a `recover` in that process can get `store_busy`; restart the Host
+process, then recover. The same holds for an install whose lease is stuck:
+its cleanup reports `store_busy` until the Host process restarts, and the
+next install or `recover` runs after that restart. A refusal whose final
+receipt was written keeps its code, with later release or restart failures
+in its `cause`. A release failure after the final receipt would not reject a
+committed result (the rule for prune failures); no path releases there today.
 
 Upgrade, rollback, recover, install and uninstall run only for the store's
 recorded lifecycle owner: another owner gets `lifecycle_owner_conflict`, and
