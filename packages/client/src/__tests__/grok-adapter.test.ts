@@ -733,6 +733,16 @@ describe('AgyAdapter', () => {
     expect(facts(resources.log).filter(fact => fact.kind === 'prompt').map(fact => fact.text)).toContain('steer-second');
   });
 
+  it('refuses an input past agy\'s 185,000-byte bound before the call, with OAR\'s input_too_large class', async () => {
+    const resources = await agyCtx();
+    const instruction = 'x'.repeat(185_001);
+    await expect(startPreparedOperation(agy(await agyVersion('1.5.1')), { instruction }, resources)).rejects.toMatchObject({
+      phase: 'start', retry: 'non-retryable', failure: { class: 'input_too_large' },
+      message: "input is 185001 bytes, over OAR's 185000-byte bound for one input to this runtime, which cuts a longer one without saying so",
+    });
+    expect(facts(resources.log).filter(fact => fact.kind === 'prompt')).toEqual([]);
+  });
+
   it('refuses a steer after the turn ends as an infrastructure failure', async () => {
     const s = await open(agy(await agyVersion('1.5.1')), { instruction: 'hello' }, await agyCtx());
     await turn(s);

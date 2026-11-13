@@ -1,0 +1,902 @@
+{
+  "format": "byok.vendor-source",
+  "version": 1,
+  "package": "@botiverse/oar",
+  "packageVersion": "0.103.0",
+  "repository": "https://github.com/botiverse/oar",
+  "commit": "95c654795f613f550ec5ff82dcf9bb441ff114ff",
+  "fork": {
+    "repository": "https://github.com/Ancienttwo/oar",
+    "branch": "byok/0.103.0",
+    "commit": "2f5c24860825eed2461d1ac57803c443abcfc6a5"
+  },
+  "release": {
+    "ecosystem": "npm",
+    "name": "@botiverse/oar",
+    "version": "0.103.0",
+    "integrity": "sha512-Yq8+bU970P0zGnIsZCCsw6Y3N8Zw7lZztmAPhgC1hqPAi6ChwPhNRqthAZnD4n0Tz2T34wjMn235nLUZxGhL/w==",
+    "gitCommit": "95c654795f613f550ec5ff82dcf9bb441ff114ff",
+    "provenance": "https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.103.0"
+  },
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sourcePath": "LICENSE",
+      "upstreamSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "vendoredSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "contracts/account-usage.ts",
+      "sourcePath": "packages/oar/src/contracts/account-usage.ts",
+      "upstreamSha256": "477b0938808b193de1076d55e75cc8af1acfcb2e5f42b3160ced79798ef00e92",
+      "vendoredSha256": "477b0938808b193de1076d55e75cc8af1acfcb2e5f42b3160ced79798ef00e92"
+    },
+    {
+      "path": "contracts/brand.ts",
+      "sourcePath": "packages/oar/src/contracts/brand.ts",
+      "upstreamSha256": "2fb5d087f79b387b3122526996a878c6548bd816ea7d420505a11988febc63f6",
+      "vendoredSha256": "2fb5d087f79b387b3122526996a878c6548bd816ea7d420505a11988febc63f6"
+    },
+    {
+      "path": "contracts/compaction.ts",
+      "sourcePath": "packages/oar/src/contracts/compaction.ts",
+      "upstreamSha256": "9821a9148db7e1b386c1d903e555e7a17774c423633709c97b5858ad104a4f82",
+      "vendoredSha256": "9821a9148db7e1b386c1d903e555e7a17774c423633709c97b5858ad104a4f82"
+    },
+    {
+      "path": "contracts/context-breakdown.ts",
+      "sourcePath": "packages/oar/src/contracts/context-breakdown.ts",
+      "upstreamSha256": "77dfbbf626eebca9748bdcc8eb3a4c68bedcf33af261fa1defdaca08dc5e2421",
+      "vendoredSha256": "77dfbbf626eebca9748bdcc8eb3a4c68bedcf33af261fa1defdaca08dc5e2421"
+    },
+    {
+      "path": "contracts/context-usage.ts",
+      "sourcePath": "packages/oar/src/contracts/context-usage.ts",
+      "upstreamSha256": "b2e8f9799265754fa81b651e947f5a9ec6d8bc6c9ad24e08581d9bf6f2a0fd90",
+      "vendoredSha256": "b2e8f9799265754fa81b651e947f5a9ec6d8bc6c9ad24e08581d9bf6f2a0fd90"
+    },
+    {
+      "path": "contracts/control.ts",
+      "sourcePath": "packages/oar/src/contracts/control.ts",
+      "upstreamSha256": "a9326c7252004658c4913db77a62d468da0e11ae5bbe0b0cdaacf533e0256102",
+      "vendoredSha256": "a9326c7252004658c4913db77a62d468da0e11ae5bbe0b0cdaacf533e0256102"
+    },
+    {
+      "path": "contracts/deliver.ts",
+      "sourcePath": "packages/oar/src/contracts/deliver.ts",
+      "upstreamSha256": "01513d6a9cb29d8aaed361e667a8d7da014c1d4d61546093d1f83caa58bd2ad2",
+      "vendoredSha256": "01513d6a9cb29d8aaed361e667a8d7da014c1d4d61546093d1f83caa58bd2ad2"
+    },
+    {
+      "path": "contracts/errors.ts",
+      "sourcePath": "packages/oar/src/contracts/errors.ts",
+      "upstreamSha256": "ec1a8e06e46a560a4cdf43c296485c0140a63716c83cdd6da03e53d5e3feb400",
+      "vendoredSha256": "ec1a8e06e46a560a4cdf43c296485c0140a63716c83cdd6da03e53d5e3feb400"
+    },
+    {
+      "path": "contracts/failure.ts",
+      "sourcePath": "packages/oar/src/contracts/failure.ts",
+      "upstreamSha256": "9422fcb7460b25443c2c2f13cdc6f8de2653369a130eb4cbb1b7994f888302bd",
+      "vendoredSha256": "c35a5a66bbcc1f106d369ecc3ea3d39292aa7ee57003ffbbcaefc0038b1557ff",
+      "delta": "Text-rule mark: every FailedTurn variant takes an optional fromText: true, set when a text rule over the runtime's words chose the class rather than a structured field."
+    },
+    {
+      "path": "contracts/goal.ts",
+      "sourcePath": "packages/oar/src/contracts/goal.ts",
+      "upstreamSha256": "b965e26768817a53ddca51e4707552579038b5373aac2624868dea3c043d776e",
+      "vendoredSha256": "b965e26768817a53ddca51e4707552579038b5373aac2624868dea3c043d776e"
+    },
+    {
+      "path": "contracts/graph.ts",
+      "sourcePath": "packages/oar/src/contracts/graph.ts",
+      "upstreamSha256": "57c5d2f1bf22da433521c9fa50d7850406d7886b4016e8ecab68f635c690f58c",
+      "vendoredSha256": "57c5d2f1bf22da433521c9fa50d7850406d7886b4016e8ecab68f635c690f58c"
+    },
+    {
+      "path": "contracts/input.ts",
+      "sourcePath": "packages/oar/src/contracts/input.ts",
+      "upstreamSha256": "c954088dc47958b6f02d4dea3f772515bb26acb40cdf324e548f047bdeff379c",
+      "vendoredSha256": "c954088dc47958b6f02d4dea3f772515bb26acb40cdf324e548f047bdeff379c"
+    },
+    {
+      "path": "contracts/install.ts",
+      "sourcePath": "packages/oar/src/contracts/install.ts",
+      "upstreamSha256": "778a913d26288adffd24aa848eff05c52f5a88a20b1e9144e9aac488a32d923d",
+      "vendoredSha256": "778a913d26288adffd24aa848eff05c52f5a88a20b1e9144e9aac488a32d923d"
+    },
+    {
+      "path": "contracts/installation.ts",
+      "sourcePath": "packages/oar/src/contracts/installation.ts",
+      "upstreamSha256": "99f9f9b5e81b268a69a713590e2c412f2b5324ec54498e20bce4ae942668d2e2",
+      "vendoredSha256": "99f9f9b5e81b268a69a713590e2c412f2b5324ec54498e20bce4ae942668d2e2"
+    },
+    {
+      "path": "contracts/inventory.ts",
+      "sourcePath": "packages/oar/src/contracts/inventory.ts",
+      "upstreamSha256": "29afb78cf38099913a0abe892a7255e6798747b863916667d9ffc5dfafdea468",
+      "vendoredSha256": "29afb78cf38099913a0abe892a7255e6798747b863916667d9ffc5dfafdea468"
+    },
+    {
+      "path": "contracts/list-models.ts",
+      "sourcePath": "packages/oar/src/contracts/list-models.ts",
+      "upstreamSha256": "fae719cc1cd1da77f1478ee4dcc69baf44beccfd8b7b9cdbb3c7690505c3649d",
+      "vendoredSha256": "fae719cc1cd1da77f1478ee4dcc69baf44beccfd8b7b9cdbb3c7690505c3649d"
+    },
+    {
+      "path": "contracts/login.ts",
+      "sourcePath": "packages/oar/src/contracts/login.ts",
+      "upstreamSha256": "3fcf6e58e4c77dfe1de916c058df311eb97a21411f8ea9a11706e053354b5e37",
+      "vendoredSha256": "3fcf6e58e4c77dfe1de916c058df311eb97a21411f8ea9a11706e053354b5e37"
+    },
+    {
+      "path": "contracts/placement.ts",
+      "sourcePath": "packages/oar/src/contracts/placement.ts",
+      "upstreamSha256": "25f862c032096b569174e675e9aea4c3299c9faf5db2a149a421f6c90a236321",
+      "vendoredSha256": "25f862c032096b569174e675e9aea4c3299c9faf5db2a149a421f6c90a236321"
+    },
+    {
+      "path": "contracts/provider-auth.ts",
+      "sourcePath": "packages/oar/src/contracts/provider-auth.ts",
+      "upstreamSha256": "d2396143eb0987f9afa3fcb846684b2770947d17d213adce6f9b86382f0c9dba",
+      "vendoredSha256": "d2396143eb0987f9afa3fcb846684b2770947d17d213adce6f9b86382f0c9dba"
+    },
+    {
+      "path": "contracts/records.ts",
+      "sourcePath": "packages/oar/src/contracts/records.ts",
+      "upstreamSha256": "a1e3563b87393cfedad20c11ec98c9802bf48aae4c1d02023902576fe806e5f7",
+      "vendoredSha256": "a1e3563b87393cfedad20c11ec98c9802bf48aae4c1d02023902576fe806e5f7"
+    },
+    {
+      "path": "contracts/runtime-failure-error.ts",
+      "sourcePath": "packages/oar/src/contracts/runtime-failure-error.ts",
+      "upstreamSha256": "a4ed44272dbcaa87160ca0f728d5d28b869bc4317588ca7b26235e28d4bcca06",
+      "vendoredSha256": "a4ed44272dbcaa87160ca0f728d5d28b869bc4317588ca7b26235e28d4bcca06"
+    },
+    {
+      "path": "contracts/runtime.ts",
+      "sourcePath": "packages/oar/src/contracts/runtime.ts",
+      "upstreamSha256": "fc387334d3e39436797464385b5c60019d953f7c172dd4bde99552adea94cc3b",
+      "vendoredSha256": "fc387334d3e39436797464385b5c60019d953f7c172dd4bde99552adea94cc3b"
+    },
+    {
+      "path": "contracts/session-not-found-error.ts",
+      "sourcePath": "packages/oar/src/contracts/session-not-found-error.ts",
+      "upstreamSha256": "c24429ee8579b744a85c27a259fe6b66be84a2cbace80f37a73ccbc1391e54af",
+      "vendoredSha256": "c24429ee8579b744a85c27a259fe6b66be84a2cbace80f37a73ccbc1391e54af"
+    },
+    {
+      "path": "contracts/session-options.ts",
+      "sourcePath": "packages/oar/src/contracts/session-options.ts",
+      "upstreamSha256": "8bf54cd3ee81df67e3694bbccb8b60330a35ef92c684cda9463150830a8aec01",
+      "vendoredSha256": "8bf54cd3ee81df67e3694bbccb8b60330a35ef92c684cda9463150830a8aec01"
+    },
+    {
+      "path": "contracts/session-unavailable-error.ts",
+      "sourcePath": "packages/oar/src/contracts/session-unavailable-error.ts",
+      "upstreamSha256": "fa4b02d8c623ca0d56297d9faa7fcbe9dfdf8f46c3e09be06f34fb9f5895d010",
+      "vendoredSha256": "fa4b02d8c623ca0d56297d9faa7fcbe9dfdf8f46c3e09be06f34fb9f5895d010"
+    },
+    {
+      "path": "contracts/session.ts",
+      "sourcePath": "packages/oar/src/contracts/session.ts",
+      "upstreamSha256": "99da538f89fe34ba1aa797615f8504acaec25b025915d59bc5a87ec8c208f54d",
+      "vendoredSha256": "99da538f89fe34ba1aa797615f8504acaec25b025915d59bc5a87ec8c208f54d"
+    },
+    {
+      "path": "contracts/status.ts",
+      "sourcePath": "packages/oar/src/contracts/status.ts",
+      "upstreamSha256": "dad30fc7f18621a092a664e12ae2fc06580ac98b88b672c694cbdf2d8239f656",
+      "vendoredSha256": "dad30fc7f18621a092a664e12ae2fc06580ac98b88b672c694cbdf2d8239f656"
+    },
+    {
+      "path": "contracts/tasks.ts",
+      "sourcePath": "packages/oar/src/contracts/tasks.ts",
+      "upstreamSha256": "a69790019c75119c9916db8afc8f6970391f39c5d2804b25c0e81e8b9afa2094",
+      "vendoredSha256": "a69790019c75119c9916db8afc8f6970391f39c5d2804b25c0e81e8b9afa2094"
+    },
+    {
+      "path": "contracts/tool-output.ts",
+      "sourcePath": "packages/oar/src/contracts/tool-output.ts",
+      "upstreamSha256": "1e801c6641eea01566834834952e363e584415fd4ecdc848c5ef3f1cadd53f6d",
+      "vendoredSha256": "1e801c6641eea01566834834952e363e584415fd4ecdc848c5ef3f1cadd53f6d"
+    },
+    {
+      "path": "contracts/turn-outcome.ts",
+      "sourcePath": "packages/oar/src/contracts/turn-outcome.ts",
+      "upstreamSha256": "e46eea431a6720333c1eeb0ac3d6f5207da9a5422b63dd1d297e77ce29fdb7e9",
+      "vendoredSha256": "e46eea431a6720333c1eeb0ac3d6f5207da9a5422b63dd1d297e77ce29fdb7e9"
+    },
+    {
+      "path": "contracts/update.ts",
+      "sourcePath": "packages/oar/src/contracts/update.ts",
+      "upstreamSha256": "8069971ce02855d800d86c345b708ff3e1b0cfcbbc78b6fd4456f656fba78f5c",
+      "vendoredSha256": "8069971ce02855d800d86c345b708ff3e1b0cfcbbc78b6fd4456f656fba78f5c"
+    },
+    {
+      "path": "observe/conversation.ts",
+      "sourcePath": "packages/oar/src/observe/conversation.ts",
+      "upstreamSha256": "c315970d5fb33d9dd8067930d29d31f4eef4f288646db884b6d46d91ddacee61",
+      "vendoredSha256": "c315970d5fb33d9dd8067930d29d31f4eef4f288646db884b6d46d91ddacee61"
+    },
+    {
+      "path": "observe/events.ts",
+      "sourcePath": "packages/oar/src/observe/events.ts",
+      "upstreamSha256": "573d016b4fb86d08c332871410a406c17c08280da8a2c8b1f320400152e40b02",
+      "vendoredSha256": "825b7cd5906093d72bd9fb2f3b0ffe47f765f1172b55476db768a1b9358d977b",
+      "delta": "Current typed SDK records are projected directly; do not import the upstream pre-0.14 record shape translator. Upstream open/released/cleanup response projections and the exit reason are retained."
+    },
+    {
+      "path": "observe/graph.ts",
+      "sourcePath": "packages/oar/src/observe/graph.ts",
+      "upstreamSha256": "57abde5fa583c7470620f89e2c3023b07f314c96fb5e8c9306594e85055fb8cd",
+      "vendoredSha256": "57abde5fa583c7470620f89e2c3023b07f314c96fb5e8c9306594e85055fb8cd"
+    },
+    {
+      "path": "observe/input-carries.ts",
+      "sourcePath": "packages/oar/src/observe/input-carries.ts",
+      "upstreamSha256": "6d6b9b153a227d3c3816d18b9433985cb0fe322437c1d230bf17c97b1857eba3",
+      "vendoredSha256": "6d6b9b153a227d3c3816d18b9433985cb0fe322437c1d230bf17c97b1857eba3"
+    },
+    {
+      "path": "observe/input-delivery.ts",
+      "sourcePath": "packages/oar/src/observe/input-delivery.ts",
+      "upstreamSha256": "07ce096d8b12d4fed295e492f138d98cbcffc691343200c91504a74a632a48d2",
+      "vendoredSha256": "07ce096d8b12d4fed295e492f138d98cbcffc691343200c91504a74a632a48d2"
+    },
+    {
+      "path": "runtimes/antigravity/options.ts",
+      "sourcePath": "packages/oar/src/runtimes/antigravity/options.ts",
+      "upstreamSha256": "da38fb16d35cce1b7d2db54948cf96c07cd042c394c88c684c01b84be7b45bb0",
+      "vendoredSha256": "da38fb16d35cce1b7d2db54948cf96c07cd042c394c88c684c01b84be7b45bb0"
+    },
+    {
+      "path": "runtimes/antigravity/session.ts",
+      "sourcePath": "packages/oar/src/runtimes/antigravity/session.ts",
+      "upstreamSha256": "a8ee2bbcb16a3f1d652d12e42eeac2b9d37aeba2ff2e67a5908071ce135d56b1",
+      "vendoredSha256": "a8ee2bbcb16a3f1d652d12e42eeac2b9d37aeba2ff2e67a5908071ce135d56b1"
+    },
+    {
+      "path": "runtimes/claude/context-usage.ts",
+      "sourcePath": "packages/oar/src/runtimes/claude/context-usage.ts",
+      "upstreamSha256": "1d53388f744f4ee7fe7bfe3b9f11732a1e3674ce89b92c1700a5f053c0d95b9c",
+      "vendoredSha256": "1d53388f744f4ee7fe7bfe3b9f11732a1e3674ce89b92c1700a5f053c0d95b9c"
+    },
+    {
+      "path": "runtimes/claude/failure.ts",
+      "sourcePath": "packages/oar/src/runtimes/claude/failure.ts",
+      "upstreamSha256": "eb1eef4ac14acd2ba0c593056ce88d749f11b7641bb1f17c2b7ab73686a175c9",
+      "vendoredSha256": "eb1eef4ac14acd2ba0c593056ce88d749f11b7641bb1f17c2b7ab73686a175c9"
+    },
+    {
+      "path": "runtimes/claude/projection.ts",
+      "sourcePath": "packages/oar/src/runtimes/claude/projection.ts",
+      "upstreamSha256": "287a05faf50a8c974756554c5c4a243eb5b96f10a25c5d97e95174a830971306",
+      "vendoredSha256": "287a05faf50a8c974756554c5c4a243eb5b96f10a25c5d97e95174a830971306"
+    },
+    {
+      "path": "runtimes/claude/service-tier.ts",
+      "sourcePath": "packages/oar/src/runtimes/claude/service-tier.ts",
+      "upstreamSha256": "47a8e565b07dd8612ae539a1dd85643481e8e9249e22128bd01108261b4ef2f7",
+      "vendoredSha256": "47a8e565b07dd8612ae539a1dd85643481e8e9249e22128bd01108261b4ef2f7"
+    },
+    {
+      "path": "runtimes/claude/tasks.ts",
+      "sourcePath": "packages/oar/src/runtimes/claude/tasks.ts",
+      "upstreamSha256": "518e97ba1108e49c2ef20314613f24e4a260cadce429274410d8bf2dc8798d43",
+      "vendoredSha256": "518e97ba1108e49c2ef20314613f24e4a260cadce429274410d8bf2dc8798d43"
+    },
+    {
+      "path": "runtimes/claude/token-usage.ts",
+      "sourcePath": "packages/oar/src/runtimes/claude/token-usage.ts",
+      "upstreamSha256": "0e47a86cc45d15d667c2e93a8fc6f9cd44383584168147587e3d89ce34d5d158",
+      "vendoredSha256": "0e47a86cc45d15d667c2e93a8fc6f9cd44383584168147587e3d89ce34d5d158"
+    },
+    {
+      "path": "runtimes/codex/app-server-client.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/app-server-client.ts",
+      "upstreamSha256": "c48cdcff3f73ec7e35a5932ae8f72f5377f60e522f36b8a83b2bc4e3aee442bc",
+      "vendoredSha256": "c7c55eb92be405f57b81d724283ef1a711c438e2c35165c2a2e3a1eb510c3f99",
+      "delta": "Caller-owned process: the injected LineProcess spawn receives exactly the explicit filtered env, cwd and launch arguments; no ambient env merge, home-initialization queue, executable manager, resources reader or killTree option. Server requests: numeric and string ids preserved; result and error replies go through the acknowledged stdin write. Terminal state: an exit or a kill sets one sticky terminal error, with the bounded, redacted exitError of the BYOK transport plus the upstream cleanup reason on exit; it settles every pending request as exited at once, rejects later requests and writes, and ignores later lines. No per-request deadline and no count budget: operation deadlines live in the SDK Codex adapter, and the BYOK transport bounds line bytes."
+    },
+    {
+      "path": "runtimes/codex/compaction.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/compaction.ts",
+      "upstreamSha256": "b3d34a9ff30a4f2efd81140013b6e948456117bbfe2fefbe10549639fb16e57e",
+      "vendoredSha256": "b3d34a9ff30a4f2efd81140013b6e948456117bbfe2fefbe10549639fb16e57e"
+    },
+    {
+      "path": "runtimes/codex/failure.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/failure.ts",
+      "upstreamSha256": "2e7224ce11ae3cda54562c82a043a3cbec769a7f4e6874f2d3c1739b0b60d590",
+      "vendoredSha256": "65472602383d549e34313d1f3dc0e8adf0d867bc1b4943f73bcfaeea639ce719",
+      "delta": "Text-rule mark: codexErrorInfo other returns the provider body's Classified, so a class from Anthropic's 400 wording keeps its fromText mark on the failed turn."
+    },
+    {
+      "path": "runtimes/codex/goal.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/goal.ts",
+      "upstreamSha256": "e48c996d6b1913efa6a1be663113034db788d2f2521665ec80742b99f5594af5",
+      "vendoredSha256": "e48c996d6b1913efa6a1be663113034db788d2f2521665ec80742b99f5594af5"
+    },
+    {
+      "path": "runtimes/codex/input-delivery.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/input-delivery.ts",
+      "upstreamSha256": "ece2bc4c6c33429410e5018468437f18402fe12b75ddd0d27f770427ec0b6644",
+      "vendoredSha256": "ece2bc4c6c33429410e5018468437f18402fe12b75ddd0d27f770427ec0b6644"
+    },
+    {
+      "path": "runtimes/codex/item-detail.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/item-detail.ts",
+      "upstreamSha256": "9afc60bf6bd7fb93c139a093b704953dede8ecf0c6bbeec28120058c64bb55e8",
+      "vendoredSha256": "9afc60bf6bd7fb93c139a093b704953dede8ecf0c6bbeec28120058c64bb55e8"
+    },
+    {
+      "path": "runtimes/codex/messages.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/messages.ts",
+      "upstreamSha256": "5f94b7eed2adc8d23821925fcf348237e3f45ceb9a686aa3a799b77df4caddcb",
+      "vendoredSha256": "5f94b7eed2adc8d23821925fcf348237e3f45ceb9a686aa3a799b77df4caddcb"
+    },
+    {
+      "path": "runtimes/codex/open.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/open.ts",
+      "upstreamSha256": "16cd10a7bd519eeabfd8a161c046aa317e39d94ace1e07a1b9ff657942e27134",
+      "vendoredSha256": "3bccd7241e08298860d74b0beb49fd9b8f41ff13e69f53db21595311b9d32472",
+      "delta": "Caller-owned interaction opt-in: codexThreadOpen accepts approvalPolicy \"never\" | \"on-request\" and sends it on thread/start and thread/resume; the default stays \"never\"."
+    },
+    {
+      "path": "runtimes/codex/options.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/options.ts",
+      "upstreamSha256": "61497eadf5f23889a6853512cc22f016a137f0e77445912f9db0c74a90f924ce",
+      "vendoredSha256": "61497eadf5f23889a6853512cc22f016a137f0e77445912f9db0c74a90f924ce"
+    },
+    {
+      "path": "runtimes/codex/projection.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/projection.ts",
+      "upstreamSha256": "6591653d1afaee38fbcd667de20f6e78f7b0ce016de733353444e4907112046b",
+      "vendoredSha256": "6591653d1afaee38fbcd667de20f6e78f7b0ce016de733353444e4907112046b"
+    },
+    {
+      "path": "runtimes/codex/reasoning.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/reasoning.ts",
+      "upstreamSha256": "d00f408f6b4627e2620d37f56a1e943631fd5911b536df4080e6f45ebd36b23e",
+      "vendoredSha256": "d00f408f6b4627e2620d37f56a1e943631fd5911b536df4080e6f45ebd36b23e"
+    },
+    {
+      "path": "runtimes/codex/refusal.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/refusal.ts",
+      "upstreamSha256": "8e3df8568de24404d85474db4828229a9dc45e15cf7907a779c9632a585bbe9e",
+      "vendoredSha256": "8e3df8568de24404d85474db4828229a9dc45e15cf7907a779c9632a585bbe9e"
+    },
+    {
+      "path": "runtimes/codex/rpc-control.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/rpc-control.ts",
+      "upstreamSha256": "d04362ef15b29999eb30ef5ea5208a8a08c81b6d7ebf567db14400efd57deb51",
+      "vendoredSha256": "d04362ef15b29999eb30ef5ea5208a8a08c81b6d7ebf567db14400efd57deb51"
+    },
+    {
+      "path": "runtimes/codex/session.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
+      "upstreamSha256": "2ae59ab4a22259182378bdf15984b639b11aeecc6a32791ccb4a68b5673461bd",
+      "vendoredSha256": "1e4e2cd3729dcd6d2a238e1f3beb70e3400817bbf2eaa5216bcfc2bdabe90020",
+      "delta": "Raw adapter for the SDK: injected spawn and a required explicit filtered env; caller-selected sandboxMode (danger-full-access default, inherit passes no override) instead of ambient OAR_CODEX_SANDBOX; native goals are not exposed (options.goals is omitted and no goal control is returned). Returns AdapterSession without sealSession/withSessionCredentials/observe, building one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control. The upstream kernel is created with that redactor, and the onRecord hook is registered as a kernel observer before any record is appended. Native-first recording: each notification is retained as a body.origin=\"byok-native\" frame before the fold; a fold failure kills the process visibly. Server requests: caller-owned bounded native interaction lifecycle when configured, else synchronous decline/-32601 rejection under a 1000ms dispatch deadline; on-request approval policy is verified in the open reply. Owned process lifetime: spawn/adoption settles before the first write; every open failure kills and awaits the process, including failures now owned by the session rather than openThread. Caller-owned open steps: optional beforeOpen and afterOpen hooks run on the same client before the thread open request (returning its params) and after its read-back, before onReady; a throw kills the process. Without them the open is unchanged. Codex steer is a required member. OAR 0.99: upstream refusal.ts is kept unchanged on this open path (codexVersion from initialize, typed runtime_outdated/runtime_config_invalid open refusals, codexControlRefusal for start/steer/queue rejections). endTurnProcessesOnAbort and retainedBytes are omitted from the signature."
+    },
+    {
+      "path": "runtimes/codex/task-control.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/task-control.ts",
+      "upstreamSha256": "56014b15ff36d54b3d897254fe3ad110f0b9928216c3fa7e9b909bb9085f3cff",
+      "vendoredSha256": "56014b15ff36d54b3d897254fe3ad110f0b9928216c3fa7e9b909bb9085f3cff"
+    },
+    {
+      "path": "runtimes/codex/tasks.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/tasks.ts",
+      "upstreamSha256": "de56126d1fb0d6abc1a43c276270cd2350f66c61651998cec4d03c8d2cecb980",
+      "vendoredSha256": "de56126d1fb0d6abc1a43c276270cd2350f66c61651998cec4d03c8d2cecb980"
+    },
+    {
+      "path": "runtimes/codex/token-usage.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/token-usage.ts",
+      "upstreamSha256": "2a9eadb0fe88e7b0ec8ff9fafeca2fb282651413b4ade93b168b4280b75a2015",
+      "vendoredSha256": "2a9eadb0fe88e7b0ec8ff9fafeca2fb282651413b4ade93b168b4280b75a2015"
+    },
+    {
+      "path": "runtimes/codex/tool-denials.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/tool-denials.ts",
+      "upstreamSha256": "5e2f75ea7b5bd2a7bf3501fa914523b79ec594f4bc42b1a600a366ea38b0a8ad",
+      "vendoredSha256": "5e2f75ea7b5bd2a7bf3501fa914523b79ec594f4bc42b1a600a366ea38b0a8ad"
+    },
+    {
+      "path": "runtimes/dsh/bridge.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/bridge.ts",
+      "upstreamSha256": "26c51a5036ddeee961a8b7272b97bda59b9e9eb617b77744c5fd52d3bf4e7d62",
+      "vendoredSha256": "26c51a5036ddeee961a8b7272b97bda59b9e9eb617b77744c5fd52d3bf4e7d62"
+    },
+    {
+      "path": "runtimes/dsh/control.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/control.ts",
+      "upstreamSha256": "65e196a9da36884a3cb2f2d4b9f697c6db14e51e46df6f40fa70122682d616fd",
+      "vendoredSha256": "545a12d8863ed24dd7b603fb84b05ec2f0f1aeb48430392c9718afaf26eaf999",
+      "delta": "Use the codex LineProcess type and read stderr from the SDK process wrapper."
+    },
+    {
+      "path": "runtimes/dsh/jobs.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/jobs.ts",
+      "upstreamSha256": "b9d86f48c2f375cf97c1c66b8f5a9530df0ecf7f1a4a101664d8d236410dab9d",
+      "vendoredSha256": "b9d86f48c2f375cf97c1c66b8f5a9530df0ecf7f1a4a101664d8d236410dab9d"
+    },
+    {
+      "path": "runtimes/dsh/launch.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/launch.ts",
+      "upstreamSha256": "85c6d373993e2e5d99c7f9992356c3f5b2934ce545fe54fc81df7a28a1126b29",
+      "vendoredSha256": "691f155e96fee2d57d01a4916ab236d66588591a5f5a854af5b2541303f127b6",
+      "delta": "Take an injected process, an explicit environment and a caller-owned directory; add the caller patches before the bridge overlay and drop the version floor."
+    },
+    {
+      "path": "runtimes/dsh/mcp.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/mcp.ts",
+      "upstreamSha256": "49e0682c6ecfd12ee5be3de28afd0cd0ef5b70b006ae7270ca967ddbec1dfa9d",
+      "vendoredSha256": "49e0682c6ecfd12ee5be3de28afd0cd0ef5b70b006ae7270ca967ddbec1dfa9d"
+    },
+    {
+      "path": "runtimes/dsh/options.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/options.ts",
+      "upstreamSha256": "8b58871899183e130694eef6c5d33e481fb6a407260468a6eac48d6f9b998cec",
+      "vendoredSha256": "8b58871899183e130694eef6c5d33e481fb6a407260468a6eac48d6f9b998cec"
+    },
+    {
+      "path": "runtimes/dsh/projection.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/projection.ts",
+      "upstreamSha256": "e89720f6566168f4d155828d7caf6feeb8f691db8c8edbb03bd6b7ae70c99197",
+      "vendoredSha256": "e89720f6566168f4d155828d7caf6feeb8f691db8c8edbb03bd6b7ae70c99197"
+    },
+    {
+      "path": "runtimes/dsh/session.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/session.ts",
+      "upstreamSha256": "c0076f4759706af1608063713c9c3fec041c2ea9f608e1d9874c2e40a482cf58",
+      "vendoredSha256": "97a909dac0ad232e90731ad22d3d4592852e3b3cd8c1575e86dcaed3683dc930",
+      "delta": "Take an injected process and an explicit launch, redact through the SDK session kernel, read the process table before a native cancel, and refuse a dsh that does not offer steer as a typed invalid_request failure."
+    },
+    {
+      "path": "runtimes/grok/compaction.ts",
+      "sourcePath": "packages/oar/src/runtimes/grok/compaction.ts",
+      "upstreamSha256": "db3a9e66caa8019e44dacd683768f735552271ade7365f7b50a34d2d31dd1938",
+      "vendoredSha256": "db3a9e66caa8019e44dacd683768f735552271ade7365f7b50a34d2d31dd1938"
+    },
+    {
+      "path": "runtimes/grok/failure.ts",
+      "sourcePath": "packages/oar/src/runtimes/grok/failure.ts",
+      "upstreamSha256": "a429b3d76e73d04acb8956d75e794d7a2fe06b388dd23ef54bfd1b532dc3881c",
+      "vendoredSha256": "a429b3d76e73d04acb8956d75e794d7a2fe06b388dd23ef54bfd1b532dc3881c"
+    },
+    {
+      "path": "runtimes/grok/native-turns.ts",
+      "sourcePath": "packages/oar/src/runtimes/grok/native-turns.ts",
+      "upstreamSha256": "0d50dc799ad33a1c9325a5c6b68e78b339eae0693b73300c78ebbae45d29fc01",
+      "vendoredSha256": "0d50dc799ad33a1c9325a5c6b68e78b339eae0693b73300c78ebbae45d29fc01"
+    },
+    {
+      "path": "runtimes/grok/options.ts",
+      "sourcePath": "packages/oar/src/runtimes/grok/options.ts",
+      "upstreamSha256": "2aca9ca2aea69c2644510abe732cf38b5ec1724c7d42e61594ac675b7017e058",
+      "vendoredSha256": "2aca9ca2aea69c2644510abe732cf38b5ec1724c7d42e61594ac675b7017e058"
+    },
+    {
+      "path": "runtimes/grok/session.ts",
+      "sourcePath": "packages/oar/src/runtimes/grok/session.ts",
+      "upstreamSha256": "0f79f5ef988e5fba0b1ccb18982c88d241ebf594c6905a21e9e7c5a34530b140",
+      "vendoredSha256": "7ab473c4ff642f265077f9c8c06b1b45073806fa1d1839791e9954696d51d6e2",
+      "delta": "Route appendSystemPrompt as session/new _meta.rules per Grok documentation, preserving built-in prompts and the upstream append-only resume refusal. No folder-trust grants."
+    },
+    {
+      "path": "runtimes/grok/spontaneous-usage.ts",
+      "sourcePath": "packages/oar/src/runtimes/grok/spontaneous-usage.ts",
+      "upstreamSha256": "3db09a092eeca341efb187f58b48cce01a4238969102f6dde9d7bfeae140976d",
+      "vendoredSha256": "3db09a092eeca341efb187f58b48cce01a4238969102f6dde9d7bfeae140976d"
+    },
+    {
+      "path": "runtimes/grok/tasks.ts",
+      "sourcePath": "packages/oar/src/runtimes/grok/tasks.ts",
+      "upstreamSha256": "7bccf92f8b7c7413707a0401fe4efb9d23ab7db9358c190df1921c76b5a2bd96",
+      "vendoredSha256": "7bccf92f8b7c7413707a0401fe4efb9d23ab7db9358c190df1921c76b5a2bd96"
+    },
+    {
+      "path": "runtimes/opencode/attribution.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/attribution.ts",
+      "upstreamSha256": "75db23dfd90ac037564081c7ce3834eced9b07768a32f66b6e1f750a5282afa3",
+      "vendoredSha256": "75db23dfd90ac037564081c7ce3834eced9b07768a32f66b6e1f750a5282afa3"
+    },
+    {
+      "path": "runtimes/opencode/compaction.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/compaction.ts",
+      "upstreamSha256": "f75a7b8a17363b953efadd0d4ae79ac55b6dc327354b7caa6c3cd81bf960f6ea",
+      "vendoredSha256": "f75a7b8a17363b953efadd0d4ae79ac55b6dc327354b7caa6c3cd81bf960f6ea"
+    },
+    {
+      "path": "runtimes/opencode/failure.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/failure.ts",
+      "upstreamSha256": "d7ffdc7209e427fa2f3707448b6b99dbcce8cebc7a2929a0ea5a0502e0733f41",
+      "vendoredSha256": "d7ffdc7209e427fa2f3707448b6b99dbcce8cebc7a2929a0ea5a0502e0733f41"
+    },
+    {
+      "path": "runtimes/opencode/options.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/options.ts",
+      "upstreamSha256": "7ef5a8fd08b2ad299f5c5bd35fae0dd3ed5594b13b745bc091334e4d54dc74e6",
+      "vendoredSha256": "7ef5a8fd08b2ad299f5c5bd35fae0dd3ed5594b13b745bc091334e4d54dc74e6"
+    },
+    {
+      "path": "runtimes/opencode/prompt-config.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/prompt-config.ts",
+      "upstreamSha256": "3d12ae7fbe27916eb6042b407d6ff77a80f3497a60a1671f902933c9b645e768",
+      "vendoredSha256": "640d9792807cb5f76752a55d61d879325ffa1be8f0d40051886f466db29d5558",
+      "delta": "Require an injected owned query runner and build query environments from the explicit session environment only; retain native prompt validation, agent readback and cleanup."
+    },
+    {
+      "path": "runtimes/opencode/session.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/session.ts",
+      "upstreamSha256": "ac0e7ccf79893b367403c4bb0f2522cb7dfca3034d54e08cf62316467a55215a",
+      "vendoredSha256": "1e55de40dff0ad41b741066ac5eb0cd8dd89a4b605a5f957d8c35cf21609a942",
+      "delta": "Inject SDK-owned line and terminal processes, explicit environment and hooks; require the probed release token; run bounded prompt configuration queries through the owned terminal seam without sealSession. Clear the prompt-cleanup disposal cache on rejection so later disposal retries reclaim terminals, while concurrent and successful calls share the cached promise."
+    },
+    {
+      "path": "runtimes/opencode/version.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/version.ts",
+      "upstreamSha256": "642c9de79fedf92628606a57943d91dd07625af723423099da073a5d0f01c179",
+      "vendoredSha256": "73e37da591ff446febe684e17a7a0bf27c07d60398c08873d85a3126d3f77404",
+      "delta": "Require the SDK-probed executable version instead of launching another version process."
+    },
+    {
+      "path": "shared/abort-fallback.ts",
+      "sourcePath": "packages/oar/src/shared/abort-fallback.ts",
+      "upstreamSha256": "665fad321bdcfc1b1e9d67f7f8beb621e2d796cd61383d8fb2d27e52573670a3",
+      "vendoredSha256": "665fad321bdcfc1b1e9d67f7f8beb621e2d796cd61383d8fb2d27e52573670a3"
+    },
+    {
+      "path": "shared/acp/additional-directories.ts",
+      "sourcePath": "packages/oar/src/shared/acp/additional-directories.ts",
+      "upstreamSha256": "f8c5d6ea21e938d87217b8e3dd31f5bcc999df8e9137b9ec97720b256747f72b",
+      "vendoredSha256": "f8c5d6ea21e938d87217b8e3dd31f5bcc999df8e9137b9ec97720b256747f72b"
+    },
+    {
+      "path": "shared/acp/client-app.ts",
+      "sourcePath": "packages/oar/src/shared/acp/client-app.ts",
+      "upstreamSha256": "3fa6e13b3f3fb53dfe4809b64b0de0caf739f43ecf7e771a71b028c39aaca432",
+      "vendoredSha256": "82c3e4826d393be425e602e54fe009eba99bfece1b47cccbab95b09d6cd1c5a1",
+      "delta": "No permissive fallback: every session/request_permission is answered cancelled (cancelPermission) instead of the broadest allow on offer, unless the caller passes its own answer (AcpClientHooks.permission). The request and the answer stay recorded. Upstream routed request targets, terminal handlers and wire-phase notification routing are retained."
+    },
+    {
+      "path": "shared/acp/config-updates.ts",
+      "sourcePath": "packages/oar/src/shared/acp/config-updates.ts",
+      "upstreamSha256": "0a271efaf0eadb7b8bde635fb89f09efd305786bd0419c7e6b788fcfe7f7d46f",
+      "vendoredSha256": "0a271efaf0eadb7b8bde635fb89f09efd305786bd0419c7e6b788fcfe7f7d46f"
+    },
+    {
+      "path": "shared/acp/effort.ts",
+      "sourcePath": "packages/oar/src/shared/acp/effort.ts",
+      "upstreamSha256": "cfca01c826c8adc32fb602a57f41faa44b0312d287b6b2cf8260c93d34e68816",
+      "vendoredSha256": "cfca01c826c8adc32fb602a57f41faa44b0312d287b6b2cf8260c93d34e68816"
+    },
+    {
+      "path": "shared/acp/errors.ts",
+      "sourcePath": "packages/oar/src/shared/acp/errors.ts",
+      "upstreamSha256": "487de929844c36a0b387bc463bc91b4086fe3da72e8111609d6a5ea36a826362",
+      "vendoredSha256": "9243967521baa9f25149636c829e08abc500899d756a1be21db65576c43bad1a",
+      "delta": "No native diagnostic bundle: upstream optional ProcessDiagnostics and its executable-manager dependency are not imported. acpProcessExitedError(exitCode) keeps the bounded transport exit message; AcpError keeps the upstream cause field."
+    },
+    {
+      "path": "shared/acp/failure.ts",
+      "sourcePath": "packages/oar/src/shared/acp/failure.ts",
+      "upstreamSha256": "f3b375e0620a2133aeed185a28e2b7837b1bcc4fa20ddc38ca4bb07f8adf59fb",
+      "vendoredSha256": "14ed69a9bc66ce07d12bb4cb5252260c8c4d17466e187b262eadacca76142635",
+      "delta": "Text-rule mark: when the profile's reader names no class, acpFailureOutcome marks the classifyFailure fallback fromText. The process-exit and auth-required branches are unchanged."
+    },
+    {
+      "path": "shared/acp/initialize.ts",
+      "sourcePath": "packages/oar/src/shared/acp/initialize.ts",
+      "upstreamSha256": "959eb4d072e67562baea4d84f941e416b8f7cf14c6f435256bca8c1e01f6d0d9",
+      "vendoredSha256": "959eb4d072e67562baea4d84f941e416b8f7cf14c6f435256bca8c1e01f6d0d9"
+    },
+    {
+      "path": "shared/acp/input.ts",
+      "sourcePath": "packages/oar/src/shared/acp/input.ts",
+      "upstreamSha256": "21331190b4cad52647a0cd53c40231f447c6973fe47ee5b2510578b140b721bc",
+      "vendoredSha256": "21331190b4cad52647a0cd53c40231f447c6973fe47ee5b2510578b140b721bc"
+    },
+    {
+      "path": "shared/acp/launch-args.ts",
+      "sourcePath": "packages/oar/src/shared/acp/launch-args.ts",
+      "upstreamSha256": "3dd9726594f9e4ceb2a3e7ea8839164b399079a5dd7811e844287c746e3a1c53",
+      "vendoredSha256": "3dd9726594f9e4ceb2a3e7ea8839164b399079a5dd7811e844287c746e3a1c53"
+    },
+    {
+      "path": "shared/acp/mcp-servers.ts",
+      "sourcePath": "packages/oar/src/shared/acp/mcp-servers.ts",
+      "upstreamSha256": "4ba04c5733810f0cc1bd69b6ba19929a85a6d7bbfcfb2cc79a8da9585154d7ed",
+      "vendoredSha256": "4ba04c5733810f0cc1bd69b6ba19929a85a6d7bbfcfb2cc79a8da9585154d7ed"
+    },
+    {
+      "path": "shared/acp/model.ts",
+      "sourcePath": "packages/oar/src/shared/acp/model.ts",
+      "upstreamSha256": "56921b4c5187c5be8fd62950132bc01bf7b8942a31c6e1638e8c9809a5e4e71a",
+      "vendoredSha256": "56921b4c5187c5be8fd62950132bc01bf7b8942a31c6e1638e8c9809a5e4e71a"
+    },
+    {
+      "path": "shared/acp/native-turns.ts",
+      "sourcePath": "packages/oar/src/shared/acp/native-turns.ts",
+      "upstreamSha256": "56fab58233d1b3ef23876fef25c3cadc91b318b9f929ea83b5775c3da7bc3cc1",
+      "vendoredSha256": "56fab58233d1b3ef23876fef25c3cadc91b318b9f929ea83b5775c3da7bc3cc1"
+    },
+    {
+      "path": "shared/acp/opening.ts",
+      "sourcePath": "packages/oar/src/shared/acp/opening.ts",
+      "upstreamSha256": "b57be839d67d9c7117c2a18347a4391892226ed7c8e1c0f2588124448e42becf",
+      "vendoredSha256": "b57be839d67d9c7117c2a18347a4391892226ed7c8e1c0f2588124448e42becf"
+    },
+    {
+      "path": "shared/acp/process.ts",
+      "sourcePath": "packages/oar/src/shared/acp/process.ts",
+      "upstreamSha256": "b7c7d8d8b205ad784010cf7c97a2298363593b1ccdf8469633df5461a906abdb",
+      "vendoredSha256": "8e0b3a04e8bdb3248188020319222ed77b3bd9be75a14f4bbc863825a39a643d",
+      "delta": "Caller-owned process: startAcpProcess takes an injected SpawnAcpLineProcess and passes exactly the explicit filtered env and cwd; no executable manager, killTree option, resources reader or native diagnostics. The owned process splits stdout into bounded lines; each line goes back to the official ndJsonStream with its newline, and each written message goes through the acknowledged stdin write, so the SDK keeps its own framing, parse-error answers and write order. Upstream incoming/outgoing filters and the draining-EOF input are retained around the injected streams. No prepareShutdown, markNativeStop or observeCancellation members. Instead the injected line process and AcpProcess carry one synchronous observeDescendants(): the SDK process-tree authority reads the process table and remembers the agent's descendants for its disposal, and throws when the table cannot be read. Upstream #652 child.pid spread is omitted because AcpLineProcess has no pid; AcpProcess.pid stays an unset upstream field."
+    },
+    {
+      "path": "shared/acp/profile.ts",
+      "sourcePath": "packages/oar/src/shared/acp/profile.ts",
+      "upstreamSha256": "ded2e8fa1b3e2c8c764a9822177895eefa1c4c574ce33e3bee6c5d5d1a44b694",
+      "vendoredSha256": "ded2e8fa1b3e2c8c764a9822177895eefa1c4c574ce33e3bee6c5d5d1a44b694"
+    },
+    {
+      "path": "shared/acp/projection.ts",
+      "sourcePath": "packages/oar/src/shared/acp/projection.ts",
+      "upstreamSha256": "b9a9818c4b4c1a07ae8f2a373e5e79dc3586bfb699d3de11c46b2fa133805cc2",
+      "vendoredSha256": "b9a9818c4b4c1a07ae8f2a373e5e79dc3586bfb699d3de11c46b2fa133805cc2"
+    },
+    {
+      "path": "shared/acp/prompt.ts",
+      "sourcePath": "packages/oar/src/shared/acp/prompt.ts",
+      "upstreamSha256": "a3165b6f24ea1ffc57922a467c919e97f8e5831dbfb028ece3a7dfae68f7adfa",
+      "vendoredSha256": "a3165b6f24ea1ffc57922a467c919e97f8e5831dbfb028ece3a7dfae68f7adfa"
+    },
+    {
+      "path": "shared/acp/records.ts",
+      "sourcePath": "packages/oar/src/shared/acp/records.ts",
+      "upstreamSha256": "036a005f2e5d8e0893bc067b13a750670f3fc865d271b423f2ecca44e700ab0b",
+      "vendoredSha256": "036a005f2e5d8e0893bc067b13a750670f3fc865d271b423f2ecca44e700ab0b"
+    },
+    {
+      "path": "shared/acp/resume-cwd.ts",
+      "sourcePath": "packages/oar/src/shared/acp/resume-cwd.ts",
+      "upstreamSha256": "fa4853f54960960249677b79c11dbcef313ab7785d1d29d2fe1504a0c26509f8",
+      "vendoredSha256": "fa4853f54960960249677b79c11dbcef313ab7785d1d29d2fe1504a0c26509f8"
+    },
+    {
+      "path": "shared/acp/session.ts",
+      "sourcePath": "packages/oar/src/shared/acp/session.ts",
+      "upstreamSha256": "e43f691e669330e5090fbb498f57fe00b0278f2379baa3c868cdbe9ef1e91d75",
+      "vendoredSha256": "07fbe8f79e0f1e5e7bf325b20726bb200e644132a40b400b9ac8a2d1166e05b5",
+      "delta": "Raw adapter for the SDK: AcpSessionHooks.onPermission forwards to AcpClientHooks.permission. acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, does not use the upstream shared-connection pool or lifecycle wrapper, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady and onRecord hooks; onRecord is registered as a kernel observer before the recorder binds. A throwing onReady releases the process and the terminal host. The exit observer terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader. Dispose does not call prepareShutdown or markNativeStop, and control does not wait on a pending cancellation observation. Upstream configUpdates, manual compaction and the adapter-held queue are wired in; compact goes through the redaction guard. OAR 0.99: the session keeps its own state construction in place of upstream session-state.ts (that module builds the terminal host without the injected spawn); it wires the upstream native-turn tracker (prompt naming, tracker-fed token usage and recorder, the recorder bound after the turn driver) and the profile steerRequest RPC through steer-request.ts; upstream turn-terminals.ts is not wired because endTurnProcessesOnAbort is omitted. endTurnProcessesOnAbort and retainedBytes are omitted from AcpSessionOptions. Upstream #652 agentPid wiring is omitted."
+    },
+    {
+      "path": "shared/acp/steer-request.ts",
+      "sourcePath": "packages/oar/src/shared/acp/steer-request.ts",
+      "upstreamSha256": "f9a9c2faeeec443a1051833216eb214b1e59f38060963ddfc6d333ce30818d95",
+      "vendoredSha256": "f9a9c2faeeec443a1051833216eb214b1e59f38060963ddfc6d333ce30818d95"
+    },
+    {
+      "path": "shared/acp/terminal.ts",
+      "sourcePath": "packages/oar/src/shared/acp/terminal.ts",
+      "upstreamSha256": "e2286144c1b0494dbe00d83c42ab8e39ff623e91d57748687b5854d3cf6f27c9",
+      "vendoredSha256": "e4e1c5357e8bbd9b50ad4e75ff9beaccf385261b9a163d0ec32bb50ccac64e78",
+      "delta": "Caller-owned terminal processes: createAcpTerminalHost takes an injected SpawnAcpTerminal that spawns, adopts and reaps each hosted command in the SDK process-tree authority with the session's explicit env plus the request's env entries. terminal/kill asks that tree to stop; release and dispose end the tree and wait for it. A released or disposed terminal stays tracked until its tree is gone. One disposal serves concurrent callers; a failed reap rejects and a later dispose retries every tree still alive. A terminal/create after disposal began is refused. OAR 0.99: createAcpTerminalHost returns upstream OwnedAcpTerminalHost, whose end(terminalIds) stops still-running commands through the same caller disposal (stopTerminal) and keeps the terminals readable. No cross-spawn and no executable manager. Upstream #652 OOM-priority launch is omitted: terminal-launch.ts needs the executable manager and which; agentPid stays an unread upstream option."
+    },
+    {
+      "path": "shared/acp/token-usage.ts",
+      "sourcePath": "packages/oar/src/shared/acp/token-usage.ts",
+      "upstreamSha256": "96a4be6cbe935d90309785fe03908f796e4a7d98ea477e1c71191b332bcd54fc",
+      "vendoredSha256": "96a4be6cbe935d90309785fe03908f796e4a7d98ea477e1c71191b332bcd54fc"
+    },
+    {
+      "path": "shared/acp/turns.ts",
+      "sourcePath": "packages/oar/src/shared/acp/turns.ts",
+      "upstreamSha256": "81e82230a2047bf0c8f5d91cef053c7b71ff47351061c1509a350093ea4720fa",
+      "vendoredSha256": "d81df30c61f42f594d49f6850ae6b69e6cadb81d20803ab9db3d27270599b1e5",
+      "delta": "Failed-prompt settle: a rejected session/prompt yields one event-loop turn before it reads its turn frames, so a notification from the same pipe read (grok's retry_state) is recorded first and the failure reader sees it. The success path already yields in promptAcp. abort has no upstream observation window (pendingCancellation is absent): it calls runtime.observeDescendants() synchronously before the native cancel, so a tool the cancel orphans stays known to the SDK process-tree authority, which kills it at dispose while it is the same process. A failed read rejects the abort with code error and sends no cancel."
+    },
+    {
+      "path": "shared/acp/usage-wait.ts",
+      "sourcePath": "packages/oar/src/shared/acp/usage-wait.ts",
+      "upstreamSha256": "ebddb960fdf5d0b99f0aaf9153b86b6e7ce5f9acf87ebb115d8d7e53541ea19c",
+      "vendoredSha256": "ebddb960fdf5d0b99f0aaf9153b86b6e7ce5f9acf87ebb115d8d7e53541ea19c"
+    },
+    {
+      "path": "shared/additional-directories.ts",
+      "sourcePath": "packages/oar/src/shared/additional-directories.ts",
+      "upstreamSha256": "63d0e410184b583c9cddad943a20b0a1ed83c5e8045b48bfdd95f98a4906732c",
+      "vendoredSha256": "63d0e410184b583c9cddad943a20b0a1ed83c5e8045b48bfdd95f98a4906732c"
+    },
+    {
+      "path": "shared/control-input.ts",
+      "sourcePath": "packages/oar/src/shared/control-input.ts",
+      "upstreamSha256": "da2009e9227e234ccdc1c754be92562a18e0ccf4c2b42f020a106dd61971c839",
+      "vendoredSha256": "da2009e9227e234ccdc1c754be92562a18e0ccf4c2b42f020a106dd61971c839"
+    },
+    {
+      "path": "shared/credential-redaction.ts",
+      "sourcePath": "packages/oar/src/shared/credential-redaction.ts",
+      "upstreamSha256": "86e46cb1b246a63e972ef068739ad2d629ff697f4a16c18d05222af84de7e15b",
+      "vendoredSha256": "86e46cb1b246a63e972ef068739ad2d629ff697f4a16c18d05222af84de7e15b"
+    },
+    {
+      "path": "shared/credential-redactor.ts",
+      "sourcePath": "packages/oar/src/shared/credential-redactor.ts",
+      "upstreamSha256": "e7358de620f170bcd2b4ec1e46d98a6fe58a1e6d52dfe5dc535c090a713af6be",
+      "vendoredSha256": "e7358de620f170bcd2b4ec1e46d98a6fe58a1e6d52dfe5dc535c090a713af6be"
+    },
+    {
+      "path": "shared/environment.ts",
+      "sourcePath": "packages/oar/src/shared/environment.ts",
+      "upstreamSha256": "6548ab8cdae0eac04b04d3a3609bbeecf8f0fda759fffbb906738d9795c17f4d",
+      "vendoredSha256": "6548ab8cdae0eac04b04d3a3609bbeecf8f0fda759fffbb906738d9795c17f4d"
+    },
+    {
+      "path": "shared/executable/process-tree.ts",
+      "sourcePath": "packages/oar/src/shared/executable/process-tree.ts",
+      "upstreamSha256": "721f8b5b7577ab68b24048dd6fbcc2034b2da0b11d1e3636f1b7a085c37bd38e",
+      "vendoredSha256": "a86869dc93b2d578e69766546325721dd26872907c708ff76d9ec61c1b4ee1f2",
+      "delta": "Node strip-only TypeScript compatibility: InvalidProcessTableError declares its reason field explicitly instead of a constructor parameter property. The ps reader runs /bin/ps by its absolute path, so a host PATH without /bin cannot hide the process table. Everything else keeps upstream 0.83.0 bytes, including the bounded observation and failure-shape APIs."
+    },
+    {
+      "path": "shared/failure-class.ts",
+      "sourcePath": "packages/oar/src/shared/failure-class.ts",
+      "upstreamSha256": "b499c00723b79fbbd8bea072cc1d6a1e9221d711c388a9f3ddd5956c741a7f2a",
+      "vendoredSha256": "7e3008a3f07d9064e7c5fd2e2e5729331f17f6af383f22e925719bbbf1c60caa",
+      "delta": "Text-rule mark: Classified takes an optional fromText: true, and failureFromErrorBody returns a Classified, marking a class from Anthropic's 400 wording (anthropicLimitText) fromText. classifyFailure and failureFromStatus are unchanged."
+    },
+    {
+      "path": "shared/held-input.ts",
+      "sourcePath": "packages/oar/src/shared/held-input.ts",
+      "upstreamSha256": "3caed53a460080b6d656903b590010e7c155a89f9e423c2e649ad97179cc0402",
+      "vendoredSha256": "3caed53a460080b6d656903b590010e7c155a89f9e423c2e649ad97179cc0402"
+    },
+    {
+      "path": "shared/input-images.ts",
+      "sourcePath": "packages/oar/src/shared/input-images.ts",
+      "upstreamSha256": "bc789ad8e1b456d58410c6ebae3bf88d7c8da13f3533e945fda71bce10939f3a",
+      "vendoredSha256": "bc789ad8e1b456d58410c6ebae3bf88d7c8da13f3533e945fda71bce10939f3a"
+    },
+    {
+      "path": "shared/instant.ts",
+      "sourcePath": "packages/oar/src/shared/instant.ts",
+      "upstreamSha256": "4cdacb86431183fc408c16eb243e54e6e8bf75812d8706202707c9c254e006dd",
+      "vendoredSha256": "4cdacb86431183fc408c16eb243e54e6e8bf75812d8706202707c9c254e006dd"
+    },
+    {
+      "path": "shared/json.ts",
+      "sourcePath": "packages/oar/src/shared/json.ts",
+      "upstreamSha256": "14c655b29c9df8355fd8a396ff2e15420de6e9dce183e55f8ee7cf336e6626cb",
+      "vendoredSha256": "14c655b29c9df8355fd8a396ff2e15420de6e9dce183e55f8ee7cf336e6626cb"
+    },
+    {
+      "path": "shared/manual-compaction.ts",
+      "sourcePath": "packages/oar/src/shared/manual-compaction.ts",
+      "upstreamSha256": "41284df5c0562d0d6fbd56e2f0c918ab03844d7c685e18b083fcdc3d8dff9c96",
+      "vendoredSha256": "41284df5c0562d0d6fbd56e2f0c918ab03844d7c685e18b083fcdc3d8dff9c96"
+    },
+    {
+      "path": "shared/mcp-servers.ts",
+      "sourcePath": "packages/oar/src/shared/mcp-servers.ts",
+      "upstreamSha256": "8de2886a2f2a6d6e25656843d4e12f3eadb8bf3592e34a1325d0acac10d268b1",
+      "vendoredSha256": "8de2886a2f2a6d6e25656843d4e12f3eadb8bf3592e34a1325d0acac10d268b1"
+    },
+    {
+      "path": "shared/native-error.ts",
+      "sourcePath": "packages/oar/src/shared/native-error.ts",
+      "upstreamSha256": "771f4d97eaf7904808b3e5b3676cc4d054e9b57c17b6b3e0359e1ad0b9e54108",
+      "vendoredSha256": "771f4d97eaf7904808b3e5b3676cc4d054e9b57c17b6b3e0359e1ad0b9e54108"
+    },
+    {
+      "path": "shared/private-temp.ts",
+      "sourcePath": "packages/oar/src/shared/private-temp.ts",
+      "upstreamSha256": "08cfbca95f8cec40afc04dfd08b3693e8d8af9c1b4124f15dbe5f08b566b66df",
+      "vendoredSha256": "08cfbca95f8cec40afc04dfd08b3693e8d8af9c1b4124f15dbe5f08b566b66df"
+    },
+    {
+      "path": "shared/record-retention.ts",
+      "sourcePath": "packages/oar/src/shared/record-retention.ts",
+      "upstreamSha256": "e9e09d26dfdf38f226c033696a616a7562d37fe4c32601422f22068f39b0e432",
+      "vendoredSha256": "e9e09d26dfdf38f226c033696a616a7562d37fe4c32601422f22068f39b0e432"
+    },
+    {
+      "path": "shared/redact-text.ts",
+      "sourcePath": "packages/oar/src/shared/redact-text.ts",
+      "upstreamSha256": "30fe17becb13c6439e251752b8fad2b74f71d66c284a66751e9e49d3d70de966",
+      "vendoredSha256": "30fe17becb13c6439e251752b8fad2b74f71d66c284a66751e9e49d3d70de966"
+    },
+    {
+      "path": "shared/same-directory.ts",
+      "sourcePath": "packages/oar/src/shared/same-directory.ts",
+      "upstreamSha256": "05184f08a488eac1be701bca1e869dbb1c31b608a8b22a8e9587d4949ef75308",
+      "vendoredSha256": "05184f08a488eac1be701bca1e869dbb1c31b608a8b22a8e9587d4949ef75308"
+    },
+    {
+      "path": "shared/session-kernel.ts",
+      "sourcePath": "packages/oar/src/shared/session-kernel.ts",
+      "upstreamSha256": "dc545b0e72c350babca602915dadf2fc2973bde7658805c00fbefe6e8d68d5ac",
+      "vendoredSha256": "dc545b0e72c350babca602915dadf2fc2973bde7658805c00fbefe6e8d68d5ac"
+    },
+    {
+      "path": "shared/session-links.ts",
+      "sourcePath": "packages/oar/src/shared/session-links.ts",
+      "upstreamSha256": "659fec8b908c70c97b744cfa1a16e2faee956c1fbb685a8f7258a2bf2bb19509",
+      "vendoredSha256": "659fec8b908c70c97b744cfa1a16e2faee956c1fbb685a8f7258a2bf2bb19509"
+    },
+    {
+      "path": "shared/session-options.ts",
+      "sourcePath": "packages/oar/src/shared/session-options.ts",
+      "upstreamSha256": "9386b404ee66a5313b74e517c06f27aa6fedbcd15aa35b2fe74e1124904a643d",
+      "vendoredSha256": "9386b404ee66a5313b74e517c06f27aa6fedbcd15aa35b2fe74e1124904a643d"
+    },
+    {
+      "path": "shared/stream-json/compaction.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/compaction.ts",
+      "upstreamSha256": "2380a634c4934b6a15c5fc4cc70c1a34fe84f31680000cdebd9aa99e577d5195",
+      "vendoredSha256": "bc7ddcb6d30f513a92fe65c13ea79e91701be53824ffa1b58e123e7cfe70bc27",
+      "delta": "Type the caller-injected Codex LineProcess."
+    },
+    {
+      "path": "shared/stream-json/content.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/content.ts",
+      "upstreamSha256": "d9969bf7463a64102ed6890f41094aef558a3ca3ed83e036df71eaf04942c5aa",
+      "vendoredSha256": "d9969bf7463a64102ed6890f41094aef558a3ca3ed83e036df71eaf04942c5aa"
+    },
+    {
+      "path": "shared/stream-json/input-lifecycle.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/input-lifecycle.ts",
+      "upstreamSha256": "25cca1f48fa16a0eb11eb9ab5b1aa929f0e637e4b0b0e92e4ac434c55434109b",
+      "vendoredSha256": "25cca1f48fa16a0eb11eb9ab5b1aa929f0e637e4b0b0e92e4ac434c55434109b"
+    },
+    {
+      "path": "shared/stream-json/profile.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/profile.ts",
+      "upstreamSha256": "0340c760b8bedc805550274e41660e7b2f6c49132acfde424caee4f54417ec86",
+      "vendoredSha256": "0340c760b8bedc805550274e41660e7b2f6c49132acfde424caee4f54417ec86"
+    },
+    {
+      "path": "shared/stream-json/projection.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/projection.ts",
+      "upstreamSha256": "100b9a2e895cb72b0b45a71c8dc9d9ff3d028c2fd6beed8d1cba745fdd50b9f2",
+      "vendoredSha256": "100b9a2e895cb72b0b45a71c8dc9d9ff3d028c2fd6beed8d1cba745fdd50b9f2"
+    },
+    {
+      "path": "shared/stream-json/session.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/session.ts",
+      "upstreamSha256": "8c396d0a7908891f0f7746f4ba5600092382b5ccc4c002f5ef49fadf4c495694",
+      "vendoredSha256": "08732ebc4deafcd13df1bb6cd416760ca3d29b992208a3917989fc32fb6b7784",
+      "delta": "Caller-owned process: streamJsonSession takes the injected Codex LineProcess and a CredentialRedactor built with sessionCredentialRedactor, creates the upstream kernel with it as the redact hook and returns the raw AdapterSession without sealSession; open and control errors go through the same redaction guard. hooks.onRecord is a kernel observer registered before any record is appended. Every toApp request, whatever its type, is recorded and passed to hooks.onAppRequest, whose respond writes the native reply through the acknowledged stdin write and records it; profile.permissionResponse is not read, and a request no hook answers stays unanswered. An optional retainedBytes goes to the upstream kernel's record retention, which elides the oldest frame payloads past it after every observer has the complete record. No diagnostics(), resources or cleanup reason. The synchronous hooks.beforeInterrupt replaces the upstream cancellation observation window: it runs before the interrupt is written, and a throw rejects the abort with code error and writes nothing."
+    },
+    {
+      "path": "shared/stream-json/state.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/state.ts",
+      "upstreamSha256": "db0365828c98cbb3d3893aebea16559b134f7ae4de49c96cb803541ddc11a619",
+      "vendoredSha256": "014b5503473b7f87c3127501ef45cae14fa4b3992e9de9d5cc0f112ba1e1d80e",
+      "delta": "Type the caller-injected Codex LineProcess."
+    },
+    {
+      "path": "shared/stream-json/task-control.ts",
+      "sourcePath": "packages/oar/src/shared/stream-json/task-control.ts",
+      "upstreamSha256": "cf2a4b274f8dcd457577a05b9ca40b69f5a613f802af9f1f24a9c79104df7af5",
+      "vendoredSha256": "a3aa3a4662868ddd1936cedf7b38308ba517a0dabd50f5a3fe6369bbc9845be7",
+      "delta": "Type the caller-injected Codex LineProcess."
+    },
+    {
+      "path": "shared/token-totals.ts",
+      "sourcePath": "packages/oar/src/shared/token-totals.ts",
+      "upstreamSha256": "e3677c889be8aac5c65ec92bfb9c6b6de7f4884345ee09d085fb8a1e82ed75eb",
+      "vendoredSha256": "e3677c889be8aac5c65ec92bfb9c6b6de7f4884345ee09d085fb8a1e82ed75eb"
+    },
+    {
+      "path": "shared/tool-output.ts",
+      "sourcePath": "packages/oar/src/shared/tool-output.ts",
+      "upstreamSha256": "e2dec2a6a674a737e08dff18fb670f1c7520c1ba3e05a04b79e306ab1ddcecd7",
+      "vendoredSha256": "e2dec2a6a674a737e08dff18fb670f1c7520c1ba3e05a04b79e306ab1ddcecd7"
+    }
+  ]
+}
