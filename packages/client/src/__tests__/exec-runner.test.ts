@@ -41,7 +41,9 @@ describe('util/exec-runner: boundedRunner (#1971)', () => {
     const failure = await boundedRunner(2_000)(process.execPath, ['-e', script]).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(PlatformCommandTimeoutError);
-    expect(failure).toMatchObject({ timeoutMs: 2_000, cause: undefined });
+    expect(failure).toMatchObject({ timeoutMs: 2_000 });
+    // Disposal proved the tree gone, so no disposal failure is attached.
+    expect((failure as Error).cause).toBeUndefined();
     expect(Date.now() - started).toBeLessThan(10_000);
     const [command, child] = (await fs.readFile(pids, 'utf8')).split(' ').map(Number);
     expect(alive(command!)).toBe(false);
