@@ -154,8 +154,8 @@ launcher query and the Startup launch, 120 s for WinSW, and 60 s for the
 Host's Windows `stop` program. On Windows, the `icacls` run that hardens a
 store root when a `ServiceInstallation` leases it has its 30 s bound too. The
 bounds are not configurable. A command that outlives its bound is stopped
-(its process tree; for the Startup launch only its own `cmd`) and surfaces as
-`ServiceUnitError` code `service_command_timeout`. Before, such a command
+(its process tree; for the Startup launch only its own `cmd`) and reported as
+`ServiceUnitError` code `service_command_timeout`, as listed below. Before, such a command
 could hang the operation forever. Launchd's leading `bootout`, `kickstart -k`
 and systemd's `daemon-reload` after removal, which ignore a failure exit,
 still fail on a timeout.
@@ -172,19 +172,43 @@ did not happen. Branch on the error's `exitConfirmed`:
   check the service manager first. The SDK keeps no ownership of that
   process.
 
-Where it appears:
+Where it appears ("in `cause`" means through `cause` and an
+`AggregateError`'s `errors`):
 
+- Every `ServiceInstallation` operation first restores the repair snapshot
+  of an earlier failed install when `current` is absent; a timed-out stop or
+  store lease there is `upgrade_pending`, with the timeout in `cause`.
+- `install()`, first install: a timed-out stop of the marked unit or store
+  lease, before anything is installed, is thrown as is; a timed-out restart
+  of that unit after a failed preparation joins the `cause` of the
+  preparation's error. A timed-out activation or start is
+  `install_health_check_failed` with it in `cause`, as is a timed-out unit
+  removal during the cleanup that follows (`upgrade_pending` instead when
+  that cleanup cannot restore the stores).
+- `install()`, same-version reinstall: a timed-out stop before the unit
+  rewrite is thrown as is, and the pending `repair` receipt stays
+  (`recover()` then reports `repair_interrupted`). A timed-out activation or
+  start is `install_health_check_failed` with it in `cause`.
+- `upgrade()`: a timed-out stop or store lease before the switch is
+  `upgrade_pending` with it in `cause`. A timed-out start of the candidate is
+  `health_check_failed` with it in `cause`, and the rollback runs; a
+  timed-out stop or lease in that rollback makes it `upgrade_pending`, and a
+  timed-out start of the restored version joins the `cause` of
+  `health_check_failed`. A store refusal whose restart of the previous
+  version times out keeps the refusal's code, with the timeout in `cause`.
+- `rollback()`: a timed-out stop or store lease is thrown as is; only the
+  stop has run. A timed-out start of the restored version is not thrown:
+  `rollback()` resolves with a `failed` receipt, `rollback_unhealthy`.
+- `recover()`: a timed-out stop or store lease before a restore is
+  `upgrade_pending` with it in `cause`. A timed-out start is not thrown:
+  `recover()` resolves with a `failed` receipt (`switch_unhealthy` or
+  `rollback_unhealthy`).
+- `uninstall()`: a timed-out stop, unregistration or `daemon-reload` is
+  thrown as is, after `current` is removed; the unit files stay when the stop
+  or unregistration timed out.
 - The lifecycle's own `install`, `repair`, `uninstall`, `start`, `stop` and
-  `status` (also through `ServiceInstallation.lifecycle`) reject with it.
-- A `ServiceInstallation` operation throws it as is when a stop or store
-  lease times out before the operation's own failure handling, as at the
-  start of `rollback()`. Otherwise it is in the `cause` of the step's code:
-  a timed-out activation or start in `install()` is
-  `install_health_check_failed`, a timed-out start of the candidate in
-  `upgrade()` is `health_check_failed`, and an operation that leaves its
-  work unfinished is `upgrade_pending` with the timeout among the failures in
-  its `cause`. Look for the code through `cause` and an `AggregateError`'s
-  `errors`.
+  `status` (also through `ServiceInstallation.lifecycle`) reject with it as
+  is.
 
 A timed-out start can still take effect later. The launcher it starts runs
 `<installRoot>/current`, so what a late start runs depends on when it lands.

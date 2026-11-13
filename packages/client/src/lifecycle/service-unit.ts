@@ -86,12 +86,16 @@ export class ServiceUnitError extends Error {
 /**
  * Throws `error`, with an internal `PlatformCommandTimeoutError` as the public
  * `service_command_timeout`. The lifecycle and installation boundaries call
- * it; inside them the internal error stays.
+ * it; inside them the internal error stays. A timeout whose gate release
+ * failed too arrives as the `AggregateError` of the timeout and the release
+ * failures (#2002): it keeps that `AggregateError` as `cause`, and its
+ * `exitConfirmed` comes from the timeout.
  *
  * @internal
  */
 export function throwPublicCommandTimeout(error: unknown): never {
-  if (error instanceof PlatformCommandTimeoutError) throw new ServiceUnitError('service_command_timeout', { cause: error, exitConfirmed: error.exitConfirmed });
+  const timeout = error instanceof AggregateError ? error.errors[0] : error;
+  if (timeout instanceof PlatformCommandTimeoutError) throw new ServiceUnitError('service_command_timeout', { cause: error, exitConfirmed: timeout.exitConfirmed });
   throw error;
 }
 

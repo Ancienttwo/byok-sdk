@@ -24,6 +24,8 @@ import { PlatformCommandTimeoutError } from '../util/command-timeouts';
 import { DRIFTED_MARKED_UNIT, memoryServiceFs } from './support/service-fs';
 import { SERVICE_UNIT_MARKER, ServiceUnitError, withServiceOwnerGate } from '../lifecycle/service-unit';
 import * as daemonOwner from '../util/daemon-owner';
+import * as mutationGate from '../util/path-mutation-gate';
+import * as secureDir from '../util/secure-dir';
 import { acquireDaemonOwner } from '../util/daemon-owner';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { OwnedProcessLedger, OwnedProcessResidueError, type OwnedProcessReconciliation } from '../daemon/owned-process-ledger';
@@ -747,10 +749,28 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await installation.install(await payload('1.0.0'));
     await installation.upgrade(await payload('2.0.0'));
     await fs.writeFile(db, 'v2 data');
-    // On Windows the store lease runs icacls; its timeout leaves rollback() public and changes no pointer (#1971).
-    const lease = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockRejectedValueOnce(new PlatformCommandTimeoutError('icacls timed out', false));
-    await expect(installation.rollback().finally(() => lease.mockRestore())).rejects.toMatchObject({ name: 'ServiceUnitError', code: 'service_command_timeout', exitConfirmed: false });
-    expect(await pointer('current')).toBe('2.0.0');
+    // On Windows the real store lease hardens the store with icacls. Its timeout, with the store gate's
+    // release failing too, is public with its exitConfirmed and the release failure, and moves no pointer (#1971, #2002).
+    const gates = vi.mocked(mutationGate.acquirePathMutationGate);
+    const inner = gates.getMockImplementation()!;
+    const fault = new Error('injected store gate release failure');
+    let armed = false;
+    gates.mockImplementation(async (input, options) => {
+      const gate = await inner(input, options);
+      return input.scope !== 'store' ? gate : { ...gate, release: async () => { await gate.release(); if (armed) { armed = false; throw fault; } } };
+    });
+    try {
+      for (const exitConfirmed of [false, true]) {
+        const timeout = new PlatformCommandTimeoutError('icacls timed out', exitConfirmed);
+        const hardening = vi.spyOn(secureDir, 'ensureSecureStoreRoot').mockImplementationOnce(async () => { armed = true; throw timeout; });
+        const error = await installation.rollback().catch((caught: unknown) => caught).finally(() => hardening.mockRestore());
+        expect(error).toMatchObject({ name: 'ServiceUnitError', code: 'service_command_timeout', exitConfirmed });
+        expect(((error as Error).cause as AggregateError).errors).toEqual([timeout, fault]);
+        expect(await pointer('current')).toBe('2.0.0');
+      }
+    } finally {
+      gates.mockImplementation(inner);
+    }
     const receipt = await installation.rollback();
     expect(receipt).toMatchObject({ state: 'rolled-back', from: '1.0.0', to: '2.0.0' });
     expect(receipt.code).toBeUndefined();
