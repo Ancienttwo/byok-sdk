@@ -11482,8 +11482,13 @@ export interface ServiceInstallationOptions {
      * returns, also against a check that ignores its abort signal. Unit writes,
      * activation, start and cleanup stop run outside it. Each service manager
      * command has its own fixed bound (30 s; WinSW 120 s; the Host's Windows
-     * stop program 60 s); one that outlives it is stopped and the operation
-     * fails with `ServiceUnitError` `service_command_timeout` (#1971).
+     * stop program 60 s) and is stopped past it, as `ServiceUnitError`
+     * `service_command_timeout` (#1971). An installation operation throws it
+     * as is when a stop or store lease times out before the operation's own
+     * failure handling (the first stop of `rollback()`), and otherwise carries
+     * it in `cause`: of the step's code (`install_health_check_failed`,
+     * `health_check_failed`) or among the failures of `upgrade_pending`. Look
+     * for it through `cause` and an `AggregateError`'s `errors`.
      */
     healthTimeoutMs?: number;
     /**
@@ -12097,16 +12102,17 @@ declare const ERROR_MESSAGES: {
     readonly invalid_owner: 'The lifecycle owner must be 1-32 characters: lowercase letters, digits and "-", starting with a letter or digit.';
     readonly service_unload_timeout: 'The service manager did not finish unloading the stopped service in time. Check the service manager, then run the operation again.';
     readonly service_stop_failed: 'The service stop program exited with a failure. The stop marker stays, so the service is not restarted; check the stop program, then run the operation again.';
-    readonly service_command_timeout: 'A service manager command did not finish in time; it was stopped. Whether it took effect is unknown. Check the service manager, then run the operation again.';
+    readonly service_command_timeout: 'A platform command the service lifecycle ran did not finish in time; it was stopped. Whether it took effect is unknown. Check the service manager, then run the operation again.';
 };
 export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
 /**
  * Closed codes only; the message never carries a path or OS text.
  *
- * `service_command_timeout` (#1971): a service manager command (`launchctl`,
- * `systemctl`, WinSW, `sc.exe`, the Windows Startup launch or launcher
- * query, the Host's Windows stop program) outlived its bound and was
- * stopped. The service's state is UNKNOWN: the command may have taken
+ * `service_command_timeout` (#1971): a platform command a service lifecycle
+ * or installation ran (`launchctl`, `systemctl`, WinSW, `sc.exe`, the Windows
+ * Startup launch or launcher query, the Host's Windows stop program, or
+ * `icacls` when an installation leases a store on Windows) outlived its
+ * bound and was stopped. The service's state is UNKNOWN: the command may have taken
  * effect before it was stopped, so the error never means the change did
  * not happen. Read {@link ServiceUnitError.exitConfirmed} before running
  * the operation again.
@@ -12127,6 +12133,14 @@ export declare class ServiceUnitError extends Error {
         exitConfirmed?: boolean | undefined;
     });
 }
+/**
+ * Throws `error`, with an internal `PlatformCommandTimeoutError` as the public
+ * `service_command_timeout`. The lifecycle and installation boundaries call
+ * it; inside them the internal error stays.
+ *
+ * @internal
+ */
+export declare function throwPublicCommandTimeout(error: unknown): never;
 export declare function assertServiceOwner(owner: unknown): asserts owner is string;
 /** `<storeDir>/service`: the SDK-owned directory for the launcher and the lifecycle owner record. */
 export declare function serviceStateDir(storeDir: string, platform?: NodeJS.Platform): string;
