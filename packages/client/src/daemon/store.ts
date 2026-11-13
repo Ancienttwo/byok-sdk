@@ -355,7 +355,9 @@ export class DeviceStore {
       ) {
         throw new Error('device identity pathname changed before safe open');
       }
-      if (before.size <= 0 || before.size > BigInt(MAX_DEVICE_RECORD_BYTES)) {
+      // An empty file is a projection that cannot be parsed, like `not json` (#1965).
+      if (before.size === 0n) throw new DeviceRecordRePairRequiredError();
+      if (before.size > BigInt(MAX_DEVICE_RECORD_BYTES)) {
         throw new Error('device identity exceeds the bounded read limit');
       }
       const size = Number(before.size);

@@ -25,6 +25,7 @@ export const scriptTestInputs = Object.freeze({
     /^packages\/client\/tsup\.config\.ts$/,
     /^packages\/client\/src\/adapters\/pi\/official-pi-(?:installation\.mjs|closure\.json)$/,
     /^scripts\/release\/[^/]+\.mjs$/, /^scripts\/architecture\/dependency-graph\.mjs$/,
+    /^scripts\/api-surface\/module-scan\.mjs$/,
   ] },
   'scripts/release/beta-release.test.mjs': { inputs: [
     /^scripts\/release\/[^/]+\.mjs$/, /^scripts\/ci\/release-artifact\.mjs$/,

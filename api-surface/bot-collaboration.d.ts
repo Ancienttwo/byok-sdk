@@ -4534,7 +4534,7 @@ export declare function contextPack<T extends object = Record<never, never>>(sta
     history: import("@byok-sdk/protocol").HandoffPack;
 };
 // ==== @byok-sdk/bot-collaboration dist/store-compatibility.d.ts ====
-import type { StoreCompatibility } from '@byok-sdk/core';
+import type { StoreCompatibility } from '@byok-sdk/client';
 /** Inspect a stopped L ledger on a private copy, including its WAL or rollback journal. */
 export declare function inspectLedger(path: string, tenant: string): StoreCompatibility;
 // ==== @byok-sdk/bot-collaboration dist/switch.d.ts ====

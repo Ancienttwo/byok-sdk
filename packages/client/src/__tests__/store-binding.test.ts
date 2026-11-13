@@ -472,11 +472,11 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
       expect(await readDeviceEnrollmentStatus(first)).toEqual({ state: 'paired', deviceId });
     });
 
-    it('refuses a store whose device.json cannot be parsed before deleting anything', async () => {
+    it.each(['not json', ''])('refuses a store whose device.json cannot be parsed (%j) before deleting anything (#1965)', async (text) => {
       const first = await storeConfig();
       const { deviceId } = await daemonFor(first).pair('pairing-code');
       const second = await storeConfig();
-      await fs.writeFile(path.join(second.storeDir!, 'device.json'), 'not json');
+      await fs.writeFile(path.join(second.storeDir!, 'device.json'), text);
 
       const refused: unknown = await clear(second).catch((error: unknown) => error);
 

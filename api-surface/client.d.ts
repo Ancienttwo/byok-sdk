@@ -6348,6 +6348,8 @@ export declare class DeviceCredentialCommandAbortedError extends DeviceCredentia
  * and devicePublicKey; a different authenticated enrollment promotes the
  * replacement and discards the attempt. `clear()` removes both authorities.
  * An attempt is kept with every field, including `storeIdentity`.
+ * An error it throws reaches the Host unchanged, as the `cause` of a public
+ * error such as `DeviceEnrollmentClearError`, so it must not carry a secret.
  */
 export interface DeviceCredentialBackend {
     read(signal?: AbortSignal): Promise<DeviceRecord | undefined>;
@@ -6537,11 +6539,21 @@ export type DeviceEnrollmentClearErrorCode = keyof typeof CLEAR_MESSAGES;
  *   this store's; nothing was cleared. `clearUnattributedAttempt: true`
  *   deletes it.
  * - `clear_failed`: `cause` holds the error. A `device.json` that cannot be
- *   parsed (`DeviceRecordRePairRequiredError`) is refused before anything is
- *   deleted; the store needs a re-pair. A credential provider failure leaves
- *   the store paired. A failed `device.json` removal after the credential was
- *   deleted leaves a valid projection without its credential, which a retry
- *   clears.
+ *   parsed or is empty (`DeviceRecordRePairRequiredError`) is refused before
+ *   anything is deleted; the store needs a re-pair. The clear deletes the
+ *   member entries one by one (pairing verification, member state, member
+ *   keys), then the device credential, each read back after its deletion. A
+ *   provider failure can come after some of those deletions (a deletion or
+ *   read-back that fails or times out). The store's state then follows
+ *   whether the device credential is still there, not the step that failed:
+ *   with it the device is paired, without it (deleted by this clear or an
+ *   earlier one) `device.json` remains and reads as re-pair-required. A failed
+ *   `device.json` removal after the credential was deleted leaves the same
+ *   state. E2EE is lost once `member-state` or `member-keys` is deleted; a
+ *   device still completing its E2EE pairing also loses that pairing with
+ *   the pairing verification. A retry clears whatever remains (#1965). An
+ *   injected `DeviceCredentialBackend`'s error is the `cause` unchanged; such
+ *   a backend must not put secrets in its errors.
  */
 export declare class DeviceEnrollmentClearError extends Error {
     readonly code: DeviceEnrollmentClearErrorCode;
@@ -6568,8 +6580,10 @@ export interface EnrollmentCustody {
  * store; another store's attempt is refused as `store_not_bound`, and one
  * that names no store as `pairing_attempt_unattributed` unless
  * `clearUnattributedAttempt` is set. The member entries
- * go first and the credential is read back after deletion: any failure up to
- * there leaves the device paired. `onCredentialCleared` runs once the
+ * go first, each read back after deletion, then the credential, also read
+ * back. A failure leaves the device paired if its credential is still there,
+ * possibly with some member entries deleted, and otherwise leaves
+ * `device.json` without its credential. `onCredentialCleared` runs once the
  * credential is gone, before `device.json` is removed. Returns the cleared
  * enrollment, or undefined when the store held no readable one.
  */
@@ -9854,6 +9868,7 @@ export declare const FILE_SCOPE_GUARD_CODES: readonly FileScopeGuardCode[];
 /** Pure Host directory layout without loading the client daemon or runtimes. */
 export { HostLayoutInputError, resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout.js';
 // ==== @byok-sdk/client dist/index.d.ts ====
+export type { StoreCompatibility } from '@byok-sdk/core';
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types.js';
 export type { AgentRef } from './agent-home.js';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home.js';
@@ -11416,7 +11431,17 @@ export interface ServiceInstallationOptions {
      * 0 otherwise. Every store the candidate rewrites must be
      * listed, Host stores included: the snapshot covers exactly the listed
      * stores. Output that breaks {@link ServiceStoreVerdict}'s rules is
-     * `precheck_failed`.
+     * `precheck_failed`; a store that is, holds or lies in the install root
+     * or a daemon store's `service/` directory, after resolving links and
+     * without case on darwin and win32, is `store_overlaps_service_state`
+     * (#2011). A store path with a `..` segment (either separator on win32)
+     * is `precheck_failed`: pass normalized absolute paths. On an upgrade's
+     * first precheck a refusal touches no store and takes no snapshot: the
+     * final receipt carries its code, `current` points at the previous version
+     * again and that service restarts. On a first install no receipt is
+     * written, a version directory this call staged is removed and a marked
+     * unit it stopped restarts. On the precheck after a migration the refusal
+     * is the cause of `store_migration_failed`, after the snapshot restores.
      */
     precheck(versionDir: string): ServiceProgram;
     /**
@@ -11671,6 +11696,7 @@ declare const ERROR_MESSAGES: {
     readonly service_program_not_current: 'The service unit must be the one this SDK writes, running from <installRoot>/current. Reinstall the payload installed now (install() with the current version id) to rewrite the unit, then retry.';
     readonly install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.';
     readonly snapshots_symlinked: 'A path under the install root\'s snapshots/ is a symbolic link. Nothing changed; replace the link, then retry.';
+    readonly store_overlaps_service_state: 'A store overlaps the install root or a daemon store\'s service/ directory.';
 };
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
 /** Closed codes; a store refusal carries the precheck verdicts, and `snapshot_failed` the copy error as `cause`. */

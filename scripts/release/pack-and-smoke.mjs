@@ -333,8 +333,8 @@ try {
     throw new Error(`release output directory must be empty: ${outDir}`);
   }
   mkdirSync(outDir, { recursive: true });
-  run(nodeBin, ['scripts/release/check-package-graph.mjs']);
   run(bunBin, ['run', 'build:release']);
+  run(nodeBin, ['scripts/release/check-package-graph.mjs']);
   run(nodeBin, ['scripts/api-surface/check-api-surface.mjs']);
   const smokeImports = runtimeSmokeImports(repoRoot);
 

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "1f0eecf3509ebc01e37e03ae4f47b125ee7f01f233093ca785a6cd2261b0420f"
+    "snapshotSha256": "82b2b176c1445c92e5f64b3539a13527a7dfec8b12e0c466cd8c7ebb8a3920b7"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,15 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "client-store-compatibility-type",
+      "impact": "additive",
+      "summary": "The client root exports the StoreCompatibility type used by bot-collaboration ledger inspection, so strict package installations can resolve the published declaration.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2076",
+      "items": [
+        "export:@byok-sdk/client#StoreCompatibility"
+      ]
+    },
     {
       "id": "bot-turn-instruction-host-kit",
       "impact": "additive",
@@ -30,7 +39,7 @@
     {
       "id": "service-store-release-failures",
       "impact": "breaking",
-      "summary": "Store lease and gate release failures preserve a refused ServiceInstallationError and its code, with the refusal and all release failures in its AggregateError cause; Hosts that matched the 0.42.0 AggregateError on first install must read cause instead. The code follows the outcome (#2010): a call that leaves its receipt pending or its stores unrestored throws upgrade_pending with every failure in its cause, so the Host runs recover(), first restarting the Host process if a stuck lease makes it fail with store_busy; a preparation error that is not the SDK's own is the new store_preparation_failed with the original error as its cause. The same type gains install_root_foreign_owner (#2001): every ServiceInstallation operation holds an install-root gate, so a second operation on one install root fails at once with lifecycle_owner_busy, and an install root owned by another user is refused before anything changes. The receipt commit protocol (#2011) adds receipt_upgrade_required, receipt_state_inconsistent, switch_unhealthy, repair_interrupted and service_program_not_current; see service-upgrade-receipt-v2.",
+      "summary": "Store lease and gate release failures preserve a refused ServiceInstallationError and its code, with the refusal and all release failures in its AggregateError cause; Hosts that matched the 0.42.0 AggregateError on first install must read cause instead. The code follows the outcome (#2010): a call that leaves its receipt pending or its stores unrestored throws upgrade_pending with every failure in its cause, so the Host runs recover(), first restarting the Host process if a stuck lease makes it fail with store_busy; a preparation error that is not the SDK's own is the new store_preparation_failed with the original error as its cause. The same type gains install_root_foreign_owner (#2001): every ServiceInstallation operation holds an install-root gate, so a second operation on one install root fails at once with lifecycle_owner_busy, and an install root owned by another user is refused before anything changes. The receipt commit protocol (#2011) adds receipt_upgrade_required, receipt_state_inconsistent, switch_unhealthy, repair_interrupted and service_program_not_current (see service-upgrade-receipt-v2), and store_overlaps_service_state: a precheck store that is, holds or lies in the install root or a daemon store's service/ directory, after resolving links and without case on darwin and win32, is refused before it is snapshotted.",
       "migration": "docs/releases/host-upgrade-next-minor.md#store-release-failures-name-the-next-step",
       "items": [
         "export:@byok-sdk/client#ServiceInstallationErrorCode"
@@ -338,6 +347,11 @@
       "item": "export:@byok-sdk/client#SqliteLocalTaskJournal",
       "change": "changed",
       "entry": "journal-prune-cutoff"
+    },
+    {
+      "item": "export:@byok-sdk/client#StoreCompatibility",
+      "change": "added",
+      "entry": "client-store-compatibility-type"
     },
     {
       "item": "export:@byok-sdk/client#clearDeviceEnrollment",

@@ -63,7 +63,7 @@ test('release graph requires keys to carry the release train version', (t) => {
   const releaseVersion = manifestOf('packages/core').version;
   const keysRecord = /("packages\/keys": \{\r?\n\s+"name": "@byok-sdk\/keys",\r?\n\s+"version": ")[^"]+(")/;
   assert.match(lockText, keysRecord);
-  const runGraph = (keysVersion, mutatePiRecord) => {
+  const runGraph = (keysVersion, mutatePiRecord, omitCore = false) => {
     const root = mkdtempSync(path.join(os.tmpdir(), 'byok-release-graph-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const copy = (relative) => {
@@ -74,6 +74,7 @@ test('release graph requires keys to carry the release train version', (t) => {
       if (name.endsWith('.mjs')) copy(`scripts/release/${name}`);
     }
     copy('scripts/architecture/dependency-graph.mjs');
+    copy('scripts/api-surface/module-scan.mjs');
     for (const name of ['official-pi-installation.mjs', 'official-pi-closure.json']) copy(`packages/client/src/adapters/pi/${name}`);
     if (mutatePiRecord) {
       const recordPath = path.join(root, 'packages/client/src/adapters/pi/official-pi-closure.json');
@@ -83,7 +84,17 @@ test('release graph requires keys to carry the release train version', (t) => {
     }
     for (const relative of ['LICENSE', 'packages/client/tsup.config.ts']) copy(relative);
     for (const directory of workspaces) copy(`${directory}/package.json`);
-    for (const directory of publicDirectories) for (const name of ['README.md', 'LICENSE']) copy(`${directory}/${name}`);
+    for (const directory of publicDirectories) {
+      for (const name of ['README.md', 'LICENSE']) copy(`${directory}/${name}`);
+      mkdirSync(path.join(root, directory, 'dist'));
+    }
+    copy('packages/bot-collaboration/dist/store-compatibility.d.ts');
+    if (omitCore) {
+      const declaration = path.join(root, 'packages/bot-collaboration/dist/store-compatibility.d.ts');
+      const contents = readFileSync(declaration, 'utf8');
+      assert.match(contents, /@byok-sdk\/client/);
+      writeFileSync(declaration, contents.replace('@byok-sdk/client', '@byok-sdk/core'));
+    }
     // The purity audit resolves the installed client dependencies.
     for (const directory of ['', 'packages/client']) {
       const installed = path.join(repoRoot, directory, 'node_modules');
@@ -103,6 +114,10 @@ test('release graph requires keys to carry the release train version', (t) => {
   const aligned = runGraph(releaseVersion);
   assert.equal(aligned.status, 0, aligned.stderr);
   assert.match(aligned.stdout, /\[release-graph\] OK: published set is exactly 9 packages at /);
+
+  const missingCore = runGraph(releaseVersion, undefined, true);
+  assert.equal(missingCore.status, 1);
+  assert.match(missingCore.stderr, /store-compatibility\.d\.ts: @byok-sdk\/core is referenced by a published declaration but missing from dependencies or peerDependencies/);
 
   const split = runGraph('0.13.1');
   assert.equal(split.status, 1);

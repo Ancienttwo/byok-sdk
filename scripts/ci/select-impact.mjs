@@ -469,11 +469,12 @@ export const reviewedScripts = Object.freeze({
   // build job that runs check:api-surface.
   'scripts/api-surface/check-api-surface.mjs': { tests: ['scripts/api-surface/check-api-surface.test.mjs'], install: true },
   'scripts/api-surface/entry-closure.mjs': { tests: ['scripts/api-surface/entry-closure.test.mjs'], install: true },
+  'scripts/api-surface/module-scan.mjs': { tests: ['scripts/api-surface/check-api-surface.test.mjs', 'scripts/api-surface/entry-closure.test.mjs'], install: true, families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'] },
   'scripts/api-surface/entry-closure.test.mjs': { tests: ['scripts/api-surface/entry-closure.test.mjs'], install: true },
   'scripts/api-surface/check-version-authority.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/api-surface/check-version-authority.test.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/release/beta-release.test.mjs': { tests: ['scripts/release/beta-release.test.mjs'] },
-  // pack-and-smoke.mjs runs this manifest-only check in each of its 4 family
+  // pack-and-smoke.mjs runs this check after building in each of its 4 family
   // jobs; #702 selects npm-release-pack alone. With the install, the targeted
   // job also runs it directly (check:release-graph).
   'scripts/release/check-package-graph.mjs': {
@@ -824,6 +825,9 @@ export function selectImpact(paths, context = {}) {
     if (/^scripts\/api-surface\/(?:check-oar-bridge\.test\.mjs|oar-bridge-types\.ts|tsconfig\.oar-bridge\.json)$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
+    // #2040: the operator-only OpenCode native canary imports the built client.
+    // Build and test its owner without running the credential-dependent canary in CI.
+    if (path === 'scripts/qualification/opencode-native-canary.ts') { dirs.add('packages/client'); continue; }
     // Opt-in Codex probes select their client runtime owner; CI does not invoke the probes.
     if (path === 'packages/client/scripts/codex-app-server-real.mjs'
       || path === 'packages/client/scripts/codex-reserved-mcp-loopback.mjs') { dirs.add('packages/client'); continue; }

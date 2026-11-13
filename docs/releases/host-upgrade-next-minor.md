@@ -42,6 +42,12 @@ Restart requires a product that needs a cloud agent using platform keys with Piâ
 
 No configuration change is needed. Every SDK Pi RPC session now caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings, instead of answering each idle `cache_warming_decision` with `stop`. Pi cancels the warmer at settlement and revalidates pending decisions before dispatch, so a late `"warm"` answer cannot send a refresh after settlement. Under `agentUserContext: 'inherit'` a device setting of `"off"` still turns warming off; under `excluded` the session's settings are in memory and do not read the device file.
 
+## MCP start-failure reasons carry only the error code (#2065)
+
+When an MCP server or helper process cannot start, the reason in `task.decline` and `task.fail` now ends in `failed to start: spawn failed: <code>` instead of Node's `spawn <command path> <code>` message. For example, `MCP toolset server "team" failed to start: spawn /usr/local/bin/team-mcp ENOENT` now reads `MCP toolset server "team" failed to start: spawn failed: ENOENT`. Node's message named the command path, and its error kept the arguments, which can carry a credential, so only the code remains. Agent runtime, agent terminal tool and Pi RPC start failures use the same `spawn failed: <code>` form.
+
+A Host that matches these reasons should key on the code (`ENOENT`, `EACCES` and so on) after `spawn failed: `, not on the command path or the old `spawn <path>` text. A reason without a Node code ends in `spawn failed: unknown`.
+
 ## Provider status reads take the configuration lock (#2012)
 
 `ProviderRegistry.get()`, `list()` and `setDefaultModelProvider()` now read provider status under the same configuration lock that credential writers hold. In one process, a status read waits for a running `configure()`, `replaceSecret()`, `delete()` or sealed provisioning change to finish. With a file-backed `SqliteProviderProfileStore` that another process also writes (for example a separate custody child), a status read waits at most the store's `configurationLockWaitMs` (default `PROVIDER_CONFIGURATION_LOCK_WAIT_MS`, 10 000 ms). If the lock is still held after that wait, the read rejects with a `ByokKeysError` whose `code` is `PROVIDER_CONFIGURATION_BUSY`. Earlier releases never rejected here.
@@ -272,6 +278,54 @@ service that had already restarted.
   or at any path segment of a file it lists, with
   `snapshots_symlinked`, before its first side effect (#2061). A link swapped
   in after that check is the Host's responsibility.
+- **`store_overlaps_service_state`:** a store your precheck lists must not
+  be, hold or lie in the install root or a daemon store's `service/`
+  directory (its leases, launcher and records), compared after resolving
+  symbolic links and, on macOS and Windows, without case. Such a store is
+  refused before anything is snapshotted; list the store's own files or
+  directory instead. List normalized absolute paths: a store path with a
+  `..` segment (either separator on Windows) is `precheck_failed`, because
+  `..` after a link resolves differently from how it is compared.
+- **What a precheck refusal does:** it depends on which precheck refuses.
+  - An upgrade's first precheck (`store_overlaps_service_state`, the `..`
+    refusal, `store_rejected` and the rest): no store is touched and no
+    snapshot is taken. The final receipt carries the code, `current` points
+    at the previous version again and its service restarts.
+  - A first install's precheck: no receipt is written, a version directory
+    this call staged is removed, and a marked unit it stopped restarts.
+  - The precheck after a migration: the snapshot is already taken. The
+    refusal becomes the cause of `store_migration_failed`, the snapshot is
+    restored, and an upgrade then returns to the previous version as above.
+- **Snapshots taken before this check (#2102):** restore does not re-check
+  them, so one taken by 0.42.0 or an earlier build of this train can list
+  `service/` or the install root, and restoring it would replace the live
+  leases, launcher and records. Before the first operation on this version:
+  1. Call no `ServiceInstallation` method yet, `upgrade`, `rollback` and
+     `recover` included: every operation first restores a kept install
+     repair snapshot when `current` is absent.
+  2. List every `<installRoot>/snapshots/*/snapshot.json`, the
+     `.install-repair-*` snapshots included.
+  3. Normalize each `entries[].path` (resolve links, and on macOS and
+     Windows ignore case) and compare it with the install root and with each
+     daemon store's `<storeDir>/service/`, each taken both resolved and as
+     the link entry that names it. An entry that is, holds or lies in one
+     of them overlaps.
+  4. With no overlap, continue as usual.
+  5. With one, keep the service stopped and back up the snapshot directory.
+     Then restore every entry by hand, in the order listed, as a restore
+     would:
+     - a directory entry (`"kind": "directory"`): remove the path, then copy
+       `files[""]` (`<index>.d`) back to it. With no `files[""]` the store
+       did not exist, so it stays removed. For the overlapping entry, skip
+       only what lies in the install root or a `service/` directory, and
+       restore the rest of its data;
+     - a file entry: remove the path and its `-wal`, `-journal` and `-shm`
+       files, then copy each `files` item back as `<path><suffix>` (an
+       SQLite file with the `-wal` and `-journal` the snapshot holds). A
+       suffix the snapshot lacks stays removed.
+  6. Only after every entry is restored, remove that snapshot directory,
+     then call `recover()`. When you cannot tell what an entry held, keep
+     the service stopped and the snapshot in place.
 - **Snapshot removal (#2062):** a snapshot that cannot be removed after the
   final receipt no longer fails the call; it stays.
 - On systemd, a start runs `systemctl --user reset-failed` first, since the
@@ -293,7 +347,7 @@ A corrupted SDK entry (new code `KEYCHAIN_SECRET_CORRUPTED` on macOS and Linux, 
 
 Known limitation on Windows: Credential Manager reports a damaged entry as `CREDENTIAL_MANAGER_READ_FAILED`, the same code as other read failures. `replaceSecret()` cannot tell the two apart, so it refuses instead of overwriting the entry. To recover, delete the entry in Credential Manager (Windows Credentials, the generic credential `<servicePrefix>.model-<profile_ref>-api-key`, by default `com.byok.keys.model-<profile_ref>-api-key`), then configure the key again.
 
-Credential-store errors from every `ProviderRegistry` method (`get()`, `list()`, `configure()`, `replaceSecret()`, `delete()`, `setDefaultModelProvider()` and `resolveDefaultModelProvider()`, #2029) keep a keychain, Credential Manager or secret-shape code with a fixed SDK message and no cause. Any other store error becomes `PROVIDER_SECRET_STORE_FAILED`, because an injected store may put a key in its own error. Match on `error.code`, not on the message text. `applySealedProviderProvisioning()` and `DeviceSealingKeyStore` use the same boundary (#2051): sealed provisioning, which used to report every store error as `PROVIDER_SECRET_STORE_FAILED`, now keeps those codes too, so handle them wherever you handle `PROVIDER_SECRET_STORE_FAILED`. `configure()`, `replaceSecret()`, `setDefaultModelProvider()` and `delete()` never read the stores after their commit (#2023). The status they return is the state the call committed, which may be stale once the call returns. A call that resolves has committed its change. A call that rejects with the new `PROVIDER_CHANGE_COMMITTED` has also committed it, but a later step failed: either deleting the previous key after `configure()` switched a profile to `auth_mode: 'none'`, in which case that key stays in the credential store until a later `configure()` or `delete()` removes it, a profile store that wrote the change but could not confirm it, or releasing the configuration lock. Its `cause` carries only the failed step's code, never the step's own message. Treat that code as success, read the status again with `get()`, and, for the `auth_mode: 'none'` case, retry the `configure()` to remove the leftover key. A rejection with any other code committed nothing. `configure()` without a secret now reuses the stored key only when the committed profile already authenticates against the same `base_url`; switching a profile from `auth_mode: 'none'` back to authentication, or changing its `base_url`, rejects with `PROVIDER_SECRET_MISSING` until the Host supplies the key again.
+Credential-store errors from every `ProviderRegistry` method (`get()`, `list()`, `configure()`, `replaceSecret()`, `delete()`, `setDefaultModelProvider()` and `resolveDefaultModelProvider()`, #2029) keep a keychain, Credential Manager or secret-shape code with a fixed SDK message and no cause. Any other store error becomes `PROVIDER_SECRET_STORE_FAILED`, because an injected store may put a key in its own error. Match on `error.code`, not on the message text. `applySealedProviderProvisioning()`, `DeviceSealingKeyStore` and `runPiProviderLauncher()` use the same boundary (#2051, #2096): sealed provisioning, which used to report every store error as `PROVIDER_SECRET_STORE_FAILED`, now keeps those codes too, so handle them wherever you handle `PROVIDER_SECRET_STORE_FAILED`. The launcher now maps other injected-store errors to `PROVIDER_SECRET_STORE_FAILED`. A launcher spawn failure now has the fixed message `spawn failed: <code>` (or `spawn failed: unknown` if the code is absent) and retains only `code`, rather than Node's path, spawn arguments and other error properties. `configure()`, `replaceSecret()`, `setDefaultModelProvider()` and `delete()` never read the stores after their commit (#2023). The status they return is the state the call committed, which may be stale once the call returns. A call that resolves has committed its change. A call that rejects with the new `PROVIDER_CHANGE_COMMITTED` has also committed it, but a later step failed: either deleting the previous key after `configure()` switched a profile to `auth_mode: 'none'`, in which case that key stays in the credential store until a later `configure()` or `delete()` removes it, a profile store that wrote the change but could not confirm it, or releasing the configuration lock. Its `cause` carries only the failed step's code, never the step's own message. Treat that code as success, read the status again with `get()`, and, for the `auth_mode: 'none'` case, retry the `configure()` to remove the leftover key. A rejection with any other code committed nothing. `configure()` without a secret now reuses the stored key only when the committed profile already authenticates against the same `base_url`; switching a profile from `auth_mode: 'none'` back to authentication, or changing its `base_url`, rejects with `PROVIDER_SECRET_MISSING` until the Host supplies the key again.
 
 
 ## Stored cancellation pruning cutoff
