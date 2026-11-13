@@ -1,6 +1,6 @@
-# Host upgrade to the next MINOR
+# Host upgrade to 0.42.0
 
-Draft checklist for a Host moving from the current release to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
+Checklist for a Host moving from 0.41.0 to the proposed 0.42.0 MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Reviewed against source base `06a14462e0a0c6b30b9843d962072adff80a0d31`, including the release-notes audit (#1931). The version and publication remain subject to owner approval and the [release gates](https://github.com/Ancienttwo/byok-sdk/issues/1918); see the [release notes](v0.42.0.md). Review this guide again if the final train changes.
 
 ## Service install prepares kept stores
 
@@ -113,6 +113,8 @@ never cleared. If removal fails, the error carries
 an `AggregateError` with both the original and removal failures as `cause`
 and names the remaining artifacts in its message. Install enforces the
 health-check deadline even if a custom check ignores abort or succeeds late.
+`upgrade()` and `restore()` retain their abort-only timeout behavior;
+[#1977](https://github.com/Ancienttwo/byok-sdk/issues/1977) tracks that follow-up.
 For install, the clock starts after start returns; unit writes, activation,
 start and cleanup stop are outside it. Platform commands have no time bound
 today; [#1971](https://github.com/Ancienttwo/byok-sdk/issues/1971) tracks that
@@ -165,7 +167,9 @@ A Host on 0.41.0 reads these as `unknown` with `reportedClass` until it upgrades
 
 `checkAgentMemoryHome(home, { commit?: { filesystem? } })` in `@byok-sdk/client/agent-memory` is additive: nothing existing changes. It returns `{ ok: true }` or `{ ok: false, code, reason }` with the class and reason the device would send for the same home. It throws when it cannot decide (missing `MEMORY.md`, a changed home identity, an I/O error, no secure memory filesystem; on macOS and Windows pass the helper's filesystem as `commit.filesystem` and close it yourself), and it is advisory because it holds no lease and has no task id. Its verdict is about the home: the device applies the resident refusals only to a task that carries `MEMORY.md` into its prompt and the snapshot refusals only to a task with `agentMemoryCommit`; the repair task (`agentMemory:"none"`, no commit) is never refused, so do not gate it on the verdict. Unlike the failure class, the check is not hidden on a task that seals its output. A Host that copied the device's limits (AiphaBee's `residentMemoryBreach` and `memoryBreach`) can replace that copy with this call.
 
-## OAR 0.99.0 driver base (#1863)
+## OAR driver base (#1863, #1945, #1956, #2005)
+
+The release uses OAR 0.103.0 (upstream release commit `95c65479`, `packages/client/vendor/oar/95c6547/`, fork branch `byok/0.103.0`). The move from 0.99.0 adds one Host-visible change: an agy instruction or steer over 185,000 UTF-8 bytes is refused before agy is called; an instruction fails with non-retryable `input_too_large` and an over-limit steer is dropped (#2005, see the [release notes](v0.42.0.md#oar-01030-2005-2006)). The runtime changes below entered the train with 0.99.0 (#1863).
 
 A Grok follow-up sent while Grok runs a turn of its own is held until that turn closes; budget the task deadline for that wait. Grok 429s that name a spending limit now fail as `quota` or `billing` (non-retryable) instead of retryable `rate_limited`. A Codex older than OAR needs, or with an unreadable `config.toml`, fails the start as non-retryable `invalid_request`. Confirm that the Host does not retry those classes as transient.
 

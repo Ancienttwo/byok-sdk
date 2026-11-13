@@ -4,6 +4,9 @@ This package hosts a pi-durable session in a Cloudflare Durable Object.
 It provides native SQLite storage, inline tools, wake and inbox processing,
 usage limits, settlement hooks, and transcript reads.
 
+The proposed source candidate is 0.42.0 in the ten-package release set; owner
+approval and publication remain pending. See the [candidate release notes](../../docs/releases/v0.42.0.md).
+
 The current stable release is 0.41.0, in the nine-package release set,
 published on npm `latest`. From 0.28.2, keys carries the same version. The npm
 registry read of 2026-11-09 (UTC) lists 0.41.0 as `latest` for all nine
@@ -57,11 +60,11 @@ The package needs Node 24.22.1 or later for build tooling.
 
 ## Install and subclass
 
-The following install example names the current stable release, 0.41.0.
+The following install example names the proposed 0.42.0 source candidate; publication remains pending.
 Use an installed package to verify the consumer path.
 
 ~~~sh
-npm install @byok-sdk/cloud-do@0.41.0
+npm install @byok-sdk/cloud-do@0.42.0
 npm install --save-dev @cloudflare/workers-types
 ~~~
 

@@ -344,9 +344,9 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-A version bump does not authorize publish. The current aligned release is `0.41.0`; publication requires separate
+A version bump does not authorize publish. The current aligned release is `0.42.0`, a proposed source candidate; publication requires separate
 release authorization and registry readback. The packed and published keys
-`@byok-sdk/core` edge must be the exact current release, `0.41.0`, proven from
+`@byok-sdk/core` edge must be the exact current release, `0.42.0`, proven from
 an isolated standard npm install rather than the workspace graph.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
@@ -356,6 +356,19 @@ version alignment, not a breaking change. The keys changes in this train are
 in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
+
+0.42.0 is the proposed next MINOR under this policy. It keeps wire v6,
+removes the Hermes runtime adapter (#1876), introduces other breaking public
+API cuts, and adds the first `@byok-sdk/bot-collaboration` publication (#1910).
+The upgrade manifest from 0.41.0 has 15 breaking and 15 additive entries.
+Postgres adds migrations 0038/0039, embedded SQLite moves from v8 to v9, and
+keys profile stores require the explicit `migrateProviderProfileStore` for
+the widened `provider_kind` CHECK set. The owner approved the MINOR;
+publication follows the [release gates](https://github.com/Ancienttwo/byok-sdk/issues/1918),
+including a green nightly on the freeze commit and Host validation of accepted
+tarballs; first publication of the new package needs separate authorization.
+See the [0.42.0 release notes](releases/v0.42.0.md) and
+[Host upgrade checklist](releases/host-upgrade-0.42.0.md).
 
 0.41.0 moves the wire to v6: the runtime capability
 `isolation.userContext` is split into one bit per source, with no derived
@@ -638,7 +651,7 @@ packages `@byok-sdk/core`, `@byok-sdk/protocol`, `@byok-sdk/client`,
 `@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`,
 `@byok-sdk/ui-runtime` and `@byok-sdk/bot-collaboration`, plus `@byok-sdk/keys`.
 From 0.28.2 all of them carry the same version. `@byok-sdk/bot-collaboration`
-(K8, #1845) is first published by the next MINOR; through 0.41.0 the set was
+(K8, #1845, #1910) is proposed for first publication in 0.42.0; through 0.41.0 the set was
 the other nine.
 `@byok-sdk/implementation-identity` is retired: the SDK no longer attests
 executables, and no later train publishes it. Every other workspace package is

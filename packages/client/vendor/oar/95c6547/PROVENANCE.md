@@ -991,7 +991,7 @@ Replace `vendor/oar/ac7fde4/` with `vendor/oar/ea3269e/`, from `ac7fde4ab2c487bc
 - `ceefab1e` The caller owns the stream-json process; the record consumer sees every record; no runtime request gets a permissive default
 - `a5252f14` The caller bounds the stream-json session's retained records
 
-Dropped: `97598dee` (the Claude `fromText` mark in `runtimes/claude/failure.ts`) and `6f5879d9` (its removal, because the SDK Claude adapter reads its failure class from structured frame fields and never reads the fold's `FailedTurn`). The pair nets to nothing, and neither was a maintained delta: `runtimes/claude/failure.ts` has blob `da8b7c81` at `v0.99.0`, `byok/0.99.0`, `v0.101.0` and `byok/0.101.0`. Every change notice now names `ea3269e`.
+Dropped: `97598dee` (the Claude `fromText` mark in `runtimes/claude/failure.ts`) and `6f5879d9` (its removal, because the SDK Claude adapter reads its failure class from structured frame fields and never reads the fold's `FailedTurn`). The pair nets to nothing, and neither was a maintained delta: `runtimes/claude/failure.ts` has blob `da8b7c81` at `v0.99.0`, `byok/0.99.0`, `v0.101.0` and `byok/0.101.0`. Every change notice that names a commit now names `ea3269e`.
 
 Upstream changed four selected files. `contracts/login.ts` documents that a given logout `timeoutMs` also bounds the confirming status query. `contracts/provider-auth.ts` makes `subscription` optional on an OAuth login method, for OpenCode, which does not report it. `contracts/session-options.ts` documents Cursor's subprocess mode. No SDK code reads the login or provider-auth contracts. The fourth file is `shared/acp/session.ts`, the one conflict:
 

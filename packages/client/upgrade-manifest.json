@@ -6,8 +6,8 @@
     "snapshotSha256": "f5aceea85bd783eb7bb2838851d4641dfb422b9f8e385a2e661fb8056703d9ad"
   },
   "to": {
-    "version": "0.41.0",
-    "snapshotSha256": "16434b895729f05c409b350e5dcc70e206bf7e95eae99c37c65dbbf41fc443fe"
+    "version": "0.42.0",
+    "snapshotSha256": "47d5ae4ed87551abbe8e30dc50c222a5aa80ee42ed3cb94b7137e6e65b617643"
   },
   "configFields": {
     "status": "tracked",
@@ -19,7 +19,7 @@
       "id": "journal-read-task-cancellation",
       "impact": "breaking",
       "summary": "Custom LocalTaskJournal implementations must add the required readTaskCancellation(taskId, identity, afterSeq), returning the original lowest-sequence stored inbound task.cancel above the offer sequence afterSeq (bytes, bytesHash and enrollment identity), or undefined. SDK code validates identity, hash, task binding and sequence order so a received offer remains cancelled / not-required / none after restart without a daemon_interrupted failure. The SDK SQLite journal reads existing envelopes without a store migration; update custom journals and test doubles.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#stored-task-cancellation",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#stored-task-cancellation",
       "items": [
         "export:@byok-sdk/client#LocalTaskJournal",
         "export:@byok-sdk/client#SqliteLocalTaskJournal"
@@ -29,7 +29,7 @@
       "id": "service-install-health-check",
       "impact": "breaking",
       "summary": "ServiceInstallation.install now runs the upgrade health check after installing and starting, using healthTimeoutMs. A failed first install or same-id reinstall removes the unit, launcher, current pointer, installation record and staged version directory and throws the new ServiceInstallationErrorCode install_health_check_failed with the original error as cause. Installation write and activation failures take the same cleanup path. Install enforces the health-check wait deadline even for a check that ignores abort. Its clock starts after start returns; unit writes, activation, start and cleanup stop are outside it and have no time bound today (#1971). Ownership and foreign-unit refusals happen before any installation write; later typed failures take the same cleanup path. Removal failures retain both errors in an AggregateError cause and name remaining artifacts. A failed reinstall after an upgrade leaves prior versions and rollback artifacts; use uninstall with an explicit installRoot or reinstall into the same root before CLI uninstall. Install also shares upgrade store preparation before writing current, record or unit: quiesce, required precheck, snapshot, migration when required, precheck again. Store refusals remove first-install staging; a later install or health failure restores the prepared stores. Store preparation runs only without a current version; same-id repair skips it and preserves earlier rollback snapshots. An allowed unmarked unit is untouched during preparation; a running legacy agent on the same stores causes store_busy before replacement. A marked owned unit without a current version is stopped before preparation and restarted after a preparation failure, after releasing leases and removing staging, unless a store restore failed; then the marked unit is removed instead. A failed install or health check removes the unit, current, record and staging before restoring the stores. After a healthy start or a completed restore, snapshot cleanup failure does not change the outcome; snapshots/.install-<uuid> is never selected by rollback/recover. A failed restore renames it snapshots/.install-repair-<uuid>, named in the error; the next first install restores it under the store leases before its precheck, and refuses without starting anything when that fails or more than one repair snapshot exists. Upgrade pruning and uninstall keep every .install-* directory, so uninstall leaves snapshots/ in place while one exists and refuses a symlinked snapshots/ with the new ServiceInstallationErrorCode snapshots_symlinked; a leftover .install-<uuid> is never restored automatically; the next first install, deciding from the snapshots listed under the store leases, refuses with the new ServiceInstallationErrorCode install_snapshot_leftover, lists every leftover path and starts nothing until an operator removes it, which also blocks an install after uninstall when a successful install could not remove its own snapshot. Host migrate must be safe to rerun after process interruption; install has no write-ahead receipt. OS credentials are never cleared. Before pairing, enable serviceEnrollment or supply a healthCheck; otherwise pair first. No precheck skip or new option was added; existing upgrade errors, including raw migration-launch errors and malformed postcheck precheck_failed, are unchanged (#1966, #1983).",
-      "migration": "docs/releases/host-upgrade-next-minor.md#service-install-requires-a-healthy-start",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#service-install-requires-a-healthy-start",
       "items": [
         "export:@byok-sdk/client#ServiceInstallationErrorCode"
       ]
@@ -38,7 +38,7 @@
       "id": "opencode-go-keys-store",
       "impact": "breaking",
       "summary": "The explicit opencode-go provider kind adds session routing and a versioned User-Agent to keys checks and widens the SQLite profile store provider_kind CHECK set. Existing stores report migration-required until the Host calls migrateProviderProfileStore before opening; profiles and credential-store key references are preserved. Pi execution separately requires the declared pi_model.providerId and completions API.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#opencode-go-key-checks-and-profile-stores",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#opencode-go-key-checks-and-profile-stores",
       "acceptance": "migrate",
       "items": [
         "export:@byok-sdk/keys#MODEL_PROVIDER_VENDORS",
@@ -51,7 +51,7 @@
       "id": "pi-opencode-go-provider-id",
       "impact": "additive",
       "summary": "OpenCode Go profiles may set pi_model.providerId to opencode-go with an explicit openai-completions API to enable Pi reasoning_content replay and session headers on RPC and durable lanes. Other models must omit it; existing profiles need no change. Saving it changes the exact profile hash. The prepared lane refuses it, and keys-profile RPC launches refuse model-runtime composition errors instead of using a built-in fallback.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#pi-opencode-go-profiles",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#pi-opencode-go-profiles",
       "items": [
         "export:@byok-sdk/keys#PiModelConfigSchema"
       ]
@@ -72,7 +72,7 @@
       "id": "agent-memory-helper-protocol-4",
       "impact": "breaking",
       "summary": "Direct callers of openAgentMemoryFilesystemHelper must pass the required ancestorRoot from the canonical AgentHomeResolution.hostStorageRoot that owns canonicalHome. Upgrade the daemon and its SDK helper assets together: open requires protocol 4 and ancestorRoot, reports helper version 4, and rejects every other request/response protocol or helper version without a protocol-3 reader or default root. Source integrations using helperAgentMemoryIntentBackend must pass ancestorRoot second and move optional assetRoot to third. hostStorageRoot must already exist durably before the first open; creating that root is outside the barrier and tracked in #1652. Windows intent B remains false pending A7 recovery evidence.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-helper-protocol-4",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#agent-memory-helper-protocol-4",
       "items": [
         "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper"
       ]
@@ -81,7 +81,7 @@
       "id": "adapter-session-limits",
       "impact": "additive",
       "summary": "agy and dsh accept fractional interruptTimeoutMs; session limits are defined once across five adapters.",
-      "migration": "CHANGELOG.md#unreleased",
+      "migration": "docs/releases/v0.42.0.md#adapter-session-limits",
       "items": [
         "export:@byok-sdk/client#AgyAdapter",
         "export:@byok-sdk/client#ClaudeAdapter",
@@ -99,7 +99,7 @@
       "id": "doctor-control-endpoint-refusal",
       "impact": "additive",
       "summary": "DiagnosticsSnapshot.health gains an optional controlEndpointRefusal (code, path, recording time) on its valid branch. byok-agent doctor reports a typed control endpoint refusal instead of daemon offline. No Host change is required.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#doctor-names-a-refused-control-endpoint",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#doctor-names-a-refused-control-endpoint",
       "items": [
         "export:@byok-sdk/client#DiagnosticsSnapshot"
       ]
@@ -108,7 +108,7 @@
       "id": "runtime-environment-lanes",
       "impact": "additive",
       "summary": "RuntimeEnvironmentReport gains an optional lanes list (RuntimeEnvironmentLaneReport) naming the launch lanes that narrow the runtime environment and the names an SDK lane removes. No Host change is required; a Host that builds a report itself may omit lanes.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#runtime-environment-lanes-in-doctor",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#runtime-environment-lanes-in-doctor",
       "items": [
         "export:@byok-sdk/client#RuntimeEnvironmentReport",
         "export:@byok-sdk/client/adapters#RuntimeEnvironmentReport"
@@ -118,7 +118,7 @@
       "id": "version-policy-source",
       "impact": "breaking",
       "summary": "The seven built-in adapter option types (Agy, Claude, Codex, Dsh, Grok, OpenCode, Pi) drop the internal option that tagged whether versionPolicy came from the adapter option or daemon config. A Host that constructs an adapter directly deletes that tag from the options object (see the migration section for its name); versionPolicy and the version verdicts it produces are unchanged.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#version-policy-source",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#version-policy-source",
       "items": [
         "export:@byok-sdk/client#AgyAdapterOptions",
         "export:@byok-sdk/client#ClaudeAdapterOptions",
@@ -140,7 +140,7 @@
       "id": "service-lifecycle-gate-root",
       "impact": "additive",
       "summary": "CreateServiceLifecycleOptions gains an optional gateRoot: an isolated macOS root for the service-lifecycle gate, for tests and parallel consumers. Omitted, the gate root stays /tmp/byok-pm-<uid>. No Host change is required.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#isolated-service-lifecycle-gate-root",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#isolated-service-lifecycle-gate-root",
       "items": [
         "export:@byok-sdk/client#CreateServiceLifecycleOptions"
       ]
@@ -149,7 +149,7 @@
       "id": "offer-selection-rules",
       "impact": "breaking",
       "summary": "@byok-sdk/protocol exports offerSelectionViolation, OfferSelectionRule and OfferSelectionViolation. TaskDeclineCode and the plaintext and sealed task.decline code enums gain agent_memory_selection_invalid, runtime_selection_mismatch and harness_selection_conflict, which the daemon now sends on its offer selection declines; an older Host reads them as unknown with reportedCode. A Host offer schema issue carries params.rule, and a payload that breaks several rules reports only the first. Breaking: @byok-sdk/cloud now refuses an offer whose custom harness the device did not advertise with agent_capability_missing instead of coordination_input_invalid (same message); a Host that branches on coordination_input_invalid for that refusal must branch on agent_capability_missing.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#offer-selection-rules",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#offer-selection-rules",
       "items": [
         "export:@byok-sdk/protocol#OfferSelectionRule",
         "export:@byok-sdk/protocol#OfferSelectionViolation",
@@ -163,7 +163,7 @@
       "id": "per-runtime-environment",
       "impact": "additive",
       "summary": "DaemonConfig.runtimes.<id> and RuntimeAdaptersRuntimes.<id> (PiRuntimeConfig for pi) gain an optional runtimeEnvironment: the environment policy of that SDK-built runtime, which replaces the top-level runtimeEnvironment for it and is not merged with the top-level pass. A runtime without it keeps the top-level policy, so existing configuration keeps its meaning. DaemonEffectiveRuntime gains an optional runtimeEnvironment, and byok-agent config check --json adds effective.runtimes[].runtimeEnvironment beside its unchanged top-level runtimeEnvironment. No Host change is required.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#per-runtime-environment-policy",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#per-runtime-environment-policy",
       "items": [
         "config:runtimes",
         "export:@byok-sdk/client#DaemonEffectiveRuntime",
@@ -175,7 +175,7 @@
       "id": "scope-key-package-v1-removed",
       "impact": "breaking",
       "summary": "Version 1 scope-key packages are removed (#1789). @byok-sdk/core no longer exports ScopeKeyPackageV1 or ScopeKeyPackageV2; ScopeKeyPackage is the one package type and sealScopeKeyPackage returns it, and openScopeKeyPackage refuses a version 1 package with key_package_invalid, so a recipient opens a package only when it names the recipient's KEM epoch. A device no longer re-wraps a version 1 package during a KEM rotation. @byok-sdk/protocol E2eeScopeKeyPackageSchema, the read shape, is now the version 2 shape for puts and reads, and E2eeScopeKeyPackageV2Schema is removed (use E2eeScopeKeyPackageSchema; ByokCloud and E2eeMemberStore put inputs name it). A Host read that meets a stored version 1 row fails the whole read with e2ee_member_state_unreadable; the put path already took version 2 only. Before upgrading, run the version 1 count check on every Host store; a Host with version 1 rows runs a KEM rotation on each affected member on the previous version first.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#scope-key-packages-are-version-2-only",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#scope-key-packages-are-version-2-only",
       "items": [
         "export:@byok-sdk/cloud#ByokCloud",
         "export:@byok-sdk/cloud#E2eeMemberStore",
@@ -191,7 +191,7 @@
       "id": "k4-transaction-rows",
       "impact": "breaking",
       "summary": "OutcomeTransaction and OccurrenceTransaction gain a required rows: ApplicationRows, the application rows of the same commit, as MessageTransaction has. A handler or hook that reads the transaction needs no change; code that builds one itself, such as a test double, adds rows.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#k4-transaction-rows-and-required-command-store-capabilities",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#k4-transaction-rows-and-required-command-store-capabilities",
       "items": [
         "export:@byok-sdk/server/execution-core#OccurrenceTransaction",
         "export:@byok-sdk/server/execution-core#OutcomeTransaction"
@@ -201,7 +201,7 @@
       "id": "runtime-failure-category-removed",
       "impact": "breaking",
       "summary": "RuntimeExecutionFailure no longer has a category axis (#1758). The category field is removed from RuntimeExecutionFailure and RuntimeExecutionFailureInput, and the RuntimeFailureCategory type is no longer exported from @byok-sdk/client or @byok-sdk/client/adapters. Nothing read the field: retry stays the only retry authority and failure (TaskFailure) the only failure-class authority, and the wire projection (reason, retryable, failure) is unchanged. A Host or runtime adapter that passes category when it constructs a RuntimeExecutionFailure deletes that key; one that names RuntimeFailureCategory deletes the reference.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#runtime-failures-have-no-category",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#runtime-failures-have-no-category",
       "items": [
         "export:@byok-sdk/client#RuntimeExecutionFailure",
         "export:@byok-sdk/client#RuntimeExecutionFailureInput",
@@ -216,7 +216,7 @@
       "impact": "breaking",
       "acceptance": "migrate",
       "summary": "Every task attempt has an Agent identity (#1780). TaskAttemptStore.open and TenantBoundTaskAttempts.open are removed; reserveAgentOffer is the only way to create an attempt. TaskAttempt.agentRef, the recordStatus agentRef, TaskArchiveWork.agentRef and server TaskSnapshot.agentRef are required. Postgres rows written without an Agent identity (builds up to v0.30.2) are retired by the operator: migration 0038 creates task_agentless_retired, the one-shot retireAgentlessTasks (cloud-dataplane, new) archives each terminal such task, removes its board item, moves it into that table and returns the count, and migration 0039 refuses while any remains, then makes the task Agent columns NOT NULL. Live ones are settled first on v0.41.0. A retired task id refuses a new offer with agent_task_already_exists; TENANT_ERASURE_TABLES gains task_agentless_retired; taskArchiveInput (cloud, new) is the shared archive input. Before that, a read that meets such a row throws the new CLOUD_ERROR_CODES member task_attempt_agent_ref_missing. The embedded SQLite schema moves to version 9 on open; the upgrade refuses a file holding such an attempt.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#every-task-attempt-has-an-agent-identity",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#every-task-attempt-has-an-agent-identity",
       "items": [
         "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
         "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
@@ -240,7 +240,7 @@
       "id": "dts-node-next-specifiers",
       "impact": "additive",
       "summary": "Published declarations spell relative specifiers with their runtime extension (./x.js, ./x/index.js), so NodeNext and Node16 Hosts resolve real SDK types instead of any or TS2834. The listed digests change only in the spelling of import(\"./x\") type references; the types are unchanged and Bundler Hosts see no difference.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#declarations-resolve-under-nodenext",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#declarations-resolve-under-nodenext",
       "items": [
         "export:@byok-sdk/client#CreateStoredDeviceProofSignerOptions",
         "export:@byok-sdk/client#DaemonConfig",
@@ -271,7 +271,7 @@
       "id": "model-route-host-entry-default-thinking-level",
       "impact": "additive",
       "summary": "ModelRouteHostEntry accepts an optional default_thinking_level that a draft takes when the entry is selected. modelRouteContext throws when the level is not one the entry's config supports; an entry without the field behaves as before.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#host-model-route-entries-can-declare-a-default-thinking-level",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#host-model-route-entries-can-declare-a-default-thinking-level",
       "items": [
         "export:@byok-sdk/keys/model-route#ModelRouteHostEntry"
       ]
@@ -280,7 +280,7 @@
       "id": "daemon-embedded-pairing",
       "impact": "additive",
       "summary": "Daemon.pairEmbedded(server) pairs an embedded Host's daemon against its in-process server and reconciles an existing enrollment; every other state throws the new EmbeddedPairingError (enrollment_missing, device_unknown, re_pair_required, store_not_bound) and writes nothing. EmbeddedPairingServer is the structural server type it reads. Daemon.whenOpen({ signal }) resolves on running/open and rejects with DaemonHaltError, the new DaemonNotOpenError (stopped, crashed) or signal.reason. Both Daemon members are required, so a Host test double typed as Daemon adds them (#1840).",
-      "migration": "docs/releases/host-upgrade-next-minor.md#embedded-pairing-and-connection-wait",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#embedded-pairing-and-connection-wait",
       "items": [
         "export:@byok-sdk/client#Daemon",
         "export:@byok-sdk/client#DaemonNotOpenError",
@@ -292,7 +292,7 @@
       "id": "daemon-when-task-settled",
       "impact": "additive",
       "summary": "Daemon.whenTaskSettled(taskId, { signal }) resolves DaemonTaskSettlement (terminal, delivery, disposal) once the terminal's first outbound settlement was published locally and the runtime owner reported its first disposal outcome; disposal is failed exactly when runtime-disposal-failed was emitted for the task's runtime (an offer-owned scratch release excepted) and none when the daemon holds no runtime for the task, including every task settled before a restart. A task with no journal row and no in-memory record rejects with the new DaemonTaskUnknownError (daemon_task_unknown). The Daemon member is required, so a Host test double typed as Daemon adds it (#1838).",
-      "migration": "docs/releases/host-upgrade-next-minor.md#per-task-settlement-awaitable",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#per-task-settlement-awaitable",
       "items": [
         "export:@byok-sdk/client#DaemonTaskSettlement",
         "export:@byok-sdk/client#DaemonTaskTerminal",
@@ -303,7 +303,7 @@
       "id": "hermes-runtime-adapter-removed",
       "impact": "breaking",
       "summary": "The Hermes runtime adapter is archived (tag archive/hermes-runtime-adapter): HermesAdapter and its option, model and launcher types leave @byok-sdk/client and @byok-sdk/client/adapters, the Hermes custody launcher exports leave @byok-sdk/keys, and FakeRuntimeAdapterId drops hermes. A Host that constructed HermesAdapter deletes it, its imports and its custody launcher; the device no longer advertises the hermes harness. No alias or stub remains.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#hermes-runtime-adapter-removed",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#hermes-runtime-adapter-removed",
       "items": [
         "export:@byok-sdk/client#HermesAdapter",
         "export:@byok-sdk/client#HermesAdapterOptions",
@@ -325,7 +325,7 @@
       "id": "testing-in-memory-device-credential-backend",
       "impact": "additive",
       "summary": "@byok-sdk/client/testing exports InMemoryDeviceCredentialBackend, a DeviceCredentialBackend held in memory for a Host's tests. A Host that hand-rolls a memory backend injects this one as deviceCredentials; no runtime Host change is required. The host-execution-core example's tests import it instead of the repo's removed scripts/testing helper.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#in-memory-device-credential-backend-1844",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#in-memory-device-credential-backend-1844",
       "items": [
         "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
         "example:host-execution-core"
@@ -335,7 +335,7 @@
       "id": "resolve-sdk-hosting",
       "impact": "additive",
       "summary": "resolveSdkHosting({ assetRoot, helperHost }) resolves a packaged Host's SDK hosting values from the copySdkPackagingAssets directory for process.platform and process.arch: daemon spreads into DaemonConfig and adapters into RuntimeAdaptersConfig. A missing required asset throws the new SdkHostingAssetsMissingError (code sdk_hosting_assets_missing, sorted relative missing paths); an unsupported target throws. sdkPackagingAssetLayout and sdkDistributionManifest keep the same values; only their declaration text changed (the agent-memory-fs directory now has one definition). The four existing configuration fields are unchanged (#1839).",
-      "migration": "docs/releases/host-upgrade-next-minor.md#packaged-hosts-resolve-sdk-hosting-from-the-asset-root",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#packaged-hosts-resolve-sdk-hosting-from-the-asset-root",
       "items": [
         "export:@byok-sdk/client#SdkHosting",
         "export:@byok-sdk/client#SdkHostingAssetsMissingError",
@@ -349,7 +349,7 @@
       "id": "service-payload-meta",
       "impact": "additive",
       "summary": "ServicePayloadManifest gains the optional meta, a Host JSON object the SDK does not interpret; version stays 1, so older readers ignore it. ServiceInstallationOptions gains verifyPayload(stagedDir, manifest), the Host's payload policy, run with a frozen copy of the manifest on the staged copy before it becomes versions/<id> and on a matched existing versions/<id>; a throw is payload_invalid with the cause. @byok-sdk/client/packaging exports writeServicePayloadManifest(dir, { id, meta? }), which writes byok-payload.json at build time and returns its bytes. The staged manifest is the exact bytes stage parsed, the same id with different manifest bytes is now version_conflict, and a listed file missing from the payload is payload_invalid instead of a raw ENOENT (#1842).",
-      "migration": "docs/releases/host-upgrade-next-minor.md#service-payload-manifest-meta-and-host-verification",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#service-payload-manifest-meta-and-host-verification",
       "items": [
         "export:@byok-sdk/client#ServiceInstallationOptions",
         "export:@byok-sdk/client#ServicePayloadManifest",
@@ -360,7 +360,7 @@
       "id": "agent-memory-start-refusal-classes",
       "impact": "breaking",
       "summary": "A claimed task that the Agent home's memory refuses before its runtime starts now carries a typed task.fail.failure.class from AGENT_MEMORY_START_REFUSALS (resident MEMORY.md over the limit, with more than one link, not a regular file or not UTF-8; a commit-on-success start copy over the snapshot file or byte limit, or refused otherwise). The reason text is unchanged. A task that seals its output sends unknown. TaskFailureReading gains a member, so an exhaustive switch over its class stops compiling until it handles the new classes. AgentMemorySnapshotLimitError takes the bound it hit as its new first constructor argument and exposes it as limit.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-start-refusal-classes",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#agent-memory-start-refusal-classes",
       "items": [
         "export:@byok-sdk/client#AgentMemorySnapshotLimitError",
         "export:@byok-sdk/protocol#AGENT_MEMORY_START_REFUSALS",
@@ -377,7 +377,7 @@
       "id": "agent-memory-home-check",
       "impact": "additive",
       "summary": "checkAgentMemoryHome(home, { commit?: { filesystem? } }) in @byok-sdk/client/agent-memory returns the AgentMemoryStartRefusal code and the task.fail reason the device would send for an Agent home, read-only, or throws when it cannot decide. It holds no lease and is advisory; the repair task is never refused.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-home-check",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#agent-memory-home-check",
       "items": [
         "export:@byok-sdk/client/agent-memory#AgentMemoryHomeCheck",
         "export:@byok-sdk/client/agent-memory#checkAgentMemoryHome"
@@ -387,7 +387,7 @@
       "id": "clear-device-enrollment",
       "impact": "additive",
       "summary": "clearDeviceEnrollment({ productId, storeDir, nativeAssetRoot?, deviceCredentials? }) clears one store's device enrollment without a daemon or serverUrl, under the store's owner lease: member custody entries, the device credential with a read-back, then device.json, the same clear Daemon.unpair() runs; it leaves the delivery cursor file. It throws the new DeviceEnrollmentClearError with code store_owned (another process holds the lease; nothing is read), store_not_bound (the OS entry holds another store's enrollment; it stays) or clear_failed (the provider or filesystem error is the cause); a device.json that cannot be parsed is refused as clear_failed before anything is deleted and needs a re-pair. Host-visible on an existing path: Daemon.unpair() now throws DeviceEnrollmentClearError clear_failed, with the provider error as cause, when the device credential cannot be deleted, instead of an untyped Error; a Host that matched that error's text reads the code instead (#1841).",
-      "migration": "docs/releases/host-upgrade-next-minor.md#clearing-a-device-enrollment-without-a-daemon",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#clearing-a-device-enrollment-without-a-daemon",
       "items": [
         "export:@byok-sdk/client#DeviceEnrollmentClearError",
         "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
@@ -399,7 +399,7 @@
       "impact": "breaking",
       "acceptance": "accept",
       "summary": "The official Pi closure is pinned to exactly 1.5.2 (upstream commit b4afdddf); the closureDigest changes, so a preparation compiled for 1.5.0 declines with preparation_runtime_identity_mismatch until it is prepared again. keys: PI_MODEL_CATALOG_PI_AI_VERSION is 1.5.2, and 12 entries pi-ai 1.5.2 dropped return not_in_catalog. pi-durable 1.5.2 keeps its document and SQLite schema versions, so replicas written by either release open in the other.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#pi-152-closure",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#pi-152-closure",
       "items": [
         "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
         "store:pi-durable"
@@ -409,7 +409,7 @@
       "id": "bot-collaboration-package",
       "impact": "breaking",
       "summary": "K8 is published as @byok-sdk/bot-collaboration on the SDK version, with four entries: . (the L Host), ./host-kit (the modules a Host adapter composes, Worker-loadable), ./rules (the pure rules, no node:sqlite) and ./testing (the shared vectors and the L test Host). The vendored example item ends: a Host that copied examples/bot-collaboration deletes its copy and installs the package at the SDK version, and maps its imports to the four entries. Names the copied source exposed but no entry exports are not public. Hosted Hosts (#1662): the hosted Host now enforces Bot autonomy as the local Host does, so an observing Bot records would-do entities instead of running create_routine, a cross-Bot delegate or room_call. Run HostedCollaborationStore.migrate() once on every existing schema before the new code serves (it replaces entity_kind_check and moves any wouldDo rows left in a scope frame by an older L import into would_do entity rows), then call setBotAutonomy(credential, botId, 'auto') for each Bot that must keep acting on its own.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#bot-collaboration-is-a-package",
+      "migration": "docs/releases/host-upgrade-0.42.0.md#bot-collaboration-is-a-package",
       "items": [
         "entry:@byok-sdk/bot-collaboration",
         "entry:@byok-sdk/bot-collaboration/host-kit",
@@ -3065,7 +3065,7 @@
       "item": "store:cloud-dataplane-postgres",
       "change": "changed",
       "before": "migrations=37 last=0037_agent_memory_projection_sealed.sql sha256=90707df3bd89ebed",
-      "after": "migrations=39 last=0039_task_agent_ref_not_null.sql sha256=e0c76802ed91b5ec",
+      "after": "migrations=39 last=0039_task_agent_ref_not_null.sql sha256=144f848980cbf31e",
       "entry": "task-attempt-agent-ref-required"
     },
     {

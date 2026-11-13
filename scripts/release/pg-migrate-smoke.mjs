@@ -209,7 +209,7 @@ try {
       `  const before = await readSeedRows(upgradePool);\n` +
       `\n` +
       // The v0.4.2 task row has no Agent identity (#1780), so the upgrade
-      // follows the operator path in docs/releases/host-upgrade-next-minor.md:
+      // follows the operator path in docs/releases/host-upgrade-0.42.0.md:
       // migrate to 0038, settle, retireAgentlessTasks, migrate 0039.
       `  const notNullStep = expected.at(-1);\n` +
       `  assert.equal(notNullStep, '0039_task_agent_ref_not_null.sql', 'the Agent-identity NOT NULL step must stay the last migration this proof splits at');\n` +

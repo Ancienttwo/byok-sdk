@@ -6,7 +6,7 @@
 -- by `retireAgentlessTasks` (@byok-sdk/cloud-dataplane), run on this build
 -- before rerunning the migrations. A task that is not terminal is settled first
 -- on v0.41.0 (cancelTask, abandonTask), the build that matches 0001-0037: this
--- build cannot read it (docs/releases/host-upgrade-next-minor.md).
+-- build cannot read it (docs/releases/host-upgrade-0.42.0.md).
 -- `task_agent_ref_pair` (0012) makes `agent_profile_revision` NULL exactly when
 -- `agent_id` is. Locks: ACCESS EXCLUSIVE on `task` until commit; SET NOT NULL
 -- scans the table once.

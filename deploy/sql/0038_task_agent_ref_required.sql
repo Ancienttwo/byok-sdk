@@ -9,7 +9,7 @@
 -- row, whole, into this table. A retired row is the task id's identity fence:
 -- the Agent offer reservation refuses an id stored here, in the statement that
 -- would insert it. 0039 then makes the task Agent columns NOT NULL.
--- docs/releases/host-upgrade-next-minor.md has the procedure.
+-- docs/releases/host-upgrade-0.42.0.md has the procedure.
 
 CREATE TABLE task_agentless_retired (
   LIKE task INCLUDING DEFAULTS,
