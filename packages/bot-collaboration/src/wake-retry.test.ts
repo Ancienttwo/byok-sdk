@@ -41,6 +41,21 @@ function failingSchedule(taskId: string) {
 }
 const outbox = () => Object.values(ledger.snapshot().outbox).filter(row => row.kind === 'schedule' || row.kind === 'cancel-wake');
 
+it('reports pending wake dispatch for committed cancel and switch abort', async () => {
+  const probe = failingSchedule('failing');
+  await setup(probe.wrap);
+  const turn = await bot.input('cancel-me', 'hello');
+  await bot.freezeForSwitch('device', 0);
+  await expect(seedRoutine(bot, 'failing', 'failing')).rejects.toThrow('Wake dispatch failed');
+  expect(await bot.cancelTurn(turn)).toMatchObject({ result: 'cancelled', wakePending: true });
+  expect(await bot.abortSwitch('device', 1)).toEqual({ mode: 'L', revision: 2, wakePending: true });
+  expect(outbox()).toContainEqual(expect.objectContaining({ kind: 'schedule', lastError: 'schedule unavailable' }));
+  await expect(bot.drain()).rejects.toThrow('Wake dispatch failed');
+  probe.fail = false;
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(outbox()).toEqual([]);
+});
+
 // K4 owns the routine wake outbox. A failed SDK call rejects the drain and keeps the row for a later drain.
 it('keeps a failed routine wake schedule in the K4 outbox, schedules another routine, and sends it on a later drain', async () => {
   const failingId = hash(['failing', 'create_routine', 0]);

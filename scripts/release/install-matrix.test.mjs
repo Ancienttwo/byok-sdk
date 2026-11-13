@@ -4,20 +4,16 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { workerConsumerImports } from './cloud-do-consumer-worker.mjs';
 import { readPublicManifests } from './publish.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const runtimeFields = ['dependencies', 'optionalDependencies', 'peerDependencies'];
 
 // The direct packages of each README install set. Self-hosted and Hosted are the
-// sets ruled in #535 over the unchanged ADR-035 topology. The Worker set is not
-// ruled: it is exactly what the installed Worker consumer of check:release-pack
-// imports (scripts/release/cloud-do-consumer-worker.mjs).
+// sets ruled in #535 over the unchanged ADR-035 topology.
 const expectedSets = new Map([
   ['Self-hosted', ['@byok-sdk/client', '@byok-sdk/keys', '@byok-sdk/server']],
-  ['Hosted / Cloudflare', ['@byok-sdk/cloud', '@byok-sdk/cloud-dataplane', '@byok-sdk/cloud-do', '@byok-sdk/ui-runtime']],
-  ['Worker', workerConsumerImports],
+  ['Hosted / Cloudflare', ['@byok-sdk/cloud', '@byok-sdk/cloud-dataplane', '@byok-sdk/ui-runtime']],
 ]);
 
 function parseInstallMatrix(readme) {
@@ -98,21 +94,12 @@ test('README install sets match the package manifests and their runtime dependen
   assert.deepEqual(installMatrixErrors(readme, manifests), []);
 });
 
-test('the README Worker set is the installed Worker consumer of check:release-pack', () => {
-  const worker = parseInstallMatrix(readme).get('Worker');
-  assert.deepEqual(worker.installs.map((spec) => spec.slice(0, spec.lastIndexOf('@'))).sort(), workerConsumerImports);
-  // The smoke type-checks that consumer against the Workers types cloud-do pins.
-  const cloudDo = manifests.get('@byok-sdk/cloud-do').manifest;
-  assert.ok(cloudDo.devDependencies?.['@cloudflare/workers-types'], 'cloud-do pins @cloudflare/workers-types for the Worker smoke');
-  assert.deepEqual(worker.devInstalls, ['@cloudflare/workers-types']);
-});
 
 test('the install-matrix check reports drift instead of passing it', () => {
   const train = manifests.get('@byok-sdk/core').version;
   const drift = [
     [`npm install @byok-sdk/client@${train}`, 'npm install @byok-sdk/client@0.0.1'],
     ['Also installed: `@byok-sdk/core`, `@byok-sdk/protocol`.', 'Also installed: `@byok-sdk/core`.'],
-    [` @byok-sdk/protocol@${train}\nnpm install --save-dev`, ` @byok-sdk/byok-sdk@${train}\nnpm install --save-dev`],
   ];
   let drifted = readme;
   for (const [from, to] of drift) {
@@ -122,5 +109,4 @@ test('the install-matrix check reports drift instead of passing it', () => {
   const errors = installMatrixErrors(drifted, manifests);
   assert.ok(errors.some((error) => /^Self-hosted: @byok-sdk\/client@0\.0\.1 does not match packages\/client\/package\.json/.test(error)), errors.join('\n'));
   assert.ok(errors.some((error) => /^Hosted \/ Cloudflare: "Also installed" is \["@byok-sdk\/core"\]/.test(error)), errors.join('\n'));
-  assert.ok(errors.some((error) => error.startsWith(`Worker: @byok-sdk/byok-sdk@${train} is not a public workspace package`)), errors.join('\n'));
 });

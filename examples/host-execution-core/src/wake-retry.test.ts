@@ -32,12 +32,25 @@ async function setup() {
   }, cancel: async key => {
     if (key.startsWith('daily:')) { probe.cancels++; if (probe.failCancel) throw new Error('cancel unavailable'); }
     return sdk.wakes.cancel(key);
-  } } }, ledger);
+  } } }, ledger, { admitSubmit: () => false });
   return probe;
 }
 const routine = (): RoutineDefinition => ({ id: 'daily', version: 1, timeZone: 'UTC', rule: { anchorMs: Date.now() + 3_600_000, everyMs: 86_400_000 },
   execution: template('device'), waitMs: 60_000, lateAfterMs: 1000 });
 const failedWakes = () => Object.values(ledger!.snapshot().outbox).filter(row => row.kind === 'schedule' && row.lastError !== undefined);
+
+it('reports a pending wake after a committed cancel while drain still rejects', async () => {
+  const probe = await setup();
+  await core!.enqueue({ key: 'held', source: 'user', execution: template('device'), waitUntil: Date.now() + 60_000 });
+  await expect(core!.addRoutine(routine())).rejects.toThrow('Wake dispatch failed');
+  expect(await core!.cancel('held')).toEqual({ wakePending: true });
+  expect(core!.intent('held')).toMatchObject({ conclusion: 'cancelled' });
+  expect(failedWakes()).toEqual([expect.objectContaining({ lastError: 'schedule unavailable' })]);
+  await expect(core!.drain()).rejects.toThrow('Wake dispatch failed');
+  probe.fail = false;
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(failedWakes()).toEqual([]);
+});
 
 it('retries a failed wake call from its own timer with backoff, then stops at the bound and keeps the row', async () => {
   const probe = await setup();

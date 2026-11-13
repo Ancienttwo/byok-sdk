@@ -22,7 +22,6 @@ const PACKAGES = [
   'client',
   'cloud',
   'cloud-dataplane',
-  'cloud-do',
   'core',
   'protocol',
   'server',

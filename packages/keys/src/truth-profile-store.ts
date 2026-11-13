@@ -132,13 +132,20 @@ export class TruthStoreProviderProfileStore implements ProviderProfileStore {
   }
 
   async commitCustody(commit: ProviderCustodyCommit): Promise<void> {
-    if (commit.mutation.kind === 'save') await this.save(commit.mutation.profile);
-    if (commit.mutation.kind === 'delete') await this.delete(commit.profileRef);
+    let unconfirmed: unknown;
+    try {
+      if (commit.mutation.kind === 'save') await this.save(commit.mutation.profile);
+      if (commit.mutation.kind === 'delete') await this.delete(commit.profileRef);
+    } catch (error) {
+      if (!(error instanceof ByokKeysError && error.code === 'PROVIDER_CHANGE_COMMITTED')) throw error;
+      unconfirmed = error;
+    }
     if (commit.receipt !== undefined) {
       applyReceipt(this.#receipts, this.#watermarks, commit.receipt);
       this.#reservations.delete(commit.receipt.requestId);
     }
     if (commit.clearPending) this.#pending.delete(commit.profileRef);
+    if (unconfirmed !== undefined) throw unconfirmed;
   }
 
   async recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean> {
@@ -241,12 +248,19 @@ export class TruthStoreProviderProfileStore implements ProviderProfileStore {
       }
       throw cause;
     }
-    if (written.body.kind !== 'inline' || written.body.body !== encoded) {
-      throw invalidTruth('TruthStore did not confirm the requested provider profile snapshot');
+    // writeSnapshot resolving is the commit; a confirmation that does not
+    // match reports the write as committed but unconfirmed, never as failed.
+    let confirmed = written.body.kind === 'inline' && written.body.body === encoded;
+    try {
+      confirmed &&= decodeRegistryRecord(written, this.#tenant).rev === expectedRev + 1;
+    } catch {
+      confirmed = false;
     }
-    const confirmed = decodeRegistryRecord(written, this.#tenant);
-    if (confirmed.rev !== expectedRev + 1) {
-      throw invalidTruth('TruthStore confirmed an unexpected provider profile revision');
+    if (!confirmed) {
+      throw new ByokKeysError(
+        'PROVIDER_CHANGE_COMMITTED',
+        'TruthStore accepted the provider profile write but did not confirm it; read the provider status again',
+      );
     }
   }
 }

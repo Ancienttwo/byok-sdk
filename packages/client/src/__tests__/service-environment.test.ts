@@ -113,6 +113,13 @@ describe.runIf(posix)('lifecycle/service-environment (issue #392)', () => {
     expect(Object.keys(testRuntimeEnv(env, 'darwin')).filter((name) => name.startsWith('BYOK_'))).toEqual([]);
   });
 
+  it('#2017: an rc that resets HOME does not move the daemon off the HOME it was started with', async () => {
+    const { home, env } = await fixtureHome('export HOME=/rc/elsewhere\nexport SAW_HOME="$HOME"\n');
+    expect(await captureAndApply({ shell, env })).toMatchObject({ source: 'login-shell' });
+    expect(env.SAW_HOME).toBe('/rc/elsewhere');
+    expect(env.HOME).toBe(home);
+  });
+
   it('the login shell never sees this process\'s BYOK_* values; they are restored afterwards', async () => {
     const { env } = await fixtureHome('export SAW_BYOK="${BYOK_TEST_SECRET-unset}"\n');
     env.BYOK_TEST_SECRET = 's3cret';

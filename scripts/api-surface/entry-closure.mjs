@@ -235,7 +235,9 @@ export function checkEntryClosure(root, { update = false } = {}) {
       if (!policy || typeof policy.purpose !== 'string' || !policy.purpose.trim()
         || !Number.isSafeInteger(policy.budgetBytes) || policy.budgetBytes < 0
         || ['zod', 'codegen'].some(key => typeof policy[key] !== 'boolean')
-        || !policy.nodeBuiltins || ['workspace', 'thirdParty'].some(key => typeof policy.nodeBuiltins[key] !== 'boolean')) throw new Error('invalid entry policy');
+        || !policy.nodeBuiltins || ['workspace', 'thirdParty'].some(key => typeof policy.nodeBuiltins[key] !== 'boolean')
+        || (policy.nodeBuiltins.forbidden !== undefined && (!Array.isArray(policy.nodeBuiltins.forbidden)
+          || policy.nodeBuiltins.forbidden.some(name => typeof name !== 'string' || !isBuiltin(name))))) throw new Error('invalid entry policy');
       for (const type of entry.types) {
         const target = path.resolve(root, type);
         if (!inside(path.join(entry.pkg.directory, 'dist'), target) || !existsSync(target)) throw new Error(`missing or escaped declaration target ${type}`);
@@ -246,9 +248,14 @@ export function checkEntryClosure(root, { update = false } = {}) {
       if (!policy.zod && [...result.thirdParty, ...result.unavailableOptional.map(packageName)].includes('zod')) throw new Error(`zod is forbidden; specifiers: ${via}`);
       if ((result.unavailableOptional.length || result.opaqueImports.length) && (!policy.codegen || !policy.nodeBuiltins.thirdParty)) throw new Error(`strict policy cannot prove optional dependency safety: ${[...result.unavailableOptional, ...result.opaqueImports].join(', ')}`);
       if (!policy.codegen && result.codegen.length) throw new Error(`code generation is forbidden: ${JSON.stringify(result.codegen.slice(0, 3))}; specifiers: ${via}`);
-      for (const layer of ['workspace', 'thirdParty']) if (!policy.nodeBuiltins[layer] && result.nodeBuiltins[layer].length) throw new Error(`Node builtins are forbidden in ${layer}: ${result.nodeBuiltins[layer].join(', ')}`);
+      for (const layer of ['workspace', 'thirdParty']) {
+        if (!policy.nodeBuiltins[layer] && result.nodeBuiltins[layer].length) throw new Error(`Node builtins are forbidden in ${layer}: ${result.nodeBuiltins[layer].join(', ')}`);
+        const forbidden = new Set((policy.nodeBuiltins.forbidden ?? []).map(name => name.replace(/^node:/, '')));
+        const denied = result.nodeBuiltins[layer].filter(name => forbidden.has(name.replace(/^node:/, '')));
+        if (denied.length) throw new Error(`Node builtins are forbidden in ${layer}: ${denied.join(', ')}`);
+      }
       if (result.bytes > policy.budgetBytes) throw new Error(`closure ${result.bytes} bytes exceeds budget ${policy.budgetBytes}`);
-      const { bytes, ...facts } = result;
+      const { bytes: _bytes, ...facts } = result;
       const next = { kind: entry.kind, policy, facts: { target: posix(path.relative(root, entry.target)), conditions: entry.conditions, types: entry.types, ...facts } };
       updated[entry.id] = next;
       if (!update && JSON.stringify(record) !== JSON.stringify(next)) throw new Error('entry facts drifted; review then run check:api-surface -- --update');
