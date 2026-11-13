@@ -2,9 +2,11 @@
 
 ## Unreleased
 
-- **Changed (client; #1972)** — The OpenCode adapter’s qualified version moves from 2.2.6 to 2.3.0. Detect now reports the unqualified-version advisory for other versions, including 2.2.6. The runtime contract checks the namespace-level notice sent when Host MCP tools disappear on resume. See the [qualification evidence](docs/researches/2026-11-13-opencode-2.3.0-qualification.md).
+- **Changed (client; #1972)** — The OpenCode adapter's qualified version moves from 2.2.6 to 2.3.0. Detect now reports the unqualified-version advisory for other versions, including 2.2.6. The runtime contract checks the namespace-level notice sent when Host MCP tools disappear on resume. See the [qualification evidence](docs/researches/2026-11-13-opencode-2.3.0-qualification.md).
+- **Added (bot-collaboration; #1978)** — `./host-kit` exports `botTurnInstruction` with an options object and `InstructionLimits`, so Hosts can compute the instruction K8 freezes for a Turn.
 
 - **Fixed (client; #1949)** — Every SDK Pi RPC session caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings, so it warms its prompt cache at most during an active run: Pi cancels the warmer at settlement and revalidates a pending decision before dispatch, so no warming request is sent after the run settled, even for a late `"warm"` answer. No Host action is needed. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#pi-cache-warming-stops-at-settlement-1949).
+- **Fixed (keys; #2012)** — `ProviderRegistry.get()`, `list()` and the status returned by `setDefaultModelProvider()` read the profile, its pending marker and whether the credential store holds its key under the configuration lock, so `secret_configured` and `configuration_pending` always describe one configuration. While another writer holds the lock, a status read waits for it; across processes the wait is the profile store's bounded `configurationLockWaitMs` (default 10 s), after which the read fails with `PROVIDER_CONFIGURATION_BUSY` instead of reporting an unlocked state. When one profile's read fails, `list()` rejects with that failure after the other reads finish. A Host that lists providers catches `PROVIDER_CONFIGURATION_BUSY` and retries. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#provider-status-reads-take-the-configuration-lock-2012).
 
 ## 0.42.0 — 2026-11-13 (published)
 

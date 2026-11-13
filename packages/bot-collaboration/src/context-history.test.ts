@@ -3,6 +3,9 @@ import { expect, it } from 'vitest';
 import { buildHandoffPack, type HandoffPackBudgets, type HandoffTurn } from '@byok-sdk/protocol';
 import { stateOf } from './model';
 import * as rules from './rules/context';
+import { botTurnInstruction, outcomeOffer } from './host-kit';
+import { seedCollaboration, SYNC_OPTIONS } from './commit-vectors.test-support';
+import { syncTurn } from './rules/sync';
 
 const limits = { turnLimit: 100, contextMaxBytes: 32_768, instructionMaxBytes: 65_536 };
 
@@ -19,6 +22,37 @@ it('freezes the same instruction from the device ledger as from the same Bot his
   const { turns: _turns, cards: _cards, questions: _questions, rejected: _rejected, ...authority } = state;
   const injected: rules.ContextHistory = { turns: [state.turns.m1!, state.turns.m2!, state.turns.m3!], cards: [], questions: [], rejected: [state.rejected[0]!] };
   expect(rules.botTurnInstruction(state, state.turns.m3!, limits)).toEqual(rules.turnInstruction(authority, injected, state.turns.m3!, limits));
+});
+
+it('host-kit computes the instruction frozen by sync', () => {
+  const state = stateOf({}); seedCollaboration(state);
+  const turn = state.turns.t = { id: 't', root: 't', botId: 'main', source: 'user', request: 'Hello', hop: 0, status: 'queued', authority: 'owner' };
+  const routines = [{ id: 'routine-marker', owner: 'main', lifecycle: 'active' }];
+  const injected: rules.ContextTurn[] = [{ id: 'earlier', root: 'earlier', source: 'user', request: 'injected-marker', hop: 0, status: 'succeeded', outcomeSummary: [] }];
+  const options = { ...SYNC_OPTIONS, routines, historyMode: true, history: { rows: injected, digest: 'digest' }, offer: outcomeOffer({ actions: { turn: ['ask_user'], main: [] } }) };
+  const expected = botTurnInstruction({ state, turn, limits: options.limits, models: options.models, routines, injected, offer: options.offer }).instruction;
+  const step = syncTurn(state, turn, { intent: () => undefined, executionStarted: () => false, retired: () => undefined }, options, () => {});
+  expect(step?.kind).toBe('freeze');
+  if (step?.kind !== 'freeze') throw new Error('Expected frozen intent');
+  expect(step.input.execution.payload.instruction).toBe(expected);
+  expect(expected).toContain('injected-marker');
+  expect(expected).toContain('routine-marker');
+  expect(expected).not.toContain('The Host connector performs confirmed actions');
+});
+
+it('host-kit uses external room history in the instruction frozen by sync', () => {
+  const state = stateOf({}); seedCollaboration(state);
+  const turn = state.turns.seat = { id: 'seat', root: 'root', botId: 'main', source: 'room_slot', request: 'Hello', hop: 0, status: 'queued' };
+  state.team.rooms.room = { id: 'room', name: 'Room', members: ['main'], mode: 'mention', announcement: '', visibleFrom: {}, messages: [] };
+  state.team.rounds.round = { id: 'round', root: 'root', roomId: 'room', input: '', seats: ['seat'], limit: 1, counts: {}, closed: false };
+  state.team.seats.seat = { id: 'seat', roundId: 'round', botId: 'main', status: 'queued', released: false, late: false };
+  const room = [{ id: 'message', from: 'owner', text: 'room-marker', late: false }];
+  const options = { ...SYNC_OPTIONS, roomHistoryMode: true, roomHistory: { rows: room, digest: 'digest' } };
+  const expected = botTurnInstruction({ state, turn, limits: options.limits, models: options.models, room }).instruction;
+  const step = syncTurn(state, turn, { intent: () => undefined, executionStarted: () => false, retired: () => undefined }, options, () => {});
+  if (step?.kind !== 'freeze') throw new Error('Expected frozen room intent');
+  expect(step.input.execution.payload.instruction).toBe(expected);
+  expect(expected).toContain('room-marker');
 });
 
 it('#1446: the history of a frozen Turn is byte for byte the handoff pack of its rows', () => {

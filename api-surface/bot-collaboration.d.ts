@@ -693,6 +693,26 @@ export type HomeServer = Partial<Pick<ByokServer, 'enqueueAgentHomeProjection' |
 /** Called only from the Host serial consumer. All delivery ids are durable. */
 export declare function flushHomes(server: HomeServer, ledger: HostLedger, now: () => number): Promise<void>;
 // ==== @byok-sdk/bot-collaboration dist/host-kit.d.ts ====
+import { type BotHistoryState, type ContextTurn, type InstructionLimits } from './rules/context.js';
+import { type CheckedOffer, type ContextRoutine, type ContextState } from './rules/schema.js';
+import type { RoomMessage } from './rules/rooms.js';
+import type { Turn } from './rules/turn.js';
+/** Inputs used by sync to freeze a Bot Turn's instruction. */
+export interface BotTurnInstructionOptions<R extends ContextRoutine = ContextRoutine> {
+    state: ContextState & BotHistoryState;
+    turn: Turn;
+    limits: InstructionLimits;
+    models: readonly string[];
+    routines?: readonly R[];
+    injected?: readonly ContextTurn[];
+    room?: readonly RoomMessage[];
+    offer?: CheckedOffer;
+}
+/** Compute the instruction sync freezes, with the same history, routines and offer. */
+export declare function botTurnInstruction<R extends ContextRoutine>(options: BotTurnInstructionOptions<R>): {
+    instruction: string;
+};
+export type { InstructionLimits } from './rules/context.js';
 export { DelegationError, HostIntentError } from './rules/delegation.js';
 export { IntentOutcomeError } from './adapter-steps.js';
 export { RetentionRefused, retainRoots } from './retention.js';
