@@ -652,7 +652,10 @@ lease that failed to release stays held until the process that took it
 exits, so a `recover` in that process can get `store_busy`; restart the Host
 process, then recover. The same holds for an install whose lease is stuck:
 its cleanup reports `store_busy` until the Host process restarts, and the
-next install or `recover` runs after that restart. A refusal whose final
+next install or `recover` runs after that restart. When an upgrade refusal's
+`failed` receipt cannot be written, the receipt stays `pending` and the old
+version stays stopped until `recover`, since recover's snapshot restore would
+overwrite what a restarted service wrote. A refusal whose final
 receipt was written keeps its code, with later release or restart failures
 in its `cause`. A release failure after the final receipt would not reject a
 committed result (the rule for prune failures); no path releases there today.

@@ -11437,7 +11437,11 @@ export interface ServiceInstallation {
      * release failure, then a failed receipt write or restart. Call
      * recover(); a lease that failed to release stays held until its process
      * exits, so restart the Host process first when recover() reports
-     * `store_busy`. A refusal whose final receipt was written keeps its code,
+     * `store_busy`. When an upgrade refusal's `failed` receipt cannot be
+     * written, the previous version also stays stopped, since recover()
+     * restores the snapshot over whatever it would write; without a release
+     * failure the refusal keeps its code and the receipt write joins its
+     * `cause`. A refusal whose final receipt was written keeps its code,
      * and a later release or restart failure joins its `cause` the same way.
      * A release failure after the final receipt would not reject a committed
      * result; no path releases there today.

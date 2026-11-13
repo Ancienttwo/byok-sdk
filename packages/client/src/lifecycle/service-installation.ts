@@ -231,7 +231,11 @@ export interface ServiceInstallation {
    * release failure, then a failed receipt write or restart. Call
    * recover(); a lease that failed to release stays held until its process
    * exits, so restart the Host process first when recover() reports
-   * `store_busy`. A refusal whose final receipt was written keeps its code,
+   * `store_busy`. When an upgrade refusal's `failed` receipt cannot be
+   * written, the previous version also stays stopped, since recover()
+   * restores the snapshot over whatever it would write; without a release
+   * failure the refusal keeps its code and the receipt write joins its
+   * `cause`. A refusal whose final receipt was written keeps its code,
    * and a later release or restart failure joins its `cause` the same way.
    * A release failure after the final receipt would not reject a committed
    * result; no path releases there today.
@@ -1162,15 +1166,18 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         // after it joins its cause.
         const later: unknown[] = [];
         let final = false;
+        let receiptFailed = false;
         if (error instanceof ServiceInstallationError) {
           await writeReceipt({ state: 'failed', from, to, code: error.code, ...(error.stores ? { stores: [...error.stores] } : {}) })
-            .then(() => { final = true; }, (receiptError: unknown) => { later.push(receiptError); });
+            .then(() => { final = true; }, (receiptError: unknown) => { receiptFailed = true; later.push(receiptError); });
         }
-        // Stores whose restore failed may be partial: `from` stays stopped
-        // and the pending receipt leaves recover() to restore them.
-        if (!startsNothing(error)) await lifecycle.start().catch((startError: unknown) => { later.push(startError); });
+        // `from` stays stopped while the receipt stays pending: recover()
+        // restores the snapshot, which would overwrite what a restarted
+        // service wrote. Stores whose restore failed may be partial too.
+        if (!startsNothing(error) && !receiptFailed) await lifecycle.start().catch((startError: unknown) => { later.push(startError); });
         if (!final && releaseParts.has(error as object)) throw storeReleaseFailed([error, ...later]);
-        throw later.length === 0 ? error : joinFailure(error, later, 'Recording the refusal or restarting the previous version failed too.');
+        if (receiptFailed) throw joinFailure(error, later, 'Its failed receipt could not be written: the previous version stays stopped and the receipt stays pending. Run recover() (CLI: byok-agent upgrade recover).');
+        throw later.length === 0 ? error : joinFailure(error, later, 'Restarting the previous version failed too.');
       }
 
       // From here a crash leaves the pending receipt, which recover() resolves.

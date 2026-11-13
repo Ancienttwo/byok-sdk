@@ -1359,6 +1359,39 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await installation.receipt()).toMatchObject({ state: 'pending', from: '1.0.0', to: '2.0.0' });
       expect(await installation.recover()).toMatchObject({ state: 'rolled-back', from: '1.0.0', code: 'upgrade_pending' });
       expect([await fs.readFile(db, 'utf8'), await fs.readFile(`${db}-wal`, 'utf8')]).toEqual(['v1 data', 'v1 wal']);
+
+      // The failed receipt cannot be written, with or without a release failure: the receipt stays pending, so the
+      // previous version stays stopped and recover() restores the snapshot under nothing the service wrote (#1991).
+      const receiptPath = path.join(installRoot, 'upgrade-receipt.json');
+      for (const releaseFails of [false, true]) {
+        await verdicts('migration-required');
+        const written: string[] = [];
+        const base = fakeLifecycle();
+        const writing = installationOver({ ...base, start: async () => {
+          await base.start();
+          written.push(`write ${written.length}`);
+          await fs.appendFile(db, `\n${written.at(-1)!}`);
+        } }, {
+          migrate: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'migration-required'] }),
+        });
+        const releaseError = new Error('injected release failure');
+        const original = daemonOwner.acquireDaemonOwner;
+        const leaseFault = releaseFails ? vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementationOnce(async (...args) => {
+          const lease = await original(...args);
+          return { release: async () => { await lease.release(); throw releaseError; } };
+        }) : undefined;
+        let receiptWrites = 0;
+        const receiptFault = failRename((file) => file === receiptPath && ++receiptWrites === 2);
+        events = [];
+        const failed = await writing.upgrade(await payload('2.0.0', { 'migrate.cjs': MIGRATE })).catch((caught: unknown) => caught)
+          .finally(() => { receiptFault.restore(); leaseFault?.mockRestore(); });
+        expect(failed).toMatchObject({ code: releaseFails ? 'store_release_failed' : 'store_migration_failed' });
+        expect(events).not.toContain('start');
+        expect(await writing.receipt()).toMatchObject({ state: 'pending' });
+        await writing.recover();
+        const data = await fs.readFile(db, 'utf8');
+        for (const line of written) expect(data).toContain(line);
+      }
     });
 
     it('a death after the migration and before the switch leaves recover() the snapshot to restore', async () => {
