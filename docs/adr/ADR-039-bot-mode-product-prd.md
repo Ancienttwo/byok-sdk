@@ -524,3 +524,7 @@ Source: Aimpact approval batch. Also mirrored at `_ops/bot-wo/PRODUCT-RULINGS-20
 本次按已批准的 [K8b 计划](ADR-041-k8b-cross-bot.md) 对齐 §5.2、§9 和 §10 P4。
 Q2 决定 fan-in 回报 key。Q7 决定取消片段和顺序。Q10 决定最坏预留。Q12 把取消项数定为 2。
 历史批准记录保持原义。这里不增加裁定，不把合成或 Draft PR 当作产品上线验收。
+
+## 修订（2026-11-13，#1959）
+
+`@byok-sdk/cloud-do` 已于 #1959 归档，见 [ADR-036 修订](../architecture/adr-2026-10-03-cloud-generic-agent.md#修订说明2026-11-131959)。

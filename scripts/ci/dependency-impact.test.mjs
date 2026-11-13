@@ -136,6 +136,8 @@ test('other metadata and malformed format versions remain refused, including bes
   }
   const removed = fixture(t);
   delete removed.lock.workspaces['packages/ui-runtime'];
+  removed.write('bun.lock', removed.lock);
+  assert.throws(() => selectImpact(['bun.lock'], removed), /removed workspace still exists/);
   rmSync(join(removed.cwd, 'packages/ui-runtime'), { recursive: true });
   removed.write('bun.lock', removed.lock);
   const plan = planCi({ ...removed, event: 'push', sha: 'a'.repeat(40), paths: ['bun.lock'] });

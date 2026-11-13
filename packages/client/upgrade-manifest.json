@@ -30,7 +30,7 @@
     {
       "id": "cloud-do-archived",
       "impact": "breaking",
-      "summary": "@byok-sdk/cloud-do is archived after 0.42.0 and leaves the release train. Hosts can remain on 0.42.0; no later version will be published.",
+      "summary": "@byok-sdk/cloud-do is archived after 0.42.0 and leaves the release train. Remove the dependency or pin it to exactly 0.42.0; no later fixes will be published and its npm versions will be deprecated.",
       "migration": "docs/releases/host-upgrade-next-minor.md#cloud-do-archived",
       "items": [
         "entry:@byok-sdk/cloud-do",

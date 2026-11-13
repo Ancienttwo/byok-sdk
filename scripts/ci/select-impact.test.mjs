@@ -428,6 +428,14 @@ test('archived vendored Hermes paths stay mapped as root CI scripts (#1854)', ()
     const base = git('rev-parse', 'HEAD').stdout.trim();
     writeFileSync(entries, JSON.stringify({ '@byok-sdk/unknown': {} }));
     assert.throws(() => selectImpact(['api-surface/entries.json'], { cwd, base }), /reviewed CI mapping required/i);
+    for (const key of ['@byok-sdk/cloud-do', '@byok-sdk/cloud-do/package.json']) {
+      writeFileSync(entries, JSON.stringify({ [key]: {} }));
+      assert.throws(() => selectImpact(['api-surface/entries.json'], { cwd, base }), /reviewed CI mapping required/i, key);
+    }
+    const restored = join(cwd, 'packages/cloud-do/package.json');
+    mkdirSync(dirname(restored), { recursive: true });
+    writeFileSync(restored, '{}');
+    assert.throws(() => selectImpact(['packages/cloud-do/package.json'], { cwd, base }), /reviewed CI mapping required/i);
   } finally { rmSync(cwd, { recursive: true, force: true }); }
 });
 

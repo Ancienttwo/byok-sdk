@@ -26,7 +26,7 @@ import { packageSurface, sha256, splitGolden, splitStatements } from './dts-surf
 
 export const SNAPSHOT_SCHEMA_VERSION = 1;
 
-/** The ten published packages, by `packages/<dir>`. */
+/** The nine published packages, by `packages/<dir>`. */
 export const PUBLIC_PACKAGES = ['bot-collaboration', 'client', 'cloud', 'cloud-dataplane', 'core', 'protocol', 'server', 'ui-runtime', 'keys'];
 
 /**

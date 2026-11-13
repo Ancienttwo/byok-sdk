@@ -73,6 +73,7 @@ export function dependencyLockImpact(before, after, { cwd, admitted = [] }) {
   if (![before, after].every(lock => plain(lock.workspaces) && plain(lock.packages))) fail('invalid Bun lock shape');
   const removed = Object.keys(before.workspaces).filter(dir => !Object.hasOwn(after.workspaces, dir));
   if (removed.includes('') || Object.keys(after.workspaces).some(dir => !Object.hasOwn(before.workspaces, dir))) fail('workspace topology changed');
+  if (removed.some(dir => existsSync(resolve(cwd, dir, 'package.json')))) fail('workspace topology changed: removed workspace still exists');
   const removedRecords = removed.map(dir => before.workspaces[dir]);
   const removedNames = new Set(removedRecords.map(record => record.name));
   if (removedRecords.some(record => typeof record.name !== 'string')

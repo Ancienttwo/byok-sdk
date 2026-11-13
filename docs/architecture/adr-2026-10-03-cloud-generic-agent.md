@@ -43,7 +43,7 @@ Aiphabee 并非首次引入 byok-sdk：其本地通路已经通过 `packages/byo
 
 ## 修订说明（2026-11-13，#1959）
 
-D7、D8、D10 在归档后不再有 SDK 实现；AiphaBee 的 `/ask` 保持使用其自身 runtime。`@byok-sdk/cloud-do` 的最后发布版本是 `v0.42.0`。只有产品需要在 Cloudflare Durable Objects 上用平台 key 运行 Pi durable harness 的云端 Agent 时才重启：从 `cloud-do-archive-0.42.0`（main 上最后一个包含该包的 commit；与最后发布版本 `v0.42.0` 仅 README 不同）取回代码，按当时的 Pi 版本重新验证，并由 Host 提供 replay-safe 工具清单、provider profiles 和 binding names。
+D7、D8、D10 在归档后不再有 SDK 实现；AiphaBee 的 `/ask` 保持使用其自身 runtime。`@byok-sdk/cloud-do` 的最后发布版本是 `v0.42.0`。只有产品需要在 Cloudflare Durable Objects 上用平台 key 运行 Pi durable harness 的云端 Agent 时才重启：从 `archive/cloud-do`（main 上最后一个包含该包的 commit；与最后发布版本 `v0.42.0` 仅 README 不同）取回代码，按当时的 Pi 版本重新验证，并由 Host 提供 replay-safe 工具清单、provider profiles 和 binding names。
 
 ## 修订说明（2026-10-13）
 

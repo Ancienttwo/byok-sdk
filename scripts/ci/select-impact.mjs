@@ -649,7 +649,10 @@ export function selectImpact(paths, context = {}) {
       for (const id of knownFamilies) if (id !== 'build-test' && id !== 'macos-client') families.add(id);
       continue;
     }
-    if (ARCHIVED_CLOUD_DO_FILES.has(path)) { scripts = true; continue; }
+    if (ARCHIVED_CLOUD_DO_FILES.has(path)) {
+      if (existsSync(resolve(context.cwd ?? process.cwd(), path))) requireMapping(path);
+      scripts = true; continue;
+    }
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
     if (path === 'package.json' || path === 'bun.lock' || /^(?:packages|examples)\/[^/]+\/package\.json$/.test(path)) {
       // A reviewed dependency move also runs the suites of the workspaces that declare it.
@@ -723,8 +726,12 @@ export function selectImpact(paths, context = {}) {
     }
     if (path === 'api-surface/entries.json') {
       for (const dir of changedApiOwners(context)) {
-        // #1959: the package is deleted; its deleted paths select API and release checks.
-        if (dir === 'packages/cloud-do') continue;
+        // #1959: only removed cloud-do entries are covered by the deleted-path checks.
+        if (dir === 'packages/cloud-do') {
+          const entries = JSON.parse(readFileSync(resolve(context.cwd ?? process.cwd(), path), 'utf8'));
+          if (Object.keys(entries).some(key => /^@byok-sdk\/cloud-do(?:[/#]|$)/.test(key))) requireMapping(path);
+          continue;
+        }
         if (!workspaceGraph[dir]) requireMapping(path);
         dirs.add(dir);
       }

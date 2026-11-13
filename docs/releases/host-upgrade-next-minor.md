@@ -4,9 +4,9 @@ Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts m
 
 ## cloud-do archived
 
-`@byok-sdk/cloud-do` leaves the release train. A Host that installs it can stay on 0.42.0; no later version will be published. The upgrade train check no longer inspects this package, even if it remains installed.
+`@byok-sdk/cloud-do` leaves the release train. Remove the dependency, or pin it to exactly 0.42.0 if the Host still needs it. No later version or fixes will be published, and its npm versions will be deprecated. The upgrade train check no longer inspects this package, even if it remains installed.
 
-Restart requires a product that needs a cloud agent using platform keys with Pi’s durable harness in Cloudflare Durable Objects. Start from `cloud-do-archive-0.42.0` (the last main commit with the package; it differs from the last published version `v0.42.0` only in its README), qualify it again against the Pi version current at the time, and obtain the replay-safe tool list, provider profiles and binding names from the Host. See [ADR-036](../architecture/adr-2026-10-03-cloud-generic-agent.md).
+Restart requires a product that needs a cloud agent using platform keys with Pi’s durable harness in Cloudflare Durable Objects. Start from `archive/cloud-do` (the last main commit with the package; it differs from the last published version `v0.42.0` only in its README), qualify it again against the Pi version current at the time, and obtain the replay-safe tool list, provider profiles and binding names from the Host. See [ADR-036](../architecture/adr-2026-10-03-cloud-generic-agent.md).
 
 ## Pi cache warming stops at settlement (#1949)
 
