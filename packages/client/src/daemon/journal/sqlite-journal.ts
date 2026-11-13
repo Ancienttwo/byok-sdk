@@ -556,6 +556,18 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
         new Error('ReceivedEnvelopeRecord.opensTask is true but no taskId was supplied — refusing to append a task-opening envelope with no task identity'),
       );
     }
+    // Rows are read back by task id, so the row must name the task its bytes
+    // bind (#2054): a Host appending directly can otherwise file one task's
+    // envelope under another.
+    let boundTaskId: unknown;
+    try {
+      boundTaskId = (JSON.parse(record.bytes) as { task_id?: unknown }).task_id;
+    } catch {
+      return Promise.reject(new TypeError('ReceivedEnvelopeRecord.bytes is not a JSON envelope'));
+    }
+    if (boundTaskId !== record.taskId) {
+      return Promise.reject(new TypeError('ReceivedEnvelopeRecord.taskId does not match the task_id in its bytes'));
+    }
 
     return this.#append('appendEnvelope', record, record.bytes, null, (committedAt) => {
       if (!record.opensTask || record.taskId === undefined) return;

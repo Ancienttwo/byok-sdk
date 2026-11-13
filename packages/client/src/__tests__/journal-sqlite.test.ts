@@ -374,6 +374,16 @@ describe('SqliteLocalTaskJournal', () => {
       const { taskId: _dropped, ...withoutTaskId } = record;
       await expect(journal.appendEnvelope(withoutTaskId as ReceivedEnvelopeRecord)).rejects.toThrow(/opensTask/);
     });
+
+    it('refuses an envelope whose bytes name another task id, writing no row', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      const bytes = JSON.stringify({ v: 1, id: 'env-1', type: 'task.offer', task_id: 'task-B' });
+
+      await expect(journal.appendEnvelope(envelopeRecord({ taskId: 'task-A', bytes, bytesHash: journalHash(bytes) })))
+        .rejects.toBeInstanceOf(TypeError);
+      for (const table of ['journal_envelope', 'journal_task', 'journal_idempotency']) expect(countRows(storeDir, table)).toBe(0);
+    });
   });
 
   describe('restart', () => {
@@ -908,7 +918,14 @@ describe('SqliteLocalTaskJournal', () => {
       const storeDir = await tmpStore();
       const journal = build(storeDir);
       await journal.appendEnvelope(offer('cancelled', 1));
-      for (const [index, bound] of rows.entries()) await journal.appendEnvelope(cancel('cancelled', 2 + index, bound));
+      for (const [index, bound] of rows.entries()) {
+        const seq = 2 + index;
+        // appendEnvelope refuses bytes naming another task (#2054), so that corruption is written to the store directly.
+        await journal.appendEnvelope(cancel('cancelled', seq, bound.taskId === undefined ? bound : {}));
+        if (bound.taskId === undefined) continue;
+        const { bytes, bytesHash } = cancel('cancelled', seq, bound);
+        readRows(storeDir, `UPDATE journal_envelope SET bytes = '${bytes}', bytes_hash = '${bytesHash}' WHERE envelope_id = 'cancel-cancelled-${seq}'`);
+      }
       await expect(journal.pruneConfirmedJournalTask('cancelled', new Date(Date.now() + 60_000))).rejects.toThrow('invalid durable cancellation binding');
       expect(countRows(storeDir, 'journal_envelope')).toBe(1 + rows.length);
       expect(countRows(storeDir, 'journal_task')).toBe(1);
