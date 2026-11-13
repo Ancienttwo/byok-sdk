@@ -763,21 +763,28 @@ await clearDeviceEnrollment({
   the member entries one at a time (pairing verification, member state,
   member keys), then the device credential, and reads each back after its
   deletion. A provider failure (a deletion or read-back that fails or times
-  out) can come after some of those deletions:
-  - Before the device credential is deleted, `device.json` and the device
-    credential remain and the device is still paired, but some or all of its
-    member entries may already be gone. For example, if `member-keys` is
-    deleted and its read-back then fails with `EIO`, the member state and
-    keys are gone. A daemon started on that store runs without E2EE. (An
+  out) can come after some of those deletions. The store's state then
+  follows whether the device credential is still there, not the step that
+  failed:
+  - With the device credential (this clear failed before deleting it, and no
+    earlier clear deleted it), `device.json` and the credential remain and
+    the device is still paired, but some or all of its member entries may
+    already be gone. E2EE is lost once `member-state` or `member-keys` is
+    deleted; a device still completing its E2EE pairing also loses that
+    pairing with `pairing-verification`. For example, if `member-keys` is deleted and its
+    read-back then fails with `EIO`, the member state and keys are gone, and
+    a daemon started on that store runs without E2EE. A device whose
+    completed pairing lost only `pairing-verification` resumes E2EE. (An
     injected `DeviceCredentialBackend` has no member entries.)
-  - After the device credential is deleted, the store keeps a valid
-    `device.json` without its credential, which reads as re-pair-required. If
-    removing `device.json` fails after the credential was deleted, the same
-    projection remains.
+  - Without the device credential (this clear or an earlier one deleted it),
+    the store keeps a valid `device.json` without its credential, which reads
+    as re-pair-required. That holds even when a retry fails during the member
+    entries. If removing `device.json` fails after the credential was
+    deleted, the same projection remains.
 
   In either case, run the clear again once the provider works: it deletes
-  whatever remains. To keep the device instead, re-pair it; a device paired
-  without its member entries does not regain E2EE any other way.
+  whatever remains. To keep a paired device that lost E2EE, re-pair it; it
+  does not regain E2EE any other way.
   A store with no enrollment clears successfully. An injected
   `DeviceCredentialBackend`'s error is the `cause` unchanged, so such a
   backend must not put secrets in its errors.

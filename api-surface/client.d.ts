@@ -6555,13 +6555,16 @@ export type DeviceEnrollmentClearErrorCode = keyof typeof CLEAR_MESSAGES;
  *   member entries one by one (pairing verification, member state, member
  *   keys), then the device credential, each read back after its deletion. A
  *   provider failure can come after some of those deletions (a deletion or
- *   read-back that fails or times out). Before the device credential is
- *   deleted, the device stays paired, but its member entries may already be
- *   partly or wholly gone, so it no longer resumes E2EE. After the device
- *   credential is deleted, the store keeps a valid `device.json` without its
- *   credential. A failed `device.json` removal after the credential was
- *   deleted leaves the same state. A retry clears whatever remains (#1965). An injected `DeviceCredentialBackend`'s error is the
- *   `cause` unchanged; such a backend must not put secrets in its errors.
+ *   read-back that fails or times out). The store's state then follows
+ *   whether the device credential is still there, not the step that failed:
+ *   with it the device is paired, without it (deleted by this clear or an
+ *   earlier one) `device.json` remains and reads as re-pair-required. A failed
+ *   `device.json` removal after the credential was deleted leaves the same
+ *   state. E2EE is lost once `member-state` or `member-keys` is deleted; a
+ *   device still completing its E2EE pairing also loses that pairing with
+ *   the pairing verification. A retry clears whatever remains (#1965). An
+ *   injected `DeviceCredentialBackend`'s error is the `cause` unchanged; such
+ *   a backend must not put secrets in its errors.
  */
 export declare class DeviceEnrollmentClearError extends Error {
     readonly code: DeviceEnrollmentClearErrorCode;
@@ -6589,9 +6592,9 @@ export interface EnrollmentCustody {
  * that names no store as `pairing_attempt_unattributed` unless
  * `clearUnattributedAttempt` is set. The member entries
  * go first, each read back after deletion, then the credential, also read
- * back. A failure before the credential deletion leaves the device paired,
- * possibly with some member entries already deleted; a failure after it
- * leaves `device.json` without its credential. `onCredentialCleared` runs once the
+ * back. A failure leaves the device paired if its credential is still there,
+ * possibly with some member entries deleted, and otherwise leaves
+ * `device.json` without its credential. `onCredentialCleared` runs once the
  * credential is gone, before `device.json` is removed. Returns the cleared
  * enrollment, or undefined when the store held no readable one.
  */
