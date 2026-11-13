@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PROVIDER_CUSTODY_RECEIPT_LIMIT } from './custody';
+import { ByokKeysError } from './errors';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import {
   assertProviderCustodyIdle,
@@ -12,7 +13,9 @@ import {
 } from './pi-provider-launcher-core';
 import { InMemoryProviderProfileStore } from './profile-store';
 import { ProviderRegistry, type ProviderConfiguration } from './registry';
-import { InMemorySecretStore, modelProviderSecretName } from './secret-store';
+import type { CommandRunner } from './command-runner';
+import { LinuxSecretServiceSecretStore } from './linux-secret-service';
+import { InMemorySecretStore, type ModelProviderSecretName, modelProviderSecretName } from './secret-store';
 import { SqliteProviderProfileStore, providerConfigurationLockPath } from './sqlite-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
 
@@ -89,6 +92,102 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     await registry().configure(OPENAI, OLD_KEY);
     await expect(registry().replaceSecret('openai', '')).rejects.toMatchObject({ code: 'PROVIDER_SECRET_EMPTY' });
     await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+  });
+
+  it('refuses a key no OS store accepts before marking the profile pending (#1946)', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    for (const invalid of [`${NEW_KEY}\n`, 'k'.repeat(2561)]) {
+      await expect(registry().replaceSecret('openai', invalid)).rejects.toMatchObject({ code: 'SECRET_VALUE_INVALID' });
+    }
+    await expect(profiles.getPending('openai')).resolves.toBeUndefined();
+    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+  });
+
+  it('a failed key write or commit restores the previous key and clears its own marker (#1946)', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    const logged = [vi.spyOn(console, 'error'), vi.spyOn(console, 'warn'), vi.spyOn(console, 'log')];
+    vi.spyOn(secrets, 'set').mockImplementationOnce(async (_name, value) => { throw new Error(`refused ${value}`); });
+    const writeError = await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error);
+    expect(writeError).toMatchObject({ code: 'PROVIDER_SECRET_STORE_FAILED' });
+    expect((writeError as Error).cause).toBeUndefined();
+    vi.spyOn(profiles, 'commitCustody').mockRejectedValueOnce(new Error('commit failed'));
+    await expect(registry().replaceSecret('openai', NEW_KEY)).rejects.toThrow('commit failed');
+
+    await expect(profiles.getPending('openai')).resolves.toBeUndefined();
+    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+    await expect(registry().resolveDefaultModelProvider()).resolves.toBeDefined();
+    const text = JSON.stringify([String(writeError), (writeError as Error).stack, logged.map((spy) => spy.mock.calls)]);
+    expect(text).not.toContain(NEW_KEY);
+  });
+
+  it('passes on store errors only as a fixed message for a known code (#1946)', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    const echo = (code: string, value: unknown) => new ByokKeysError(code, `echo ${String(value)} ${OLD_KEY}`);
+    const set = secrets.set.bind(secrets);
+    const failures = ['KEYCHAIN_WRITE_FAILED', 'STORE_DEFINED_CODE'];
+    vi.spyOn(secrets, 'set').mockImplementation(async (name, value) => {
+      if (value === NEW_KEY && failures.length > 0) throw echo(failures.shift()!, value);
+      return set(name, value);
+    });
+    const errors = [
+      await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error),
+      await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error),
+    ];
+    vi.spyOn(secrets, 'has').mockRejectedValueOnce(echo('KEYCHAIN_UNAVAILABLE', NEW_KEY));
+    errors.push(await registry().configure({ ...OPENAI, model: 'gpt-5.2-mini' }).catch((error: unknown) => error));
+    expect(errors.map((error) => (error as ByokKeysError).code)).toEqual(['KEYCHAIN_WRITE_FAILED', 'PROVIDER_SECRET_STORE_FAILED', 'KEYCHAIN_UNAVAILABLE']);
+    expect((errors[2] as Error).message).toContain('install secret-tool');
+    expect(JSON.stringify(errors.map((error) => [(error as Error).message, (error as Error).stack, String((error as Error).cause)]))).not.toMatch(new RegExp(`${OLD_KEY}|${NEW_KEY}`, 'u'));
+  });
+
+  it('keeps the marker when the restore fails or the change was already unfinished (#1946)', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    vi.spyOn(secrets, 'set').mockImplementation(async (_name, value) => { throw new Error(`refused ${value}`); });
+    const rollbackError = await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error);
+    expect(rollbackError).toMatchObject({ code: 'PROVIDER_SECRET_ROLLBACK_FAILED' });
+    expect((rollbackError as Error).cause).toBeUndefined();
+    expect(`${String(rollbackError)} ${(rollbackError as Error).stack}`).not.toMatch(new RegExp(`${OLD_KEY}|${NEW_KEY}`, 'u'));
+    await expect(profiles.getPending('openai')).resolves.toMatchObject({ operation: 'replace_secret' });
+    vi.mocked(secrets.set).mockRestore();
+
+    vi.spyOn(profiles, 'commitCustody').mockRejectedValueOnce(new Error('commit failed'));
+    await expect(registry().replaceSecret('openai', NEW_KEY)).rejects.toThrow('commit failed');
+    await expect(profiles.getPending('openai')).resolves.toBeDefined();
+    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+  });
+
+  it('never overwrites an entry the SDK did not write, even when the commit would fail (#1946)', async () => {
+    const entries = new Map<string, string>();
+    const commandRunner: CommandRunner = async (_command, args, stdin) => {
+      const service = args[args.indexOf('service') + 1]!;
+      if (args[0] === 'store') entries.set(service, stdin!);
+      if (args[0] === 'clear') entries.delete(service);
+      const value = args[0] === 'lookup' ? entries.get(service) : '';
+      return { exitCode: value === undefined ? 1 : 0, stdout: value ?? '', stderr: '' };
+    };
+    const linux = new LinuxSecretServiceSecretStore<ModelProviderSecretName>({ platform: 'linux', commandRunner });
+    const subject = new ProviderRegistry({ now: () => new Date(clock), profileStore: profiles, secretStore: linux });
+    await subject.configure(OPENAI, OLD_KEY);
+    const [service] = [...entries.keys()];
+    entries.set(service!, 'sk-foreign-entry');
+    vi.spyOn(profiles, 'commitCustody').mockRejectedValue(new Error('commit failed'));
+
+    await expect(subject.replaceSecret('openai', NEW_KEY)).rejects.toMatchObject({ code: 'KEYCHAIN_SECRET_DECODE_FAILED' });
+    expect(entries.get(service!)).toBe('sk-foreign-entry');
+    await expect(profiles.getPending('openai')).resolves.toBeUndefined();
+  });
+
+  it('a new key overwrites a previous entry the store cannot read (#1946)', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    const corrupted = () => vi.spyOn(secrets, 'get').mockRejectedValueOnce(new ByokKeysError('KEYCHAIN_SECRET_CORRUPTED', 'undecodable'));
+    corrupted();
+    vi.spyOn(secrets, 'set').mockRejectedValueOnce(new Error('store refused'));
+    await expect(registry().replaceSecret('openai', NEW_KEY)).rejects.toMatchObject({ code: 'PROVIDER_SECRET_ROLLBACK_FAILED' });
+    await expect(profiles.getPending('openai')).resolves.toBeDefined();
+
+    corrupted();
+    await expect(registry().replaceSecret('openai', NEW_KEY)).resolves.toMatchObject({ configuration_pending: false });
+    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
   });
 });
 

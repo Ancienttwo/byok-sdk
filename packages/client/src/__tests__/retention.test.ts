@@ -106,7 +106,7 @@ it.skipIf(process.getuid===undefined)('refuses a different reported UID before c
    return {format:'module',shortCircuit:true,source:transformSync(readFileSync(new URL(url),'utf8'),{loader:'ts',format:'esm',sourcefile:url}).code};
   }});
   const {ScratchRoot}=await import(${JSON.stringify(new URL('../daemon/retention/scratch.ts',import.meta.url).href)});
-  const root=${JSON.stringify(root)},uid=process.getuid();process.getuid=()=>uid+1;
+  const root=${JSON.stringify(root)},uid=process.geteuid();process.geteuid=()=>uid+1;
   const chmod=fs.chmod;let chmodCalls=0;fs.chmod=async(...args)=>{chmodCalls++;return chmod(...args);};
   let error;try{await new ScratchRoot(root).create();}catch(cause){error={name:cause.name,message:cause.message};}
   console.log(JSON.stringify({error,chmodCalls,mode:(await fs.lstat(root)).mode&0o777}));
@@ -134,7 +134,7 @@ it('default journal retention discovers old confirmed rows and protects unconfir
  await terminal(journal,'expired','confirmed');await terminal(journal,'pending','pending');await terminal(journal,'marked','confirmed');await journal.markRecovered('marked',{disposition:'interrupted'});
  await terminal(journal,'recent','confirmed','2026-10-13T00:00:00.000Z');const f=await fixture({store,journal});await f.sweeper.runPass('startup');
  expect(await journal.readTask('expired',identity)).toBeUndefined();for(const id of ['pending','marked','recent'])expect(await journal.readTask(id,identity)).toBeDefined();
- expect(await journal.pruneConfirmedJournalTask('marked')).toBe(false);
+ expect(await journal.pruneConfirmedJournalTask('marked',new Date())).toBe(false);
 });
 it('locked and unknown replicas survive; journal-terminal replicas require an exclusive lock before deletion',async()=>{
  const store=testScratchRoot(),journal=new SqliteLocalTaskJournal({storeDir:store});cleanups.push(()=>journal.close());await terminal(journal,'locked','pending');await terminal(journal,'closed','pending');

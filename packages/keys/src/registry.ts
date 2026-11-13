@@ -1,6 +1,11 @@
 import { AnthropicMessagesClient } from './anthropic-client.js';
-import { configurationPendingError, withConfigurationLock } from './custody.js';
-import { ByokKeysError } from './errors.js';
+import {
+  type ProviderCustodyCommit,
+  type ProviderCustodyPending,
+  configurationPendingError,
+  withConfigurationLock,
+} from './custody.js';
+import { BYOK_KEYS_ERROR_CODES, ByokKeysError, type ByokKeysErrorCode } from './errors.js';
 import type { ProviderFetch } from './http.js';
 import { OpenAiCompatibleChatClient } from './openai-client.js';
 import { type ProviderProfileStore, providerNotConfigured } from './profile-store.js';
@@ -20,6 +25,7 @@ import {
   type SecretStore,
   modelProviderSecretName,
 } from './secret-store.js';
+import { PROVIDER_PROVISIONING_SECRET_MAX_BYTES, isPortableSecretValue } from './secret-value.js';
 
 /** A transport client for whichever dialect the resolved profile declares. */
 export type ModelProviderClient =
@@ -123,6 +129,33 @@ export function buildConfiguredProfile(
     kind: 'model',
     updated_at: timestamp,
   });
+}
+
+/** Fixed, credential-free guidance for the store codes an operator can act on. */
+const SECRET_STORE_GUIDANCE: Partial<Record<ByokKeysErrorCode, string>> = {
+  KEYCHAIN_SECRET_CORRUPTED: 'The OS keychain entry for this provider cannot be decoded; supply a new key to replace it',
+  KEYCHAIN_SECRET_DECODE_FAILED: "The OS keychain holds an entry with this provider key's name that the SDK did not write; delete or rename it, or use another profile",
+  KEYCHAIN_UNAVAILABLE: 'The OS keychain is unavailable; on Linux, install secret-tool and unlock a keyring on the session D-Bus',
+  CREDENTIAL_MANAGER_READ_FAILED: 'Windows Credential Manager could not read this secret; if the entry is damaged, delete it in Credential Manager and supply the key again',
+};
+
+/**
+ * Call the injected secret store without letting its error escape: a store
+ * may echo a key in its message, its cause, or an error it builds itself. A
+ * known keychain, Credential Manager or secret-shape code keeps its code with a
+ * fixed message (guidance where an operator can act, such as installing
+ * secret-tool); anything else becomes `PROVIDER_SECRET_STORE_FAILED`.
+ */
+async function secretStoreCall<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    const code = error instanceof ByokKeysError ? error.code : '';
+    if (Object.hasOwn(BYOK_KEYS_ERROR_CODES, code) && /^(?:KEYCHAIN|CREDENTIAL_MANAGER|SECRET)_/u.test(code)) {
+      throw new ByokKeysError(code, SECRET_STORE_GUIDANCE[code as ByokKeysErrorCode] ?? 'Credential store operation failed');
+    }
+    throw new ByokKeysError('PROVIDER_SECRET_STORE_FAILED', 'Provider credential store operation failed');
+  }
 }
 
 /** The credential-free status projection of a profile. */
@@ -233,7 +266,7 @@ export class ProviderRegistry {
       const pendingBefore = await this.#profiles.getPending(profileRef);
       if (configuration.auth_mode !== 'none' && secret === undefined) {
         if (pendingBefore !== undefined) throw configurationPendingError();
-        if (!(await this.#secrets.has(secretName))) {
+        if (!(await secretStoreCall(() => this.#secrets.has(secretName)))) {
           throw new ByokKeysError(
             'PROVIDER_SECRET_MISSING',
             'Provider authentication requires a secret in the operating-system credential store',
@@ -241,54 +274,15 @@ export class ProviderRegistry {
         }
       }
 
-      await this.#profiles.markPending({
+      await this.#writeAndCommit(
         profileRef,
-        operation: 'configure',
-        requestId: null,
-        requestDigest: null,
-        operationGeneration: null,
-        since: this.#now().toISOString(),
-      });
-      let previousSecret: string | undefined;
-      let secretWritten = false;
-      if (secret !== undefined) {
-        previousSecret = await this.#secrets.get(secretName);
-        await this.#secrets.set(secretName, secret);
-        secretWritten = true;
-      }
-
-      try {
-        await this.#profiles.commitCustody({
-          profileRef,
-          mutation: { kind: 'save', profile },
-          clearPending: true,
-        });
-      } catch (cause) {
-        if (secretWritten) {
-          try {
-            if (previousSecret === undefined) {
-              await this.#secrets.delete(secretName);
-            } else {
-              await this.#secrets.set(secretName, previousSecret);
-            }
-          } catch (rollbackCause) {
-            throw new ByokKeysError(
-              'PROVIDER_SECRET_ROLLBACK_FAILED',
-              'Provider profile write failed and the previous secret could not be restored',
-              { cause: new AggregateError([cause, rollbackCause]) },
-            );
-          }
-        }
-        // The previous profile and secret are back in place. The marker is
-        // cleared only when it was this call's own; an earlier unfinished
-        // change stays unfinished.
-        if (pendingBefore === undefined) {
-          await this.#profiles.commitCustody({ profileRef, mutation: { kind: 'none' }, clearPending: true });
-        }
-        throw cause;
-      }
+        'configure',
+        pendingBefore,
+        secret,
+        { profileRef, mutation: { kind: 'save', profile }, clearPending: true },
+      );
       if (profile.auth_mode === 'none') {
-        await this.#secrets.delete(secretName);
+        await secretStoreCall(() => this.#secrets.delete(secretName));
       }
       const saved = (await this.#profiles.get(profileRef)) ?? profile;
       return this.#status(saved);
@@ -313,16 +307,13 @@ export class ProviderRegistry {
       if (secret.length === 0) {
         throw new ByokKeysError('PROVIDER_SECRET_EMPTY', 'Provider secret cannot be empty');
       }
-      await this.#profiles.markPending({
+      await this.#writeAndCommit(
         profileRef,
-        operation: 'replace_secret',
-        requestId: null,
-        requestDigest: null,
-        operationGeneration: null,
-        since: this.#now().toISOString(),
-      });
-      await this.#secrets.set(modelProviderSecretName(profileRef), secret);
-      await this.#profiles.commitCustody({ profileRef, mutation: { kind: 'none' }, clearPending: true });
+        'replace_secret',
+        await this.#profiles.getPending(profileRef),
+        secret,
+        { profileRef, mutation: { kind: 'none' }, clearPending: true },
+      );
       return this.#status(profile);
     });
   }
@@ -405,6 +396,77 @@ export class ProviderRegistry {
     profileRef: ProviderProfileRef,
   ): Promise<ProviderStatus> {
     return withConfigurationLock(this.#profiles, async () => this.#status(await this.#profiles.setEnabled(profileRef)));
+  }
+
+  /**
+   * The custody write shared by `configure` and `replaceSecret`: mark pending,
+   * write the key, commit. A key no supported OS store accepts is refused
+   * before the marker. When the key write or the commit fails, the previous
+   * key is restored and the marker is cleared only when it was this call's
+   * own, so an earlier unfinished change stays unfinished.
+   *
+   * A previous entry the store proves the SDK wrote but cannot decode
+   * (`KEYCHAIN_SECRET_CORRUPTED`) does not block the overwrite, so supplying a
+   * new key repairs it; a failure then has nothing to restore. That case, like
+   * a failed restore, throws `PROVIDER_SECRET_ROLLBACK_FAILED` and keeps the
+   * marker, so readers keep refusing the key. Any other read failure,
+   * including an entry the SDK did not write, refuses before the marker and
+   * before any credential write: such an entry is never overwritten.
+   */
+  async #writeAndCommit(
+    profileRef: ProviderProfileRef,
+    operation: 'configure' | 'replace_secret',
+    pendingBefore: ProviderCustodyPending | undefined,
+    secret: string | undefined,
+    commit: ProviderCustodyCommit,
+  ): Promise<void> {
+    const secretName = modelProviderSecretName(profileRef);
+    if (secret !== undefined && !isPortableSecretValue(secret)) {
+      throw new ByokKeysError(
+        'SECRET_VALUE_INVALID',
+        `Secret must contain 1 to ${PROVIDER_PROVISIONING_SECRET_MAX_BYTES} UTF-8 bytes without null or newline characters`,
+      );
+    }
+    let previous: { readable: true; secret: string | undefined } | { readable: false } = { readable: true, secret: undefined };
+    if (secret !== undefined) {
+      try {
+        previous = { readable: true, secret: await secretStoreCall(() => this.#secrets.get(secretName)) };
+      } catch (error) {
+        if (!(error instanceof ByokKeysError && error.code === 'KEYCHAIN_SECRET_CORRUPTED')) throw error;
+        previous = { readable: false };
+      }
+    }
+    await this.#profiles.markPending({
+      profileRef,
+      operation,
+      requestId: null,
+      requestDigest: null,
+      operationGeneration: null,
+      since: this.#now().toISOString(),
+    });
+    try {
+      if (secret !== undefined) await secretStoreCall(() => this.#secrets.set(secretName, secret));
+      await this.#profiles.commitCustody(commit);
+    } catch (cause) {
+      if (secret !== undefined) {
+        try {
+          if (!previous.readable) throw cause;
+          const restore = previous.secret;
+          await secretStoreCall(() => restore === undefined
+            ? this.#secrets.delete(secretName).then(() => undefined)
+            : this.#secrets.set(secretName, restore));
+        } catch {
+          throw new ByokKeysError(
+            'PROVIDER_SECRET_ROLLBACK_FAILED',
+            'Provider credential change failed and the previous secret could not be restored',
+          );
+        }
+      }
+      if (pendingBefore === undefined) {
+        await this.#profiles.commitCustody({ profileRef, mutation: { kind: 'none' }, clearPending: true });
+      }
+      throw cause;
+    }
   }
 
   async #status(profile: ModelProviderProfile): Promise<ProviderStatus> {

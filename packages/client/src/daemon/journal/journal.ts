@@ -29,6 +29,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { decodeEnvelope } from '@byok-sdk/protocol';
 
 /**
  * The journal's one hash function, shared by every producer so a stored digest
@@ -38,6 +39,19 @@ import { createHash } from 'node:crypto';
  */
 export function journalHash(bytes: string): string {
   return `sha256:${createHash('sha256').update(bytes, 'utf8').digest('hex')}`;
+}
+
+/**
+ * Decode stored cancellation bytes and require a `task.cancel` for `taskId`
+ * sequenced after the offer at `offerSeq`; returns the envelope's own sequence.
+ * Recovery and journal pruning share this so they accept the same evidence.
+ */
+export function assertTaskCancellationBinding(bytes: string, taskId: string, offerSeq: number): number {
+  const envelope = decodeEnvelope(bytes);
+  if (envelope.type !== 'task.cancel' || envelope.task_id !== taskId || envelope.seq === undefined || envelope.seq <= offerSeq) {
+    throw new Error('invalid durable cancellation binding');
+  }
+  return envelope.seq;
 }
 
 /**
@@ -320,8 +334,23 @@ export interface LocalTaskJournal {
   measureUsage(): Promise<LocalStorageUsage>;
   /** Confirmed terminals older than cutoff, without recovery markers, oldest first. */
   listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
-  /** Transactionally rechecks confirmation and recovery protection before pruning. */
-  pruneConfirmedJournalTask(taskId: string): Promise<boolean>;
+  /**
+   * Transactionally rechecks confirmation and recovery protection before
+   * pruning. Inside its delete transaction, under the write lock, it returns
+   * `false` and deletes nothing when the task is valid but not prunable: a
+   * confirmed terminal last updated at or after `cutoff`, or a received offer
+   * whose first stored `task.cancel` sequenced above the offer was committed
+   * at or after `cutoff` (including evidence replaced under the same task id)
+   * or that has no such cancellation. For a received offer it throws and
+   * deletes nothing when the `task.cancel` that qualifies it is broken: that
+   * cancellation fails its hash or enrollment check, names another task id,
+   * or carries a `seq` different from its row's. No other row is part of this
+   * contract: a confirmed terminal's envelopes, withheld rows and the task's
+   * other envelopes may be deleted without verification (#2054). An
+   * implementation that ignores `cutoff` still compiles but can delete
+   * unexpired or replaced evidence; the SDK does not repeat these checks.
+   */
+  pruneConfirmedJournalTask(taskId: string, cutoff: Date): Promise<boolean>;
   /** Bounded WAL checkpoint + incremental vacuum. Maintenance only; never on the envelope path. */
   compact(options: CompactOptions): Promise<CompactResult>;
   /**

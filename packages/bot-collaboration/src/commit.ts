@@ -61,6 +61,10 @@ export function retainInLedger(ledger: HostLedger, input: RetentionInput, limits
     occurrenceOpen: turnId => { const occurrence = s.occurrences[routineOccurrence({ id: turnId })]; return !!occurrence && !occurrence.conclusion; },
   }, rows));
 }
+const wouldDoRowNeedsMigration = (row: { turnId?: string }): boolean => row.turnId === undefined;
+export function wouldDoNeedsMigration(state: CollaborationState): boolean {
+  return Object.values(state.wouldDo ?? {}).some(wouldDoRowNeedsMigration);
+}
 /** The result of `migrateWouldDo`: rows that got their `turnId`, and rows archived because no live Turn owns them. */
 export interface WouldDoMigration { backfilled: number; archived: number }
 /**
@@ -77,9 +81,10 @@ export function migrateWouldDo(ledger: HostLedger): WouldDoMigration {
       for (let generation = 0; generation <= intent.generation; generation++) owners.set(taskId(intent.key, generation), intent.key);
     }
     for (const row of Object.values(state.wouldDo ?? {})) {
-      if (row.turnId !== undefined) continue;
+      if (!wouldDoRowNeedsMigration(row)) continue;
       const turnId = owners.get(row.taskId);
       if (turnId !== undefined) { row.turnId = turnId; result.backfilled++; continue; }
+      // SAFETY: The persisted would-do row consists of JSON fields and can be stored as an application row.
       rows.put('wouldDo', row.id, row as unknown as Json);
       delete state.wouldDo![row.id];
       result.archived++;

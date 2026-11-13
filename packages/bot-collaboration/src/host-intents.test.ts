@@ -304,6 +304,51 @@ it('cancels an unsubmitted Host intent, so no handler runs and the Bot FIFO move
   expect({ keys, cancels }).toEqual({ keys: ['head'], cancels: [] });
 });
 
+it('cancels chosen queued Host intents atomically without a pass and replays after restart (#2003)', async () => {
+  paused = true;
+  const handledKeys: string[] = [], handlers = { research: handled(handledKeys) }, options = { deviceConcurrency: 2 };
+  bot = openBot(handlers, options);
+  for (const [key, source, agent] of [['z', 'user', 'z'], ['a', 'bot', 'research'], ['a2', 'user', 'research'], ['b', 'bot', 'other']] as const)
+    await bot.enqueueHostIntent(input({ key, source, execution: template('device', agent) }), 'research');
+  expect(['z', 'a', 'a2', 'b'].map(key => bot!.core.intent(key)!.phase)).toEqual(['inflight', 'queued', 'queued', 'queued']);
+  const transaction = vi.spyOn(ledger!, 'transaction'), drain = vi.spyOn(bot.core, 'drain'), count = submitted.size;
+  const result = [{ key: 'a', result: 'cancelled', conclusion: 'cancelled' }, { key: 'b', result: 'cancelled', conclusion: 'cancelled' }];
+  await expect(bot.cancelHostIntents(['a', 'b'])).resolves.toEqual(result);
+  expect({ transactions: transaction.mock.calls.length, drains: drain.mock.calls.length, submitted: submitted.size, phase: bot.core.intent('a2')!.phase, handledKeys })
+    .toEqual({ transactions: 1, drains: 0, submitted: count, phase: 'queued', handledKeys: [] });
+  transaction.mockRestore(); drain.mockRestore();
+  await bot.drain();
+  expect(bot.core.intent('a2')!.phase).toBe('inflight');
+  const replay = result.map(row => ({ ...row, result: 'already_settled' }));
+  await expect(bot.cancelHostIntents(['a', 'b'])).resolves.toEqual(replay);
+  bot = await restart(handlers, options);
+  await expect(bot.cancelHostIntents(['a', 'b'])).resolves.toEqual(replay);
+});
+
+it('reports every refused key in order and rolls back the whole set (#2003)', async () => {
+  paused = true; bot = openBot({ research: () => {} }, { deviceConcurrency: 2 });
+  await bot.enqueueHostIntent(input({ key: 'z', execution: template('device', 'z') }), 'research');
+  await bot.enqueueHostIntent(input({ key: 'a', source: 'bot' }), 'research');
+  const turn = await bot.input('k1', 'hello');
+  const before = ledger!.snapshot();
+  await expect(bot.cancelHostIntents(['a', 'z', 'missing', turn])).rejects.toMatchObject({ key: 'z', code: 'inflight', rejected: [
+    { key: 'z', code: 'inflight' }, { key: 'missing', code: 'unknown_intent' }, { key: turn, code: 'not_host_intent' }] });
+  await expect(bot.cancelHostIntents(['a', 'a'])).rejects.toThrow('Duplicate Host intent key: a');
+  expect(ledger!.snapshot()).toEqual(before);
+  await expect(bot.cancelHostIntents(['a'], { id: 'guest', kind: 'human' })).rejects.toThrow('not_owner');
+  expect({ intent: bot.core.intent('a')?.conclusion, cancels }).toEqual({ intent: undefined, cancels: [] });
+});
+
+it('cancels queued Host work on a frozen device without admitting new work (#2003)', async () => {
+  paused = true; bot = openBot({ research: () => {} }, { deviceConcurrency: 2 });
+  await bot.enqueueHostIntent(input({ key: 'z', execution: template('device', 'z') }), 'research');
+  await bot.enqueueHostIntent(input({ key: 'a', source: 'bot' }), 'research');
+  await bot.freezeForSwitch('device', 0);
+  expect((await bot.drainForSwitch('device')).intents).toContain('a');
+  await expect(bot.cancelHostIntents(['a'])).resolves.toEqual([{ key: 'a', result: 'cancelled', conclusion: 'cancelled' }]);
+  expect((await bot.drainForSwitch('device')).intents).not.toContain('a');
+});
+
 it('sends an SDK cancel for a submitted Host intent, and a cancelled terminal after a restart runs no handler', async () => {
   paused = true;
   const keys: string[] = [];

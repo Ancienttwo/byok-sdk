@@ -285,7 +285,7 @@ const paired = config.pairingCode === undefined ? undefined : await daemon.pair(
 await daemon.start();
 // #391: start() is local startup only; "ready" means the cloud accepted this run's hello.
 await waitForDaemonOpen(daemon);
-const device = paired ?? await new DeviceStore(config.storeDir, createDeviceCredentialStore(config)).load();
+const device = paired ?? await new DeviceStore(config.productId, config.storeDir, createDeviceCredentialStore(config)).load();
 process.stdout.write(`${JSON.stringify({ ready: true, pid: process.pid, deviceId: device?.deviceId })}\n`);
 
 const lines = createInterface({ input: process.stdin });

@@ -479,7 +479,9 @@ migration and preserves earlier upgrade rollback snapshots.
 With no current version, preparation stops an SDK-marked unit of the
 recorded owner (including a payload-less CLI service) before taking the
 daemon-store leases and gates. On any preparation failure before writing
-`current`, it releases the leases/gates, removes staging, then starts that
+`current`, it releases the leases/gates, removes the version directory it
+created (one it reused stays: it holds the version already staged), then
+starts that
 unit again, even if it was stopped before the call. The one exception is a
 failed store restore: the stores may then be partial, so the unit is not
 started and is removed, leaving only the repair snapshot, as after a failed
@@ -487,6 +489,20 @@ health check; otherwise a boot or login could start it on those stores. The
 next install writes the unit again. When that removal fails, the error names
 both the unit and the snapshot. Failures after preparation succeeds use the
 installation cleanup below.
+
+Every `install`, `upgrade`, `rollback`, `recover` and `uninstall` holds an
+install-root gate for its whole run (#2001). A second operation on the same
+install root, from any process of the same user and under any `gateRoot`,
+fails at once with `lifecycle_owner_busy` and writes nothing. The operation
+creates a missing install root first, so every spelling of the root (a
+symlink, or another letter case on a case-insensitive volume) takes the same
+gate and a refusal leaves at most that empty directory. On macOS and Linux an
+install root owned by another user, including one that user created first,
+is refused with `install_root_foreign_owner` before anything is written in
+it. These guarantees hold only while the install root's parent directory is
+writable by the installing user alone; otherwise another user can rename the
+root or replace it with a symlink after the check (#2028). Windows has no
+owner check, and exclusion between Windows users is not guaranteed.
 
 Preparation does not stop an absent unit or an allowed unmarked unit. It
 leases and gates the daemon stores instead. With `replaceUnmarked`, a
@@ -504,9 +520,10 @@ that are already accepted need no migration. A busy daemon store is
 writing a pointer, record or unit. Without `migrate`, a required migration
 is `store_migration_required`. A migration that exits unsuccessfully or
 leaves non-accepting verdicts restores the snapshot and throws
-`store_migration_failed`. Launch failures or malformed post-migration
-precheck output retain upgrade's existing raw error or `precheck_failed`
-behavior after restoring the snapshot.
+`store_migration_failed`. So does every other failure after the snapshot:
+a `migrate` callback that throws, or a post-migration precheck that cannot
+run or prints malformed output, is `store_migration_failed` with that error
+as `cause`.
 
 The temporary snapshot lives at
 `<installRoot>/snapshots/.install-<uuid>`. The call that took it removes it
@@ -524,8 +541,8 @@ store leases and before its precheck: the stores return to how they were
 before the failed install, and anything written to them since is replaced.
 It then retires the repair name and continues. When that install cannot
 stop the service, take the store leases, restore the snapshot or retire its
-name, it throws the same kind of error, changes nothing else and starts
-nothing. When more than one repair snapshot exists it restores none of them
+name, it throws the same kind of error, starts nothing and removes a marked
+unit; nothing else changes. When more than one repair snapshot exists it restores none of them
 and lists them all: their names do not order them in time, so an operator
 keeps the one to restore and removes the others.
 
@@ -559,9 +576,13 @@ or crashed run fails immediately. For the CLI, a service installed before
 pairing must enable `serviceEnrollment: { enabled: true }` in its config;
 otherwise pair first. An embedded Host can instead pass its own
 `healthCheck`. An unpaired daemon without service enrollment halts on start
-and cannot pass the default check. Install enforces the health-check
-deadline even if a custom check ignores abort or succeeds late. For install,
-`healthTimeoutMs` bounds only the health-check wait after start returns. Unit
+and cannot pass the default check. Install, upgrade, rollback and recover
+enforce the health-check deadline even if a custom check ignores abort or
+succeeds late: a late upgrade check restores the previous version, and a late
+check of a restored version is `rollback_unhealthy`. `healthTimeoutMs` is an
+integer from 1 to 2147483647 ms (another value is a `TypeError` when the
+installation is created) and bounds only the health-check wait after start
+returns. Unit
 writes, activation, start and the cleanup stop run outside that deadline;
 platform commands have no time bound today (follow-up: [#1971](https://github.com/Ancienttwo/byok-sdk/issues/1971)).
 Install awaits platform commands before proceeding, so cleanup cannot race
@@ -608,11 +629,25 @@ reinstall into the same root to record it again before CLI uninstall.
 6. if that health check fails, restores the old version and its store
    snapshot together and fails with `health_check_failed`.
 
+When a migration fails and its snapshot restore fails too, the stores may be
+partial. `upgrade apply` then leaves the old version stopped, keeps the
+`pending` receipt and `snapshots/<id>`, and the error names the snapshot path
+and says to run `recover()` (CLI: `byok-agent upgrade recover`). Run it as soon as
+possible, before restarting the machine: the service unit stays installed,
+so a reboot or login before `recover()` starts the old version on those
+partial stores.
+
 `upgrade rollback` writes a `pending` receipt, then restores `previous` and the
 snapshot taken when `current` was switched to; store writes since then are
 discarded. A failed upgrade keeps
 the earlier one rollbackable. Only the latest switch keeps a snapshot, so one
-rollback is possible after it.
+rollback is possible after it. After a healthy switch, `upgrade apply`
+removes the older snapshots as cleanup: when one cannot be removed (for
+example `EBUSY`), the upgrade still succeeds with its `switched` receipt and
+the next successful upgrade tries again. A snapshot that keeps failing (for
+example a persistent `EACCES`) stays, and each later successful upgrade
+retries it, until the cause is fixed. Nothing selects it meanwhile. There is no
+cleanup diagnostic hook.
 
 `upgrade-receipt.json` is what a Host UI reads: `switched`, `rolled-back`,
 `failed` (with `code`, and `stores` for a store refusal) or `pending`. A
@@ -622,6 +657,26 @@ until `byok-agent upgrade recover` finishes it: it restores the receipt's
 `from` version and snapshot (for a rollback, the version it was going back
 to). A snapshot is removed only after the receipt that ends the operation is
 written.
+
+The top-level error code names the next step, which follows where the
+receipt stops. Whenever a store gate or lease fails to release and the
+receipt stays `pending` (a refusal whose `failed` receipt could not be
+written, a failed pointer write or snapshot restore, the release after the
+pointer writes, a rollback after a failed health check), the error is
+`store_release_failed`. Its `cause` is one flat list: the failure that came
+first (such as `health_check_failed` or `store_busy`), every release failure,
+then a failed receipt write or restart. Run `byok-agent upgrade recover`. A
+lease that failed to release stays held until the process that took it
+exits, so a `recover` in that process can get `store_busy`; restart the Host
+process, then recover. The same holds for an install whose lease is stuck:
+its cleanup reports `store_busy` until the Host process restarts, and the
+next install or `recover` runs after that restart. When an upgrade refusal's
+`failed` receipt cannot be written, the receipt stays `pending` and the old
+version stays stopped until `recover`, since recover's snapshot restore would
+overwrite what a restarted service wrote. A refusal whose final
+receipt was written keeps its code, with later release or restart failures
+in its `cause`. A release failure after the final receipt would not reject a
+committed result (the rule for prune failures); no path releases there today.
 
 Upgrade, rollback, recover, install and uninstall run only for the store's
 recorded lifecycle owner: another owner gets `lifecycle_owner_conflict`, and
@@ -698,7 +753,10 @@ await clearDeviceEnrollment({
   later pairing reads because each pairing mints a new device id.
 - `DeviceEnrollmentClearError.code` is `store_owned` when another process holds
   the owner lease (nothing is read or cleared), `store_not_bound` when the OS
-  entry holds an enrollment another `storeDir` paired (it is left in place), or
+  entry holds an enrollment another `storeDir` paired or a first-pairing
+  attempt another `storeDir` staged (it is left in place),
+  `pairing_attempt_unattributed` when it holds a first-pairing attempt that
+  names no `storeDir` (staged by 0.42.0; it is left in place), or
   `clear_failed` with the provider or filesystem error as `cause`. A
   `device.json` that cannot be parsed is refused as `clear_failed` before
   anything is deleted; that store needs a re-pair. A credential provider
@@ -707,7 +765,37 @@ await clearDeviceEnrollment({
   store with no enrollment clears successfully.
 - It clears the OS credential set of the account it runs as. A Windows
   `LocalSystem` service's enrollment is out of an interactive user's reach.
-- Clearing acts on the productId-wide OS credential entry; with more than one store under one productId, do not clear one store while another is pairing or has an unresolved first pairing (#1964).
+- The OS credential entry is shared by every store of one `productId`. A store
+  clears its own staged first pairing, never another store's, and pairs only
+  with a staged attempt it made (#1964, #2033). Under
+  the store's owner lease the clear takes a per-user `productId` lock and holds
+  it from its validation through its deletion. A running daemon's token
+  renewal takes the same lock around validating and persisting the new token,
+  and never across a network request. A pairing is one critical section: it
+  takes the lock, rereads the OS entry, `device.json` and the staged attempt
+  (never a cached record), and holds the lock through its request, persisting
+  the enrollment, and the E2EE member entries, which are also shared per
+  `productId`. Re-pairing a running daemon also shuts it down inside the lock.
+  The pairing holds the lock across its request because the server's device
+  registration has no fencing (#2045 F1). Another store's pairing or renewal
+  therefore lands wholly before or wholly after the clear (#2034, #2030 F2).
+  Lock order is the store owner lease, then the `productId` lock.
+- The request deadline bounds only the network request, and each OS credential
+  command has its own 15 s deadline; nothing bounds the whole time a holder
+  keeps the lock. Each waiter waits up to 30 seconds: a clear that times out
+  fails as `clear_failed` and deletes nothing, a pairing fails as busy, and a
+  renewal fails as busy, not as revocation, and is retried (#2045 F5).
+- A pairing whose request times out releases the lock while the server may
+  still register it. Its outcome is unknown: the staged attempt stays, and
+  pairing again retries with the same key. If another store pairs with
+  `replaceOtherStore` meanwhile, the late registration can still supersede
+  it on the server; only server-side registration fencing closes that gap.
+- A renewal that finds the enrollment gone writes nothing and halts the
+  daemon: `store_not_bound` when another store paired over it,
+  `re_pair_required` when it was cleared.
+- `clearUnattributedAttempt: true` also deletes a first-pairing attempt that
+  names no `storeDir`. Set it only when no other store of this `productId` is
+  pairing.
 - Clear before deleting the data directory. The owner lease recreates
   `storeDir` if it is already gone.
 - `byok-agent unpair --yes --config <file>` runs `Daemon.unpair()`, which also
@@ -813,6 +901,16 @@ size bound. Older clients fail closed while the replacement attempt is pending;
 after promotion, the entry is an ordinary enrollment again. The public credential
 backend API shape is unchanged; injected backends must preserve the same staging
 and renewal semantics.
+
+**Staged first pairing of another store.** A pairing reuses a staged
+first-pairing attempt only when that attempt names this `storeDir` (#2033).
+Otherwise it throws `FirstPairingAttemptRefusedError` and writes nothing:
+`store_not_bound` when another store staged it (that store finishes or clears
+its pairing, or `pair --replace-other-store` discards the attempt and stages a
+fresh key), or `pairing_attempt_unattributed` when it names no store, as one
+staged by 0.42.0 does (when no other store of this `productId` is pairing,
+clear it with `clearDeviceEnrollment({ productId, storeDir,
+clearUnattributedAttempt: true })`, then pair again).
 
 **Provider unreachable on a slow IPv4 network.** Node tries each resolved
 address for 250 ms by default before it moves to the next one. When a device's

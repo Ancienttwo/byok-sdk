@@ -382,6 +382,7 @@ export declare function commitInLedger(ledger: HostLedger, request: CommitReques
 export declare function commitInRows(state: CollaborationState, scope: string, request: CommitRequest<Command>, rows: ApplicationRows, ports: CommandPorts): CommitResult;
 /** One retention call in one ledger transaction. K4 facts come from the same state. */
 export declare function retainInLedger(ledger: HostLedger, input: RetentionInput, limits: RetentionLimits): RetentionResult;
+export declare function wouldDoNeedsMigration(state: CollaborationState): boolean;
 /** The result of `migrateWouldDo`: rows that got their `turnId`, and rows archived because no live Turn owns them. */
 export interface WouldDoMigration {
     backfilled: number;
@@ -1018,6 +1019,14 @@ export declare class BotCollaboration {
      */
     cancelHostIntent(key: string, ...by: PrincipalArg): Promise<HostIntentCancelResult>;
     /**
+     * Cancel selected Host intents atomically without a pass. A submitted intent refuses the whole set; after a successful
+     * call, successors wait for the next pass, or the Host can call `drain()`. Results keep input order and are replayable.
+     */
+    cancelHostIntents(keys: readonly string[], ...by: PrincipalArg): Promise<(HostIntentCancelResult & {
+        result: 'cancelled' | 'already_settled';
+        conclusion: Conclusion;
+    })[]>;
+    /**
      * Owner API (#882): settles as `failed` an open intent whose K4 terminal K8 refuses with `IntentOutcomeError`, so its FIFO
      * moves on. A fresh K4 drain decides that the intent is stuck, so the call also works right after a restart. One transaction
      * settles it and writes the audit row. The settle runs no handler, and the intent records no terminal; the server task
@@ -1188,6 +1197,7 @@ export declare class BotCollaboration {
     close(): Promise<void>;
 }
 // ==== @byok-sdk/bot-collaboration dist/index.d.ts ====
+export { inspectLedger } from './store-compatibility.js';
 export { BotCollaboration } from './host.js';
 export { botCompactVeto } from './compaction.js';
 export type { AgentMessageInput, BotOptions, HostIntentCancelResult, HostIntentHandler, HostIntentMessageHandler, MessageServer } from './host.js';
@@ -1611,6 +1621,12 @@ export interface CollaborationState extends AutonomyState {
      * dream routine, so an older ledger reads none. Never in ContextPack or projections.
      */
     dreams?: DreamState;
+}
+/** A state version this build cannot adopt without a new ledger. */
+export declare class OldCollaborationStateError extends Error {
+    readonly foundVersion: 1 | 2;
+    readonly code: 'collaboration_state_unsupported_old';
+    constructor(foundVersion: 1 | 2, message: string);
 }
 export declare function stateOf(application: Record<string, Json>): CollaborationState;
 // ==== @byok-sdk/bot-collaboration dist/persona.d.ts ====
@@ -3258,12 +3274,20 @@ export declare class DelegationError extends Error {
 /**
  * A refused intent key. `cancelHostIntent` (#1320): `unknown_intent` for a key with no Host intent, or `not_host_intent` for a
  * Bot Turn. `failStuckIntent` (#1405): `unknown_intent` for a key with no K4 intent, `already_settled`, or `not_stuck` for an
- * intent whose terminal K8 did not refuse.
+ * intent whose terminal K8 did not refuse. `cancelHostIntents` (#2003) also refuses `inflight`, and `rejected` lists every
+ * refused key in input order. `key` and `code` name the first refusal.
  */
 export declare class HostIntentError extends Error {
     readonly key: string;
-    readonly code: 'unknown_intent' | 'not_host_intent' | 'already_settled' | 'not_stuck';
-    constructor(key: string, code: 'unknown_intent' | 'not_host_intent' | 'already_settled' | 'not_stuck', message: string);
+    readonly code: 'unknown_intent' | 'not_host_intent' | 'already_settled' | 'not_stuck' | 'inflight';
+    readonly rejected: readonly {
+        key: string;
+        code: HostIntentError['code'];
+    }[];
+    constructor(key: string, code: 'unknown_intent' | 'not_host_intent' | 'already_settled' | 'not_stuck' | 'inflight', message: string, rejected?: readonly {
+        key: string;
+        code: HostIntentError['code'];
+    }[]);
 }
 /**
  * `cancelled`: the intent was not submitted and settled as `cancelled`. `cancel_pending`: the SDK cancel went out, and K4
@@ -4499,6 +4523,10 @@ export declare function contextPack<T extends object = Record<never, never>>(sta
     routines: BotRoutine[];
     history: import("@byok-sdk/protocol").HandoffPack;
 };
+// ==== @byok-sdk/bot-collaboration dist/store-compatibility.d.ts ====
+import type { StoreCompatibility } from '@byok-sdk/core';
+/** Inspect a stopped L ledger on a private copy, including its WAL or rollback journal. */
+export declare function inspectLedger(path: string, tenant: string): StoreCompatibility;
 // ==== @byok-sdk/bot-collaboration dist/switch.d.ts ====
 import { type HostLedger, type LedgerDump } from '@byok-sdk/server/execution-core';
 import { type CollaborationState } from './model.js';

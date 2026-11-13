@@ -42,6 +42,10 @@ export class ByokKeysError extends Error {
  * `PROVIDER_CONFIGURATION_PENDING`, `PROVIDER_CUSTODY_STATE_INVALID`,
  * `PROVIDER_SECRET_STORE_FAILED`) and `DEVICE_SEALING_KEY_INVALID` belong to
  * sealed provider provisioning and likewise have no source counterpart.
+ * `KEYCHAIN_SECRET_CORRUPTED` narrows the decode failure to an entry that
+ * carries this store's storage prefix (one the SDK wrote) but whose payload
+ * does not decode; `KEYCHAIN_SECRET_DECODE_FAILED` remains the code for a
+ * value without the prefix, which the SDK did not write.
  * Everything else matches the source string for string.
  *
  * `SECRET_NAMESPACE_INVALID` is a separate case. The source does record it:
@@ -64,6 +68,7 @@ export const BYOK_KEYS_ERROR_CODES = {
   KEYCHAIN_ARGUMENT_INVALID: 'KEYCHAIN_ARGUMENT_INVALID',
   KEYCHAIN_DELETE_FAILED: 'KEYCHAIN_DELETE_FAILED',
   KEYCHAIN_READ_FAILED: 'KEYCHAIN_READ_FAILED',
+  KEYCHAIN_SECRET_CORRUPTED: 'KEYCHAIN_SECRET_CORRUPTED',
   KEYCHAIN_SECRET_DECODE_FAILED: 'KEYCHAIN_SECRET_DECODE_FAILED',
   KEYCHAIN_SECRET_INVALID: 'KEYCHAIN_SECRET_INVALID',
   KEYCHAIN_UNAVAILABLE: 'KEYCHAIN_UNAVAILABLE',

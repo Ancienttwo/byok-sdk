@@ -15,22 +15,22 @@ import {
 } from './util/path-mutation-gate.js';
 
 export class LocalStateRelocationError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'LocalStateRelocationError';
   }
 }
 
 export class LocalStateRelocationBusyError extends LocalStateRelocationError {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'LocalStateRelocationBusyError';
   }
 }
 
 export class LocalStateRelocationIntegrityError extends LocalStateRelocationError {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'LocalStateRelocationIntegrityError';
   }
 }
@@ -141,7 +141,7 @@ async function assertAgentHomeRootQuiescent(hostStorageRoot: string): Promise<vo
   }
 }
 
-async function releaseAll(gates: readonly PathMutationGate[]): Promise<void> {
+async function releaseFailures(gates: readonly PathMutationGate[]): Promise<unknown[]> {
   const failures: unknown[] = [];
   for (const gate of [...gates].reverse()) {
     try {
@@ -150,17 +150,24 @@ async function releaseAll(gates: readonly PathMutationGate[]): Promise<void> {
       failures.push(error);
     }
   }
+  return failures;
+}
+
+async function releaseAll(gates: readonly PathMutationGate[]): Promise<void> {
+  const failures = await releaseFailures(gates);
   if (failures.length === 1) throw failures[0];
   if (failures.length > 1) throw new AggregateError(failures, 'failed to release every local-state relocation gate');
 }
 
 function mapRelocationError(error: unknown): never {
   if (error instanceof LocalStateRelocationError) throw error;
+  // The cause keeps release failures a partial gate acquisition joined to the error (#2002).
   if (error instanceof PathMutationGateBusyError || error instanceof DaemonOwnerActiveError) {
-    throw new LocalStateRelocationBusyError(error.message);
+    throw new LocalStateRelocationBusyError(error.message, { cause: error });
   }
   throw new LocalStateRelocationIntegrityError(
     `local-state relocation preflight failed: ${error instanceof Error ? error.message : String(error)}`,
+    { cause: error },
   );
 }
 
@@ -240,14 +247,12 @@ async function acquire(input: LocalStateRelocationInput): Promise<LocalStateRelo
     await assertAgentHomeRootQuiescent(canonical.sourceHostStorageRoot);
     await assertAgentHomeRootQuiescent(canonical.destinationHostStorageRoot);
   } catch (error) {
-    if (gates !== undefined) {
-      try {
-        await releaseAll(gates);
-      } catch (releaseError) {
-        throw new LocalStateRelocationIntegrityError(
-          `local-state relocation refusal also failed to release every gate: ${releaseError instanceof Error ? releaseError.message : String(releaseError)}`,
-        );
-      }
+    const failures = gates === undefined ? [] : await releaseFailures(gates);
+    if (failures.length > 0) {
+      throw new LocalStateRelocationIntegrityError(
+        'local-state relocation refusal also failed to release every gate',
+        { cause: new AggregateError([error, ...failures], 'local-state relocation refusal and its gate release failures') },
+      );
     }
     mapRelocationError(error);
   }

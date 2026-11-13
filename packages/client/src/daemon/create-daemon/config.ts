@@ -230,7 +230,7 @@ export function hostJournal(journal: LocalTaskJournal): LocalTaskJournal {
     markRecovered: (taskId, outcome) => journal.markRecovered(taskId, outcome),
     measureUsage: () => journal.measureUsage(),
     listPrunableConfirmedTasks: (cutoff, limit) => journal.listPrunableConfirmedTasks(cutoff, limit),
-    pruneConfirmedJournalTask: (taskId) => journal.pruneConfirmedJournalTask(taskId),
+    pruneConfirmedJournalTask: (taskId, cutoff) => journal.pruneConfirmedJournalTask(taskId, cutoff),
     compact: (options) => journal.compact(options),
     close: () => journal.close(),
   };

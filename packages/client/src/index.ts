@@ -146,6 +146,7 @@ export {
   DaemonJournalProtocolUnsupportedError,
   DeviceStoreBindingMismatchError,
   EmbeddedPairingError,
+  FirstPairingAttemptRefusedError,
   HostLayoutInputError,
   type DaemonJournalProtocolRecord,
 } from './daemon/daemon-errors.js';

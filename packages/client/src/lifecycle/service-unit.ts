@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate.js';
+import { acquirePathMutationGate, PathMutationGateBusyError, withGateReleaseFailures } from '../util/path-mutation-gate.js';
 import type { ServiceProgram } from './service-types.js';
 
 /**
@@ -52,8 +52,8 @@ export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
 
 /** Closed codes only; the message never carries a path or OS text. */
 export class ServiceUnitError extends Error {
-  constructor(readonly code: ServiceUnitErrorCode) {
-    super(ERROR_MESSAGES[code]);
+  constructor(readonly code: ServiceUnitErrorCode, options?: ErrorOptions) {
+    super(ERROR_MESSAGES[code], options);
     this.name = 'ServiceUnitError';
   }
 }
@@ -240,11 +240,20 @@ export async function withServiceOwnerGate<T>(operation: () => Promise<T>, gateR
     if (error instanceof PathMutationGateBusyError) throw new ServiceUnitError('lifecycle_owner_busy');
     throw error;
   }
+  let result: T;
   try {
-    return await operation();
-  } finally {
-    await gate.release();
+    result = await operation();
+  } catch (error) {
+    const failures: unknown[] = [];
+    await gate.release().catch((releaseError: unknown) => { failures.push(releaseError); });
+    // A ServiceUnitError keeps its class and code, as a busy gate error does (#2002).
+    if (failures.length > 0 && error instanceof ServiceUnitError) {
+      throw new ServiceUnitError(error.code, { cause: new AggregateError([error, ...failures], `${error.message}; releasing the service-lifecycle gate failed too`) });
+    }
+    throw withGateReleaseFailures(error, failures);
   }
+  await gate.release();
+  return result;
 }
 
 /**

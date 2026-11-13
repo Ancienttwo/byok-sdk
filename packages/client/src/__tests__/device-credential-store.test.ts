@@ -142,7 +142,7 @@ describe('DeviceCredentialStore', () => {
 describe('replacement pairing credential authority', () => {
   const attempt: FirstPairingAttempt = {
     kind: 'first-pairing-attempt-v1', deviceName: 'replacement', devicePublicKey: 'replacement-public-key',
-    devicePrivateKeyPem: 'replacement-private-key', machineId: 'replacement-machine',
+    devicePrivateKeyPem: 'replacement-private-key', machineId: 'replacement-machine', storeIdentity: 'a'.repeat(64),
   };
   const encoded = (value: unknown): string => `byok-device-credential-v1:${Buffer.from(JSON.stringify(value), 'utf8').toString('base64')}`;
 

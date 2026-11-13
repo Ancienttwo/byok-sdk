@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -9,6 +9,7 @@ import { botCompactVeto } from './compaction';
 import { RetentionRefused } from './retention';
 import { migrateWouldDo, retainInLedger } from './commit';
 import { stateOf } from './model';
+import { inspectLedger } from './index';
 
 // #798: the Host retention API on a real K4 ledger.
 const base = baseTemplate('device');
@@ -107,7 +108,7 @@ it('L: refuses a Turn that still has its K4 intent and is not reported, and a ro
 
 it('L: migrateWouldDo gives each row the Turn of its task id over every generation, and archives and counts a row with no live Turn (#1756)', () => {
   const root = mkdtempSync(join(tmpdir(), 'k8-would-do-')); roots.push(root);
-  const ledger = new HostLedger(join(root, 'host.sqlite'), 'tenant'); closers.push(() => ledger.close());
+  const ledger = new HostLedger(join(root, 'host.sqlite'), 'tenant', { compactVeto: botCompactVeto }); closers.push(() => ledger.close());
   const row = (id: string, task: string) => ({ id, botId: 'main', taskId: task, action: 'delegate', index: 0, at: 0, detail: null });
   ledger.transaction(s => {
     const state = stateOf(s.application);
@@ -115,8 +116,45 @@ it('L: migrateWouldDo gives each row the Turn of its task id over every generati
     (s.intents as Record<string, unknown>)[hash('a')] = { id: hash('a'), key: 'a', generation: 1 };
     state.wouldDo = { w0: row('w0', taskId('a', 0)), w1: row('w1', taskId('a', 1)), gone: row('gone', taskId('b', 0)) } as never;
   });
+  const file = join(root, 'host.sqlite');
+  const files = () => Object.fromEntries(readdirSync(root).sort().map(name => [name, readFileSync(join(root, name)).toString('hex')]));
+  const before = files();
+  expect(inspectLedger(file, 'tenant')).toMatchObject({ verdict: 'migration-required', reason: expect.stringContaining('turnId') });
+  expect(files()).toEqual(before);
+  expect(inspectLedger(join(root, 'missing'), 'tenant').verdict).toBe('absent');
   expect(migrateWouldDo(ledger)).toEqual({ backfilled: 2, archived: 1 });
+  expect(inspectLedger(file, 'tenant').verdict).toBe('accepted');
   expect(Object.values(stateOf(ledger.snapshot().application).wouldDo ?? {}).map(r => [r.id, r.turnId])).toEqual([['w0', 'a'], ['w1', 'a']]);
   expect(ledger.transaction((_, rows) => rows.get('wouldDo', 'gone'))).toEqual(row('gone', taskId('b', 0)));
   expect(migrateWouldDo(ledger)).toEqual({ backfilled: 0, archived: 0 });
+  ledger.transaction(s => {
+    const state = stateOf(s.application); s.intents = {};
+    state.wouldDo!.legacy = row('legacy', taskId('gone', 0)) as never;
+    state.switchExport = { digest: 'export', exportedAt: 1, devices: [{ deviceId: 'device', frozenRevision: 1 }] };
+  });
+  const open = () => new BotCollaboration(server, ledger, { botId: 'main', execution: template, dreaming: false, connector: async () => ({}) });
+  const exported = open(); closers.push(() => exported.close());
+  expect(inspectLedger(file, 'tenant')).toMatchObject({ verdict: 'accepted', reason: expect.stringContaining('aborted') });
+  ledger.transaction(s => { stateOf(s.application).switchExport!.devices = []; });
+  expect(open).toThrow('Invalid switch export record');
+  expect(inspectLedger(file, 'tenant')).toMatchObject({ verdict: 'rejected', reason: 'Invalid switch export record' });
+  ledger.transaction(s => { const state = stateOf(s.application); delete state.switchExport; state.topology = { device: { mode: 'L', revision: 0 } }; });
+  expect(open).toThrow('Invalid topology record');
+  expect(inspectLedger(file, 'tenant')).toMatchObject({ verdict: 'rejected', reason: expect.stringContaining('Invalid topology record') });
+  ledger.transaction(s => { const state = stateOf(s.application); delete state.topology; state.switchImport = { digest: 'pending', devices: ['device'] }; });
+  expect(open).toThrow('switch import');
+  expect(inspectLedger(file, 'tenant')).toMatchObject({ verdict: 'rejected', code: 'switch_imported' });
+  ledger.transaction(s => { delete stateOf(s.application).switchImport; });
+  for (const version of [1, 2, 999]) {
+    ledger.transaction(s => { (s.application.collaboration as { version: number }).version = version; });
+    const unsupported = files();
+    expect(inspectLedger(file, 'tenant')).toMatchObject(version < 3
+      ? { verdict: 'new-path-repair', code: 'collaboration_state_unsupported_old', reason: expect.stringContaining(`version ${version}`) }
+      : { verdict: 'rejected' });
+    expect(files()).toEqual(unsupported);
+  }
+  ledger.transaction(s => { s.version = 999 as 1; });
+  expect(inspectLedger(file, 'tenant').verdict).toBe('rejected');
+  const damaged = join(root, 'damaged.sqlite'); writeFileSync(damaged, 'not sqlite');
+  expect(inspectLedger(damaged, 'tenant').verdict).toBe('rejected');
 });
