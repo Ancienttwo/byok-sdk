@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2740507,
+      "budgetBytes": 2742555,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -49,6 +49,7 @@
         "node:url",
         "node:util",
         "node:zlib",
+        "os",
         "path",
         "zod"
       ],
@@ -93,6 +94,7 @@
           "node:url",
           "node:util",
           "node:zlib",
+          "os",
           "path"
         ],
         "thirdParty": [

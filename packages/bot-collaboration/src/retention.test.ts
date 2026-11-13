@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -9,6 +9,7 @@ import { botCompactVeto } from './compaction';
 import { RetentionRefused } from './retention';
 import { migrateWouldDo, retainInLedger } from './commit';
 import { stateOf } from './model';
+import { inspectLedger } from './index';
 
 // #798: the Host retention API on a real K4 ledger.
 const base = baseTemplate('device');
@@ -115,8 +116,25 @@ it('L: migrateWouldDo gives each row the Turn of its task id over every generati
     (s.intents as Record<string, unknown>)[hash('a')] = { id: hash('a'), key: 'a', generation: 1 };
     state.wouldDo = { w0: row('w0', taskId('a', 0)), w1: row('w1', taskId('a', 1)), gone: row('gone', taskId('b', 0)) } as never;
   });
+  const file = join(root, 'host.sqlite');
+  const files = () => Object.fromEntries(readdirSync(root).sort().map(name => [name, readFileSync(join(root, name)).toString('hex')]));
+  const before = files();
+  expect(inspectLedger(file, 'tenant')).toMatchObject({ verdict: 'migration-required', reason: expect.stringContaining('turnId') });
+  expect(files()).toEqual(before);
+  expect(inspectLedger(join(root, 'missing'), 'tenant').verdict).toBe('absent');
   expect(migrateWouldDo(ledger)).toEqual({ backfilled: 2, archived: 1 });
+  expect(inspectLedger(file, 'tenant').verdict).toBe('accepted');
   expect(Object.values(stateOf(ledger.snapshot().application).wouldDo ?? {}).map(r => [r.id, r.turnId])).toEqual([['w0', 'a'], ['w1', 'a']]);
   expect(ledger.transaction((_, rows) => rows.get('wouldDo', 'gone'))).toEqual(row('gone', taskId('b', 0)));
   expect(migrateWouldDo(ledger)).toEqual({ backfilled: 0, archived: 0 });
+  for (const version of [2, 999]) {
+    ledger.transaction(s => { (s.application.collaboration as { version: number }).version = version; });
+    const unsupported = files();
+    expect(inspectLedger(file, 'tenant').verdict).toBe('rejected');
+    expect(files()).toEqual(unsupported);
+  }
+  ledger.transaction(s => { s.version = 999 as 1; });
+  expect(inspectLedger(file, 'tenant').verdict).toBe('rejected');
+  const damaged = join(root, 'damaged.sqlite'); writeFileSync(damaged, 'not sqlite');
+  expect(inspectLedger(damaged, 'tenant').verdict).toBe('rejected');
 });

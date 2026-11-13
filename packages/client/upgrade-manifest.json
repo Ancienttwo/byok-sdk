@@ -16,6 +16,17 @@
   },
   "entries": [
     {
+      "id": "bot-collaboration-ledger-precheck",
+      "impact": "additive",
+      "summary": "The local bot-collaboration entry exports inspectLedger(path, tenant), a read-only precheck returning StoreCompatibility. It reports migration-required for would-do rows without turnId; run migrateWouldDo after snapshot and before serving. LocalStoreId gains bot-collaboration-ledger.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1981",
+      "items": [
+        "export:@byok-sdk/bot-collaboration#inspectLedger",
+        "export:@byok-sdk/core#LocalStoreId",
+        "store:bot-collaboration-ledger"
+      ]
+    },
+    {
       "id": "bot-turn-instruction-host-kit",
       "impact": "additive",
       "summary": "Host adapters can compute the instruction frozen by K8 sync with botTurnInstruction on the host-kit entry, using an options object and InstructionLimits.",

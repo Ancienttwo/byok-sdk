@@ -1188,6 +1188,7 @@ export declare class BotCollaboration {
     close(): Promise<void>;
 }
 // ==== @byok-sdk/bot-collaboration dist/index.d.ts ====
+export { inspectLedger } from './store-compatibility.js';
 export { BotCollaboration } from './host.js';
 export { botCompactVeto } from './compaction.js';
 export type { AgentMessageInput, BotOptions, HostIntentCancelResult, HostIntentHandler, HostIntentMessageHandler, MessageServer } from './host.js';
@@ -4499,6 +4500,10 @@ export declare function contextPack<T extends object = Record<never, never>>(sta
     routines: BotRoutine[];
     history: import("@byok-sdk/protocol").HandoffPack;
 };
+// ==== @byok-sdk/bot-collaboration dist/store-compatibility.d.ts ====
+import type { StoreCompatibility } from '@byok-sdk/core';
+/** Inspect a stopped L ledger on a private copy, including its WAL or rollback journal. */
+export declare function inspectLedger(path: string, tenant: string): StoreCompatibility;
 // ==== @byok-sdk/bot-collaboration dist/switch.d.ts ====
 import { type HostLedger, type LedgerDump } from '@byok-sdk/server/execution-core';
 import { type CollaborationState } from './model.js';

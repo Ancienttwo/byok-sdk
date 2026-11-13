@@ -3399,7 +3399,7 @@ export interface SkillPackStore {
  * (`docs/upgrade-manifest.md`). The hosted Postgres store is checked by
  * `release-pack-migrate`, not here.
  */
-export type LocalStoreId = 'server-sqlite' | 'client-journal' | 'keys-profile-store' | 'pi-durable';
+export type LocalStoreId = 'server-sqlite' | 'client-journal' | 'keys-profile-store' | 'pi-durable' | 'bot-collaboration-ledger';
 /**
  * What the build that ran the check does when it opens the store:
  *
