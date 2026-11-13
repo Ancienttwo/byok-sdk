@@ -13,7 +13,7 @@ import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
 import { resolveRuntimeInvocation, runtimeInvocationHost } from '../runtime-invocation.js';
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
-import { haltGate, raceDeadline, RetainedRecordBudget, RetryableOnce } from '../session-kit.js';
+import { haltGate, oarCancelSettled, raceDeadline, RetainedRecordBudget, RetryableOnce } from '../session-kit.js';
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 import { agentPersona } from '../agent-persona.js';
 import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
@@ -301,8 +301,8 @@ class OpenCodeSession implements Session {
     this.cancelled = true;
     this.child?.observeDescendants();
     try {
-      await raceDeadline((async () => { await this.raw?.abort(); await this.runner; })(), this.interruptTimeoutMs,
-        () => infrastructure('opencode interrupt timed out'));
+      const settled = this.raw ? oarCancelSettled(this.raw.abort(), this.runner ?? Promise.resolve(), 'opencode') : Promise.resolve();
+      await raceDeadline(settled, this.interruptTimeoutMs, () => infrastructure('opencode interrupt timed out'));
     } catch (error) { this.halt(error); await this.close(); throw error; }
   }
   async close(): Promise<void> {
