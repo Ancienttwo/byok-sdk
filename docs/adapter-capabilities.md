@@ -53,7 +53,7 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 ## Pi background subagents in packaged products (#1589)
 
 Bun-compiled executables with shipped install-root assets support native
-background subagents and workflows through embedded Pi and pi-subagents 0.87.0.
+background subagents and workflows through embedded Pi and pi-subagents 0.88.1.
 The real executable's directory is the code anchor and has the binary's
 filesystem trust. Symlinks are rejected; each process's dev/ino pins detect
 in-process swaps before loading. They do not authenticate the runner against
@@ -68,7 +68,7 @@ reason when reserved runner re-entry rejects it before loading code. Present
 but invalid assets remain fatal; no other background root is selected.
 
 Node SEA retains foreground subagents and explicitly refuses background
-subagents and workflows: pi-subagents 0.87.0 resolves its runner through Node
+subagents and workflows: pi-subagents 0.88.1 resolves its runner through Node
 and forks its supervisor on `process.execPath`; a SEA product cannot stand in
 for Node. No executable alias or hardlink is created, so EXDEV/EPERM cannot
 affect foreground startup. Node/Bun interpreter + bundle products also retain
