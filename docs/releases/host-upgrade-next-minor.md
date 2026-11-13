@@ -8,8 +8,8 @@ No configuration change is needed. Every SDK Pi RPC session now caps its setting
 
 ## Retained records elide past the limit (#1932)
 
-The Codex, Grok, Antigravity, OpenCode and dsh adapters no longer fail a task with `<runtime> retained record byte budget exceeded`. Past `maxRetainedBytes` (default 16 MiB) they elide the oldest native payloads in place and the task keeps running, as Claude already did. The limit also covers the native payload of a runtime request and its reply. `ClaudeAdapterOptions` gains `maxRetainedBytes` with the same validation and default.
+`maxRetainedBytes` (default 16 MiB) is now a memory limit on retained records and no longer fails a task. Past it the Codex, Grok, Antigravity, OpenCode and dsh adapters elide the oldest native payloads in place and the task keeps running, as Claude already did, so `<runtime> retained record byte budget exceeded` no longer occurs. The limit also covers the native payload of a runtime request and its reply. `ClaudeAdapterOptions` gains `maxRetainedBytes` with the same validation and default.
 
-- A Host that relied on that failure to stop a runaway task watches the records that carry `elided: true` and bounds the task with `maxDurationMs`.
+- A Host that needs to bound how long a task runs sets `maxDurationMs`: the offer's `limits.maxDurationMs`, or `DaemonConfig.defaultMaxDurationMs`.
 - A Host that matched the failure message drops that match; it no longer occurs.
 - A Host that passes no `maxRetainedBytes` needs no change.

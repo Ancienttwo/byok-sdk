@@ -18,7 +18,7 @@
     {
       "id": "retained-records-one-policy",
       "impact": "breaking",
-      "summary": "Past maxRetainedBytes (default 16 MiB) the Codex, Grok, Antigravity, OpenCode and dsh adapters elide the oldest native payloads in place (elided: true) and the task keeps running, as Claude already did; the failure '<runtime> retained record byte budget exceeded' no longer occurs. The limit also covers runtime request and reply native payloads. ClaudeAdapterOptions gains maxRetainedBytes. A Host that relied on the failure to stop a task watches elided records and bounds the task with maxDurationMs.",
+      "summary": "maxRetainedBytes (default 16 MiB) is now a memory limit on retained records and no longer fails a task: past it the Codex, Grok, Antigravity, OpenCode and dsh adapters elide the oldest native payloads in place and the task keeps running, as Claude already did, so the failure '<runtime> retained record byte budget exceeded' no longer occurs. The limit also covers runtime request and reply native payloads. ClaudeAdapterOptions gains maxRetainedBytes. A Host that needs to bound how long a task runs sets maxDurationMs: the offer's limits.maxDurationMs, or DaemonConfig.defaultMaxDurationMs.",
       "migration": "docs/releases/host-upgrade-next-minor.md#retained-records-elide-past-the-limit-1932",
       "items": [
         "export:@byok-sdk/client#ClaudeAdapter",

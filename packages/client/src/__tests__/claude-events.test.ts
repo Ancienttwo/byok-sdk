@@ -600,6 +600,10 @@ describe('Claude context window reserved for S4', () => {
     expect(fold(toolUse('nested', 'root-7'))).toEqual(['root-7']);
     expect([...state.agents]).toEqual([['nested', ['root-7']]]);
     expect(fold({ type: 'assistant', parent_tool_use_id: 'nested', message: { id: 'm-x', role: 'assistant', content: [{ type: 'text', text: 'deep' }] } })).toEqual(['root-7', 'nested']);
+    // A root tool use that reuses the id drops the old ancestors.
+    fold(toolUse('nested', null));
+    expect(state.agents.size).toBe(0);
+    expect(fold({ type: 'assistant', parent_tool_use_id: 'nested', message: { id: 'm-y', role: 'assistant', content: [{ type: 'text', text: 'again' }] } })).toEqual(['nested']);
   });
   it('traverses values and leaves inconsistent or invalid windows unknown', () => {
     expect(

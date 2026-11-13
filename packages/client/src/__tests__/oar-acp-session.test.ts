@@ -14,6 +14,7 @@ import { createAcpTurns } from '../../vendor/oar/95c6547/shared/acp/turns';
 import { createUsageUpdateGate } from '../../vendor/oar/95c6547/shared/acp/profile';
 import type { AcpProcess } from '../../vendor/oar/95c6547/shared/acp/process';
 import { createSessionKernel } from '../../vendor/oar/95c6547/shared/session-kernel';
+import { recordRetention } from '../../vendor/oar/95c6547/shared/record-retention';
 import { antigravityAcpProfile } from '../../vendor/oar/95c6547/runtimes/antigravity/session';
 
 const FAKE = path.join(import.meta.dirname, 'fixtures/fake-acp-agent.mjs');
@@ -269,6 +270,16 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     const reply = retained.find(record => record.kind === 'response' && record.requestId === live_.id)!;
     expect(request.body).toMatchObject({ kind: 'native', native: null, elided: true });
     expect(reply.body).toMatchObject({ kind: 'answered', native: null, elided: true });
+  });
+  // Native payloads of 100 B (`"…"` is 98 characters plus quotes) against a 150 B limit.
+  const reply = (seq: number) => ({ kind: 'response', seq, requestId: `r${seq}`, body: { kind: 'answered', native: 'x'.repeat(98) } }) as unknown as RawEvent;
+  const retain = (log: RawEvent[]) => { recordRetention(150)(log, log.length); return log.map(record => (record.body as { elided?: true }).elided === true); };
+  it('elides consecutive large replies in a log with no frame (#1932)', () => {
+    expect(retain([reply(0), reply(1), reply(2)])).toEqual([true, true, false]);
+  });
+  it('elides consecutive large replies after the last frame and keeps that frame (#1932)', () => {
+    const frame = { kind: 'frame', seq: 0, body: { type: 'x', native: {}, events: [] } } as unknown as RawEvent;
+    expect(retain([frame, reply(1), reply(2), reply(3)])).toEqual([false, true, true, false]);
   });
   it('reaps a hosted terminal tree when the session is disposed mid-turn', async () => {
     const { dir, log } = workspace();

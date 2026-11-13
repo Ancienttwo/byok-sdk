@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.103.0",
-    "commit": "02b65ff565a4af9a43cd4369670a13fe74d1c7ed"
+    "commit": "e5a96e7cd5532c495307fd346a5a1f741257c000"
   },
   "release": {
     "ecosystem": "npm",
@@ -803,8 +803,8 @@
       "path": "shared/record-retention.ts",
       "sourcePath": "packages/oar/src/shared/record-retention.ts",
       "upstreamSha256": "e9e09d26dfdf38f226c033696a616a7562d37fe4c32601422f22068f39b0e432",
-      "vendoredSha256": "d5e7f28f062380862c866e06c9a505f20f0138240ee568c939ebb50c86a81f8b",
-      "delta": "The retention limit bounds every native payload the kernel retains: a toApp request's native, and the native of an accepted, rejected or answered response, are measured as UTF-8 JSON bytes beside frame payloads, and elision sets that native to null with elided: true, oldest first, in the same pass. The guard that keeps the newest frame is unchanged."
+      "vendoredSha256": "533e7fbb018486cde541733996c0397e52a539322b7d889eed123a35a230e58d",
+      "delta": "The retention limit bounds every native payload the kernel retains: a toApp request's native, and the native of an accepted, rejected or answered response, are measured as UTF-8 JSON bytes beside frame payloads, and elision sets that native to null with elided: true, oldest first, in the same pass. The elide pass walks every measured record not yet elided and skips only the newest frame, so requests and replies after it, or in a log with no frame, are elided too."
     },
     {
       "path": "shared/redact-text.ts",
@@ -865,8 +865,8 @@
       "path": "shared/stream-json/projection.ts",
       "sourcePath": "packages/oar/src/shared/stream-json/projection.ts",
       "upstreamSha256": "100b9a2e895cb72b0b45a71c8dc9d9ff3d028c2fd6beed8d1cba745fdd50b9f2",
-      "vendoredSha256": "889a8749579df587b335f8de1fe24cafc23e140a0748f425ffafda7578e7e230",
-      "delta": "Attribution bookkeeping: rememberToolUses stores only tool uses made inside an agent. A root tool use adds no state.agents entry and copies no map; attributionOf gives a frame naming it the same path as before, because an empty-path entry and no entry read alike. Entries for tool uses inside an agent stay for the session, since a background agent can report after its tool's result."
+      "vendoredSha256": "f70a306f81a3b302b302d3db49e45f2bddc7139804c9017551cdaa5cf6180368",
+      "delta": "Attribution bookkeeping: rememberToolUses stores only tool uses made inside an agent. A root tool use adds no state.agents entry and copies no map; attributionOf gives a frame naming it the same path as before, because an empty-path entry and no entry read alike. Entries for tool uses inside an agent stay for the session, since a background agent can report after its tool's result. A root tool use whose id is already remembered removes that entry, so it is not attributed to the old ancestors."
     },
     {
       "path": "shared/stream-json/session.ts",

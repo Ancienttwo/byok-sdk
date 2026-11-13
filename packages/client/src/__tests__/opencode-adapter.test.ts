@@ -337,6 +337,45 @@ it('normalizes startup failures to start while retaining native classification',
   }
 });
 
+it('retries a halt whose cleanup failed before signalling without retaining its rejected exit receipt', async () => {
+  // The agent exits during the opening while its tree cleanup fails, so its exit receipt rejects and halts the session.
+  const box = setup('1.18.35', { FAKE_ACP_INITIALIZE: 'exit' });
+  const scratch = await testExecutionScratch();
+  const release = vi.fn(() => scratch.release());
+  const real = processTree.disposeOwnedProcessTree;
+  let blocked = true;
+  let owned: Parameters<typeof real>[0] | undefined;
+  const spy = vi.spyOn(processTree, 'disposeOwnedProcessTree').mockImplementation(async options => {
+    if (options.label === 'opencode acp') {
+      owned = options;
+      if (blocked) throw new RuntimeDisposalFailure({ stage: 'signal', reason: 'injected signal failure' });
+    }
+    return real(options);
+  });
+  let error: unknown;
+  const opening = startPreparedOperation(box.adapter, { instruction: 'hello' }, { workspaceDir: box.cwd, env: box.env, scratch: { ...scratch, release } })
+    .catch(value => { error = value; });
+  try {
+    await vi.waitFor(() => expect(error).toBeInstanceOf(RuntimeStartupDisposalFailure), { timeout: 1000 });
+    expect((error as RuntimeStartupDisposalFailure).cause).toMatchObject({ stage: 'signal' });
+    expect(release).not.toHaveBeenCalled();
+    // External recovery closes the root while the transport's own cleanup still fails.
+    await real(owned!);
+    blocked = false;
+    await (error as RuntimeStartupDisposalFailure).retryDisposal();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(box.facts().some(fact => fact.kind === 'close')).toBe(false);
+    expect(() => process.kill(owned!.child.pid!, 0)).toThrow();
+  } finally {
+    blocked = false;
+    spy.mockRestore();
+    if (owned) await real(owned);
+    await opening;
+    if (error instanceof RuntimeStartupDisposalFailure) await error.retryDisposal().catch(() => {});
+    await scratch.release();
+  }
+});
+
 it('retries failed v1 prompt cleanup and shares concurrent and successful disposal', async () => {
   const box = setup();
   const owned = createOwnedTerminalSpawn();
