@@ -20,8 +20,8 @@ export function catalogEntryFor(profile: ModelProviderProfile, base: ExecutionTe
 }
 
 /**
- * The Host's read-only view of the keys store. The catalog rebuilds on exactly
- * two triggers: `load()` at Host start and `changed()` after a custody receipt.
+ * The Host's read-only view of the keys store. The catalog builds from `load()`
+ * at Host start and rebuilds through `changed()` after custody receipts and lists.
  */
 export class ProviderProfiles {
   readonly #keysDb: string;
@@ -52,7 +52,7 @@ export class ProviderProfiles {
     return () => this.#listeners.delete(listener);
   }
 
-  /** A custody receipt arrived: reread the store and hand every listener the new profiles; a listener's failure rejects. */
+  /** Rereads the store and hands every listener the current profiles; a listener's failure rejects. Safe without a change. */
   async changed(): Promise<void> {
     const profiles = await this.load();
     for (const listener of this.#listeners) await listener(profiles);

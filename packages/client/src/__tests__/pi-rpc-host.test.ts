@@ -237,6 +237,66 @@ describe('SDK ordinary Pi RPC entry', () => {
     }
   }, 30_000);
 
+  it.each(['default', 'idle', 'streaming', 'off', 'excluded'] as const)('cancels a cache-warming decision held across settlement with mode %s (#1949)', async (mode) => {
+    const f = fixture(), agent = f.env.PI_CODING_AGENT_DIR;
+    mkdirSync(agent);
+    const settings = join(agent, 'settings.json'), before = JSON.stringify(mode === 'default' ? {} : { cacheWarming: mode === 'excluded' ? 'off' : mode });
+    writeFileSync(settings, before);
+    const runHeld = join(f.root, 'run-held'), releaseRun = join(f.root, 'release-run');
+    const decisionHeld = join(f.root, 'decision-held'), releaseDecision = join(f.root, 'release-decision'), decisionFinished = join(f.root, 'decision-finished');
+    writeFileSync(f.entry, `import {existsSync,writeFileSync} from 'node:fs';
+      import {runPiSessionRuntime} from ${JSON.stringify(resolve(import.meta.dirname, '../bin/pi-session-runtime.ts'))};
+      const wait=async path=>{while(!existsSync(path))await new Promise(resolve=>setTimeout(resolve,10));};
+      let session;
+      runPiSessionRuntime({cwd:${JSON.stringify(f.cwd)},credentialSource:'pi-auth-store',provider:'probe',model:'probe',initialModel:'required',label:'warming-race',
+        configureSession:value=>{session=value;},
+        ${mode === 'excluded' ? `resourceAgentDir:${JSON.stringify(join(f.root, 'resources'))},` : ''}
+        resourceLoaderOptions:{noExtensions:true,noSkills:true,noThemes:true,noPromptTemplates:true,
+          extensionFactories:[pi=>{
+            pi.on('agent_before_settle',async()=>{writeFileSync(${JSON.stringify(runHeld)},'held');await wait(${JSON.stringify(releaseRun)});});
+            pi.on('cache_warming_decision',async(_event,ctx)=>{
+              writeFileSync(${JSON.stringify(decisionHeld)},JSON.stringify({idle:ctx.isIdle()}));
+              await wait(${JSON.stringify(releaseDecision)});
+              let observing=false;
+              return {get action(){
+                // The runner consumes action after awaiting this handler. Its microtasks finish before setImmediate.
+                if(!observing){observing=true;setImmediate(async()=>{
+                  while(session.cacheWarmingStatus?.state==='refreshing')await new Promise(resolve=>setTimeout(resolve,10));
+                  writeFileSync(${JSON.stringify(decisionFinished)},JSON.stringify(session.cacheWarmingStatus));
+                });}
+                return 'warm';
+              }};});
+          }],
+          // Put the SDK's old idle hook before the held decision, exposing its stale active answer.
+          extensionsOverride:base=>({...base,extensions:[...base.extensions].reverse()})},
+        reject:message=>{throw new Error(message);}}).catch(error=>{console.error(String(error));process.exit(1);});`);
+    const provider = await startLoopbackProvider('openai-chat', () => ({ kind: 'text', chunks: ['done'] }));
+    writeFileSync(join(agent, 'models.json'), JSON.stringify({ providers: { probe: { api: 'openai-completions', baseUrl: provider.baseUrl,
+      apiKey: 'synthetic', models: [{ id: 'probe', name: 'probe', contextWindow: 8192, maxTokens: 32, input: ['text'], reasoning: false, promptCache: { short: 13 } }] } } }));
+    let settled = false;
+    const client = new PiRpcClient({ command: bun, cwd: f.sealed, env: f.env, args: [f.entry],
+      onFrame: frame => { if (frame.type === 'agent_settled') settled = true; } });
+    try {
+      expect((await client.send({ type: 'prompt', message: 'Hold the run across the cache-warming decision.' })).success).toBe(true);
+      await expect.poll(() => existsSync(runHeld), { timeout: 5_000 }).toBe(true);
+      if (mode !== 'off') {
+        await expect.poll(() => existsSync(decisionHeld), { timeout: 6_000 }).toBe(true);
+        expect(JSON.parse(readFileSync(decisionHeld, 'utf8'))).toEqual({ idle: false });
+      }
+      writeFileSync(releaseRun, 'release');
+      await expect.poll(() => settled, { timeout: 5_000 }).toBe(true);
+      writeFileSync(releaseDecision, 'release');
+      if (mode !== 'off') await expect.poll(() => existsSync(decisionFinished), { timeout: 5_000 }).toBe(true);
+      expect(provider.requests).toHaveLength(1);
+      if (mode !== 'off') expect(JSON.parse(readFileSync(decisionFinished, 'utf8'))).toMatchObject({ state: 'inactive', reason: 'agent run settled' });
+      expect(existsSync(decisionHeld)).toBe(mode !== 'off');
+      expect(readFileSync(settings, 'utf8')).toBe(before);
+    } finally {
+      writeFileSync(releaseRun, 'release'); writeFileSync(releaseDecision, 'release');
+      await client.dispose(); await provider.close();
+    }
+  }, 20_000);
+
   it('classifies every slash command registered by pinned pi-subagents, including child-process probes (#1642)', async () => {
     const inventory = {
       run: 'refused: native child', 'prompt-workflow': 'refused: workflow children', 'subagents-refine': 'refused: proposal child',

@@ -73,14 +73,16 @@ async function submitOnce(change: CustodyChange, submit: KeysSubmit): Promise<Su
 }
 
 /**
- * Submits the draft. A typed key leaves the returned draft whatever the outcome, so it never outlives the submission
- * in the renderer; `keep` and `none` carry no key and stay.
+ * Submits the draft, clearing its typed key through `onDraft` before calling the bridge.
+ * `keep` and `none` carry no key and stay.
  */
-export async function submitModelRoute(draft: ModelRouteDraft, context: ModelRouteContext, stored: ProviderStatus | null, submit: KeysSubmit): Promise<{ draft: ModelRouteDraft; outcome: SubmitOutcome }> {
-  const cleared = typeof draft.secret === 'object' ? applyModelRouteChange(draft, { field: 'secret', value: 'none' }, context) : draft;
+export async function submitModelRoute(
+  draft: ModelRouteDraft, context: ModelRouteContext, stored: ProviderStatus | null, submit: KeysSubmit, onDraft: (draft: ModelRouteDraft) => void,
+): Promise<SubmitOutcome> {
   const submission = modelRouteSubmission(draft, context);
-  if (!submission.ok) return { draft: cleared, outcome: { refusal: { message: 'The form has errors; fix the marked fields.' } } };
-  return { draft: cleared, outcome: await submitOnce(custodyRequest(submission, stored), submit) };
+  onDraft(typeof draft.secret === 'object' ? applyModelRouteChange(draft, { field: 'secret', value: 'none' }, context) : draft);
+  if (!submission.ok) return { refusal: { message: 'The form has errors; fix the marked fields.' } };
+  return submitOnce(custodyRequest(submission, stored), submit);
 }
 
 /** Replaces a stored profile's key and nothing else; the caller clears its key input whatever the outcome. */

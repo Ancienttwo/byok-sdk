@@ -277,6 +277,13 @@ test('#1106: the moved K4 source still selects the example memory jobs and the K
   assert.ok(!ledger.families.includes('agent-memory-export-linux'));
 });
 
+test('the desktop keys browser script selects its owner and unknown siblings remain unmapped', () => {
+  const plan = selectImpact(['examples/desktop-bot-app/scripts/keys-submit.browser.mjs']);
+  assert.deepEqual(plan.dirs, ['examples/desktop-bot-app']);
+  assert.deepEqual(plan.families, ['desktop']);
+  assert.throws(() => selectImpact(['examples/desktop-bot-app/scripts/other.browser.mjs']), /Reviewed CI mapping required/);
+});
+
 test('a platform family is selected only by a path it owns', () => {
   const owned = {
     'agent-memory-export-linux': 'packages/client/src/daemon/agent-memory-export.ts',

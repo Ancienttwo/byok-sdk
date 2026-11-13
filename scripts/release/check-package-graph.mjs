@@ -3,7 +3,8 @@ import { checkRetiredIdentities } from './check-retired-identities.mjs';
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseBunLock, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, PI_RUNTIME_CLOSURE, readLockedPiClosure } from './pi-runtime-identity.mjs';
+import { assertRecordedPiClosureIntegrity, parseBunLock, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, PI_RUNTIME_CLOSURE, readLockedPiClosure } from './pi-runtime-identity.mjs';
+import officialPiClosure from '../../packages/client/src/adapters/pi/official-pi-closure.json' with { type: 'json' };
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const dispatchPackages = [
@@ -228,7 +229,7 @@ for (const [directory, record] of Object.entries(workspaceRecords)) {
 // The official Pi closure is exact and integrity-locked, with no fork alias.
 if (piRuntime !== undefined) {
   try {
-    readLockedPiClosure(lockfileText, piRuntime);
+    assertRecordedPiClosureIntegrity(officialPiClosure, readLockedPiClosure(lockfileText, piRuntime), piRuntime);
   } catch (error) {
     errors.push(error.message);
   }
