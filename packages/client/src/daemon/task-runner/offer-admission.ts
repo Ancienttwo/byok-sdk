@@ -27,6 +27,11 @@ export function offerAlreadyHandled(this: TaskRunner, taskId: string): boolean {
     || hostFor(this).runnerSnapshot().strictDeclined.includes(taskId);
 }
 
+export function offerHasOwner(this: TaskRunner, taskId: string): boolean {
+  return offerAlreadyHandled.call(this, taskId) || this['sealedOpening'].has(taskId)
+    || hostFor(this).current(taskId) !== undefined;
+}
+
 export async function reserveOfferHome(
   this: TaskRunner,
   phase: OfferPhaseContext,

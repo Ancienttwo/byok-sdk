@@ -5555,14 +5555,26 @@ export interface Daemon {
     /**
      * Resolves once the task's terminal had its first outbound settlement (no
      * earlier than its local terminal event) and the runtime owner reported
-     * its first disposal outcome. A task this daemon has not seen is read from
-     * the journal: after a restart the result reflects the journal's current
-     * truth, so a refused terminal that was replaced reads as its replacement,
-     * never the reverse. Rejects with {@link DaemonTaskUnknownError} for a task
-     * with neither, before `start()` the way `approve()` does, and with
-     * `signal.reason` on abort; the task is untouched. `stop()` rejects no
-     * pending wait, so pass a signal if one can span it; after `stop()` an
-     * unseen id rejects with the closed journal's error.
+     * its first disposal outcome. A received offer with no execution owner
+     * resolves as `cancelled`/`not-required`/`none` once its cloud cancellation
+     * is journaled; no local terminal is required. Redelivery of that task id
+     * in this run keeps that result and cannot start a runtime. An offer
+     * that was never claimed is not final by itself: it may be redelivered.
+     * A task this daemon has not seen is read from the journal: after a restart
+     * the result reflects the journal's current truth, so a refused terminal
+     * that was replaced reads as its replacement, never the reverse. Known
+     * limit (#1955): after restart, including stop/start of the same Daemon,
+     * the journal interface cannot expose a consumed cancellation. Run-local
+     * cancellation results expire when the new run binds its journal, so
+     * recovery and waits agree: with the cursor past the cancellation, the
+     * received offer is recovered as `failed` (`daemon_interrupted`),
+     * `accepted`, `none`.
+     * Rejects with {@link DaemonTaskUnknownError} for an unknown task, before
+     * `start()` the way `approve()` does, and with `signal.reason` on abort;
+     * the task is untouched. Revocation and replay expiry carry no per-task
+     * cancellation authority. `stop()` and halt reject no pending wait, so
+     * pass an AbortSignal if one can span either; after `stop()` an unseen id
+     * rejects with the closed journal's error.
      */
     whenTaskSettled(taskId: string, options?: {
         readonly signal?: AbortSignal;
@@ -5646,8 +5658,11 @@ export interface DaemonOverrides {
     /**
      * A durable local journal the host supplies instead of `SqliteLocalTaskJournal`
      * (§12.7.2). It must meet the same contract (a resolved `appendEnvelope` is
-     * fsynced); the daemon does not check that. `stop()` does not close it:
-     * whoever injected it owns its lifetime.
+     * fsynced). The daemon checks one thing about it: every task row it reads
+     * must have a `seq` that is a safe integer, otherwise the row is treated as
+     * malformed and takes the existing stall path. Everything else remains the
+     * injector's responsibility. `stop()` does not close it: whoever injected it
+     * owns its lifetime.
      */
     journal?: LocalTaskJournal;
     /** Test-only post-open SQLite initialization fault seam. */
@@ -8674,13 +8689,17 @@ export declare const RESULT_NOT_SUBMITTED_REASON_PREFIX = "result_not_submitted"
 export declare const RESULT_UNREADABLE_REASON_PREFIX = "result_unreadable";
 // ==== @byok-sdk/client dist/daemon/task-settlement.d.ts ====
 import type { TerminalTruthState } from './journal/journal.js';
-/** {@link DaemonTaskSettlement.terminal}: the kind of the task's terminal envelope. */
+/** {@link DaemonTaskSettlement.terminal}: the terminal kind, including a cloud cancellation before admission. */
 export type DaemonTaskTerminal = 'complete' | 'failed' | 'cancelled' | 'declined';
 /** What `Daemon.whenTaskSettled` resolves with. */
 export interface DaemonTaskSettlement {
     readonly terminal: DaemonTaskTerminal;
-    /** The first settlement of the terminal; `accepted` includes a duplicate. */
-    readonly delivery: 'accepted' | 'rejected';
+    /**
+     * The first settlement of the terminal; `accepted` includes a duplicate.
+     * `not-required`: a durable cloud cancellation suppressed a received offer
+     * before admission; no local terminal envelope or runtime was required.
+     */
+    readonly delivery: 'accepted' | 'rejected' | 'not-required';
     /**
      * `failed` exactly when `runtime-disposal-failed` was emitted for the task's
      * runtime; a failed release of an offer-owned scratch (`runtimeId: 'scratch'`)
@@ -8723,6 +8742,10 @@ export declare class TaskSettlementRegistry implements TaskRuntimeOwnership {
     runtimeDisposed(taskId: string): void;
     runtimeDisposalFailed(taskId: string): void;
     terminalSettled(taskId: string, terminal: DaemonTaskTerminal, delivery: DaemonTaskSettlement['delivery']): void;
+    /** Only for a received offer with no execution owner, after its cloud cancel is durable. */
+    cancelledBeforeAdmission(taskId: string): void;
+    /** A redelivery in this run cannot reopen an offer the cloud already cancelled. */
+    isCancelledBeforeAdmission(taskId: string): boolean;
     wait(taskId: string, signal?: AbortSignal): Promise<DaemonTaskSettlement>;
 }
 // ==== @byok-sdk/client dist/daemon/team-workspace.d.ts ====

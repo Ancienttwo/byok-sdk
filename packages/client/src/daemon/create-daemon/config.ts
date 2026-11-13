@@ -8,6 +8,7 @@ import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory.js';
 import { resolveAgentMemoryMcpBin, resolveAgentMemoryDescribeBin } from '../resolve-agent-memory-mcp-bin.js';
 import { resolveLocalAgentReleaseIdentity } from '../../release-identity.js';
 import { LocalStorageConfigError } from '../retention/config.js';
+import type { LocalTaskJournal, RecoverableTask, WithheldOfferTask } from '../journal/journal.js';
 import { McpToolsetRegistry } from '../toolset-registry.js';
 import { resolvePiByokLauncher } from '../../adapters/runtime-adapters.js';
 import { DEFAULT_MAX_TASK_OUTPUT_BYTES, DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME, DEFAULT_MAX_CONCURRENT_TASKS } from '../task-runner.js';
@@ -197,6 +198,40 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
     agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, agentMemoryMcpBin,
     agentMemoryDescribeBin, agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, piByokLauncher,
     memoryHelper, configWarnings, toolAuthorizationResolver,
+  };
+}
+
+/**
+ * The only view the daemon has of a host-supplied journal. A task row whose
+ * seq is not a safe integer is malformed: mailbox ordering never compares it.
+ */
+export function hostJournal(journal: LocalTaskJournal): LocalTaskJournal {
+  const checked = <T extends RecoverableTask | WithheldOfferTask>(row: T): T => {
+    if (!Number.isSafeInteger(row.seq)) throw new Error(`injected journal row for task ${row.taskId} is malformed: seq must be a safe integer`);
+    return row;
+  };
+  return {
+    readTask: async (taskId, identity) => {
+      const row = await journal.readTask(taskId, identity);
+      return row && checked(row);
+    },
+    listRecoveryTasks: async (identity) => (await journal.listRecoveryTasks(identity)).map(checked),
+    listRecoverable: async () => (await journal.listRecoverable()).map(checked),
+    appendEnvelope: (record) => journal.appendEnvelope(record),
+    appendWithheldOffer: (record) => journal.appendWithheldOffer(record),
+    recordAdmission: (record) => journal.recordAdmission(record),
+    recordTransition: (record) => journal.recordTransition(record),
+    recordTerminal: (record) => journal.recordTerminal(record),
+    listPendingTerminals: (identity) => journal.listPendingTerminals(identity),
+    confirmTerminal: (taskId, payloadHash) => journal.confirmTerminal(taskId, payloadHash),
+    rejectTerminal: (taskId, payloadHash, reason) => journal.rejectTerminal(taskId, payloadHash, reason),
+    replaceRefusedTerminal: (taskId, refusedPayloadHash, record) => journal.replaceRefusedTerminal(taskId, refusedPayloadHash, record),
+    markRecovered: (taskId, outcome) => journal.markRecovered(taskId, outcome),
+    measureUsage: () => journal.measureUsage(),
+    listPrunableConfirmedTasks: (cutoff, limit) => journal.listPrunableConfirmedTasks(cutoff, limit),
+    pruneConfirmedJournalTask: (taskId) => journal.pruneConfirmedJournalTask(taskId),
+    compact: (options) => journal.compact(options),
+    close: () => journal.close(),
   };
 }
 
