@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PlatformCommandTimeoutError } from '../util/command-timeouts';
 import type { Runner } from '../util/exec-runner';
 import { buildIcaclsArgs, ensurePiProjectionDir, ensureSecureDir, ensureSecureStoreRoot, SecureDirHardeningError, SecureDirModeError } from '../util/secure-dir';
 
@@ -106,6 +107,12 @@ describe('util/secure-dir: ensureSecureDir (finding F7/R4)', () => {
     expect(stat.isDirectory()).toBe(true);
     expect(run).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledWith('icacls', buildIcaclsArgs(dir, 'winuser'));
+  });
+
+  it('#1971: an icacls timeout surfaces as PlatformCommandTimeoutError, not a hardening error', async () => {
+    const dir = path.join(await tmpDir('byok-secure-dir-win-'), 'store');
+    const timeout = new PlatformCommandTimeoutError('icacls timed out', false);
+    await expect(ensureSecureDir(dir, { platform: 'win32', run: async () => Promise.reject(timeout) })).rejects.toBe(timeout);
   });
 
   // #1373: only the keys Pi projection directory also grants OWNER RIGHTS READ_CONTROL, without inheritance.

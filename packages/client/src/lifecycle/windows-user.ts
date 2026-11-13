@@ -1,8 +1,8 @@
-import { spawn } from 'node:child_process';
+import { spawn, type SpawnOptions } from 'node:child_process';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { COMMAND_TIMEOUT_MS } from '../util/command-timeouts.js';
-import { PlatformCommandTimeoutError, type Runner } from '../util/exec-runner.js';
+import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError, stopRoot } from '../util/command-timeouts.js';
+import type { Runner } from '../util/exec-runner.js';
 import { defaultRunner, runBounded } from './platform-command.js';
 import { resolveSystemTool } from '@byok-sdk/core/system-tool';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
@@ -48,9 +48,6 @@ export function generateWindowsStartupUnit(launcherPath: string): string {
   return `@REM ${SERVICE_UNIT_MARKER}\r\n@start "" /min cmd.exe /d /c "${cmdQuote(launcherPath)}"\r\n`;
 }
 
-/** How long a timed-out unit run's `cmd` may take to exit after it is terminated. */
-const LAUNCH_KILL_GRACE_MS = 2_000;
-
 /**
  * The Host's stop program's exit code; `null` when it could not run or ended
  * on a signal. One that outlives its bound has its tree terminated and
@@ -59,7 +56,7 @@ const LAUNCH_KILL_GRACE_MS = 2_000;
  */
 async function runStopProgram(program: ServiceProgram): Promise<number | null> {
   try {
-    return (await runBounded(program.command, program.args, COMMAND_TIMEOUT_MS.hostStop, program.cwd)).code;
+    return (await runBounded(program.command, program.args, COMMAND_TIMEOUT_MS.hostStop, { cwd: program.cwd })).code;
   } catch (error) {
     if (error instanceof PlatformCommandTimeoutError) throw error;
     return null;
@@ -72,12 +69,15 @@ async function runStopProgram(program: ServiceProgram): Promise<number | null> {
  * `cmd` is terminated, never its tree: the launcher `start` made is that
  * `cmd`'s child and is the service itself. The rejection then means the
  * launcher may or may not be running; `start()` and `status()` ask the
- * launcher query again.
+ * launcher query again. A `cmd` whose exit is not confirmed may still start
+ * one (`exitConfirmed: false`). `spawnCmd` is a test seam.
+ *
+ * @internal
  */
-function launchUnit(unitPath: string): Promise<void> {
+export function launchUnit(unitPath: string, spawnCmd = (args: string[], options: SpawnOptions) => spawn(resolveSystemTool('cmd'), args, options)): Promise<void> {
   return new Promise((resolve, reject) => {
     // cmd /c strips the outer pair of quotes, leaving the quoted path.
-    const child = spawn(resolveSystemTool('cmd'), ['/d', '/c', `"${cmdQuote(unitPath)}"`], {
+    const child = spawnCmd(['/d', '/c', `"${cmdQuote(unitPath)}"`], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
@@ -86,13 +86,7 @@ function launchUnit(unitPath: string): Promise<void> {
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill();
-      const timeout = new PlatformCommandTimeoutError(`${unitPath} timed out`);
-      const grace = setTimeout(() => reject(timeout), LAUNCH_KILL_GRACE_MS);
-      child.once('exit', () => {
-        clearTimeout(grace);
-        reject(timeout);
-      });
+      void stopRoot(child, unitPath).then(reject);
     }, COMMAND_TIMEOUT_MS.launch);
     child.once('error', (error) => {
       clearTimeout(timer);

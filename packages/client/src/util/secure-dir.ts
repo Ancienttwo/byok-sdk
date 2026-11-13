@@ -4,12 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { resolveSystemTool } from '@byok-sdk/core/system-tool';
-import { COMMAND_TIMEOUT_MS } from './command-timeouts.js';
+import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError, stopRoot } from './command-timeouts.js';
 import type { Runner } from './exec-runner.js';
 
 /**
  * Runs `icacls` within the `platform` bound (#1971); past it the process is
- * killed and waited for, and the run rejects. Not the lifecycle's
+ * killed and the run rejects with `PlatformCommandTimeoutError`, its exit
+ * confirmed only when it exited within the `rootExit` bound. Not the lifecycle's
  * `defaultRunner` (`lifecycle/platform-command.ts`): `util` may not depend on
  * `lifecycle`, and this lazily loaded module would pull that runner's
  * process-tree graph into lazy initialisers. `icacls` starts no children, so
@@ -17,10 +18,17 @@ import type { Runner } from './exec-runner.js';
  */
 const runIcacls: Runner = (command, args) =>
   new Promise((resolve, reject) => {
-    execFile(resolveSystemTool(command), args, { timeout: COMMAND_TIMEOUT_MS.platform, killSignal: 'SIGKILL', windowsHide: true }, (error, stdout, stderr) => {
+    const child = execFile(resolveSystemTool(command), args, { windowsHide: true }, (error, stdout, stderr) => {
+      clearTimeout(timer);
+      if (timedOut) return;
       if (error && typeof error.code !== 'number') reject(error);
       else resolve({ code: error ? (error.code as number) : 0, stdout, stderr });
     });
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      void stopRoot(child, command).then(reject);
+    }, COMMAND_TIMEOUT_MS.platform);
   });
 
 /**
@@ -263,6 +271,7 @@ async function secureDir(dir: string, buildArgs: (dir: string, username: string)
   try {
     result = await run('icacls', buildArgs(dir, username));
   } catch (err) {
+    if (err instanceof PlatformCommandTimeoutError) throw err;
     throw new SecureDirHardeningError(dir, `could not run icacls: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (result.code !== 0) {
@@ -303,6 +312,7 @@ export async function ensureSecureFile(filePath: string, opts: EnsureSecureDirOp
   try {
     result = await run('icacls', buildIcaclsFileArgs(filePath, username));
   } catch (err) {
+    if (err instanceof PlatformCommandTimeoutError) throw err;
     throw new SecureFileHardeningError(filePath, `could not run icacls: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (result.code !== 0) {

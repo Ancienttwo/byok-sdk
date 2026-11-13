@@ -1,3 +1,5 @@
+import type { PlatformCommandTimeoutError } from './command-timeouts.js';
+
 
 /**
  * Result of running an external command, regardless of its exit code.
@@ -33,15 +35,6 @@ export interface RunResult {
  * verification requirement, without ever shelling out for real in tests.
  */
 export type Runner = (command: string, args: string[]) => Promise<RunResult>;
-
-/**
- * A platform command outlived its bound and its process tree was stopped.
- * Whether it took effect is UNKNOWN (a job may have been bootstrapped or a
- * service registered before the stop); it never means the change did not
- * happen and is never idempotent absence. The next install or uninstall
- * starts again from the service manager's own state.
- */
-export class PlatformCommandTimeoutError extends Error {}
 
 /**
  * Runs `command`/`args` via `run` and throws a clear, labeled error if it
