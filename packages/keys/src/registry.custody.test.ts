@@ -13,7 +13,9 @@ import {
 } from './pi-provider-launcher-core';
 import { InMemoryProviderProfileStore } from './profile-store';
 import { ProviderRegistry, type ProviderConfiguration } from './registry';
-import { InMemorySecretStore, modelProviderSecretName } from './secret-store';
+import type { CommandRunner } from './command-runner';
+import { LinuxSecretServiceSecretStore } from './linux-secret-service';
+import { InMemorySecretStore, type ModelProviderSecretName, modelProviderSecretName } from './secret-store';
 import { SqliteProviderProfileStore, providerConfigurationLockPath } from './sqlite-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
 
@@ -134,9 +136,30 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
   });
 
+  it('never overwrites an entry the SDK did not write, even when the commit would fail (#1946)', async () => {
+    const entries = new Map<string, string>();
+    const commandRunner: CommandRunner = async (_command, args, stdin) => {
+      const service = args[args.indexOf('service') + 1]!;
+      if (args[0] === 'store') entries.set(service, stdin!);
+      if (args[0] === 'clear') entries.delete(service);
+      const value = args[0] === 'lookup' ? entries.get(service) : '';
+      return { exitCode: value === undefined ? 1 : 0, stdout: value ?? '', stderr: '' };
+    };
+    const linux = new LinuxSecretServiceSecretStore<ModelProviderSecretName>({ platform: 'linux', commandRunner });
+    const subject = new ProviderRegistry({ now: () => new Date(clock), profileStore: profiles, secretStore: linux });
+    await subject.configure(OPENAI, OLD_KEY);
+    const [service] = [...entries.keys()];
+    entries.set(service!, 'sk-foreign-entry');
+    vi.spyOn(profiles, 'commitCustody').mockRejectedValue(new Error('commit failed'));
+
+    await expect(subject.replaceSecret('openai', NEW_KEY)).rejects.toMatchObject({ code: 'KEYCHAIN_SECRET_DECODE_FAILED' });
+    expect(entries.get(service!)).toBe('sk-foreign-entry');
+    await expect(profiles.getPending('openai')).resolves.toBeUndefined();
+  });
+
   it('a new key overwrites a previous entry the store cannot read (#1946)', async () => {
     await registry().configure(OPENAI, OLD_KEY);
-    const corrupted = () => vi.spyOn(secrets, 'get').mockRejectedValueOnce(new ByokKeysError('KEYCHAIN_SECRET_DECODE_FAILED', 'undecodable'));
+    const corrupted = () => vi.spyOn(secrets, 'get').mockRejectedValueOnce(new ByokKeysError('KEYCHAIN_SECRET_CORRUPTED', 'undecodable'));
     corrupted();
     vi.spyOn(secrets, 'set').mockRejectedValueOnce(new Error('store refused'));
     await expect(registry().replaceSecret('openai', NEW_KEY)).rejects.toMatchObject({ code: 'PROVIDER_SECRET_ROLLBACK_FAILED' });

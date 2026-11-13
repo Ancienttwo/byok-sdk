@@ -394,11 +394,13 @@ export class ProviderRegistry {
    * key is restored and the marker is cleared only when it was this call's
    * own, so an earlier unfinished change stays unfinished.
    *
-   * A previous entry the store holds but cannot decode (corrupted outside
-   * the SDK) does not block the overwrite, so supplying a new key repairs it;
-   * a failure then has nothing to restore. That case, like a failed restore,
-   * throws `PROVIDER_SECRET_ROLLBACK_FAILED` and keeps the marker, so readers
-   * keep refusing the key. Any other read failure refuses before the marker.
+   * A previous entry the store proves the SDK wrote but cannot decode
+   * (`KEYCHAIN_SECRET_CORRUPTED`) does not block the overwrite, so supplying a
+   * new key repairs it; a failure then has nothing to restore. That case, like
+   * a failed restore, throws `PROVIDER_SECRET_ROLLBACK_FAILED` and keeps the
+   * marker, so readers keep refusing the key. Any other read failure,
+   * including an entry the SDK did not write, refuses before the marker and
+   * before any credential write: such an entry is never overwritten.
    */
   async #writeAndCommit(
     profileRef: ProviderProfileRef,
@@ -419,7 +421,7 @@ export class ProviderRegistry {
       try {
         previous = { readable: true, secret: await secretStoreCall(() => this.#secrets.get(secretName)) };
       } catch (error) {
-        if (!(error instanceof ByokKeysError && error.code === 'KEYCHAIN_SECRET_DECODE_FAILED')) throw error;
+        if (!(error instanceof ByokKeysError && error.code === 'KEYCHAIN_SECRET_CORRUPTED')) throw error;
         previous = { readable: false };
       }
     }

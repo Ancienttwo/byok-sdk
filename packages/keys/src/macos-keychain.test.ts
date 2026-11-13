@@ -200,7 +200,7 @@ describe('MacOsKeychainSecretStore.get', () => {
       stdout: `${DEFAULT_KEYCHAIN_SECRET_STORAGE_PREFIX}not!base64!\n`,
     });
     await expect(store().get('model-openai-api-key')).rejects.toThrowError(
-      expect.objectContaining({ code: 'KEYCHAIN_SECRET_DECODE_FAILED' }),
+      expect.objectContaining({ code: 'KEYCHAIN_SECRET_CORRUPTED' }),
     );
   });
 
@@ -211,7 +211,7 @@ describe('MacOsKeychainSecretStore.get', () => {
       stdout: `${DEFAULT_KEYCHAIN_SECRET_STORAGE_PREFIX}${payload}\n`,
     });
     await expect(store().get('model-openai-api-key')).rejects.toThrowError(
-      expect.objectContaining({ code: 'KEYCHAIN_SECRET_DECODE_FAILED' }),
+      expect.objectContaining({ code: 'KEYCHAIN_SECRET_CORRUPTED' }),
     );
   });
 
@@ -221,7 +221,7 @@ describe('MacOsKeychainSecretStore.get', () => {
       stdout: `${DEFAULT_KEYCHAIN_SECRET_STORAGE_PREFIX}\n`,
     });
     await expect(store().get('model-openai-api-key')).rejects.toThrowError(
-      expect.objectContaining({ code: 'KEYCHAIN_SECRET_DECODE_FAILED' }),
+      expect.objectContaining({ code: 'KEYCHAIN_SECRET_CORRUPTED' }),
     );
   });
 
