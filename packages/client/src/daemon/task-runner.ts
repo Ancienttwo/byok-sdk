@@ -1258,9 +1258,10 @@ export class TaskRunner {
    * steering channel, log and acknowledge it without calling the session.
    * This keeps the inbound cursor from stalling on a permanent mismatch.
    *
-   * A steering-capable session can throw {@link SteerUnsupportedError} to
-   * reject a particular steer without retry. Other errors propagate and keep
-   * the existing cursor stall and redelivery behavior.
+   * A steering-capable session can throw {@link SteerUnsupportedError}, or a
+   * run failure of class `input_too_large`, to reject a particular steer
+   * without retry. Other errors propagate and keep the existing cursor stall
+   * and redelivery behavior.
    */
   private handleSteer(taskId: string, text: string): Promise<void> {
     return handleSteer.call(this, taskId, text);

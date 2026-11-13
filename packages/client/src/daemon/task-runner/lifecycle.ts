@@ -2,7 +2,7 @@
 // (see ./support.ts for how a member module runs).
 import { createEnvelope } from '@byok-sdk/protocol';
 import { SteerUnsupportedError } from '../../types.js';
-import { RuntimeDisposalFailure, isRuntimeDisposalFailure } from '../../runtime-failure.js';
+import { RuntimeDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
 import { DAEMON_TASK_FAILURE } from '../task-failure.js';
 import { MAX_TIMER_DELAY_MS } from '../../util/timer-delay.js';
 import type { ActiveTask } from './support.js';
@@ -303,6 +303,13 @@ export async function handleSteer(this: TaskRunner, taskId: string, text: string
     if (err instanceof SteerUnsupportedError) {
       console.error(
         `[byok/client] inbound task.steer for task ${taskId} rejected: runtime "${err.runtimeId}" has no steering channel (${err.message}) — acked without retry; this envelope should have been gated server-side`,
+      );
+      return;
+    }
+    // OAR refuses an input over the runtime's byte bound (agy) before sending it; a redelivery would be refused the same way.
+    if (isRuntimeExecutionFailure(err) && err.failure.class === 'input_too_large') {
+      console.error(
+        `[byok/client] inbound task.steer for task ${taskId} dropped: runtime "${active.adapter.descriptor.id}" refused it before delivery (${err.message}) — acked without retry`,
       );
       return;
     }

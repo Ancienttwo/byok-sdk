@@ -9,6 +9,7 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { CursorStore } from '../daemon/cursor-store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { SteerUnsupportedError } from '../types';
+import { RuntimeExecutionFailure } from '../runtime-failure';
 import { dispatchResumedAgentTask, startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
 import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
 
@@ -196,7 +197,14 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
    * acks the envelope: the cursor advances past the steer's seq and the daemon
    * never calls `session.steer` for it a second time.
    */
-  it('a polled task.steer whose handler throws SteerUnsupportedError is recorded and acked: the cursor advances and it is never redelivered', async () => {
+  // An input_too_large steer refusal (OAR's agy input bound) is as deterministic as a missing steering channel.
+  it.each([
+    ['SteerUnsupportedError', () => new SteerUnsupportedError('stub', 'stub runtime cannot steer'), 'no steering channel', '"stub"'],
+    ['an input_too_large refusal', () => new RuntimeExecutionFailure({
+      phase: 'run', retry: 'non-retryable', failure: { class: 'input_too_large' },
+      reason: "input is 185001 bytes, over OAR's 185000-byte bound for one input to this runtime, which cuts a longer one without saying so",
+    }), '185000-byte bound', '"pi"'],
+  ] as const)('a polled task.steer whose handler throws %s is recorded and acked: the cursor advances and it is never redelivered', async (_name, steerError, logged, runtime) => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
     const storeDir = await tmpDir('byok-e2e-store-');
@@ -242,7 +250,7 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
 
       // Persistent (never auto-clearing) so a redelivery would fail again —
       // exactly the infinite loop the classification exists to prevent.
-      session.steerErrorPersistent = new SteerUnsupportedError('stub', 'stub runtime cannot steer');
+      session.steerErrorPersistent = steerError();
 
       await handle.steer('impossible steer');
 
@@ -269,7 +277,7 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
 
       expect(
         errors.mock.calls.some(
-          (call) => typeof call[0] === 'string' && call[0].includes('no steering channel') && call[0].includes('stub'),
+          (call) => typeof call[0] === 'string' && call[0].includes(logged) && call[0].includes(runtime),
         ),
       ).toBe(true);
 

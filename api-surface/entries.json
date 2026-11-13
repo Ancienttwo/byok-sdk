@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2740023,
+      "budgetBytes": 2740451,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -284,7 +284,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3195806,
+      "budgetBytes": 3196234,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -458,7 +458,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2413878,
+      "budgetBytes": 2414306,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -575,7 +575,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 548626,
+      "budgetBytes": 548764,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -906,7 +906,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 511004,
+      "budgetBytes": 511142,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -976,7 +976,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private ACP runtime stack (Grok, agy, OpenCode)",
-      "budgetBytes": 121275,
+      "budgetBytes": 121958,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2585,7 +2585,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2406243,
+      "budgetBytes": 2406671,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

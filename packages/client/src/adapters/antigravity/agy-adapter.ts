@@ -19,9 +19,9 @@ import {
   type RuntimeVersionPolicy,
   type Session,
 } from '../../types.js';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
-import type { AcpPermissionRequest, AcpPermissionResponse, AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime.js';
+import type { AcpControl, AcpPermissionRequest, AcpPermissionResponse, AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
@@ -72,6 +72,9 @@ const authority = (reason: string) =>
   new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
 const infrastructure = (reason: string, failure?: TaskFailure) =>
   new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason, failure });
+/** OAR's own class on a refusal (`input_too_large` past agy's input bound) is structured evidence, so it reaches `task.fail`. */
+const refused = (body: AcpControl['response']['body'] | undefined, fallback: string) =>
+  infrastructure(body?.reason ?? fallback, body?.failure === undefined ? undefined : { class: runtimeFailureClassOf(body.failure) });
 
 /**
  * The Antigravity CLI over its native ACP
@@ -396,7 +399,7 @@ class AgySession implements Session {
     this.active = true;
     try {
       const result = await this.raw.prompt(input);
-      if (result.response.body.kind !== 'accepted') throw infrastructure(result.response.body.reason ?? 'agy prompt refused');
+      if (result.response.body.kind !== 'accepted') throw refused(result.response.body, 'agy prompt refused');
     } catch (error) {
       this.active = false;
       throw error;
@@ -407,7 +410,7 @@ class AgySession implements Session {
   }
   async steer(text: string): Promise<void> {
     const result = await this.raw?.steer?.(text);
-    if (result?.response.body.kind !== 'accepted') throw infrastructure(result?.response.body.reason ?? 'agy steer refused');
+    if (result?.response.body.kind !== 'accepted') throw refused(result?.response.body, 'agy steer refused');
   }
   async interrupt(): Promise<void> {
     if (!this.raw || !this.active) return;

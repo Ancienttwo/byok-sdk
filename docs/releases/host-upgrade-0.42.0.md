@@ -167,9 +167,9 @@ A Host on 0.41.0 reads these as `unknown` with `reportedClass` until it upgrades
 
 `checkAgentMemoryHome(home, { commit?: { filesystem? } })` in `@byok-sdk/client/agent-memory` is additive: nothing existing changes. It returns `{ ok: true }` or `{ ok: false, code, reason }` with the class and reason the device would send for the same home. It throws when it cannot decide (missing `MEMORY.md`, a changed home identity, an I/O error, no secure memory filesystem; on macOS and Windows pass the helper's filesystem as `commit.filesystem` and close it yourself), and it is advisory because it holds no lease and has no task id. Its verdict is about the home: the device applies the resident refusals only to a task that carries `MEMORY.md` into its prompt and the snapshot refusals only to a task with `agentMemoryCommit`; the repair task (`agentMemory:"none"`, no commit) is never refused, so do not gate it on the verdict. Unlike the failure class, the check is not hidden on a task that seals its output. A Host that copied the device's limits (AiphaBee's `residentMemoryBreach` and `memoryBreach`) can replace that copy with this call.
 
-## OAR driver base (#1863, #1945, #1956)
+## OAR driver base (#1863, #1945, #1956, #2005)
 
-The release uses OAR 0.101.0 (`ea3269e`, fork branch `byok/0.101.0`). The move from 0.99.0 adds no Host-visible behavior change; the runtime changes below entered the train with 0.99.0 (#1863).
+The release uses OAR 0.103.0 (upstream release commit `95c65479`, `packages/client/vendor/oar/95c6547/`, fork branch `byok/0.103.0`). The move from 0.99.0 adds one Host-visible change: an agy instruction or steer over 185,000 UTF-8 bytes is refused before agy is called; an instruction fails with non-retryable `input_too_large` and an over-limit steer is dropped (#2005, see the [release notes](v0.42.0.md#oar-01030-2005-2006)). The runtime changes below entered the train with 0.99.0 (#1863).
 
 A Grok follow-up sent while Grok runs a turn of its own is held until that turn closes; budget the task deadline for that wait. Grok 429s that name a spending limit now fail as `quota` or `billing` (non-retryable) instead of retryable `rate_limited`. A Codex older than OAR needs, or with an unreadable `config.toml`, fails the start as non-retryable `invalid_request`. Confirm that the Host does not retry those classes as transient.
 
