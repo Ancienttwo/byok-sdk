@@ -535,14 +535,14 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     await fs.chmod(root, 0o700);
     const link = path.join(root, 'link');
     await fs.symlink(root, link);
-    const getuid = vi.spyOn(process, 'getuid').mockReturnValue(process.getuid!() + 1);
+    const geteuid = vi.spyOn(process, 'geteuid').mockReturnValue(process.geteuid!() + 1);
     try {
       expect(() => foldNameAliases(path.join(link, 'missing'))).toThrow(expect.objectContaining({
         code: 'configured_path_untrusted_link', link, reason: 'link_owner',
       }));
       await expect(fs.lstat(path.join(root, 'missing'))).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
-      getuid.mockRestore();
+      geteuid.mockRestore();
     }
   });
 
