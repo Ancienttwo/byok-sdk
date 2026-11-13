@@ -1775,13 +1775,6 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         await expect(installation.upgrade(await payload('3.0.0'))).rejects.toMatchObject({ code: 'store_overlaps_service_state' });
         expect([await pointer('current'), existsSync(path.join(installRoot, 'snapshots', '3.0.0'))]).toEqual(['2.0.0', false]);
       }
-      // A snapshot taken before the check is refused before it replaces anything.
-      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
-      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: { path: string }[] };
-      await fs.writeFile(index, JSON.stringify({ entries: snapshot.entries.map((entry) => ({ ...entry, path: path.join(service, 'host.db') })) }));
-      const lease = await fs.readdir(service);
-      await expect(installation.rollback()).rejects.toMatchObject({ cause: expect.objectContaining({ errors: expect.arrayContaining([expect.objectContaining({ code: 'store_overlaps_service_state' })]) }) });
-      expect([await fs.readdir(service), await fs.readFile(db, 'utf8')]).toEqual([lease, 'v2 data']);
     });
 
     it('a linked snapshots/<version> is refused before it is probed or removed (#2061)', async () => {

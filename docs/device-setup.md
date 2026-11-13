@@ -752,8 +752,8 @@ every store the candidate rewrites, including any server or provider-key
 store (`inspectSqliteStore`, `inspectProviderProfileStore`). A listed store
 must not be, hold or lie in a daemon store's `service/` directory, which
 holds its leases, launcher and records: such a store is refused with
-`store_overlaps_service_state` before anything is snapshotted, and a snapshot
-entry like it is refused before it is restored.
+`store_overlaps_service_state` before anything is snapshotted (a snapshot
+taken before this check is not re-checked on restore: #2102).
 [`examples/service-upgrade`](../examples/service-upgrade/) is such an App.
 
 ### Other installs

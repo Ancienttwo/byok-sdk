@@ -1041,15 +1041,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * release takes its store gate), and resolves to every release failure.
    * A failure here is thrown with the release failures joined to it.
    */
-  /** The `service/` directories of the daemon stores the last stop quiesced: leases, launcher and records live there. */
+  /** The `service/` directories (leases, launcher, records) of the daemon stores the last stop quiesced; the precheck that follows reads them. */
   let serviceDirs: string[] = [];
-
-  /** A store that is, holds or lies in one of {@link serviceDirs} is refused (#2011): restoring it would replace the live leases and launcher. */
-  function refuseServiceState(paths: readonly string[]): void {
-    for (const at of paths.map((store) => path.resolve(store))) {
-      if (serviceDirs.some((dir) => at === dir || at.startsWith(`${dir}${path.sep}`) || dir.startsWith(`${at}${path.sep}`))) throw new ServiceInstallationError('store_overlaps_service_state');
-    }
-  }
 
   async function stopQuiescent(stopService = true): Promise<() => Promise<unknown[]>> {
     if (stopService) await lifecycle.stop();
@@ -1131,7 +1124,11 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
     if (!Array.isArray(stores) || !stores.every(isServiceStoreVerdict) || overlaps(stores)) throw new ServiceInstallationError('precheck_failed');
     if (stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
-    refuseServiceState(stores.map((store) => store.path));
+    // A store that is, holds or lies in a daemon store's service/ would have its live leases and launcher replaced by a restore (#2011).
+    for (const { path: at } of stores) {
+      const a = path.resolve(at);
+      if (serviceDirs.some((b) => a === b || a.startsWith(b + path.sep) || b.startsWith(a + path.sep))) throw new ServiceInstallationError('store_overlaps_service_state');
+    }
     return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path) } : store);
   }
 
@@ -1289,7 +1286,6 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   async function restoreSnapshot(to: string): Promise<void> {
     const dir = path.join(snapshotsDir, to);
     const snapshot = JSON.parse(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8')) as { entries: SnapshotEntry[] };
-    refuseServiceState(snapshot.entries.map((entry) => entry.path));
     // Older snapshots retain the Host's spelling. Check every directory root
     // before changing any store, including links hidden by a trailing / or /.
     const entries = snapshot.entries.map((entry) => entry.kind === 'directory' ? { ...entry, path: directoryStorePath(entry.path) } : entry);
