@@ -36,7 +36,7 @@ describe.each(['OS entry', 'injected backend'] as const)('replacement pairing pr
       const storeDir = path.join(root, name);
       const credentials = backend === 'injected backend' ? injected
         : new DeviceCredentialStore({ storeDir, productId: 'replacement-test', platform: 'linux', commandRunner: run });
-      const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir, credentials) });
+      const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore('replacement-test', storeDir, credentials) });
       auths.push(auth);
       return { auth, credentials };
     };

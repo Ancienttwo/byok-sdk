@@ -220,7 +220,7 @@ describe('#1117 keychain command deadline and cancellation', () => {
     const keyring = linuxKeyring();
     const storeDir = await tmpDir('byok-keychain-deadline-');
     const credentials = new DeviceCredentialStore({ storeDir, productId: 'test-product', platform: 'linux', commandRunner: keyring.run, commandDeadlineMs: 200 });
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir, credentials) });
+    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore('test-product', storeDir, credentials) });
     const record = await auth.pair('pairing-code');
     keyring.state.hangWrites = true;
 
@@ -240,7 +240,7 @@ describe('#1117 keychain command deadline and cancellation', () => {
     const keyring = linuxKeyring();
     const storeDir = await tmpDir('byok-keychain-stop-');
     const credentials = new DeviceCredentialStore({ storeDir, productId: 'test-product', platform: 'linux', commandRunner: keyring.run });
-    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir, credentials) });
+    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore('test-product', storeDir, credentials) });
     await auth.pair('pairing-code');
     keyring.state.hangWrites = true;
 

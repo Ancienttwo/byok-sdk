@@ -769,14 +769,30 @@ await clearDeviceEnrollment({
   clears its own staged first pairing, never another store's, and pairs only
   with a staged attempt it made (#1964, #2033). Under
   the store's owner lease the clear takes a per-user `productId` lock and holds
-  it from its validation through its deletion; a pairing takes the same lock,
-  after its own owner lease, across its credential writes, so a pairing of
-  another store runs wholly before or wholly after the clear. Either side waits
-  up to 30 seconds for the other; a clear that times out fails as
-  `clear_failed` and deletes nothing. A running daemon's token renewal does
-  not take the lock yet (#2034): a daemon whose enrollment another store
-  replaced can write its renewed credential back while that store clears, and
-  the clear deletes it.
+  it from its validation through its deletion. A running daemon's token
+  renewal takes the same lock around validating and persisting the new token,
+  and never across a network request. A pairing is one critical section: it
+  takes the lock, rereads the OS entry, `device.json` and the staged attempt
+  (never a cached record), and holds the lock through its request, persisting
+  the enrollment, and the E2EE member entries, which are also shared per
+  `productId`. Re-pairing a running daemon also shuts it down inside the lock.
+  The pairing holds the lock across its request because the server's device
+  registration has no fencing (#2045 F1). Another store's pairing or renewal
+  therefore lands wholly before or wholly after the clear (#2034, #2030 F2).
+  Lock order is the store owner lease, then the `productId` lock.
+- The request deadline bounds only the network request, and each OS credential
+  command has its own 15 s deadline; nothing bounds the whole time a holder
+  keeps the lock. Each waiter waits up to 30 seconds: a clear that times out
+  fails as `clear_failed` and deletes nothing, a pairing fails as busy, and a
+  renewal fails as busy, not as revocation, and is retried (#2045 F5).
+- A pairing whose request times out releases the lock while the server may
+  still register it. Its outcome is unknown: the staged attempt stays, and
+  pairing again retries with the same key. If another store pairs with
+  `replaceOtherStore` meanwhile, the late registration can still supersede
+  it on the server; only server-side registration fencing closes that gap.
+- A renewal that finds the enrollment gone writes nothing and halts the
+  daemon: `store_not_bound` when another store paired over it,
+  `re_pair_required` when it was cleared.
 - `clearUnattributedAttempt: true` also deletes a first-pairing attempt that
   names no `storeDir`. Set it only when no other store of this `productId` is
   pairing.

@@ -38,7 +38,7 @@ export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = 
   const connectControl = deps.connectControl ?? connectControlClient;
 
   const [record, records, environment, logs] = await Promise.all([
-    new DeviceStore(storeDir, createDeviceCredentialStore({ productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials })).load(),
+    new DeviceStore(config.productId, storeDir, createDeviceCredentialStore({ productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials })).load(),
     readAuditRecords(storeDir),
     readLastEnvironmentRecord(storeDir),
     inspectServiceLogs(serviceLogDir(storeDir)),

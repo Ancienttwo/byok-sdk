@@ -3345,6 +3345,8 @@ export interface AuthManagerOptions {
     authRequestDeadlineMs?: number;
     /** Called once revocation is detected, so a caller (ConnectionManager) can stop retrying and surface the state instead of looping. */
     onRevoked?: () => void;
+    /** Called once a renewal finds the OS entry no longer holds this store's enrollment (#2034); the daemon halts with that reason. */
+    onBindingLost?: (reason: 'store_not_bound' | 're_pair_required') => void;
 }
 /**
  * Owns device pairing and the access token lifecycle (protocol §6):
@@ -3407,9 +3409,16 @@ export declare class AuthManager {
      * attempt is reused only when it names this store; otherwise it refuses
      * with {@link FirstPairingAttemptRefusedError}, and `replaceOtherStore`
      * discards another store's attempt (#2033).
+     *
+     * The whole pairing is one critical section of the enrollment gate: it
+     * rereads the OS entry, `device.json` and the staged attempt after taking
+     * the gate, never trusting a cached record, and releases the gate only
+     * after `custody` has run.
      */
     pair(pairingCode: string, options?: {
         readonly replaceOtherStore?: boolean;
+        /** Internal daemon seam: runs once the enrollment is persisted, before the gate is released; the daemon writes its E2EE member custody here (#2030 F2). */
+        readonly custody?: (record: DeviceRecord) => Promise<void>;
     }): Promise<DeviceRecord>;
     /** The current, non-expired access token — renews first if it's expired or close to it. Throws {@link DeviceRevokedError} if the device has been revoked. */
     getValidAccessToken(): Promise<string>;
@@ -3426,6 +3435,20 @@ export declare class AuthManager {
     /** A typed revocation 401 halts now; any other 401 resolves `undefined` for the one recheck. */
     private readUnauthorized;
     private backOff;
+    /** The OS entry no longer holds this store's enrollment: drop the cached record, stop renewing and report it. Always throws `error`. */
+    private loseBinding;
+    private underEnrollmentGate;
+    /** Under the enrollment gate: the key and request facts a pairing proves, staging a new first-pairing attempt when this store has none. */
+    private pairingKey;
+    /**
+     * Under the enrollment gate, reread from the OS entry and `device.json`:
+     * this store's bound enrollment, or else its own staged first-pairing
+     * attempt (undefined when none, or when `replaceOtherStore` discards another
+     * store's). Another store's enrollment or attempt, or an attempt that names
+     * no store, is refused, also beside this store's enrollment: the pairing
+     * would consume that attempt (#2033, #2030 F1).
+     */
+    private pairingAuthority;
     /** Always throws — `never` return type lets call sites use `if (x === 401) this.markRevoked();` without an explicit `return`/`throw` of their own. */
     private markRevoked;
     private scheduleProactiveRenewal;
@@ -3802,7 +3825,7 @@ export declare const MAX_OUTBOX_EPHEMERAL_BYTES: number;
  */
 export type ConnectionState = 'connecting' | 'open';
 /** The remote conditions that end a session for good. */
-export type ConnectionHaltReason = Extract<DaemonHaltReason, 'device_revoked' | 'handshake_rejected' | 'replay_cursor_too_old'>;
+export type ConnectionHaltReason = Extract<DaemonHaltReason, 'device_revoked' | 'handshake_rejected' | 'replay_cursor_too_old' | 'store_not_bound' | 're_pair_required'>;
 export interface ConnectionManagerOptions {
     serverUrl: string;
     deviceId: string;
@@ -4085,6 +4108,8 @@ export declare class ConnectionManager {
     getHaltReason(): ConnectionHaltReason | undefined;
     /** The device was found revoked outside this session's own requests (proactive token renewal). */
     noteDeviceRevoked(): void;
+    /** A renewal found the OS entry no longer holds this store's enrollment (#2034). */
+    noteBindingLost(reason: 'store_not_bound' | 're_pair_required'): void;
     /**
      * Stops the long-poll transport and waits for every in-flight envelope handler
      * (the F3 FIFO chain) and the most recent cursor write to actually land on
@@ -6535,7 +6560,6 @@ export declare class DeviceEnrollmentClearError extends Error {
 }
 /** One store's enrollment custody: the `device.json` projection, the OS credential and, with the OS provider, the member entries. */
 export interface EnrollmentCustody {
-    readonly productId: string;
     readonly store: DeviceStore;
     readonly memberRecords: {
         clear(): Promise<void>;
@@ -6571,9 +6595,8 @@ export declare function clearEnrollmentUnderLease(custody: EnrollmentCustody, re
  * id. It reads the calling process's OS credential set, so it clears the
  * enrollment of the account it runs as. The OS credential entry is shared by
  * every store of one productId: the clear never deletes another store's
- * enrollment or staged first pairing, and it excludes their pairing writes
- * while it runs (#1964). A running daemon's token renewal does not take that
- * lock yet (#2034), so a renewal written back while the clear runs is deleted. `clearUnattributedAttempt: true` also deletes a
+ * enrollment or staged first pairing, and it excludes their pairing and
+ * renewal writes while it runs (#1964, #2034). `clearUnattributedAttempt: true` also deletes a
  * first-pairing attempt that names no store; set it only when no other store
  * of this productId is pairing.
  */
@@ -8675,6 +8698,8 @@ export declare function assertStoreBound(projection: DeviceMetadata | undefined,
  * OS DeviceCredentialStore.
  */
 export declare class DeviceStore {
+    /** The productId whose OS credential entry this store shares; the one source of the enrollment lock's scope (#2034). */
+    readonly productId: string;
     readonly credentials: DeviceCredentialBackend;
     private readonly secureDirOptions?;
     private readonly filePath;
@@ -8694,7 +8719,9 @@ export declare class DeviceStore {
      * ACL-unprotected credential") is verifiable from a real `darwin`/`linux`
      * CI/dev machine, not just asserted.
      */
-    constructor(storeDir: string, credentials: DeviceCredentialBackend, secureDirOptions?: EnsureSecureDirOptions | undefined);
+    constructor(
+    /** The productId whose OS credential entry this store shares; the one source of the enrollment lock's scope (#2034). */
+    productId: string, storeDir: string, credentials: DeviceCredentialBackend, secureDirOptions?: EnsureSecureDirOptions | undefined);
     /**
      * Resolve the one store pathname every daemon/CLI component must share.
      * A configured relative path is anchored once at process entry rather than
