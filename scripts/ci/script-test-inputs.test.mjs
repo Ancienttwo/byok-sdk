@@ -43,6 +43,7 @@ test('reader inventory includes copied fixtures, native identity and built cross
     ['packages/protocol/src/provisioning.ts', 'scripts/api-surface/check-provisioning-code-alignment.test.mjs'],
     ['packages/client/src/adapters/pi/official-pi-closure.json', 'scripts/release/beta-release.test.mjs'],
     ['packages/core/README.md', 'scripts/release/pack-and-smoke.test.mjs'],
+    ['scripts/api-surface/module-scan.mjs', 'scripts/release/pack-and-smoke.test.mjs'],
     ['packages/client/daemon-config.schema.json', 'scripts/docs/device-setup.test.mjs'],
     ['scripts/release/registry-expectations.json', 'scripts/release/registry-contract.test.mjs'],
   ]) assert.ok(scriptChecksForPaths([input]).tests.includes(reader), `${input} -> ${reader}`);

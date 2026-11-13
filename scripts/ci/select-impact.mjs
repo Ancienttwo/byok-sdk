@@ -397,7 +397,7 @@ export const reviewedScripts = Object.freeze({
   'scripts/api-surface/check-version-authority.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/api-surface/check-version-authority.test.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/release/beta-release.test.mjs': { tests: ['scripts/release/beta-release.test.mjs'] },
-  // pack-and-smoke.mjs runs this manifest-only check in each of its 4 family
+  // pack-and-smoke.mjs runs this check after building in each of its 4 family
   // jobs; #702 selects npm-release-pack alone. With the install, the targeted
   // job also runs it directly (check:release-graph).
   'scripts/release/check-package-graph.mjs': {

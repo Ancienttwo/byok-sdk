@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "5ff0f556b11b924a1a350f5d7beaaf3094cd6c2177346cac3aa58d1916b245f6"
+    "snapshotSha256": "0000d2959afa2d2b38f8e8c68a9f5e3495abddd9776ba8619c8fbc521abb9db4"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,15 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "client-store-compatibility-type",
+      "impact": "additive",
+      "summary": "The client root exports the StoreCompatibility type used by bot-collaboration ledger inspection, so strict package installations can resolve the published declaration.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2076",
+      "items": [
+        "export:@byok-sdk/client#StoreCompatibility"
+      ]
+    },
     {
       "id": "bot-turn-instruction-host-kit",
       "impact": "additive",
@@ -265,6 +274,11 @@
       "item": "export:@byok-sdk/client#SqliteLocalTaskJournal",
       "change": "changed",
       "entry": "journal-prune-cutoff"
+    },
+    {
+      "item": "export:@byok-sdk/client#StoreCompatibility",
+      "change": "added",
+      "entry": "client-store-compatibility-type"
     },
     {
       "item": "export:@byok-sdk/client#clearDeviceEnrollment",
