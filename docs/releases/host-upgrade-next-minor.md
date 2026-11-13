@@ -235,8 +235,16 @@ Apply this import codemod (including type-only imports); split a mixed root impo
 
 ## When whenTaskSettled reports an unknown task (#2067)
 
-No code change. `whenTaskSettled(taskId)` rejects with `DaemonTaskUnknownError` when, checked after its journal read, this `Daemon` instance has no in-memory record for the task (no held runtime, nothing settled or awaited for it in this run), the journal has no row for it, and no offer for it is marked as seen. That mark ends once the offer is journaled or its append is refused, so a refused offer with no row also reads as unknown. A task whose rows retention pruned (confirmed-journal TTL, default 30 days), a task never journaled on this device and an offer the server sent that has not reached this daemon yet look the same, and the error carries no reason.
+No code change. `whenTaskSettled(taskId)` rejects with `DaemonTaskUnknownError` when an earlier journal read returned no row for the task and, once that read finished, this `Daemon` instance had no in-memory record for it (no held runtime, nothing settled or awaited for it in this run) and no offer for it marked as seen. The read and those checks are not atomic. An offer appended while the read was pending ends the mark, so the wait can report unknown although the row now exists ([#2097](https://github.com/Ancienttwo/byok-sdk/issues/2097)). The mark also ends when the offer's append is refused, so a refused offer with no row reads as unknown too. A task whose rows retention pruned (confirmed-journal TTL, default 30 days), a task never journaled on this device and an offer the server sent that has not reached this daemon yet look the same, and the error carries no reason.
 
-Unknown means only that this `Daemon` holds no runtime for the task at that moment. It does not prove the task is over or will never start: an offer may still be on its way and start a runtime later. Do not delete a Host attach record on this error alone. Keep the record, or settle it from your own server's terminal state and delivery guarantees.
+Unknown does not prove the task is over or will never start: an offer may still be on its way and start a runtime later. Do not delete a Host attach record on this error alone. Keep the record, or settle it from your own server's terminal state and delivery guarantees.
 
-The wait rejects in three other ways, and none of them is `DaemonTaskUnknownError`. An abort through the caller's `signal` rejects with `signal.reason` and leaves the task untouched. A call before `start()` rejects as `approve()` does. A failed journal read (for example a closed or corrupt journal) rejects with the journal's own error, which is a fault.
+Every other rejection has its own source, and none of them is `DaemonTaskUnknownError`:
+
+- **Abort:** a `signal` already aborted at the call rejects with `signal.reason`, and so does an abort after the journal read succeeded, while the wait is registered. The task is untouched. The wait does not listen during the journal read: a pending read delays the abort, and a failed read rejects with the journal's error instead ([#2097](https://github.com/Ancienttwo/byok-sdk/issues/2097)).
+- **Not started:** a call before `start()` rejects as `approve()` does.
+- **Journal read failure:** the journal's own error, for example a closed or corrupt journal, or a Host-injected journal row the SDK refuses as malformed.
+- **Stored evidence fails an SDK check:** an SDK `Error` when a stored cancellation fails its enrollment identity, hash or task binding check, or a task row carries an unknown terminal state.
+- **Offer append refused:** the waiters of an offer whose journal append failed reject with that append's error (for example `LocalStorageEmergencyError`). A redelivery starts a new wait.
+
+The last three are faults.
