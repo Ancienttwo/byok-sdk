@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createSystemdLifecycle, generateSystemdUnit } from '../lifecycle/systemd';
+import { PlatformCommandTimeoutError } from '../util/command-timeouts';
 import type { RunResult, Runner } from '../util/exec-runner';
 import { nodeAgentProgram, sanitizeServiceName, type ServiceDefinition } from '../lifecycle/service-types';
 import { SERVICE_UNIT_MARKER } from '../lifecycle/service-unit';
@@ -198,6 +199,15 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
     expect(calls).toEqual(['systemctl --user disable --now Acme-Agent-.service', 'systemctl --user daemon-reload']);
     expect(fs.rm).toHaveBeenCalledWith('/h/.config/systemd/user/Acme-Agent-.service', { force: true });
     expect(fs.rm).toHaveBeenCalledWith(LAUNCHER, { force: true });
+  });
+
+  it('#1971: a timed-out best-effort daemon-reload fails uninstall()', async () => {
+    const timeout = new PlatformCommandTimeoutError('systemctl timed out', true);
+    const run = vi.fn<Runner>().mockImplementation(async (_cmd, args) => {
+      if (args[1] === 'daemon-reload') throw timeout;
+      return fail(1, '', 'Unit Acme-Agent-.service not loaded.');
+    });
+    await expect(createSystemdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h' }).uninstall()).rejects.toBe(timeout);
   });
 
   it('uninstall() throws and does NOT delete the unit file when disable --now fails for a real reason (P1 #7)', async () => {

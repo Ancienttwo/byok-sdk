@@ -1,7 +1,8 @@
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner.js';
+import { runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner.js';
+import { defaultRunner } from './platform-command.js';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log.js';
 import { sanitizeServiceName, type ServiceDefinition } from './service-types.js';

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runDeviceCommand } from '../daemon/device-credential-store';
-import { defaultRunner } from '../util/exec-runner';
+import { defaultRunner } from '../lifecycle/platform-command';
 import { resolveSystemTool, SystemToolUnavailableError, type SystemToolHost } from '@byok-sdk/core/system-tool';
 
 function fakeHost(platform: NodeJS.Platform, files: readonly string[], systemRoot?: string): SystemToolHost & { probed: string[] } {

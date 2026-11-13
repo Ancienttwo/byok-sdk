@@ -14945,9 +14945,11 @@ export interface RunResult {
  * command exited non-zero (see {@link RunResult}'s doc comment: that is
  * everyday signal for several callers here, not failure). It DOES reject
  * for a genuine spawn failure (the executable itself couldn't be found/run
- * at all, e.g. `ENOENT`) — see {@link defaultRunner}'s implementation for
- * how the two are told apart. Callers that need "ran and returned 0 or
- * throw" wrap this with {@link runOrThrow}.
+ * at all, e.g. `ENOENT`), and for a command that outlives its bound
+ * ({@link PlatformCommandTimeoutError}, #1971). A timeout is never a
+ * {@link RunResult}, so {@link runIdempotent} cannot read it as absence and a
+ * best-effort caller that ignores the exit code still fails on it. Callers
+ * that need "ran and returned 0 or throw" wrap this with {@link runOrThrow}.
  *
  * The DI seam every one of `launchd.ts`/`systemd.ts`/`winsw.ts` accepts
  * (`LaunchdDeps.run`/`SystemdDeps.run`/`WinswDeps.run`) — this is what lets
@@ -14956,32 +14958,6 @@ export interface RunResult {
  * verification requirement, without ever shelling out for real in tests.
  */
 export type Runner = (command: string, args: string[]) => Promise<RunResult>;
-/**
- * Real implementation: `child_process.execFile`, never a shell
- * (`exec`/`shell: true`) — the same reasoning as the pi adapter's own
- * `detect()` (see `templates/packaging/sea/README.md`'s "Windows note" and
- * `adapters/pi/pi-adapter.ts`): no shell-quoting hazard for a service name,
- * config path, or WinSW install directory containing spaces or special
- * characters. Every command this module ever invokes (`launchctl`,
- * `systemctl`, a WinSW-produced `.exe`, `sc.exe`) is a genuine native
- * executable, never a `.cmd`/`.bat` shell script, so the one real caveat of
- * `execFile`-without-`shell` on Windows (a `.cmd`/`.bat` target can't be
- * `CreateProcess`'d directly) never applies here.
- *
- * Node's `execFile` callback distinguishes two failure shapes on its error
- * argument: when the target process ran and merely exited non-zero, `error.code`
- * is that NUMERIC exit code; when the executable itself couldn't be spawned
- * (e.g. `ENOENT`), `error.code` is an ERRNO STRING and there is no real exit
- * code at all. This implementation resolves the first case as an ordinary
- * {@link RunResult} (letting callers decide whether a given non-zero exit
- * matters) and rejects only the second (a real inability to run the
- * command at all, which every caller should hear about).
- *
- * A bare `command` is a system tool and starts from its trusted location,
- * never from `PATH`; one that has none rejects with
- * `SystemToolUnavailableError` (`@byok-sdk/core/system-tool`, #1304).
- */
-export declare const defaultRunner: Runner;
 /**
  * Runs `command`/`args` via `run` and throws a clear, labeled error if it
  * exits non-zero — for the subset of calls across launchd/systemd/WinSW
@@ -15111,7 +15087,7 @@ import { type Runner } from './exec-runner.js';
  * Returns a plain ARGV array with NO manually-embedded quote characters —
  * this is meant for `child_process.execFile`'s array form (this codebase's
  * own established convention for every external command it ever runs; see
- * `util/exec-runner.ts`'s `defaultRunner`), which is never a shell and
+ * `lifecycle/platform-command.ts`'s `defaultRunner`), which is never a shell and
  * so has no shell-quoting hazard for a `dir`/username containing spaces —
  * Node's own Windows argv encoding (used internally by `execFile`/`spawn`
  * when given an array) already quotes/escapes each element correctly
@@ -15126,7 +15102,7 @@ export declare function buildIcaclsArgs(dir: string, username: string): string[]
 /** Restrictive ACL for one already-created file; no inheritance flags because the target cannot contain children. */
 export declare function buildIcaclsFileArgs(filePath: string, username: string): string[];
 export interface EnsureSecureDirOptions {
-    /** DI for tests — see `util/exec-runner.ts`'s identical `Runner` seam. Defaults to `defaultRunner` (real `execFile`, never a shell). */
+    /** DI for tests — see `util/exec-runner.ts`'s identical `Runner` seam. Defaults to a bounded `icacls` run (real `execFile`, never a shell). */
     run?: Runner;
     /** DI for tests — lets the win32 branch below be exercised (with a fake `run`) from any host OS, mirroring `control-protocol.ts`'s `controlEndpointPath` platform-override convention. Defaults to `process.platform`. */
     platform?: NodeJS.Platform;

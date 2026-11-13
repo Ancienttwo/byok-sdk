@@ -184,6 +184,21 @@ describe('host-exit registry', () => {
     expect(__hostExitBackstopForTests.registeredPids()).toEqual([]);
   });
 
+  it.skipIf(process.platform === 'win32')('reads the table once for the sweep, a timed-out read too, and still SIGKILLs every unreaped group (#2105)', async () => {
+    const roots = [spawnOwnedIdle(), spawnOwnedIdle()];
+    const signalled: Array<[number, NodeJS.Signals | number]> = [];
+    for (const child of roots) {
+      await adoptOwnedProcessTree({ child, label: 'unreadable', killFn: (pid, signal) => { signalled.push([pid, signal]); } });
+    }
+    let reads = 0;
+    __hostExitBackstopForTests.run(() => {
+      reads += 1;
+      throw new Error('Process table ps: timed out after 2000 ms, exit unconfirmed');
+    });
+    expect(reads).toBe(1);
+    expect(signalled).toEqual(roots.map((child) => [-(child.pid as number), 'SIGKILL']));
+  });
+
   it('uses a synchronous taskkill tree sweep on win32', async () => {
     const child = spawnOwnedIdle();
     const invocations: Array<{ command: string; args: readonly string[]; options: unknown }> = [];

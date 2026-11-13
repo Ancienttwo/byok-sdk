@@ -1,5 +1,5 @@
-import { execFile } from 'node:child_process';
-import { systemExecutable } from '@byok-sdk/core/system-tool';
+import type { PlatformCommandTimeoutError } from './command-timeouts.js';
+
 
 /**
  * Result of running an external command, regardless of its exit code.
@@ -22,9 +22,11 @@ export interface RunResult {
  * command exited non-zero (see {@link RunResult}'s doc comment: that is
  * everyday signal for several callers here, not failure). It DOES reject
  * for a genuine spawn failure (the executable itself couldn't be found/run
- * at all, e.g. `ENOENT`) — see {@link defaultRunner}'s implementation for
- * how the two are told apart. Callers that need "ran and returned 0 or
- * throw" wrap this with {@link runOrThrow}.
+ * at all, e.g. `ENOENT`), and for a command that outlives its bound
+ * ({@link PlatformCommandTimeoutError}, #1971). A timeout is never a
+ * {@link RunResult}, so {@link runIdempotent} cannot read it as absence and a
+ * best-effort caller that ignores the exit code still fails on it. Callers
+ * that need "ran and returned 0 or throw" wrap this with {@link runOrThrow}.
  *
  * The DI seam every one of `launchd.ts`/`systemd.ts`/`winsw.ts` accepts
  * (`LaunchdDeps.run`/`SystemdDeps.run`/`WinswDeps.run`) — this is what lets
@@ -33,50 +35,6 @@ export interface RunResult {
  * verification requirement, without ever shelling out for real in tests.
  */
 export type Runner = (command: string, args: string[]) => Promise<RunResult>;
-
-/**
- * Real implementation: `child_process.execFile`, never a shell
- * (`exec`/`shell: true`) — the same reasoning as the pi adapter's own
- * `detect()` (see `templates/packaging/sea/README.md`'s "Windows note" and
- * `adapters/pi/pi-adapter.ts`): no shell-quoting hazard for a service name,
- * config path, or WinSW install directory containing spaces or special
- * characters. Every command this module ever invokes (`launchctl`,
- * `systemctl`, a WinSW-produced `.exe`, `sc.exe`) is a genuine native
- * executable, never a `.cmd`/`.bat` shell script, so the one real caveat of
- * `execFile`-without-`shell` on Windows (a `.cmd`/`.bat` target can't be
- * `CreateProcess`'d directly) never applies here.
- *
- * Node's `execFile` callback distinguishes two failure shapes on its error
- * argument: when the target process ran and merely exited non-zero, `error.code`
- * is that NUMERIC exit code; when the executable itself couldn't be spawned
- * (e.g. `ENOENT`), `error.code` is an ERRNO STRING and there is no real exit
- * code at all. This implementation resolves the first case as an ordinary
- * {@link RunResult} (letting callers decide whether a given non-zero exit
- * matters) and rejects only the second (a real inability to run the
- * command at all, which every caller should hear about).
- *
- * A bare `command` is a system tool and starts from its trusted location,
- * never from `PATH`; one that has none rejects with
- * `SystemToolUnavailableError` (`@byok-sdk/core/system-tool`, #1304).
- */
-export const defaultRunner: Runner = (command, args) =>
-  new Promise((resolve, reject) => {
-    // A system tool runs from its trusted location; one with none rejects typed, unstarted.
-    let executable: string;
-    try {
-      executable = systemExecutable(command);
-    } catch (error) {
-      reject(error);
-      return;
-    }
-    execFile(executable, args, (error, stdout, stderr) => {
-      if (error && typeof error.code !== 'number') {
-        reject(error);
-        return;
-      }
-      resolve({ code: error ? (error.code as number) : 0, stdout, stderr });
-    });
-  });
 
 /**
  * Runs `command`/`args` via `run` and throws a clear, labeled error if it

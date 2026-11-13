@@ -2,7 +2,34 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { defaultRunner, type Runner } from './exec-runner.js';
+import { execFile } from 'node:child_process';
+import { resolveSystemTool } from '@byok-sdk/core/system-tool';
+import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError, stopRoot } from './command-timeouts.js';
+import { type Runner } from './exec-runner.js';
+
+/**
+ * Runs `icacls` within the `platform` bound (#1971); past it the process is
+ * killed and the run rejects with `PlatformCommandTimeoutError`, its exit
+ * confirmed only when it exited within the `rootExit` bound. Not the lifecycle's
+ * `defaultRunner` (`lifecycle/platform-command.ts`): `util` may not depend on
+ * `lifecycle`, and this lazily loaded module would pull that runner's
+ * process-tree graph into lazy initialisers. `icacls` starts no children, so
+ * killing it stops the whole command.
+ */
+const runIcacls: Runner = (command, args) =>
+  new Promise((resolve, reject) => {
+    const child = execFile(resolveSystemTool(command), args, { windowsHide: true }, (error, stdout, stderr) => {
+      clearTimeout(timer);
+      if (timedOut) return;
+      if (error && typeof error.code !== 'number') reject(error);
+      else resolve({ code: error ? (error.code as number) : 0, stdout, stderr });
+    });
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      void stopRoot(child, command).then(reject);
+    }, COMMAND_TIMEOUT_MS.platform);
+  });
 
 /**
  * Finding F7 (cross-model adversarial review): POSIX file MODES
@@ -75,7 +102,7 @@ const OWNER_RIGHTS_SID = '*S-1-3-4';
  * Returns a plain ARGV array with NO manually-embedded quote characters —
  * this is meant for `child_process.execFile`'s array form (this codebase's
  * own established convention for every external command it ever runs; see
- * `util/exec-runner.ts`'s `defaultRunner`), which is never a shell and
+ * `lifecycle/platform-command.ts`'s `defaultRunner`), which is never a shell and
  * so has no shell-quoting hazard for a `dir`/username containing spaces —
  * Node's own Windows argv encoding (used internally by `execFile`/`spawn`
  * when given an array) already quotes/escapes each element correctly
@@ -105,7 +132,7 @@ export function buildIcaclsFileArgs(filePath: string, username: string): string[
 }
 
 export interface EnsureSecureDirOptions {
-  /** DI for tests — see `util/exec-runner.ts`'s identical `Runner` seam. Defaults to `defaultRunner` (real `execFile`, never a shell). */
+  /** DI for tests — see `util/exec-runner.ts`'s identical `Runner` seam. Defaults to a bounded `icacls` run (real `execFile`, never a shell). */
   run?: Runner;
   /** DI for tests — lets the win32 branch below be exercised (with a fake `run`) from any host OS, mirroring `control-protocol.ts`'s `controlEndpointPath` platform-override convention. Defaults to `process.platform`. */
   platform?: NodeJS.Platform;
@@ -230,7 +257,7 @@ export async function ensurePiProjectionDir(dir: string, opts: EnsureSecureDirOp
 
 async function secureDir(dir: string, buildArgs: (dir: string, username: string) => string[], opts: EnsureSecureDirOptions, role: 'owned' | 'store-root'): Promise<void> {
   const platform = opts.platform ?? process.platform;
-  const run = opts.run ?? defaultRunner;
+  const run = opts.run ?? runIcacls;
 
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   // No chmod on win32: the icacls DACL below is the authority there.
@@ -244,6 +271,7 @@ async function secureDir(dir: string, buildArgs: (dir: string, username: string)
   try {
     result = await run('icacls', buildArgs(dir, username));
   } catch (err) {
+    if (err instanceof PlatformCommandTimeoutError) throw err;
     throw new SecureDirHardeningError(dir, `could not run icacls: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (result.code !== 0) {
@@ -277,7 +305,7 @@ async function requireMode0700(dir: string, role: 'owned' | 'store-root'): Promi
 /** Re-asserts 0600 on POSIX and a non-inherited owner/SYSTEM/Admin DACL on Windows. */
 export async function ensureSecureFile(filePath: string, opts: EnsureSecureDirOptions = {}): Promise<void> {
   const platform = opts.platform ?? process.platform;
-  const run = opts.run ?? defaultRunner;
+  const run = opts.run ?? runIcacls;
   await fs.chmod(filePath, 0o600);
   if (platform !== 'win32') return;
   const { username } = os.userInfo();
@@ -285,6 +313,7 @@ export async function ensureSecureFile(filePath: string, opts: EnsureSecureDirOp
   try {
     result = await run('icacls', buildIcaclsFileArgs(filePath, username));
   } catch (err) {
+    if (err instanceof PlatformCommandTimeoutError) throw err;
     throw new SecureFileHardeningError(filePath, `could not run icacls: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (result.code !== 0) {
