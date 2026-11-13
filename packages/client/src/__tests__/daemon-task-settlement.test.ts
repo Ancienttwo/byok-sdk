@@ -80,10 +80,12 @@ describe('Daemon.whenTaskSettled', () => {
     await expect(d.whenTaskSettled('task-complete')).resolves.toEqual({ terminal: 'complete', delivery: 'accepted', disposal: 'disposed' });
   });
 
-  it('reports a failed close as disposal failed', async () => {
-    const adapter = new StubRuntimeAdapter();
+  // A custom harness may be named `scratch`, like the offer-owned scratch (#1944).
+  it.each([['pi', {}], ['scratch', { harnessId: 'scratch' }]] as const)('reports a failed close of a %s runtime as disposal failed', async (id, extra) => {
+    if (id !== 'pi') server.setAckCapabilities(['custom-harness']);
+    const adapter = new StubRuntimeAdapter(id);
     const { d } = await started(adapter);
-    offer('task-close-fails');
+    offer('task-close-fails', extra);
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-close-fails');
     const [session] = adapter.sessions;
     vi.spyOn(session!, 'close').mockRejectedValueOnce(new RuntimeDisposalFailure({ stage: 'quiescence', reason: 'process still running' }));

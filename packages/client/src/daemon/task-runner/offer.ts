@@ -366,7 +366,7 @@ export async function handleOffer(
         try { await executionScratch.release(); }
         catch (error) {
           this['deps'].scratchRoot?.abandon(executionScratch.token);
-          this['deps'].onRuntimeDisposalFailure?.({ taskId, runtimeId: 'scratch', stage: 'cleanup', reason: 'offer scratch disposal did not complete' });
+          this['deps'].onOfferScratchDisposalFailure?.({ taskId, reason: 'offer scratch disposal did not complete' });
           throw error;
         }
       }

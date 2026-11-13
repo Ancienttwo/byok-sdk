@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Fixed (client; #1944)** — A failed release of an offer-owned scratch (an offer that declines or fails before any runtime starts) no longer sets `disposal: 'failed'` on `whenTaskSettled`. It still emits `runtime-disposal-failed` with `runtimeId: 'scratch'`, but `disposal` stays `none` whether the failure lands before or after the decline or failure settles. This resolves the 0.42.0 known issue.
+- **Fixed (client; #1944)** — A failed release of an offer-owned scratch (an offer that declines or fails before any runtime starts) no longer sets `disposal: 'failed'` on `whenTaskSettled`. It still emits `runtime-disposal-failed` with `runtimeId: 'scratch'`, but `disposal` stays `none` whether the failure lands before or after the decline or failure settles. The daemon classifies the failure by the owner that reported it, not by the id, so a custom harness whose id is `scratch` still sets `disposal: 'failed'`. This resolves the 0.42.0 known issue.
 
 - **Breaking (bot-collaboration; #2003)** — `cancelHostIntents(keys)` atomically cancels selected unsubmitted Host intents without a pass; `HostIntentError.rejected` reports all refused keys and `code` adds `inflight`. Successors wait for a pass or an explicit `drain()`. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#cancel-selected-host-intents-without-a-pass-2003).
 
