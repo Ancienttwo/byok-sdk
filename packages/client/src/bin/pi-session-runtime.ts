@@ -4,6 +4,7 @@ import { constants } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { acquirePiSessionDiscovery, acquirePiSessionRebinding, acquirePiSessionWriter, type PiSessionRetentionLease } from '../util/pi-session-retention.js';
 import { resolvePathWithoutCreate, type PathMutationGate } from '../util/path-mutation-gate.js';
+import { createPiSubagentAbortBoundary } from '../adapters/pi/subagent-interruption.js';
 import {
   createAgentSession, createAgentSessionRuntime, createAgentSessionServices, createCodingTools,
   getAgentDir, ModelRuntime, resolveCliModel, runRpcMode, SessionManager, SettingsManager,
@@ -201,11 +202,13 @@ export async function runPiSessionRuntime(options: {
     // Cap this instance's public read; preserve "off" and never persist the cap.
     const getCacheWarmingMode = settingsManager.getCacheWarmingMode.bind(settingsManager);
     settingsManager.getCacheWarmingMode = () => getCacheWarmingMode() === 'off' ? 'off' : 'streaming';
+    const subagentAbort = createPiSubagentAbortBoundary();
     const services = await createAgentSessionServices({
       cwd: options.cwd, agentDir, modelRuntimeSignal: AbortSignal.timeout(15_000),
       ...(modelRuntime === undefined ? {} : { modelRuntime }),
       settingsManager,
-      resourceLoaderOptions: options.resourceLoaderOptions,
+      resourceLoaderOptions: { ...options.resourceLoaderOptions,
+        extensionFactories: [...(options.resourceLoaderOptions?.extensionFactories ?? []), { name: 'byok-subagent-interruption', factory: subagentAbort.factory }] },
     });
     if (options.credentialSource === 'keys-profile' && services.modelRuntime.getError() !== undefined) {
       options.reject('keys_profile_model_composition_failed: launcher provider projection could not be composed');
@@ -242,6 +245,7 @@ export async function runPiSessionRuntime(options: {
       model: resolved?.model, thinkingLevel: options.thinking ?? resolved?.thinkingLevel,
       tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools, customTools: options.customTools,
     });
+    subagentAbort.bind(created.session);
     options.configureSession?.(created.session);
     if (options.tools === undefined && options.noTools === undefined) resetResumedPiTools(created.session, services.settingsManager, options.cwd);
     // A replacement is visible to RPC while session_start is awaiting. Keep
