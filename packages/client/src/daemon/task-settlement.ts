@@ -40,14 +40,16 @@ export interface DaemonTaskSettlement {
 }
 
 /**
- * `whenTaskSettled` rejects with this only when, at the call, all three hold:
- * this Daemon instance has no in-memory record of the task (it holds no
- * runtime for it and settled nothing for it in this run), the journal has no
- * row for it, and this instance has not seen an offer for it. A task whose
- * rows retention pruned, a task never journaled on this device and an offer
- * the server sent that has not reached this daemon all look the same here;
- * whether an offer is still on its way is a question for the Host's own
- * server. A failed journal read is never reported as this error: the wait
+ * `whenTaskSettled` rejects with this when, checked after its journal read,
+ * this Daemon instance has no in-memory record of the task (no held runtime,
+ * nothing settled or awaited for it in this run), the journal has no row for
+ * it, and no offer for it is marked as seen. That mark ends once the offer is
+ * journaled or its append is refused, so a refused offer with no row also
+ * reads as unknown. A task whose rows retention pruned, a task never
+ * journaled on this device and an offer still on its way look the same.
+ * Unknown does not prove the task is over or will never start: an offer may
+ * still arrive. Whether one is on its way is for the Host's own server to
+ * answer. A failed journal read is never reported as this error: the wait
  * rejects with the journal's own error.
  */
 export class DaemonTaskUnknownError extends Error {
