@@ -357,6 +357,27 @@ it('reports a refused abort without sending native cancel', async () => {
   } finally { spy.mockRestore(); }
 });
 
+it('preserves a completed turn when interrupted while native disposal is pending', async () => {
+  const box = setup();
+  const gate = Promise.withResolvers<void>();
+  let disposing = false;
+  const dispose = processTree.disposeOwnedProcessTree;
+  const spy = vi.spyOn(processTree, 'disposeOwnedProcessTree').mockImplementation(async options => {
+    if (options.label === 'opencode acp') { disposing = true; await gate.promise; }
+    return dispose(options);
+  });
+  try {
+    const session = await box.start('hello');
+    await vi.waitFor(() => expect(disposing).toBe(true));
+    const interrupted = session.interrupt().then(() => undefined, error => error);
+    gate.resolve();
+    expect(await interrupted).toBeUndefined();
+    expect((await collect(session)).at(-1)).toEqual({ type: 'turn_end' });
+    await expect(session.interrupt()).resolves.toBeUndefined();
+    expect(box.facts().some(fact => fact.kind === 'cancel')).toBe(false);
+  } finally { gate.resolve(); spy.mockRestore(); }
+});
+
 it('settles an opening budget kill before disposing the native session', async () => {
   const box = setup();
   const adapter = new OpenCodeAdapter({ models, maxRetainedBytes: 1, resolveBin: () => ({ command: fake, source: 'env' }) });
