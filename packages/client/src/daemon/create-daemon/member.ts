@@ -1,4 +1,5 @@
 import { type DeviceRecord, enrollmentIdentityOf } from '../store.js';
+import { writeUnderBinding } from '../enrollment-gate.js';
 import { E2eeMemberClient } from '../e2ee-member-client.js';
 import { StoredDeviceProofSigner } from '../device-proof-signer.js';
 import { resumeDeviceMember } from '../device-member.js';
@@ -80,7 +81,9 @@ export function startDeviceMember(daemonScope: DaemonScope, record: DeviceRecord
   if (memberRecords === undefined) return;
   const abort = new AbortController();
   const options = {
-    records: memberRecords, client: memberClient(record, abort.signal), tenantId: record.tenantId, deviceId: record.deviceId, log: logMember,
+    // A running daemon writes the shared member entries only under the enrollment gate while its enrollment holds (#2055).
+    records: memberRecords.guardedBy((write) => writeUnderBinding(daemonState.auth, write, abort.signal)),
+    client: memberClient(record, abort.signal), tenantId: record.tenantId, deviceId: record.deviceId, log: logMember,
     signal: abort.signal,
   };
   daemonState.memberAbort = abort;
