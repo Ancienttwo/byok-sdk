@@ -613,7 +613,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     }
   }
   assert.deepEqual(reviewedScripts['scripts/api-surface/module-scan.mjs'], {
-    tests: ['scripts/api-surface/entry-closure.test.mjs'], install: true, families: ['npm-release-pack'],
+    tests: ['scripts/api-surface/entry-closure.test.mjs'], install: true, families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
   });
   assert.deepEqual(reviewedScripts['scripts/api-surface/entry-closure.test.mjs'], { tests: ['scripts/api-surface/entry-closure.test.mjs'], install: true });
   // pack-and-smoke.mjs selects exactly the family jobs that run it.
