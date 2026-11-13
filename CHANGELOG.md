@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **Fixed (client; #1949)** — Every SDK Pi RPC session caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings, so it warms its prompt cache at most during an active run: Pi cancels the warmer at settlement and revalidates a pending decision before dispatch, so no warming request is sent after the run settled, even for a late `"warm"` answer. No Host action is needed. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#pi-cache-warming-stops-at-settlement-1949).
+- **Fixed (keys; #2012)** — `ProviderRegistry.get()`, `list()` and the status returned by `setDefaultModelProvider()` read the profile, its pending marker and whether the credential store holds its key under the configuration lock, so `secret_configured` and `configuration_pending` always describe one configuration. While another writer holds the lock, a status read waits for it; across processes the wait is the profile store's bounded `configurationLockWaitMs` (default 10 s), after which the read fails with `PROVIDER_CONFIGURATION_BUSY` instead of reporting an unlocked state. A UI listing providers shows that error and can retry. No Host action is needed.
 
 ## 0.42.0 — 2026-11-13 (published)
 

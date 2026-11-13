@@ -114,6 +114,17 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     await expect(registry().resolveDefaultModelProvider()).resolves.toBeDefined();
   });
 
+  it('status reads wait for a held configuration lock (#2012)', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    const lock = await profiles.acquireConfigurationLock();
+    let settled = false;
+    const reads = Promise.all([registry().list(), registry().get('openai')]).finally(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    await lock.release();
+    await expect(reads).resolves.toMatchObject([[{ secret_configured: true }], { configuration_pending: false }]);
+  });
+
   it('remove goes through the same pending path and keeps the watermark tombstone', async () => {
     await registry().configure(OPENAI, OLD_KEY);
     await profiles.commitCustody({

@@ -345,15 +345,24 @@ export class ProviderRegistry {
     });
   }
 
+  /**
+   * Status reads hold the configuration lock like every other credential
+   * reader, so `secret_configured` and `configuration_pending` describe one
+   * configuration. While a writer holds the lock, a status read waits for it
+   * (the store's bounded wait) and then fails closed with
+   * `PROVIDER_CONFIGURATION_BUSY`; it never reports an unlocked guess.
+   */
   async get(profileRef: ProviderProfileRef): Promise<ProviderStatus | undefined> {
-    const profile = await this.#profiles.get(profileRef);
-    return profile === undefined ? undefined : this.#status(profile);
+    return withConfigurationLock(this.#profiles, async () => {
+      const profile = await this.#profiles.get(profileRef);
+      return profile === undefined ? undefined : this.#status(profile);
+    });
   }
 
   async list(): Promise<ProviderStatus[]> {
-    return Promise.all(
+    return withConfigurationLock(this.#profiles, async () => Promise.all(
       (await this.#profiles.list()).map((profile) => this.#status(profile)),
-    );
+    ));
   }
 
   /**
@@ -388,8 +397,7 @@ export class ProviderRegistry {
   async setDefaultModelProvider(
     profileRef: ProviderProfileRef,
   ): Promise<ProviderStatus> {
-    const profile = await withConfigurationLock(this.#profiles, () => this.#profiles.setEnabled(profileRef));
-    return this.#status(profile);
+    return withConfigurationLock(this.#profiles, async () => this.#status(await this.#profiles.setEnabled(profileRef)));
   }
 
   async #status(profile: ModelProviderProfile): Promise<ProviderStatus> {

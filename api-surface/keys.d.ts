@@ -2025,6 +2025,13 @@ export declare class ProviderRegistry {
     replaceSecret(profileRef: ProviderProfileRef, secret: string): Promise<ProviderStatus>;
     /** Remove a profile and its secret together, through the same pending/commit path. */
     delete(profileRef: ProviderProfileRef): Promise<boolean>;
+    /**
+     * Status reads hold the configuration lock like every other credential
+     * reader, so `secret_configured` and `configuration_pending` describe one
+     * configuration. While a writer holds the lock, a status read waits for it
+     * (the store's bounded wait) and then fails closed with
+     * `PROVIDER_CONFIGURATION_BUSY`; it never reports an unlocked guess.
+     */
     get(profileRef: ProviderProfileRef): Promise<ProviderStatus | undefined>;
     list(): Promise<ProviderStatus[]>;
     /**
