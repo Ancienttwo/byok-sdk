@@ -171,10 +171,10 @@ describe('custody child', () => {
   it.each([
     ['stopped', new BridgeError('unknown_method', 'Unknown bridge method keys.profilesChanged')],
     ['not running', new BridgeError('host_exited', 'No Host is running')],
-  ])('lists stored providers while the Host is %s', async (_state, refusal) => {
+  ])('saves and lists stored providers while the Host is %s', async (_state, refusal) => {
     const secrets = new InMemorySecretStore<ModelProviderSecretName>();
     const handlers = keysMainHandlers({ spawnHostCommand: () => custodyChild(secrets, []), callHost: () => Promise.reject(refusal) });
-    await expect(Promise.resolve(handlers['keys.submit']({ op: 'configure', configuration: CONFIGURATION, secret: SECRET }))).rejects.toBe(refusal);
+    await expect(handlers['keys.submit']({ op: 'configure', configuration: CONFIGURATION, secret: SECRET })).resolves.toMatchObject({ profile_ref: 'writer' });
     const statuses = await handlers['keys.list'](undefined);
     expect(statuses.map(status => status.profile_ref)).toEqual(['writer']);
   });
