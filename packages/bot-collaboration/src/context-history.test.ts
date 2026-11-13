@@ -3,6 +3,10 @@ import { expect, it } from 'vitest';
 import { buildHandoffPack, type HandoffPackBudgets, type HandoffTurn } from '@byok-sdk/protocol';
 import { stateOf } from './model';
 import * as rules from './rules/context';
+import { botTurnInstruction } from './host-kit';
+import { seedCollaboration, SYNC_OPTIONS } from './commit-vectors.test-support';
+import { syncTurn } from './rules/sync';
+import { outcomeSchema, promptActions } from './rules/schema';
 
 const limits = { turnLimit: 100, contextMaxBytes: 32_768, instructionMaxBytes: 65_536 };
 
@@ -19,6 +23,17 @@ it('freezes the same instruction from the device ledger as from the same Bot his
   const { turns: _turns, cards: _cards, questions: _questions, rejected: _rejected, ...authority } = state;
   const injected: rules.ContextHistory = { turns: [state.turns.m1!, state.turns.m2!, state.turns.m3!], cards: [], questions: [], rejected: [state.rejected[0]!] };
   expect(rules.botTurnInstruction(state, state.turns.m3!, limits)).toEqual(rules.turnInstruction(authority, injected, state.turns.m3!, limits));
+});
+
+it('host-kit computes the instruction frozen by sync', () => {
+  const state = stateOf({}); seedCollaboration(state);
+  const turn = state.turns.t = { id: 't', root: 't', botId: 'main', source: 'user', request: 'Hello', hop: 0, status: 'queued', authority: 'owner' };
+  const actions = promptActions(outcomeSchema(turn.botId, state, turn, SYNC_OPTIONS.models, SYNC_OPTIONS.routines, SYNC_OPTIONS.offer), SYNC_OPTIONS.offer);
+  const expected = botTurnInstruction({ state, turn, limits: SYNC_OPTIONS.limits, routines: SYNC_OPTIONS.routines, actions }).instruction;
+  const step = syncTurn(state, turn, { intent: () => undefined, executionStarted: () => false, retired: () => undefined }, SYNC_OPTIONS, () => {});
+  expect(step?.kind).toBe('freeze');
+  if (step?.kind !== 'freeze') throw new Error('Expected frozen intent');
+  expect(step.input.execution.payload.instruction).toBe(expected);
 });
 
 it('#1446: the history of a frozen Turn is byte for byte the handoff pack of its rows', () => {

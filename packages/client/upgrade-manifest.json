@@ -14,6 +14,18 @@
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
+  "entries": [
+    {
+      "id": "bot-turn-instruction-host-kit",
+      "impact": "additive",
+      "summary": "Host adapters can compute the instruction frozen by K8 sync with botTurnInstruction on the host-kit entry, using an options object and InstructionLimits.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1978",
+      "items": [
+        "export:@byok-sdk/bot-collaboration/host-kit#botTurnInstruction",
+        "export:@byok-sdk/bot-collaboration/host-kit#BotTurnInstructionOptions",
+        "export:@byok-sdk/bot-collaboration/host-kit#InstructionLimits"
+      ]
+    }
+  ],
   "changes": []
 }

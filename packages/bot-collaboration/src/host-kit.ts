@@ -1,6 +1,21 @@
 // The `./host-kit` entry: the L modules a Host adapter composes (model, channel, delivery, routines, team,
 // migration, retention, dreaming, adapter steps). It does not load the L Host or @byok-sdk/client, so a Worker
 // can bundle it.
+import { botTurnInstruction as buildBotTurnInstruction, type BotHistoryState, type ContextTurn, type InstructionLimits } from './rules/context.js';
+import type { ContextRoutine, ContextState } from './rules/schema.js';
+import type { RoomMessage } from './rules/rooms.js';
+import type { Turn } from './rules/turn.js';
+
+/** Inputs used by sync to freeze a Bot Turn's instruction. */
+export interface BotTurnInstructionOptions<R extends ContextRoutine = ContextRoutine> {
+  state: ContextState & BotHistoryState; turn: Turn; limits: InstructionLimits;
+  routines?: readonly R[]; injected?: readonly ContextTurn[]; room?: readonly RoomMessage[]; actions?: readonly string[];
+}
+/** Compute the instruction sync freezes, with the same history, routines and prompt actions. */
+export function botTurnInstruction<R extends ContextRoutine>(options: BotTurnInstructionOptions<R>) {
+  return buildBotTurnInstruction(options.state, options.turn, options.limits, options.routines, options.injected, options.room, options.actions);
+}
+export type { InstructionLimits } from './rules/context.js';
 export { DelegationError, HostIntentError } from './rules/delegation.js';
 export { IntentOutcomeError } from './adapter-steps.js';
 export { RetentionRefused, retainRoots } from './retention.js';
