@@ -564,7 +564,7 @@ describe('Claude context window reserved for S4', () => {
   it('the session reads the window of the root init model, not a subagent init model', async () => {
     const claude = memoryClaude();
     const stream = new ClaudeStreamSession(claude.child as never);
-    await stream.open({ env: {}, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+    await stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
     expect((await stream.raw.prompt('go')).response.body.kind).toBe('accepted');
     claude.send({ type: 'system', subtype: 'init', model: 'root-model', session_id: 'session-1' });
     claude.send({ type: 'system', subtype: 'init', model: 'child-model', session_id: 'session-1', parent_tool_use_id: 'toolu_task' });
@@ -577,7 +577,7 @@ describe('Claude context window reserved for S4', () => {
     const claude = memoryClaude();
     const stream = new ClaudeStreamSession(claude.child as never);
     const read: number[] = [];
-    await stream.open({ env: {}, mcpServers: {}, onFrame: frame => { read.push(JSON.stringify(frame).length); }, onExit: () => {}, onAppRequest: () => {} });
+    await stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, onFrame: frame => { read.push(JSON.stringify(frame).length); }, onExit: () => {}, onAppRequest: () => {} });
     expect((await stream.raw.prompt('go')).response.body.kind).toBe('accepted');
     const text = 'x'.repeat(7 * 1024 * 1024);
     for (const id of ['a', 'b', 'c']) claude.send({ type: 'assistant', message: { id, role: 'assistant', content: [{ type: 'text', text }] } });

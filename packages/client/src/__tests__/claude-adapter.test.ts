@@ -396,7 +396,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   ] as const)('settles %s as not interrupted, so the owner terminates', async (_label, refuse, during) => {
     const claude = memoryClaude(refuse);
     const stream = new ClaudeStreamSession(claude.child as never);
-    await stream.open({ env: {}, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+    await stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
     expect((await stream.raw.prompt('go')).response.body.kind).toBe('accepted');
     const settled = stream.interruptAndSettle(1_000);
     during(claude);
@@ -543,7 +543,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     } })(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { env: {} });
     const stream = new ClaudeStreamSession(child);
     try {
-      await stream.open({ env: {}, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+      await stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
       native.stdin.emit('error', new Error('stdin already failed'));
       const control = await stream.prompt('must not be accepted');
       expect(control.response.body).toMatchObject({ kind: 'rejected', code: 'error', reason: 'stdin already failed' });

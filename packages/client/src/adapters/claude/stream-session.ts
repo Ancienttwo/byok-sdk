@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { AsyncQueue } from '../../util/async-queue.js';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
-import { DEFAULT_MAX_RETAINED_BYTES } from '../session-limits.js';
 import type { McpStdioServerConfig } from '../../types.js';
 import type { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import {
@@ -24,6 +23,8 @@ export interface ClaudeStreamSessionOptions {
   /** The requested `--resume` id; a fresh session learns its id from `system/init`. */
   resume?: string;
   env: Readonly<Record<string, string>>;
+  /** The kernel's retention limit: past it the oldest native payloads are elided. */
+  maxRetainedBytes: number;
   mcpServers: Readonly<Record<string, McpStdioServerConfig>>;
   /** `initialize` with these SDK callback hooks; absent when no native control is in use. */
   initialize?: { hooks: Readonly<Record<string, unknown>> | null };
@@ -122,7 +123,7 @@ export class ClaudeStreamSession {
         reply => this.#fatal === undefined ? respond(reply) : Promise.reject(this.#fatal)),
       // Before a native interrupt: tools it orphans stay killable at disposal.
       beforeInterrupt: () => this.child.observeDescendants(),
-    }, DEFAULT_MAX_RETAINED_BYTES);
+    }, options.maxRetainedBytes);
     // Without withdraw a cancelled task's held follow-up would still reach Claude.
     if (this.#raw.withdraw === undefined) throw new Error('claude stream-json session has no withdraw');
     this.#withdraw = this.#raw.withdraw.bind(this.#raw);

@@ -342,7 +342,7 @@ describe('Claude native bridge transport fencing', () => {
     vi.useFakeTimers();
     const claude = memoryClaude();
     const stream = new ClaudeStreamSession(claude.child as never);
-    const opened = stream.open({ env: {}, mcpServers: {}, initialize: { hooks: null }, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+    const opened = stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, initialize: { hooks: null }, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
     const refused = expect(opened).rejects.toMatchObject({ phase: 'start', message: expect.stringContaining('Claude native control initialization failed') });
     await vi.advanceTimersByTimeAsync(0);
     expect(claude.written).toMatchObject([{ type: 'control_request', request: { subtype: 'initialize', hooks: null } }]);

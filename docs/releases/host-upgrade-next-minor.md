@@ -5,3 +5,11 @@ Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts m
 ## Pi cache warming stops at settlement (#1949)
 
 No configuration change is needed. Every SDK Pi RPC session now caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings, instead of answering each idle `cache_warming_decision` with `stop`. Pi cancels the warmer at settlement and revalidates pending decisions before dispatch, so a late `"warm"` answer cannot send a refresh after settlement. Under `agentUserContext: 'inherit'` a device setting of `"off"` still turns warming off; under `excluded` the session's settings are in memory and do not read the device file.
+
+## Retained records elide past the limit (#1932)
+
+The Codex, Grok, Antigravity, OpenCode and dsh adapters no longer fail a task with `<runtime> retained record byte budget exceeded`. Past `maxRetainedBytes` (default 16 MiB) they elide the oldest native payloads in place and the task keeps running, as Claude already did. The limit also covers the native payload of a runtime request and its reply. `ClaudeAdapterOptions` gains `maxRetainedBytes` with the same validation and default.
+
+- A Host that relied on that failure to stop a runaway task watches the records that carry `elided: true` and bounds the task with `maxDurationMs`.
+- A Host that matched the failure message drops that match; it no longer occurs.
+- A Host that passes no `maxRetainedBytes` needs no change.

@@ -7,13 +7,47 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "47d5ae4ed87551abbe8e30dc50c222a5aa80ee42ed3cb94b7137e6e65b617643"
+    "snapshotSha256": "3104e82732638ea1b25c45036a0487ef6cc8d4d735b4aabb927c45ec849093ed"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "retained-records-one-policy",
+      "impact": "breaking",
+      "summary": "Past maxRetainedBytes (default 16 MiB) the Codex, Grok, Antigravity, OpenCode and dsh adapters elide the oldest native payloads in place (elided: true) and the task keeps running, as Claude already did; the failure '<runtime> retained record byte budget exceeded' no longer occurs. The limit also covers runtime request and reply native payloads. ClaudeAdapterOptions gains maxRetainedBytes. A Host that relied on the failure to stop a task watches elided records and bounds the task with maxDurationMs.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retained-records-elide-past-the-limit-1932",
+      "items": [
+        "export:@byok-sdk/client#ClaudeAdapter",
+        "export:@byok-sdk/client#ClaudeAdapterOptions",
+        "export:@byok-sdk/client/adapters#ClaudeAdapter",
+        "export:@byok-sdk/client/adapters#ClaudeAdapterOptions"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "export:@byok-sdk/client#ClaudeAdapter",
+      "change": "changed",
+      "entry": "retained-records-one-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#ClaudeAdapterOptions",
+      "change": "changed",
+      "entry": "retained-records-one-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#ClaudeAdapter",
+      "change": "changed",
+      "entry": "retained-records-one-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#ClaudeAdapterOptions",
+      "change": "changed",
+      "entry": "retained-records-one-policy"
+    }
+  ]
 }

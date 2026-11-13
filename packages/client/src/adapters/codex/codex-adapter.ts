@@ -36,7 +36,7 @@ import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js
 import { codexFailure } from '../../runtime/oar-failure-runtime.js';
 import { CodexProjection, type CodexRecord } from './projection.js';
 import { AsyncQueue } from '../../util/async-queue.js';
-import { RetainedRecordBudget, haltGate, SettleWaiters, raceDeadline, RetryableOnce } from '../session-kit.js';
+import { haltGate, SettleWaiters, raceDeadline, RetryableOnce } from '../session-kit.js';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin.js';
 import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation.js';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
@@ -276,7 +276,6 @@ export class CodexAdapter implements RuntimeAdapter {
       model,
       this.interruptTimeoutMs,
       this.options.operationTimeoutMs ?? DEFAULT_OPERATION_MS,
-      this.maxRetainedBytes,
       input.manifest.sessionRef === undefined,
       this.options.nativeInteractions,
       input.manifest.sessionRef,
@@ -298,6 +297,7 @@ export class CodexAdapter implements RuntimeAdapter {
         {
           cwd,
           env: { ...input.env, ...input.scratch.env, ...codexHome } as Record<string, string>,
+          retainedBytes: this.maxRetainedBytes,
           ...(model === undefined ? {} : { model }),
           sandboxMode: this.options.sandbox ?? 'danger-full-access',
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
@@ -388,7 +388,6 @@ class CodexSession implements Session {
   private readonly turnWaiters = new SettleWaiters();
   private stopping = false;
   private readonly closeOnce = new RetryableOnce();
-  private readonly recordBudget: RetainedRecordBudget;
   /** Set when the record consumer failed: no later line reaches the client, so the kernel retains no more of them. */
   halted?: RuntimeExecutionFailure;
   private readonly native?: CodexNativeInteractions;
@@ -399,12 +398,10 @@ class CodexSession implements Session {
     private readonly model: string | undefined,
     private readonly interruptMs: number,
     private readonly operationMs: number,
-    maxRetainedBytes: number,
     private readonly fresh: boolean,
     interactions?: NativeInteractionHostOptions,
     private readonly expectedSessionRef?: string,
   ) {
-    this.recordBudget = new RetainedRecordBudget(maxRetainedBytes, 'codex');
     if (interactions) {
       this.native = new CodexNativeInteractions(() => this.sessionRef, interactions, () => this.fail(infrastructure('codex native interaction transport failed')));
       this.interactions = this.native.channel;
@@ -453,8 +450,6 @@ class CodexSession implements Session {
   record(record: CodexRecord): void {
     if (this.halted !== undefined) return;
     try {
-      // The observer receives the redacted, retained record: measure what the kernel keeps.
-      this.recordBudget.add(record);
       const nativeFrame = record.body as { origin?: string; type?: string; native?: Record<string, unknown> };
       if (record.kind === 'frame' && nativeFrame.origin === 'byok-native' && nativeFrame.type && nativeFrame.native) this.native?.notification(nativeFrame.type, nativeFrame.native);
       this.projection?.consume(this.stream, record, (event) =>

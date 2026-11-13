@@ -255,6 +255,21 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     await session.dispose();
     expect(facts(log).some(fact => fact.kind === 'cancel')).toBe(false);
   });
+  it('elides the native payload of an old runtime request and its reply past the retention limit (#1932)', async () => {
+    const { dir, log } = workspace();
+    const records: RawEvent[] = [];
+    const session = await start(spawnOwnedLineProcess, spawnOwnedTerminalProcess, { kind: 'available', via: 'executable', command: FAKE },
+      { cwd: dir, env: { PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log }, retainedBytes: 1 }, { onRecord: record => records.push(record) });
+    live.push(session);
+    await turn(session, records, 'permission');
+    const live_ = records.find((record): record is RequestRecord => record.kind === 'request' && record.body.kind === 'native' && record.body.type === 'session/request_permission')!;
+    expect(live_.body).toMatchObject({ native: expect.anything() });
+    const retained = session.records();
+    const request = retained.find(record => record.kind === 'request' && record.id === live_.id)!;
+    const reply = retained.find(record => record.kind === 'response' && record.requestId === live_.id)!;
+    expect(request.body).toMatchObject({ kind: 'native', native: null, elided: true });
+    expect(reply.body).toMatchObject({ kind: 'answered', native: null, elided: true });
+  });
   it('reaps a hosted terminal tree when the session is disposed mid-turn', async () => {
     const { dir, log } = workspace();
     const records: RawEvent[] = [];

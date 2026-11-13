@@ -67,6 +67,8 @@ export interface ClaudeAdapterOptions {
     spawnFn?: SpawnFn;
     /** Deadline for native interrupt ACK before owned-process termination fallback. */
     interruptTimeoutMs?: number;
+    /** Native payload bytes the session retains; past it the oldest are elided and the task continues. Default 16 MiB. */
+    maxRetainedBytes?: number;
     /** Local Host callbacks for native stdio requests; never enables remote boolean approvals. */
     nativeInteractions?: NativeInteractionHostOptions;
     /**
@@ -102,6 +104,7 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly environmentPolicy;
     private readonly effectiveVersionPolicy;
     private readonly interruptTimeoutMs;
+    private readonly maxRetainedBytes;
     constructor(options?: ClaudeAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(): Promise<RuntimeDetectResult>;

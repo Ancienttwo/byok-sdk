@@ -1,4 +1,4 @@
-import { resolveInterruptTimeoutMs } from '../session-limits.js';
+import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
 import type { RuntimeTaskInput } from '../../types.js';
 import { createClaudeMcpIdentityResolver } from './mcp-identity.js';
 import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities.js';
@@ -102,6 +102,8 @@ export interface ClaudeAdapterOptions {
   spawnFn?: SpawnFn;
   /** Deadline for native interrupt ACK before owned-process termination fallback. */
   interruptTimeoutMs?: number;
+  /** Native payload bytes the session retains; past it the oldest are elided and the task continues. Default 16 MiB. */
+  maxRetainedBytes?: number;
   /** Local Host callbacks for native stdio requests; never enables remote boolean approvals. */
   nativeInteractions?: NativeInteractionHostOptions;
   /**
@@ -163,9 +165,11 @@ export class ClaudeAdapter implements RuntimeAdapter {
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
   private readonly effectiveVersionPolicy: RuntimeVersionPolicy | undefined;
   private readonly interruptTimeoutMs: number;
+  private readonly maxRetainedBytes: number;
 
   constructor(private readonly options: ClaudeAdapterOptions = {}) {
     this.interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'Claude');
+    this.maxRetainedBytes = resolveMaxRetainedBytes(options.maxRetainedBytes, 'Claude');
     if (options.agentUserContext !== undefined && options.agentUserContext !== 'inherit' && options.agentUserContext !== 'excluded')
       throw new TypeError('ClaudeAdapterOptions.agentUserContext must be inherit or excluded');
     if (options.agentSessionPersistence !== undefined && options.agentSessionPersistence !== 'enabled' && options.agentSessionPersistence !== 'disabled')
@@ -422,6 +426,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         await Promise.race([opened.open({
           ...(resumeSessionId === undefined ? {} : { resume: resumeSessionId }),
           env,
+          maxRetainedBytes: this.maxRetainedBytes,
           mcpServers: taskMcpServers,
           ...(native === undefined && gate === undefined ? {} : { initialize: { hooks: gate?.hooks ?? null } }),
           onFrame: frame => native?.receive(frame),

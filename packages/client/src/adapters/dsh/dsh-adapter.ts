@@ -233,7 +233,6 @@ export class DshAdapter implements RuntimeAdapter {
     const session = new DshSession(
       input.scratch,
       this.interruptTimeoutMs,
-      this.maxRetainedBytes,
       model,
     );
     try {
@@ -258,6 +257,7 @@ export class DshAdapter implements RuntimeAdapter {
           model,
           // The process runs in the scratch directory, so dsh reads no workspace `.env`; the workspace stays the session cwd.
           launch: { directory: input.scratch.sdkDir, patches: [patch], env },
+          retainedBytes: this.maxRetainedBytes,
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
           ...(resume === undefined ? {} : { resume }),
         },
@@ -296,14 +296,12 @@ class DshSession implements Session {
   private stopAttempt?: Promise<void>;
   private closeAttempt?: Promise<void>;
   private turnClosed = false;
-  private retainedBytes = 0;
   /** Set when the record consumer failed: no later line reaches the ACP stream, so the kernel retains no more of them. */
   halted?: RuntimeExecutionFailure;
 
   constructor(
     private readonly scratch: ExecutionScratch,
     private readonly interruptMs: number,
-    private readonly maxRetainedBytes: number,
     private readonly model: string,
   ) {}
 
@@ -333,9 +331,6 @@ class DshSession implements Session {
   record(record: DshRecord): void {
     if (this.halted !== undefined || this.turnClosed) return;
     try {
-      // The observer receives the redacted, retained record: measure what the kernel keeps.
-      this.retainedBytes += Buffer.byteLength(JSON.stringify(record), 'utf8');
-      if (this.retainedBytes > this.maxRetainedBytes) throw infrastructure('dsh retained record byte budget exceeded');
       this.projection?.consume(record, (event) => this.queue.push(event), (turn) => this.turnEnded(turn));
     } catch (error) {
       this.fail(error);

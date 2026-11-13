@@ -562,13 +562,11 @@ describe('Codex persistent app-server adapter', () => {
       ).toBeDefined();
     });
   });
-  it('retention overflow is explicit typed failure and termination', async () => {
-    const { pids, spawnFn } = tracked();
-    const error = await open(adapter({ maxRetainedBytes: 1, spawnFn })).catch((caught) => caught);
-    expect(error).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(error).toMatchObject({ message: 'codex retained record byte budget exceeded' });
-    expect(pids).toHaveLength(1);
-    await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
+  it('elides the oldest native payloads past the retention limit and keeps the session open (#1932)', async () => {
+    const s = await open(adapter({ maxRetainedBytes: 1 }));
+    expect((await turn(s)).at(-1)).toMatchObject({ type: 'turn_end' });
+    const records = (s as unknown as { raw: { records(): readonly { body: { elided?: true } }[] } }).raw.records();
+    expect(records.some(record => record.body.elided === true)).toBe(true);
   });
   it('a failing record consumer fails the session although the kernel swallows observer errors', async () => {
     const { pids, spawnFn } = tracked();
