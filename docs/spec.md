@@ -4229,7 +4229,7 @@ poll the cloud read API. With no draft producer, only a terminal marker appears.
 ## Pi subagents
 
 Pi subagents are the upstream `pi-subagents` package (exact client dependency,
-0.87.0), loaded by the ordinary RPC host when the credential source is
+0.88.1), loaded by the ordinary RPC host when the credential source is
 `pi-auth-store` (see the `keys-profile` lane above). The SDK vendors and patches none of it. pi-subagents reads its own
 package files at run time, so a product bundler never inlines it. The installed
 host imports the installed package through opaque specifiers. A single-file
@@ -4287,7 +4287,7 @@ session's gate hook remembers the `subagent` calls the gate allowed, until
 them with `tool_authorization_denied`, before it reaches the gate: no parent,
 a parent that is not `subagent` (codemode), a denied or still-pending
 `subagent` call, or a parent from before the shutdown. It also refuses a launch whose input is not
-the pinned 0.87.0 schema: the required strings `workflowRunId` and `key`; the
+the pinned 0.88.1 schema: the required strings `workflowRunId` and `key`; the
 optional strings `agent`, `task`, `model` and `resume`; the optional booleans
 `async` and `worktree`; the non-empty paths `cwd` and `output`; and `commands`,
 whose entries hold a `command` string, a non-empty `cwd` and a string-valued
@@ -4371,7 +4371,7 @@ continue to fail closed, even when the other directory is absent.
 Node SEA starts its foreground host with the original executable and creates
 no `node` hardlink or executable alias, at startup or on demand. Link permissions
 and volume boundaries cannot prevent a foreground task from starting. SEA
-background requests return `pi_background_unavailable`: pi-subagents 0.87.0
+background requests return `pi_background_unavailable`: pi-subagents 0.88.1
 uses `resolveNodeExecutable` for its background runner and `fork` on
 `process.execPath` for its workflow supervisor, and a SEA binary cannot stand
 in for Node. The message names foreground subagents and a Bun-compiled product
@@ -4406,7 +4406,7 @@ model probes, do not gain a general Pi CLI re-entry. A separately invoked
 ambient Pi cannot use the product's process-local peer bridge or select a
 foreign SDK through it.
 The upstream host runner command seam proposed in nicobailon/pi-subagents#3105
-was closed as not planned, and pinned 0.87.0 still has no such seam. See the
+was closed as not planned, and pinned 0.88.1 still has no such seam. See the
 [upstream decision and package-source evidence](researches/2026-11-09-pi-background-runner-seam.md).
 
 ## Local native interaction contract

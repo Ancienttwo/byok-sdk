@@ -14,6 +14,16 @@ Other errors can still reject after commit. In particular, a drain that also enc
 
 The OpenCode adapter's default policy qualifies 2.3.0. A device still running 2.2.6 reports the `runtime_version_unqualified` advisory with `qualifiedVersion: '2.3.0'` through detect; hello and presence report `state: 'warn'` with the same qualified version. The default policy remains `warn`, so tasks can still run. Upgrade the device's OpenCode to 2.3.0 to clear the advisory, or keep 2.2.6 and show the advisory while planning the upgrade. A Host that supplies its own OpenCode `versionPolicy` keeps that policy; review it separately before changing versions. See the [qualification evidence](../researches/2026-11-13-opencode-2.3.0-qualification.md).
 
+## Undici in the Host dependency tree (#2081)
+
+The client now depends on `undici` 8.12.4. Pi 1.5.2 still declares 8.12.3 exactly, so a Host install can retain a separate vulnerable copy. To use 8.12.4 throughout the npm dependency tree, add the line for your package manager to the root `package.json` and reinstall:
+
+- npm: `"overrides": { "undici": "8.12.4" }`
+- Bun: `"overrides": { "undici": "8.12.4" }`
+- pnpm: `"pnpm": { "overrides": { "undici": "8.12.4" } }`
+
+Merge these entries into any existing overrides. After reinstalling, inspect the dependency tree with `npm ls undici --all`, `bun pm why undici`, or `pnpm why -r undici`, respectively; every listed undici version should be 8.12.4. Pi's upstream pin is tracked in [#2098](https://github.com/Ancienttwo/byok-sdk/issues/2098). This does not update Node's built-in undici or copies bundled inside other packages; update those runtimes and packages separately.
+
 ## Cancel selected Host intents without a pass (#2003)
 
 `BotCollaboration.cancelHostIntents(keys)` atomically cancels a chosen set of unsubmitted Host intents without draining. It returns settled conclusions on replay and refuses the whole set when any key is unknown, a Bot Turn or in flight. `HostIntentError.rejected` lists every refused key and code; exhaustive switches over `HostIntentError.code` add `inflight`. Existing single cancellation and switch APIs retain their other behavior, and the store format is unchanged; see the wake-dispatch change above. A Host may replace freeze → individual cancels → abort with this call; keep the freeze when other work on the device must also be held. Successors start on the next pass, or call `drain()` to start them.
