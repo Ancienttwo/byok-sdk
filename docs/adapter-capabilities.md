@@ -1275,8 +1275,16 @@ request or its reply loses its `native`. Each elided record carries
 `elided: true`. Elision runs after every observer has the complete record, so
 live events, the closing reply and usage are unchanged, and the newest frame
 keeps its payload. The task keeps running; exceeding the limit is not a
-failure. Envelopes, event kinds and text stay, so the log still grows slowly
-with the record count, and the task's `maxDurationMs` bounds that.
+failure.
+
+The limit bounds only native and tool payloads. Text and reasoning, envelopes
+and event kinds are kept whole, because the folds read them, so
+`maxRetainedBytes` is not a bound on total retained bytes (#2056). A task's
+text grows with the provider's per-turn output limit times the number of turns;
+a Host that needs a hard bound sets `maxDurationMs` (the offer's
+`limits.maxDurationMs`, or `DaemonConfig.defaultMaxDurationMs`). For Claude
+this is the behavior since #1892. Codex, Grok, agy, OpenCode and dsh used to
+count their text toward the limit and fail the task past it.
 
 Limit: Grok classifies a failed prompt from the turn's retained frames. If more
 than `maxRetainedBytes` of frame payload arrives between a failed
