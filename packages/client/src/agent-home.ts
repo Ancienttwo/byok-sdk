@@ -14,7 +14,6 @@ import { atomicWriteFile } from './util/atomic-write.js';
 import { type ExistingAncestor, resolveExistingAncestor } from './util/existing-ancestor.js';
 import { ConfiguredPathLinkError, foldNameAliases } from './util/fold-name-aliases.js';
 import {
-  AGENT_HOME_READER_RUN_MAX_RETAINED,
   AGENT_HOME_READER_RUNS_DIRECTORY,
   isReaderRunName,
   type AgentHomeAccessMode,
@@ -1530,7 +1529,7 @@ export class AgentHomeManager {
         }
         return;
       }
-      const runsRoot = await ensureDirectoryNoSymlink(resolution.canonicalHome, path.dirname(lease.cwd));
+      await ensureDirectoryNoSymlink(resolution.canonicalHome, path.dirname(lease.cwd));
       const created = await fs.mkdir(lease.cwd, { mode: 0o700 }).then(() => true, (error: NodeJS.ErrnoException) => {
         if (error.code === 'EEXIST') return false;
         throw error;
