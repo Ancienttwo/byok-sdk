@@ -8831,8 +8831,8 @@ export interface DaemonTaskSettlement {
     readonly delivery: 'accepted' | 'rejected' | 'not-required';
     /**
      * `failed` exactly when `runtime-disposal-failed` was emitted for the task's
-     * runtime; a failed release of an offer-owned scratch (`runtimeId: 'scratch'`)
-     * can race the decline or failure settlement and is not covered.
+     * runtime. A failed release of an offer-owned scratch emits that event with
+     * `runtimeId: 'scratch'` but never sets `failed`.
      * `none`: this daemon holds no runtime for the task and has no disposal
      * receipt, as for a decline, a failure before start, or any task that
      * finished before a restart.

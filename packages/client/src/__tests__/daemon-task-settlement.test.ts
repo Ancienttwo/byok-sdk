@@ -1,10 +1,12 @@
 import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from './fixtures/execution-scratch';
+import { ScratchRoot } from '../daemon/retention/scratch';
+import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { createEnvelope, encodeEnvelope, HOST_MCP_TASK_CONTEXT_CAPABILITY } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonOverrides } from '../daemon/create-daemon';
 import { DaemonTaskUnknownError, TaskSettlementRegistry, hasTaskCancellation, type DaemonTaskSettlement } from '../daemon/task-settlement';
@@ -95,6 +97,43 @@ describe('Daemon.whenTaskSettled', () => {
     offer('task-decline', { harnessId: 'acme-harness', runtime: 'claude' });
     await server.waitFor((e) => e.type === 'task.decline' && e.task_id === 'task-decline');
     await expect(d.whenTaskSettled('task-decline')).resolves.toEqual({ terminal: 'declined', delivery: 'accepted', disposal: 'none' });
+  });
+
+  it('keeps a failed offer scratch release out of disposal, whatever lands first', async () => {
+    // The prepared operation takes an execution scratch, so the offer owns one before its claim fails.
+    class LaunchingAdapter extends StubRuntimeAdapter {
+      override async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+        const base = await super.prepare(input);
+        return base.kind !== 'prepared' ? base : { ...base, operation: { ...base.operation,
+          resolveRuntimeLaunch: async ({ cwd, scratch }) => ({ scratch, kind: 'pi-rpc', command: 'unused', fixedArgs: [], cwd, env: {},
+            sessionCwd: cwd, credentialSource: 'pi-auth-store', release: async () => {} }) } };
+      }
+    }
+    const create = ScratchRoot.prototype.create;
+    const spy = vi.spyOn(ScratchRoot.prototype, 'create').mockImplementation(async function (this: ScratchRoot) {
+      const scratch = await create.call(this);
+      return { ...scratch, release: async () => { await scratch.release(); throw new Error('fixture scratch release failure'); } };
+    });
+    onTestFinished(() => spy.mockRestore());
+    const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-settlement-scratch-'));
+    const journal = new SqliteLocalTaskJournal({ storeDir });
+    vi.spyOn(journal, 'recordAdmission').mockRejectedValueOnce(new Error('fixture admission failure'));
+    const adapter = new LaunchingAdapter();
+    const d = build(adapter, storeDir, { journal });
+    const failures: string[] = [];
+    d.subscribe((event) => { if (event.kind === 'runtime-disposal-failed') failures.push(event.runtimeId); });
+    await d.pair('pairing-code');
+    await d.start();
+    // The scratch failure lands before the terminal's settlement.
+    const releaseTerminal = server.holdNextMessagesResponse((e) => e.task_id === 'task-scratch-fails' && ['task.fail', 'task.decline'].includes(e.type));
+    offer('task-scratch-fails');
+    await vi.waitFor(() => expect(failures).toEqual(['scratch']), { timeout: 10_000 });
+    releaseTerminal();
+    await expect(d.whenTaskSettled('task-scratch-fails', { signal: AbortSignal.timeout(10_000) }))
+      .resolves.toMatchObject({ disposal: 'none' });
+    expect(adapter.startCalls).toHaveLength(0);
+    await d.stop();
+    await journal.close();
   });
 
   it('resolves when called from the offered listener, before the offer is journaled', async () => {

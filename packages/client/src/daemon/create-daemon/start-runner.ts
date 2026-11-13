@@ -91,7 +91,10 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     runtimeOwnership: taskSettlement,
     onRuntimeDisposalFailure: (event) => {
       observer.noteRuntimeDisposalFailure(event);
-      taskSettlement.runtimeDisposalFailed(event.taskId);
+      // An offer-owned scratch is not the task's runtime (#1944): its failed
+      // release is evidence only, so `disposal` does not depend on whether it
+      // lands before or after the decline or failure settles.
+      if (event.runtimeId !== 'scratch') taskSettlement.runtimeDisposalFailed(event.taskId);
     },
     onExecutionRecord: (record) => observer.noteExecutionRecord(record),
 
