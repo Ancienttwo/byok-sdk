@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "05f70a178381e1e2d08c2c3b98aa77c3fa7ddd5099ff74b1a8ad5ba6e9d865c2"
+    "snapshotSha256": "40c9201e88c77c9f4deb960e08c29a414e287fce9afa0fbe6f348d4247a18ff0"
   },
   "configFields": {
     "status": "tracked",
@@ -34,6 +34,15 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#store-release-failures-name-the-next-step",
       "items": [
         "export:@byok-sdk/client#ServiceInstallationErrorCode"
+      ]
+    },
+    {
+      "id": "keys-secret-corrupted-code",
+      "impact": "breaking",
+      "summary": "macOS Keychain and Linux Secret Service report an SDK entry that does not decode as the new KEYCHAIN_SECRET_CORRUPTED instead of KEYCHAIN_SECRET_DECODE_FAILED, and ProviderRegistry.replaceSecret/configure overwrite it with a new key. KEYCHAIN_SECRET_DECODE_FAILED now means an entry the SDK did not write; the registry never overwrites it and refuses before any write. A Host that offered 'enter the key again' for KEYCHAIN_SECRET_DECODE_FAILED offers it for KEYCHAIN_SECRET_CORRUPTED and shows delete, rename or other-profile guidance for KEYCHAIN_SECRET_DECODE_FAILED.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#provider-key-changes-roll-back-on-failure-1946",
+      "items": [
+        "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES"
       ]
     }
   ],
@@ -62,6 +71,11 @@
       "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
       "change": "changed",
       "entry": "service-store-release-failures"
+    },
+    {
+      "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
+      "change": "changed",
+      "entry": "keys-secret-corrupted-code"
     }
   ]
 }

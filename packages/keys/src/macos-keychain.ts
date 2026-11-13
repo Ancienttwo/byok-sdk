@@ -212,7 +212,7 @@ export class MacOsKeychainSecretStore<TName extends string = string>
     );
     if (decoded === undefined || decoded.length === 0) {
       throw new ByokKeysError(
-        'KEYCHAIN_SECRET_DECODE_FAILED',
+        'KEYCHAIN_SECRET_CORRUPTED',
         'macOS Keychain returned a secret that is not valid base64-encoded UTF-8',
       );
     }

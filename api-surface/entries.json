@@ -1947,7 +1947,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 242491,
+      "budgetBytes": 244231,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2014,7 +2014,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Headless Pi model route: choices, linkage, field errors and submission",
-      "budgetBytes": 323502,
+      "budgetBytes": 323552,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2926,7 +2926,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 181825,
+      "budgetBytes": 181948,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

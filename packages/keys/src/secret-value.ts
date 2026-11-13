@@ -13,3 +13,9 @@ export function isSharedSecretValue(secret: string): boolean {
  * on every platform instead of a store failure that leaves a pending marker.
  */
 export const PROVIDER_PROVISIONING_SECRET_MAX_BYTES = 2560;
+
+/** A key every supported OS store accepts: the shared shape within the smallest ceiling. */
+export function isPortableSecretValue(secret: string): boolean {
+  return isSharedSecretValue(secret)
+    && new TextEncoder().encode(secret).byteLength <= PROVIDER_PROVISIONING_SECRET_MAX_BYTES;
+}
