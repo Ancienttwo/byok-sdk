@@ -112,6 +112,16 @@ test('docs and known CI contracts select light checks, not release families', ()
   }
 });
 
+test('the retained DSH wake evidence selects only docs checks and unknown siblings fail closed', () => {
+  const dir = 'docs/researches/2026-11-12-1619-dsh-wake-probe';
+  for (const name of ['background-job.jsonl', 'background-subagent.jsonl', 'job-kill.jsonl',
+    'job-output-wait.jsonl', 'two-background-jobs.jsonl', 'summary.json', 'probe.ts']) {
+    const path = `${dir}/${name}`;
+    assert.deepEqual(selectImpact([path]), { dirs: [], files: [path], families: [], reason: 'docs-only' });
+  }
+  assert.throws(() => selectImpact([`${dir}/unknown.jsonl`]), /Reviewed CI mapping required/);
+});
+
 test('a published package LICENSE selects the release pack; a LICENSE outside the published set does not map', () => {
   assert.deepEqual(selectImpact(['packages/server/LICENSE']).families, ['npm-release-pack']);
   assert.throws(() => selectImpact(['packages/unknown/LICENSE']), /Reviewed CI mapping required/);
