@@ -151,13 +151,14 @@ at once.
 Every service manager command a service lifecycle runs now has a fixed bound:
 30 s for `launchctl`, `systemctl --user`, `sc.exe`, the Windows Startup
 launcher query and the Startup launch, 120 s for WinSW, and 60 s for the
-Host's Windows `stop` program. The bounds are not configurable. A command
-that outlives its bound is stopped (its process tree; for the Startup launch
-only its own `cmd`), and `install`, `repair`, `uninstall`, `start`, `stop`
-and `status` reject with `ServiceUnitError` code `service_command_timeout`.
-Before, such a command could hang the operation forever. Launchd's leading
-`bootout`, `kickstart -k` and systemd's `daemon-reload` after removal, which
-ignore a failure exit, still fail on a timeout.
+Host's Windows `stop` program. On Windows, the `icacls` run that hardens a
+store root when a `ServiceInstallation` leases it has its 30 s bound too. The
+bounds are not configurable. A command that outlives its bound is stopped
+(its process tree; for the Startup launch only its own `cmd`) and surfaces as
+`ServiceUnitError` code `service_command_timeout`. Before, such a command
+could hang the operation forever. Launchd's leading `bootout`, `kickstart -k`
+and systemd's `daemon-reload` after removal, which ignore a failure exit,
+still fail on a timeout.
 
 The code is new: an exhaustive switch over `ServiceUnitErrorCode` gains a
 case. A timeout means the service's state is unknown, never that the change
@@ -171,12 +172,33 @@ did not happen. Branch on the error's `exitConfirmed`:
   check the service manager first. The SDK keeps no ownership of that
   process.
 
-Inside a `ServiceInstallation`, a timed-out start or stop takes the failure
-path of the step it belongs to: a start of the candidate during `upgrade()`
-is `health_check_failed` with the `service_command_timeout` error as `cause`,
-and the previous version is restored. A late effect of the stopped command
-runs the launcher, which starts whatever `current` names then, so it never
-starts the refused version.
+Where it appears:
+
+- The lifecycle's own `install`, `repair`, `uninstall`, `start`, `stop` and
+  `status` (also through `ServiceInstallation.lifecycle`) reject with it.
+- A `ServiceInstallation` operation throws it as is when a stop or store
+  lease times out before the operation's own failure handling, as at the
+  start of `rollback()`. Otherwise it is in the `cause` of the step's code:
+  a timed-out activation or start in `install()` is
+  `install_health_check_failed`, a timed-out start of the candidate in
+  `upgrade()` is `health_check_failed`, and an operation that leaves its
+  work unfinished is `upgrade_pending` with the timeout among the failures in
+  its `cause`. Look for the code through `cause` and an `AggregateError`'s
+  `errors`.
+
+A timed-out start can still take effect later. The launcher it starts runs
+`<installRoot>/current`, so what a late start runs depends on when it lands.
+After a timed-out candidate start, `upgrade()` stops the service and leases
+its stores while `current` still names the candidate: a late start in that
+window runs the candidate. Once `current` is removed, a late start finds no
+payload (the SDK's own daemon start refuses with `store_owned`), and once the
+previous version is restored and `current` names it, a late start runs that
+version. If the stop or the lease fails too, `upgrade()` throws
+`upgrade_pending` and `current` still names the candidate. Run `recover()`
+(CLI: `byok-agent upgrade recover`) after checking the service manager: it
+resolves the receipt from where `current` points, and a present `current`
+runs as it is, so read the receipt it returns and call `rollback()` to go
+back to the previous version.
 
 ## Upgrade resolves when an old snapshot cannot be pruned
 

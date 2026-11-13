@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { acquirePathMutationGate, PathMutationGateBusyError, withGateReleaseFailures } from '../util/path-mutation-gate.js';
+import { PlatformCommandTimeoutError } from '../util/command-timeouts.js';
 import type { ServiceProgram } from './service-types.js';
 
 /**
@@ -46,7 +47,7 @@ const ERROR_MESSAGES = {
   invalid_owner: 'The lifecycle owner must be 1-32 characters: lowercase letters, digits and "-", starting with a letter or digit.',
   service_unload_timeout: 'The service manager did not finish unloading the stopped service in time. Check the service manager, then run the operation again.',
   service_stop_failed: 'The service stop program exited with a failure. The stop marker stays, so the service is not restarted; check the stop program, then run the operation again.',
-  service_command_timeout: 'A service manager command did not finish in time; it was stopped. Whether it took effect is unknown. Check the service manager, then run the operation again.',
+  service_command_timeout: 'A platform command the service lifecycle ran did not finish in time; it was stopped. Whether it took effect is unknown. Check the service manager, then run the operation again.',
 } as const;
 
 export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
@@ -54,10 +55,11 @@ export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
 /**
  * Closed codes only; the message never carries a path or OS text.
  *
- * `service_command_timeout` (#1971): a service manager command (`launchctl`,
- * `systemctl`, WinSW, `sc.exe`, the Windows Startup launch or launcher
- * query, the Host's Windows stop program) outlived its bound and was
- * stopped. The service's state is UNKNOWN: the command may have taken
+ * `service_command_timeout` (#1971): a platform command a service lifecycle
+ * or installation ran (`launchctl`, `systemctl`, WinSW, `sc.exe`, the Windows
+ * Startup launch or launcher query, the Host's Windows stop program, or
+ * `icacls` when an installation leases a store on Windows) outlived its
+ * bound and was stopped. The service's state is UNKNOWN: the command may have taken
  * effect before it was stopped, so the error never means the change did
  * not happen. Read {@link ServiceUnitError.exitConfirmed} before running
  * the operation again.
@@ -79,6 +81,18 @@ export class ServiceUnitError extends Error {
     this.name = 'ServiceUnitError';
     if (options?.exitConfirmed !== undefined) this.exitConfirmed = options.exitConfirmed;
   }
+}
+
+/**
+ * Throws `error`, with an internal `PlatformCommandTimeoutError` as the public
+ * `service_command_timeout`. The lifecycle and installation boundaries call
+ * it; inside them the internal error stays.
+ *
+ * @internal
+ */
+export function throwPublicCommandTimeout(error: unknown): never {
+  if (error instanceof PlatformCommandTimeoutError) throw new ServiceUnitError('service_command_timeout', { cause: error, exitConfirmed: error.exitConfirmed });
+  throw error;
 }
 
 const OWNER_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/u;
@@ -271,7 +285,7 @@ export async function withServiceOwnerGate<T>(operation: () => Promise<T>, gateR
     await gate.release().catch((releaseError: unknown) => { failures.push(releaseError); });
     // A ServiceUnitError keeps its class and code, as a busy gate error does (#2002).
     if (failures.length > 0 && error instanceof ServiceUnitError) {
-      throw new ServiceUnitError(error.code, { cause: new AggregateError([error, ...failures], `${error.message}; releasing the service-lifecycle gate failed too`) });
+      throw new ServiceUnitError(error.code, { cause: new AggregateError([error, ...failures], `${error.message}; releasing the service-lifecycle gate failed too`), exitConfirmed: error.exitConfirmed });
     }
     throw withGateReleaseFailures(error, failures);
   }

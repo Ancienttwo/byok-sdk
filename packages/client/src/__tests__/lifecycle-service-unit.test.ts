@@ -377,6 +377,12 @@ describe('lifecycle (#1097) service-lifecycle gate and the daemon store gate', (
       expect(refused).toBeInstanceOf(ServiceUnitError);
       expect(refused).toMatchObject({ code: 'lifecycle_owner_conflict' });
       expect(((refused as Error).cause as AggregateError).errors).toEqual([typed, fault]);
+      for (const exitConfirmed of [true, false]) {
+        const timeout = new ServiceUnitError('service_command_timeout', { exitConfirmed });
+        const timedOut = await withServiceOwnerGate(async () => { throw timeout; }).catch((error: unknown) => error);
+        expect(timedOut).toMatchObject({ code: 'service_command_timeout', exitConfirmed });
+        expect(((timedOut as Error).cause as AggregateError).errors).toEqual([timeout, fault]);
+      }
       const raw = new Error('raw operation failure');
       const other = await withServiceOwnerGate(async () => { throw raw; }).catch((error: unknown) => error);
       expect(other).toBeInstanceOf(AggregateError);

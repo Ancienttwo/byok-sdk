@@ -702,7 +702,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(await installation.receipt()).toMatchObject({ state: 'rolled-back', code: 'health_check_failed', from: '1.0.0', to: '2.0.0' });
   });
 
-  it('a timed-out start of the candidate is service_command_timeout, and its late effect starts the restored version, never `to` (#1971)', async () => {
+  it('a timed-out start of the candidate is health_check_failed with service_command_timeout in cause, and `current` names the restored version once the upgrade has failed (#1971)', async () => {
     const unitPath = path.join(root, 'unit');
     let late: (() => Promise<string | undefined>) | undefined;
     const unit: PlatformUnit = {
@@ -711,7 +711,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       activate: async () => { events.push('install'); }, deactivate: async () => undefined, removeFiles: async () => undefined,
       start: async () => {
         if (late !== undefined || (await pointer('current')) !== '2.0.0') { events.push('start'); return; }
-        // The service manager acts on the stopped command later: its launcher runs what `current` names then.
+        // A start that lands after upgrade() has failed: the launcher would run what `current` names then.
         late = () => pointer('current');
         throw new PlatformCommandTimeoutError('launchctl timed out', false);
       },
@@ -745,6 +745,10 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await installation.install(await payload('1.0.0'));
     await installation.upgrade(await payload('2.0.0'));
     await fs.writeFile(db, 'v2 data');
+    // On Windows the store lease runs icacls; its timeout leaves rollback() public and changes no pointer (#1971).
+    const lease = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockRejectedValueOnce(new PlatformCommandTimeoutError('icacls timed out', false));
+    await expect(installation.rollback().finally(() => lease.mockRestore())).rejects.toMatchObject({ name: 'ServiceUnitError', code: 'service_command_timeout', exitConfirmed: false });
+    expect(await pointer('current')).toBe('2.0.0');
     const receipt = await installation.rollback();
     expect(receipt).toMatchObject({ state: 'rolled-back', from: '1.0.0', to: '2.0.0' });
     expect(receipt.code).toBeUndefined();

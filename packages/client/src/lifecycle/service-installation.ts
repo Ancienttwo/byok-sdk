@@ -17,7 +17,7 @@ import type { HeldServiceLifecycle, ManagedServiceLifecycle } from './managed-li
 import {
   isJsonObject, isPayloadPath, listPayloadFiles, SERVICE_PAYLOAD_MANIFEST, sha256File, SHA256_HEX, VERSION_ID, type ServicePayloadManifest,
 } from '../service-payload-manifest.js';
-import { ServiceUnitError } from './service-unit.js';
+import { ServiceUnitError, throwPublicCommandTimeout } from './service-unit.js';
 import { readInstallPointer, readServiceInstallationRecord, serviceInstallationRecordPath, type InstallPointer, type ServiceInstallationRecord } from '../util/service-installation-record.js';
 import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types.js';
 
@@ -134,8 +134,13 @@ export interface ServiceInstallationOptions {
    * returns, also against a check that ignores its abort signal. Unit writes,
    * activation, start and cleanup stop run outside it. Each service manager
    * command has its own fixed bound (30 s; WinSW 120 s; the Host's Windows
-   * stop program 60 s); one that outlives it is stopped and the operation
-   * fails with `ServiceUnitError` `service_command_timeout` (#1971).
+   * stop program 60 s) and is stopped past it, as `ServiceUnitError`
+   * `service_command_timeout` (#1971). An installation operation throws it
+   * as is when a stop or store lease times out before the operation's own
+   * failure handling (the first stop of `rollback()`), and otherwise carries
+   * it in `cause`: of the step's code (`install_health_check_failed`,
+   * `health_check_failed`) or among the failures of `upgrade_pending`. Look
+   * for it through `cause` and an `AggregateError`'s `errors`.
    */
   healthTimeoutMs?: number;
   /**
@@ -1766,7 +1771,8 @@ async function leaseStore(storeDir: string, deadline: number): Promise<DaemonOwn
     try {
       return await acquireDaemonOwner(storeDir, 'installer');
     } catch (error) {
-      if (!(error instanceof DaemonOwnerActiveError) && !(error instanceof DaemonOwnerReclaimingError)) throw error;
+      // On Windows the lease hardens the store root with icacls, whose timeout is public here (#1971).
+      if (!(error instanceof DaemonOwnerActiveError) && !(error instanceof DaemonOwnerReclaimingError)) throwPublicCommandTimeout(error);
       if (Date.now() >= deadline) throw new ServiceInstallationError('store_busy');
       await delay(100);
     }

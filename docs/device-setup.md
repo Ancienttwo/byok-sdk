@@ -601,8 +601,11 @@ writes, activation, start and the cleanup stop run outside that deadline.
 Each service manager command has its own fixed bound: 30 seconds for
 `launchctl`, `systemctl`, `sc.exe`, the Windows launcher query and the
 Startup launch, 120 seconds for WinSW, and 60 seconds for the Host's Windows
-stop program. One that outlives it is stopped, and the operation fails with
-`ServiceUnitError` `service_command_timeout` ([#1971](https://github.com/Ancienttwo/byok-sdk/issues/1971)).
+stop program. One that outlives it is stopped and surfaces as
+`ServiceUnitError` `service_command_timeout` ([#1971](https://github.com/Ancienttwo/byok-sdk/issues/1971)):
+the `service` commands fail with it directly, while install and upgrade
+report it in the `cause` of `install_health_check_failed`,
+`health_check_failed` or `upgrade_pending`.
 Install awaits platform commands before proceeding, so cleanup cannot race
 a start that could restart the service after removal.
 
