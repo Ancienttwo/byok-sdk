@@ -274,7 +274,7 @@ const ENVELOPE_TASK_INDEX = 'CREATE INDEX IF NOT EXISTS journal_envelope_task ON
  * stored `task.cancel` sequenced after it: the restart rule settles it as
  * cancelled, so it ages out like a confirmed terminal. A cancellation at or
  * below the offer sequence preceded the offer and never qualifies. Malformed
- * bytes do not match; the prune transaction verifies every hash.
+ * bytes do not match; the prune transaction verifies the qualifying cancellation's hash.
  */
 const CANCELLED_RECEIVED_TASK = `t.local_state = 'received' AND t.recovery_marker IS NULL
   AND NOT EXISTS (SELECT 1 FROM journal_terminal term WHERE term.task_id = t.task_id)`;
@@ -845,7 +845,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     });
   }
 
-  /** Every stored envelope of the task, in sequence order, after its enrollment and hash are verified. */
+  /** Every non-withheld stored envelope of the task, in sequence order, after its enrollment and hash are verified. */
   #taskEnvelopeRows(taskId: string, identity: JournalIdentity): Record<string, unknown>[] {
     const rows = this.#db.prepare(`SELECT tenant_id, product_id, device_id, seq, bytes, bytes_hash, committed_at FROM journal_envelope
       WHERE task_id = ? AND withheld_bytes IS NULL

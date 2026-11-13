@@ -341,10 +341,12 @@ export interface LocalTaskJournal {
    * confirmed terminal last updated at or after `cutoff`, or a received offer
    * whose first stored `task.cancel` sequenced above the offer was committed
    * at or after `cutoff` (including evidence replaced under the same task id)
-   * or that has no such cancellation. It throws and deletes nothing when the
-   * evidence is broken: any stored envelope of the task fails its hash or
-   * enrollment check, or any stored `task.cancel` of the task names another
-   * task id or carries a `seq` different from its row's. An implementation
+   * or that has no such cancellation. For a received offer it throws and
+   * deletes nothing when the `task.cancel` that qualifies it is broken: that
+   * cancellation fails its hash or enrollment check, names another task id,
+   * or carries a `seq` different from its row's. No other row is part of this
+   * contract: a confirmed terminal's envelopes, withheld rows and the task's
+   * other envelopes may be deleted without verification. An implementation
    * that ignores `cutoff` still compiles but can delete unexpired or replaced
    * evidence; the SDK does not repeat these checks.
    */
