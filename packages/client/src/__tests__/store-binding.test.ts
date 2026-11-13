@@ -330,9 +330,10 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
       const member = writeUnderBinding(auth, write, abort.signal);
       const successor = auth.readCurrent().then(() => order.push('successor'));
 
-      abort.abort();
+      const reason = new Error('member run aborted');
+      abort.abort(reason);
 
-      await expect(within(member)).rejects.toThrow();
+      await expect(within(member)).rejects.toBe(reason);
       expect(order).toEqual([]);
       unblock();
       await within(Promise.all([predecessor, successor]));
