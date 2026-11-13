@@ -81,7 +81,8 @@ export interface ServiceInstallationOptions {
    * 0 otherwise. Every store the candidate rewrites must be
    * listed, Host stores included: the snapshot covers exactly the listed
    * stores. Output that breaks {@link ServiceStoreVerdict}'s rules is
-   * `precheck_failed`.
+   * `precheck_failed`; a store that is, holds or lies in a daemon store's
+   * `service/` directory is `store_overlaps_service_state` (#2011).
    */
   precheck(versionDir: string): ServiceProgram;
   /**
@@ -339,6 +340,7 @@ const ERROR_MESSAGES = {
   service_program_not_current: 'The service unit must be the one this SDK writes, running from <installRoot>/current. Reinstall the payload installed now (install() with the current version id) to rewrite the unit, then retry.',
   install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.',
   snapshots_symlinked: 'A path under the install root\'s snapshots/ is a symbolic link. Nothing changed; replace the link, then retry.',
+  store_overlaps_service_state: 'A store overlaps a daemon store\'s service/ directory, which a restore would replace.',
 } as const;
 
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
@@ -1039,6 +1041,16 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * release takes its store gate), and resolves to every release failure.
    * A failure here is thrown with the release failures joined to it.
    */
+  /** The `service/` directories of the daemon stores the last stop quiesced: leases, launcher and records live there. */
+  let serviceDirs: string[] = [];
+
+  /** A store that is, holds or lies in one of {@link serviceDirs} is refused (#2011): restoring it would replace the live leases and launcher. */
+  function refuseServiceState(paths: readonly string[]): void {
+    for (const at of paths.map((store) => path.resolve(store))) {
+      if (serviceDirs.some((dir) => at === dir || at.startsWith(`${dir}${path.sep}`) || dir.startsWith(`${at}${path.sep}`))) throw new ServiceInstallationError('store_overlaps_service_state');
+    }
+  }
+
   async function stopQuiescent(stopService = true): Promise<() => Promise<unknown[]>> {
     if (stopService) await lifecycle.stop();
     const deadline = Date.now() + (opts.stopTimeoutMs ?? 30_000);
@@ -1052,6 +1064,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     };
     try {
       const stores = await readDaemonStores();
+      serviceDirs = stores.map((store) => path.join(store.storeDir, 'service'));
       for (const store of stores) {
         leases.push(await leaseStore(store.storeDir, deadline));
         await removeStaleControlToken(store);
@@ -1118,6 +1131,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
     if (!Array.isArray(stores) || !stores.every(isServiceStoreVerdict) || overlaps(stores)) throw new ServiceInstallationError('precheck_failed');
     if (stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
+    refuseServiceState(stores.map((store) => store.path));
     return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path) } : store);
   }
 
@@ -1275,6 +1289,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   async function restoreSnapshot(to: string): Promise<void> {
     const dir = path.join(snapshotsDir, to);
     const snapshot = JSON.parse(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8')) as { entries: SnapshotEntry[] };
+    refuseServiceState(snapshot.entries.map((entry) => entry.path));
     // Older snapshots retain the Host's spelling. Check every directory root
     // before changing any store, including links hidden by a trailing / or /.
     const entries = snapshot.entries.map((entry) => entry.kind === 'directory' ? { ...entry, path: directoryStorePath(entry.path) } : entry);

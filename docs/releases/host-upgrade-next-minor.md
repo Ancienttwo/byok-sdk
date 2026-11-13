@@ -248,6 +248,11 @@ service that had already restarted.
   or at any path segment of a file it lists, with
   `snapshots_symlinked`, before its first side effect (#2061). A link swapped
   in after that check is the Host's responsibility.
+- **`store_overlaps_service_state`:** a store your precheck lists, or a
+  snapshot entry about to be restored, must not be, hold or lie in a daemon
+  store's `service/` directory (its leases, launcher and records). Such a
+  store is refused before anything is snapshotted or restored; list the
+  store's own files or directory instead.
 - **Snapshot removal (#2062):** a snapshot that cannot be removed after the
   final receipt no longer fails the call; it stays.
 - On systemd, a start runs `systemctl --user reset-failed` first, since the

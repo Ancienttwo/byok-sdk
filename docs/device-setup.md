@@ -749,7 +749,11 @@ A Host whose service is not `byok-agent` calls `createServiceInstallation`
 with its own `program(versionDir)` and `precheck(versionDir)`; the precheck
 prints `{ "stores": [...] }` as `upgrade check --store --json` does and lists
 every store the candidate rewrites, including any server or provider-key
-store (`inspectSqliteStore`, `inspectProviderProfileStore`).
+store (`inspectSqliteStore`, `inspectProviderProfileStore`). A listed store
+must not be, hold or lie in a daemon store's `service/` directory, which
+holds its leases, launcher and records: such a store is refused with
+`store_overlaps_service_state` before anything is snapshotted, and a snapshot
+entry like it is refused before it is restored.
 [`examples/service-upgrade`](../examples/service-upgrade/) is such an App.
 
 ### Other installs
