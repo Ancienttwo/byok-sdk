@@ -134,8 +134,8 @@ function resolveGateTarget(input: PathMutationGateInput): Promise<string> {
  */
 export function withGateReleaseFailures(error: unknown, releaseFailures: readonly unknown[]): unknown {
   if (releaseFailures.length === 0) return error;
-  const message = error instanceof Error ? error.message : String(error);
-  const all = new AggregateError([error, ...releaseFailures], `${message}; releasing a path mutation gate failed too`);
+  // A fixed message: formatting a thrown value can itself throw and drop both errors.
+  const all = new AggregateError([error, ...releaseFailures], 'An operation failed, and releasing a path mutation gate failed too');
   return error instanceof PathMutationGateBusyError ? new PathMutationGateBusyError(error.scope, error.targetPath, { cause: all }) : all;
 }
 

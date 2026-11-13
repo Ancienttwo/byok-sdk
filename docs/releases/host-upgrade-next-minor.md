@@ -33,7 +33,10 @@ A path mutation gate release that fails while another error is thrown is
 no longer dropped (#2002). A Host that matches `PathMutationGateBusyError`,
 `ServiceUnitError` codes or `LocalStateRelocationBusyError` keeps matching
 them: those classes and codes stay, and the release failure is in `cause`,
-an `AggregateError` of the original error and every release failure. An
+an `AggregateError` of the original error and every release failure. A
+`LocalStateRelocationBusyError` from a partial gate acquisition has two
+levels: its `cause` is that `PathMutationGateBusyError`, whose own `cause` is
+the `AggregateError`. An
 error of another class that a managed service lifecycle operation throws
 becomes that `AggregateError` when the `service-lifecycle` gate also fails
 to release. `localStateRelocation.acquire()` reports a refusal whose gate

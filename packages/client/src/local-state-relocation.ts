@@ -250,7 +250,7 @@ async function acquire(input: LocalStateRelocationInput): Promise<LocalStateRelo
     const failures = gates === undefined ? [] : await releaseFailures(gates);
     if (failures.length > 0) {
       throw new LocalStateRelocationIntegrityError(
-        `local-state relocation refusal also failed to release every gate: ${failures.map((failure) => (failure instanceof Error ? failure.message : String(failure))).join('; ')}`,
+        'local-state relocation refusal also failed to release every gate',
         { cause: new AggregateError([error, ...failures], 'local-state relocation refusal and its gate release failures') },
       );
     }

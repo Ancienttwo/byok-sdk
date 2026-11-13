@@ -9,7 +9,7 @@ import {
   LocalStateRelocationIntegrityError,
   localStateRelocation,
 } from '../index';
-import { acquireDaemonOwner } from '../util/daemon-owner';
+import { acquireDaemonOwner, DaemonOwnerActiveError } from '../util/daemon-owner';
 import { claimServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError } from '../lifecycle/service-unit';
 import * as mutationGate from '../util/path-mutation-gate';
 import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';
@@ -155,6 +155,28 @@ describe('localStateRelocation', () => {
       expect(release).toBe(fault);
     } finally {
       await store.release();
+    }
+  });
+
+  it('a refusal after every gate is taken keeps the refusal and every release failure, including one that cannot become a string (#2002)', async () => {
+    const input = relocationInput(await makeRoot());
+    const owner = await acquireDaemonOwner(input.sourceStoreDir, 'daemon');
+    const unprintable: unknown = Object.create(null);
+    const realGates = mutationGate.acquirePathMutationGates;
+    vi.mocked(mutationGate.acquirePathMutationGate).mockImplementationOnce(async () => ({
+      scope: 'service-lifecycle', targetPath: '*', identity: 'service-lifecycle', release: async () => { throw unprintable; },
+    }));
+    const gates = vi.spyOn(mutationGate, 'acquirePathMutationGates').mockImplementationOnce(async (inputs, options) => (await realGates(inputs, options))
+      .map((gate, index) => ({ ...gate, release: async () => { await gate.release(); throw new Error(`release ${index} failed`); } })));
+    try {
+      const refused = await localStateRelocation.acquire(input).catch((error: unknown) => error);
+      expect(refused).toBeInstanceOf(LocalStateRelocationIntegrityError);
+      const [refusal, ...failures] = ((refused as Error).cause as AggregateError).errors;
+      expect(refusal).toBeInstanceOf(DaemonOwnerActiveError);
+      expect(failures).toEqual([new Error('release 3 failed'), new Error('release 2 failed'), new Error('release 1 failed'), new Error('release 0 failed'), unprintable]);
+    } finally {
+      gates.mockRestore();
+      await owner.release();
     }
   });
 

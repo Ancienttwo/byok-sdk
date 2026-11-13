@@ -381,6 +381,9 @@ describe('lifecycle (#1097) service-lifecycle gate and the daemon store gate', (
       const other = await withServiceOwnerGate(async () => { throw raw; }).catch((error: unknown) => error);
       expect(other).toBeInstanceOf(AggregateError);
       expect((other as AggregateError).errors).toEqual([raw, fault]);
+      const unprintable: unknown = Object.create(null);
+      const opaque = await withServiceOwnerGate(async () => { throw unprintable; }).catch((error: unknown) => error);
+      expect((opaque as AggregateError).errors).toEqual([unprintable, fault]);
     } finally {
       spy.mockRestore();
     }
