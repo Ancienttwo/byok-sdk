@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.103.0",
-    "commit": "0a6395a329d3670c6b5eb4a2fe9ed961e2e52f5a"
+    "commit": "7a5543bf25ef40cb1e564c5329453a7a7886a6be"
   },
   "release": {
     "ecosystem": "npm",
@@ -697,8 +697,8 @@
       "path": "shared/acp/turns.ts",
       "sourcePath": "packages/oar/src/shared/acp/turns.ts",
       "upstreamSha256": "81e82230a2047bf0c8f5d91cef053c7b71ff47351061c1509a350093ea4720fa",
-      "vendoredSha256": "03d2d2e3582f58e412a01fc4bf4c21284bc1a52400934b5b52b6955d60c05019",
-      "delta": "Failed-prompt settle: a rejected session/prompt yields one event-loop turn before it reads its turn frames, so a notification from the same pipe read (grok's retry_state) is recorded first and the failure reader sees it. The success path already yields in promptAcp. abort has no upstream observation window (pendingCancellation is absent): it calls runtime.observeDescendants() synchronously before the native cancel, so a tool the cancel orphans stays known to the SDK process-tree authority, which kills it at dispose while it is the same process. A failed read rejects the abort with code error and sends no cancel. A rejected cancel write clears the aborting mark, so a retry writes the cancel again and a later prompt error stays a failure; an abort during the pending write gets that write's answer, and a prompt that ends during it waits for its result before reading the mark."
+      "vendoredSha256": "48585fef1be1fec0ce4e2afac0fa6b186c101092591b6a97a9fedf6ed221ab90",
+      "delta": "Failed-prompt settle: a rejected session/prompt yields one event-loop turn before it reads its turn frames, so a notification from the same pipe read (grok's retry_state) is recorded first and the failure reader sees it. The success path already yields in promptAcp. abort has no upstream observation window (pendingCancellation is absent): it calls runtime.observeDescendants() synchronously before the native cancel, so a tool the cancel orphans stays known to the SDK process-tree authority, which kills it at dispose while it is the same process. A failed read rejects the abort with code error and sends no cancel. A rejected cancel write clears the aborting mark, so a retry writes the cancel again and a later prompt error stays a failure; an abort during the pending write gets that write's answer, and a prompt that ends during it waits for its result before reading the mark. Once every prompt of the turn has its answer decoded, abort sends no session/cancel, sets no mark and arms no fallback; it answers no_active_turn after the turn's closing frame is published."
     },
     {
       "path": "shared/acp/usage-wait.ts",

@@ -433,8 +433,10 @@ class GrokSession implements Session {
       if (!this.active) return;
     }
     const waiter = this.turnWaiters.wait();
+    // Grok already ended the task's prompt and runs another one; the session-wide cancel would stop that one instead (#1942).
+    const ended = this.projection?.sdkPromptSuperseded === true ? waiter.settled : oarCancelSettled(this.raw.abort(), waiter.settled, 'grok');
     try {
-      await raceDeadline(oarCancelSettled(this.raw.abort(), waiter.settled, 'grok'), this.interruptMs, () => infrastructure('grok interrupt timed out'));
+      await raceDeadline(ended, this.interruptMs, () => infrastructure('grok interrupt timed out'));
     } catch (error) {
       this.fail(error);
       throw error;

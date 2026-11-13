@@ -156,6 +156,31 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     expect(state.fallback).not.toBeNull();
     clearTimeout(state.fallback!);
   });
+  it('sends no cancel once the prompt answer is decoded, and answers after the turn closes with its real outcome (#1942)', async () => {
+    const reply = Promise.withResolvers<{ stopReason: string }>();
+    const notify = vi.fn(async () => {});
+    const runtime = {
+      spawned: Promise.resolve(), closed: false, exitCode: null,
+      connection: { agent: { request: vi.fn(() => reply.promise), notify } },
+      observeDescendants: () => {}, kill: vi.fn(),
+    } as unknown as AcpProcess;
+    const kernel = createSessionKernel('answered');
+    const turns = createAcpTurns({ kernel, runtime, profile: antigravityAcpProfile,
+      usageGate: createUsageUpdateGate(), capabilities: { images: false }, promptUsage: () => null });
+    expect(turns.begin(null, 'first').kind).toBe('accepted');
+    const state = turns.active()!;
+    await vi.waitFor(() => expect(state.pending.size).toBe(1));
+    reply.resolve({ stopReason: 'end_turn' });
+    // The answer is decoded; promptAcp still waits one event-loop turn before the turn closes.
+    while (state.answered.size === 0) await Promise.resolve();
+    expect(turns.active()).toBe(state);
+    expect(await turns.abort(state)).toEqual({ kind: 'rejected', code: 'no_active_turn', reason: 'turn ended before cancellation was sent' });
+    expect(turns.active()).toBeNull();
+    expect(notify).not.toHaveBeenCalled();
+    expect(state.abortRequested).toBe(false);
+    const ended = kernel.records().flatMap(record => record.kind === 'frame' ? record.body.events : []).find(event => event.kind === 'turn_ended');
+    expect(ended).toEqual({ kind: 'turn_ended', outcome: { kind: 'completed' } });
+  });
   it('passes exactly the explicit env to the agent and to hosted terminals', async () => {
     vi.stubEnv('BYOK_ACP_AMBIENT_SECRET', 'must not inherit');
     const { dir, log } = workspace();
