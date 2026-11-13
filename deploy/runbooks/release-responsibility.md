@@ -77,12 +77,9 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
-The proposed source candidate is 0.42.0 for all ten packages, keys included.
-Owner version approval and publication remain pending; see the
-[candidate release notes](../../docs/releases/v0.42.0.md).
-The current published release is 0.41.0 for the previous nine-package set.
-See its [release notes](../../docs/releases/v0.41.0.md).
-The registry read of 2026-11-09 (UTC) reports `latest` 0.41.0 for all nine packages.
+The current release is 0.42.0 for all ten packages, keys included.
+See the [release notes](../../docs/releases/v0.42.0.md).
+The registry read of 2026-11-13 (UTC) reports `latest` 0.42.0 for all ten packages.
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
 Historical 0.27.0 preparation named train 0.27.0 and
@@ -95,15 +92,16 @@ manifests, lock workspace records, version documents and packed internal
 dependencies consistent.
 
 A release set contains nine aligned packages plus keys: ten packages, since
-`@byok-sdk/bot-collaboration` is proposed for first publication in 0.42.0 (#1845, #1910). From 0.28.2 all
+`@byok-sdk/bot-collaboration` was first published in 0.42.0 (#1845, #1910). From 0.28.2 all
 of them carry one version; `check:release-graph` fails when keys
 differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
-the dist-tag `latest`, observed at 0.41.0 for all nine packages on 2026-11-09 (UTC).
+the dist-tag `latest`, observed at 0.42.0 for all ten packages on 2026-11-13 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records the prior `latest` 0.41.0 for the nine existing packages and explicit
-package absence for `@byok-sdk/bot-collaboration`. Its first npm publication
-requires the owner's separate authorization; source preparation does not grant it.
+still records the 0.42.0 baseline, not the current registry: the prior `latest`
+0.41.0 for the nine existing packages and explicit package absence for
+`@byok-sdk/bot-collaboration`. The next train has no first publication unless
+its preparation declares one.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
 package-document absence before a declared first publication, then exact-version
 readback and the declared absent `latest` after an RC. Missing tags/versions or
@@ -164,6 +162,10 @@ separate evidence and authorization; see the
    4. Obtain separate publication authorization for that exact destination, public package/version set and channel. For stable, release with `node scripts/release/publish.mjs --ci-run-id <run-id> --ci-artifact-id <artifact-id> --ci-artifact-digest <digest> --execute`, the same evidence flags as the dry run; append `--tag rc` only for an approved RC. `--execute` without all three flags fails with `RELEASE_CI_EVIDENCE_REQUIRED`. Run interactively in Terminal.app for npm write 2FA. It refuses if the tag already exists, if `npm whoami` reports no account, or if `npm profile get --json` does not report `tfa.mode` `auth-and-writes` — there is no override. Immediately before the first RC write, it rechecks exact-version absence and the entire baseline; this narrows the race window but npm publication remains nontransactional. It then publishes each tarball in dependency order (the local release logs that no attestation is attached), reads the registry back, and only then creates the annotated `v<version>` tag carrying the source commit.
 
       On a slow uplink, raise npm's request timeout for this run (for example `npm_config_fetch_timeout=3600000`): the client tarball is about 10.8 MB, and its publish request can outlast npm's default `fetch-timeout` of 300000 ms.
+
+      On the release machine, Node's automatic IPv4/IPv6 family selection can time out against `registry.npmjs.org` while `curl` succeeds: `npm view` fails with `ETIMEDOUT`, or after about 79 seconds falls back to stale cache. Before running `publish.mjs`, run `export NODE_OPTIONS="--no-network-family-autoselection --dns-result-order=ipv4first"`.
+
+      After a large tarball is published (client is about 10.8 MB), the registry can take about three minutes to serve it, so the `publish.mjs` readback can time out and the run exits before tagging. Re-run the same command: it continues from readback, under the rules for uncertain or partial publication and **Partial stable** below.
    5. Push the tag: `git push origin v<version>`. A tag exists only for a train the registry has already confirmed.
    6. Create the GitHub Release from the pushed tag with the release notes: `gh release create v<version> --verify-tag --notes-file docs/releases/v<version>.md`. `--verify-tag` refuses when the tag is not on the remote, so the Release never creates a tag of its own.
 
