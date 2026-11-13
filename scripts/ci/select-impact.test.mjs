@@ -609,11 +609,18 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     if (path.endsWith('.test.mjs')) assert.ok(tests.includes(path), `${path} must run itself`);
     for (const file of tests) {
       assert.ok(tracked.has(file) && scripts['test:scripts'].includes(file), `${path}: ${file} must be a tracked test:scripts file`);
-      if (file !== path) assert.ok(readFileSync(new URL(file, root), 'utf8').includes(path.split('/').pop()), `${file} does not run ${path}`);
+      if (file !== path) {
+        const source = readFileSync(new URL(file, root), 'utf8');
+        if (path === 'scripts/api-surface/module-scan.mjs' && file === 'scripts/api-surface/check-api-surface.test.mjs') {
+          assert.ok(source.includes('check-api-surface.mjs'));
+          assert.ok(readFileSync(new URL('scripts/api-surface/check-api-surface.mjs', root), 'utf8').includes('entry-closure.mjs'));
+          assert.ok(readFileSync(new URL('scripts/api-surface/entry-closure.mjs', root), 'utf8').includes('module-scan.mjs'));
+        } else assert.ok(source.includes(path.split('/').pop()), `${file} does not run ${path}`);
+      }
     }
   }
   assert.deepEqual(reviewedScripts['scripts/api-surface/module-scan.mjs'], {
-    tests: ['scripts/api-surface/entry-closure.test.mjs'], install: true, families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
+    tests: ['scripts/api-surface/check-api-surface.test.mjs', 'scripts/api-surface/entry-closure.test.mjs'], install: true, families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
   });
   assert.deepEqual(reviewedScripts['scripts/api-surface/entry-closure.test.mjs'], { tests: ['scripts/api-surface/entry-closure.test.mjs'], install: true });
   // pack-and-smoke.mjs selects exactly the family jobs that run it.
