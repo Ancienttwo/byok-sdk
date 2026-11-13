@@ -6,6 +6,16 @@ upstream CLI might support. The production authority remains the immutable
 This document and the conformance expectations are evidence of that contract;
 they are not a second runtime-selection registry.
 
+## Startup contract
+
+`PreparedRuntimeOperation.start()` must resolve without waiting on anything a
+first-turn tool call produces. The startup deadline bounds the normal start
+path. Every `close()` during startup disposal has no bound. Memory calls still
+pending when startup fails are rejected before the offer disposes its startup
+owner, so that `close()` may drain them. Two closes run earlier, inside the
+start path, and do not get that release: closing an incomplete session, and
+memory-lane abort disposal, which waits for start to return.
+
 ## Capability matrix
 
 Generated from each adapter's capability constant
