@@ -479,7 +479,10 @@ migration and preserves earlier upgrade rollback snapshots.
 With no current version, preparation stops an SDK-marked unit of the
 recorded owner (including a payload-less CLI service) before taking the
 daemon-store leases and gates. On any preparation failure before writing
-`current`, it releases the leases/gates, removes staging, then starts that
+`current`, it releases the leases/gates, removes the version directory it
+created (after `installation_exists` every version directory stays, since
+another installation may be using it; the next successful upgrade's prune or
+`uninstall` removes it), then starts that
 unit again, even if it was stopped before the call. The one exception is a
 failed store restore: the stores may then be partial, so the unit is not
 started and is removed, leaving only the repair snapshot, as after a failed
@@ -504,9 +507,10 @@ that are already accepted need no migration. A busy daemon store is
 writing a pointer, record or unit. Without `migrate`, a required migration
 is `store_migration_required`. A migration that exits unsuccessfully or
 leaves non-accepting verdicts restores the snapshot and throws
-`store_migration_failed`. Launch failures or malformed post-migration
-precheck output retain upgrade's existing raw error or `precheck_failed`
-behavior after restoring the snapshot.
+`store_migration_failed`. So does every other failure after the snapshot:
+a `migrate` callback that throws, or a post-migration precheck that cannot
+run or prints malformed output, is `store_migration_failed` with that error
+as `cause`.
 
 The temporary snapshot lives at
 `<installRoot>/snapshots/.install-<uuid>`. The call that took it removes it
@@ -524,8 +528,8 @@ store leases and before its precheck: the stores return to how they were
 before the failed install, and anything written to them since is replaced.
 It then retires the repair name and continues. When that install cannot
 stop the service, take the store leases, restore the snapshot or retire its
-name, it throws the same kind of error, changes nothing else and starts
-nothing. When more than one repair snapshot exists it restores none of them
+name, it throws the same kind of error, starts nothing and removes a marked
+unit; nothing else changes. When more than one repair snapshot exists it restores none of them
 and lists them all: their names do not order them in time, so an operator
 keeps the one to restore and removes the others.
 
@@ -559,9 +563,13 @@ or crashed run fails immediately. For the CLI, a service installed before
 pairing must enable `serviceEnrollment: { enabled: true }` in its config;
 otherwise pair first. An embedded Host can instead pass its own
 `healthCheck`. An unpaired daemon without service enrollment halts on start
-and cannot pass the default check. Install enforces the health-check
-deadline even if a custom check ignores abort or succeeds late. For install,
-`healthTimeoutMs` bounds only the health-check wait after start returns. Unit
+and cannot pass the default check. Install, upgrade, rollback and recover
+enforce the health-check deadline even if a custom check ignores abort or
+succeeds late: a late upgrade check restores the previous version, and a late
+check of a restored version is `rollback_unhealthy`. `healthTimeoutMs` is an
+integer from 1 to 2147483647 ms (another value is a `TypeError` when the
+installation is created) and bounds only the health-check wait after start
+returns. Unit
 writes, activation, start and the cleanup stop run outside that deadline;
 platform commands have no time bound today (follow-up: [#1971](https://github.com/Ancienttwo/byok-sdk/issues/1971)).
 Install awaits platform commands before proceeding, so cleanup cannot race
@@ -608,11 +616,25 @@ reinstall into the same root to record it again before CLI uninstall.
 6. if that health check fails, restores the old version and its store
    snapshot together and fails with `health_check_failed`.
 
+When a migration fails and its snapshot restore fails too, the stores may be
+partial. `upgrade apply` then leaves the old version stopped, keeps the
+`pending` receipt and `snapshots/<id>`, and the error names the snapshot path
+and says to run `recover()` (CLI: `byok-agent upgrade recover`). Run it as soon as
+possible, before restarting the machine: the service unit stays installed,
+so a reboot or login before `recover()` starts the old version on those
+partial stores.
+
 `upgrade rollback` writes a `pending` receipt, then restores `previous` and the
 snapshot taken when `current` was switched to; store writes since then are
 discarded. A failed upgrade keeps
 the earlier one rollbackable. Only the latest switch keeps a snapshot, so one
-rollback is possible after it.
+rollback is possible after it. After a healthy switch, `upgrade apply`
+removes the older snapshots as cleanup: when one cannot be removed (for
+example `EBUSY`), the upgrade still succeeds with its `switched` receipt and
+the next successful upgrade tries again. A snapshot that keeps failing (for
+example a persistent `EACCES`) stays, and each later successful upgrade
+retries it, until the cause is fixed. Nothing selects it meanwhile. There is no
+cleanup diagnostic hook.
 
 `upgrade-receipt.json` is what a Host UI reads: `switched`, `rolled-back`,
 `failed` (with `code`, and `stores` for a store refusal) or `pending`. A
@@ -622,6 +644,26 @@ until `byok-agent upgrade recover` finishes it: it restores the receipt's
 `from` version and snapshot (for a rollback, the version it was going back
 to). A snapshot is removed only after the receipt that ends the operation is
 written.
+
+The top-level error code names the next step, which follows where the
+receipt stops. Whenever a store gate or lease fails to release and the
+receipt stays `pending` (a refusal whose `failed` receipt could not be
+written, a failed pointer write or snapshot restore, the release after the
+pointer writes, a rollback after a failed health check), the error is
+`store_release_failed`. Its `cause` is one flat list: the failure that came
+first (such as `health_check_failed` or `store_busy`), every release failure,
+then a failed receipt write or restart. Run `byok-agent upgrade recover`. A
+lease that failed to release stays held until the process that took it
+exits, so a `recover` in that process can get `store_busy`; restart the Host
+process, then recover. The same holds for an install whose lease is stuck:
+its cleanup reports `store_busy` until the Host process restarts, and the
+next install or `recover` runs after that restart. When an upgrade refusal's
+`failed` receipt cannot be written, the receipt stays `pending` and the old
+version stays stopped until `recover`, since recover's snapshot restore would
+overwrite what a restarted service wrote. A refusal whose final
+receipt was written keeps its code, with later release or restart failures
+in its `cause`. A release failure after the final receipt would not reject a
+committed result (the rule for prune failures); no path releases there today.
 
 Upgrade, rollback, recover, install and uninstall run only for the store's
 recorded lifecycle owner: another owner gets `lifecycle_owner_conflict`, and

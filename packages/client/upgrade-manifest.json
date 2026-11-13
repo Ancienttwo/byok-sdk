@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "ebca28d268b0e90f6f29c9c0f4f9d4894b2d6a746599eaea1ed5d2d710e4fd99"
+    "snapshotSha256": "05f70a178381e1e2d08c2c3b98aa77c3fa7ddd5099ff74b1a8ad5ba6e9d865c2"
   },
   "configFields": {
     "status": "tracked",
@@ -25,6 +25,15 @@
         "export:@byok-sdk/bot-collaboration/host-kit#BotTurnInstructionOptions",
         "export:@byok-sdk/bot-collaboration/host-kit#InstructionLimits",
         "export:@byok-sdk/bot-collaboration/rules#SyncOptions"
+      ]
+    },
+    {
+      "id": "service-store-release-failures",
+      "impact": "breaking",
+      "summary": "Store lease and gate release failures preserve a refused ServiceInstallationError and its code, with the refusal and all release failures in its AggregateError cause; Hosts that matched the 0.42.0 AggregateError on first install must read cause instead. When a release fails and an upgrade, rollback or recover receipt remains pending, the new store_release_failed code directs the Host to recover; restart the Host process first if the stuck lease causes store_busy.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#store-release-failures-name-the-next-step",
+      "items": [
+        "export:@byok-sdk/client#ServiceInstallationErrorCode"
       ]
     }
   ],
@@ -48,6 +57,11 @@
       "item": "export:@byok-sdk/bot-collaboration/rules#SyncOptions",
       "change": "changed",
       "entry": "bot-turn-instruction-host-kit"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
+      "change": "changed",
+      "entry": "service-store-release-failures"
     }
   ]
 }
