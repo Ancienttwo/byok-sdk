@@ -298,10 +298,13 @@ class OpenCodeSession implements Session {
   async steer(): Promise<void> { throw new PolicyUnsupportedError('opencode steer is unsupported on both release lines'); }
   async followUp(): Promise<void> { throw new PolicyUnsupportedError('opencode runs one turn per process; resume for a later turn'); }
   async interrupt(): Promise<void> {
-    this.cancelled = true;
-    this.child?.observeDescendants();
+    if (!this.ending) {
+      this.cancelled = true;
+      this.child?.observeDescendants();
+    }
     try {
-      const settled = this.raw ? oarCancelSettled(this.raw.abort(), this.runner ?? Promise.resolve(), 'opencode') : Promise.resolve();
+      const settled = this.ending || !this.raw ? this.runner ?? Promise.resolve()
+        : oarCancelSettled(this.raw.abort(), this.runner ?? Promise.resolve(), 'opencode').then(() => this.runner);
       await raceDeadline(settled, this.interruptTimeoutMs, () => infrastructure('opencode interrupt timed out'));
     } catch (error) { this.halt(error); await this.close(); throw error; }
   }
