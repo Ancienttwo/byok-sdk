@@ -78,8 +78,16 @@ describe('DeviceSealingKeyStore', () => {
       vi.spyOn(secrets, 'get').mockRejectedValueOnce(new ByokKeysError(code, echo));
       const error = await store.loadOrCreate(ENROLLMENT).then(() => undefined, (thrown: unknown) => thrown as Error);
       expect(error).toMatchObject({ code, message: expect.stringContaining('device sealing key') });
-      expect(error!.message).not.toMatch(/provider|supply/u);
+      expect(error!.message).toMatch(/submitted again to the new key.*receipts.*provider keys are unaffected/u);
+      expect(error!.message).not.toMatch(/supply/u);
     }
+    // A store error whose code getter throws still leaves only in the fixed form.
+    const hostile = new ByokKeysError('KEYCHAIN_UNAVAILABLE', echo);
+    Object.defineProperty(hostile, 'code', { get: () => { throw new Error(echo); } });
+    vi.spyOn(secrets, 'get').mockRejectedValueOnce(hostile);
+    const error = await store.loadOrCreate(ENROLLMENT).then(() => undefined, (thrown: unknown) => thrown as Error);
+    expect(error).toMatchObject({ code: 'PROVIDER_SECRET_STORE_FAILED', message: 'Device sealing key credential store operation failed' });
+    expect(error!.cause).toBeUndefined();
   });
 
   it('rotate replaces the private key and advances the epoch', async () => {
