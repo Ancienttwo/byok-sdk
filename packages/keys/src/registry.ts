@@ -131,6 +131,22 @@ export function buildConfiguredProfile(
   });
 }
 
+/**
+ * Call the injected secret store without letting its error escape: a store
+ * may echo a key in its message or cause. The package's own `ByokKeysError`
+ * keeps its code and fixed message (so `KEYCHAIN_UNAVAILABLE` still names the
+ * missing tool) but loses its cause; anything else becomes
+ * `PROVIDER_SECRET_STORE_FAILED`.
+ */
+async function secretStoreCall<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (error instanceof ByokKeysError) throw new ByokKeysError(error.code, error.message);
+    throw new ByokKeysError('PROVIDER_SECRET_STORE_FAILED', 'Provider credential store operation failed');
+  }
+}
+
 /** The credential-free status projection of a profile. */
 export function providerStatusOf(
   profile: ModelProviderProfile,
@@ -376,8 +392,13 @@ export class ProviderRegistry {
    * write the key, commit. A key no supported OS store accepts is refused
    * before the marker. When the key write or the commit fails, the previous
    * key is restored and the marker is cleared only when it was this call's
-   * own, so an earlier unfinished change stays unfinished. When the restore
-   * itself fails the marker stays and readers keep refusing the key.
+   * own, so an earlier unfinished change stays unfinished.
+   *
+   * A previous entry the store holds but cannot decode (corrupted outside
+   * the SDK) does not block the overwrite, so supplying a new key repairs it;
+   * a failure then has nothing to restore. That case, like a failed restore,
+   * throws `PROVIDER_SECRET_ROLLBACK_FAILED` and keeps the marker, so readers
+   * keep refusing the key. Any other read failure refuses before the marker.
    */
   async #writeAndCommit(
     profileRef: ProviderProfileRef,
@@ -393,7 +414,15 @@ export class ProviderRegistry {
         `Secret must contain 1 to ${PROVIDER_PROVISIONING_SECRET_MAX_BYTES} UTF-8 bytes without null or newline characters`,
       );
     }
-    const previousSecret = secret === undefined ? undefined : await this.#secrets.get(secretName);
+    let previous: { readable: true; secret: string | undefined } | { readable: false } = { readable: true, secret: undefined };
+    if (secret !== undefined) {
+      try {
+        previous = { readable: true, secret: await secretStoreCall(() => this.#secrets.get(secretName)) };
+      } catch (error) {
+        if (!(error instanceof ByokKeysError && error.code === 'KEYCHAIN_SECRET_DECODE_FAILED')) throw error;
+        previous = { readable: false };
+      }
+    }
     await this.#profiles.markPending({
       profileRef,
       operation,
@@ -403,21 +432,20 @@ export class ProviderRegistry {
       since: this.#now().toISOString(),
     });
     try {
-      if (secret !== undefined) await this.#secrets.set(secretName, secret);
+      if (secret !== undefined) await secretStoreCall(() => this.#secrets.set(secretName, secret));
       await this.#profiles.commitCustody(commit);
     } catch (cause) {
       if (secret !== undefined) {
         try {
-          if (previousSecret === undefined) {
-            await this.#secrets.delete(secretName);
-          } else {
-            await this.#secrets.set(secretName, previousSecret);
-          }
-        } catch (rollbackCause) {
+          if (!previous.readable) throw cause;
+          const restore = previous.secret;
+          await secretStoreCall(() => restore === undefined
+            ? this.#secrets.delete(secretName).then(() => undefined)
+            : this.#secrets.set(secretName, restore));
+        } catch {
           throw new ByokKeysError(
             'PROVIDER_SECRET_ROLLBACK_FAILED',
             'Provider credential change failed and the previous secret could not be restored',
-            { cause: new AggregateError([cause, rollbackCause]) },
           );
         }
       }
