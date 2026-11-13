@@ -57,6 +57,8 @@ export declare function dshSession(
     )[];
     /** The process directory, the SDK patches before the bridge overlay, and the explicit environment. */
     launch: { directory: string; patches: readonly string[]; env: Readonly<Record<string, string>> };
+    /** OAR SessionOptions.retainedBytes: past it the kernel elides the oldest native payloads. */
+    retainedBytes: number;
   },
   hooks?: {
     onReady?: (sessionId: string) => void;

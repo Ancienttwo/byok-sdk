@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { haltGate, oarCancelSettled, raceDeadline, RetainedRecordBudget, RetryableOnce, SettleWaiters } from '../adapters/session-kit';
-import { RuntimeExecutionFailure } from '../runtime-failure';
+import { haltGate, oarCancelSettled, raceDeadline, RetryableOnce, SettleWaiters } from '../adapters/session-kit';
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
@@ -43,14 +42,6 @@ describe('session kit', () => {
     waiter.release();
     await expect(oarCancelSettled(Promise.resolve({ response: { body: { kind: 'rejected', code: 'no_active_turn' } } }), Promise.resolve(), 'grok')).resolves.toBeUndefined();
     await expect(oarCancelSettled(Promise.resolve({ response: { body: { kind: 'rejected', code: 'denied', reason: 'no' } } }), Promise.resolve(), 'grok')).rejects.toMatchObject({ message: 'grok interrupt refused: no', phase: 'run', retry: 'non-retryable' });
-  });
-
-  it('counts UTF-8 bytes and fails on the record exceeding the budget', () => {
-    const budget = new RetainedRecordBudget(8, 'grok');
-    budget.add('é');
-    budget.add('ab');
-    expect(() => budget.add('x')).toThrow(RuntimeExecutionFailure);
-    expect(() => budget.add('x')).toThrow('grok retained record byte budget exceeded');
   });
 
   it('drops lines after halt and releases individual waiters', async () => {

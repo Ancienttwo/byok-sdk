@@ -58,17 +58,17 @@ async function onPlatform<T>(platform: NodeJS.Platform, run: () => Promise<T>): 
 
 describe('session limits', () => {
   it.each([
-    ['Claude', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new ClaudeAdapter(limits), false],
-    ['Codex', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new CodexAdapter(limits), true],
-    ['Grok', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new GrokAdapter(limits), true],
-    ['agy', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new AgyAdapter({ home: path.join(os.tmpdir(), 'agy-limits'), ...limits }), true],
-    ['dsh', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new DshAdapter({ home: path.join(os.tmpdir(), 'dsh-limits'), model: { provider: 'deepseek', model: 'test', keyEnv: 'TEST_KEY' }, ...limits }), true],
-  ] as const)('%s validates limits', (label, create, retained) => {
+    ['Claude', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new ClaudeAdapter(limits)],
+    ['Codex', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new CodexAdapter(limits)],
+    ['Grok', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new GrokAdapter(limits)],
+    ['agy', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new AgyAdapter({ home: path.join(os.tmpdir(), 'agy-limits'), ...limits })],
+    ['dsh', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new DshAdapter({ home: path.join(os.tmpdir(), 'dsh-limits'), model: { provider: 'deepseek', model: 'test', keyEnv: 'TEST_KEY' }, ...limits })],
+  ] as const)('%s validates limits', (label, create) => {
     expect(() => create({ interruptTimeoutMs: 0.5 })).not.toThrow();
     for (const interruptTimeoutMs of [0, Number.NaN, 2_147_483_648]) {
       expect(() => create({ interruptTimeoutMs })).toThrow(`invalid ${label} interrupt timeout`);
     }
-    if (retained) expect(() => create({ maxRetainedBytes: 1.5 })).toThrow(`invalid ${label} retention budget`);
+    expect(() => create({ maxRetainedBytes: 1.5 })).toThrow(`invalid ${label} retention budget`);
   });
 });
 

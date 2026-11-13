@@ -338,6 +338,11 @@ export async function handleOffer(
         // leases and the preparation pin only after the disposal receipt
         // and the terminal commit. A failed release keeps the owner, and
         // StartupOwnership retries it.
+        // A startup owner never became active, so its memory calls fail
+        // closed. A runtime may drain pending memory calls in close(): revoke
+        // and wake them before disposal can await them.
+        this['revokeAgentMemoryContext'](taskId);
+        endMemoryStartWait.call(this, taskId);
         await this['startupOwnership'].dispose(taskId);
       }
       if (held.owner === 'offer') {

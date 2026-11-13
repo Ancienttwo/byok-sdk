@@ -362,6 +362,66 @@ describe('Agent memory MCP local authority', () => {
     } finally { consoleError.mockRestore(); }
   });
 
+  itWithMemoryMcp.each(['bind', 'handoff', 'unexpected', 'aborted start'] as const)(
+    'releases memory waiters before startup disposal after %s failure', async failure => {
+      const acquire = AgentHomeManager.prototype.acquireExecution;
+      const acquireSpy = vi.spyOn(AgentHomeManager.prototype, 'acquireExecution').mockImplementation(async function (this: AgentHomeManager, ...args: Parameters<typeof acquire>) {
+        const binding = await acquire.apply(this, args);
+        return failure === 'bind'
+          ? { ...binding, lease: { ...binding.lease, bindSession: async () => { throw new Error('fixture bind failure'); } } }
+          : binding;
+      });
+      const { adapter, runner, offer, recall, releaseStart } = await memoryCallDuringBlockedStart();
+      acquireSpy.mockRestore();
+      const token = reservedMcpToken(adapter.startCalls[0]?.ctx.mcpServers?.byokagentmemory);
+      const handoff = vi.spyOn(runner['deps'].agentSessionHandoffs!, 'record');
+      const send = vi.spyOn(runner['deps'], 'send');
+      if (failure === 'handoff') handoff.mockRejectedValueOnce(new Error('fixture handoff failure'));
+      if (failure === 'unexpected') send.mockImplementation(envelope => {
+        if (envelope.type === 'task.started') throw new Error('fixture activation send failure');
+      });
+      // The aborted start returns during failure IO, before the offer's disposal check.
+      const failClaimed = runner['failClaimedAgent'].bind(runner);
+      const failSpy = vi.spyOn(runner as unknown as { failClaimedAgent: typeof failClaimed }, 'failClaimedAgent')
+        .mockImplementation(async (...args) => {
+          if (failure === 'aborted start') { releaseStart(); await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1)); }
+          return failClaimed(...args);
+        });
+      let releaseClose!: () => void;
+      const closeGate = new Promise<void>(resolve => { releaseClose = resolve; });
+      let closeEntered!: () => void;
+      const closing = new Promise<void>(resolve => { closeEntered = resolve; });
+      adapter.decorateSession = session => {
+        const close = session.close.bind(session);
+        vi.spyOn(session, 'close').mockImplementation(async () => {
+          closeEntered();
+          // Model a runtime that drains its outstanding MCP request on close.
+          await Promise.race([recall.catch(() => undefined), closeGate]);
+          await close();
+        });
+      };
+      try {
+        // The startup deadline aborts this signal.
+        if (failure === 'aborted start') runner['inFlightBlobAborts'].get('task-memory-start')!.abort(new Error('fixture deadline'));
+        else releaseStart();
+        await closing;
+        expect(runner['memoryStartWaits'].size).toBe(0);
+        await expect(recall).rejects.toThrow('invalid, expired, or quiescing Agent memory task context');
+        await expect(runner.recallAgentMemory({ contextToken: token, path: 'MEMORY.md' }))
+          .rejects.toThrow('invalid, expired, or quiescing Agent memory task context');
+        await offer;
+        expect(adapter.sessions[0]?.closeCalled).toBe(true);
+        expect(runner['startupOwnership'].count).toBe(0);
+        expect(send.mock.calls.filter(([envelope]) => envelope.type === 'task.fail')).toHaveLength(1);
+        await runner.shutdownActiveTasks('fixture shutdown');
+      } finally {
+        releaseClose();
+        await offer;
+        handoff.mockRestore(); send.mockRestore(); failSpy.mockRestore();
+      }
+    },
+  );
+
   it('does zero capture, audit, or network work when projection authority is incomplete', async () => {
     const { context, release } = await memory();
     let networkCalls = 0;

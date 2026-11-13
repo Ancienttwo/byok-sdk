@@ -31,7 +31,7 @@ type BridgeArgs = Parameters<typeof Bridge.codexSession>;
 type Executable = Extract<VendorArgs[1], { via: 'executable' }>;
 type BridgeInstallation = Mutable<Pick<Executable, 'kind' | 'via' | 'command'>>;
 type BridgeOptions = Mutable<
-  Pick<VendorArgs[2], 'cwd' | 'resume' | 'model' | 'approvalPolicy' | 'sandboxMode' | 'launchArgs' | 'mcpServers'> & Required<Pick<VendorArgs[2], 'env'>>
+  Pick<VendorArgs[2], 'cwd' | 'resume' | 'model' | 'approvalPolicy' | 'sandboxMode' | 'launchArgs' | 'mcpServers'> & Required<Pick<VendorArgs[2], 'env' | 'retainedBytes'>>
 >;
 type VendorHooks = NonNullable<VendorArgs[4]>;
 type BridgeHooks = Mutable<Omit<VendorHooks, 'onRecord'>> & {
@@ -151,7 +151,7 @@ import type { antigravitySession as vendorAntigravitySession } from '../../packa
 
 type AcpBridgeArgs = Parameters<AcpBridge.StartAcpSession>;
 type AcpBridgeOptions = Mutable<
-  Pick<AcpSessionOptions, 'cwd' | 'env' | 'resume' | 'model' | 'appendSystemPrompt' | 'launchArgs' | 'mcpServers'>
+  Pick<AcpSessionOptions, 'cwd' | 'env' | 'resume' | 'model' | 'appendSystemPrompt' | 'launchArgs' | 'mcpServers'> & Required<Pick<AcpSessionOptions, 'retainedBytes'>>
 >;
 type AcpBridgeHooks = Mutable<Omit<AcpSessionHooks, 'onRecord' | 'onPermission'>> & {
   onRecord?: (record: AcpBridge.AcpRecord) => void;
@@ -237,7 +237,7 @@ import type { DshLineProcess } from '../../packages/client/vendor/oar/95c6547/ru
 
 type VendorDshArgs = Parameters<typeof vendorDshSession>;
 type DshBridgeArgs = Parameters<typeof DshBridge.dshSession>;
-type DshBridgeOptions = { cwd: string; model: string; resume?: string; mcpServers?: VendorDshArgs[2]['mcpServers']; launch: { directory: string; patches: readonly string[]; env: Readonly<Record<string, string>> } };
+type DshBridgeOptions = { cwd: string; model: string; resume?: string; mcpServers?: VendorDshArgs[2]['mcpServers']; launch: { directory: string; patches: readonly string[]; env: Readonly<Record<string, string>> }; retainedBytes: number };
 type DshVendorSession = Awaited<ReturnType<typeof vendorDshSession>>;
 type DshBridgeSession = {
   readonly id: AdapterSession['id'];

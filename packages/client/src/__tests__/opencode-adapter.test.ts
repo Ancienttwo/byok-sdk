@@ -337,20 +337,9 @@ it('normalizes startup failures to start while retaining native classification',
   }
 });
 
-it('settles an opening budget kill before disposing the native session', async () => {
-  const box = setup();
-  const adapter = new OpenCodeAdapter({ models, maxRetainedBytes: 1, resolveBin: () => ({ command: fake, source: 'env' }) });
-  const error = await startPreparedOperation(adapter, { instruction: 'hello' }, { workspaceDir: box.cwd, env: box.env })
-    .then(() => undefined, error => error);
-  expect(error).toMatchObject({ name: 'RuntimeExecutionFailure', phase: 'start',
-    message: 'opencode retained record byte budget exceeded' });
-  expect(box.facts().some(fact => fact.kind === 'prompt' || fact.kind === 'close')).toBe(false);
-  const started = box.facts().find(fact => fact.kind === 'start')!;
-  expect(() => process.kill(started.pid, 0)).toThrow();
-});
-
 it('retries a halt whose cleanup failed before signalling without retaining its rejected exit receipt', async () => {
-  const box = setup();
+  // The agent exits during the opening while its tree cleanup fails, so its exit receipt rejects and halts the session.
+  const box = setup('1.18.35', { FAKE_ACP_INITIALIZE: 'exit' });
   const scratch = await testExecutionScratch();
   const release = vi.fn(() => scratch.release());
   const real = processTree.disposeOwnedProcessTree;
@@ -363,13 +352,12 @@ it('retries a halt whose cleanup failed before signalling without retaining its 
     }
     return real(options);
   });
-  const adapter = new OpenCodeAdapter({ models, maxRetainedBytes: 1, resolveBin: () => ({ command: fake, source: 'env' }) });
   let error: unknown;
-  const opening = startPreparedOperation(adapter, { instruction: 'hello' }, { workspaceDir: box.cwd, env: box.env, scratch: { ...scratch, release } })
+  const opening = startPreparedOperation(box.adapter, { instruction: 'hello' }, { workspaceDir: box.cwd, env: box.env, scratch: { ...scratch, release } })
     .catch(value => { error = value; });
   try {
     await vi.waitFor(() => expect(error).toBeInstanceOf(RuntimeStartupDisposalFailure), { timeout: 1000 });
-    expect(() => process.kill(owned!.child.pid!, 0)).not.toThrow();
+    expect((error as RuntimeStartupDisposalFailure).cause).toMatchObject({ stage: 'signal' });
     expect(release).not.toHaveBeenCalled();
     // External recovery closes the root while the transport's own cleanup still fails.
     await real(owned!);

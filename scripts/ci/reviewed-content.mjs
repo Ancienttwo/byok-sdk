@@ -417,6 +417,15 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   } else {
     if (!version(before.version) || !version(after.version)) throw new Error('Invalid package version');
     if (path === 'packages/client/package.json') {
+      // #1925: shells and installers load only this independent Host layout entry.
+      const hostLayout = {
+        types: './dist/host-layout.d.ts',
+        import: './dist/host-layout.js',
+      };
+      if (before.exports?.['./host-layout'] === undefined
+        && isDeepStrictEqual(after.exports?.['./host-layout'], hostLayout)) {
+        delete after.exports['./host-layout'];
+      }
       if (before.exports?.['./packaging'] === undefined && isDeepStrictEqual(after.exports?.['./packaging'], CLIENT_PACKAGING_EXPORT)) delete after.exports['./packaging'];
       // #1854 archives the Hermes adapter: exactly its private imports key and its build smoke go.
       const key = '#byok-hermes-session';

@@ -8,6 +8,7 @@ if (typeof manifest.version !== 'string') throw new Error('packages/client/packa
 export default defineConfig({
   entry: [
     'src/index.ts',
+    'src/host-layout.ts',
     'src/adapters/index.ts',
     'src/agent-memory/index.ts',
     'src/assertion-client/index.ts',
