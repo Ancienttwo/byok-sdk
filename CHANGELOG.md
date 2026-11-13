@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Changed (client; #1972)** — The OpenCode adapter’s qualified version moves from 2.2.6 to 2.3.0. Detect now reports the unqualified-version advisory for other versions, including 2.2.6. The runtime contract checks the namespace-level notice sent when Host MCP tools disappear on resume. See the [qualification evidence](docs/researches/2026-11-13-opencode-2.3.0-qualification.md).
+
 - **Fixed (client; #1949)** — Every SDK Pi RPC session caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings, so it warms its prompt cache at most during an active run: Pi cancels the warmer at settlement and revalidates a pending decision before dispatch, so no warming request is sent after the run settled, even for a late `"warm"` answer. No Host action is needed. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#pi-cache-warming-stops-at-settlement-1949).
 
 ## 0.42.0 — 2026-11-13 (published)
