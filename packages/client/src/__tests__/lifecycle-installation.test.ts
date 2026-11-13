@@ -334,7 +334,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         if (mode === 'late') { mode = 'ok'; await new Promise((resolve) => setTimeout(resolve, 100)); }
       },
     });
-    await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'rollback_unhealthy' });
+    await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'health_check_failed' });
     expect(signals.map((signal) => signal.aborted)).toEqual([true, true]);
     expect(await installation.receipt()).toMatchObject({ state: 'failed', from: '1.0.0', to: '2.0.0', code: 'rollback_unhealthy' });
     expect(await pointer('current')).toBe('1.0.0');
@@ -574,7 +574,10 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await installation.install(await payload('1.0.0'));
     unhealthy.add('2.0.0');
     unhealthy.add('1.0.0');
-    await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'rollback_unhealthy' });
+    // The receipt records the double failure; the error keeps the first failure's code (#2010).
+    const error = await installation.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: 'health_check_failed' });
+    expect(causes(error)).toEqual([expect.objectContaining({ code: 'health_check_failed' }), expect.any(Error)]);
     expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'rollback_unhealthy' });
   });
 
@@ -995,7 +998,9 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
           expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
         } else {
           expect(rename!.fired()).toBe(true);
-          expect(first).toMatchObject({ code: 'upgrade_pending' });
+          expect(first).toMatchObject({ code: 'upgrade_pending', message: expect.stringContaining('which recover() does not restore') });
+          // Both failures, in order (#2010).
+          expect(causes(first).slice(1, 3)).toEqual([restore!.restoreError, expect.objectContaining({ code: 'EIO' })]);
           expect(events).not.toContain('start');
           expect(existsSync(db)).toBe(false);
         }
@@ -1297,6 +1302,32 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       }
     });
 
+    it('a repair snapshot under a linked snapshots/ or with a failing inspect() changes nothing and names it (#2010)', async () => {
+      const migrate: ServiceInstallationOptions['migrate'] = (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] });
+      installation = installationOver(fakeLifecycle(), { migrate });
+      await verdicts('migration-required');
+      const fault = failRestore();
+      await installation.install(await payload('2.0.0', { 'migrate.cjs': `${MIGRATE}\nprocess.exit(1);` })).catch(() => undefined).finally(() => fault.restore());
+      const [repair] = await snapshotNames();
+      // A failing inspect(): unfinished, naming the repair snapshot.
+      const inspectError = new Error('service manager unavailable');
+      events = [];
+      const inspecting = installationOver({ ...fakeLifecycle(), inspect: async () => { throw inspectError; } }, { migrate });
+      const failed = await inspecting.recover().catch((caught: unknown) => caught);
+      expect(failed).toMatchObject({ code: 'upgrade_pending', message: expect.stringContaining(path.join(installRoot, 'snapshots', repair!)) });
+      expect(causes(failed)).toEqual([inspectError]);
+      expect(events).toEqual([]);
+      // A linked snapshots/: refused before anything under it is read, stores untouched.
+      const moved = path.join(root, 'elsewhere');
+      await fs.rename(path.join(installRoot, 'snapshots'), moved);
+      await fs.symlink(moved, path.join(installRoot, 'snapshots'));
+      await fs.writeFile(db, 'store bytes');
+      await expect(installation.uninstall()).rejects.toMatchObject({ code: 'snapshots_symlinked' });
+      expect(events).toEqual([]);
+      expect(await fs.readFile(db, 'utf8')).toBe('store bytes');
+      expect(await fs.readdir(moved)).toEqual([repair]);
+    });
+
     it('restores the stores only after every installation artifact is removed, and keeps a failed restore for repair', async () => {
       installation = migrating();
       await verdicts('migration-required');
@@ -1514,6 +1545,15 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       onHealth = async () => undefined;
       expect(await installation.receipt()).toMatchObject({ state: 'pending', from: '1.0.0', to: '2.0.0' });
       await expect(installation.recover()).resolves.toMatchObject({ state: 'rolled-back' });
+    });
+
+    it('a healthy upgrade whose switched receipt cannot be written is unfinished (#2010)', async () => {
+      await installation.install(await payload('1.0.0'));
+      let writes = 0;
+      const injected = failRename((to) => to === path.join(installRoot, 'upgrade-receipt.json') && ++writes === 2);
+      try { expectPendingEio(await installation.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught)); }
+      finally { injected.restore(); }
+      expect(await installation.receipt()).toMatchObject({ state: 'pending', from: '1.0.0', to: '2.0.0' });
     });
 
     it('rollback journals an interrupted pointer switch', async () => {

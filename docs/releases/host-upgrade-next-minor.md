@@ -99,7 +99,9 @@ restarted.
 no longer keeps the operation pending with the lifecycle owner gate held, and
 a check that succeeds after the deadline fails. A late upgrade check restores
 the previous version (`health_check_failed`), and a late check of the
-restored version is `rollback_unhealthy`, as for any failed check. The clock
+restored version leaves a `failed` receipt with `rollback_unhealthy`, as for
+any failed check; `upgrade()` then throws `health_check_failed` with that
+failure in its `cause` (#2010). The clock
 now starts after start returns, as on install; platform commands still have
 no time bound (#1971). A Host whose check is slower than `healthTimeoutMs`
 raises it. `healthTimeoutMs` must now be an integer from 1 to 2147483647
@@ -168,14 +170,16 @@ fail with `store_busy` in its cause; restart the Host process first. When an
 upgrade refusal's `failed` receipt cannot be written, the previous version
 stays stopped until `recover()`, which would otherwise restore the snapshot
 over what the restarted service wrote. A preparation error that is not the
-SDK's own (a throwing `precheck` or `daemonStores` setup, a failed stop) is
+SDK's own (a `precheck` launch that throws, a failed stop) is
 the new `ServiceInstallationErrorCode` `store_preparation_failed` with the
 original error as its cause: an upgrade records it in a `failed` receipt and
 starts the previous version again, where 0.42.0 left the receipt `pending`
 and started the previous version anyway. A repair snapshot
 (`snapshots/.install-repair-<uuid>`) is now restored first by any operation,
 `recover()` included, while no version is current, not only by the next first
-install. When a failed
+install. With no version current, a symlinked `snapshots/` is refused
+with `snapshots_symlinked` before anything under it is read, by every
+operation; nothing changes. When a failed
 install's cleanup restored the stores but could not release their leases,
 the error lists `store lease release` as remaining and says the stores were
 restored; the install snapshot it names is then an ordinary leftover to

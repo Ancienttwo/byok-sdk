@@ -579,7 +579,9 @@ otherwise pair first. An embedded Host can instead pass its own
 and cannot pass the default check. Install, upgrade, rollback and recover
 enforce the health-check deadline even if a custom check ignores abort or
 succeeds late: a late upgrade check restores the previous version, and a late
-check of a restored version is `rollback_unhealthy`. `healthTimeoutMs` is an
+check of a restored version leaves a `failed` receipt with `rollback_unhealthy`
+(`upgrade()` still throws `health_check_failed`, with that failure in its
+`cause`). `healthTimeoutMs` is an
 integer from 1 to 2147483647 ms (another value is a `TypeError` when the
 installation is created) and bounds only the health-check wait after start
 returns. Unit
@@ -671,7 +673,7 @@ cause; restart the Host process, then recover. When an upgrade refusal's
 `failed` receipt cannot be written, the receipt stays `pending` and the old
 version stays stopped until `recover`, since recover's snapshot restore would
 overwrite what a restarted service wrote. A preparation error that is not
-the SDK's own (a throwing `precheck` or `daemonStores` setup, a failed stop)
+the SDK's own (a `precheck` launch that throws, a failed stop)
 is `store_preparation_failed` with the original error as its cause: the
 receipt records it as `failed` and the old version starts again, since the
 stores are intact.
