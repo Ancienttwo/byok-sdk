@@ -81,7 +81,7 @@ describe('copyPiRuntimeAssets', () => {
     expect(spawn).toContain('? [...preload, runner, cfgPath]');
     expect(spawn).toContain('["--no-extensions", "--no-skills", "--no-prompt-templates", "--no-session", "--mode", "rpc", "--extension", bootstrap]');
     const supervisor = await fs.readFile(path.join(pkg, 'src/workflows/workflow-script-worker.js'), 'utf8');
-    expect(supervisor).toContain('fork(WORKFLOW_PROCESS_URL, [acorn]');
+    expect(supervisor).toContain('fork(fileURLToPath(WORKFLOW_PROCESS_URL), [acorn]');
     expect(supervisor).toMatch(/"--permission",\s*"--allow-worker"/u);
   });
 
