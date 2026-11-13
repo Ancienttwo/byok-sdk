@@ -68,18 +68,25 @@ export interface CollaborationState extends AutonomyState {
    */
   dreams?: DreamState;
 }
+/** A state version this build cannot adopt without a new ledger. */
+export class OldCollaborationStateError extends Error {
+  readonly code = 'collaboration_state_unsupported_old' as const;
+  constructor(readonly foundVersion: 1 | 2, message: string) { super(message); this.name = 'OldCollaborationStateError'; }
+}
 export function stateOf(application: Record<string, Json>): CollaborationState {
   if (application.collaboration === undefined) application.collaboration = json({
     version: 3, team: emptyTeam(), turns: {}, budgets: {}, delegations: {}, batches: {}, units: {}, replies: {}, schemas: {}, questions: {}, cards: {},
     rejected: [], audit: [], sequence: 0,
   });
+  // SAFETY: Stored JSON may have any shape; optional access checks its version before it is treated as collaboration state.
   const version = (application.collaboration as unknown as { version?: unknown } | null)?.version;
   // No migration: version 1 kept Bot routines in this state, and K4 owns them now.
-  if (version === 1) throw new Error('Bot collaboration state version 1 is not supported. Bot routines moved to K4 routines. '
+  if (version === 1) throw new OldCollaborationStateError(version, 'Bot collaboration state version 1 is not supported. Bot routines moved to K4 routines. '
     + 'Restore a ledger backup made before this change, or start a new ledger.');
   // No migration: a version 2 writer cannot read archived rows, so the two versions never share a ledger.
-  if (version === 2) throw new Error('Bot collaboration state version 2 is not supported. Retention moved settled rows out of the state. '
+  if (version === 2) throw new OldCollaborationStateError(version, 'Bot collaboration state version 2 is not supported. Retention moved settled rows out of the state. '
     + 'Restore a ledger backup made before this change, or start a new ledger.');
   if (version !== 3) throw new Error('Unsupported Bot collaboration state version');
+  // SAFETY: The stored version was checked above; version 3 is the collaboration state this build writes.
   return application.collaboration as unknown as CollaborationState;
 }

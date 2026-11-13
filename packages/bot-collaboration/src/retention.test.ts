@@ -127,10 +127,14 @@ it('L: migrateWouldDo gives each row the Turn of its task id over every generati
   expect(Object.values(stateOf(ledger.snapshot().application).wouldDo ?? {}).map(r => [r.id, r.turnId])).toEqual([['w0', 'a'], ['w1', 'a']]);
   expect(ledger.transaction((_, rows) => rows.get('wouldDo', 'gone'))).toEqual(row('gone', taskId('b', 0)));
   expect(migrateWouldDo(ledger)).toEqual({ backfilled: 0, archived: 0 });
-  for (const version of [2, 999]) {
+  ledger.transaction(s => { stateOf(s.application).switchExport = { digest: 'export', exportedAt: 1, devices: [] }; });
+  expect(inspectLedger(file, 'tenant').verdict).toBe('accepted');
+  for (const version of [1, 2, 999]) {
     ledger.transaction(s => { (s.application.collaboration as { version: number }).version = version; });
     const unsupported = files();
-    expect(inspectLedger(file, 'tenant').verdict).toBe('rejected');
+    expect(inspectLedger(file, 'tenant')).toMatchObject(version < 3
+      ? { verdict: 'new-path-repair', code: 'collaboration_state_unsupported_old', reason: expect.stringContaining(`version ${version}`) }
+      : { verdict: 'rejected' });
     expect(files()).toEqual(unsupported);
   }
   ledger.transaction(s => { s.version = 999 as 1; });

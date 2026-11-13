@@ -17,9 +17,9 @@
   "entries": [
     {
       "id": "bot-collaboration-ledger-precheck",
-      "impact": "additive",
-      "summary": "The local bot-collaboration entry exports inspectLedger(path, tenant), a read-only precheck returning StoreCompatibility. It reports migration-required for would-do rows without turnId; run migrateWouldDo after snapshot and before serving. LocalStoreId gains bot-collaboration-ledger.",
-      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1981",
+      "impact": "breaking",
+      "summary": "The local bot-collaboration entry exports inspectLedger(path, tenant), a read-only precheck returning StoreCompatibility. It reports migration-required for would-do rows without turnId; run migrateWouldDo after snapshot and before serving. LocalStoreId gains bot-collaboration-ledger; Hosts with exhaustive switches or Record<LocalStoreId, ...> must add this member.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#ledger-precheck-and-store-id-1981",
       "items": [
         "export:@byok-sdk/bot-collaboration#inspectLedger",
         "export:@byok-sdk/core#LocalStoreId",

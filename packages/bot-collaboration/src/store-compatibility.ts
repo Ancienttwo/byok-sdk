@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { HostLedger } from '@byok-sdk/server/execution-core';
 import type { StoreCompatibility } from '@byok-sdk/core';
-import { migrateWouldDo } from './commit.js';
-import { stateOf } from './model.js';
+import { wouldDoNeedsMigration } from './commit.js';
+import { OldCollaborationStateError, stateOf } from './model.js';
 
 /** Inspect a stopped L ledger on a private copy, including its WAL or rollback journal. */
 export function inspectLedger(path: string, tenant: string): StoreCompatibility {
@@ -27,15 +27,15 @@ export function inspectLedger(path: string, tenant: string): StoreCompatibility 
       } finally { db.close(); }
       const ledger = new HostLedger(copy, tenant);
       try {
-        stateOf(ledger.snapshot().application);
-        const result = migrateWouldDo(ledger);
-        return result.backfilled || result.archived
+        const state = stateOf(ledger.snapshot().application);
+        return wouldDoNeedsMigration(state)
           ? { store, path: file, verdict: 'migration-required', reason: 'Would-do rows lack turnId; run migrateWouldDo before serving' }
           : { store, path: file, verdict: 'accepted', reason: 'This build opens the ledger' };
       } finally { ledger.close(); }
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
-      return { store, path: file, verdict: 'rejected', ...(typeof code === 'string' ? { code } : {}), reason: error instanceof Error ? error.message : String(error) };
+      return { store, path: file, verdict: error instanceof OldCollaborationStateError ? 'new-path-repair' : 'rejected',
+        ...(typeof code === 'string' ? { code } : {}), reason: error instanceof Error ? error.message : String(error) };
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 }

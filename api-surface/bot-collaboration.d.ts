@@ -382,6 +382,7 @@ export declare function commitInLedger(ledger: HostLedger, request: CommitReques
 export declare function commitInRows(state: CollaborationState, scope: string, request: CommitRequest<Command>, rows: ApplicationRows, ports: CommandPorts): CommitResult;
 /** One retention call in one ledger transaction. K4 facts come from the same state. */
 export declare function retainInLedger(ledger: HostLedger, input: RetentionInput, limits: RetentionLimits): RetentionResult;
+export declare function wouldDoNeedsMigration(state: CollaborationState): boolean;
 /** The result of `migrateWouldDo`: rows that got their `turnId`, and rows archived because no live Turn owns them. */
 export interface WouldDoMigration {
     backfilled: number;
@@ -1612,6 +1613,12 @@ export interface CollaborationState extends AutonomyState {
      * dream routine, so an older ledger reads none. Never in ContextPack or projections.
      */
     dreams?: DreamState;
+}
+/** A state version this build cannot adopt without a new ledger. */
+export declare class OldCollaborationStateError extends Error {
+    readonly foundVersion: 1 | 2;
+    readonly code: 'collaboration_state_unsupported_old';
+    constructor(foundVersion: 1 | 2, message: string);
 }
 export declare function stateOf(application: Record<string, Json>): CollaborationState;
 // ==== @byok-sdk/bot-collaboration dist/persona.d.ts ====
