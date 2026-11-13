@@ -5,6 +5,7 @@ import { __hostExitBackstopForTests } from '../adapters/process-tree';
 import { createOwnedTerminalSpawn } from '../runtime/owned-terminal-process';
 import { PiRpcClient } from '../adapters/pi/rpc-client';
 import { McpStdioClient } from '../mcp/client';
+import { spawnStartError } from '../util/spawn-input';
 import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/95c6547/runtimes/codex/app-server-client';
 
 // Pass-through spy: every spawn below, including MCP's direct one, is observable.
@@ -86,6 +87,12 @@ describe('BYOK owned line process', () => {
     }
     // A synchronous Node rejection keeps its code, without the raw exception.
     await expect(new McpStdioClient({ command: '' }, { env: {} }).connect()).rejects.toThrow(/^MCP server failed to spawn: ERR_INVALID_ARG_VALUE$/);
+  });
+
+  it('falls back to fixed text for a code-less spawn error', () => {
+    const error = spawnStartError(new Error('spawn /bin/fake-key-2065 failed'));
+    expect(error).toMatchObject({ message: 'spawn failed: unknown', code: undefined });
+    expect(carriesSecret(error)).toBe(false);
   });
 
   it('rejects spawn failure with only its code on every client spawn and still settles its exit receipt', async () => {
