@@ -1093,8 +1093,10 @@ Same base commit. Two fork commits on `byok/0.103.0`, after `02b65ff5` (#1932), 
 
 ### Refused or unwritten interrupt leaves the turn as it was (#2037)
 
-Same base commit. Fork commit `39cab81` on `byok/0.103.0`, after `e5a96e7c` (#1932 round 2): `A refused or unwritten Claude interrupt leaves the turn as it was`. `shared/stream-json/session.ts` was already maintained, so the selection is unchanged: 141 sources plus LICENSE, 112 with upstream bytes and 29 maintained.
+Same base commit. Fork commit `39cab8135162d0b93766ddc667b2b6c6086b91c7` on `byok/0.103.0`, after `e5a96e7c` (#1932 round 2): `A refused or unwritten Claude interrupt leaves the turn as it was`. `shared/stream-json/session.ts` was already maintained, so the selection is unchanged: 141 sources plus LICENSE, 112 with upstream bytes and 29 maintained.
 
 The defect: `abort` set the projection's `abortRequested` and armed the kill fallback before it wrote the interrupt. A write that threw left both, and left the abort's request unanswered; a `control_response` error withdrew only the fallback. The next root `result` was then folded as `aborted` however the turn ended, and after a throw the fallback could kill a process that was still running the turn. Upstream `v0.103.0` has the same order. This is the stream-json form of #1957 (ACP).
+
+The fork commit is pushed: `Ancienttwo/oar` `byok/0.103.0` fast-forwarded `e5a96e7c` → `39cab813`, no force.
 
 BYOK change: the session keeps the interrupts of the current turn that were written and not refused. A write that throws answers the abort `rejected` with code `error` and withdraws its fallback attempt and its mark; a refusal withdraws both too. The mark is cleared when the last such interrupt is withdrawn, so an accepted earlier interrupt keeps the turn `aborted`. A turn end, a dropped input that ends the busy state and a process exit forget the set, as they clear the fallback. The interrupt write is synchronous, so its result is known before the abort returns; a result that arrives while an interrupt is written but not yet answered is still read as `aborted`, as before.
