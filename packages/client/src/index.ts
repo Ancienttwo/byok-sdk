@@ -1,3 +1,4 @@
+export type { StoreCompatibility } from '@byok-sdk/core';
 export type {
   RuntimeAdapter,
   RuntimeAdapterDescriptor,

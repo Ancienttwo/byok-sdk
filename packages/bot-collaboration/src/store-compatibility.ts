@@ -2,7 +2,7 @@ import { copyFileSync, mkdtempSync, rmSync, statSync, type Stats } from 'node:fs
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { HostLedger } from '@byok-sdk/server/execution-core';
-import type { StoreCompatibility } from '@byok-sdk/core';
+import type { StoreCompatibility } from '@byok-sdk/client';
 import { wouldDoNeedsMigration } from './commit.js';
 import { OldCollaborationStateError, stateOf } from './model.js';
 import { checkTopology } from './topology.js';
