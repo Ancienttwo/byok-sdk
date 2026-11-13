@@ -23,6 +23,10 @@ export type ExecutionServer = {
     /** Embedded process-local hints; reads from tasks remain authoritative. */
     events?: ByokServer['events'];
 };
+/**
+ * A drain or wake hook failed only on wake dispatch; failed calls remain in the durable outbox for retry.
+ * A drain that also fails on a Host job or outbox capacity throws a plain AggregateError instead.
+ */
 export declare class WakeDispatchError extends AggregateError {
     constructor(failures: unknown[]);
 }
@@ -138,6 +142,11 @@ export declare class HostExecutionCore {
     /** The one path for routine commands. */
     private routineCommands;
     lifecycle(id: string, lifecycle: Routine['lifecycle']): Promise<void>;
+    /**
+     * Commits the cancellation, then drains. Returns `wakePending: true` if that drain fails only on wake dispatch;
+     * the outbox retains failed wakes for retry. The failure may concern another wake or already be retried before return.
+     * Other errors can still reject after commit, including a Host job or outbox capacity failure (#2072).
+     */
     cancel(key: string): Promise<{
         wakePending?: true;
     }>;

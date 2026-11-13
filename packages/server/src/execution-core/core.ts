@@ -29,6 +29,10 @@ const CANCEL_PROBE_MAX_MS = 1000;
 const WAKE_RETRY_LIMIT = 10;
 const WAKE_RETRY_FIRST_MS = 1000;
 const WAKE_RETRY_MAX_MS = 60_000;
+/**
+ * A drain or wake hook failed only on wake dispatch; failed calls remain in the durable outbox for retry.
+ * A drain that also fails on a Host job or outbox capacity throws a plain AggregateError instead.
+ */
 export class WakeDispatchError extends AggregateError {
   constructor(failures: unknown[]) { super(failures, 'Wake dispatch failed; durable outbox retained'); }
 }
@@ -244,6 +248,11 @@ export class HostExecutionCore {
     this.ledger.transaction(state => this.routineCommands(state).lifecycle(id, lifecycle));
     await this.drain();
   }
+  /**
+   * Commits the cancellation, then drains. Returns `wakePending: true` if that drain fails only on wake dispatch;
+   * the outbox retains failed wakes for retry. The failure may concern another wake or already be retried before return.
+   * Other errors can still reject after commit, including a Host job or outbox capacity failure (#2072).
+   */
   async cancel(key: string): Promise<{ wakePending?: true }> {
     this.assertOpen();
     this.ledger.transaction(state => {

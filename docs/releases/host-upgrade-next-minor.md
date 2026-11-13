@@ -2,9 +2,17 @@
 
 Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Committed cancellation with a pending wake (#2004)
+
+`HostExecutionCore.cancel()` now returns an object instead of `void`. Update callers and test doubles that require `Promise<void>` to accept its result. `BotCollaboration.cancelTurn()` and `abortSwitch()` keep their existing result fields. When only wake dispatch fails after one of these operations commits, it resolves with `wakePending: true` instead of rejecting. The failure can concern any wake in that drain, including one unrelated to the operation, and a concurrent retry may succeed before the result returns. Do not repeat the committed operation solely because the flag is present.
+
+To inspect outstanding work, read `HostLedger.snapshot().outbox` on the ledger used by the core or Bot. Failed rows have `kind: 'schedule'` or `kind: 'cancel-wake'` and `lastError`; the core retries them on its wake retry timer and on later drains. Track the row's outbox key and wake key: a successful SDK schedule or cancel removes that unchanged row. A row can also be superseded by later work, so its disappearance alone does not prove that the wake fired. For a scheduled wake, `server.wakes.pending()` reports SDK-queued wakes; acceptance into that queue is not completion of the wake hook. An explicit `HostExecutionCore.drain()` or `BotCollaboration.drain()` that resolves confirms its drain did not report a dispatch failure; drains and wake hooks still reject `WakeDispatchError` when their only failures are wake calls.
+
+Other errors can still reject after commit. In particular, a drain that also encounters a Host job failure or `OutboxFullError` may reject after the cancellation or abort was committed; this remaining ambiguity is tracked in [#2072](https://github.com/Ancienttwo/byok-sdk/issues/2072).
+
 ## Cancel selected Host intents without a pass (#2003)
 
-`BotCollaboration.cancelHostIntents(keys)` atomically cancels a chosen set of unsubmitted Host intents without draining. It returns settled conclusions on replay and refuses the whole set when any key is unknown, a Bot Turn or in flight. `HostIntentError.rejected` lists every refused key and code; exhaustive switches over `HostIntentError.code` add `inflight`. Existing single cancellation and switch APIs keep their behavior, and the store format is unchanged. A Host may replace freeze → individual cancels → abort with this call; keep the freeze when other work on the device must also be held. Successors start on the next pass, or call `drain()` to start them.
+`BotCollaboration.cancelHostIntents(keys)` atomically cancels a chosen set of unsubmitted Host intents without draining. It returns settled conclusions on replay and refuses the whole set when any key is unknown, a Bot Turn or in flight. `HostIntentError.rejected` lists every refused key and code; exhaustive switches over `HostIntentError.code` add `inflight`. Existing single cancellation and switch APIs retain their other behavior, and the store format is unchanged; see the wake-dispatch change above. A Host may replace freeze → individual cancels → abort with this call; keep the freeze when other work on the device must also be held. Successors start on the next pass, or call `drain()` to start them.
 
 ## Ledger precheck and store ID (#1981)
 

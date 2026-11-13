@@ -31,7 +31,7 @@
       "id": "committed-cancel-wake-pending",
       "impact": "breaking",
       "summary": "HostExecutionCore.cancel returns an object; BotCollaboration.cancelTurn and abortSwitch may return wakePending: true when wake dispatch fails after commit. The durable outbox records lastError and retries; drain and wake hooks still reject WakeDispatchError, an AggregateError. Update callers expecting cancel to return void.",
-      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2004",
+      "migration": "docs/releases/host-upgrade-next-minor.md#committed-cancellation-with-a-pending-wake-2004",
       "items": [
         "export:@byok-sdk/server/execution-core#HostExecutionCore",
         "export:@byok-sdk/server/execution-core#WakeDispatchError"
