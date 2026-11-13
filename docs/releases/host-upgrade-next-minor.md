@@ -136,14 +136,93 @@ the previous version (`health_check_failed`), and a late check of the
 restored version leaves a `failed` receipt with `rollback_unhealthy`, as for
 any failed check; `upgrade()` then throws `health_check_failed` with that
 failure in its `cause` (#2010). The clock
-now starts after start returns, as on install; platform commands still have
-no time bound (#1971). A Host whose check is slower than `healthTimeoutMs`
+now starts after start returns, as on install; platform commands run
+outside it, under their own bounds (see
+[Service manager commands time out](#service-manager-commands-time-out-1971)). A Host whose check is slower than `healthTimeoutMs`
 raises it. `healthTimeoutMs` must now be an integer from 1 to 2147483647
 (2^31-1): any other value makes `createServiceInstallation()` throw a
 `TypeError`, the error it already throws for `daemonStores` without
 `healthCheck`. Before,
 0 or less still ran the check once, and a larger value made the timer fire
 at once.
+
+## Service manager commands time out (#1971)
+
+Every service manager command a service lifecycle runs now has a fixed bound:
+30 s for `launchctl`, `systemctl --user`, `sc.exe`, the Windows Startup
+launcher query and the Startup launch, 120 s for WinSW, and 60 s for the
+Host's Windows `stop` program. On Windows, the `icacls` run that hardens a
+store root when a `ServiceInstallation` leases it has its 30 s bound too. The
+bounds are not configurable. A command that outlives its bound is stopped
+(its process tree; for the Startup launch only its own `cmd`) and reported as
+`ServiceUnitError` code `service_command_timeout`, as listed below. Before, such a command
+could hang the operation forever. Launchd's leading `bootout`, `kickstart -k`
+and systemd's `daemon-reload` after removal, which ignore a failure exit,
+still fail on a timeout.
+
+The code is new: an exhaustive switch over `ServiceUnitErrorCode` gains a
+case. A timeout means the service's state is unknown, never that the change
+did not happen. Branch on the error's `exitConfirmed`:
+
+- `true`: the command has exited. Read `status()`, then run the operation
+  again; each platform's next `install` or `uninstall` starts from the
+  service manager's own state.
+- `false`: the command's cleanup failed or did not finish in time, so it may
+  still be running and still change the service. Retrying now can race it;
+  check the service manager first. The SDK keeps no ownership of that
+  process.
+
+Where it appears ("in `cause`" means through `cause` and an
+`AggregateError`'s `errors`):
+
+- Every `ServiceInstallation` operation first restores the repair snapshot
+  of an earlier failed install when `current` is absent; a timed-out stop or
+  store lease there is `upgrade_pending`, with the timeout in `cause`.
+- `install()`, first install: a timed-out stop of the marked unit or store
+  lease, before anything is installed, is thrown as is; a timed-out restart
+  of that unit after a failed preparation joins the `cause` of the
+  preparation's error. A timed-out activation or start is
+  `install_health_check_failed` with it in `cause`, as is a timed-out unit
+  removal during the cleanup that follows (`upgrade_pending` instead when
+  that cleanup cannot restore the stores).
+- `install()`, same-version reinstall: a timed-out stop before the unit
+  rewrite is thrown as is, and the pending `repair` receipt stays
+  (`recover()` then reports `repair_interrupted`). A timed-out activation or
+  start is `install_health_check_failed` with it in `cause`.
+- `upgrade()`: a timed-out stop or store lease before the switch is
+  `upgrade_pending` with it in `cause`. A timed-out start of the candidate is
+  `health_check_failed` with it in `cause`, and the rollback runs; a
+  timed-out stop or lease in that rollback makes it `upgrade_pending`, and a
+  timed-out start of the restored version joins the `cause` of
+  `health_check_failed`. A store refusal whose restart of the previous
+  version times out keeps the refusal's code, with the timeout in `cause`.
+- `rollback()`: a timed-out stop or store lease is thrown as is; only the
+  stop has run. A timed-out start of the restored version is not thrown:
+  `rollback()` resolves with a `failed` receipt, `rollback_unhealthy`.
+- `recover()`: a timed-out stop or store lease before a restore is
+  `upgrade_pending` with it in `cause`. A timed-out start is not thrown:
+  `recover()` resolves with a `failed` receipt (`switch_unhealthy` or
+  `rollback_unhealthy`).
+- `uninstall()`: a timed-out stop, unregistration or `daemon-reload` is
+  thrown as is, after `current` is removed; the unit files stay when the stop
+  or unregistration timed out.
+- The lifecycle's own `install`, `repair`, `uninstall`, `start`, `stop` and
+  `status` (also through `ServiceInstallation.lifecycle`) reject with it as
+  is.
+
+A timed-out start can still take effect later. The launcher it starts runs
+`<installRoot>/current`, so what a late start runs depends on when it lands.
+After a timed-out candidate start, `upgrade()` stops the service and leases
+its stores while `current` still names the candidate: a late start in that
+window runs the candidate. Once `current` is removed, a late start finds no
+payload (the SDK's own daemon start refuses with `store_owned`), and once the
+previous version is restored and `current` names it, a late start runs that
+version. If the stop or the lease fails too, `upgrade()` throws
+`upgrade_pending` and `current` still names the candidate. Run `recover()`
+(CLI: `byok-agent upgrade recover`) after checking the service manager: it
+resolves the receipt from where `current` points, and a present `current`
+runs as it is, so read the receipt it returns and call `rollback()` to go
+back to the previous version.
 
 ## Upgrade resolves when an old snapshot cannot be pruned
 

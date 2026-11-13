@@ -127,7 +127,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
       if (args[0] === step) throw timeout;
       return args[0] === 'print' ? ABSENT : ok();
     });
-    await expect(createLaunchdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h', getuid: () => 501 }).install()).rejects.toBe(timeout);
+    await expect(createLaunchdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h', getuid: () => 501 }).install()).rejects.toMatchObject({ name: 'ServiceUnitError', code: 'service_command_timeout', exitConfirmed: true, cause: timeout });
     expect(run.mock.calls.map(([, args]) => args[0]).slice(0, calls.length)).toEqual(calls);
   });
 

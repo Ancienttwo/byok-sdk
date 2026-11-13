@@ -94,7 +94,7 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
       await vi.advanceTimersByTimeAsync(COMMAND_TIMEOUT_MS.winsw - 500);
       expect(settled).toBe(false);
       await vi.advanceTimersByTimeAsync(500);
-      expect(await stopped).toMatchObject({ constructor: PlatformCommandTimeoutError, exitConfirmed: true });
+      expect(await stopped).toMatchObject({ name: 'ServiceUnitError', code: 'service_command_timeout', exitConfirmed: true, cause: expect.any(PlatformCommandTimeoutError) });
     } finally {
       vi.useRealTimers();
       await nodeFs.rm(dir, { recursive: true, force: true });

@@ -1,6 +1,8 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { ownedProcessGroupRecord } from '../adapters/process-tree';
 import { createHash, randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,9 +20,12 @@ import { SERVICE_PAYLOAD_MANIFEST, writeServicePayloadManifest, type ServicePayl
 import { createManagedLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
 import { createLaunchdLifecycle } from '../lifecycle/launchd';
 import type { Runner } from '../util/exec-runner';
+import { PlatformCommandTimeoutError } from '../util/command-timeouts';
 import { DRIFTED_MARKED_UNIT, memoryServiceFs } from './support/service-fs';
 import { SERVICE_UNIT_MARKER, ServiceUnitError, withServiceOwnerGate } from '../lifecycle/service-unit';
 import * as daemonOwner from '../util/daemon-owner';
+import * as mutationGate from '../util/path-mutation-gate';
+import * as secureDir from '../util/secure-dir';
 import { acquireDaemonOwner } from '../util/daemon-owner';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { OwnedProcessLedger, OwnedProcessResidueError, type OwnedProcessReconciliation } from '../daemon/owned-process-ledger';
@@ -701,6 +706,34 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(await installation.receipt()).toMatchObject({ state: 'rolled-back', code: 'health_check_failed', from: '1.0.0', to: '2.0.0' });
   });
 
+  it('a timed-out start of the candidate is health_check_failed with service_command_timeout in cause, and `current` names the restored version once the upgrade has failed (#1971)', async () => {
+    const unitPath = path.join(root, 'unit');
+    let late: (() => Promise<string | undefined>) | undefined;
+    const unit: PlatformUnit = {
+      serviceName: 'svc', unitPath, launcherPath: unitPath,
+      files: () => [{ path: unitPath, content: SERVICE_UNIT_MARKER }],
+      activate: async () => { events.push('install'); }, deactivate: async () => undefined, removeFiles: async () => undefined,
+      start: async () => {
+        if (late !== undefined || (await pointer('current')) !== '2.0.0') { events.push('start'); return; }
+        // A start that lands after upgrade() has failed: the launcher would run what `current` names then.
+        late = () => pointer('current');
+        throw new PlatformCommandTimeoutError('launchctl timed out', false);
+      },
+      stop: async () => { events.push('stop'); },
+      query: async () => ({ running: true, determinate: true, detail: 'fake' }),
+    };
+    const def = { name: 'svc', storeDir, logDir: path.join(storeDir, 'service-logs'), owner: 'app', program: { command: process.execPath, args: [] } };
+    installation = installationOver(createManagedLifecycle(def, unit));
+    await installation.install(await payload('1.0.0'));
+    events = [];
+    const error = await installation.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: 'health_check_failed', cause: { code: 'service_command_timeout', exitConfirmed: false } });
+    expect((error as Error).cause).toBeInstanceOf(ServiceUnitError);
+    expect(await late!()).toBe('1.0.0');
+    expect(events).toEqual(['stop', 'stop', 'start', 'health 1.0.0']);
+    expect(await installation.receipt()).toMatchObject({ state: 'rolled-back', code: 'health_check_failed', from: '1.0.0', to: '2.0.0' });
+  });
+
   it('reports rollback_unhealthy when the restored version fails too', async () => {
     await installation.install(await payload('1.0.0'));
     unhealthy.add('2.0.0');
@@ -716,6 +749,28 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await installation.install(await payload('1.0.0'));
     await installation.upgrade(await payload('2.0.0'));
     await fs.writeFile(db, 'v2 data');
+    // On Windows the real store lease hardens the store with icacls. Its timeout, with the store gate's
+    // release failing too, is public with its exitConfirmed and the release failure, and moves no pointer (#1971, #2002).
+    const gates = vi.mocked(mutationGate.acquirePathMutationGate);
+    const inner = gates.getMockImplementation()!;
+    const fault = new Error('injected store gate release failure');
+    let armed = false;
+    gates.mockImplementation(async (input, options) => {
+      const gate = await inner(input, options);
+      return input.scope !== 'store' ? gate : { ...gate, release: async () => { await gate.release(); if (armed) { armed = false; throw fault; } } };
+    });
+    try {
+      for (const exitConfirmed of [false, true]) {
+        const timeout = new PlatformCommandTimeoutError('icacls timed out', exitConfirmed);
+        const hardening = vi.spyOn(secureDir, 'ensureSecureStoreRoot').mockImplementationOnce(async () => { armed = true; throw timeout; });
+        const error = await installation.rollback().catch((caught: unknown) => caught).finally(() => hardening.mockRestore());
+        expect(error).toMatchObject({ name: 'ServiceUnitError', code: 'service_command_timeout', exitConfirmed });
+        expect(((error as Error).cause as AggregateError).errors).toEqual([timeout, fault]);
+        expect(await pointer('current')).toBe('2.0.0');
+      }
+    } finally {
+      gates.mockImplementation(inner);
+    }
     const receipt = await installation.rollback();
     expect(receipt).toMatchObject({ state: 'rolled-back', from: '1.0.0', to: '2.0.0' });
     expect(receipt.code).toBeUndefined();
@@ -2057,6 +2112,21 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await installation.upgrade(c.payload);
     `;
     const hook = new URL('./fixtures/ts-source-resolve-hook.mjs', import.meta.url).href;
+    // This source has parameter properties, which type stripping cannot erase,
+    // and Node 26 removed --experimental-transform-types: esbuild transforms it.
+    const esbuild = pathToFileURL(createRequire(import.meta.url).resolve('esbuild')).href;
+    const transform = `data:text/javascript,${encodeURIComponent(`
+      import { registerHooks } from 'node:module';
+      import { readFileSync } from 'node:fs';
+      import { fileURLToPath } from 'node:url';
+      const { transformSync } = (await import(${JSON.stringify(esbuild)})).default;
+      registerHooks({
+        load(url, context, nextLoad) {
+          if (!url.startsWith('file:') || !url.endsWith('.ts')) return nextLoad(url, context);
+          return { format: 'module', source: transformSync(readFileSync(fileURLToPath(url), 'utf8'), { loader: 'ts', format: 'esm' }).code, shortCircuit: true };
+        },
+      });
+    `)}`;
     const source = (relative: string) => new URL(relative, import.meta.url).href;
 
     it.each([false, true])('every kill point (migrating: %s) leaves stores that belong to the version current names, and nothing started without current', async (migrate) => {
@@ -2077,7 +2147,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
           installation: source('../lifecycle/service-installation.ts'), unit: source('../lifecycle/service-unit.ts'), gate: source('../util/path-mutation-gate.ts'),
           gates: path.join(root, `gates-${killAt}`), killAt, installRoot, storeDir, db, payload: candidate, startedWithoutCurrent, verdicts: path.join(root, 'verdicts.json'),
         };
-        const child = spawn(process.execPath, ['--experimental-transform-types', '--no-warnings', '--import', hook, '--input-type=module', '-e', CHILD], { env: { ...process.env, BYOK_KILL_CHILD: JSON.stringify(config) }, stdio: ['ignore', 'ignore', 'pipe'] });
+        const child = spawn(process.execPath, ['--no-warnings', '--import', transform, '--import', hook, '--input-type=module', '-e', CHILD], { env: { ...process.env, BYOK_KILL_CHILD: JSON.stringify(config) }, stdio: ['ignore', 'ignore', 'pipe'] });
         let stderr = '';
         child.stderr!.on('data', (chunk) => { stderr += String(chunk); });
         const [code, signal] = await new Promise<[number | null, NodeJS.Signals | null]>((resolve) => child.once('exit', (...result) => resolve(result)));

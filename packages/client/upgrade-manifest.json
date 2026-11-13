@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "82b2b176c1445c92e5f64b3539a13527a7dfec8b12e0c466cd8c7ebb8a3920b7"
+    "snapshotSha256": "ce605303d6fae80af78499dc9cb351c3845d29a19f6c59b68a91bdf19c0292c6"
   },
   "configFields": {
     "status": "tracked",
@@ -104,6 +104,15 @@
         "export:@byok-sdk/client#LocalStateRelocationError",
         "export:@byok-sdk/client#LocalStateRelocationIntegrityError",
         "export:@byok-sdk/client#ServiceUnitError"
+      ]
+    },
+    {
+      "id": "service-command-timeout",
+      "impact": "breaking",
+      "summary": "ServiceUnitErrorCode gains service_command_timeout (#1971): a platform command a service lifecycle or installation ran (launchctl, systemctl --user, WinSW, sc.exe, the Windows Startup launcher query and launch, the Host's Windows stop program, or icacls when a ServiceInstallation leases a store on Windows) outlived its fixed bound and was stopped, where the operation could hang before. Where it is reported: every ServiceInstallation operation's restore of an earlier install's repair snapshot (when current is absent) is upgrade_pending on a timed-out stop or lease; install() throws a timed-out stop or store lease before anything is installed as is, and a timed-out activation, start or cleanup removal is install_health_check_failed with it in cause (upgrade_pending when cleanup cannot restore the stores); a same-version reinstall throws a timed-out stop as is and keeps its pending repair receipt; upgrade() is upgrade_pending on a timed-out stop or lease before the switch, health_check_failed with it in cause on a timed-out candidate start (upgrade_pending when the rollback's stop or lease times out too), and keeps a store refusal's code when the restart of the previous version times out; rollback() throws a timed-out stop or lease as is but resolves with a failed rollback_unhealthy receipt on a timed-out start; recover() is upgrade_pending on a timed-out stop or lease before a restore but resolves with a failed receipt on a timed-out start; uninstall() throws a timed-out stop, unregistration or daemon-reload as is; the lifecycle's own operations reject with it as is. The service's state is then unknown, never \"the change did not happen\". ServiceUnitError gains exitConfirmed, set only with this code: true when the command is proven to have exited, false when it may still run and change the service, so a retry can race it. An exhaustive switch over ServiceUnitErrorCode needs the new case.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#service-manager-commands-time-out-1971",
+      "items": [
+        "export:@byok-sdk/client#ServiceUnitErrorCode"
       ]
     },
     {
@@ -337,6 +346,11 @@
       "item": "export:@byok-sdk/client#ServiceUnitError",
       "change": "changed",
       "entry": "path-gate-release-failures"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUnitErrorCode",
+      "change": "changed",
+      "entry": "service-command-timeout"
     },
     {
       "item": "export:@byok-sdk/client#ServiceUpgradeReceipt",

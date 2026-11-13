@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { acquirePathMutationGate, PathMutationGateBusyError, withGateReleaseFailures } from '../util/path-mutation-gate.js';
+import { PlatformCommandTimeoutError } from '../util/command-timeouts.js';
 import type { ServiceProgram } from './service-types.js';
 
 /**
@@ -46,16 +47,56 @@ const ERROR_MESSAGES = {
   invalid_owner: 'The lifecycle owner must be 1-32 characters: lowercase letters, digits and "-", starting with a letter or digit.',
   service_unload_timeout: 'The service manager did not finish unloading the stopped service in time. Check the service manager, then run the operation again.',
   service_stop_failed: 'The service stop program exited with a failure. The stop marker stays, so the service is not restarted; check the stop program, then run the operation again.',
+  service_command_timeout: 'A platform command the service lifecycle ran did not finish in time; it was stopped. Whether it took effect is unknown. Check the service manager, then run the operation again.',
 } as const;
 
 export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
 
-/** Closed codes only; the message never carries a path or OS text. */
+/**
+ * Closed codes only; the message never carries a path or OS text.
+ *
+ * `service_command_timeout` (#1971): a platform command a service lifecycle
+ * or installation ran (`launchctl`, `systemctl`, WinSW, `sc.exe`, the Windows
+ * Startup launch or launcher query, the Host's Windows stop program, or
+ * `icacls` when an installation leases a store on Windows) outlived its
+ * bound and was stopped. The service's state is UNKNOWN: the command may have taken
+ * effect before it was stopped, so the error never means the change did
+ * not happen. Read {@link ServiceUnitError.exitConfirmed} before running
+ * the operation again.
+ */
 export class ServiceUnitError extends Error {
-  constructor(readonly code: ServiceUnitErrorCode, options?: ErrorOptions) {
+  /**
+   * Set only with `service_command_timeout`. `true`: the timed-out command
+   * (its process tree, or the Startup launch's own `cmd`) is proven to have
+   * exited, so no part of it can still change the service. `false`: its
+   * cleanup failed or did not finish in time, so it may still be running and
+   * still change the service; a retry now can race it. The SDK keeps no
+   * later ownership of that process. `cause` names the command, for
+   * diagnostics only.
+   */
+  readonly exitConfirmed?: boolean;
+
+  constructor(readonly code: ServiceUnitErrorCode, options?: ErrorOptions & { exitConfirmed?: boolean | undefined }) {
     super(ERROR_MESSAGES[code], options);
     this.name = 'ServiceUnitError';
+    if (options?.exitConfirmed !== undefined) this.exitConfirmed = options.exitConfirmed;
   }
+}
+
+/**
+ * Throws `error`, with an internal `PlatformCommandTimeoutError` as the public
+ * `service_command_timeout`. The lifecycle and installation boundaries call
+ * it; inside them the internal error stays. A timeout whose gate release
+ * failed too arrives as the `AggregateError` of the timeout and the release
+ * failures (#2002): it keeps that `AggregateError` as `cause`, and its
+ * `exitConfirmed` comes from the timeout.
+ *
+ * @internal
+ */
+export function throwPublicCommandTimeout(error: unknown): never {
+  const timeout = error instanceof AggregateError ? error.errors[0] : error;
+  if (timeout instanceof PlatformCommandTimeoutError) throw new ServiceUnitError('service_command_timeout', { cause: error, exitConfirmed: timeout.exitConfirmed });
+  throw error;
 }
 
 const OWNER_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/u;
@@ -248,7 +289,7 @@ export async function withServiceOwnerGate<T>(operation: () => Promise<T>, gateR
     await gate.release().catch((releaseError: unknown) => { failures.push(releaseError); });
     // A ServiceUnitError keeps its class and code, as a busy gate error does (#2002).
     if (failures.length > 0 && error instanceof ServiceUnitError) {
-      throw new ServiceUnitError(error.code, { cause: new AggregateError([error, ...failures], `${error.message}; releasing the service-lifecycle gate failed too`) });
+      throw new ServiceUnitError(error.code, { cause: new AggregateError([error, ...failures], `${error.message}; releasing the service-lifecycle gate failed too`), exitConfirmed: error.exitConfirmed });
     }
     throw withGateReleaseFailures(error, failures);
   }

@@ -11324,7 +11324,7 @@ export interface ManagedServiceLifecycle extends ServiceLifecycle {
  * repair and uninstall run whole inside the store's owner gate, so the owner
  * they checked is still the owner when they write, deactivate or release.
  */
-export declare function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs?: ManagedLifecycleFs, gateRoot?: string): ManagedServiceLifecycle;
+export declare function createManagedLifecycle(def: ServiceDefinition, platform: PlatformUnit, fs?: ManagedLifecycleFs, gateRoot?: string): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/sdk-reserved-helper-command.d.ts ====
 /**
  * Product entrypoint seam for single-file/SEA hosts. Returns `false` without
@@ -11480,8 +11480,11 @@ export interface ServiceInstallationOptions {
      * 60000. On install, upgrade,
      * rollback and recover, this bounds only the health-check wait after start
      * returns, also against a check that ignores its abort signal. Unit writes,
-     * activation, start and cleanup stop run outside it; platform commands
-     * have no time bound today (#1971).
+     * activation, start and cleanup stop run outside it. Each service manager
+     * command has its own fixed bound (30 s; WinSW 120 s; the Host's Windows
+     * stop program 60 s) and is stopped past it, as `ServiceUnitError`
+     * `service_command_timeout` (#1971). Where each operation reports it:
+     * {@link ServiceInstallation}.
      */
     healthTimeoutMs?: number;
     /**
@@ -11544,6 +11547,44 @@ export interface ServiceUpgradeReceipt {
  * passes the lifecycle's owner check: when another owner is recorded for the
  * store it throws `ServiceUnitError` `lifecycle_owner_conflict` and changes
  * nothing.
+ *
+ * A platform command that outlives its bound is `ServiceUnitError`
+ * `service_command_timeout` (#1971): a service manager command, or `icacls`
+ * when a store is leased on Windows. Each operation reports it as follows;
+ * "in `cause`" means through `cause` and an `AggregateError`'s `errors`.
+ *
+ * - Every operation first restores the repair snapshot of an earlier failed
+ *   install when `current` is absent; a timed-out stop or store lease there
+ *   is `upgrade_pending`, with the timeout in `cause`.
+ * - `install()`, first install: a timed-out stop of the marked unit or store
+ *   lease, before anything is installed, is thrown as is; a timed-out
+ *   restart of that unit after a failed preparation joins the `cause` of
+ *   the preparation's error. A timed-out activation or start is
+ *   `install_health_check_failed` with it in `cause`, as is a timed-out unit
+ *   removal during the cleanup that follows (`upgrade_pending` instead when
+ *   that cleanup cannot restore the stores).
+ * - `install()`, same-version reinstall: a timed-out stop before the unit
+ *   rewrite is thrown as is, and the pending `repair` receipt stays (recover()
+ *   then reports `repair_interrupted`). A timed-out activation or start is
+ *   `install_health_check_failed` with it in `cause`.
+ * - `upgrade()`: a timed-out stop or store lease before the switch is
+ *   `upgrade_pending` with it in `cause`. A timed-out start of the candidate
+ *   is `health_check_failed` with it in `cause`, and the rollback runs; a
+ *   timed-out stop or lease in that rollback makes it `upgrade_pending`, and
+ *   a timed-out start of the restored version joins the `cause` of
+ *   `health_check_failed`. A store refusal whose restart of the previous
+ *   version times out keeps the refusal's code, with the timeout in `cause`.
+ * - `rollback()`: a timed-out stop or store lease is thrown as is; only the
+ *   stop has run. A timed-out start of the restored version is not thrown:
+ *   rollback() resolves with a `failed` receipt, `rollback_unhealthy`.
+ * - `recover()`: a timed-out stop or store lease before a restore is
+ *   `upgrade_pending` with it in `cause`. A timed-out start is not thrown:
+ *   recover() resolves with a `failed` receipt (`switch_unhealthy` or
+ *   `rollback_unhealthy`).
+ * - `uninstall()`: a timed-out stop, unregistration or `daemon-reload` is
+ *   thrown as is, after `current` is removed; the unit files stay when the
+ *   stop or unregistration timed out.
+ * - `lifecycle`: each of its operations rejects with it as is.
  *
  * A payload starts only through `current` (#2011): while a pending receipt
  * has `current` absent the stores may be mid-restore, and the SDK's own
@@ -12095,13 +12136,48 @@ declare const ERROR_MESSAGES: {
     readonly invalid_owner: 'The lifecycle owner must be 1-32 characters: lowercase letters, digits and "-", starting with a letter or digit.';
     readonly service_unload_timeout: 'The service manager did not finish unloading the stopped service in time. Check the service manager, then run the operation again.';
     readonly service_stop_failed: 'The service stop program exited with a failure. The stop marker stays, so the service is not restarted; check the stop program, then run the operation again.';
+    readonly service_command_timeout: 'A platform command the service lifecycle ran did not finish in time; it was stopped. Whether it took effect is unknown. Check the service manager, then run the operation again.';
 };
 export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
-/** Closed codes only; the message never carries a path or OS text. */
+/**
+ * Closed codes only; the message never carries a path or OS text.
+ *
+ * `service_command_timeout` (#1971): a platform command a service lifecycle
+ * or installation ran (`launchctl`, `systemctl`, WinSW, `sc.exe`, the Windows
+ * Startup launch or launcher query, the Host's Windows stop program, or
+ * `icacls` when an installation leases a store on Windows) outlived its
+ * bound and was stopped. The service's state is UNKNOWN: the command may have taken
+ * effect before it was stopped, so the error never means the change did
+ * not happen. Read {@link ServiceUnitError.exitConfirmed} before running
+ * the operation again.
+ */
 export declare class ServiceUnitError extends Error {
     readonly code: ServiceUnitErrorCode;
-    constructor(code: ServiceUnitErrorCode, options?: ErrorOptions);
+    /**
+     * Set only with `service_command_timeout`. `true`: the timed-out command
+     * (its process tree, or the Startup launch's own `cmd`) is proven to have
+     * exited, so no part of it can still change the service. `false`: its
+     * cleanup failed or did not finish in time, so it may still be running and
+     * still change the service; a retry now can race it. The SDK keeps no
+     * later ownership of that process. `cause` names the command, for
+     * diagnostics only.
+     */
+    readonly exitConfirmed?: boolean;
+    constructor(code: ServiceUnitErrorCode, options?: ErrorOptions & {
+        exitConfirmed?: boolean | undefined;
+    });
 }
+/**
+ * Throws `error`, with an internal `PlatformCommandTimeoutError` as the public
+ * `service_command_timeout`. The lifecycle and installation boundaries call
+ * it; inside them the internal error stays. A timeout whose gate release
+ * failed too arrives as the `AggregateError` of the timeout and the release
+ * failures (#2002): it keeps that `AggregateError` as `cause`, and its
+ * `exitConfirmed` comes from the timeout.
+ *
+ * @internal
+ */
+export declare function throwPublicCommandTimeout(error: unknown): never;
 export declare function assertServiceOwner(owner: unknown): asserts owner is string;
 /** `<storeDir>/service`: the SDK-owned directory for the launcher and the lifecycle owner record. */
 export declare function serviceStateDir(storeDir: string, platform?: NodeJS.Platform): string;

@@ -8,6 +8,7 @@ import {
   readServiceLifecycleOwner,
   releaseHeldServiceLifecycleOwner,
   ServiceUnitError,
+  throwPublicCommandTimeout,
   withServiceOwnerGate,
   type ServiceUnitFile,
   type ServiceUnitInspection,
@@ -55,6 +56,28 @@ export interface ManagedServiceLifecycle extends ServiceLifecycle {
 }
 
 /**
+ * `platform` with every step that runs a service manager command reporting
+ * a timeout as `service_command_timeout` (#1971). Inside the platform
+ * lifecycles it stays `PlatformCommandTimeoutError`. The installation's store
+ * lease (`leaseStore` in service-installation.ts) is the only other place
+ * it becomes public.
+ */
+function publicTimeouts(platform: PlatformUnit): PlatformUnit {
+  const { prepare, preparedArtifactsExact } = platform;
+  return {
+    ...platform,
+    activate: () => platform.activate().catch(throwPublicCommandTimeout),
+    deactivate: () => platform.deactivate().catch(throwPublicCommandTimeout),
+    removeFiles: () => platform.removeFiles().catch(throwPublicCommandTimeout),
+    start: () => platform.start().catch(throwPublicCommandTimeout),
+    stop: () => platform.stop().catch(throwPublicCommandTimeout),
+    query: () => platform.query().catch(throwPublicCommandTimeout),
+    ...(prepare && { prepare: () => prepare.call(platform).catch(throwPublicCommandTimeout) }),
+    ...(preparedArtifactsExact && { preparedArtifactsExact: () => preparedArtifactsExact.call(platform).catch(throwPublicCommandTimeout) }),
+  };
+}
+
+/**
  * The install, repair, uninstall and status rules all three platforms share
  * (#1097): a `foreign` unit is never changed (`install` replaces it only
  * with `replaceUnmarked`), one lifecycle owner per product store, and the
@@ -62,8 +85,9 @@ export interface ManagedServiceLifecycle extends ServiceLifecycle {
  * repair and uninstall run whole inside the store's owner gate, so the owner
  * they checked is still the owner when they write, deactivate or release.
  */
-export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs: ManagedLifecycleFs = fsp, gateRoot?: string): ManagedServiceLifecycle {
+export function createManagedLifecycle(def: ServiceDefinition, platform: PlatformUnit, fs: ManagedLifecycleFs = fsp, gateRoot?: string): ManagedServiceLifecycle {
   assertServiceOwner(def.owner);
+  const unit = publicTimeouts(platform);
   const owner = def.owner;
   const gated = <T>(operation: () => Promise<T>): Promise<T> => withServiceOwnerGate(operation, gateRoot);
 

@@ -383,6 +383,10 @@ process and for any store, or a store is being relocated, the command fails at
 once with `lifecycle_owner_busy`; run it again when that one has finished.
 On macOS a stop returns only once launchd has unloaded the job; if it is still
 loaded after 10 seconds, the command fails with `service_unload_timeout`.
+A service manager command that outlives its bound fails with
+`service_command_timeout`: it was stopped, but it may have taken effect
+first, so check the service manager (`service status`) before running the
+command again.
 
 Exit codes: a service exits 0 to stay stopped (a normal stop, or a halt such as
 revocation) and 1 to be restarted (a crash). The units encode this as launchd
@@ -593,8 +597,50 @@ check of a restored version leaves a `failed` receipt with `rollback_unhealthy`
 integer from 1 to 2147483647 ms (another value is a `TypeError` when the
 installation is created) and bounds only the health-check wait after start
 returns. Unit
-writes, activation, start and the cleanup stop run outside that deadline;
-platform commands have no time bound today (follow-up: [#1971](https://github.com/Ancienttwo/byok-sdk/issues/1971)).
+writes, activation, start and the cleanup stop run outside that deadline.
+Each service manager command has its own fixed bound: 30 seconds for
+`launchctl`, `systemctl`, `sc.exe`, the Windows launcher query and the
+Startup launch, 120 seconds for WinSW, and 60 seconds for the Host's Windows
+stop program; `icacls` when a store is leased on Windows has 30 seconds too.
+One that outlives it is stopped and reported as `ServiceUnitError`
+`service_command_timeout` ([#1971](https://github.com/Ancienttwo/byok-sdk/issues/1971)).
+"In `cause`" below means through `cause` and an `AggregateError`'s `errors`:
+
+- Every `ServiceInstallation` operation first restores the repair snapshot
+  of an earlier failed install when `current` is absent; a timed-out stop or
+  store lease there is `upgrade_pending`, with the timeout in `cause`.
+- `install()`, first install: a timed-out stop of the marked unit or store
+  lease, before anything is installed, is thrown as is; a timed-out restart
+  of that unit after a failed preparation joins the `cause` of the
+  preparation's error. A timed-out activation or start is
+  `install_health_check_failed` with it in `cause`, as is a timed-out unit
+  removal during the cleanup that follows (`upgrade_pending` instead when
+  that cleanup cannot restore the stores).
+- `install()`, same-version reinstall: a timed-out stop before the unit
+  rewrite is thrown as is, and the pending `repair` receipt stays
+  (`recover()` then reports `repair_interrupted`). A timed-out activation or
+  start is `install_health_check_failed` with it in `cause`.
+- `upgrade()`: a timed-out stop or store lease before the switch is
+  `upgrade_pending` with it in `cause`. A timed-out start of the candidate is
+  `health_check_failed` with it in `cause`, and the rollback runs; a
+  timed-out stop or lease in that rollback makes it `upgrade_pending`, and a
+  timed-out start of the restored version joins the `cause` of
+  `health_check_failed`. A store refusal whose restart of the previous
+  version times out keeps the refusal's code, with the timeout in `cause`.
+- `rollback()`: a timed-out stop or store lease is thrown as is; only the
+  stop has run. A timed-out start of the restored version is not thrown:
+  `rollback()` resolves with a `failed` receipt, `rollback_unhealthy`.
+- `recover()`: a timed-out stop or store lease before a restore is
+  `upgrade_pending` with it in `cause`. A timed-out start is not thrown:
+  `recover()` resolves with a `failed` receipt (`switch_unhealthy` or
+  `rollback_unhealthy`).
+- `uninstall()`: a timed-out stop, unregistration or `daemon-reload` is
+  thrown as is, after `current` is removed; the unit files stay when the stop
+  or unregistration timed out.
+- The lifecycle's own `install`, `repair`, `uninstall`, `start`, `stop` and
+  `status` (also through `ServiceInstallation.lifecycle`) reject with it as
+  is.
+
 Install awaits platform commands before proceeding, so cleanup cannot race
 a start that could restart the service after removal.
 
