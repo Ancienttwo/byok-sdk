@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "module.sdk.bot-collaboration",
+  "kind": "module",
+  "name": "Bot collaboration",
+  "status": "active",
+  "parent": "capability.sdk.sdk-root",
+  "layer": "composition",
+  "summary": "Host-owned Bot collaboration built on the execution core, including delegation, group coordination and collaboration rules.",
+  "source": {
+    "include": [
+      "packages/bot-collaboration/**"
+    ]
+  },
+  "notes": [
+    "Public @byok-sdk/bot-collaboration package. Entries: root, ./host-kit, ./rules and ./testing.",
+    "ADR-046 D4 keeps Bot state and rules in the Host collaboration layer; core packages must not depend on this package. Products without Bots compose the core Agent primitives directly."
+  ]
+}
