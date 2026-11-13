@@ -260,6 +260,24 @@ describe('Daemon.whenTaskSettled', () => {
     await journal.close();
   });
 
+  it('starts with a frozen injected journal', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-settlement-frozen-'));
+    const journal = new SqliteLocalTaskJournal({ storeDir });
+    // A Host object whose methods are own, frozen properties.
+    const methods = Object.getOwnPropertyNames(SqliteLocalTaskJournal.prototype).filter((name) => name !== 'constructor');
+    const frozen = Object.freeze(Object.fromEntries(methods.map((name) => [name,
+      (...args: unknown[]) => (journal as unknown as Record<string, (...a: unknown[]) => unknown>)[name]!(...args)])));
+    const d = build(adapter, storeDir, { journal: frozen as unknown as SqliteLocalTaskJournal });
+    await d.pair('pairing-code');
+    await d.start();
+    const taskId = 'task-frozen-journal';
+    offer(taskId);
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
+    await d.stop();
+    await journal.close();
+  });
+
   it('does not settle a received offer when cancellation sequence equals its durable offer sequence', async () => {
     const taskId = 'task-cancel-unproven-order';
     const { d, adapter, original } = await recoveredOffer(taskId);

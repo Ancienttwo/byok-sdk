@@ -8,7 +8,7 @@ import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory.js';
 import { resolveAgentMemoryMcpBin, resolveAgentMemoryDescribeBin } from '../resolve-agent-memory-mcp-bin.js';
 import { resolveLocalAgentReleaseIdentity } from '../../release-identity.js';
 import { LocalStorageConfigError } from '../retention/config.js';
-import type { JournalIdentity, LocalTaskJournal, RecoverableTask, WithheldOfferTask } from '../journal/journal.js';
+import type { LocalTaskJournal, RecoverableTask, WithheldOfferTask } from '../journal/journal.js';
 import { McpToolsetRegistry } from '../toolset-registry.js';
 import { resolvePiByokLauncher } from '../../adapters/runtime-adapters.js';
 import { DEFAULT_MAX_TASK_OUTPUT_BYTES, DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME, DEFAULT_MAX_CONCURRENT_TASKS } from '../task-runner.js';
@@ -210,18 +210,29 @@ export function hostJournal(journal: LocalTaskJournal): LocalTaskJournal {
     if (!Number.isSafeInteger(row.seq)) throw new Error(`injected journal row for task ${row.taskId} is malformed: seq must be a safe integer`);
     return row;
   };
-  return new Proxy(journal, {
-    get(target, key) {
-      if (key === 'readTask') return async (...args: Parameters<LocalTaskJournal['readTask']>) => {
-        const row = await target.readTask(...args);
-        return row && checked(row);
-      };
-      if (key === 'listRecoveryTasks') return async (identity: JournalIdentity) => (await target.listRecoveryTasks(identity)).map(checked);
-      if (key === 'listRecoverable') return async () => (await target.listRecoverable()).map(checked);
-      const value: unknown = Reflect.get(target, key, target);
-      return typeof value === 'function' ? value.bind(target) : value;
+  return {
+    readTask: async (taskId, identity) => {
+      const row = await journal.readTask(taskId, identity);
+      return row && checked(row);
     },
-  });
+    listRecoveryTasks: async (identity) => (await journal.listRecoveryTasks(identity)).map(checked),
+    listRecoverable: async () => (await journal.listRecoverable()).map(checked),
+    appendEnvelope: (record) => journal.appendEnvelope(record),
+    appendWithheldOffer: (record) => journal.appendWithheldOffer(record),
+    recordAdmission: (record) => journal.recordAdmission(record),
+    recordTransition: (record) => journal.recordTransition(record),
+    recordTerminal: (record) => journal.recordTerminal(record),
+    listPendingTerminals: (identity) => journal.listPendingTerminals(identity),
+    confirmTerminal: (taskId, payloadHash) => journal.confirmTerminal(taskId, payloadHash),
+    rejectTerminal: (taskId, payloadHash, reason) => journal.rejectTerminal(taskId, payloadHash, reason),
+    replaceRefusedTerminal: (taskId, refusedPayloadHash, record) => journal.replaceRefusedTerminal(taskId, refusedPayloadHash, record),
+    markRecovered: (taskId, outcome) => journal.markRecovered(taskId, outcome),
+    measureUsage: () => journal.measureUsage(),
+    listPrunableConfirmedTasks: (cutoff, limit) => journal.listPrunableConfirmedTasks(cutoff, limit),
+    pruneConfirmedJournalTask: (taskId) => journal.pruneConfirmedJournalTask(taskId),
+    compact: (options) => journal.compact(options),
+    close: () => journal.close(),
+  };
 }
 
 export type DaemonConfigScope = ReturnType<typeof resolveDaemonConfig>;

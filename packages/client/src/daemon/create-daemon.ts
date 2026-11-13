@@ -847,8 +847,11 @@ export interface DaemonOverrides {
   /**
    * A durable local journal the host supplies instead of `SqliteLocalTaskJournal`
    * (§12.7.2). It must meet the same contract (a resolved `appendEnvelope` is
-   * fsynced); the daemon does not check that. `stop()` does not close it:
-   * whoever injected it owns its lifetime.
+   * fsynced). The daemon checks one thing about it: every task row it reads
+   * must have a `seq` that is a safe integer, otherwise the row is treated as
+   * malformed and takes the existing stall path. Everything else remains the
+   * injector's responsibility. `stop()` does not close it: whoever injected it
+   * owns its lifetime.
    */
   journal?: LocalTaskJournal;
   /** Test-only post-open SQLite initialization fault seam. */
