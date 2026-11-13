@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "0f00369c0e23208b0ba495bcb62e17e821dd96aa4a60bd6158c1b563bddbaa82"
+    "snapshotSha256": "023b0be05de2de4cc5755d34c5d6a457ca77ada804720d1cab9f8a42c4c1d803"
   },
   "configFields": {
     "status": "tracked",
@@ -39,7 +39,7 @@
     {
       "id": "keys-secret-corrupted-code",
       "impact": "breaking",
-      "summary": "macOS Keychain and Linux Secret Service report an SDK entry that does not decode as the new KEYCHAIN_SECRET_CORRUPTED instead of KEYCHAIN_SECRET_DECODE_FAILED, and ProviderRegistry.replaceSecret/configure overwrite it with a new key. KEYCHAIN_SECRET_DECODE_FAILED now means an entry the SDK did not write; the registry never overwrites it and refuses before any write. A Host that offered 'enter the key again' for KEYCHAIN_SECRET_DECODE_FAILED offers it for KEYCHAIN_SECRET_CORRUPTED and shows delete, rename or other-profile guidance for KEYCHAIN_SECRET_DECODE_FAILED.",
+      "summary": "macOS Keychain and Linux Secret Service report an SDK entry that does not decode as the new KEYCHAIN_SECRET_CORRUPTED instead of KEYCHAIN_SECRET_DECODE_FAILED, and ProviderRegistry.replaceSecret/configure overwrite it with a new key. KEYCHAIN_SECRET_DECODE_FAILED now means an entry the SDK did not write; the registry never overwrites it and refuses before any write. A Host that offered 'enter the key again' for KEYCHAIN_SECRET_DECODE_FAILED offers it for KEYCHAIN_SECRET_CORRUPTED and shows delete, rename or other-profile guidance for KEYCHAIN_SECRET_DECODE_FAILED. ProviderRegistry.configure/replaceSecret/setDefaultModelProvider/delete reject with the new PROVIDER_CHANGE_COMMITTED when the change committed but a later step (the auth-none key delete, an unconfirmed profile-store write or the lock release) failed; treat it as success and read the status again. ProviderRegistry.configure without a secret reuses the stored key only for an authenticating profile with an unchanged base_url and otherwise rejects with PROVIDER_SECRET_MISSING.",
       "migration": "docs/releases/host-upgrade-next-minor.md#provider-key-changes-roll-back-on-failure-1946",
       "items": [
         "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES"
