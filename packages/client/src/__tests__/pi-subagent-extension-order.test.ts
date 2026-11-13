@@ -63,7 +63,7 @@ describe('native Pi subagent required-extension order (#1061 D11)', () => {
       await writeFile(path.join(dir, 'bundle', 'required-child-extensions.mjs'),
         'export const registerRequiredChildExtensions = input => { globalThis.__byokRegistered.push(input); return { dispose() {} }; };');
       (globalThis as { __byokRegistered?: unknown[] }).__byokRegistered = state.registered;
-      await writeFile(path.join(dir, 'package.json'), manifest('0.87.0'));
+      await writeFile(path.join(dir, 'package.json'), manifest('0.88.1'));
       const asset = await loadPiSubagentsAsset(root, gate, true);
       expect(asset.extensionPath).toBe(path.join(dir, 'bundle', 'index.js'));
       const input = await registeredInput(undefined, asset.factories);
@@ -73,7 +73,7 @@ describe('native Pi subagent required-extension order (#1061 D11)', () => {
         { id: 'byok-tool-authorization', path: path.join(root, 'pi-subagent-extensions', 'pi-subagent-gate.js') },
       ]);
       await writeFile(path.join(dir, 'package.json'), manifest('0.86.0'));
-      await expect(loadPiSubagentsAsset(root, gate, true)).rejects.toThrow(/pi_bundled_assets_unavailable: .*pi-subagents@0\.86\.0, not pi-subagents@0\.87\.0/u);
+      await expect(loadPiSubagentsAsset(root, gate, true)).rejects.toThrow(/pi_bundled_assets_unavailable: .*pi-subagents@0\.86\.0, not pi-subagents@0\.88\.1/u);
       await expect(loadPiSubagentsAsset(path.join(root, 'absent'), gate, false)).rejects.toThrow(/pi_bundled_assets_unavailable: the Pi asset root has no pi-subagents package/u);
     } finally {
       await rm(root, { recursive: true, force: true });

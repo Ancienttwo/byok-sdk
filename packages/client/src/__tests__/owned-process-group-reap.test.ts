@@ -7,6 +7,8 @@ import {
   adoptOwnedProcessTree,
   attachOwnedProcessGroupLedger,
   currentBootId,
+  ownedProcessGroupRuns,
+  win32ProcessStart,
   readBootId,
   disposeOwnedProcessTree,
   reapOwnedProcessGroups,
@@ -359,5 +361,24 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
     const orphan = await spawnOrphanedTree();
     expect(await reapOwnedProcessGroups([recordFor(orphan.pgid)], { platform: 'win32' })).toEqual({ ...NOTHING, ended: [] });
     expect(groupAlive(orphan.pgid)).toBe(true);
+  });
+});
+
+describe('a recorded migrate group (#2011)', () => {
+  it.skipIf(process.platform === 'win32')('has ended only in an earlier boot or on ESRCH; any other answer counts as running', () => {
+    const group = { pgid: 4242, rootStart: '1', bootId: currentBootId(), writerPid: process.pid, writerStart: '' };
+    const kill = (code?: string) => () => { if (code !== undefined) throw Object.assign(new Error(code), { code }); };
+    expect(ownedProcessGroupRuns({ ...group, bootId: 'an earlier boot' }, 'linux', kill())).toBe(false);
+    expect(ownedProcessGroupRuns(group, 'linux', kill('ESRCH'))).toBe(false);
+    expect(ownedProcessGroupRuns(group, 'linux', kill('EPERM'))).toBe(true);
+    expect(ownedProcessGroupRuns(group, 'linux', kill())).toBe(true);
+  });
+
+  it('win32 reads the root start in ticks, none for a missing pid, and throws on anything else', () => {
+    const answer = (status: number, stdout: string) => (() => ({ status, stdout })) as never;
+    expect(win32ProcessStart(7, answer(0, '638000000000000000\r\n'))).toBe('638000000000000000');
+    expect(win32ProcessStart(7, answer(0, 'none'))).toBeUndefined();
+    expect(() => win32ProcessStart(7, answer(0, ''))).toThrow(/process 7/);
+    expect(() => win32ProcessStart(7, answer(1, 'none'))).toThrow(/process 7/);
   });
 });

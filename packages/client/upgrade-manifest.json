@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "ec6056583ccd9cc6d41c6054c681c12efeb740a22748e6d649a19cdf2687c3d5"
+    "snapshotSha256": "1f0eecf3509ebc01e37e03ae4f47b125ee7f01f233093ca785a6cd2261b0420f"
   },
   "configFields": {
     "status": "tracked",
@@ -30,10 +30,19 @@
     {
       "id": "service-store-release-failures",
       "impact": "breaking",
-      "summary": "Store lease and gate release failures preserve a refused ServiceInstallationError and its code, with the refusal and all release failures in its AggregateError cause; Hosts that matched the 0.42.0 AggregateError on first install must read cause instead. The code follows the outcome (#2010): a call that leaves its receipt pending or its stores unrestored throws upgrade_pending with every failure in its cause, so the Host runs recover(), first restarting the Host process if a stuck lease makes it fail with store_busy; a preparation error that is not the SDK's own is the new store_preparation_failed with the original error as its cause. The same type gains install_root_foreign_owner (#2001): every ServiceInstallation operation holds an install-root gate, so a second operation on one install root fails at once with lifecycle_owner_busy, and an install root owned by another user is refused before anything changes.",
+      "summary": "Store lease and gate release failures preserve a refused ServiceInstallationError and its code, with the refusal and all release failures in its AggregateError cause; Hosts that matched the 0.42.0 AggregateError on first install must read cause instead. The code follows the outcome (#2010): a call that leaves its receipt pending or its stores unrestored throws upgrade_pending with every failure in its cause, so the Host runs recover(), first restarting the Host process if a stuck lease makes it fail with store_busy; a preparation error that is not the SDK's own is the new store_preparation_failed with the original error as its cause. The same type gains install_root_foreign_owner (#2001): every ServiceInstallation operation holds an install-root gate, so a second operation on one install root fails at once with lifecycle_owner_busy, and an install root owned by another user is refused before anything changes. The receipt commit protocol (#2011) adds receipt_upgrade_required, receipt_state_inconsistent, switch_unhealthy, repair_interrupted and service_program_not_current; see service-upgrade-receipt-v2.",
       "migration": "docs/releases/host-upgrade-next-minor.md#store-release-failures-name-the-next-step",
       "items": [
         "export:@byok-sdk/client#ServiceInstallationErrorCode"
+      ]
+    },
+    {
+      "id": "service-upgrade-receipt-v2",
+      "impact": "breaking",
+      "summary": "upgrade-receipt.json is version 2 (#2011): ServiceUpgradeReceipt.version is 2 and a pending receipt carries kind (upgrade, rollback or repair). recover() acts on the kind, the code and where current points, starting a present current as it is instead of restoring the snapshot over its writes; a candidate found unhealthy is failed with switch_unhealthy and nothing starts, and an interrupted same-version reinstall is repair_interrupted. A pending version 1 receipt is receipt_upgrade_required: run recover() with SDK 0.42 before upgrading the SDK; a final one reads as version 2 and the next write stores version 2. Hosts that parse the receipt accept version 2 and kind; Hosts that switch on codes handle the five new ServiceInstallationErrorCode values. createServiceInstallation refuses a program that does not run from current, and upgrade() and rollback() a unit the SDK did not write, with service_program_not_current.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#upgrades-commit-through-current-2011",
+      "items": [
+        "export:@byok-sdk/client#ServiceUpgradeReceipt"
       ]
     },
     {
@@ -91,7 +100,7 @@
     {
       "id": "enrollment-clear-store-scope",
       "impact": "breaking",
-      "summary": "clearDeviceEnrollment and Daemon.unpair() no longer delete another store's credential or staged first pairing under the same productId: they hold a per-user productId lock from validation through deletion, and pairing takes it across its credential writes, each waiting up to 30 seconds. FirstPairingAttempt gains storeIdentity (DeviceStore.identity, the SHA-256 hex of the resolved storeDir); an injected DeviceCredentialBackend keeps every attempt field, or the store's own attempt is refused. A clear refuses another store's attempt as store_not_bound and an attempt that names no store (staged by 0.42.0) with the new DeviceEnrollmentClearErrorCode pairing_attempt_unattributed; clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }) deletes it. Pairing applies the same rule (#2033): it reuses only its own store's staged attempt and otherwise throws the new FirstPairingAttemptRefusedError (store_not_bound, which replaceOtherStore discards, or pairing_attempt_unattributed). A running daemon's token renewal takes the same lock around its write and writes only while the OS entry still holds its store's enrollment; otherwise the daemon halts as store_not_bound or re_pair_required (#2034). A renewal never holds the lock across a network request. A pairing is one critical section: it rereads the enrollment and staged attempt under the lock, never a cached record, refuses another store's or an unattributed attempt even beside its own enrollment, and holds the lock across its own request, because server registration has no fencing, and through its E2EE member entries. BlobClient and InstallSkillPacksOptions change only through the types they reference (#1964).",
+      "summary": "clearDeviceEnrollment and Daemon.unpair() no longer delete another store's credential or staged first pairing under the same productId: they hold a per-user productId lock from validation through deletion, and pairing takes it across its credential writes, each waiting up to 30 seconds. FirstPairingAttempt gains storeIdentity (DeviceStore.identity, the SHA-256 hex of the resolved storeDir); an injected DeviceCredentialBackend keeps every attempt field, or the store's own attempt is refused. A clear refuses another store's attempt as store_not_bound and an attempt that names no store (staged by 0.42.0) with the new DeviceEnrollmentClearErrorCode pairing_attempt_unattributed; clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }) deletes it. Pairing applies the same rule (#2033): it reuses only its own store's staged attempt and otherwise throws the new FirstPairingAttemptRefusedError (store_not_bound, which replaceOtherStore discards, or pairing_attempt_unattributed). A running daemon's token renewal takes the same lock around its write and writes only while the OS entry still holds its store's enrollment; otherwise the daemon halts as store_not_bound or re_pair_required (#2034). A renewal never holds the lock across a network request. A pairing is one critical section: it rereads the enrollment and staged attempt under the lock, never a cached record, refuses another store's or an unattributed attempt even beside its own enrollment, and holds the lock across its own request, because server registration has no fencing, and through its E2EE member entries. A running daemon's member resume and KEM rotation write the member entries only under the same lock while its enrollment still holds, otherwise they write nothing and the daemon halts the same way (#2055). BlobClient and InstallSkillPacksOptions change only through the types they reference (#1964).",
       "migration": "docs/releases/host-upgrade-next-minor.md#enrollment-clear-is-scoped-to-its-store-1964",
       "items": [
         "export:@byok-sdk/client#BlobClient",
@@ -319,6 +328,11 @@
       "item": "export:@byok-sdk/client#ServiceUnitError",
       "change": "changed",
       "entry": "path-gate-release-failures"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUpgradeReceipt",
+      "change": "changed",
+      "entry": "service-upgrade-receipt-v2"
     },
     {
       "item": "export:@byok-sdk/client#SqliteLocalTaskJournal",

@@ -371,6 +371,22 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       await expect(profiles.getPending(PROFILE_REF)).resolves.toMatchObject({ requestId: 'r2' });
     });
 
+    it('passes a credential-store error on only through the shared boundary (#2051)', async () => {
+      await configured();
+      const echo = () => new ByokKeysError('KEYCHAIN_UNAVAILABLE', `secret-tool: ${KEY_A}`, { cause: new Error(KEY_A) });
+      vi.spyOn(secrets, 'has').mockRejectedValueOnce(echo());
+      const updated = await apply(await updateModelRequest({ requestId: 'u1', generation: 2, expected: await expectedOf(), modelId: 'glm-5.3' }))
+        .catch((thrown: unknown) => thrown as Error);
+      vi.spyOn(secrets, 'get').mockRejectedValueOnce(echo());
+      const checked = await apply(await replaceSecretRequest(sealingKey, KEY_B, { requestId: 'r3', generation: 3, expected: await expectedOf() }), { keyCheck: { fetchImpl: vi.fn() } })
+        .catch((thrown: unknown) => thrown as Error);
+      for (const error of [updated, checked]) {
+        expect(error).toMatchObject({ code: 'KEYCHAIN_UNAVAILABLE' });
+        expect((error as Error).cause).toBeUndefined();
+        expect(`${(error as Error).message} ${(error as Error).stack}`).not.toContain(KEY_A);
+      }
+    });
+
     it('rejects before marking when the credential store is unavailable', async () => {
       vi.spyOn(secrets, 'available').mockResolvedValueOnce(false);
       const result = await apply(await configureRequest(sealingKey, KEY_A, { requestId: 'req-1', generation: 1 }));

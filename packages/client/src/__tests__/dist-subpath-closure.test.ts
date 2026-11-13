@@ -47,14 +47,14 @@ describe('client build and private lazy entry boundaries', () => {
     expect(host).not.toMatch(/(?:from|import\()\s*['"]pi-subagents/u);
     expect(host).toMatch(/=\s*["']pi-subagents["']/u);
     expect(host).toMatch(/=\s*["']pi-subagents\/required-child-extensions["']/u);
-    expect(manifest.dependencies['pi-subagents']).toBe('0.87.0');
+    expect(manifest.dependencies['pi-subagents']).toBe('0.88.1');
     expect(manifest.devDependencies?.['pi-subagents']).toBeUndefined();
     const installedVersion = (name: string) => {
       let dir = path.dirname(createRequire(path.join(DIST, 'bin/pi-runtime-host.js')).resolve(name));
       while (!existsSync(path.join(dir, 'package.json'))) dir = path.dirname(dir);
       return JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')) as { name: string; version: string };
     };
-    expect(installedVersion('pi-subagents')).toMatchObject({ name: 'pi-subagents', version: '0.87.0' });
+    expect(installedVersion('pi-subagents')).toMatchObject({ name: 'pi-subagents', version: '0.88.1' });
     const gate = readFileSync(path.join(DIST, 'bin/pi-subagent-gate.js'), 'utf8');
     expect(gate).toContain('tool_authorization_unavailable');
     expect(gate).not.toMatch(/(?:from|import\()\s*['"]@earendil-works\//u);

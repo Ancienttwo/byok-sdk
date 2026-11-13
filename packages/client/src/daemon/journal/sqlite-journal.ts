@@ -546,22 +546,41 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
    * exactly what the cursor needed.
    */
   appendEnvelope(record: ReceivedEnvelopeRecord): Promise<JournalReceipt> {
-    const bytes = byteLength(record.bytes);
+    // A string cannot change after the check; a Buffer from untyped callers could.
+    if (typeof record.bytes !== 'string') {
+      return Promise.reject(new TypeError('ReceivedEnvelopeRecord.bytes must be a string'));
+    }
+    // The write runs after the queue drains, so it and the checks below read
+    // one copy the caller cannot change in between.
+    const entry: ReceivedEnvelopeRecord = Object.freeze({ ...record, identity: Object.freeze({ ...record.identity }) });
+    const bytes = byteLength(entry.bytes);
     const bound = Math.max(this.#maxRecordBytes, ENVELOPE_RECORD_FLOOR_BYTES);
     if (bytes > bound) {
       return Promise.reject(new JournalRecordTooLargeError('bytes', bytes, bound));
     }
-    if (record.opensTask && record.taskId === undefined) {
+    if (entry.opensTask && entry.taskId === undefined) {
       return Promise.reject(
         new Error('ReceivedEnvelopeRecord.opensTask is true but no taskId was supplied — refusing to append a task-opening envelope with no task identity'),
       );
     }
+    // Rows are read back by task id, so the row must name the task its bytes
+    // bind (#2054): a Host appending directly can otherwise file one task's
+    // envelope under another.
+    let boundTaskId: unknown;
+    try {
+      boundTaskId = (JSON.parse(entry.bytes) as { task_id?: unknown }).task_id;
+    } catch {
+      return Promise.reject(new TypeError('ReceivedEnvelopeRecord.bytes is not a JSON envelope'));
+    }
+    if (boundTaskId !== entry.taskId) {
+      return Promise.reject(new TypeError('ReceivedEnvelopeRecord.taskId does not match the task_id in its bytes'));
+    }
 
-    return this.#append('appendEnvelope', record, record.bytes, null, (committedAt) => {
-      if (!record.opensTask || record.taskId === undefined) return;
-      const task = this.#db.prepare('SELECT * FROM journal_task WHERE task_id = ?').get(record.taskId) as Record<string, unknown> | undefined;
+    return this.#append('appendEnvelope', entry, entry.bytes, null, (committedAt) => {
+      if (!entry.opensTask || entry.taskId === undefined) return;
+      const task = this.#db.prepare('SELECT * FROM journal_task WHERE task_id = ?').get(entry.taskId) as Record<string, unknown> | undefined;
       if (task) {
-        this.#assertIdentity(task, record.identity);
+        this.#assertIdentity(task, entry.identity);
         const original = this.#db.prepare('SELECT bytes, withheld_bytes FROM journal_envelope WHERE envelope_id = ?')
           .get(task.envelope_id as string) as { bytes: string; withheld_bytes: number | null };
         // Transport IDs/seq can change on duplicate delivery, but the execution
@@ -569,7 +588,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
         // A withheld offer has no contract to compare: its task is declined.
         if (original.withheld_bytes === null) {
           const oldOffer = JSON.parse(original.bytes) as { type?: unknown; payload?: unknown };
-          const newOffer = JSON.parse(record.bytes) as { type?: unknown; payload?: unknown };
+          const newOffer = JSON.parse(entry.bytes) as { type?: unknown; payload?: unknown };
           if (oldOffer.type !== newOffer.type || JSON.stringify(oldOffer.payload) !== JSON.stringify(newOffer.payload)) {
             throw new Error('journal task identity reused with a different execution contract');
           }
@@ -579,7 +598,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       // id (a re-offer after the cloud lost track) must not clobber the
       // admission/claim state the first one already accumulated. The
       // envelope row above still records that the second envelope arrived.
-      this.#insertTask(record, record.taskId, RECEIVED_STATE, committedAt);
+      this.#insertTask(entry, entry.taskId, RECEIVED_STATE, committedAt);
     });
   }
 

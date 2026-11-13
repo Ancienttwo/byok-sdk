@@ -5,7 +5,7 @@ import {
   configurationPendingError,
   withConfigurationLock,
 } from './custody.js';
-import { BYOK_KEYS_ERROR_CODES, ByokKeysError, type ByokKeysErrorCode } from './errors.js';
+import { BYOK_KEYS_ERROR_CODES, ByokKeysError } from './errors.js';
 import type { ProviderFetch } from './http.js';
 import { OpenAiCompatibleChatClient } from './openai-client.js';
 import { type ProviderProfileStore, providerNotConfigured } from './profile-store.js';
@@ -25,6 +25,7 @@ import {
   type SecretStore,
   modelProviderSecretName,
 } from './secret-store.js';
+import { secretStoreCall } from './secret-store-call.js';
 import { PROVIDER_PROVISIONING_SECRET_MAX_BYTES, isPortableSecretValue } from './secret-value.js';
 
 /** A transport client for whichever dialect the resolved profile declares. */
@@ -136,31 +137,8 @@ export function buildConfiguredProfile(
   });
 }
 
-/** Fixed, credential-free guidance for the store codes an operator can act on. */
-const SECRET_STORE_GUIDANCE: Partial<Record<ByokKeysErrorCode, string>> = {
-  KEYCHAIN_SECRET_CORRUPTED: 'The OS keychain entry for this provider cannot be decoded; supply a new key to replace it',
-  KEYCHAIN_SECRET_DECODE_FAILED: "The OS keychain holds an entry with this provider key's name that the SDK did not write; delete or rename it, or use another profile",
-  KEYCHAIN_UNAVAILABLE: 'The OS keychain is unavailable; on Linux, install secret-tool and unlock a keyring on the session D-Bus',
-  CREDENTIAL_MANAGER_READ_FAILED: 'Windows Credential Manager could not read this secret; if the entry is damaged, delete it in Credential Manager and supply the key again',
-};
-
-/**
- * Call the injected secret store without letting its error escape: a store
- * may echo a key in its message, its cause, or an error it builds itself. A
- * known keychain, Credential Manager or secret-shape code keeps its code with a
- * fixed message (guidance where an operator can act, such as installing
- * secret-tool); anything else becomes `PROVIDER_SECRET_STORE_FAILED`.
- */
-async function secretStoreCall<T>(call: () => Promise<T>): Promise<T> {
-  try {
-    return await call();
-  } catch (error) {
-    const code = error instanceof ByokKeysError ? error.code : '';
-    if (Object.hasOwn(BYOK_KEYS_ERROR_CODES, code) && /^(?:KEYCHAIN|CREDENTIAL_MANAGER|SECRET)_/u.test(code)) {
-      throw new ByokKeysError(code, SECRET_STORE_GUIDANCE[code as ByokKeysErrorCode] ?? 'Credential store operation failed');
-    }
-    throw new ByokKeysError('PROVIDER_SECRET_STORE_FAILED', 'Provider credential store operation failed');
-  }
+function isChangeCommitted(error: unknown): boolean {
+  return error instanceof ByokKeysError && error.code === 'PROVIDER_CHANGE_COMMITTED';
 }
 
 /**
@@ -169,10 +147,6 @@ async function secretStoreCall<T>(call: () => Promise<T>): Promise<T> {
  * and the marker its commit cleared) instead of a read after the commit, so a
  * failed read can never report a committed change as failed.
  */
-function isChangeCommitted(error: unknown): boolean {
-  return error instanceof ByokKeysError && error.code === 'PROVIDER_CHANGE_COMMITTED';
-}
-
 function committedStatus(profile: ModelProviderProfile, secretConfigured: boolean): ProviderStatus {
   return providerStatusOf(profile, { secretConfigured, configurationPending: false });
 }

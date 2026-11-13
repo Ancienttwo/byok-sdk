@@ -2,6 +2,36 @@
 
 Checklist for a Host moving from 0.41.0 to the 0.42.0 MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Reviewed against source base `06a14462e0a0c6b30b9843d962072adff80a0d31`, including the release-notes audit (#1931). The release commit is main `14e0628d2`; tag `v0.42.0` points to it and all ten packages are on npm `latest` (2026-11-13, UTC); see the [release notes](v0.42.0.md). Pin the Host's direct and resolved SDK dependencies to the released versions in its lockfile.
 
+## Keep Host React versions aligned (#2024)
+
+`@byok-sdk/client` 0.42.0 depends on `@earendil-works/chord` 1.5.2
+both directly and through `@earendil-works/pi-durable`. Chord declares an
+optional peer on exactly `react` 19.3.0. In npm 11, a Host with
+`react` and `react-dom` on `^19.2.7` has resolved React to 19.3.0 while
+leaving React DOM on 19.2.7. The app can then fail with `Incompatible React
+versions`, even when the Host does not use chord's React surface.
+
+If the Host sees this split, set its direct `react` and `react-dom`
+dependencies to the same exact version and align the resolution in the
+Host's root `package.json`. For example, use 19.3.0 for both, merging the
+appropriate line below into the existing root fields:
+
+- npm: `"overrides": { "react": "19.3.0", "react-dom": "19.3.0" }`
+- Bun: `"overrides": { "react": "19.3.0", "react-dom": "19.3.0" }`
+- pnpm: `"pnpm": { "overrides": { "react": "19.3.0", "react-dom": "19.3.0" } }`
+
+For npm, direct dependency specifications must match their override
+specifications or npm rejects the install. Reinstall with the Host's package
+manager and update its lockfile. With npm, run `npm ls react react-dom` and
+check that the application resolves one React version and a matching React
+DOM version. With Bun or pnpm, inspect the resolved tree with the respective
+package manager. Test the Host's app after changing its React version.
+
+No override is needed if the Host does not use React, or if its installed
+React and React DOM versions are already aligned and the app resolves a
+single React instance. Bun and pnpm have not been confirmed to reproduce the
+npm 11 split. The SDK workspace's overrides do not apply to the Host.
+
 ## Service install prepares kept stores
 
 A Host that preserves stores on uninstall can now reinstall a candidate

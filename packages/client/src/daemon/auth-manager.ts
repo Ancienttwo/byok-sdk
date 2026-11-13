@@ -16,7 +16,7 @@ import {
   type DeviceRecord,
 } from './store.js';
 import type { DeviceCredentialBackend, FirstPairingAttempt } from './device-credential-store.js';
-import { acquireEnrollmentGate } from './enrollment-gate.js';
+import { acquireEnrollmentGate, registerMemberWrites } from './enrollment-gate.js';
 import type { PathMutationGate } from '../util/path-mutation-gate.js';
 import { DeviceStoreBindingMismatchError, FirstPairingAttemptRefusedError } from './daemon-errors.js';
 import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys.js';
@@ -138,6 +138,23 @@ export interface AuthManagerOptions {
   onBindingLost?: (reason: 'store_not_bound' | 're_pair_required') => void;
 }
 
+/** Under the enrollment gate: the OS entry still holds `record`, or the binding is lost. Set by {@link AuthManager}'s static block. */
+let checkBinding: (auth: AuthManager, record: DeviceRecord | undefined, signal: AbortSignal) => Promise<void>;
+
+/** `predecessor`, or `cancel`'s reason once it aborts first. */
+function queuedBehind(predecessor: Promise<void>, cancel: AbortSignal | undefined): Promise<void> {
+  if (cancel === undefined) return predecessor;
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(cancel.reason);
+    if (cancel.aborted) return onAbort();
+    cancel.addEventListener('abort', onAbort, { once: true });
+    void predecessor.then(() => {
+      cancel.removeEventListener('abort', onAbort);
+      resolve();
+    });
+  });
+}
+
 /**
  * Owns device pairing and the access token lifecycle (protocol §6):
  * generates/reuses the device Ed25519 keypair, pairs, and renews the access
@@ -146,6 +163,29 @@ export interface AuthManagerOptions {
  * that WS connects, blob HTTP calls, and the long-poll fallback all use.
  */
 export class AuthManager {
+  static {
+    checkBinding = async (auth: AuthManager, record: DeviceRecord | undefined, signal: AbortSignal): Promise<void> => {
+      let current: DeviceRecord | undefined;
+      try {
+        current = await auth.loadRecord(signal);
+      } catch (error) {
+        if (error instanceof DeviceStoreBindingMismatchError || error instanceof DeviceRecordRePairRequiredError) auth.loseBinding(error);
+        throw error;
+      }
+      if (current === undefined || record === undefined) auth.loseBinding(new DeviceRecordRePairRequiredError());
+      if (current.deviceId !== record.deviceId || current.tenantId !== record.tenantId || current.devicePublicKey !== record.devicePublicKey) {
+        auth.loseBinding(new DeviceStoreBindingMismatchError(current, record));
+      }
+    };
+    registerMemberWrites(<T>(auth: AuthManager, write: () => Promise<T>, signal: AbortSignal) => auth.runCredentialMutation((mutationSignal) => {
+      const both = AbortSignal.any([mutationSignal, signal]);
+      return auth.underEnrollmentGate(both, async () => {
+        await checkBinding(auth, auth.record, both);
+        return write();
+      });
+    }, signal));
+  }
+
   private record: DeviceRecord | undefined;
   private renewing: Promise<string> | undefined;
   private proactiveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -401,17 +441,7 @@ export class AuthManager {
     // this store still holds that enrollment, under the enrollment gate
     // (#2034); otherwise the new token is discarded and the binding is lost.
     await this.underEnrollmentGate(signal, async () => {
-      let current: DeviceRecord | undefined;
-      try {
-        current = await this.loadRecord(signal);
-      } catch (error) {
-        if (error instanceof DeviceStoreBindingMismatchError || error instanceof DeviceRecordRePairRequiredError) this.loseBinding(error);
-        throw error;
-      }
-      if (current === undefined) this.loseBinding(new DeviceRecordRePairRequiredError());
-      if (current.deviceId !== record.deviceId || current.tenantId !== record.tenantId || current.devicePublicKey !== record.devicePublicKey) {
-        this.loseBinding(new DeviceStoreBindingMismatchError(current, record));
-      }
+      await checkBinding(this, record, signal);
       await this.credentials.replace(updated, signal);
     });
     this.record = updated;
@@ -654,13 +684,19 @@ export class AuthManager {
     }
   }
 
-  private async runCredentialMutation<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  private async runCredentialMutation<T>(operation: (signal: AbortSignal) => Promise<T>, cancel?: AbortSignal): Promise<T> {
     const predecessor = this.credentialMutationTail;
     let release!: () => void;
     this.credentialMutationTail = new Promise<void>((resolve) => {
       release = resolve;
     });
-    await predecessor;
+    try {
+      await queuedBehind(predecessor, cancel);
+    } catch (error) {
+      // A cancelled waiter leaves the queue now and runs nothing; its successors still wait for the predecessor.
+      void predecessor.then(release);
+      throw error;
+    }
     const controller = new AbortController();
     // A stop() that landed while this mutation queued already cancelled it.
     if (this.stopped) controller.abort();

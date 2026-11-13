@@ -30,8 +30,9 @@ export interface DaemonTaskSettlement {
   readonly delivery: 'accepted' | 'rejected' | 'not-required';
   /**
    * `failed` exactly when `runtime-disposal-failed` was emitted for the task's
-   * runtime; a failed release of an offer-owned scratch (`runtimeId: 'scratch'`)
-   * can race the decline or failure settlement and is not covered.
+   * runtime, including a custom harness whose id is `scratch`. A failed
+   * release of an offer-owned scratch emits that event with
+   * `runtimeId: 'scratch'` but never sets `failed`.
    * `none`: this daemon holds no runtime for the task and has no disposal
    * receipt, as for a decline, a failure before start, or any task that
    * finished before a restart.
@@ -39,7 +40,24 @@ export interface DaemonTaskSettlement {
   readonly disposal: 'disposed' | 'failed' | 'none';
 }
 
-/** `whenTaskSettled` was asked about a task with no journal row and no in-memory record. */
+/**
+ * `whenTaskSettled` rejects with this when an earlier journal read returned
+ * no row for the task and, once that read finished, this Daemon instance had
+ * no in-memory record of the task (no held runtime, nothing settled or
+ * awaited for it in this run) and no offer for it marked as seen. The read
+ * and those checks are not atomic: an offer appended while the read was
+ * pending ends the mark, so the wait can report unknown although the row now
+ * exists (#2097). The mark also ends when the offer's append is refused, so a
+ * refused offer with no row reads as unknown too. A task whose rows retention
+ * pruned, a task never journaled on this device and an offer still on its way
+ * look the same. Unknown does not prove the task is over or will never start:
+ * an offer may still arrive, and whether one is on its way is for the Host's
+ * own server to answer. Other failures are not reported as this error: a
+ * failed journal read rejects with the journal's error, stored evidence that
+ * fails an SDK check (cancellation identity, hash or binding, or an unknown
+ * terminal state) with an SDK `Error`, a refused offer append with that
+ * append's error, and an abort with `signal.reason`.
+ */
 export class DaemonTaskUnknownError extends Error {
   readonly code = 'daemon_task_unknown' as const;
   constructor(readonly taskId: string) {

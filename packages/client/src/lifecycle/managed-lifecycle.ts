@@ -81,10 +81,14 @@ export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUni
   async function writeFiles(): Promise<void> {
     await fs.mkdir(def.logDir, { recursive: true });
     await unit.prepare?.();
+    // Each file is replaced with one rename: a service manager that restarts
+    // the unit meanwhile reads the old file or the new one, never a partial one.
     for (const file of unit.files()) {
       await fs.mkdir(path.dirname(file.path), { recursive: true });
-      await fs.writeFile(file.path, file.content, 'utf8');
-      if (file.mode !== undefined) await fs.chmod(file.path, file.mode);
+      const temp = `${file.path}.${process.pid}.tmp`;
+      await fs.writeFile(temp, file.content, 'utf8');
+      if (file.mode !== undefined) await fs.chmod(temp, file.mode);
+      await fs.rename(temp, file.path);
     }
   }
 

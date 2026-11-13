@@ -122,7 +122,7 @@ export async function privateDirectory(directory: string, options: { ownedLeaf?:
     });
     if (stat !== undefined && (!stat.isDirectory() || stat.isSymbolicLink())) throw new ScratchRootPathError('contains a non-directory or symbolic link');
   }
-  if (options.ownedLeaf && process.getuid !== undefined) {
+  if (options.ownedLeaf && process.geteuid !== undefined) {
     await ensureOwnedPrivateDirectory(absolute, (code, _ownerUid, cause) => code === 'private_dir_mode' ? new SecureDirModeError(absolute, cause)
       : new ScratchRootPathError(code === 'private_dir_foreign_owner' ? 'is owned by another user' : 'contains a non-directory or symbolic link'));
   }

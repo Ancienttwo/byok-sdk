@@ -62,7 +62,8 @@ async function createProjectionDir(projectionRoot: string, sessionCwd: string): 
   await ensureSecureDir(root);
   const stat = await fs.lstat(root);
   if (stat.isSymbolicLink() || !stat.isDirectory() || (process.platform !== 'win32' && (stat.mode & 0o777) !== 0o700)
-    || (process.getuid !== undefined && stat.uid !== process.getuid())) throw failure('runtime projection root is not owned private directory');
+    // The effective uid owns the directory ensureSecureDir just created (#2016).
+    || (process.geteuid !== undefined && stat.uid !== process.geteuid())) throw failure('runtime projection root is not owned private directory');
   const canonicalRoot = await fs.realpath(root);
   const canonicalSession = await fs.realpath(session);
   if (canonicalRoot === canonicalSession || canonicalRoot.startsWith(`${canonicalSession}${path.sep}`)) {
