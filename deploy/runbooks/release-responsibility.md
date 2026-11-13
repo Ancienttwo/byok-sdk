@@ -163,6 +163,7 @@ separate evidence and authorization; see the
 
       On a slow uplink, raise npm's request timeout for this run (for example `npm_config_fetch_timeout=3600000`): the client tarball is about 10.8 MB, and its publish request can outlast npm's default `fetch-timeout` of 300000 ms.
    5. Push the tag: `git push origin v<version>`. A tag exists only for a train the registry has already confirmed.
+   6. Create the GitHub Release from the pushed tag with the release notes: `gh release create v<version> --verify-tag --notes-file docs/releases/v<version>.md`. `--verify-tag` refuses when the tag is not on the remote, so the Release never creates a tag of its own.
 
    **Uncertain or partial publication:** inspect exact registry versions, digests,
    dependency edges and dist-tags before retrying. Propagation delay or a second

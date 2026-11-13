@@ -19,8 +19,8 @@ const names = Object.keys(reviewed.packages);
 const fresh = '@byok-sdk/cloud-do';
 const old = '@byok-sdk/core';
 // Contract fixture: the 0.24.0-rc.1 baseline shape, with one declared first
-// publication. The reviewed file has no first publication after 0.24.0, so the
-// contract tests keep this fixture to cover that path.
+// publication, so the RC prior-publication paths are covered independently of
+// the reviewed file.
 const plan = {
   schemaVersion: 1,
   packages: Object.fromEntries(names.map((name) => [name, name === fresh
