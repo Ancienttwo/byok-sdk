@@ -487,7 +487,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/bot-collaboration/host-kit` | K8 modules a Host adapter composes; Worker-loadable, no @byok-sdk/client | `@cfworker/json-schema`, `zod` | allowed | 607813 B |
 | `@byok-sdk/bot-collaboration/package.json` | Package metadata | — | forbidden | 2086 B |
 | `@byok-sdk/bot-collaboration/rules` | K8 pure rules; Worker-safe, no node:sqlite | `@cfworker/json-schema`, `zod` | allowed | 243887 B |
-| `@byok-sdk/bot-collaboration/testing` | K8 shared vectors and L test Host | `@cfworker/json-schema`, `@hono/node-server`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `chai`, `eventsource`, `eventsource-parser`, `expect-type`, `hono`, `pkce-challenge`, `tinybench`, `vite`, `vitest`, `zod` | allowed | 3211636 B |
+| `@byok-sdk/bot-collaboration/testing` | K8 shared vectors and L test Host | `@cfworker/json-schema`, `@hono/node-server`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `chai`, `eventsource`, `eventsource-parser`, `expect-type`, `hono`, `pkce-challenge`, `tinybench`, `vite`, `vitest`, `zod` | allowed | 3211765 B |
 | `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2429264 B |
 | `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 550424 B |
 | `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 80957 B |
@@ -519,7 +519,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/protocol/agent-memory` | Agent memory Host contract; schema-free | — | forbidden | 1418 B |
 | `@byok-sdk/protocol/constants` | Schema-free protocol values | — | forbidden | 8897 B |
 | `@byok-sdk/protocol/package.json` | Package metadata | — | forbidden | 1636 B |
-| `@byok-sdk/server` | Resident Node server | `@cfworker/json-schema`, `@hono/node-server`, `hono`, `zod` | allowed | 709866 B |
+| `@byok-sdk/server` | Resident Node server | `@cfworker/json-schema`, `@hono/node-server`, `hono`, `zod` | allowed | 710023 B |
 | `@byok-sdk/server/execution-core` | Host execution core: FIFO, ledger, routines, memory restore | `@cfworker/json-schema`, `zod` | allowed | 415277 B |
 | `@byok-sdk/server/execution-core/canonical` | Worker-safe canonical JSON hash | — | forbidden | 574 B |
 | `@byok-sdk/server/package.json` | Package metadata | — | forbidden | 1761 B |

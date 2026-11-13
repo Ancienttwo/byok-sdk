@@ -38,8 +38,9 @@ export function manifestEntries(root) {
       const runtime = targets.filter(item => !item.conditions.includes('types'));
       for (const item of runtime) {
         if (!item.target.startsWith('./')) throw new Error(`${pkg.manifest.name} ${specifier}: target must be package-relative`);
-        const base = kind === 'bin' ? `bin:${specifier}` : kind === 'imports' ? `${pkg.manifest.name}${specifier}`
-          : pkg.manifest.name + (specifier === '.' ? '' : specifier.slice(1));
+        let base = pkg.manifest.name + (specifier === '.' ? '' : specifier.slice(1));
+        if (kind === 'bin') base = `bin:${specifier}`;
+        else if (kind === 'imports') base = `${pkg.manifest.name}${specifier}`;
         const id = runtime.length === 1 ? base : `${base}[${item.conditions.join('.')}]`;
         const target = path.resolve(pkg.directory, item.target);
         if (!inside(pkg.directory, target)) throw new Error(`${id}: target leaves package`);
@@ -125,7 +126,7 @@ export function createWalker(root) {
     }
   }
   function fileAt(base, pkg) {
-    const file = [base, base + '.js', base + '.mjs', base + '.cjs', base + '.json', path.join(base, 'index.js')]
+    const file = [base, `${base}.js`, `${base}.mjs`, `${base}.cjs`, `${base}.json`, path.join(base, 'index.js')]
       .find(file => existsSync(file) && statSync(file).isFile());
     if (!file) throw new Error(`missing module ${posix(path.relative(root, base))}`);
     const real = realpathSync(file);
@@ -153,9 +154,10 @@ export function createWalker(root) {
     // policies below reject closures whose optional source cannot be examined.
     if (pkg === null) return { unavailableOptional: specifier };
     if (pkg.unavailablePackage) return { opaqueImport: specifier };
-    const subpath = specifier === name ? '.' : '.' + specifier.slice(name.length);
-    const target = pkg.manifest.exports !== undefined ? mappedTarget(pkg.manifest.exports, subpath, conditions)
-      : subpath === '.' ? (pkg.manifest.main ?? './index.js') : subpath;
+    const subpath = specifier === name ? '.' : `.${specifier.slice(name.length)}`;
+    let target = subpath;
+    if (pkg.manifest.exports !== undefined) target = mappedTarget(pkg.manifest.exports, subpath, conditions);
+    else if (subpath === '.') target = pkg.manifest.main ?? './index.js';
     if (target === undefined) throw new Error(`${from.manifest.name}: unexported specifier ${specifier}`);
     if (typeof target !== 'string' || path.isAbsolute(target) || (pkg.manifest.exports !== undefined && !target.startsWith('./'))) {
       throw new Error(`${specifier}: invalid package export target`);
@@ -179,7 +181,9 @@ export function createWalker(root) {
           const manifest = path.join(directory, 'package.json');
           if (existsSync(manifest)) { type = readJson(manifest).type; break; }
         }
-        const sourceType = file.endsWith('.mjs') || type === 'module' ? 'module' : file.endsWith('.cjs') || type === 'commonjs' ? 'script' : 'auto';
+        let sourceType = 'auto';
+        if (file.endsWith('.mjs') || type === 'module') sourceType = 'module';
+        else if (file.endsWith('.cjs') || type === 'commonjs') sourceType = 'script';
         try { tokenCache.set(file, scanModule(readFileSync(file, 'utf8'), { sourceType })); }
         catch (error) { throw new Error(`${file}: ${error.message}`); }
       }
@@ -216,8 +220,8 @@ export function createWalker(root) {
 }
 
 export function renderEntryTable(contract) {
-  const escape = value => String(value).replaceAll('|', '\\|').replaceAll('\n', ' ');
-  const rows = Object.entries(contract).map(([id, record]) => `| \`${escape(id)}\` | ${escape(record.policy.purpose)} | ${record.facts.thirdParty.map(name => `\`${name}\``).join(', ') || '—'} | ${record.policy.zod ? 'allowed' : 'forbidden'} | ${record.policy.budgetBytes} B |`);
+  const escapeCell = value => String(value).replaceAll('|', '\\|').replaceAll('\n', ' ');
+  const rows = Object.entries(contract).map(([id, record]) => `| \`${escapeCell(id)}\` | ${escapeCell(record.policy.purpose)} | ${record.facts.thirdParty.map(name => `\`${name}\``).join(', ') || '—'} | ${record.policy.zod ? 'allowed' : 'forbidden'} | ${record.policy.budgetBytes} B |`);
   return `${START}\n\nWorkspace static closure budgets exclude third-party bytes, sourcemaps and literal lazy imports.\nThird-party dependencies and code-generation evidence follow static dependency edges; these are build facts, not a CSP sandbox guarantee.\n\n| Import / command | Purpose | Third-party dependencies | Zod | Budget |\n| --- | --- | --- | --- | ---: |\n${rows.join('\n')}\n\n${END}`;
 }
 
@@ -235,7 +239,9 @@ export function checkEntryClosure(root, { update = false } = {}) {
       if (!policy || typeof policy.purpose !== 'string' || !policy.purpose.trim()
         || !Number.isSafeInteger(policy.budgetBytes) || policy.budgetBytes < 0
         || ['zod', 'codegen'].some(key => typeof policy[key] !== 'boolean')
-        || !policy.nodeBuiltins || ['workspace', 'thirdParty'].some(key => typeof policy.nodeBuiltins[key] !== 'boolean')) throw new Error('invalid entry policy');
+        || !policy.nodeBuiltins || ['workspace', 'thirdParty'].some(key => typeof policy.nodeBuiltins[key] !== 'boolean')
+        || (policy.nodeBuiltins.forbidden !== undefined && (!Array.isArray(policy.nodeBuiltins.forbidden)
+          || policy.nodeBuiltins.forbidden.some(name => typeof name !== 'string' || !isBuiltin(name))))) throw new Error('invalid entry policy');
       for (const type of entry.types) {
         const target = path.resolve(root, type);
         if (!inside(path.join(entry.pkg.directory, 'dist'), target) || !existsSync(target)) throw new Error(`missing or escaped declaration target ${type}`);
@@ -246,7 +252,12 @@ export function checkEntryClosure(root, { update = false } = {}) {
       if (!policy.zod && [...result.thirdParty, ...result.unavailableOptional.map(packageName)].includes('zod')) throw new Error(`zod is forbidden; specifiers: ${via}`);
       if ((result.unavailableOptional.length || result.opaqueImports.length) && (!policy.codegen || !policy.nodeBuiltins.thirdParty)) throw new Error(`strict policy cannot prove optional dependency safety: ${[...result.unavailableOptional, ...result.opaqueImports].join(', ')}`);
       if (!policy.codegen && result.codegen.length) throw new Error(`code generation is forbidden: ${JSON.stringify(result.codegen.slice(0, 3))}; specifiers: ${via}`);
-      for (const layer of ['workspace', 'thirdParty']) if (!policy.nodeBuiltins[layer] && result.nodeBuiltins[layer].length) throw new Error(`Node builtins are forbidden in ${layer}: ${result.nodeBuiltins[layer].join(', ')}`);
+      for (const layer of ['workspace', 'thirdParty']) {
+        if (!policy.nodeBuiltins[layer] && result.nodeBuiltins[layer].length) throw new Error(`Node builtins are forbidden in ${layer}: ${result.nodeBuiltins[layer].join(', ')}`);
+        const forbidden = new Set((policy.nodeBuiltins.forbidden ?? []).map(name => name.replace(/^node:/, '')));
+        const denied = result.nodeBuiltins[layer].filter(name => forbidden.has(name.replace(/^node:/, '')));
+        if (denied.length) throw new Error(`Node builtins are forbidden in ${layer}: ${denied.join(', ')}`);
+      }
       if (result.bytes > policy.budgetBytes) throw new Error(`closure ${result.bytes} bytes exceeds budget ${policy.budgetBytes}`);
       const { bytes, ...facts } = result;
       const next = { kind: entry.kind, policy, facts: { target: posix(path.relative(root, entry.target)), conditions: entry.conditions, types: entry.types, ...facts } };
@@ -264,7 +275,7 @@ export function checkEntryClosure(root, { update = false } = {}) {
   const nextReadme = readme.slice(0, start) + table + readme.slice(end + END.length);
   if (!update && nextReadme !== readme) failures.push('README.md: entry dependency table drifted from entries.json');
   if (update) {
-    writeFileSync(file, JSON.stringify(updated, null, 2) + '\n');
+    writeFileSync(file, `${JSON.stringify(updated, null, 2)}\n`);
     writeFileSync(readmeFile, nextReadme);
   }
   return { failures, measured };

@@ -1,5 +1,3 @@
-import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
-import { dirname } from 'node:path';
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 
 export type SqliteOpenStep = 'after-open' | 'after-wal';
@@ -248,6 +246,8 @@ export function openSqliteDatabase(
 ): DatabaseSync {
   const { DatabaseSync } = loadSqliteModule();
   if (path !== ':memory:') {
+    const { existsSync, mkdirSync, statSync } = process.getBuiltinModule('node:fs');
+    const { dirname } = process.getBuiltinModule('node:path');
     mkdirSync(dirname(path), { recursive: true, mode: SECURE_DIR_MODE });
     // WAL names are path-bound: a second hard-link name cannot recover the
     // original path's WAL after a crash. stat follows a symlink's target.
@@ -297,6 +297,7 @@ export function openSqliteDatabase(
  */
 export function secureSqliteFilePermissions(dbPath: string): void {
   if (dbPath === ':memory:') return;
+  const { chmodSync, existsSync, realpathSync } = process.getBuiltinModule('node:fs');
   const databasePath = realpathSync(dbPath);
   for (const candidate of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) {
     if (existsSync(candidate)) {
