@@ -44,7 +44,12 @@ gate, so a refused operation can leave an empty install root behind; every
 spelling of the root takes the same gate. On macOS and Linux, an install root
 owned by another user (also one that user created first) is refused with the
 new `ServiceInstallationErrorCode` `install_root_foreign_owner` before
-anything is written in it; run the operation as the owner of the root.
+anything is written in it; run the operation as the owner of the root. The
+gate and the owner check use the effective uid. These guarantees hold only
+while the install root's parent directory is writable by the installing user
+alone: another user who can write it can rename the root or replace it with a
+symlink after the check (#2028). Windows has no owner check, and two Windows
+users operating on one install root are not guaranteed to exclude each other.
 
 ## Gate release failures join the thrown error
 

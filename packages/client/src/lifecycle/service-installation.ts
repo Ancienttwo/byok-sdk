@@ -508,8 +508,11 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * owner check act on an existing directory: the gate resolves its real
    * path, one spelling for every alias (a symlink, or another letter case on
    * a case-insensitive volume), and whoever creates a missing root owns it.
-   * The gate is per OS user, so on POSIX a root another user owns is
-   * `install_root_foreign_owner` before anything is written under it.
+   * The gate is per effective uid, so on POSIX a root another user owns is
+   * `install_root_foreign_owner` before anything is written under it. This
+   * holds only while the root's parent directory is writable by this user
+   * alone: otherwise the root can be renamed or replaced by a symlink after
+   * the check (#2028). Windows has no owner check.
    */
   function rootOwned<T>(operation: (held: HeldServiceLifecycle) => Promise<T>): Promise<T> {
     return lifecycle.owned(async (held) => {

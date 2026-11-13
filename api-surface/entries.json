@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2747016,
+      "budgetBytes": 2747022,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -284,7 +284,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3202799,
+      "budgetBytes": 3202805,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -458,7 +458,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2420815,
+      "budgetBytes": 2420821,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -575,7 +575,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 549403,
+      "budgetBytes": 549408,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -691,7 +691,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Task/device assertions; core includes protected Zod probes",
-      "budgetBytes": 126022,
+      "budgetBytes": 126023,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -906,7 +906,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 511781,
+      "budgetBytes": 511786,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1046,7 +1046,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 575945,
+      "budgetBytes": 575950,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2587,7 +2587,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2412248,
+      "budgetBytes": 2412254,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2702,7 +2702,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent memory MCP helper",
-      "budgetBytes": 46531,
+      "budgetBytes": 46532,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2743,7 +2743,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent message MCP helper",
-      "budgetBytes": 46535,
+      "budgetBytes": 46536,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2784,7 +2784,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Task-bound structured outcome MCP helper",
-      "budgetBytes": 46531,
+      "budgetBytes": 46532,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2825,7 +2825,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent team MCP helper",
-      "budgetBytes": 46501,
+      "budgetBytes": 46502,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {

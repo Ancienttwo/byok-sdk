@@ -499,7 +499,10 @@ symlink, or another letter case on a case-insensitive volume) takes the same
 gate and a refusal leaves at most that empty directory. On macOS and Linux an
 install root owned by another user, including one that user created first,
 is refused with `install_root_foreign_owner` before anything is written in
-it.
+it. These guarantees hold only while the install root's parent directory is
+writable by the installing user alone; otherwise another user can rename the
+root or replace it with a symlink after the check (#2028). Windows has no
+owner check, and exclusion between Windows users is not guaranteed.
 
 Preparation does not stop an absent unit or an allowed unmarked unit. It
 leases and gates the daemon stores instead. With `replaceUnmarked`, a
