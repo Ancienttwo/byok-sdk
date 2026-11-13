@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "40c9201e88c77c9f4deb960e08c29a414e287fce9afa0fbe6f348d4247a18ff0"
+    "snapshotSha256": "5385c1d42d3fbe350ea32b10ffb7d5355b834310f41b8ee2765888daf985624a"
   },
   "configFields": {
     "status": "tracked",
@@ -44,13 +44,49 @@
       "items": [
         "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES"
       ]
+    },
+    {
+      "id": "bot-collaboration-cancel-host-intents",
+      "impact": "breaking",
+      "summary": "cancelHostIntents atomically cancels selected unsubmitted Host intents without a pass. HostIntentError.rejected lists all refused keys and code gains inflight; update exhaustive switches. Existing cancelHostIntent, drainForSwitch and abortSwitch behavior and store format are unchanged. Hosts may replace freeze, individual cancels and abort with this call, retaining freeze when other device work must be held. Successors wait for a later pass or an explicit drain().",
+      "migration": "docs/releases/host-upgrade-next-minor.md#cancel-selected-host-intents-without-a-pass-2003",
+      "items": [
+        "export:@byok-sdk/bot-collaboration#BotCollaboration",
+        "export:@byok-sdk/bot-collaboration/host-kit#HostIntentError"
+      ]
+    },
+    {
+      "id": "bot-collaboration-ledger-precheck",
+      "impact": "breaking",
+      "summary": "The local bot-collaboration entry exports inspectLedger(path, tenant), a read-only precheck returning StoreCompatibility. It reports migration-required for would-do rows without turnId; run migrateWouldDo after snapshot and before serving. LocalStoreId gains bot-collaboration-ledger; Hosts with exhaustive switches or Record<LocalStoreId, ...> must add this member.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#ledger-precheck-and-store-id-1981",
+      "items": [
+        "export:@byok-sdk/bot-collaboration#inspectLedger",
+        "export:@byok-sdk/core#LocalStoreId",
+        "store:bot-collaboration-ledger"
+      ]
     }
   ],
   "changes": [
     {
+      "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
+      "change": "changed",
+      "entry": "bot-collaboration-cancel-host-intents"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#inspectLedger",
+      "change": "added",
+      "entry": "bot-collaboration-ledger-precheck"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#BotTurnInstructionOptions",
       "change": "added",
       "entry": "bot-turn-instruction-host-kit"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#HostIntentError",
+      "change": "changed",
+      "entry": "bot-collaboration-cancel-host-intents"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#InstructionLimits",
@@ -73,9 +109,20 @@
       "entry": "service-store-release-failures"
     },
     {
+      "item": "export:@byok-sdk/core#LocalStoreId",
+      "change": "changed",
+      "entry": "bot-collaboration-ledger-precheck"
+    },
+    {
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
       "change": "changed",
       "entry": "keys-secret-corrupted-code"
+    },
+    {
+      "item": "store:bot-collaboration-ledger",
+      "change": "added",
+      "after": "ledger=1 collaboration=3 ddl-sha256=c5721e95abe5c4d1",
+      "entry": "bot-collaboration-ledger-precheck"
     }
   ]
 }

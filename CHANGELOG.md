@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Breaking (bot-collaboration; #2003)** — `cancelHostIntents(keys)` atomically cancels selected unsubmitted Host intents without a pass; `HostIntentError.rejected` reports all refused keys and `code` adds `inflight`. Successors wait for a pass or an explicit `drain()`. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#cancel-selected-host-intents-without-a-pass-2003).
+
+- **Breaking (bot-collaboration; #1981)** — `inspectLedger(path, tenant)` on the local Host entry returns a store compatibility verdict from a private copy. `LocalStoreId` includes `bot-collaboration-ledger`; update exhaustive switches and records. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#ledger-precheck-and-store-id-1981).
+
 - **Added (bot-collaboration; #1978)** — `./host-kit` exports `botTurnInstruction` with an options object and `InstructionLimits`, so Hosts can compute the instruction K8 freezes for a Turn.
 
 - **Fixed (client; #1949)** — Every SDK Pi RPC session caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings, so it warms its prompt cache at most during an active run: Pi cancels the warmer at settlement and revalidates a pending decision before dispatch, so no warming request is sent after the run settled, even for a late `"warm"` answer. No Host action is needed. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#pi-cache-warming-stops-at-settlement-1949).
@@ -18,6 +22,8 @@
 - **Fixed (client; #1986)** — `ServiceInstallation.upgrade()` no longer rejects after a committed switch when an earlier version snapshot cannot be removed: it resolves with the `switched` receipt and the next successful upgrade tries to remove the leftover again; one that keeps failing (for example a persistent `EACCES`) stays, and each later successful upgrade retries it, until the cause is fixed. Other pruning errors still reject.
 
 - **Fixed (client; #1987)** — `ServiceInstallation.upgrade()` no longer restarts the previous version when a failed migration's snapshot restore fails too, since the stores may be partial. The service stays stopped, the `pending` receipt and `snapshots/<to>` stay, and the error (an `AggregateError` with the preparation and restore errors) names the snapshot path and `recover()`. Call `recover()` before anything restarts the machine: the unit stays installed, so a reboot or login before it starts the previous version on those stores.
+
+- **Fixed (client; #2008)** — An agent, agent terminal tool or Pi RPC spawn whose environment holds a value containing a NUL byte now fails before the process starts, with an error that names the variable and never its value. Previously Node's rejection quoted the value in escaped form, which credential redaction did not match, so a credential could reach the start failure reason. No Host action is needed.
 
 ## 0.42.0 — 2026-11-13 (published)
 

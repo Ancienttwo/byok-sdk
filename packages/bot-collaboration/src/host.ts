@@ -611,6 +611,38 @@ export class BotCollaboration {
     });
   }
   /**
+   * Cancel selected Host intents atomically without a pass. A submitted intent refuses the whole set; after a successful
+   * call, successors wait for the next pass, or the Host can call `drain()`. Results keep input order and are replayable.
+   */
+  cancelHostIntents(keys: readonly string[], ...by: PrincipalArg): Promise<(HostIntentCancelResult & { result: 'cancelled' | 'already_settled'; conclusion: Conclusion })[]> {
+    return this.exclusive(async () => {
+      this.ownerOnly(by, 'cancelHostIntents', keys.join(' '));
+      const seen = new Set<string>();
+      for (const key of keys) { if (seen.has(key)) throw new Error(`Duplicate Host intent key: ${key}`); seen.add(key); }
+      return this.write(s => {
+        const state = stateOf(s.application), rejected: { key: string; code: HostIntentError['code'] }[] = [];
+        for (const key of keys) {
+          const intent = s.intents[hash(key)];
+          if (Object.hasOwn(state.turns, key)) rejected.push({ key, code: 'not_host_intent' });
+          else if (!hostIntent(state, key) || !intent) rejected.push({ key, code: 'unknown_intent' });
+          else if (!intent.conclusion && intent.phase === 'inflight') rejected.push({ key, code: 'inflight' });
+        }
+        if (rejected.length) {
+          const first = rejected[0]!;
+          const message = first.code === 'inflight' ? 'The intent is in flight: use cancelHostIntent'
+            : first.code === 'not_host_intent' ? 'The key is a Bot Turn: use cancelTurn' : 'No Host intent has this key';
+          throw new HostIntentError(first.key, first.code, message, rejected);
+        }
+        return keys.map(key => {
+          const intent = s.intents[hash(key)]!;
+          if (intent.conclusion) return { key, result: 'already_settled' as const, conclusion: intent.conclusion };
+          intent.cancelReason = 'cancelled'; settle(s, intent, 'cancelled');
+          return { key, result: 'cancelled' as const, conclusion: 'cancelled' as const };
+        });
+      });
+    });
+  }
+  /**
    * Owner API (#882): settles as `failed` an open intent whose K4 terminal K8 refuses with `IntentOutcomeError`, so its FIFO
    * moves on. A fresh K4 drain decides that the intent is stuck, so the call also works right after a restart. One transaction
    * settles it and writes the audit row. The settle runs no handler, and the intent records no terminal; the server task
