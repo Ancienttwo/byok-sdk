@@ -6,8 +6,9 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig, type EmbeddedPairingServer } from '../daemon/create-daemon';
 import { DaemonHaltError } from '../daemon/daemon-lifecycle';
-import { DeviceRecordRePairRequiredError, readDeviceEnrollmentIdentity, readDeviceEnrollmentStatus } from '../daemon/store';
-import { DeviceStoreBindingMismatchError } from '../daemon/daemon-errors';
+import { DeviceRecordRePairRequiredError, DeviceStore, readDeviceEnrollmentIdentity, readDeviceEnrollmentStatus } from '../daemon/store';
+import { DeviceStoreBindingMismatchError, FirstPairingAttemptRefusedError } from '../daemon/daemon-errors';
+import { acquireEnrollmentGate } from '../daemon/enrollment-gate';
 import { createTestDeviceStore, InMemoryDeviceCredentialBackend } from './fixtures/device-credentials';
 import { testDeviceCredentials } from './fixtures/credential-backend';
 import { clearDeviceEnrollment, DeviceEnrollmentClearError } from '../daemon/enrollment-clear';
@@ -18,6 +19,10 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
 vi.mock('../daemon/control-client', () => ({ connectControlClient: vi.fn() }));
+vi.mock('../daemon/enrollment-gate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../daemon/enrollment-gate')>();
+  return { acquireEnrollmentGate: vi.fn(actual.acquireEnrollmentGate) };
+});
 
 /**
  * #1094 pairing binding. The unit-suite credential backend is keyed by
@@ -212,31 +217,70 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
       const secondDaemon = daemonFor(kept === 'credential' ? second : unreachable(second));
       const credentials = testDeviceCredentials(productId);
       const deleteEntry = credentials.clear.bind(credentials);
+      const { acquireEnrollmentGate: acquire } = await vi.importActual<typeof import('../daemon/enrollment-gate')>('../daemon/enrollment-gate');
+      let held = 0;
+      let inWindow = false;
+      let reachedGate!: () => void;
+      const pairingAtGate = new Promise<void>((resolve) => { reachedGate = resolve; });
+      vi.mocked(acquireEnrollmentGate).mockImplementation(async (id) => {
+        if (inWindow) reachedGate();
+        const gate = await acquire(id);
+        held += 1;
+        return { ...gate, release: async () => { held -= 1; await gate.release(); } };
+      });
       let pairing: Promise<unknown> = Promise.resolve();
       vi.spyOn(credentials, 'clear').mockImplementationOnce(async () => {
+        // The clear holds the productId gate from its validation to here.
+        expect(held).toBe(1);
+        inWindow = true;
         pairing = secondDaemon.pair('pairing-code', { replaceOtherStore: true }).catch((error: unknown) => error);
-        // Without the productId gate the pairing completes inside this window.
-        await Promise.race([pairing, new Promise((resolve) => setTimeout(resolve, 500))]);
+        // Released once the pairing has either written in this window or is waiting on the held gate.
+        await Promise.race([pairing, pairingAtGate]);
         return deleteEntry();
       });
 
-      await clear(first);
-      await pairing;
+      try {
+        await clear(first);
+        await pairing;
+      } finally {
+        vi.mocked(acquireEnrollmentGate).mockImplementation(acquire);
+      }
 
       if (kept === 'credential') expect(await readDeviceEnrollmentStatus(second)).toMatchObject({ state: 'paired' });
       else expect(await credentials.readFirstPairingAttempt()).toBeDefined();
     });
 
-    it('an unpaired store clears its own staged first pairing and refuses another store\'s (#1964, #1767)', async () => {
-      const staging = await storeConfig();
-      await expect(daemonFor(unreachable(staging)).pair('pairing-code')).rejects.toThrow();
+    it('refuses another store\'s staged first pairing with store_not_bound and leaves it (#1964)', async () => {
+      await expect(daemonFor(unreachable(await storeConfig())).pair('pairing-code')).rejects.toThrow();
       const credentials = testDeviceCredentials(productId);
 
       expect(await clear(await storeConfig()).catch((error: unknown) => error)).toMatchObject({ code: 'store_not_bound' });
       expect(await credentials.readFirstPairingAttempt()).toBeDefined();
+    });
+
+    it('an unpaired store clears the first pairing it staged (#1964, #1767)', async () => {
+      const staging = await storeConfig();
+      await expect(daemonFor(unreachable(staging)).pair('pairing-code')).rejects.toThrow();
+      const credentials = testDeviceCredentials(productId);
+      const own = new DeviceStore(DeviceStore.resolveDir(productId, staging.storeDir), credentials).identity;
+      expect((await credentials.readFirstPairingAttempt())?.storeIdentity).toMatch(/^[0-9a-f]{64}$/u);
+      expect((await credentials.readFirstPairingAttempt())?.storeIdentity).toBe(own);
 
       await clear(staging);
       expect(await credentials.readFirstPairingAttempt()).toBeUndefined();
+    });
+
+    it.each(['another store', 'no store'] as const)('pairing refuses a staged first pairing of %s and leaves it (#2033)', async (owner) => {
+      const credentials = testDeviceCredentials(productId);
+      if (owner === 'another store') await expect(daemonFor(unreachable(await storeConfig())).pair('pairing-code')).rejects.toThrow();
+      else await credentials.saveFirstPairingAttempt({ kind: 'first-pairing-attempt-v1', deviceName: 'legacy', devicePublicKey: 'legacy-public-key', devicePrivateKeyPem: 'legacy-private-key' });
+      const staged = await credentials.readFirstPairingAttempt();
+
+      const refused: unknown = await daemonFor(await storeConfig()).pair('pairing-code').catch((error: unknown) => error);
+
+      expect(refused).toBeInstanceOf(FirstPairingAttemptRefusedError);
+      expect(refused).toMatchObject({ code: owner === 'another store' ? 'store_not_bound' : 'pairing_attempt_unattributed' });
+      expect(await credentials.readFirstPairingAttempt()).toEqual(staged);
     });
 
     it('refuses a staged first pairing that names no store unless told to clear it (#1964)', async () => {

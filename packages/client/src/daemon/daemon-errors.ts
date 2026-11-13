@@ -105,6 +105,26 @@ export class DeviceStoreBindingMismatchError extends Error {
   }
 }
 
+const PAIRING_ATTEMPT_MESSAGES = {
+  store_not_bound: 'the OS credential entry for this productId holds a first-pairing attempt another storeDir staged; nothing was changed. That store finishes or clears its pairing, or pair this store with replaceOtherStore (--replace-other-store), which discards the attempt',
+  pairing_attempt_unattributed: 'the OS credential entry for this productId holds a first-pairing attempt that names no storeDir; nothing was changed. If no other store of this productId is pairing, clear it with clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }), then pair again',
+} as const;
+
+/**
+ * A pairing refused to reuse a staged first-pairing attempt this storeDir
+ * cannot prove it staged (#1964, #2033), by the same rule as an enrollment
+ * clear: `store_not_bound` when another storeDir staged it (pairing with
+ * `replaceOtherStore` discards it), `pairing_attempt_unattributed` when it
+ * names no storeDir (staged by 0.42.0; clear it with
+ * `clearUnattributedAttempt`, then pair). Nothing was written.
+ */
+export class FirstPairingAttemptRefusedError extends Error {
+  constructor(readonly code: keyof typeof PAIRING_ATTEMPT_MESSAGES) {
+    super(PAIRING_ATTEMPT_MESSAGES[code]);
+    this.name = 'FirstPairingAttemptRefusedError';
+  }
+}
+
 /**
  * Why `Daemon.pairEmbedded` refused. Each reason leaves the local
  * enrollment and the server unchanged:
