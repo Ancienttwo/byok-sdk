@@ -27,6 +27,14 @@ import {
  * Owns the active turn, replies, queue and cancellation. Native replies end
  * turns; refused steers drop only their input; process exit has its own response.
  */
+/**
+ * BYOK change: how long a turn waits for a runtime to honor `session/cancel`
+ * before the fallback stops it, when the profile names no `abortTimeoutMs`.
+ * The cancel write itself gets the same bound: a runtime that has not taken
+ * the cancel off its stdin by then would not honor it before the fallback.
+ */
+const DEFAULT_ABORT_TIMEOUT_MS = 10_000;
+
 export interface ActiveTurn {
   /** The prompt request that opened this turn; null for a spontaneous (queue-drained) turn. */
   readonly request: RequestRecord | null;
@@ -37,6 +45,12 @@ export interface ActiveTurn {
   /** Replies received before the SDK notification flush and final record publication. */
   readonly answered: Set<number>;
   abortRequested: boolean;
+  /** BYOK change: the answer of the cancel write in flight, shared by an abort that arrives meanwhile. */
+  cancelWrite?: Promise<ResponseBody>;
+  /** BYOK change: settled when the turn closes, for an abort fenced after the prompt answer was decoded. */
+  closed?: PromiseWithResolvers<void>;
+  /** BYOK change: a cancel write of this turn did not complete within its bound; this turn writes no second one. */
+  stdinUnwritable?: true;
   fallback: NodeJS.Timeout | null;
 }
 
@@ -94,6 +108,7 @@ export function createAcpTurns(deps: {
     if (active === state) {
       active = null;
     }
+    state.closed?.resolve();
     queueMicrotask(drainHeld); return deps.native?.afterClose() ?? [];
   };
   const finishRequest = (
@@ -143,6 +158,7 @@ export function createAcpTurns(deps: {
         });
         // Kimi's bounded late-usage wait precedes turn end so contextUsage()
         // at that end includes this turn's usage.
+        if (state.cancelWrite !== undefined) { await state.cancelWrite; } // BYOK change: see the failure branch.
         await usageGate.settleAfterPrompt(profile, state.abortRequested);
         const usage = promptUsage(result);
         finishRequest(state, requestNumber, {
@@ -174,6 +190,9 @@ export function createAcpTurns(deps: {
         await new Promise<void>((resolve) => {
           setImmediate(resolve);
         });
+        // BYOK change: an abort whose cancel write is still pending decides
+        // whether this failure is the abort's; a rejected write clears the mark.
+        if (state.cancelWrite !== undefined) { await state.cancelWrite; }
         const turnFrames = kernel.records().flatMap((record) => (record.kind === "frame" && record.seq > state.since ? [record.body] : []));
         const outcome = state.abortRequested ? { kind: "aborted" as const } : acpFailureOutcome(error, turnFrames, profile.failureOutcome);
         const refused = steered !== undefined && (profile.isSteerRefusal?.(error) === true || profile.steerOutcomeIsLatest !== true
@@ -254,7 +273,21 @@ export function createAcpTurns(deps: {
       });
     },
     async abort(state, request) {
+      if (state.cancelWrite !== undefined) { return state.cancelWrite; }
+      // BYOK change: once every prompt of the turn has its answer decoded, the
+      // runtime has ended it, and a session-wide cancel would reach whatever it
+      // runs next. Send none; answer when the turn's closing frame is out.
+      if (!state.abortRequested && state.pending.size > 0 && [...state.pending].every((number) => state.answered.has(number))) {
+        if (active === state) {
+          state.closed ??= Promise.withResolvers<void>();
+          await state.closed.promise;
+        }
+        return { kind: "rejected", code: "no_active_turn", reason: "turn ended before cancellation was sent" };
+      }
       if (!state.abortRequested) {
+        if (state.stdinUnwritable === true) {
+          return { kind: "rejected", code: "error", reason: "an earlier session/cancel write of this turn did not complete; no second one is written" };
+        }
         // BYOK change: no upstream observation window. The injected process
         // remembers the agent's descendants synchronously before the native
         // cancel can orphan them; the SDK process-tree authority kills those
@@ -265,22 +298,46 @@ export function createAcpTurns(deps: {
           return { kind: "rejected", code: "error", reason: error instanceof Error ? error.message : String(error) };
         }
         state.abortRequested = true;
-        try {
-          await runtime.connection.agent.notify(methods.agent.session.cancel, { sessionId: rootId });
-        } catch (error) {
-          return { kind: "rejected", code: "error", reason: error instanceof Error ? error.message : String(error) };
-        }
-        // A stalled shared prompt releases only this root; isolated fallback
-        // stops its own process and records the observed exit.
-        state.fallback = setTimeout(() => {
-          if (active === state) {
-            if (deps.fallback !== undefined && request !== undefined) {
-              closeTurn(state); held.splice(0);
-              void deps.fallback(request);
-            } else { runtime.kill(); }
+        // BYOK change: a failed cancel write leaves the turn as it was, so a
+        // retry sends the cancel again and a later prompt error stays a failure.
+        // A write that does not complete within the bound counts as failed, and
+        // the turn's stdin as not writable: the prompt's own end decides the turn.
+        const abortTimeoutMs = profile.abortTimeoutMs ?? DEFAULT_ABORT_TIMEOUT_MS;
+        const write = (async (): Promise<ResponseBody> => {
+          let timer: NodeJS.Timeout | undefined;
+          const bound = new Promise<{ readonly timedOut: true }>((resolve) => {
+            timer = setTimeout(() => resolve({ timedOut: true }), abortTimeoutMs);
+            timer.unref();
+          });
+          const sent = runtime.connection.agent.notify(methods.agent.session.cancel, { sessionId: rootId })
+            .then(() => null, (error: unknown) => ({ error }));
+          const result = await Promise.race([sent, bound]);
+          clearTimeout(timer);
+          if (result !== null) {
+            state.abortRequested = false;
+            if ("timedOut" in result) {
+              state.stdinUnwritable = true;
+              return { kind: "rejected", code: "error", reason: `session/cancel write did not complete within ${abortTimeoutMs} ms` };
+            }
+            return { kind: "rejected", code: "error", reason: result.error instanceof Error ? result.error.message : String(result.error) };
           }
-        }, profile.abortTimeoutMs ?? 10_000);
-        state.fallback.unref();
+          // A stalled shared prompt releases only this root; isolated fallback
+          // stops its own process and records the observed exit.
+          state.fallback = setTimeout(() => {
+            if (active === state) {
+              if (deps.fallback !== undefined && request !== undefined) {
+                closeTurn(state); held.splice(0);
+                void deps.fallback(request);
+              } else { runtime.kill(); }
+            }
+          }, abortTimeoutMs);
+          state.fallback.unref();
+          return { kind: "accepted" };
+        })();
+        state.cancelWrite = write;
+        const answer = await write;
+        if (state.cancelWrite === write) { state.cancelWrite = undefined; }
+        return answer;
       }
       return { kind: "accepted" };
     },
