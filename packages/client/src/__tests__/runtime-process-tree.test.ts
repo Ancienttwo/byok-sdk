@@ -9,7 +9,7 @@ import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { isRuntimeDisposalFailure } from '../runtime-failure';
-import { OWNED_TREE_OBSERVE_MS, adoptOwnedProcessTree, disposeOwnedProcessTree, withOwnedProcessTree } from '../adapters/process-tree';
+import { OWNED_TREE_OBSERVE_MS, adoptOwnedProcessTree, disposeOwnedProcessTree, readOwnedProcessTable, withOwnedProcessTree } from '../adapters/process-tree';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
 const PI_FIXTURE = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
@@ -265,4 +265,56 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
       reapAll([child.pid!]);
     }
   });
+
+  it('a disposal whose last table read timed out still ends the remembered setsid grandchild on retry (#2105)', async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-process-tree-retry-'));
+    const receiptFile = path.join(workspaceDir, 'process-tree.json');
+    const child = spawn(process.execPath, [DESCENDANT_FIXTURE, receiptFile, '0', '0', '', '1'], withOwnedProcessTree({ stdio: 'ignore', env: {} }));
+    let closed = false;
+    const closeReceipt = new Promise<void>((resolve) => child.once('close', () => { closed = true; resolve(); }));
+    const receipt = await readReceipt(receiptFile, ['descendantPid', 'grandchildPid']);
+    let reads = 0;
+    const options = {
+      child, waitClosed: () => closeReceipt, isClosed: () => closed, label: 'setsid fixture', termGraceMs: 300,
+      // The read before the SIGTERM succeeds; the read before killing what left the group times out once.
+      readProcessTableFn: () => {
+        reads += 1;
+        if (reads === 2) throw new Error('Process table ps: timed out after 2000 ms, exit unconfirmed');
+        return readOwnedProcessTable();
+      },
+    };
+    try {
+      await expect(disposeOwnedProcessTree(options)).rejects.toMatchObject({ name: 'RuntimeDisposalFailure', message: expect.stringContaining('exit unconfirmed') });
+      expect(processExists(receipt.grandchildPid)).toBe(true);
+      await disposeOwnedProcessTree(options);
+      expect(reads).toBe(3);
+      expect(processExists(receipt.grandchildPid)).toBe(false);
+    } finally {
+      reapAll([receipt.descendantPid, receipt.grandchildPid]);
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('a hung ps is SIGKILLed at its time limit and the disposal is refused before any group signal (#2105)', async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-hung-ps-'));
+    const fakePs = path.join(workspaceDir, 'ps');
+    // Ignores SIGTERM like a ps stuck reading a wedged process; only SIGKILL ends it.
+    await fs.writeFile(fakePs, "#!/bin/sh\ntrap '' TERM\nexec sleep 30\n", { mode: 0o755 });
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], withOwnedProcessTree({ stdio: 'ignore', env: {} }));
+    await new Promise((resolve) => child.once('spawn', resolve));
+    const signals: Array<[number, NodeJS.Signals | number]> = [];
+    const started = Date.now();
+    try {
+      await expect(disposeOwnedProcessTree({
+        child, waitClosed: () => new Promise(() => {}), isClosed: () => false, label: 'pi',
+        killFn: (pid, signal) => { signals.push([pid, signal]); process.kill(pid, signal); },
+        readProcessTableFn: () => readOwnedProcessTable('ps', fakePs),
+      })).rejects.toMatchObject({ name: 'RuntimeDisposalFailure', stage: 'signal', message: expect.stringContaining('exit unconfirmed') });
+      expect(Date.now() - started).toBeLessThan(4_000);
+      expect(signals.filter(([pid, signal]) => pid < 0 && signal !== 0)).toEqual([]);
+    } finally {
+      reapAll([child.pid!]);
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  }, 10_000);
 });
