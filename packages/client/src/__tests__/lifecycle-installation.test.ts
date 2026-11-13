@@ -8,13 +8,12 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createServiceInstallation,
-  installationHoldsStart,
-  readServiceInstallationRecord,
   serviceInstallationOver,
   ServiceInstallationError,
   type ServiceInstallation,
   type ServiceInstallationOptions,
 } from '../lifecycle/service-installation';
+import { installationHoldsStart, readServiceInstallationRecord } from '../util/service-installation-record';
 import { SERVICE_PAYLOAD_MANIFEST, writeServicePayloadManifest, type ServicePayloadManifest } from '../service-payload-manifest';
 import { createManagedLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
 import { createLaunchdLifecycle } from '../lifecycle/launchd';
