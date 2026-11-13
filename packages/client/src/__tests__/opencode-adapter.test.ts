@@ -337,6 +337,26 @@ it('normalizes startup failures to start while retaining native classification',
   }
 });
 
+it('reports a refused abort without sending native cancel', async () => {
+  const box = setup();
+  const adapter = new OpenCodeAdapter({ models, interruptTimeoutMs: 1_000, resolveBin: () => ({ command: fake, source: 'env' }),
+    runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_ACP_*'] } });
+  const session = await startPreparedOperation(adapter, { instruction: 'hold' }, { workspaceDir: box.cwd, env: box.env });
+  sessions.push(session);
+  await vi.waitFor(() => expect(box.facts().some(fact => fact.kind === 'prompt')).toBe(true));
+  const remember = processTree.rememberOwnedDescendants;
+  let observations = 0;
+  const spy = vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(child => {
+    if (++observations === 2) throw new Error('Process table ps: timeout after 5000 ms');
+    return remember(child);
+  });
+  try {
+    await expect(session.interrupt()).rejects.toMatchObject({ phase: 'run', retry: 'non-retryable',
+      message: 'opencode interrupt refused: Process table ps: timeout after 5000 ms' });
+    expect(box.facts().some(fact => fact.kind === 'cancel')).toBe(false);
+  } finally { spy.mockRestore(); }
+});
+
 it('settles an opening budget kill before disposing the native session', async () => {
   const box = setup();
   const adapter = new OpenCodeAdapter({ models, maxRetainedBytes: 1, resolveBin: () => ({ command: fake, source: 'env' }) });
