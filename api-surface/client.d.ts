@@ -11483,12 +11483,8 @@ export interface ServiceInstallationOptions {
      * activation, start and cleanup stop run outside it. Each service manager
      * command has its own fixed bound (30 s; WinSW 120 s; the Host's Windows
      * stop program 60 s) and is stopped past it, as `ServiceUnitError`
-     * `service_command_timeout` (#1971). An installation operation throws it
-     * as is when a stop or store lease times out before the operation's own
-     * failure handling (the first stop of `rollback()`), and otherwise carries
-     * it in `cause`: of the step's code (`install_health_check_failed`,
-     * `health_check_failed`) or among the failures of `upgrade_pending`. Look
-     * for it through `cause` and an `AggregateError`'s `errors`.
+     * `service_command_timeout` (#1971). Where each operation reports it:
+     * {@link ServiceInstallation}.
      */
     healthTimeoutMs?: number;
     /**
@@ -11551,6 +11547,44 @@ export interface ServiceUpgradeReceipt {
  * passes the lifecycle's owner check: when another owner is recorded for the
  * store it throws `ServiceUnitError` `lifecycle_owner_conflict` and changes
  * nothing.
+ *
+ * A platform command that outlives its bound is `ServiceUnitError`
+ * `service_command_timeout` (#1971): a service manager command, or `icacls`
+ * when a store is leased on Windows. Each operation reports it as follows;
+ * "in `cause`" means through `cause` and an `AggregateError`'s `errors`.
+ *
+ * - Every operation first restores the repair snapshot of an earlier failed
+ *   install when `current` is absent; a timed-out stop or store lease there
+ *   is `upgrade_pending`, with the timeout in `cause`.
+ * - `install()`, first install: a timed-out stop of the marked unit or store
+ *   lease, before anything is installed, is thrown as is; a timed-out
+ *   restart of that unit after a failed preparation joins the `cause` of
+ *   the preparation's error. A timed-out activation or start is
+ *   `install_health_check_failed` with it in `cause`, as is a timed-out unit
+ *   removal during the cleanup that follows (`upgrade_pending` instead when
+ *   that cleanup cannot restore the stores).
+ * - `install()`, same-version reinstall: a timed-out stop before the unit
+ *   rewrite is thrown as is, and the pending `repair` receipt stays (recover()
+ *   then reports `repair_interrupted`). A timed-out activation or start is
+ *   `install_health_check_failed` with it in `cause`.
+ * - `upgrade()`: a timed-out stop or store lease before the switch is
+ *   `upgrade_pending` with it in `cause`. A timed-out start of the candidate
+ *   is `health_check_failed` with it in `cause`, and the rollback runs; a
+ *   timed-out stop or lease in that rollback makes it `upgrade_pending`, and
+ *   a timed-out start of the restored version joins the `cause` of
+ *   `health_check_failed`. A store refusal whose restart of the previous
+ *   version times out keeps the refusal's code, with the timeout in `cause`.
+ * - `rollback()`: a timed-out stop or store lease is thrown as is; only the
+ *   stop has run. A timed-out start of the restored version is not thrown:
+ *   rollback() resolves with a `failed` receipt, `rollback_unhealthy`.
+ * - `recover()`: a timed-out stop or store lease before a restore is
+ *   `upgrade_pending` with it in `cause`. A timed-out start is not thrown:
+ *   recover() resolves with a `failed` receipt (`switch_unhealthy` or
+ *   `rollback_unhealthy`).
+ * - `uninstall()`: a timed-out stop, unregistration or `daemon-reload` is
+ *   thrown as is, after `current` is removed; the unit files stay when the
+ *   stop or unregistration timed out.
+ * - `lifecycle`: each of its operations rejects with it as is.
  *
  * A payload starts only through `current` (#2011): while a pending receipt
  * has `current` absent the stores may be mid-restore, and the SDK's own
@@ -12136,7 +12170,10 @@ export declare class ServiceUnitError extends Error {
 /**
  * Throws `error`, with an internal `PlatformCommandTimeoutError` as the public
  * `service_command_timeout`. The lifecycle and installation boundaries call
- * it; inside them the internal error stays.
+ * it; inside them the internal error stays. A timeout whose gate release
+ * failed too arrives as the `AggregateError` of the timeout and the release
+ * failures (#2002): it keeps that `AggregateError` as `cause`, and its
+ * `exitConfirmed` comes from the timeout.
  *
  * @internal
  */
