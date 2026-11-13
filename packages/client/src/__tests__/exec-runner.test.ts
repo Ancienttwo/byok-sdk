@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { boundedRunner, PlatformCommandTimeoutError } from '../util/exec-runner';
+import { PlatformCommandTimeoutError, runBounded } from '../util/exec-runner';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -18,10 +18,9 @@ function alive(pid: number): boolean {
   }
 }
 
-describe('util/exec-runner: boundedRunner (#1971)', () => {
+describe('util/exec-runner: runBounded (#1971)', () => {
   it('resolves a non-zero exit with its output', async () => {
-    const run = boundedRunner(10_000);
-    await expect(run(process.execPath, ['-e', 'process.stdout.write("out"); process.stderr.write("err"); process.exit(3)']))
+    await expect(runBounded(process.execPath, ['-e', 'process.stdout.write("out"); process.stderr.write("err"); process.exit(3)'], 10_000))
       .resolves.toEqual({ code: 3, stdout: 'out', stderr: 'err' });
   });
 
@@ -38,10 +37,9 @@ describe('util/exec-runner: boundedRunner (#1971)', () => {
       setInterval(() => {}, 1000);
     `;
     const started = Date.now();
-    const failure = await boundedRunner(2_000)(process.execPath, ['-e', script]).catch((error: unknown) => error);
+    const failure = await runBounded(process.execPath, ['-e', script], 2_000).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(PlatformCommandTimeoutError);
-    expect(failure).toMatchObject({ timeoutMs: 2_000 });
     // Disposal proved the tree gone, so no disposal failure is attached.
     expect((failure as Error).cause).toBeUndefined();
     expect(Date.now() - started).toBeLessThan(10_000);

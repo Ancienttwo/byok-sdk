@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
-import path from 'node:path';
 import { systemExecutable } from '@byok-sdk/core/system-tool';
 import { disposeOwnedProcessTree, withOwnedProcessTree } from '../adapters/process-tree.js';
+import { COMMAND_TIMEOUT_MS } from './command-timeouts.js';
 
 /**
  * Result of running an external command, regardless of its exit code.
@@ -38,116 +38,74 @@ export interface RunResult {
  */
 export type Runner = (command: string, args: string[]) => Promise<RunResult>;
 
-/** The bound on one service-manager query or change (`launchctl`, `systemctl`, `sc.exe`, PowerShell, `icacls`) (#1971). */
-export const PLATFORM_COMMAND_TIMEOUT_MS = 30_000;
-
-/** Captured stdout or stderr above this fails the run, as `execFile`'s default `maxBuffer` did. */
-const MAX_OUTPUT_BYTES = 1024 * 1024;
-
 /**
- * A platform command did not exit within its bound, and its process tree was
- * terminated (SIGTERM, then SIGKILL; `taskkill /T /F` on Windows). Its effect
- * is UNKNOWN: the command may have completed its change before it was stopped
- * (a job bootstrapped, a service registered), done part of it, or nothing. It
- * is never evidence that the change did not happen, and never an idempotent
- * "already absent". The next install or uninstall starts again from the
- * service manager's own state. `cause` is set when the tree could not be
- * proved gone within the disposal grace.
+ * A platform command outlived its bound and its process tree was stopped.
+ * Whether it took effect is UNKNOWN (a job may have been bootstrapped or a
+ * service registered before the stop); it never means the change did not
+ * happen and is never idempotent absence. The next install or uninstall
+ * starts again from the service manager's own state.
  */
-export class PlatformCommandTimeoutError extends Error {
-  constructor(readonly command: string, readonly timeoutMs: number, options?: ErrorOptions) {
-    super(`${command} did not finish within ${timeoutMs} ms and was stopped; whether it took effect is unknown`, options);
-    this.name = 'PlatformCommandTimeoutError';
-  }
-}
-
-/** {@link runBounded}'s result: `code` is `null` when the process ended on a signal. */
-export interface BoundedRunResult {
-  code: number | null;
-  stdout: string;
-  stderr: string;
-}
+export class PlatformCommandTimeoutError extends Error {}
 
 /**
  * Runs `executable` directly (never a shell) as the root of an owned process
  * tree and resolves with its exit code and output, whatever the code. It
- * rejects when the executable cannot be started, when its output exceeds
- * 1 MiB, or, after `timeoutMs`, with {@link PlatformCommandTimeoutError} once
- * the tree has been terminated and waited for (bounded by the disposal grace
- * of `adapters/process-tree.ts`), so no timed-out command is left running.
+ * rejects when the executable cannot start, ends on a signal or prints more
+ * than 1 MiB, and after `timeoutMs` with {@link PlatformCommandTimeoutError},
+ * once `disposeOwnedProcessTree` has stopped the tree (SIGTERM, then SIGKILL;
+ * `taskkill /T /F` on Windows) and waited for it within its bounded grace.
  */
-export function runBounded(executable: string, args: readonly string[], options: { timeoutMs: number; cwd?: string }): Promise<BoundedRunResult> {
+export function runBounded(executable: string, args: readonly string[], timeoutMs: number, cwd?: string): Promise<RunResult> {
   return new Promise((resolve, reject) => {
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn(executable, args, withOwnedProcessTree({ cwd: options.cwd, stdio: ['ignore', 'pipe', 'pipe'] as const, windowsHide: true }));
-    } catch (error) {
-      reject(error);
-      return;
-    }
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
+    const child = spawn(executable, args, withOwnedProcessTree({ cwd, stdio: ['ignore', 'pipe', 'pipe'] as const, windowsHide: true }));
+    const output: [Buffer[], Buffer[]] = [[], []];
     let bytes = 0;
     let closed = false;
     let failure: Error | undefined;
-    const closedPromise = new Promise<void>((settle) => child.once('close', () => settle()));
-    const label = path.basename(executable);
+    const closing = new Promise<void>((done) => child.once('close', () => done()));
+    const fail = (error: Error): void => {
+      failure ??= error;
+      clearTimeout(timer);
+    };
     const stop = (error: Error): void => {
       if (failure !== undefined || closed) return;
-      failure = error;
-      clearTimeout(timer);
-      disposeOwnedProcessTree({ child, label, isClosed: () => closed, waitClosed: () => closedPromise }).then(
-        () => reject(error),
-        (disposal: unknown) => reject(error instanceof PlatformCommandTimeoutError ? new PlatformCommandTimeoutError(label, options.timeoutMs, { cause: disposal }) : error),
-      );
+      fail(error);
+      disposeOwnedProcessTree({ child, label: executable, isClosed: () => closed, waitClosed: () => closing })
+        .catch((cause: unknown) => (error.cause = cause))
+        .then(() => reject(error));
     };
-    const collect = (into: Buffer[]) => (chunk: Buffer) => {
+    const collect = (index: 0 | 1) => (chunk: Buffer) => {
       bytes += chunk.length;
-      if (bytes > MAX_OUTPUT_BYTES) stop(new Error(`${label} printed more than ${MAX_OUTPUT_BYTES} bytes`));
-      else into.push(chunk);
+      if (bytes > 1024 * 1024) stop(new Error(`${executable} printed more than 1 MiB`));
+      else output[index].push(chunk);
     };
-    child.stdout?.on('data', collect(stdout));
-    child.stderr?.on('data', collect(stderr));
-    const timer = setTimeout(() => stop(new PlatformCommandTimeoutError(label, options.timeoutMs)), options.timeoutMs);
+    child.stdout?.on('data', collect(0));
+    child.stderr?.on('data', collect(1));
+    const timer = setTimeout(() => stop(new PlatformCommandTimeoutError(`${executable} timed out`)), timeoutMs);
     child.once('error', (error) => {
-      // A spawn failure (`ENOENT`) has no process to stop.
       if (failure !== undefined) return;
-      failure = error;
-      clearTimeout(timer);
+      fail(error);
       reject(error);
     });
-    child.once('close', (code) => {
+    void closing.then(() => {
       closed = true;
       if (failure !== undefined) return;
       clearTimeout(timer);
-      resolve({ code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') });
+      if (child.exitCode === null) reject(new Error(`${executable} ended on a signal`));
+      else resolve({ code: child.exitCode, stdout: Buffer.concat(output[0]).toString('utf8'), stderr: Buffer.concat(output[1]).toString('utf8') });
     });
   });
 }
 
 /**
- * A {@link Runner} over {@link runBounded} with bound `timeoutMs`. A bare
- * `command` is a system tool and starts from its trusted location, never from
- * `PATH`; one that has none rejects with `SystemToolUnavailableError`
- * (`@byok-sdk/core/system-tool`, #1304). A process that ends on a signal
- * rejects: it has no exit code to report.
+ * The real {@link Runner}: {@link runBounded} at the `platform` bound. A bare
+ * `command` is a system tool and starts from its trusted location, never
+ * from `PATH`; one that has none rejects with `SystemToolUnavailableError`
+ * (`@byok-sdk/core/system-tool`, #1304). Every command it runs is a native
+ * executable, never a `.cmd`/`.bat` script, which Windows cannot start
+ * without a shell.
  */
-export function boundedRunner(timeoutMs: number): Runner {
-  return async (command, args) => {
-    const result = await runBounded(systemExecutable(command), args, { timeoutMs });
-    if (result.code === null) throw new Error(`${command} ended on a signal`);
-    return { code: result.code, stdout: result.stdout, stderr: result.stderr };
-  };
-}
-
-/**
- * The real {@link Runner}: {@link boundedRunner} at
- * {@link PLATFORM_COMMAND_TIMEOUT_MS}. Never a shell, so a service name,
- * config path or install directory with spaces or special characters needs
- * no quoting; every command it runs is a native executable, never a
- * `.cmd`/`.bat` script, which Windows cannot start without a shell.
- */
-export const defaultRunner: Runner = boundedRunner(PLATFORM_COMMAND_TIMEOUT_MS);
+export const defaultRunner: Runner = async (command, args) => runBounded(systemExecutable(command), args, COMMAND_TIMEOUT_MS.platform);
 
 /**
  * Runs `command`/`args` via `run` and throws a clear, labeled error if it

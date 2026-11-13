@@ -1,6 +1,7 @@
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { boundedRunner, defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner.js';
+import { COMMAND_TIMEOUT_MS } from '../util/command-timeouts.js';
+import { defaultRunner, runBounded, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner.js';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { SERVICE_REDIRECT_LIMITS } from './service-log.js';
 import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types.js';
@@ -121,13 +122,6 @@ async function rmWithImageLockRetry(fs: Pick<typeof fsp, 'rm'>, p: string): Prom
   }
 }
 
-/**
- * The bound on one WinSW command (#1971): `start`, `stop` and `stopwait` wait
- * on the SCM, `stop` for up to the service's own `stoptimeout` plus the SCM's
- * wait hints. `sc.exe` queries keep `exec-runner.ts`'s `PLATFORM_COMMAND_TIMEOUT_MS`.
- */
-const WINSW_COMMAND_TIMEOUT_MS = 120_000;
-
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. `run` replaces both the WinSW and the `sc.exe` runner. */
 export interface WinswDeps {
   run?: Runner;
@@ -208,7 +202,7 @@ ${argXml}${cwdXml}
  */
 export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {}, gateRoot?: string): ManagedServiceLifecycle {
   const run = deps.run ?? defaultRunner;
-  const runWinsw = deps.run ?? boundedRunner(WINSW_COMMAND_TIMEOUT_MS);
+  const runWinsw: Runner = deps.run ?? ((command, args) => runBounded(command, args, COMMAND_TIMEOUT_MS.winsw));
   const fs = deps.fs ?? fsp;
 
   const windows = def.windows;

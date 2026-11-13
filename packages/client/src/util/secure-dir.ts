@@ -2,7 +2,25 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { defaultRunner, type Runner } from './exec-runner.js';
+import { execFile } from 'node:child_process';
+import { resolveSystemTool } from '@byok-sdk/core/system-tool';
+import { COMMAND_TIMEOUT_MS } from './command-timeouts.js';
+import type { Runner } from './exec-runner.js';
+
+/**
+ * Runs `icacls` within the `platform` bound (#1971); past it the process is
+ * killed and waited for, and the run rejects. Not `exec-runner.ts`'s
+ * `defaultRunner`: this module is loaded lazily, and a value import of that
+ * runner makes the bundler wrap its process-tree graph in lazy initialisers.
+ * `icacls` starts no children, so killing it stops the whole command.
+ */
+const runIcacls: Runner = (command, args) =>
+  new Promise((resolve, reject) => {
+    execFile(resolveSystemTool(command), args, { timeout: COMMAND_TIMEOUT_MS.platform, killSignal: 'SIGKILL', windowsHide: true }, (error, stdout, stderr) => {
+      if (error && typeof error.code !== 'number') reject(error);
+      else resolve({ code: error ? (error.code as number) : 0, stdout, stderr });
+    });
+  });
 
 /**
  * Finding F7 (cross-model adversarial review): POSIX file MODES
@@ -105,7 +123,7 @@ export function buildIcaclsFileArgs(filePath: string, username: string): string[
 }
 
 export interface EnsureSecureDirOptions {
-  /** DI for tests — see `util/exec-runner.ts`'s identical `Runner` seam. Defaults to `defaultRunner` (real `execFile`, never a shell). */
+  /** DI for tests — see `util/exec-runner.ts`'s identical `Runner` seam. Defaults to a bounded `icacls` run (real `execFile`, never a shell). */
   run?: Runner;
   /** DI for tests — lets the win32 branch below be exercised (with a fake `run`) from any host OS, mirroring `control-protocol.ts`'s `controlEndpointPath` platform-override convention. Defaults to `process.platform`. */
   platform?: NodeJS.Platform;
@@ -230,7 +248,7 @@ export async function ensurePiProjectionDir(dir: string, opts: EnsureSecureDirOp
 
 async function secureDir(dir: string, buildArgs: (dir: string, username: string) => string[], opts: EnsureSecureDirOptions, role: 'owned' | 'store-root'): Promise<void> {
   const platform = opts.platform ?? process.platform;
-  const run = opts.run ?? defaultRunner;
+  const run = opts.run ?? runIcacls;
 
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   // No chmod on win32: the icacls DACL below is the authority there.
@@ -276,7 +294,7 @@ async function requireMode0700(dir: string, role: 'owned' | 'store-root'): Promi
 /** Re-asserts 0600 on POSIX and a non-inherited owner/SYSTEM/Admin DACL on Windows. */
 export async function ensureSecureFile(filePath: string, opts: EnsureSecureDirOptions = {}): Promise<void> {
   const platform = opts.platform ?? process.platform;
-  const run = opts.run ?? defaultRunner;
+  const run = opts.run ?? runIcacls;
   await fs.chmod(filePath, 0o600);
   if (platform !== 'win32') return;
   const { username } = os.userInfo();

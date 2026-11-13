@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
+import { COMMAND_TIMEOUT_MS } from '../util/command-timeouts.js';
 import { defaultRunner, PlatformCommandTimeoutError, runBounded, type Runner } from '../util/exec-runner.js';
 import { resolveSystemTool } from '@byok-sdk/core/system-tool';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
@@ -46,10 +47,6 @@ export function generateWindowsStartupUnit(launcherPath: string): string {
   return `@REM ${SERVICE_UNIT_MARKER}\r\n@start "" /min cmd.exe /d /c "${cmdQuote(launcherPath)}"\r\n`;
 }
 
-/** The bound on the Host's `stop` program (#1971). */
-const WINDOWS_USER_STOP_PROGRAM_TIMEOUT_MS = 60_000;
-/** The bound on running the Startup unit, whose `start` returns at once (#1971). */
-const WINDOWS_USER_LAUNCH_TIMEOUT_MS = 30_000;
 /** How long a timed-out unit run's `cmd` may take to exit after it is terminated. */
 const LAUNCH_KILL_GRACE_MS = 2_000;
 
@@ -61,7 +58,7 @@ const LAUNCH_KILL_GRACE_MS = 2_000;
  */
 async function runStopProgram(program: ServiceProgram): Promise<number | null> {
   try {
-    return (await runBounded(program.command, program.args, { timeoutMs: WINDOWS_USER_STOP_PROGRAM_TIMEOUT_MS, cwd: program.cwd })).code;
+    return (await runBounded(program.command, program.args, COMMAND_TIMEOUT_MS.hostStop, program.cwd)).code;
   } catch (error) {
     if (error instanceof PlatformCommandTimeoutError) throw error;
     return null;
@@ -70,7 +67,7 @@ async function runStopProgram(program: ServiceProgram): Promise<number | null> {
 
 /**
  * Runs the unit the way Explorer does; the launcher it starts outlives this
- * process. After {@link WINDOWS_USER_LAUNCH_TIMEOUT_MS} only the unit's own
+ * process. After the `launch` bound only the unit's own
  * `cmd` is terminated, never its tree: the launcher `start` made is that
  * `cmd`'s child and is the service itself. The rejection then means the
  * launcher may or may not be running; `start()` and `status()` ask the
@@ -89,13 +86,13 @@ function launchUnit(unitPath: string): Promise<void> {
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill();
-      const timeout = new PlatformCommandTimeoutError('cmd', WINDOWS_USER_LAUNCH_TIMEOUT_MS);
+      const timeout = new PlatformCommandTimeoutError(`${unitPath} timed out`);
       const grace = setTimeout(() => reject(timeout), LAUNCH_KILL_GRACE_MS);
       child.once('exit', () => {
         clearTimeout(grace);
         reject(timeout);
       });
-    }, WINDOWS_USER_LAUNCH_TIMEOUT_MS);
+    }, COMMAND_TIMEOUT_MS.launch);
     child.once('error', (error) => {
       clearTimeout(timer);
       reject(error);
