@@ -90,6 +90,41 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     await expect(registry().replaceSecret('openai', '')).rejects.toMatchObject({ code: 'PROVIDER_SECRET_EMPTY' });
     await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
   });
+
+  it('refuses a key no OS store accepts before marking the profile pending (#1946)', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    for (const invalid of [`${NEW_KEY}\n`, 'k'.repeat(2561)]) {
+      await expect(registry().replaceSecret('openai', invalid)).rejects.toMatchObject({ code: 'SECRET_VALUE_INVALID' });
+    }
+    await expect(profiles.getPending('openai')).resolves.toBeUndefined();
+    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+  });
+
+  it('a failed key write or commit restores the previous key and clears its own marker (#1946)', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    const failure = new Error('store refused');
+    vi.spyOn(secrets, 'set').mockRejectedValueOnce(failure);
+    await expect(registry().replaceSecret('openai', NEW_KEY)).rejects.toBe(failure);
+    vi.spyOn(profiles, 'commitCustody').mockRejectedValueOnce(failure);
+    await expect(registry().replaceSecret('openai', NEW_KEY)).rejects.toBe(failure);
+
+    await expect(profiles.getPending('openai')).resolves.toBeUndefined();
+    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+    await expect(registry().resolveDefaultModelProvider()).resolves.toBeDefined();
+  });
+
+  it('keeps the marker when the restore fails or the change was already unfinished (#1946)', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    vi.spyOn(secrets, 'set').mockRejectedValue(new Error('store refused'));
+    await expect(registry().replaceSecret('openai', NEW_KEY)).rejects.toMatchObject({ code: 'PROVIDER_SECRET_ROLLBACK_FAILED' });
+    await expect(profiles.getPending('openai')).resolves.toMatchObject({ operation: 'replace_secret' });
+    vi.mocked(secrets.set).mockRestore();
+
+    vi.spyOn(profiles, 'commitCustody').mockRejectedValueOnce(new Error('commit failed'));
+    await expect(registry().replaceSecret('openai', NEW_KEY)).rejects.toThrow('commit failed');
+    await expect(profiles.getPending('openai')).resolves.toBeDefined();
+    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+  });
 });
 
 describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('registry custody (A4, A8)', () => {

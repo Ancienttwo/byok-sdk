@@ -31,10 +31,9 @@ import { buildConfiguredProfile } from './registry.js';
 import {
   type ModelProviderSecretName,
   type SecretStore,
-  assertSharedSecretValue,
   modelProviderSecretName,
 } from './secret-store.js';
-import { PROVIDER_PROVISIONING_SECRET_MAX_BYTES } from './secret-value.js';
+import { isPortableSecretValue } from './secret-value.js';
 import { normalizeProviderUrl } from './url.js';
 
 /** Largest issuedAt-in-the-future a device tolerates (bounded clock skew, A9). */
@@ -494,12 +493,7 @@ async function decide(
   }
 
   if (secret !== undefined) {
-    try {
-      assertSharedSecretValue(secret);
-    } catch {
-      return reject('secret_invalid');
-    }
-    if (new TextEncoder().encode(secret).byteLength > PROVIDER_PROVISIONING_SECRET_MAX_BYTES) return reject('secret_invalid');
+    if (!isPortableSecretValue(secret)) return reject('secret_invalid');
   }
 
   switch (config.operation) {

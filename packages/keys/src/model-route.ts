@@ -30,7 +30,7 @@ import {
   type ProviderAuthMode,
   type ProviderModelCapability,
 } from './provider-profile.js';
-import { PROVIDER_PROVISIONING_SECRET_MAX_BYTES, isSharedSecretValue } from './secret-value.js';
+import { isPortableSecretValue } from './secret-value.js';
 import { normalizeProviderUrl } from './url.js';
 
 /** The draft fields, in the order a Host renders them. */
@@ -701,10 +701,7 @@ function secretFieldError(draft: ModelRouteDraft, context: ModelRouteContext): M
   if (secret !== 'keep') {
     if (!isRecord(secret) || typeof secret.replace !== 'string') return { code: 'secret_invalid' };
     if (secret.replace.trim() === '') return { code: 'secret_required' };
-    const bytes = new TextEncoder().encode(secret.replace).byteLength;
-    return isSharedSecretValue(secret.replace) && bytes <= PROVIDER_PROVISIONING_SECRET_MAX_BYTES
-      ? undefined
-      : { code: 'secret_invalid' };
+    return isPortableSecretValue(secret.replace) ? undefined : { code: 'secret_invalid' };
   }
   const stored = context.stored;
   if (stored === null || !stored.secret_configured) return { code: 'secret_required' };

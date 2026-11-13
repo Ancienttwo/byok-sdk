@@ -1,5 +1,10 @@
 import { AnthropicMessagesClient } from './anthropic-client.js';
-import { configurationPendingError, withConfigurationLock } from './custody.js';
+import {
+  type ProviderCustodyCommit,
+  type ProviderCustodyPending,
+  configurationPendingError,
+  withConfigurationLock,
+} from './custody.js';
 import { ByokKeysError } from './errors.js';
 import type { ProviderFetch } from './http.js';
 import { OpenAiCompatibleChatClient } from './openai-client.js';
@@ -20,6 +25,7 @@ import {
   type SecretStore,
   modelProviderSecretName,
 } from './secret-store.js';
+import { PROVIDER_PROVISIONING_SECRET_MAX_BYTES, isPortableSecretValue } from './secret-value.js';
 
 /** A transport client for whichever dialect the resolved profile declares. */
 export type ModelProviderClient =
@@ -241,52 +247,13 @@ export class ProviderRegistry {
         }
       }
 
-      await this.#profiles.markPending({
+      await this.#writeAndCommit(
         profileRef,
-        operation: 'configure',
-        requestId: null,
-        requestDigest: null,
-        operationGeneration: null,
-        since: this.#now().toISOString(),
-      });
-      let previousSecret: string | undefined;
-      let secretWritten = false;
-      if (secret !== undefined) {
-        previousSecret = await this.#secrets.get(secretName);
-        await this.#secrets.set(secretName, secret);
-        secretWritten = true;
-      }
-
-      try {
-        await this.#profiles.commitCustody({
-          profileRef,
-          mutation: { kind: 'save', profile },
-          clearPending: true,
-        });
-      } catch (cause) {
-        if (secretWritten) {
-          try {
-            if (previousSecret === undefined) {
-              await this.#secrets.delete(secretName);
-            } else {
-              await this.#secrets.set(secretName, previousSecret);
-            }
-          } catch (rollbackCause) {
-            throw new ByokKeysError(
-              'PROVIDER_SECRET_ROLLBACK_FAILED',
-              'Provider profile write failed and the previous secret could not be restored',
-              { cause: new AggregateError([cause, rollbackCause]) },
-            );
-          }
-        }
-        // The previous profile and secret are back in place. The marker is
-        // cleared only when it was this call's own; an earlier unfinished
-        // change stays unfinished.
-        if (pendingBefore === undefined) {
-          await this.#profiles.commitCustody({ profileRef, mutation: { kind: 'none' }, clearPending: true });
-        }
-        throw cause;
-      }
+        'configure',
+        pendingBefore,
+        secret,
+        { profileRef, mutation: { kind: 'save', profile }, clearPending: true },
+      );
       if (profile.auth_mode === 'none') {
         await this.#secrets.delete(secretName);
       }
@@ -313,16 +280,13 @@ export class ProviderRegistry {
       if (secret.length === 0) {
         throw new ByokKeysError('PROVIDER_SECRET_EMPTY', 'Provider secret cannot be empty');
       }
-      await this.#profiles.markPending({
+      await this.#writeAndCommit(
         profileRef,
-        operation: 'replace_secret',
-        requestId: null,
-        requestDigest: null,
-        operationGeneration: null,
-        since: this.#now().toISOString(),
-      });
-      await this.#secrets.set(modelProviderSecretName(profileRef), secret);
-      await this.#profiles.commitCustody({ profileRef, mutation: { kind: 'none' }, clearPending: true });
+        'replace_secret',
+        await this.#profiles.getPending(profileRef),
+        secret,
+        { profileRef, mutation: { kind: 'none' }, clearPending: true },
+      );
       return this.#status(profile);
     });
   }
@@ -405,6 +369,63 @@ export class ProviderRegistry {
     profileRef: ProviderProfileRef,
   ): Promise<ProviderStatus> {
     return withConfigurationLock(this.#profiles, async () => this.#status(await this.#profiles.setEnabled(profileRef)));
+  }
+
+  /**
+   * The custody write shared by `configure` and `replaceSecret`: mark pending,
+   * write the key, commit. A key no supported OS store accepts is refused
+   * before the marker. When the key write or the commit fails, the previous
+   * key is restored and the marker is cleared only when it was this call's
+   * own, so an earlier unfinished change stays unfinished. When the restore
+   * itself fails the marker stays and readers keep refusing the key.
+   */
+  async #writeAndCommit(
+    profileRef: ProviderProfileRef,
+    operation: 'configure' | 'replace_secret',
+    pendingBefore: ProviderCustodyPending | undefined,
+    secret: string | undefined,
+    commit: ProviderCustodyCommit,
+  ): Promise<void> {
+    const secretName = modelProviderSecretName(profileRef);
+    if (secret !== undefined && !isPortableSecretValue(secret)) {
+      throw new ByokKeysError(
+        'SECRET_VALUE_INVALID',
+        `Secret must contain 1 to ${PROVIDER_PROVISIONING_SECRET_MAX_BYTES} UTF-8 bytes without null or newline characters`,
+      );
+    }
+    const previousSecret = secret === undefined ? undefined : await this.#secrets.get(secretName);
+    await this.#profiles.markPending({
+      profileRef,
+      operation,
+      requestId: null,
+      requestDigest: null,
+      operationGeneration: null,
+      since: this.#now().toISOString(),
+    });
+    try {
+      if (secret !== undefined) await this.#secrets.set(secretName, secret);
+      await this.#profiles.commitCustody(commit);
+    } catch (cause) {
+      if (secret !== undefined) {
+        try {
+          if (previousSecret === undefined) {
+            await this.#secrets.delete(secretName);
+          } else {
+            await this.#secrets.set(secretName, previousSecret);
+          }
+        } catch (rollbackCause) {
+          throw new ByokKeysError(
+            'PROVIDER_SECRET_ROLLBACK_FAILED',
+            'Provider credential change failed and the previous secret could not be restored',
+            { cause: new AggregateError([cause, rollbackCause]) },
+          );
+        }
+      }
+      if (pendingBefore === undefined) {
+        await this.#profiles.commitCustody({ profileRef, mutation: { kind: 'none' }, clearPending: true });
+      }
+      throw cause;
+    }
   }
 
   async #status(profile: ModelProviderProfile): Promise<ProviderStatus> {

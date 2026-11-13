@@ -2354,6 +2354,8 @@ export declare function isSharedSecretValue(secret: string): boolean;
  * on every platform instead of a store failure that leaves a pending marker.
  */
 export declare const PROVIDER_PROVISIONING_SECRET_MAX_BYTES = 2560;
+/** A key every supported OS store accepts: the shared shape within the smallest ceiling. */
+export declare function isPortableSecretValue(secret: string): boolean;
 // ==== @byok-sdk/keys dist/sqlite-profile-store.d.ts ====
 import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderCustodyReservation, type ProviderKeyCheckOutcome } from './custody.js';
 import { type ProviderProfileStore } from './profile-store.js';
