@@ -221,3 +221,14 @@ For Claude this is the existing behavior (since #1892). For Codex, Grok, Antigra
 - A task's text grows with the provider's per-turn output limit times the number of turns. A Host that needs a hard bound sets `maxDurationMs`: the offer's `limits.maxDurationMs`, or `DaemonConfig.defaultMaxDurationMs`.
 - A Host that matched the failure message drops that match; it no longer occurs.
 - A Host that passes no `maxRetainedBytes` needs no change.
+
+## Host layout import moves to a subpath
+
+**Breaking (#1925).** Import `resolveHostLayout`, `HostLayoutInputError`, `HostLayout`, `HostLayoutOptions` and `HostLayoutPlatform` from `@byok-sdk/client/host-layout`. They leave the client root; each symbol has one public import path. This pure entry lets an installer or Electron main process compute directories without loading the client daemon, Pi or provider SDKs. The returned paths and error codes are unchanged, and existing stores stay in place.
+
+Apply this import codemod (including type-only imports); split a mixed root import so its other symbols still come from `@byok-sdk/client`:
+
+```diff
+-import { resolveHostLayout, HostLayoutInputError, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform } from '@byok-sdk/client';
++import { resolveHostLayout, HostLayoutInputError, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform } from '@byok-sdk/client/host-layout';
+```

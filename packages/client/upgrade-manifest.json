@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "62ce4a555b397691093f784f9e001d33dd7ff4c2d6f7eb627f556a5da71a1e25"
+    "snapshotSha256": "5ff0f556b11b924a1a350f5d7beaaf3094cd6c2177346cac3aa58d1916b245f6"
   },
   "configFields": {
     "status": "tracked",
@@ -114,9 +114,33 @@
         "export:@byok-sdk/client/adapters#ClaudeAdapter",
         "export:@byok-sdk/client/adapters#ClaudeAdapterOptions"
       ]
+    },
+    {
+      "id": "host-layout-subpath",
+      "impact": "breaking",
+      "summary": "Move resolveHostLayout, HostLayoutInputError, HostLayout, HostLayoutOptions and HostLayoutPlatform imports from @byok-sdk/client to @byok-sdk/client/host-layout, including type-only imports. Split mixed imports and leave other symbols at the root. The new pure entry avoids loading Pi and provider SDKs in a shell or installer; paths, error codes and existing stores are unchanged (#1925).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-layout-import-moves-to-a-subpath",
+      "items": [
+        "entry:@byok-sdk/client/host-layout",
+        "export:@byok-sdk/client#HostLayout",
+        "export:@byok-sdk/client/host-layout#HostLayout",
+        "export:@byok-sdk/client#HostLayoutInputError",
+        "export:@byok-sdk/client/host-layout#HostLayoutInputError",
+        "export:@byok-sdk/client#HostLayoutOptions",
+        "export:@byok-sdk/client/host-layout#HostLayoutOptions",
+        "export:@byok-sdk/client#HostLayoutPlatform",
+        "export:@byok-sdk/client/host-layout#HostLayoutPlatform",
+        "export:@byok-sdk/client#resolveHostLayout",
+        "export:@byok-sdk/client/host-layout#resolveHostLayout"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "entry:@byok-sdk/client/host-layout",
+      "change": "added",
+      "entry": "host-layout-subpath"
+    },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
       "change": "changed",
@@ -183,6 +207,26 @@
       "entry": "enrollment-clear-store-scope"
     },
     {
+      "item": "export:@byok-sdk/client#HostLayout",
+      "change": "removed",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayoutInputError",
+      "change": "removed",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayoutOptions",
+      "change": "removed",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayoutPlatform",
+      "change": "removed",
+      "entry": "host-layout-subpath"
+    },
+    {
       "item": "export:@byok-sdk/client#InstallSkillPacksOptions",
       "change": "changed",
       "entry": "enrollment-clear-store-scope"
@@ -228,6 +272,11 @@
       "entry": "enrollment-clear-store-scope"
     },
     {
+      "item": "export:@byok-sdk/client#resolveHostLayout",
+      "change": "removed",
+      "entry": "host-layout-subpath"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#ClaudeAdapter",
       "change": "changed",
       "entry": "retained-records-one-policy"
@@ -236,6 +285,31 @@
       "item": "export:@byok-sdk/client/adapters#ClaudeAdapterOptions",
       "change": "changed",
       "entry": "retained-records-one-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/host-layout#HostLayout",
+      "change": "added",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client/host-layout#HostLayoutInputError",
+      "change": "added",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client/host-layout#HostLayoutOptions",
+      "change": "added",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client/host-layout#HostLayoutPlatform",
+      "change": "added",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client/host-layout#resolveHostLayout",
+      "change": "added",
+      "entry": "host-layout-subpath"
     },
     {
       "item": "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",

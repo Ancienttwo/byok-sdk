@@ -492,9 +492,10 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 550594 B |
 | `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 80957 B |
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 126165 B |
+| `@byok-sdk/client/host-layout` | Pure Host directory layout for shells and installers; no client daemon or runtime SDKs | — | forbidden | 4171 B |
 | `@byok-sdk/client/mcp-server` | Tools-only MCP server | — | forbidden | 13135 B |
 | `@byok-sdk/client/mcp-server/http` | Tools-only MCP Streamable HTTP framing | — | forbidden | 28394 B |
-| `@byok-sdk/client/package.json` | Package metadata | — | forbidden | 4618 B |
+| `@byok-sdk/client/package.json` | Package metadata | — | forbidden | 4730 B |
 | `@byok-sdk/client/packaging` | Single-file Host build: esbuild packaging plugin and SDK asset copy | — | forbidden | 33069 B |
 | `@byok-sdk/client/testing` | Runtime adapter and device credential test doubles; no daemon | — | forbidden | 512972 B |
 | `@byok-sdk/client#byok-acp-runtime` | Private ACP runtime stack (Grok, agy, OpenCode) | `@agentclientprotocol/sdk`, `zod` | allowed | 125256 B |

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Breaking (client; #1925)** — `resolveHostLayout`, `HostLayoutInputError`, `HostLayout`, `HostLayoutOptions` and `HostLayoutPlatform` move from `@byok-sdk/client` to the new `@byok-sdk/client/host-layout` entry and leave the root, with no alias. The entry loads no daemon, Pi or provider SDK, so an installer or Electron main process can compute Host directories without them. Returned paths, error codes and existing stores are unchanged. Change the import path, including type-only imports, and split a mixed root import. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#host-layout-import-moves-to-a-subpath).
+
 - **Breaking (bot-collaboration; #2003)** — `cancelHostIntents(keys)` atomically cancels selected unsubmitted Host intents without a pass; `HostIntentError.rejected` reports all refused keys and `code` adds `inflight`. Successors wait for a pass or an explicit `drain()`. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#cancel-selected-host-intents-without-a-pass-2003).
 
 - **Breaking (bot-collaboration; #1981)** — `inspectLedger(path, tenant)` on the local Host entry returns a store compatibility verdict from a private copy. `LocalStoreId` includes `bot-collaboration-ledger`; update exhaustive switches and records. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#ledger-precheck-and-store-id-1981).
