@@ -79,7 +79,7 @@ import {
 } from './agent-content-read.js';
 import type { DaemonState } from './create-daemon/state.js';
 import { injectedAdapterConfigConflicts } from './create-daemon/support.js';
-import { resolveDaemonConfig } from './create-daemon/config.js';
+import { hostJournal, resolveDaemonConfig } from './create-daemon/config.js';
 import { composeDaemonStores } from './create-daemon/stores.js';
 import { composeDaemonWorkspaces } from './create-daemon/workspaces.js';
 import type { DaemonScope } from './create-daemon/scope.js';
@@ -747,14 +747,28 @@ export interface Daemon {
   /**
    * Resolves once the task's terminal had its first outbound settlement (no
    * earlier than its local terminal event) and the runtime owner reported
-   * its first disposal outcome. A task this daemon has not seen is read from
-   * the journal: after a restart the result reflects the journal's current
-   * truth, so a refused terminal that was replaced reads as its replacement,
-   * never the reverse. Rejects with {@link DaemonTaskUnknownError} for a task
-   * with neither, before `start()` the way `approve()` does, and with
-   * `signal.reason` on abort; the task is untouched. `stop()` rejects no
-   * pending wait, so pass a signal if one can span it; after `stop()` an
-   * unseen id rejects with the closed journal's error.
+   * its first disposal outcome. A received offer with no execution owner
+   * resolves as `cancelled`/`not-required`/`none` once its cloud cancellation
+   * is journaled; no local terminal is required. Redelivery of that task id
+   * in this run keeps that result and cannot start a runtime. An offer
+   * that was never claimed is not final by itself: it may be redelivered.
+   * A task this daemon has not seen is read from the journal: after a restart
+   * the result reflects the journal's current truth, so a refused terminal
+   * that was replaced reads as its replacement, never the reverse. A stored
+   * cancellation sequenced after the offer preserves
+   * `cancelled`/`not-required`/`none` after restart,
+   * including with the cursor past the cancellation; recovery sends no
+   * `daemon_interrupted` failure for that received offer. A stored offer
+   * whose only cancellation preceded it awaits mailbox redelivery: restart
+   * relies on the server contract that mailbox replay suppresses a cancelled
+   * task's offer (spec "Hosted task cancellation authority"). A custom Host
+   * whose server does not honor that contract is outside this guarantee.
+   * Rejects with {@link DaemonTaskUnknownError} for an unknown task, before
+   * `start()` the way `approve()` does, and with `signal.reason` on abort;
+   * the task is untouched. Revocation and replay expiry carry no per-task
+   * cancellation authority. `stop()` and halt reject no pending wait, so
+   * pass an AbortSignal if one can span either; after `stop()` an unseen id
+   * rejects with the closed journal's error.
    */
   whenTaskSettled(taskId: string, options?: { readonly signal?: AbortSignal }): Promise<DaemonTaskSettlement>;
   status(): DaemonStatus;
@@ -835,8 +849,11 @@ export interface DaemonOverrides {
   /**
    * A durable local journal the host supplies instead of `SqliteLocalTaskJournal`
    * (§12.7.2). It must meet the same contract (a resolved `appendEnvelope` is
-   * fsynced); the daemon does not check that. `stop()` does not close it:
-   * whoever injected it owns its lifetime.
+   * fsynced). The daemon checks one thing about it: every task row it reads
+   * must have a `seq` that is a safe integer, otherwise the row is treated as
+   * malformed and takes the existing stall path. Everything else remains the
+   * injector's responsibility. `stop()` does not close it: whoever injected it
+   * owns its lifetime.
    */
   journal?: LocalTaskJournal;
   /** Test-only post-open SQLite initialization fault seam. */
@@ -1024,7 +1041,7 @@ function buildDaemon(
     fleetJitter: undefined,
     agentEgress: initialAgentEgress,
     ownedJournal: undefined,
-    journal: overrides.journal,
+    journal: overrides.journal && hostJournal(overrides.journal),
     hostedStorageInitializationBarrierComplete: true,
     connection: undefined,
     blobLifecycleAbort: undefined,

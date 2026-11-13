@@ -2,6 +2,92 @@
 
 Checklist for a Host moving from 0.41.0 to the proposed 0.42.0 MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Reviewed against source base `06a14462e0a0c6b30b9843d962072adff80a0d31`, including the release-notes audit (#1931). The version and publication remain subject to owner approval and the [release gates](https://github.com/Ancienttwo/byok-sdk/issues/1918); see the [release notes](v0.42.0.md). Review this guide again if the final train changes.
 
+## Service install prepares kept stores
+
+A Host that preserves stores on uninstall can now reinstall a candidate
+that needs a store migration without a separate Host migration sequence
+(#1983). `install()` and `upgrade()` share quiescence, staged candidate
+precheck, store snapshot, migration and the second precheck. Install writes
+`current`, the installation record and service unit only after preparation
+succeeds. Preparation runs only without a current version; same-id
+reinstall remains the #1966 repair/health path and does not precheck,
+snapshot or migrate, preserving earlier rollback snapshots.
+
+An SDK-marked unit of the recorded owner with no current version, such as
+a payload-less CLI service, is stopped before preparation takes its store
+leases. On any preparation failure before writing `current`, leases/gates
+are released, staging is removed, then the unit is started again, even if
+it was previously stopped. After a failed store restore it is not started
+and is removed instead, because the stores may be partial and a boot or
+login would otherwise start it; the next install writes it again. Later
+failures use #1966 cleanup.
+
+An absent unit and an unmarked unit allowed by `replaceUnmarked` are not
+stopped during preparation. The store leases establish quiescence. A
+running legacy agent on those stores now makes `install(..., {
+replaceUnmarked: true })` return `store_busy`, leaving its unit untouched.
+Stop the legacy agent before retrying; replacement happens only after
+preparation succeeds.
+
+`precheck` is already required by `ServiceInstallationOptions`; no option
+was added and there is no skip when it is omitted. The CLI supplies the SDK
+store precheck; embedded Hosts must list their own stores too. An empty
+list or already accepted stores need no migration. First-install refusals
+remove the staged version and use the same `store_busy`, `store_rejected`,
+`store_repair_required` and `store_migration_required` errors as upgrade.
+A failed migration or a second precheck with non-accepting verdicts
+restores the snapshot and throws `store_migration_failed`. Existing raw
+launch errors and `precheck_failed` for malformed post-migration output
+remain unchanged in both paths, after restoring the snapshot.
+
+After successful preparation, a failed installation or health check
+removes the unit, `current`, the installation record and the staged
+version, and restores the prepared stores last. When an artifact cannot be
+removed, or the store leases for the restore cannot be taken, the stores
+stay migrated and are not restored; the error names the kept snapshot. OS credentials are
+never cleared. After health succeeds, installation is committed: failure to
+remove its temporary `<installRoot>/snapshots/.install-<uuid>` does not
+reject the install, and after a completed restore it does not replace the
+store error. No existing diagnostic/event hook reports cleanup.
+Rollback/recover never select `.install-*`.
+
+A restore that fails renames the snapshot to
+`<installRoot>/snapshots/.install-repair-<uuid>` and names it in the error.
+The next first install restores it under the store leases, before its
+precheck, then retires it and continues. If it cannot stop the service,
+take the leases, restore or retire the repair name, the install fails,
+changes nothing else and starts nothing. With more than one repair snapshot
+it restores none and lists them all for an operator to choose. Anything written to the stores
+between the two installs is replaced.
+
+Host-visible changes follow. `upgrade()` pruning no longer removes any
+`.install-*` directory, and `uninstall()` keeps them too: it does not
+remove `snapshots/` while one exists, and it refuses a symlinked
+`snapshots/` with the new `ServiceInstallationErrorCode`
+`snapshots_symlinked` before changing anything. A leftover `.install-<uuid>` is never
+restored automatically. The next first install, deciding from the snapshots
+it lists while holding the store leases, refuses with the new
+`ServiceInstallationErrorCode` `install_snapshot_leftover`, lists every
+leftover path and starts nothing; an operator compares its `snapshot.json`
+with the current stores, removes it once it is not needed, and retries.
+This also blocks an install after `uninstall()` when a successful install
+could not remove its own snapshot, until that directory is removed by hand.
+A first install also reads `current` again under the store leases and
+refuses with `installation_exists`, before its precheck, when another
+installation (an owner gate under another `gateRoot`) wrote it in between.
+That refusal keeps every version directory, since the other installation may
+use it; the next successful upgrade's prune or `uninstall()` removes what is
+left. Known issue: other interleavings of installations under different
+`gateRoot`s that share one `installRoot` remain; an install-root lock is
+#2001.
+When a lease release fails after a refused first install, the error is an
+`AggregateError` carrying the refusal (with its code) and the release
+error. Install has no write-ahead receipt
+for process death during migration: the next install prechecks the stores
+as they remain, and the Host must make `migrate` safe to run again. Adding
+an install receipt is outside this change.
+See [Versioned installs](../device-setup.md#versioned-installs).
+
 ## Service install requires a healthy start
 
 `ServiceInstallation.install()` now runs the same health check as `upgrade()`
@@ -21,8 +107,9 @@ is healthy even before pairing.
 If the service fails to install, activate, start or pass its health check,
 install removes the unit, launcher, `current`, installation record and the
 staged version directory, including on a same-id
-reinstall. No service remains after successful cleanup. Host stores, daemon
-stores and OS credentials are preserved. If removal fails, the error carries
+reinstall. No service remains after successful cleanup. Prepared Host and
+daemon stores are restored from the install snapshot; OS credentials are
+never cleared. If removal fails, the error carries
 an `AggregateError` with both the original and removal failures as `cause`
 and names the remaining artifacts in its message. Install enforces the
 health-check deadline even if a custom check ignores abort or succeeds late.
@@ -53,9 +140,17 @@ An uninstaller that built a daemon per store only to call `daemon.unpair()` can 
 
 ## Per-task settlement awaitable
 
-A Host that decides a task is over by combining `completed`, `failed`, `cancelled`, a terminal `outbound-rejected` and `execution-record` with its own wrapper around each adapter's `session.close()` can replace both with `await daemon.whenTaskSettled(taskId, { signal })` (#1838). It resolves once the terminal's first settlement was published locally and the runtime's first disposal outcome is known: `disposal: 'failed'` matches a `runtime-disposal-failed` event for the task's runtime (not a failed release of an offer-owned scratch, `runtimeId: 'scratch'`), and `disposal: 'none'` means this daemon held no runtime for the task, including every task that settled before a restart. Call it after the task's `offered` event or later; an id the daemon never saw offered and has no journal row for rejects with `DaemonTaskUnknownError`. After a restart the result reflects the journal's current truth, so a refused terminal that was replaced reads as its replacement, never the reverse. `stop()` rejects no pending wait: pass a signal if a wait can span `stop()`. `Daemon` gains the member, so a test double typed as `Daemon` adds `whenTaskSettled`.
+A Host that decides a task is over by combining `completed`, `failed`, `cancelled`, a terminal `outbound-rejected` and `execution-record` with its own wrapper around each adapter's `session.close()` can replace both with `await daemon.whenTaskSettled(taskId, { signal })` (#1838). For a local terminal it resolves once the terminal's first settlement was published locally and the runtime's first disposal outcome is known: `disposal: 'failed'` matches a `runtime-disposal-failed` event for the task's runtime (not a failed release of an offer-owned scratch, `runtimeId: 'scratch'`), and `disposal: 'none'` means this daemon held no runtime for the task, including every task that settled before a restart. Call it after the task's `offered` event or later; an id the daemon never saw offered and has no journal row for rejects with `DaemonTaskUnknownError`. After a restart the result reflects the journal's current truth, so a refused terminal that was replaced reads as its replacement, never the reverse. `stop()` rejects no pending wait: pass a signal if a wait can span `stop()`. `Daemon` gains the member, so a test double typed as `Daemon` adds `whenTaskSettled`.
+
+A received offer with no owner also resolves `cancelled` / `not-required` / `none` once its cloud cancellation is journaled (#1944). `DaemonTaskSettlement.delivery` is `accepted` or `rejected` for an outbound terminal, or `not-required` when no local terminal envelope or runtime was required; a Host that exhaustively checks it handles the new member. Late waits and redelivery in the same run keep the cancellation result without starting a runtime. A never-claimed offer alone is not final; revocation and replay expiry carry no per-task cancellation authority, so waits spanning stop or halt need an `AbortSignal`.
 
 A wait on a task whose offer the journal refused now rejects with the append's error, `LocalStorageEmergencyError` under local-storage emergency (#1901); retry the wait after the offer is redelivered. An aborted wait keeps nothing on the daemon.
+
+## Stored task cancellation
+
+Custom implementations of `LocalTaskJournal` must implement the required `readTaskCancellation(taskId, identity, afterSeq)` method (#1955). Return `{ identity, bytes, bytesHash }` from the stored inbound `task.cancel` with the lowest mailbox sequence strictly above `afterSeq`, the stored offer's sequence, for that task and exact tenant/product/device enrollment, or `undefined` if no cancellation exists. Fail closed by rejecting on a candidate from another enrollment or with a mismatched hash; verify candidate hashes before filtering by content. Return the original canonical bytes and stored `sha256:` hash; do not reconstruct bytes or return a derived flag. SDK code checks identity, hash, envelope type, task binding and sequence order before using the cancellation. Update journal test doubles too. Hosts using the SDK SQLite journal need no code or storage migration: it reads the envelopes already stored.
+
+A received offer cancelled before admission now keeps `cancelled / not-required / none` after restart, including when the cursor has passed the cancellation. Recovery sends no `daemon_interrupted` failure for it, and redelivery cannot start a runtime.
 
 ## Packaged Hosts resolve SDK hosting from the asset root
 

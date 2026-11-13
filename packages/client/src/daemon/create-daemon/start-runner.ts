@@ -27,12 +27,6 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     record, sendEnvelope, withReplyTransition, activeJournal, journalIdentity, recordReplyState,
     blobClient, opened, activePressureEngine,
   } = run;
-  // The runner and the settlement registry read the same journal in this run.
-  taskSettlement.bindJournal({
-    readTask: (taskId) => activeJournal.readTask(taskId, journalIdentity),
-    unconfirmedTerminal: async (taskId) => (await activeJournal.listPendingTerminals(journalIdentity))
-      .find((row) => row.taskId === taskId)?.truthState,
-  });
   const deps: TaskRunnerDeps = {
     adapters,
     ...(run.capabilities.includes('native-sessions') ? { nativeSessions: { sessionDir: config.piByokLauncher!.sessionDir! } } : {}),

@@ -465,9 +465,95 @@ junctions on Windows), `snapshots/` and `upgrade-receipt.json` in it, and
 records the root in `<storeDir>/service/installation.json`. The unit runs
 `current`, so it never changes across upgrades.
 
-`install()` (CLI: `install --payload`) installs and starts the service, then
-runs `healthCheck`, using `healthTimeoutMs` (default 60000 ms), as `upgrade()`
-does. The default check waits for a live daemon lifecycle on its control
+`install()` (CLI: `install --payload`) first stages the candidate and runs
+the same store preparation as `upgrade()`: quiesce daemon stores, run the
+candidate `precheck`, snapshot every listed store, run `migrate` for
+`migration-required`, then precheck again. Only after preparation succeeds
+does it write `current` and the installation record, install/start the
+service and run `healthCheck` with `healthTimeoutMs` (default 60000 ms).
+This includes stores kept by an earlier uninstall. This preparation runs
+only when no version is current. A same-id reinstall remains a unit/launcher
+repair with its existing health check: it runs no precheck, snapshot or
+migration and preserves earlier upgrade rollback snapshots.
+
+With no current version, preparation stops an SDK-marked unit of the
+recorded owner (including a payload-less CLI service) before taking the
+daemon-store leases and gates. On any preparation failure before writing
+`current`, it releases the leases/gates, removes staging, then starts that
+unit again, even if it was stopped before the call. The one exception is a
+failed store restore: the stores may then be partial, so the unit is not
+started and is removed, leaving only the repair snapshot, as after a failed
+health check; otherwise a boot or login could start it on those stores. The
+next install writes the unit again. When that removal fails, the error names
+both the unit and the snapshot. Failures after preparation succeeds use the
+installation cleanup below.
+
+Preparation does not stop an absent unit or an allowed unmarked unit. It
+leases and gates the daemon stores instead. With `replaceUnmarked`, a
+running legacy agent that owns the same stores now causes `store_busy`;
+its unit is left running and unchanged. Stop that agent before retrying.
+Only after preparation succeeds does installation replace the unmarked unit.
+
+`precheck` is required by `ServiceInstallationOptions`, including for first
+install; there is no no-precheck mode or new option. The CLI supplies its
+`upgrade check --store --json` program. An embedded Host lists every store
+the candidate can rewrite, including Host stores. An empty list or stores
+that are already accepted need no migration. A busy daemon store is
+`store_busy`. `rejected` and `new-path-repair` use `store_rejected` and
+`store_repair_required`; for a first install they remove staging without
+writing a pointer, record or unit. Without `migrate`, a required migration
+is `store_migration_required`. A migration that exits unsuccessfully or
+leaves non-accepting verdicts restores the snapshot and throws
+`store_migration_failed`. Launch failures or malformed post-migration
+precheck output retain upgrade's existing raw error or `precheck_failed`
+behavior after restoring the snapshot.
+
+The temporary snapshot lives at
+`<installRoot>/snapshots/.install-<uuid>`. The call that took it removes it
+after a healthy start or after a restore that completed. Once health passes,
+the install is committed and resolves even if that removal fails; after a
+completed restore, a removal failure does not replace the store error.
+There is no cleanup diagnostic/event hook. Rollback and recover select
+version-named snapshots, never `.install-*` (version ids must start with a
+letter or digit).
+
+A restore that fails renames the snapshot to
+`<installRoot>/snapshots/.install-repair-<uuid>` and the error names that
+path. The next first install restores it before anything else, under the
+store leases and before its precheck: the stores return to how they were
+before the failed install, and anything written to them since is replaced.
+It then retires the repair name and continues. When that install cannot
+stop the service, take the store leases, restore the snapshot or retire its
+name, it throws the same kind of error, changes nothing else and starts
+nothing. When more than one repair snapshot exists it restores none of them
+and lists them all: their names do not order them in time, so an operator
+keeps the one to restore and removes the others.
+
+Later upgrades never prune `.install-*` directories, and `uninstall()` keeps
+them: it removes every other snapshot but leaves `snapshots/` in place while
+one exists. `uninstall()` refuses a `snapshots/` that is a symbolic link
+with `ServiceInstallationError` `snapshots_symlinked` before it changes
+anything. A leftover `.install-<uuid>` (a removal that failed, a rename
+that failed, an installer that was killed) is never restored automatically,
+because nothing shows whether it is still needed. It may hold the only copy
+of the stores, so the next first install refuses with
+`ServiceInstallationError` `install_snapshot_leftover`, lists every leftover
+path, and installs and starts nothing. An operator recognizes it by that
+name, compares its `snapshot.json` entries with the current stores, and
+removes the directory once it is not needed; then the install can be
+retried. The cost: when a successful install could not remove its own
+snapshot, an install after `uninstall()` is refused until that directory is
+removed by hand.
+
+A first install decides from the snapshots it lists after it holds the
+store leases, so a repair snapshot or leftover written by another
+installation before that point is seen.
+Unlike upgrade, install has no write-ahead receipt: if the process dies
+during migration, `recover()` does not complete that install. The next
+install prechecks the stores as migration left them. The Host must make
+`migrate` safe to run again after an interruption.
+
+After preparation, install starts and health-checks the service as before. The default check waits for a live daemon lifecycle on its control
 endpoint: `running` (connecting or open) or `awaiting-enrollment`; a halted
 or crashed run fails immediately. For the CLI, a service installed before
 pairing must enable `serviceEnrollment: { enabled: true }` in its config;
@@ -485,8 +571,17 @@ If the service fails to install, activate, start or pass its health check,
 install removes the unit and launcher, `current`, the installation record and
 the staged `versions/<id>` directory, then throws `ServiceInstallationError`
 with code `install_health_check_failed` and the original error as `cause`. This also applies when reinstalling
-the same id: a failed repair leaves no service installed. Cleanup preserves
-Host stores, daemon stores and OS credentials. If removal itself fails, the
+the same id: a failed repair leaves no service installed. After a first
+install that prepared stores, cleanup restores the prepared snapshot last,
+once the unit, `current`, the record and the staged directory are gone,
+including Host and daemon stores changed by migration or startup. A failed
+restore therefore always leaves nothing installed and one repair snapshot.
+When an artifact cannot be removed, the restore is not attempted: the stores
+stay migrated, matching what remains, the snapshot keeps its
+`.install-<uuid>` name, and the error names its path. When every artifact is
+gone but the store leases for the restore cannot be taken, nothing is
+installed and the stores stay migrated: consistent, but newer than the
+snapshot. The snapshot keeps its ordinary name and the error names it. Cleanup never clears OS credentials. If removal itself fails, the
 same error code carries an `AggregateError` containing the original failure
 and the removal error as `cause`; its message names the artifacts that remain.
 

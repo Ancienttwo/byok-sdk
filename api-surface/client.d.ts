@@ -5555,14 +5555,28 @@ export interface Daemon {
     /**
      * Resolves once the task's terminal had its first outbound settlement (no
      * earlier than its local terminal event) and the runtime owner reported
-     * its first disposal outcome. A task this daemon has not seen is read from
-     * the journal: after a restart the result reflects the journal's current
-     * truth, so a refused terminal that was replaced reads as its replacement,
-     * never the reverse. Rejects with {@link DaemonTaskUnknownError} for a task
-     * with neither, before `start()` the way `approve()` does, and with
-     * `signal.reason` on abort; the task is untouched. `stop()` rejects no
-     * pending wait, so pass a signal if one can span it; after `stop()` an
-     * unseen id rejects with the closed journal's error.
+     * its first disposal outcome. A received offer with no execution owner
+     * resolves as `cancelled`/`not-required`/`none` once its cloud cancellation
+     * is journaled; no local terminal is required. Redelivery of that task id
+     * in this run keeps that result and cannot start a runtime. An offer
+     * that was never claimed is not final by itself: it may be redelivered.
+     * A task this daemon has not seen is read from the journal: after a restart
+     * the result reflects the journal's current truth, so a refused terminal
+     * that was replaced reads as its replacement, never the reverse. A stored
+     * cancellation sequenced after the offer preserves
+     * `cancelled`/`not-required`/`none` after restart,
+     * including with the cursor past the cancellation; recovery sends no
+     * `daemon_interrupted` failure for that received offer. A stored offer
+     * whose only cancellation preceded it awaits mailbox redelivery: restart
+     * relies on the server contract that mailbox replay suppresses a cancelled
+     * task's offer (spec "Hosted task cancellation authority"). A custom Host
+     * whose server does not honor that contract is outside this guarantee.
+     * Rejects with {@link DaemonTaskUnknownError} for an unknown task, before
+     * `start()` the way `approve()` does, and with `signal.reason` on abort;
+     * the task is untouched. Revocation and replay expiry carry no per-task
+     * cancellation authority. `stop()` and halt reject no pending wait, so
+     * pass an AbortSignal if one can span either; after `stop()` an unseen id
+     * rejects with the closed journal's error.
      */
     whenTaskSettled(taskId: string, options?: {
         readonly signal?: AbortSignal;
@@ -5646,8 +5660,11 @@ export interface DaemonOverrides {
     /**
      * A durable local journal the host supplies instead of `SqliteLocalTaskJournal`
      * (§12.7.2). It must meet the same contract (a resolved `appendEnvelope` is
-     * fsynced); the daemon does not check that. `stop()` does not close it:
-     * whoever injected it owns its lifetime.
+     * fsynced). The daemon checks one thing about it: every task row it reads
+     * must have a `seq` that is a safe integer, otherwise the row is treated as
+     * malformed and takes the existing stall path. Everything else remains the
+     * injector's responsibility. `stop()` does not close it: whoever injected it
+     * owns its lifetime.
      */
     journal?: LocalTaskJournal;
     /** Test-only post-open SQLite initialization fault seam. */
@@ -6976,6 +6993,22 @@ export interface LocalTaskJournal {
     /** Includes old interruption markers without reports; they must not hide pending work. */
     listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]>;
     readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined>;
+    /**
+     * Read the stored inbound `task.cancel` with the lowest mailbox sequence
+     * strictly above `afterSeq` (the stored offer's sequence) for this task and
+     * exact enrollment, or `undefined` when none exists. A cancellation at or
+     * below the offer sequence preceded that offer and is not returned.
+     * Fail closed by rejecting on a candidate from another enrollment or with
+     * a mismatched hash; verify candidate hashes before filtering by content.
+     * Return the original canonical bytes and stored hash, not a derived
+     * cancellation flag. The SDK also validates the returned identity, hash
+     * and envelope binding before using it as cancellation authority.
+     */
+    readTaskCancellation(taskId: string, identity: JournalIdentity, afterSeq: number): Promise<{
+        readonly identity: JournalIdentity;
+        readonly bytes: string;
+        readonly bytesHash: string;
+    } | undefined>;
     /** Tasks with no terminal and no recovery marker — what this daemon was in the middle of when it last stopped. */
     listRecoverable(): Promise<RecoverableTask[]>;
     /** Close out one recoverable task by writing its recovery marker. Never deletes; a marked row is on §12.7.2.1's never-auto-delete list. */
@@ -7143,6 +7176,15 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
      */
     recordTerminal(record: LocalTerminalRecord): Promise<void>;
     readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined>;
+    readTaskCancellation(taskId: string, identity: JournalIdentity, afterSeq: number): Promise<{
+        identity: {
+            tenantId: string;
+            productId: string;
+            deviceId: string;
+        };
+        bytes: string;
+        bytesHash: string;
+    } | undefined>;
     listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]>;
     listPendingTerminals(identity: JournalIdentity): Promise<LocalTerminalRecord[]>;
     confirmTerminal(taskId: string, payloadHash: string): Promise<void>;
@@ -8673,14 +8715,24 @@ export declare const RESULT_NOT_SUBMITTED_REASON_PREFIX = "result_not_submitted"
  */
 export declare const RESULT_UNREADABLE_REASON_PREFIX = "result_unreadable";
 // ==== @byok-sdk/client dist/daemon/task-settlement.d.ts ====
-import type { TerminalTruthState } from './journal/journal.js';
-/** {@link DaemonTaskSettlement.terminal}: the kind of the task's terminal envelope. */
+import { type JournalIdentity, type LocalTaskJournal, type TerminalTruthState } from './journal/journal.js';
+/**
+ * Validate raw journal evidence in SDK code, including for Host-injected
+ * backends. Only a cancellation sequenced after the stored offer settles it;
+ * an earlier one is a pre-cancel whose offer still needs its decline.
+ */
+export declare function hasTaskCancellation(journal: Pick<LocalTaskJournal, 'readTaskCancellation'>, taskId: string, offerSeq: number, identity: JournalIdentity): Promise<boolean>;
+/** {@link DaemonTaskSettlement.terminal}: the terminal kind, including a cloud cancellation before admission. */
 export type DaemonTaskTerminal = 'complete' | 'failed' | 'cancelled' | 'declined';
 /** What `Daemon.whenTaskSettled` resolves with. */
 export interface DaemonTaskSettlement {
     readonly terminal: DaemonTaskTerminal;
-    /** The first settlement of the terminal; `accepted` includes a duplicate. */
-    readonly delivery: 'accepted' | 'rejected';
+    /**
+     * The first settlement of the terminal; `accepted` includes a duplicate.
+     * `not-required`: a durable cloud cancellation suppressed a received offer
+     * before admission; no local terminal envelope or runtime was required.
+     */
+    readonly delivery: 'accepted' | 'rejected' | 'not-required';
     /**
      * `failed` exactly when `runtime-disposal-failed` was emitted for the task's
      * runtime; a failed release of an offer-owned scratch (`runtimeId: 'scratch'`)
@@ -8701,7 +8753,10 @@ export declare class DaemonTaskUnknownError extends Error {
 export interface TaskSettlementJournal {
     readTask(taskId: string): Promise<{
         readonly localState: string;
+        readonly seq: number;
     } | undefined>;
+    /** SDK-validated inbound cancellation sequenced after the received offer at `offerSeq`. */
+    hasTaskCancellation(taskId: string, offerSeq: number): Promise<boolean>;
     /** Truth state of an unconfirmed terminal; `undefined` once confirmed or when there is none. */
     unconfirmedTerminal(taskId: string): Promise<TerminalTruthState | undefined>;
 }
@@ -8723,6 +8778,10 @@ export declare class TaskSettlementRegistry implements TaskRuntimeOwnership {
     runtimeDisposed(taskId: string): void;
     runtimeDisposalFailed(taskId: string): void;
     terminalSettled(taskId: string, terminal: DaemonTaskTerminal, delivery: DaemonTaskSettlement['delivery']): void;
+    /** Only for a received offer with no execution owner, after its cloud cancel is durable. */
+    cancelledBeforeAdmission(taskId: string): void;
+    /** A redelivery in this run cannot reopen an offer the cloud already cancelled. */
+    isCancelledBeforeAdmission(taskId: string): boolean;
     wait(taskId: string, signal?: AbortSignal): Promise<DaemonTaskSettlement>;
 }
 // ==== @byok-sdk/client dist/daemon/team-workspace.d.ts ====
@@ -11229,7 +11288,9 @@ export interface ServiceInstallationOptions {
      * the snapshot when the precheck reports a store as `migration-required`;
      * exit 0 is success. The precheck then runs again and must report every
      * store `accepted` or `absent`. Without it, a `migration-required` store is
-     * `store_migration_required` and nothing is switched.
+     * `store_migration_required` and nothing is switched. The Host must make
+     * this program safe to run again after interruption: install has no
+     * write-ahead receipt for a process death during migration.
      */
     migrate?(versionDir: string): ServiceProgram;
     /**
@@ -11247,8 +11308,9 @@ export interface ServiceInstallationOptions {
      */
     healthTimeoutMs?: number;
     /**
-     * Every daemon store the service process owns, read after the service has
-     * stopped, on every upgrade, rollback and recover (#1328). Each `storeDir`
+     * Every daemon store the service process owns, leased on a first install
+     * and read after stopping the service on upgrade, rollback and recover
+     * (#1328, #1983). Each `storeDir`
      * is absolute and listed once; `productId` is not empty; an empty list is
      * valid. An invalid list or a throw is `daemon_stores_invalid`. Default:
      * `[{ storeDir: service.storeDir, productId }]`. Requires `healthCheck`,
@@ -11305,12 +11367,35 @@ export interface ServiceInstallation {
     /** The service lifecycle whose program runs `<installRoot>/current`. */
     readonly lifecycle: ServiceLifecycle;
     /**
-     * Stages the payload as the first version, points `current` at it, installs
-     * and starts the service, then waits for its health check. A write,
-     * activation, start or health-check failure removes
-     * the unit, launcher, `current`, installation record and staged version,
-     * including on a same-id reinstall, and throws `install_health_check_failed`.
-     * Host stores, daemon stores and OS credentials are left intact.
+     * With no current version, stages the payload, leases daemon stores, runs
+     * the candidate precheck, snapshots listed stores and migrates when
+     * required, then points
+     * `current` at it, records, installs, starts and checks health. Preparation
+     * failures remove staging and use upgrade's store errors. A later failure
+     * removes the installation and restores the prepared store snapshot,
+     * then throws `install_health_check_failed`. A same-id reinstall only
+     * repairs the service and checks health, as before; it does not prepare
+     * stores or change earlier rollback snapshots. An allowed unmarked unit
+     * is untouched until preparation succeeds; its live store owner causes
+     * `store_busy`. An owned marked unit without a current version is stopped
+     * before preparation and started again after preparation fails, once
+     * leases/gates are released and staging removed. After a failed store
+     * restore it is removed instead, and the next install writes it again.
+     * OS credentials are never cleared. `precheck` is required.
+     * The temporary snapshot `snapshots/.install-<uuid>` is removed after a
+     * healthy start or a completed restore; a removal failure does not change
+     * the outcome, and a leftover is kept, never restored automatically: the
+     * next first install refuses with `install_snapshot_leftover`, listing it,
+     * and starts nothing until an operator removes it. Every check uses
+     * `current` and the snapshots read under the store leases: when another
+     * installation wrote `current` in between, it refuses with
+     * `installation_exists` and keeps every version directory. A
+     * failed restore renames it `snapshots/.install-repair-<uuid>` and the
+     * error names it: the next first install restores it, under the store
+     * leases and before its precheck. When it cannot stop the service, take
+     * the leases, restore or retire the repair name, or when more than one
+     * repair snapshot exists, it fails without other changes, names the
+     * snapshots and starts nothing.
      */
     install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
     /**
@@ -11332,7 +11417,7 @@ export interface ServiceInstallation {
     rollback(): Promise<ServiceUpgradeReceipt>;
     /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. */
     recover(): Promise<ServiceUpgradeReceipt | undefined>;
-    /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. The store is not touched. */
+    /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
     uninstall(): Promise<void>;
     /** The last receipt, or `undefined`. */
     receipt(): Promise<ServiceUpgradeReceipt | undefined>;
@@ -11359,6 +11444,8 @@ declare const ERROR_MESSAGES: {
     readonly health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.';
     readonly rollback_unhealthy: 'The previous version was restored but failed its health check too.';
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
+    readonly install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.';
+    readonly snapshots_symlinked: 'The install root\'s snapshots/ is a symbolic link. Uninstall does not follow it and changed nothing; replace it with a directory or remove the link, then retry.';
 };
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
 /** Closed codes; a store refusal carries the precheck verdicts, and `snapshot_failed` the copy error as `cause`. */

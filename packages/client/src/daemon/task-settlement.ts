@@ -1,13 +1,37 @@
-import type { TerminalTruthState } from './journal/journal.js';
+import { decodeEnvelope } from '@byok-sdk/protocol';
+import { journalHash, type JournalIdentity, type LocalTaskJournal, type TerminalTruthState } from './journal/journal.js';
 
-/** {@link DaemonTaskSettlement.terminal}: the kind of the task's terminal envelope. */
+/**
+ * Validate raw journal evidence in SDK code, including for Host-injected
+ * backends. Only a cancellation sequenced after the stored offer settles it;
+ * an earlier one is a pre-cancel whose offer still needs its decline.
+ */
+export async function hasTaskCancellation(journal: Pick<LocalTaskJournal, 'readTaskCancellation'>, taskId: string, offerSeq: number, identity: JournalIdentity): Promise<boolean> {
+  const record = await journal.readTaskCancellation(taskId, identity, offerSeq);
+  if (record === undefined) return false;
+  if (record.identity.tenantId !== identity.tenantId || record.identity.productId !== identity.productId || record.identity.deviceId !== identity.deviceId) {
+    throw new Error('journal cancellation enrollment identity mismatch');
+  }
+  if (journalHash(record.bytes) !== record.bytesHash) throw new Error('durable cancellation bytes/hash mismatch');
+  const envelope = decodeEnvelope(record.bytes);
+  if (envelope.type !== 'task.cancel' || envelope.task_id !== taskId || envelope.seq === undefined || envelope.seq <= offerSeq) {
+    throw new Error('invalid durable cancellation binding');
+  }
+  return true;
+}
+
+/** {@link DaemonTaskSettlement.terminal}: the terminal kind, including a cloud cancellation before admission. */
 export type DaemonTaskTerminal = 'complete' | 'failed' | 'cancelled' | 'declined';
 
 /** What `Daemon.whenTaskSettled` resolves with. */
 export interface DaemonTaskSettlement {
   readonly terminal: DaemonTaskTerminal;
-  /** The first settlement of the terminal; `accepted` includes a duplicate. */
-  readonly delivery: 'accepted' | 'rejected';
+  /**
+   * The first settlement of the terminal; `accepted` includes a duplicate.
+   * `not-required`: a durable cloud cancellation suppressed a received offer
+   * before admission; no local terminal envelope or runtime was required.
+   */
+  readonly delivery: 'accepted' | 'rejected' | 'not-required';
   /**
    * `failed` exactly when `runtime-disposal-failed` was emitted for the task's
    * runtime; a failed release of an offer-owned scratch (`runtimeId: 'scratch'`)
@@ -30,7 +54,9 @@ export class DaemonTaskUnknownError extends Error {
 
 /** The durable facts one daemon run reads for a task it has not seen. */
 export interface TaskSettlementJournal {
-  readTask(taskId: string): Promise<{ readonly localState: string } | undefined>;
+  readTask(taskId: string): Promise<{ readonly localState: string; readonly seq: number } | undefined>;
+  /** SDK-validated inbound cancellation sequenced after the received offer at `offerSeq`. */
+  hasTaskCancellation(taskId: string, offerSeq: number): Promise<boolean>;
   /** Truth state of an unconfirmed terminal; `undefined` once confirmed or when there is none. */
   unconfirmedTerminal(taskId: string): Promise<TerminalTruthState | undefined>;
 }
@@ -71,7 +97,14 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
   readonly #offersSeen = new Set<string>();
   #journal: TaskSettlementJournal | undefined;
 
-  bindJournal(journal: TaskSettlementJournal): void { this.#journal = journal; }
+  bindJournal(journal: TaskSettlementJournal): void {
+    // A new run must read recovery's durable answer, including on the same Daemon.
+    // These cancellations have no terminal row; their cached answer is run-local.
+    for (const [taskId, entry] of this.#entries) {
+      if (entry.result?.delivery === 'not-required') this.#entries.delete(taskId);
+    }
+    this.#journal = journal;
+  }
 
   offerSeen(taskId: string): void {
     if (!this.#entries.get(taskId)?.result) this.#offersSeen.add(taskId);
@@ -114,6 +147,16 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
     const entry = this.#entry(taskId);
     entry.delivered ??= { terminal, delivery };
     this.#settle(entry);
+  }
+
+  /** Only for a received offer with no execution owner, after its cloud cancel is durable. */
+  cancelledBeforeAdmission(taskId: string): void {
+    this.terminalSettled(taskId, 'cancelled', 'not-required');
+  }
+
+  /** A redelivery in this run cannot reopen an offer the cloud already cancelled. */
+  isCancelledBeforeAdmission(taskId: string): boolean {
+    return this.#entries.get(taskId)?.result?.delivery === 'not-required';
   }
 
   async wait(taskId: string, signal?: AbortSignal): Promise<DaemonTaskSettlement> {
@@ -171,6 +214,9 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
 async function durableSettlement(journal: TaskSettlementJournal, taskId: string): Promise<DaemonTaskSettlement | 'pending' | 'unknown'> {
   const task = await journal.readTask(taskId);
   if (task === undefined) return 'unknown';
+  if (task.localState === 'received' && await journal.hasTaskCancellation(taskId, task.seq)) {
+    return { terminal: 'cancelled', delivery: 'not-required', disposal: 'none' };
+  }
   if (!task.localState.startsWith(TERMINAL_STATE_PREFIX)) return 'pending';
   const terminal = task.localState.slice(TERMINAL_STATE_PREFIX.length);
   if (!TERMINALS.has(terminal)) throw new Error(`journal task ${taskId} has an unknown terminal state`);

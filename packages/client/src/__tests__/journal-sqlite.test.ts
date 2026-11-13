@@ -125,6 +125,60 @@ describe('SqliteLocalTaskJournal', () => {
     }
   });
 
+  describe('stored task cancellation', () => {
+    it('returns original cancellation bytes and hash after reopen, ignoring other task envelopes', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      await journal.appendEnvelope(envelopeRecord());
+      await expect(journal.readTaskCancellation('task-1', IDENTITY, 1)).resolves.toBeUndefined();
+      const bytes = JSON.stringify({ v: 1, id: 'cancel-1', type: 'task.cancel', task_id: 'task-1' });
+      const later = JSON.stringify({ v: 1, id: 'cancel-later', type: 'task.cancel', task_id: 'task-1' });
+      await journal.appendEnvelope(envelopeRecord({ envelopeId: 'cancel-later', seq: 4, bytes: later, bytesHash: journalHash(later), opensTask: false }));
+      await journal.appendEnvelope(envelopeRecord({ envelopeId: 'cancel-1', seq: 2, bytes, bytesHash: journalHash(bytes), opensTask: false }));
+      const otherBytes = JSON.stringify({ v: 1, id: 'cancel-2', type: 'task.cancel', task_id: 'task-2' });
+      await journal.appendEnvelope(envelopeRecord({ envelopeId: 'cancel-2', taskId: 'task-2', seq: 3, bytes: otherBytes, bytesHash: journalHash(otherBytes), opensTask: false }));
+      await journal.close();
+      const reopened = build(storeDir);
+      await expect(reopened.readTaskCancellation('task-1', IDENTITY, 1)).resolves.toEqual({ identity: IDENTITY, bytes, bytesHash: journalHash(bytes) });
+      await expect(reopened.readTaskCancellation('task-1', IDENTITY, 2)).resolves.toEqual({ identity: IDENTITY, bytes: later, bytesHash: journalHash(later) });
+      await expect(reopened.readTaskCancellation('task-1', IDENTITY, 4)).resolves.toBeUndefined();
+      await expect(reopened.readTaskCancellation('unknown', IDENTITY, 1)).resolves.toBeUndefined();
+      expect((await reopened.readTask('task-1', IDENTITY))?.localState).toBe('received');
+      expect(await reopened.listPendingTerminals(IDENTITY)).toEqual([]);
+    });
+
+    it.each(['changed-type', 'invalid-json', 'after-valid-cancel'] as const)('refuses corrupt stored cancellation candidates: %s', async (kind) => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      await journal.appendEnvelope(envelopeRecord());
+      const bytes = JSON.stringify({ v: 1, id: 'cancel-corrupt', type: 'task.cancel', task_id: 'task-1' });
+      if (kind === 'after-valid-cancel') {
+        const first = JSON.stringify({ v: 1, id: 'cancel-first', type: 'task.cancel', task_id: 'task-1' });
+        await journal.appendEnvelope(envelopeRecord({ envelopeId: 'cancel-first', seq: 2, bytes: first, bytesHash: journalHash(first), opensTask: false }));
+      }
+      await journal.appendEnvelope(envelopeRecord({ envelopeId: 'cancel-corrupt', seq: 3, bytes, bytesHash: journalHash(bytes), opensTask: false }));
+      const corrupted = kind === 'invalid-json' ? '{' : bytes.replace('task.cancel', 'task.started');
+      const db = openJournalDatabase(path.join(storeDir, JOURNAL_DB_FILENAME), DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
+      try {
+        db.prepare('UPDATE journal_envelope SET bytes = ? WHERE envelope_id = ?').run(corrupted, 'cancel-corrupt');
+      } finally {
+        db.close();
+      }
+      await expect(journal.readTaskCancellation('task-1', IDENTITY, 1)).rejects.toThrow('durable cancellation candidate bytes/hash mismatch');
+      expect(readRows(storeDir, "SELECT bytes_hash FROM journal_envelope WHERE envelope_id = 'cancel-corrupt'"))
+        .toEqual([{ bytes_hash: journalHash(bytes) }]);
+      expect((await journal.readTask('task-1', IDENTITY))?.localState).toBe('received');
+      expect(await journal.listPendingTerminals(IDENTITY)).toEqual([]);
+    });
+
+    it.each(['tenantId', 'productId', 'deviceId'] as const)('refuses a cancellation read with another %s', async (field) => {
+      const journal = build(await tmpStore());
+      const bytes = JSON.stringify({ v: 1, id: 'cancel-1', type: 'task.cancel', task_id: 'task-1' });
+      await journal.appendEnvelope(envelopeRecord({ envelopeId: 'cancel-1', bytes, bytesHash: journalHash(bytes), opensTask: false }));
+      await expect(journal.readTaskCancellation('task-1', { ...IDENTITY, [field]: 'other' }, 1)).rejects.toThrow('journal enrollment identity mismatch');
+    });
+  });
+
   describe('durability settings', () => {
     it.each(OPEN_STEPS)('closes the native handle when initialization fails at %s', async (step) => {
       const storeDir = await tmpStore(`byok-journal-open-fault-${step}-`);
