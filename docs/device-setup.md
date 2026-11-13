@@ -758,11 +758,15 @@ await clearDeviceEnrollment({
   `pairing_attempt_unattributed` when it holds a first-pairing attempt that
   names no `storeDir` (staged by 0.42.0; it is left in place), or
   `clear_failed` with the provider or filesystem error as `cause`. A
-  `device.json` that cannot be parsed is refused as `clear_failed` before
-  anything is deleted; that store needs a re-pair. A credential provider
-  failure leaves the store paired. If removing `device.json` fails after the
-  credential was deleted, a retry clears the valid projection that remains. A
-  store with no enrollment clears successfully.
+  `device.json` that cannot be parsed or is empty is refused as `clear_failed`
+  before anything is deleted; that store needs a re-pair. A credential
+  provider failure can come before or after the OS deleted the credential (a
+  read-back that fails or times out): the store stays paired, or keeps a valid
+  `device.json` without its credential. If removing `device.json` fails after
+  the credential was deleted, the same projection remains. A retry clears it.
+  A store with no enrollment clears successfully. An injected
+  `DeviceCredentialBackend`'s error is the `cause` unchanged, so such a
+  backend must not put secrets in its errors.
 - It clears the OS credential set of the account it runs as. A Windows
   `LocalSystem` service's enrollment is out of an interactive user's reach.
 - The OS credential entry is shared by every store of one `productId`. A store

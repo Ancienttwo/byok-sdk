@@ -6359,6 +6359,8 @@ export declare class DeviceCredentialCommandAbortedError extends DeviceCredentia
  * and devicePublicKey; a different authenticated enrollment promotes the
  * replacement and discards the attempt. `clear()` removes both authorities.
  * An attempt is kept with every field, including `storeIdentity`.
+ * An error it throws reaches the Host unchanged, as the `cause` of a public
+ * error such as `DeviceEnrollmentClearError`, so it must not carry a secret.
  */
 export interface DeviceCredentialBackend {
     read(signal?: AbortSignal): Promise<DeviceRecord | undefined>;
@@ -6548,11 +6550,14 @@ export type DeviceEnrollmentClearErrorCode = keyof typeof CLEAR_MESSAGES;
  *   this store's; nothing was cleared. `clearUnattributedAttempt: true`
  *   deletes it.
  * - `clear_failed`: `cause` holds the error. A `device.json` that cannot be
- *   parsed (`DeviceRecordRePairRequiredError`) is refused before anything is
- *   deleted; the store needs a re-pair. A credential provider failure leaves
- *   the store paired. A failed `device.json` removal after the credential was
- *   deleted leaves a valid projection without its credential, which a retry
- *   clears.
+ *   parsed or is empty (`DeviceRecordRePairRequiredError`) is refused before
+ *   anything is deleted; the store needs a re-pair. A credential provider
+ *   failure can come before or after the OS deleted the credential (a
+ *   read-back that fails or times out): the store stays paired, or keeps a
+ *   valid `device.json` without its credential. A failed `device.json`
+ *   removal after the credential was deleted leaves the same state. A retry
+ *   clears it (#1965). An injected `DeviceCredentialBackend`'s error is the
+ *   `cause` unchanged; such a backend must not put secrets in its errors.
  */
 export declare class DeviceEnrollmentClearError extends Error {
     readonly code: DeviceEnrollmentClearErrorCode;
