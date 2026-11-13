@@ -138,6 +138,37 @@ export interface AuthManagerOptions {
   onBindingLost?: (reason: 'store_not_bound' | 're_pair_required') => void;
 }
 
+/** Under the enrollment gate: the OS entry still holds `record`, or the binding is lost. Set by {@link AuthManager}'s static block. */
+let checkBinding: (auth: AuthManager, record: DeviceRecord | undefined, signal: AbortSignal) => Promise<void>;
+let underBinding: <T>(auth: AuthManager, write: () => Promise<T>, signal: AbortSignal) => Promise<T>;
+
+/**
+ * Package-internal daemon seam, not part of `AuthManager`'s public type
+ * (#2055): runs `write` of the shared E2EE member entries under the
+ * enrollment gate, after rereading that the OS entry and `device.json` still
+ * hold this run's enrollment. Otherwise it writes nothing and loses the
+ * binding as a renewal does. `signal` also ends its wait in the credential
+ * mutation queue, so a member run aborted at a re-pair never waits behind a
+ * renewal that waits for the re-pair's gate. Never hold it across network I/O.
+ */
+export function writeUnderBinding<T>(auth: AuthManager, write: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  return underBinding(auth, write, signal);
+}
+
+/** `predecessor`, or `cancel`'s reason once it aborts first. */
+function queuedBehind(predecessor: Promise<void>, cancel: AbortSignal | undefined): Promise<void> {
+  if (cancel === undefined) return predecessor;
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(cancel.reason);
+    if (cancel.aborted) return onAbort();
+    cancel.addEventListener('abort', onAbort, { once: true });
+    void predecessor.then(() => {
+      cancel.removeEventListener('abort', onAbort);
+      resolve();
+    });
+  });
+}
+
 /**
  * Owns device pairing and the access token lifecycle (protocol §6):
  * generates/reuses the device Ed25519 keypair, pairs, and renews the access
@@ -146,6 +177,29 @@ export interface AuthManagerOptions {
  * that WS connects, blob HTTP calls, and the long-poll fallback all use.
  */
 export class AuthManager {
+  static {
+    checkBinding = async (auth, record, signal) => {
+      let current: DeviceRecord | undefined;
+      try {
+        current = await auth.loadRecord(signal);
+      } catch (error) {
+        if (error instanceof DeviceStoreBindingMismatchError || error instanceof DeviceRecordRePairRequiredError) auth.loseBinding(error);
+        throw error;
+      }
+      if (current === undefined || record === undefined) auth.loseBinding(new DeviceRecordRePairRequiredError());
+      if (current.deviceId !== record.deviceId || current.tenantId !== record.tenantId || current.devicePublicKey !== record.devicePublicKey) {
+        auth.loseBinding(new DeviceStoreBindingMismatchError(current, record));
+      }
+    };
+    underBinding = (auth, write, signal) => auth.runCredentialMutation((mutationSignal) => {
+      const both = AbortSignal.any([mutationSignal, signal]);
+      return auth.underEnrollmentGate(both, async () => {
+        await checkBinding(auth, auth.record, both);
+        return write();
+      });
+    }, signal);
+  }
+
   private record: DeviceRecord | undefined;
   private renewing: Promise<string> | undefined;
   private proactiveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -401,7 +455,7 @@ export class AuthManager {
     // this store still holds that enrollment, under the enrollment gate
     // (#2034); otherwise the new token is discarded and the binding is lost.
     await this.underEnrollmentGate(signal, async () => {
-      await this.checkBinding(record, signal);
+      await checkBinding(this, record, signal);
       await this.credentials.replace(updated, signal);
     });
     this.record = updated;
@@ -483,38 +537,6 @@ export class AuthManager {
       }, UNTYPED_401_RECHECK_DELAY_MS);
       signal.addEventListener('abort', onStop, { once: true });
     });
-  }
-
-  /**
-   * Internal daemon seam (#2055): runs `write` of the shared E2EE member
-   * entries under the enrollment gate, after rereading that the OS entry and
-   * `device.json` still hold this run's enrollment. Otherwise it writes
-   * nothing and loses the binding as a renewal does. Never hold it across
-   * network I/O.
-   */
-  async underBinding<T>(write: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-    return this.runCredentialMutation((mutationSignal) => {
-      const both = signal === undefined ? mutationSignal : AbortSignal.any([mutationSignal, signal]);
-      return this.underEnrollmentGate(both, async () => {
-        await this.checkBinding(this.record, both);
-        return write();
-      });
-    });
-  }
-
-  /** Under the enrollment gate: the OS entry still holds `record`, or the binding is lost. */
-  private async checkBinding(record: DeviceRecord | undefined, signal: AbortSignal): Promise<void> {
-    let current: DeviceRecord | undefined;
-    try {
-      current = await this.loadRecord(signal);
-    } catch (error) {
-      if (error instanceof DeviceStoreBindingMismatchError || error instanceof DeviceRecordRePairRequiredError) this.loseBinding(error);
-      throw error;
-    }
-    if (current === undefined || record === undefined) this.loseBinding(new DeviceRecordRePairRequiredError());
-    if (current.deviceId !== record.deviceId || current.tenantId !== record.tenantId || current.devicePublicKey !== record.devicePublicKey) {
-      this.loseBinding(new DeviceStoreBindingMismatchError(current, record));
-    }
   }
 
   /** The OS entry no longer holds this store's enrollment: drop the cached record, stop renewing and report it. Always throws `error`. */
@@ -676,13 +698,19 @@ export class AuthManager {
     }
   }
 
-  private async runCredentialMutation<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  private async runCredentialMutation<T>(operation: (signal: AbortSignal) => Promise<T>, cancel?: AbortSignal): Promise<T> {
     const predecessor = this.credentialMutationTail;
     let release!: () => void;
     this.credentialMutationTail = new Promise<void>((resolve) => {
       release = resolve;
     });
-    await predecessor;
+    try {
+      await queuedBehind(predecessor, cancel);
+    } catch (error) {
+      // A cancelled waiter leaves the queue now and runs nothing; its successors still wait for the predecessor.
+      void predecessor.then(release);
+      throw error;
+    }
     const controller = new AbortController();
     // A stop() that landed while this mutation queued already cancelled it.
     if (this.stopped) controller.abort();

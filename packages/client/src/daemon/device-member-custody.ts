@@ -135,7 +135,7 @@ export class DeviceMemberKeyStore implements MemberKeyStore {
 
   /** Store a next KEM key beside the current one, or return the rotation that has begun. */
   async beginKemRotation(binding: MemberKeyBinding): Promise<MemberKeys> {
-    return this.#rewrite(binding, (text) => beginMemberKemRotation(text), 'begin a KEM rotation');
+    return this.guard(() => this.#rewrite(binding, (text) => beginMemberKemRotation(text), 'begin a KEM rotation'));
   }
 
   /**
@@ -144,21 +144,19 @@ export class DeviceMemberKeyStore implements MemberKeyStore {
    * changes nothing.
    */
   async finishKemRotation(binding: MemberKeyBinding, epoch: number): Promise<MemberKeys> {
-    return this.#rewrite(binding, async (text) => finishMemberKemRotation(text, epoch), `finish a KEM rotation to epoch ${epoch}`);
+    return this.guard(() => this.#rewrite(binding, async (text) => finishMemberKemRotation(text, epoch), `finish a KEM rotation to epoch ${epoch}`));
   }
 
-  #rewrite(binding: MemberKeyBinding, change: (text: string) => Promise<string | undefined>, what: string): Promise<MemberKeys> {
-    return this.guard(async () => {
-      if ((await this.load(binding)) === undefined) throw new DeviceMemberCustodyError(`no device member keys of this enrollment to ${what}`);
-      const text = (await this.custody.read('member-keys'))!;
-      const next = await change(text);
-      if (next === undefined) throw new DeviceMemberCustodyError(`the device member keys cannot ${what}`);
-      if (next !== text) await this.custody.replace('member-keys', next);
-      // Read back: the stored keys, not the ones computed here, are the member.
-      const stored = await this.load(binding);
-      if (stored === undefined) throw new DeviceMemberCustodyError('the device member keys were not stored');
-      return stored;
-    });
+  async #rewrite(binding: MemberKeyBinding, change: (text: string) => Promise<string | undefined>, what: string): Promise<MemberKeys> {
+    if ((await this.load(binding)) === undefined) throw new DeviceMemberCustodyError(`no device member keys of this enrollment to ${what}`);
+    const text = (await this.custody.read('member-keys'))!;
+    const next = await change(text);
+    if (next === undefined) throw new DeviceMemberCustodyError(`the device member keys cannot ${what}`);
+    if (next !== text) await this.custody.replace('member-keys', next);
+    // Read back: the stored keys, not the ones computed here, are the member.
+    const stored = await this.load(binding);
+    if (stored === undefined) throw new DeviceMemberCustodyError('the device member keys were not stored');
+    return stored;
   }
 }
 

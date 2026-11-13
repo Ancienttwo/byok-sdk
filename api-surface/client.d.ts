@@ -3435,16 +3435,6 @@ export declare class AuthManager {
     /** A typed revocation 401 halts now; any other 401 resolves `undefined` for the one recheck. */
     private readUnauthorized;
     private backOff;
-    /**
-     * Internal daemon seam (#2055): runs `write` of the shared E2EE member
-     * entries under the enrollment gate, after rereading that the OS entry and
-     * `device.json` still hold this run's enrollment. Otherwise it writes
-     * nothing and loses the binding as a renewal does. Never hold it across
-     * network I/O.
-     */
-    underBinding<T>(write: () => Promise<T>, signal?: AbortSignal): Promise<T>;
-    /** Under the enrollment gate: the OS entry still holds `record`, or the binding is lost. */
-    private checkBinding;
     /** The OS entry no longer holds this store's enrollment: drop the cached record, stop renewing and report it. Always throws `error`. */
     private loseBinding;
     private underEnrollmentGate;
