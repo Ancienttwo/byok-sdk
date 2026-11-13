@@ -607,7 +607,7 @@ export interface PiProviderLaunchDependencies {
 }
 
 /**
- * 与 client process-tree 的 NUL 检查同语义，core 下次加公开面时合成一份 (#2043).
+ * 与 client util/spawn-input 的 NUL 检查同语义，core 下次加公开面时合成一份 (#2043).
  * Node's rejection quotes a NUL-bearing input escaped, which credential redaction misses,
  * so only the argument position or env name is reported; `for...in` matches Node's
  * inclusion of inherited enumerable env keys.

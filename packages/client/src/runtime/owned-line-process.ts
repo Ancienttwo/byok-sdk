@@ -1,7 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import {
-  adoptOwnedProcessTree, disposeOwnedProcessTree, rememberOwnedDescendants, withOwnedProcessTree, assertNoNulSpawnInput,
+  adoptOwnedProcessTree, disposeOwnedProcessTree, rememberOwnedDescendants, withOwnedProcessTree,
 } from '../adapters/process-tree.js';
+import { assertNoNulSpawnInput } from '../util/spawn-input.js';
 import { createJsonlLineDecoder } from '../util/jsonl-lines.js';
 
 const MAX_LINE_BYTES = 1024 * 1024;

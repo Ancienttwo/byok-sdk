@@ -15,7 +15,7 @@ import {
 } from '@modelcontextprotocol/client';
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/client/validators/cf-worker';
 import { McpAuthorityError } from './authority-error.js';
-import { assertNoNulSpawnInput } from '../adapters/process-tree.js';
+import { assertNoNulSpawnInput } from '../util/spawn-input.js';
 
 export { McpAuthorityError };
 
