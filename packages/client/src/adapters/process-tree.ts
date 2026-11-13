@@ -10,10 +10,21 @@ import { processSignalState } from '../util/process-signal-state.js';
 const DEFAULT_TERM_GRACE_MS = 750;
 const DEFAULT_KILL_GRACE_MS = 2_000;
 const POLL_MS = 20;
-/** How long an async `ps` read may run before it is killed and the read refused (#2105). */
-const PROCESS_TABLE_TIMEOUT_MS = 5_000;
-/** The vendored synchronous read's output cap. */
-const PROCESS_TABLE_MAX_BYTES = 16 * 1024 * 1024;
+/**
+ * Time limit of each synchronous `ps` and `sysctl` run here; past it the
+ * command is SIGKILLed and the read fails as exit unconfirmed (#2105). These
+ * runs block the event loop, so a path's worst-case block is its run count
+ * times this limit. Runs per path at most: a disposal 3 (before the SIGTERM,
+ * before the SIGKILL, before killing what left the group), 2 after
+ * {@link requestOwnedProcessTreeTermination} took the first, so an interrupt
+ * that first calls {@link rememberOwnedDescendants} reaches 4 (8 s); a cleanup
+ * after a platform-command timeout (#2091) disposes, 3 (6 s); an adoption
+ * record 2 with the boot id; the host-exit sweep 1. The owned-root observer
+ * adds one run per {@link OWNED_TREE_OBSERVE_MS} while a root still runs.
+ * Residual: a `ps` stuck in uninterruptible kernel sleep outlives SIGKILL,
+ * and `spawnSync` still waits for it.
+ */
+const PROCESS_COMMAND_TIMEOUT_MS = 2_000;
 /** POSIX: how often a running owned root's descendants are read. A process started and orphaned inside one period is not seen. */
 export const OWNED_TREE_OBSERVE_MS = 1_000;
 
@@ -51,8 +62,8 @@ export interface OwnedProcessTreeOptions {
   spawnFn?: typeof spawn;
   /** DI seam for liveness probing — defaults to `process.kill`. */
   killFn?: KillFn;
-  /** DI seam for the POSIX process-table reads — defaults to {@link readProcessTableBounded}. */
-  readProcessTableFn?: () => Promise<ProcessTable>;
+  /** DI seam for the POSIX process-table reads — defaults to {@link readOwnedProcessTable}. */
+  readProcessTableFn?: () => ProcessTable;
 }
 
 function defaultKill(pid: number, signal: NodeJS.Signals | number): void {
@@ -88,20 +99,16 @@ export function withOwnedProcessTree<T extends SpawnOptions>(options: T): T {
 const observedRoots = new Map<ChildProcess, number>();
 let observer: NodeJS.Timeout | undefined;
 
-let observing = false;
-
 function observeOwnedRoots(): void {
-  // A read still running when the next period starts is not doubled.
-  if (observing) return;
-  observing = true;
-  readProcessTableBounded().then((table) => {
-    for (const [child, pid] of observedRoots) if (isRunning(child)) rememberDescendants(child, pid, table);
-  }, () => {
+  let table: ProcessTable;
+  try {
+    table = readOwnedProcessTable();
+  } catch {
     // A timer has no caller to fail. The previous observation stands, and
     // disposal reads the table again before it signals anything.
-  }).finally(() => {
-    observing = false;
-  });
+    return;
+  }
+  for (const [child, pid] of observedRoots) rememberDescendants(child, pid, () => table);
 }
 
 function observeOwnedRoot(child: ChildProcess, pid: number): void {
@@ -153,7 +160,7 @@ function terminateOwnedTreesForHostExit(): void {
   // One read of the process table serves every target (OAR 0.37.0 `ownership.ts`).
   let table: ProcessTable | null = null;
   const read = (): ProcessTable => {
-    table ??= readProcessTable();
+    table ??= readOwnedProcessTable();
     return table;
   };
   for (const [child, target] of hostExitTargets) {
@@ -246,7 +253,7 @@ export function readBootId(
   platform: NodeJS.Platform,
   deps: { readFile: (file: string) => string; sysctl: (key: string) => string } = {
     readFile: (file) => readFileSync(file, 'utf8'),
-    sysctl: (key) => execFileSync('/usr/sbin/sysctl', ['-n', key], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }),
+    sysctl: (key) => execFileSync('/usr/sbin/sysctl', ['-n', key], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: PROCESS_COMMAND_TIMEOUT_MS, killSignal: 'SIGKILL' }),
   },
 ): string {
   let id: string;
@@ -289,8 +296,8 @@ export interface AdoptOwnedProcessTreeOptions {
   killFn?: KillFn;
   /** DI seam for the win32 host-exit sweep — defaults to `spawnSync` of the tool from `%SystemRoot%\System32`. */
   spawnSyncFn?: typeof spawnSync;
-  /** DI seam for the POSIX ledger record's process-table read — defaults to {@link readProcessTableBounded}. */
-  readProcessTableFn?: () => Promise<ProcessTable>;
+  /** DI seam for the POSIX ledger record's process-table read — defaults to {@link readOwnedProcessTable}. */
+  readProcessTableFn?: () => ProcessTable;
 }
 
 /**
@@ -378,7 +385,7 @@ export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOption
 
   if (platform !== 'win32') {
     observeOwnedRoot(options.child, pid);
-    await recordOwnedGroup(options.child, options.label, options.readProcessTableFn ?? readProcessTableBounded);
+    await recordOwnedGroup(options.child, options.label, options.readProcessTableFn ?? readOwnedProcessTable);
     return;
   }
   const job = await (options.jobObject ? options.jobObject.assign(pid) : defaultJobObject.assign(pid, options.nativeAssetRoot));
@@ -396,7 +403,7 @@ export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOption
  * unreadable table, or a child missing while running or not leading its own
  * group, throws, and nothing it owns is left unrecorded.
  */
-export function ownedProcessGroupRecord(child: ChildProcess, label: string, read: () => ProcessTable = readProcessTable, platform: NodeJS.Platform = process.platform): OwnedProcessGroupRecord | undefined {
+export function ownedProcessGroupRecord(child: ChildProcess, label: string, read: () => ProcessTable = readOwnedProcessTable, platform: NodeJS.Platform = process.platform): OwnedProcessGroupRecord | undefined {
   const pid = child.pid!;
   if (platform === 'win32') {
     // win32 has no group: the root alone, named by its pid and start time.
@@ -415,12 +422,11 @@ export function ownedProcessGroupRecord(child: ChildProcess, label: string, read
   return { pgid: pid, rootStart: root.start, bootId: currentBootId(), writerPid: process.pid, writerStart: writer.start };
 }
 
-async function recordOwnedGroup(child: ChildProcess, label: string, read: () => Promise<ProcessTable>): Promise<void> {
+async function recordOwnedGroup(child: ChildProcess, label: string, read: () => ProcessTable): Promise<void> {
   if (ownedGroupLedgers.size === 0) return;
-  const table = await read();
   // Fail closed: an owned tree whose record could not be written is refused,
   // like a win32 tree whose job assignment failed.
-  const record = ownedProcessGroupRecord(child, `${label} runtime`, () => table);
+  const record = ownedProcessGroupRecord(child, `${label} runtime`, read);
   if (record === undefined) return;
   ownedGroupRecords.set(child, record);
   await Promise.all([...ownedGroupLedgers].map((ledger) => ledger.adopted(record)));
@@ -524,7 +530,7 @@ export async function reapOwnedProcessGroups(
   if (platform === 'win32' || groups.length === 0) return { found: 0, terminated: 0, survived: 0, liveWriter: 0, ended: [], survivors: [] };
   const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
   const readable = (table: ProcessTable): boolean => table.has(process.pid);
-  const table = await readProcessTableBounded();
+  const table = readOwnedProcessTable();
   if (!readable(table)) {
     throw new RuntimeDisposalFailure({
       stage: 'quiescence',
@@ -570,7 +576,7 @@ export async function reapOwnedProcessGroups(
   let live = found;
   const deadline = Date.now() + killGraceMs;
   while (live.length > 0) {
-    const current = await readProcessTableBounded();
+    const current = readOwnedProcessTable();
     if (readable(current)) live = live.filter((group) => held(group, current));
     if (live.length === 0 || Date.now() >= deadline) break;
     await new Promise<void>((resolve) => {
@@ -609,7 +615,9 @@ function isRunning(child: ChildProcess): boolean {
  * entry seen before stays while `table` shows the same process (same start
  * time), so one whose parent exited is still remembered.
  */
-function rememberDescendants(child: ChildProcess, pid: number, current: ProcessTable): void {
+function rememberDescendants(child: ChildProcess, pid: number, read: () => ProcessTable): void {
+  if (!isRunning(child)) return;
+  const current = read();
   const state = stateFor(child);
   const remembered = new Map<number, ProcessEntry>();
   for (const entry of state.descendants) if (current.get(entry.pid)?.start === entry.start) remembered.set(entry.pid, entry);
@@ -628,82 +636,48 @@ function rememberDescendants(child: ChildProcess, pid: number, current: ProcessT
  */
 export function rememberOwnedDescendants(child: ChildProcess): void {
   const pid = observedRoots.get(child);
-  if (pid !== undefined && isRunning(child)) rememberDescendants(child, pid, readProcessTable());
+  if (pid !== undefined) rememberDescendants(child, pid, readOwnedProcessTable);
 }
 
 /**
- * The process table, read without blocking the event loop: the vendored read
- * runs `ps` synchronously, and a `ps` that hangs would stall every timer the
- * caller races it against (#2105). Past `timeoutMs` the `ps` is SIGKILLed and
- * the read rejects without waiting for it to exit (one stuck in the kernel
- * never does): its outcome is unconfirmed, never an empty table. procfs and
- * Windows keep the vendored read; procfs runs no command.
+ * The process table now, synchronously. The vendored `ps` read sends SIGTERM
+ * at its deadline, which a hung `ps` may ignore, so `ps` runs here with
+ * {@link PROCESS_COMMAND_TIMEOUT_MS} and SIGKILL. A timeout throws: the
+ * outcome is unconfirmed, never an empty table. procfs and Windows keep the
+ * vendored read. `command` is a test seam.
  */
-export function readProcessTableBounded(
-  options: { source?: 'procfs' | 'ps' | 'windows'; command?: string; timeoutMs?: number } = {},
-): Promise<ProcessTable> {
-  const source = options.source ?? (process.platform === 'linux' ? 'procfs' : (process.platform === 'win32' ? 'windows' : 'ps'));
-  if (source !== 'ps') return Promise.resolve().then(() => readProcessTable(source));
-  const timeoutMs = options.timeoutMs ?? PROCESS_TABLE_TIMEOUT_MS;
-  const started = performance.now();
-  return new Promise<ProcessTable>((resolve, reject) => {
-    let settled = false;
-    const fail = (reason: string): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(new Error(`Process table ps: ${reason} after ${(performance.now() - started).toFixed(0)} ms`));
-    };
-    const stop = (reason: string): void => {
-      try {
-        ps.kill('SIGKILL');
-      } catch {
-        // Kill failure is reported as `error`; the read is refused either way.
-      }
-      fail(reason);
-    };
-    const timer = setTimeout(() => stop('timeout, exit unconfirmed'), timeoutMs);
+export function readOwnedProcessTable(
+  source: 'procfs' | 'ps' | 'windows' = process.platform === 'linux' ? 'procfs' : (process.platform === 'win32' ? 'windows' : 'ps'),
+  command = '/bin/ps',
+): ProcessTable {
+  if (source !== 'ps') return readProcessTable(source);
+  let output: string;
+  try {
     // By absolute path, as the vendored read does: the host's PATH may not name /bin.
-    const ps = spawn(options.command ?? '/bin/ps', ['-A', '-o', 'pid=,ppid=,pgid=,lstart='], {
+    output = execFileSync(command, ['-A', '-o', 'pid=,ppid=,pgid=,lstart='], {
+      encoding: 'utf8',
       env: { ...process.env, LC_ALL: 'C' },
       stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: PROCESS_COMMAND_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+      maxBuffer: 16 * 1024 * 1024,
     });
-    const chunks: Buffer[] = [];
-    let bytes = 0;
-    ps.stdout!.on('data', (chunk: Buffer) => {
-      bytes += chunk.length;
-      if (bytes > PROCESS_TABLE_MAX_BYTES) stop('output_too_large');
-      else chunks.push(chunk);
-    });
-    ps.once('error', (error: NodeJS.ErrnoException) => fail(`spawn_failed (${error.code ?? 'unknown'})`));
-    ps.once('close', (code, signal) => {
-      if (code !== 0) {
-        fail(`command_failed (${code ?? signal})`);
-        return;
-      }
-      let table: ProcessTable;
-      try {
-        table = parseProcessPs(Buffer.concat(chunks).toString('utf8')).table;
-      } catch {
-        fail('invalid_output');
-        return;
-      }
-      if (!table.has(process.pid)) {
-        fail('missing_host');
-        return;
-      }
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(table);
-    });
-  });
+  } catch (cause) {
+    // Node's error embeds the output and the command line; only its code leaves.
+    const code = (cause as NodeJS.ErrnoException).code;
+    throw new Error(code === 'ETIMEDOUT'
+      ? `Process table ps: timed out after ${PROCESS_COMMAND_TIMEOUT_MS} ms, exit unconfirmed`
+      : `Process table ps: read failed (${code ?? 'exit status'})`);
+  }
+  const { table } = parseProcessPs(output);
+  if (!table.has(process.pid)) throw new Error('Process table ps: missing_host');
+  return table;
 }
 
 /** Disposal's process-table read: an unreadable table fails the disposal typed, naming the read, and nothing is signalled on a guess. */
-async function readDisposalTable(options: OwnedProcessTreeOptions): Promise<ProcessTable> {
+function readDisposalTable(options: OwnedProcessTreeOptions): ProcessTable {
   try {
-    return await (options.readProcessTableFn ?? readProcessTableBounded)();
+    return (options.readProcessTableFn ?? readOwnedProcessTable)();
   } catch (cause) {
     throw new RuntimeDisposalFailure({
       stage: 'signal',
@@ -717,12 +691,12 @@ async function readDisposalTable(options: OwnedProcessTreeOptions): Promise<Proc
  * the same process (same start time), and their groups; never the host or its
  * group (OAR `killEntries`). Returns the pids signalled, for the quiescence wait.
  */
-async function killDescendants(child: ChildProcess, table: () => Promise<ProcessTable>, more: readonly ProcessEntry[] = []): Promise<number[]> {
+function killDescendants(child: ChildProcess, table: () => ProcessTable, more: readonly ProcessEntry[] = []): number[] {
   const state = stateFor(child);
   const entries = [...state.descendants, ...more];
   state.descendants = [];
   if (entries.length === 0) return [];
-  const current = await table();
+  const current = table();
   killEntries(entries, current);
   return [...new Set(entries
     .filter((entry) => entry.pid !== process.pid && current.get(entry.pid)?.start === entry.start)
@@ -893,7 +867,7 @@ export async function requestOwnedProcessTreeTermination(options: OwnedProcessTr
     state.requested = true;
     return;
   }
-  if (isRunning(options.child)) rememberDescendants(options.child, pid, await readDisposalTable(options));
+  rememberDescendants(options.child, pid, () => readDisposalTable(options));
   await signalGroup(pid, 'SIGTERM', options.label, options.killFn ?? defaultKill);
   stateFor(options.child).requested = true;
 }
@@ -1013,19 +987,19 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
     return;
   }
 
-  const readTable = (): Promise<ProcessTable> => readDisposalTable(options);
+  const readTable = (): ProcessTable => readDisposalTable(options);
   if (groupExists(pid, options.label, kill) && !terminationState.get(options.child)?.requested) {
-    if (isRunning(options.child)) rememberDescendants(options.child, pid, await readTable());
+    rememberDescendants(options.child, pid, readTable);
     await signalGroup(pid, 'SIGTERM', options.label, kill);
     stateFor(options.child).requested = true;
   }
   const killed: number[] = [];
   if (!(await waitUntil(() => groupExists(pid, options.label, kill), termGraceMs))) {
     // Read again first: the root may have started more since the SIGTERM.
-    const table = await readTable();
+    const table = readTable();
     const more = isRunning(options.child) ? descendantsOf(table, pid) : [];
     await signalGroup(pid, 'SIGKILL', options.label, kill);
-    killed.push(...await killDescendants(options.child, async () => table, more));
+    killed.push(...killDescendants(options.child, () => table, more));
     if (!(await waitUntil(() => groupExists(pid, options.label, kill), killGraceMs))) {
       throw new RuntimeDisposalFailure({
         stage: 'quiescence',
@@ -1035,7 +1009,7 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
   }
   // The group is gone. What the root left running outside it, from the read
   // before the SIGTERM, goes now (OAR does this when the root exits).
-  killed.push(...await killDescendants(options.child, readTable));
+  killed.push(...killDescendants(options.child, readTable));
   if (!(await waitUntil(() => killed.some((descendant) => processExists(descendant, options.label, kill)), killGraceMs))) {
     throw new RuntimeDisposalFailure({
       stage: 'quiescence',
