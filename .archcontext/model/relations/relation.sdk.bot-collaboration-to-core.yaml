@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.bot-collaboration-to-core",
+  "kind": "depends-on",
+  "source": "module.sdk.bot-collaboration",
+  "target": "module.sdk.core",
+  "synchrony": "synchronous",
+  "intent": "Reference the StoreCompatibility type in the published root declaration; core is currently a development dependency (see #2076)."
+}

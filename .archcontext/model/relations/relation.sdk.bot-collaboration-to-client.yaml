@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.bot-collaboration-to-client",
+  "kind": "depends-on",
+  "source": "module.sdk.bot-collaboration",
+  "target": "module.sdk.client",
+  "synchrony": "synchronous",
+  "intent": "Compose the local Host and its device integration."
+}
