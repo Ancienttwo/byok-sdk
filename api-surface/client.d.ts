@@ -11212,11 +11212,6 @@ export declare const LAUNCHD_UNLOAD_TIMEOUT_MS = 10000;
  *   first `onfailure` delay.
  * - `StandardOutPath`/`StandardErrorPath` receive only early-boot crash
  *   output; the daemon writes its own rotated log (`service-log.ts`).
- * - `workingDirectory` is the job's home: `EnvironmentVariables.HOME` is set
- *   to it (#2017). launchd otherwise starts a `gui/<uid>` job with the
- *   account's home, so an install under another HOME (a scratch test
- *   install) would run against the account's real home-relative paths. The
- *   `--service` login-shell step seeds the shell with this HOME and keeps it.
  */
 export declare function generateLaunchdPlist(def: {
     label: string;
@@ -11304,14 +11299,19 @@ import { type ApplyLoginShellEnvironmentOptions, type ServiceEnvironmentStatus }
  * minimal environment. {@link applyLoginShellEnvironment} replaces this
  * process's `process.env` with the login-shell snapshot
  * (`../login-shell-environment.ts`, the base of every runtime environment)
- * and puts back the `BYOK_*` values this process had, so that the daemon
- * resolves its own config and binaries as the user's terminal would.
+ * and puts back the `HOME` and `BYOK_*` values this process had, so that the
+ * daemon resolves its own config and binaries as the user's terminal would.
+ *
+ * `HOME` is the home the service manager gave the job (the launchd plist pins
+ * the lifecycle's home, #2017), so an rc that resets it cannot move the daemon
+ * to another home. Only `HOME` and `BYOK_*` are pinned: `PATH`, `XDG_*` and
+ * other values an rc derives from a different home stay as the rc set them.
  */
 /** The `byok-agent start` flag generated service definitions pass. */
 export declare const SERVICE_FLAG = "--service";
 /**
  * Replaces `process.env` with this process's login-shell snapshot, keeping
- * this process's own `BYOK_*` values. Runs once per process: later calls
+ * this process's own `HOME` and `BYOK_*` values. Runs once per process: later calls
  * return the first call's result. On failure `process.env` is left exactly as
  * inherited. Never throws.
  */
