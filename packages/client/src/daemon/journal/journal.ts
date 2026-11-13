@@ -346,9 +346,9 @@ export interface LocalTaskJournal {
    * cancellation fails its hash or enrollment check, names another task id,
    * or carries a `seq` different from its row's. No other row is part of this
    * contract: a confirmed terminal's envelopes, withheld rows and the task's
-   * other envelopes may be deleted without verification. An implementation
-   * that ignores `cutoff` still compiles but can delete unexpired or replaced
-   * evidence; the SDK does not repeat these checks.
+   * other envelopes may be deleted without verification (#2054). An
+   * implementation that ignores `cutoff` still compiles but can delete
+   * unexpired or replaced evidence; the SDK does not repeat these checks.
    */
   pruneConfirmedJournalTask(taskId: string, cutoff: Date): Promise<boolean>;
   /** Bounded WAL checkpoint + incremental vacuum. Maintenance only; never on the envelope path. */
