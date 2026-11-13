@@ -34,7 +34,8 @@ by side. See `packages/client/src/bin/commands/service.ts` for every flag
 ## What gets generated
 
 A plist along these lines (see `packages/client/src/lifecycle/launchd.ts`'s
-`generateLaunchdPlist` for the exact, unit-tested template):
+`createLaunchdLifecycle` for the exact, unit-tested template; the public
+`generateLaunchdPlist` renders the same plist without `EnvironmentVariables`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -81,7 +82,9 @@ A plist along these lines (see `packages/client/src/lifecycle/launchd.ts`'s
 - **`EnvironmentVariables.HOME`** (#2017) is the home the install resolved,
   the same directory the plist and its paths were placed under. launchd would
   otherwise start the job with the account's home, so an install run under a
-  scratch `HOME` keeps its service on the scratch tree.
+  scratch `HOME` keeps its service on the scratch tree. `--service` keeps this
+  `HOME` even if your shell rc resets it; `PATH` and `XDG_*` values your rc
+  derives from `$HOME` are not corrected.
 - **`KeepAlive.SuccessfulExit: false`** is the exit-code contract: launchd
   restarts the job after any exit but 0. This is delegated entirely to launchd
   — the SDK never runs its own in-process supervisor.

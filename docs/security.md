@@ -725,7 +725,10 @@ changes `process.env`; `--service` additionally replaces the daemon's
 the user's terminal would. The shell never receives the daemon's `BYOK_*`
 values. Captured `BYOK_*` names are dropped and, under `--service`, the
 daemon's own pre-capture `BYOK_*` values are restored, so rc files cannot set
-SDK control variables; task children still receive no `BYOK_*` at all. Only
+SDK control variables; task children still receive no `BYOK_*` at all. The
+daemon's pre-capture `HOME` is restored the same way (#2017), so an rc cannot
+move the service to another home; values an rc derives from `$HOME` are not
+corrected. Only
 the source, a closed failure code and the shell's basename are recorded
 (`environment-resolved` in `audit.jsonl`, shown by `status`, `doctor` and the
 support bundle) — never variable values or paths. Variable names leave the

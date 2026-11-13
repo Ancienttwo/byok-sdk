@@ -31,8 +31,8 @@ describe('lifecycle/launchd: generateLaunchdPlist', () => {
     // #1097: the unit names only the stable launcher — no versioned path, no args.
     expect(xml).toContain('<key>ProgramArguments</key>\n  <array>\n    <string>/Users/t/.byok/acme/service/com.acme.agent.launcher.sh</string>\n  </array>');
     expect(xml).toContain('<key>WorkingDirectory</key>\n  <string>/Users/t</string>');
-    // #2017: HOME is the only variable the plist sets.
-    expect(xml).toContain('<key>EnvironmentVariables</key>\n  <dict>\n    <key>HOME</key>\n    <string>/Users/t</string>\n  </dict>');
+    // #2017: the public generator takes no home, so it pins none.
+    expect(xml).not.toContain('EnvironmentVariables');
     expect(xml).toContain('<key>RunAtLoad</key>\n  <true/>');
     // Exit-code contract: only exit 0 stops (see exit-codes.ts).
     expect(xml).toContain('<key>KeepAlive</key>\n  <dict>\n    <key>SuccessfulExit</key>\n    <false/>\n  </dict>');
