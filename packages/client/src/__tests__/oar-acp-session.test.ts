@@ -92,6 +92,70 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     expect(request).toHaveBeenCalledTimes(1);
     expect(kernel.records().flatMap(record => record.kind === 'frame' ? record.body.events : []).filter(event => event.kind === 'turn_ended')).toHaveLength(1);
   });
+  function cancelHarness(notify: ReturnType<typeof vi.fn>) {
+    const reply = Promise.withResolvers<{ stopReason: string }>();
+    const runtime = {
+      spawned: Promise.resolve(), closed: false, exitCode: null,
+      connection: { agent: { request: vi.fn(() => reply.promise), notify } },
+      observeDescendants: () => {}, kill: vi.fn(),
+    } as unknown as AcpProcess;
+    const kernel = createSessionKernel('cancel-write');
+    const turns = createAcpTurns({ kernel, runtime, profile: { ...antigravityAcpProfile, abortTimeoutMs: 60_000 },
+      usageGate: createUsageUpdateGate(), capabilities: { images: false }, promptUsage: () => null });
+    expect(turns.begin(null, 'first').kind).toBe('accepted');
+    const state = turns.active()!;
+    const ended = async () => {
+      await vi.waitFor(() => expect(turns.active()).toBeNull());
+      const event = kernel.records().flatMap(record => record.kind === 'frame' ? record.body.events : []).find(e => e.kind === 'turn_ended');
+      return event?.kind === 'turn_ended' ? event.outcome.kind : undefined;
+    };
+    return { reply, runtime, turns, state, ended };
+  }
+  const writeRejected = { kind: 'rejected', code: 'error', reason: 'cancel write failed' };
+  it('leaves the turn as it was when the cancel write rejects (#1957)', async () => {
+    const write = Promise.withResolvers<void>();
+    const notify = vi.fn().mockReturnValueOnce(write.promise).mockResolvedValue(undefined);
+    const { reply, turns, state, ended } = cancelHarness(notify);
+    const first = turns.abort(state);
+    const during = turns.abort(state);
+    write.reject(new Error('cancel write failed'));
+    expect([await first, await during]).toEqual([writeRejected, writeRejected]);
+    expect(state.abortRequested).toBe(false);
+    reply.reject(new Error('unrelated prompt error'));
+    expect(await ended()).toBe('failed');
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+  it('publishes a prompt failure that precedes a failing cancel write as that failure (#1957)', async () => {
+    const write = Promise.withResolvers<void>();
+    const { reply, turns, state, ended } = cancelHarness(vi.fn(() => write.promise));
+    const abort = turns.abort(state);
+    reply.reject(new Error('unrelated prompt error'));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(turns.active()).toBe(state);
+    write.reject(new Error('cancel write failed'));
+    expect(await abort).toEqual(writeRejected);
+    expect(await ended()).toBe('failed');
+  });
+  it('ends a prompt that answers during the cancel write with its answer, and the fallback stops nothing (#1957)', async () => {
+    const write = Promise.withResolvers<void>();
+    const { reply, runtime, turns, state, ended } = cancelHarness(vi.fn(() => write.promise));
+    const abort = turns.abort(state);
+    reply.resolve({ stopReason: 'end_turn' });
+    write.resolve();
+    expect(await abort).toEqual({ kind: 'accepted' });
+    expect(await ended()).toBe('completed');
+    expect(state.fallback).toBeNull();
+    expect(runtime.kill).not.toHaveBeenCalled();
+  });
+  it('retries a cancel whose first write rejected (#1957)', async () => {
+    const notify = vi.fn().mockRejectedValueOnce(new Error('cancel write failed')).mockResolvedValue(undefined);
+    const { turns, state } = cancelHarness(notify);
+    expect(await turns.abort(state)).toEqual(writeRejected);
+    expect(await turns.abort(state)).toEqual({ kind: 'accepted' });
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(state.fallback).not.toBeNull();
+    clearTimeout(state.fallback!);
+  });
   it('passes exactly the explicit env to the agent and to hosted terminals', async () => {
     vi.stubEnv('BYOK_ACP_AMBIENT_SECRET', 'must not inherit');
     const { dir, log } = workspace();
