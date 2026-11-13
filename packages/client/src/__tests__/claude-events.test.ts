@@ -720,7 +720,6 @@ describe('a refused or unwritten interrupt leaves the turn as it was (#2037)', (
   it.each([
     ['an interrupt write that throws', ['interrupt', 'throw'], () => {}],
     ['an interrupt write that rejects later', ['interrupt', 'reject'], () => {}],
-    ['an interrupt write that never completes', ['interrupt', 'hang'], () => {}],
     ['an interrupt Claude refuses after its result', [], (claude: ReturnType<typeof memoryClaude>) => { answer(claude, 1, 'error'); }],
   ] as const)('%s: the abort is rejected, no fallback kill, and the result that arrived meanwhile completes', async (_label, args, settle) => {
     const { claude, stream } = await opened(...args);
@@ -739,7 +738,31 @@ describe('a refused or unwritten interrupt leaves the turn as it was (#2037)', (
     claude.send(success);
     await vi.advanceTimersByTimeAsync(10_000);
     expect((await abort).response.body.kind).toBe('accepted');
+    expect(claude.kills()).toBe(1);
+    claude.exit(null);
     expect(outcome(stream)).toBe('aborted');
+  });
+  it('a fallback kill with queued input does not dispatch the next turn to the killed process', async () => {
+    const { claude, stream } = await opened();
+    expect((await stream.raw.queue('next', { inputId: 'next' })).response.body.kind).toBe('accepted');
+    const abort = stream.raw.abort();
+    claude.send(success);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect((await abort).response.body.kind).toBe('accepted');
+    expect(claude.kills()).toBe(1);
+    claude.exit(null);
+    expect(outcome(stream)).toBe('aborted');
+    expect(claude.written.filter(frame => (frame as { type?: string }).type === 'user')).toHaveLength(1);
+  });
+  it.each([
+    ['unanswered', () => {}],
+    ['answered before its acknowledgement', (claude: ReturnType<typeof memoryClaude>) => { answer(claude, 1, 'success'); }],
+  ] as const)('an interrupt write never acknowledged and %s counts as written: the abort is accepted and the fallback kills', async (_label, settle) => {
+    const { claude, stream } = await opened('interrupt', 'hang');
+    const abort = stream.raw.abort();
+    settle(claude);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect((await abort).response.body.kind).toBe('accepted');
     expect(claude.kills()).toBe(1);
   });
   it('a refused second interrupt keeps the mark of an accepted first one', async () => {
