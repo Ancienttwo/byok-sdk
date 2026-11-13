@@ -25,10 +25,6 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
   const label = deps.label ?? 'codex app-server';
   return (command: string, args: readonly string[], options: { readonly env: Readonly<Record<string, string>>; readonly cwd?: string }) => {
     if (options.env === undefined) throw new Error('owned line process requires an explicit filtered environment');
-    // Node's own rejection quotes the value in escaped form, which literal credential redaction cannot match.
-    for (const [name, value] of Object.entries(options.env)) {
-      if (value.includes('\0')) throw new Error(`owned line process env variable ${name} contains a NUL byte`);
-    }
     const child = (deps.spawnFn ?? spawn)(command, [...args], withOwnedProcessTree({
       ...('cwd' in options ? { cwd: options.cwd } : {}), env: options.env,
       stdio: ['pipe', 'pipe', 'pipe'],

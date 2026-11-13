@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { spawn, type SpawnOptions } from 'node:child_process';
 import { createOwnedLineProcessSpawn, spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { __hostExitBackstopForTests } from '../adapters/process-tree';
+import { createOwnedTerminalSpawn } from '../runtime/owned-terminal-process';
+import { PiRpcClient } from '../adapters/pi/rpc-client';
 import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/95c6547/runtimes/codex/app-server-client';
 
 const checkedSpawn: SpawnLineProcess = spawnOwnedLineProcess;
@@ -48,12 +50,11 @@ describe('BYOK owned line process', () => {
     await child.spawned; expect(await line).toBe('你好'); expect(await child.exited).toBe(7); expect(exited).toHaveBeenCalledWith(7);
   });
 
-  it('rejects a NUL-bearing env value by name without echoing the value', () => {
-    const spawnFn = vi.fn((command: string, args: readonly string[], options: SpawnOptions) => spawn(command, args, options));
-    const start = () => createOwnedLineProcessSpawn({ spawnFn })(process.execPath, ['-e', ''], { env: { BYOK_TEST_KEY: 'fake-key\0tail' } });
-    expect(start).toThrow('env variable BYOK_TEST_KEY contains a NUL byte');
-    expect(start).not.toThrow(/fake-key|tail/);
-    expect(spawnFn).not.toHaveBeenCalled();
+  it('rejects a NUL-bearing env value by name on every owned spawn', () => {
+    const env = { BYOK_TEST_KEY: 'fake-key\0tail' };
+    for (const start of [() => createOwnedLineProcessSpawn()(process.execPath, [], { env }),
+      () => createOwnedTerminalSpawn()(process.execPath, [], { cwd: '.', env, shell: false }),
+      () => new PiRpcClient({ command: process.execPath, args: [], cwd: '.', env })]) expect.soft(start).toThrow(/^spawn env variable BYOK_TEST_KEY contains a NUL byte$/);
   });
 
   it('rejects spawn failure and still settles its exit receipt', async () => {
