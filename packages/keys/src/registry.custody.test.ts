@@ -242,9 +242,52 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       inFlight -= 1;
       return has(name);
     });
-    await expect(registry().list()).rejects.toThrow('store refused');
+    await expect(registry().list()).rejects.toMatchObject({ code: 'PROVIDER_SECRET_STORE_FAILED' });
     expect(inFlight).toBe(0);
     expect(held).toBe(0);
+  });
+
+  it('no public method passes on a store error that echoes a key (#2029)', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    const echo = async () => { throw new Error(`echo ${OLD_KEY}`, { cause: new Error(NEW_KEY) }); };
+    const echoing = Object.assign(Object.create(secrets) as InMemorySecretStore, { get: echo, has: echo, set: echo, delete: echo });
+    const subject = new ProviderRegistry({ now: () => new Date(clock), profileStore: profiles, secretStore: echoing });
+    const calls = [
+      () => subject.get('openai'), () => subject.list(), () => subject.configure(OPENAI, NEW_KEY),
+      () => subject.configure({ ...OPENAI, model: 'gpt-5.2-mini' }), () => subject.replaceSecret('openai', NEW_KEY),
+      () => subject.setDefaultModelProvider('openai'), () => subject.resolveDefaultModelProvider(), () => subject.delete('openai'),
+    ];
+    for (const call of calls) {
+      const error = await call().then(() => undefined, (thrown: unknown) => thrown as Error);
+      expect(error).toMatchObject({ code: 'PROVIDER_SECRET_STORE_FAILED' });
+      expect(JSON.stringify([error!.message, error!.stack, String(error!.cause)])).not.toMatch(new RegExp(`${OLD_KEY}|${NEW_KEY}`, 'u'));
+    }
+  });
+
+  it('a committed change is returned even when a later read would fail (#2023)', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    let committed = false;
+    const commit = profiles.commitCustody.bind(profiles);
+    vi.spyOn(profiles, 'commitCustody').mockImplementation(async (change) => { await commit(change); committed = true; });
+    const setEnabled = profiles.setEnabled.bind(profiles);
+    vi.spyOn(profiles, 'setEnabled').mockImplementation(async (ref) => { const profile = await setEnabled(ref); committed = true; return profile; });
+    const failAfterCommit = <T extends object>(target: T, method: keyof T) => {
+      const original = (target[method] as (...args: unknown[]) => unknown).bind(target);
+      vi.spyOn(target, method as never).mockImplementation((async (...args: unknown[]) => {
+        if (committed) throw new Error('read after commit');
+        return original(...args);
+      }) as never);
+    };
+    failAfterCommit(secrets, 'has');
+    failAfterCommit(profiles, 'get');
+    failAfterCommit(profiles, 'getPending');
+
+    await expect(registry().replaceSecret('openai', NEW_KEY)).resolves.toMatchObject({ secret_configured: true, configuration_pending: false });
+    committed = false;
+    await expect(registry().configure({ ...OPENAI, model: 'gpt-5.2-mini' }, OLD_KEY))
+      .resolves.toMatchObject({ model: 'gpt-5.2-mini', secret_configured: true, configuration_pending: false });
+    committed = false;
+    await expect(registry().setDefaultModelProvider('openai')).resolves.toMatchObject({ enabled: true, secret_configured: true });
   });
 
   it('remove goes through the same pending path and keeps the watermark tombstone', async () => {

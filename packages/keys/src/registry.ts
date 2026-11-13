@@ -158,6 +158,16 @@ async function secretStoreCall<T>(call: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * The status a credential write returns, built from facts the call itself
+ * established under the lock (the committed profile, whether it holds a key,
+ * and the marker its commit cleared) instead of a read after the commit, so a
+ * failed read can never report a committed change as failed.
+ */
+function committedStatus(profile: ModelProviderProfile, secretConfigured: boolean): ProviderStatus {
+  return providerStatusOf(profile, { secretConfigured, configurationPending: false });
+}
+
 /** The credential-free status projection of a profile. */
 export function providerStatusOf(
   profile: ModelProviderProfile,
@@ -284,8 +294,7 @@ export class ProviderRegistry {
       if (profile.auth_mode === 'none') {
         await secretStoreCall(() => this.#secrets.delete(secretName));
       }
-      const saved = (await this.#profiles.get(profileRef)) ?? profile;
-      return this.#status(saved);
+      return committedStatus(profile, profile.auth_mode !== 'none');
     });
   }
 
@@ -314,7 +323,7 @@ export class ProviderRegistry {
         secret,
         { profileRef, mutation: { kind: 'none' }, clearPending: true },
       );
-      return this.#status(profile);
+      return committedStatus(profile, true);
     });
   }
 
@@ -330,7 +339,7 @@ export class ProviderRegistry {
         operationGeneration: null,
         since: this.#now().toISOString(),
       });
-      await this.#secrets.delete(modelProviderSecretName(profileRef));
+      await secretStoreCall(() => this.#secrets.delete(modelProviderSecretName(profileRef)));
       await this.#profiles.commitCustody({ profileRef, mutation: { kind: 'delete' }, clearPending: true });
       return existed;
     });
@@ -379,9 +388,9 @@ export class ProviderRegistry {
       if ((await this.#profiles.getPending(profile.profile_ref)) !== undefined) {
         throw configurationPendingError();
       }
-      const secret = await this.#secrets.get(
+      const secret = await secretStoreCall(() => this.#secrets.get(
         modelProviderSecretName(profile.profile_ref),
-      );
+      ));
       return { profile, secret };
     });
     if (snapshot === undefined) return undefined;
@@ -395,7 +404,12 @@ export class ProviderRegistry {
   async setDefaultModelProvider(
     profileRef: ProviderProfileRef,
   ): Promise<ProviderStatus> {
-    return withConfigurationLock(this.#profiles, async () => this.#status(await this.#profiles.setEnabled(profileRef)));
+    return withConfigurationLock(this.#profiles, async () => {
+      // Switching the default changes neither the key nor the marker, so both
+      // are read before the commit and nothing fallible runs after it.
+      const state = await this.#state(profileRef);
+      return providerStatusOf(await this.#profiles.setEnabled(profileRef), state);
+    });
   }
 
   /**
@@ -470,11 +484,13 @@ export class ProviderRegistry {
   }
 
   async #status(profile: ModelProviderProfile): Promise<ProviderStatus> {
-    return providerStatusOf(profile, {
-      secretConfigured: await this.#secrets.has(
-        modelProviderSecretName(profile.profile_ref),
-      ),
-      configurationPending: (await this.#profiles.getPending(profile.profile_ref)) !== undefined,
-    });
+    return providerStatusOf(profile, await this.#state(profile.profile_ref));
+  }
+
+  async #state(profileRef: ProviderProfileRef): Promise<{ secretConfigured: boolean; configurationPending: boolean }> {
+    return {
+      secretConfigured: await secretStoreCall(() => this.#secrets.has(modelProviderSecretName(profileRef))),
+      configurationPending: (await this.#profiles.getPending(profileRef)) !== undefined,
+    };
   }
 }
