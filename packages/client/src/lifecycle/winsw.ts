@@ -126,7 +126,7 @@ async function rmWithImageLockRetry(fs: Pick<typeof fsp, 'rm'>, p: string): Prom
  * on the SCM, `stop` for up to the service's own `stoptimeout` plus the SCM's
  * wait hints. `sc.exe` queries keep `exec-runner.ts`'s `PLATFORM_COMMAND_TIMEOUT_MS`.
  */
-export const WINSW_COMMAND_TIMEOUT_MS = 120_000;
+const WINSW_COMMAND_TIMEOUT_MS = 120_000;
 
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. `run` replaces both the WinSW and the `sc.exe` runner. */
 export interface WinswDeps {

@@ -47,9 +47,9 @@ export function generateWindowsStartupUnit(launcherPath: string): string {
 }
 
 /** The bound on the Host's `stop` program (#1971). */
-export const WINDOWS_USER_STOP_PROGRAM_TIMEOUT_MS = 60_000;
+const WINDOWS_USER_STOP_PROGRAM_TIMEOUT_MS = 60_000;
 /** The bound on running the Startup unit, whose `start` returns at once (#1971). */
-export const WINDOWS_USER_LAUNCH_TIMEOUT_MS = 30_000;
+const WINDOWS_USER_LAUNCH_TIMEOUT_MS = 30_000;
 /** How long a timed-out unit run's `cmd` may take to exit after it is terminated. */
 const LAUNCH_KILL_GRACE_MS = 2_000;
 
