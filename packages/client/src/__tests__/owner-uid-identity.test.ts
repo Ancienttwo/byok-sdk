@@ -12,8 +12,10 @@ let root: string | undefined;
 afterEach(async () => { vi.restoreAllMocks(); if (root !== undefined) await fs.rm(root, { recursive: true, force: true }); root = undefined; });
 
 // #2031: owner checks compare against the effective uid, which owns what this
-// process creates. A diverging real uid must not change any verdict.
-it.skipIf(process.platform === 'win32')('owner checks use the effective uid when the real uid differs', async () => {
+// process creates. A diverging real uid must not change any verdict. Skipped
+// as root: foldNameAliases trusts uid 0 unconditionally, so a getuid revert
+// would still pass there (CI does not run as root).
+it.skipIf(process.platform === 'win32' || process.geteuid?.() === 0)('owner checks use the effective uid when the real uid differs', async () => {
   root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'owner-uid-')));
   const storeRoot = path.join(root, 'store');
   await fs.mkdir(storeRoot, { mode: 0o755 });
