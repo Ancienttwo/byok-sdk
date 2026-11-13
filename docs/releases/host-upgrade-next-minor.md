@@ -4,7 +4,7 @@ Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts m
 
 ## Ledger precheck and store ID (#1981)
 
-The local bot-collaboration entry exports `inspectLedger(path, tenant)`, a precheck that reads a private copy of the stopped L ledger. If it reports `migration-required`, run `migrateWouldDo` after taking a snapshot and before serving. `LocalStoreId` adds `bot-collaboration-ledger`: update exhaustive switches and `Record<LocalStoreId, ...>` mappings to include the new member.
+The local bot-collaboration entry exports `inspectLedger(path, tenant)`, a precheck that reads a private copy of the stopped L ledger. If it reports `migration-required`, run `migrateWouldDo` after taking a snapshot and before serving. A valid exported ledger is accepted; if its switch is aborted, run the precheck again before serving. `LocalStoreId` adds `bot-collaboration-ledger`: update exhaustive switches and `Record<LocalStoreId, ...>` mappings to include the new member.
 
 ## Pi cache warming stops at settlement (#1949)
 

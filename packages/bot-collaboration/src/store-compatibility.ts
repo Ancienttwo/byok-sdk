@@ -5,6 +5,8 @@ import { HostLedger } from '@byok-sdk/server/execution-core';
 import type { StoreCompatibility } from '@byok-sdk/core';
 import { wouldDoNeedsMigration } from './commit.js';
 import { OldCollaborationStateError, stateOf } from './model.js';
+import { checkTopology } from './topology.js';
+import { checkSwitchRecords } from './switch.js';
 
 /** Inspect a stopped L ledger on a private copy, including its WAL or rollback journal. */
 export function inspectLedger(path: string, tenant: string): StoreCompatibility {
@@ -28,6 +30,9 @@ export function inspectLedger(path: string, tenant: string): StoreCompatibility 
       const ledger = new HostLedger(copy, tenant);
       try {
         const state = stateOf(ledger.snapshot().application);
+        checkTopology(state); checkSwitchRecords(state);
+        if (state.switchExport) return { store, path: file, verdict: 'accepted',
+          reason: 'This build opens the exported ledger; run migrateWouldDo if the switch is aborted' };
         return wouldDoNeedsMigration(state)
           ? { store, path: file, verdict: 'migration-required', reason: 'Would-do rows lack turnId; run migrateWouldDo before serving' }
           : { store, path: file, verdict: 'accepted', reason: 'This build opens the ledger' };

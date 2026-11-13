@@ -86,7 +86,7 @@ export function stateOf(application: Record<string, Json>): CollaborationState {
   // No migration: a version 2 writer cannot read archived rows, so the two versions never share a ledger.
   if (version === 2) throw new OldCollaborationStateError(version, 'Bot collaboration state version 2 is not supported. Retention moved settled rows out of the state. '
     + 'Restore a ledger backup made before this change, or start a new ledger.');
-  if (version !== 3) throw new Error('Unsupported Bot collaboration state version');
+  if (version !== 3) throw new Error(`Unsupported Bot collaboration state version: ${String(version)}`);
   // SAFETY: The stored version was checked above; version 3 is the collaboration state this build writes.
   return application.collaboration as unknown as CollaborationState;
 }

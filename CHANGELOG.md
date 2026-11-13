@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Added (bot-collaboration; #1981)** — `inspectLedger(path, tenant)` on the local Host entry returns a store compatibility verdict from a private copy, reporting would-do rows that need `migrateWouldDo` before serving. `LocalStoreId` includes `bot-collaboration-ledger`.
+- **Breaking (bot-collaboration; #1981)** — `inspectLedger(path, tenant)` on the local Host entry returns a store compatibility verdict from a private copy. `LocalStoreId` includes `bot-collaboration-ledger`; update exhaustive switches and records. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#ledger-precheck-and-store-id-1981).
 
 - **Added (bot-collaboration; #1978)** — `./host-kit` exports `botTurnInstruction` with an options object and `InstructionLimits`, so Hosts can compute the instruction K8 freezes for a Turn.
 

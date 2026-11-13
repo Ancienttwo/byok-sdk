@@ -108,7 +108,7 @@ it('L: refuses a Turn that still has its K4 intent and is not reported, and a ro
 
 it('L: migrateWouldDo gives each row the Turn of its task id over every generation, and archives and counts a row with no live Turn (#1756)', () => {
   const root = mkdtempSync(join(tmpdir(), 'k8-would-do-')); roots.push(root);
-  const ledger = new HostLedger(join(root, 'host.sqlite'), 'tenant'); closers.push(() => ledger.close());
+  const ledger = new HostLedger(join(root, 'host.sqlite'), 'tenant', { compactVeto: botCompactVeto }); closers.push(() => ledger.close());
   const row = (id: string, task: string) => ({ id, botId: 'main', taskId: task, action: 'delegate', index: 0, at: 0, detail: null });
   ledger.transaction(s => {
     const state = stateOf(s.application);
@@ -127,8 +127,24 @@ it('L: migrateWouldDo gives each row the Turn of its task id over every generati
   expect(Object.values(stateOf(ledger.snapshot().application).wouldDo ?? {}).map(r => [r.id, r.turnId])).toEqual([['w0', 'a'], ['w1', 'a']]);
   expect(ledger.transaction((_, rows) => rows.get('wouldDo', 'gone'))).toEqual(row('gone', taskId('b', 0)));
   expect(migrateWouldDo(ledger)).toEqual({ backfilled: 0, archived: 0 });
-  ledger.transaction(s => { stateOf(s.application).switchExport = { digest: 'export', exportedAt: 1, devices: [] }; });
-  expect(inspectLedger(file, 'tenant').verdict).toBe('accepted');
+  ledger.transaction(s => {
+    const state = stateOf(s.application); s.intents = {};
+    state.wouldDo!.legacy = row('legacy', taskId('gone', 0)) as never;
+    state.switchExport = { digest: 'export', exportedAt: 1, devices: [{ deviceId: 'device', frozenRevision: 1 }] };
+  });
+  const open = () => new BotCollaboration(server, ledger, { botId: 'main', execution: template, dreaming: false, connector: async () => ({}) });
+  const exported = open(); closers.push(() => exported.close());
+  expect(inspectLedger(file, 'tenant')).toMatchObject({ verdict: 'accepted', reason: expect.stringContaining('aborted') });
+  ledger.transaction(s => { stateOf(s.application).switchExport!.devices = []; });
+  expect(open).toThrow('Invalid switch export record');
+  expect(inspectLedger(file, 'tenant')).toMatchObject({ verdict: 'rejected', reason: 'Invalid switch export record' });
+  ledger.transaction(s => { const state = stateOf(s.application); delete state.switchExport; state.topology = { device: { mode: 'L', revision: 0 } }; });
+  expect(open).toThrow('Invalid topology record');
+  expect(inspectLedger(file, 'tenant')).toMatchObject({ verdict: 'rejected', reason: expect.stringContaining('Invalid topology record') });
+  ledger.transaction(s => { const state = stateOf(s.application); delete state.topology; state.switchImport = { digest: 'pending', devices: ['device'] }; });
+  expect(open).toThrow('switch import');
+  expect(inspectLedger(file, 'tenant')).toMatchObject({ verdict: 'rejected', code: 'switch_imported' });
+  ledger.transaction(s => { delete stateOf(s.application).switchImport; });
   for (const version of [1, 2, 999]) {
     ledger.transaction(s => { (s.application.collaboration as { version: number }).version = version; });
     const unsupported = files();
