@@ -201,7 +201,7 @@ cross-release baseline (see the evidence list below).
   for each offer lane (resume, resume with `egressPolicy`, fresh, prepared),
   and an `approvalId` on every approval request and decision.
   `golden/v6.releases.json` registers the published 0.41.0 release, the first v6
-  release, and has no `floor`. Each registered v6 entry pins both corpus
+  release, and the published 0.42.0 release, and has no `floor`. Each registered v6 entry pins both corpus
   prefixes, and the lines it covers are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
   published 0.40.0 registry tarball, the last v5 release. It rejects every v6

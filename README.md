@@ -7,19 +7,20 @@ composition over Postgres and R2.
 
 ## Release status
 
-The proposed source candidate is **0.42.0** for all ten packages, a MINOR
-with breaking changes and the first publication of `@byok-sdk/bot-collaboration`.
+The current stable release is **0.42.0** for all ten packages, a MINOR
+with breaking changes and the first publication of `@byok-sdk/bot-collaboration`,
+published on TBD-after-publish:date (UTC). It keeps wire v6.
 See the [release notes](docs/releases/v0.42.0.md) and
-[Host upgrade checklist](docs/releases/host-upgrade-0.42.0.md). Owner approval,
-release validation and publication remain pending ([release gates](https://github.com/Ancienttwo/byok-sdk/issues/1918)).
+[Host upgrade checklist](docs/releases/host-upgrade-0.42.0.md). Publication does not establish
+platform or production acceptance.
 
-The current stable release is **0.41.0** for all nine packages, a MINOR
+The previous stable release is **0.41.0** for all nine packages, a MINOR
 with breaking changes, published on 2026-11-09, and the first wire v6 release: a v5 peer cannot read v6.
 See the [release notes](docs/releases/v0.41.0.md) and
 [Host upgrade checklist](docs/releases/host-upgrade-0.41.0.md). Publication does not establish
 platform or production acceptance.
 
-The previous stable release is **0.40.0** for all nine packages, a MINOR
+An earlier stable release is **0.40.0** for all nine packages, a MINOR
 with breaking changes, published on 2026-11-08. See the [release notes](docs/releases/v0.40.0.md) and
 [Host upgrade checklist](docs/releases/host-upgrade-0.40.0.md). Publication does not establish
 platform or production acceptance.
@@ -100,8 +101,8 @@ Another earlier stable release is **0.30.2** for all nine packages. See the
 notes do not say that 0.30.2, or a Host on it, is ready for production; the
 product loop gate (#977) moves to 0.34.0 with the Host upgrade checklist.
 
-A registry read on 2026-11-09 (UTC) shows `latest` **0.41.0** for all nine
-packages. The registry lists 0.40.0 (2026-11-08, UTC), 0.39.0 (2026-11-06, UTC), 0.38.0 and 0.37.0 (2026-11-04, UTC), 0.36.0 (2026-11-03, UTC), 0.35.0 and 0.34.0 (2026-11-02, UTC), 0.33.0 and 0.32.0 (2026-11-01, UTC), 0.31.0 (2026-10-29,
+A registry read on TBD-after-publish:readback-date (UTC) shows `latest` **0.42.0** for all ten
+packages; `@byok-sdk/bot-collaboration` has no earlier version. The registry lists 0.41.0 (2026-11-09, UTC), 0.40.0 (2026-11-08, UTC), 0.39.0 (2026-11-06, UTC), 0.38.0 and 0.37.0 (2026-11-04, UTC), 0.36.0 (2026-11-03, UTC), 0.35.0 and 0.34.0 (2026-11-02, UTC), 0.33.0 and 0.32.0 (2026-11-01, UTC), 0.31.0 (2026-10-29,
 UTC), 0.30.2 (2026-10-26, UTC), 0.30.1 and 0.30.0 (2026-10-24, UTC), 0.29.0
 (2026-10-23, UTC), 0.28.3 and 0.28.2 (2026-10-22, UTC), 0.28.1 / keys 0.13.1
 (2026-10-21, UTC) and 0.28.0 / keys 0.13.0 (2026-10-20, UTC) as the earlier
@@ -120,7 +121,7 @@ changes server, cloud, client and keys APIs.
 [Release notes](docs/releases/v0.27.0.md) describe the changes since 0.26.1
 and the Host upgrade and migration steps.
 
-Versioned install examples below name the proposed 0.42.0 source candidate; publication remains pending.
+Versioned install examples below name the current stable release, 0.42.0.
 The historical `rc` publication is **0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
 [publication record](docs/releases/v0.27.0-rc.2-publication.md).
 
@@ -278,7 +279,7 @@ Also installed: none.
 The public dispatch packages are `@byok-sdk/client`, `@byok-sdk/server`,
 `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`, `@byok-sdk/core`,
 `@byok-sdk/protocol`, `@byok-sdk/ui-runtime` and `@byok-sdk/bot-collaboration`
-(K8 Bot collaboration, first publication proposed for 0.42.0), all on the same train.
+(K8 Bot collaboration, first published in 0.42.0), all on the same train.
 `@byok-sdk/implementation-identity` is retired and no later train publishes it.
 Starting with 0.21.0, the `byok-sdk` namespace
 umbrella and `@byok-sdk/testkit` are no longer published. Their existing
