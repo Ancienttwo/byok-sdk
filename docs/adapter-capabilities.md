@@ -1009,6 +1009,20 @@ dependency.
   case runs this on the qualified Grok: a background command's completion
   wakes Grok, the follow-up sent during that turn reaches the model after it,
   and each model request's usage is reported once.
+- Task turn end and Grok's next turn (#1942): Grok can end the task's prompt
+  and start its own next turn before the SDK has published the prompt's
+  answer, which waits for the notifications decoded before it. An interrupt
+  in that interval sends no `session/cancel`, because the cancel names only
+  the session and would stop Grok's own turn: once the prompt's answer is
+  decoded, or a queue report names another running prompt, the interrupt
+  waits for the task turn to close with its real outcome. This covers what
+  the client can observe; the cancel itself is not atomic inside Grok.
+  Known limit: when a Grok-own turn starts while the task turn before it is
+  being published, its text can appear in that task turn's reply and its
+  usage is reported with that task instead of the next. Totals are
+  unchanged: no usage is lost or counted twice. This is reopened on a Host
+  report of own-turn text inside a task's reply, or a Grok wire capture that
+  shows own-turn output inside the publication of a completed task turn.
 - Qualified version: 1.0.77, the newest stable release on 2026-11-12 (npm
   `latest`; 1.0.78 to 1.0.81 are published only under `alpha`). Grok gates
   its own turns at 1.0.70, and OAR 0.99's native-turn wire evidence is 1.0.77.

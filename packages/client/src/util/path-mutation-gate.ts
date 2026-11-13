@@ -5,7 +5,7 @@ import path from 'node:path';
 import { resolveExistingAncestor } from './existing-ancestor.js';
 import { ensureOwnedPrivateDirectory } from './private-unix-socket.js';
 
-export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'service-lifecycle' | 'pi-session-discovery' | `agy-session:${string}` | `pi-session-admission:${string}` | `pi-session-writer:${string}`;
+export type PathMutationGateScope = 'store' | 'install-root' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'service-lifecycle' | 'pi-session-discovery' | `agy-session:${string}` | `pi-session-admission:${string}` | `pi-session-writer:${string}` | `device-enrollment:${string}`;
 
 /**
  * Scopes with one fixed identity and no target path.
@@ -14,8 +14,11 @@ export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-st
  * - `service-lifecycle`: the OS service manager's per-user namespace (#1097).
  *   An owner-record change or a managed install/repair/uninstall holds it,
  *   and local-state relocation takes it before any store gate.
+ * - `device-enrollment:<productId>`: the productId-wide OS credential entry
+ *   (#1964). Taken after the store owner lease, by an enrollment clear across
+ *   its validate and delete and by a pairing across its credential writes.
  */
-type PathlessScope = 'pi-session-rebinding' | 'service-lifecycle';
+type PathlessScope = 'pi-session-rebinding' | 'service-lifecycle' | `device-enrollment:${string}`;
 
 export type PathMutationGateInput = {
   readonly scope: Exclude<PathMutationGateScope, PathlessScope>;
@@ -26,7 +29,7 @@ export type PathMutationGateInput = {
 };
 
 function isPathless(input: PathMutationGateInput): input is Extract<PathMutationGateInput, { readonly scope: PathlessScope }> {
-  return input.scope === 'pi-session-rebinding' || input.scope === 'service-lifecycle';
+  return input.scope === 'pi-session-rebinding' || input.scope === 'service-lifecycle' || input.scope.startsWith('device-enrollment:');
 }
 
 export interface PathMutationGateAcquireOptions {
@@ -52,8 +55,9 @@ export class PathMutationGateBusyError extends Error {
   constructor(
     public readonly scope: PathMutationGateScope,
     public readonly targetPath: string,
+    options?: ErrorOptions,
   ) {
-    super(`${scope} mutation gate is already held for ${targetPath}`);
+    super(`${scope} mutation gate is already held for ${targetPath}`, options);
     this.name = 'PathMutationGateBusyError';
   }
 }
@@ -82,7 +86,9 @@ export class PathMutationGateBusyError extends Error {
 export const PATH_MUTATION_GATE_PROTOCOL = 2;
 
 // Fixed and environment-independent; holds the darwin lock files.
-export const POSIX_GATE_ROOT = `/tmp/byok-pm-${process.getuid?.() ?? 'unknown'}`;
+// Keyed by the effective uid, the identity that owns the files a holder writes and that
+// the install-root owner check compares (#2001): a process whose real uid differs locks in the same place.
+export const POSIX_GATE_ROOT = `/tmp/byok-pm-${process.geteuid?.() ?? 'unknown'}`;
 // Read at acquire time. Only the client test setup replaces it, so test runs do
 // not leave one never-unlinked lock per temp path in the real root. Not exported
 // from the package entry.
@@ -122,6 +128,22 @@ function resolveGateTarget(input: PathMutationGateInput): Promise<string> {
   return isPathless(input) ? Promise.resolve('*') : resolvePathWithoutCreate(input.targetPath);
 }
 
+/**
+ * The error to throw when releasing gates after `error` failed too (#2002). A
+ * release failure is never dropped: a busy error is rebuilt as a
+ * {@link PathMutationGateBusyError}, so callers that map busy keep doing so,
+ * with an `AggregateError` of `error` and the release failures as its cause;
+ * any other error becomes that `AggregateError`.
+ *
+ * @internal
+ */
+export function withGateReleaseFailures(error: unknown, releaseFailures: readonly unknown[]): unknown {
+  if (releaseFailures.length === 0) return error;
+  // A fixed message: formatting a thrown value can itself throw and drop both errors.
+  const all = new AggregateError([error, ...releaseFailures], 'An operation failed, and releasing a path mutation gate failed too');
+  return error instanceof PathMutationGateBusyError ? new PathMutationGateBusyError(error.scope, error.targetPath, { cause: all }) : all;
+}
+
 /** Takes the OS lock for `identity`; resolves to the function that drops it, or `undefined` when another handle holds it. */
 async function lockIdentity(identity: string, gateRoot: string | undefined): Promise<(() => Promise<void>) | undefined> {
   if (process.platform === 'darwin') {
@@ -141,7 +163,7 @@ async function lockIdentity(identity: string, gateRoot: string | undefined): Pro
     return async () => closeSync(fd);
   }
   let endpoint: string;
-  if (process.platform === 'linux') endpoint = `\0byok-pm-${process.getuid?.() ?? 'unknown'}-${identity}`;
+  if (process.platform === 'linux') endpoint = `\0byok-pm-${process.geteuid?.() ?? 'unknown'}-${identity}`;
   else if (process.platform === 'win32') endpoint = `\\\\.\\pipe\\byok-path-mutation-${identity}`;
   else throw new Error(`path mutation gate is not supported on ${process.platform}`);
   const server: Server = createServer((socket) => socket.destroy());
@@ -174,8 +196,9 @@ async function acquireOne(input: PathMutationGateInput, gateRoot: string | undef
       throw new Error(`path mutation gate target changed during acquisition: ${input.targetPath}`);
     }
   } catch (error) {
-    await unlock();
-    throw error;
+    const failures: unknown[] = [];
+    await unlock().catch((unlockError: unknown) => { failures.push(unlockError); });
+    throw withGateReleaseFailures(error, failures);
   }
 
   let released = false;
@@ -219,8 +242,8 @@ export async function acquirePathMutationGates(
     for (const item of unique) acquired.push(await acquireBefore(item.input, deadline, options.gateRoot));
     return Object.freeze(acquired.slice());
   } catch (error) {
-    await Promise.allSettled(acquired.reverse().map((gate) => gate.release()));
-    throw error;
+    const released = await Promise.allSettled(acquired.reverse().map((gate) => gate.release()));
+    throw withGateReleaseFailures(error, released.flatMap((result) => (result.status === 'rejected' ? [result.reason] : [])));
   }
 }
 

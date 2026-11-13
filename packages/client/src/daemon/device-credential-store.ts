@@ -49,6 +49,12 @@ export interface FirstPairingAttempt {
   readonly devicePublicKey: string;
   readonly devicePrivateKeyPem: string;
   readonly machineId?: string;
+  /**
+   * `DeviceStore.identity` of the store that staged the attempt. An attempt
+   * staged by 0.42.0 has none; a clear refuses it as
+   * `pairing_attempt_unattributed` unless told to delete it (#1964).
+   */
+  readonly storeIdentity?: string;
 }
 
 interface ReplacementPairingAttempt {
@@ -148,6 +154,7 @@ export class DeviceCredentialCommandAbortedError extends DeviceCredentialStoreEr
  * `replace()` retains that attempt when renewing the same deviceId, tenantId
  * and devicePublicKey; a different authenticated enrollment promotes the
  * replacement and discards the attempt. `clear()` removes both authorities.
+ * An attempt is kept with every field, including `storeIdentity`.
  */
 export interface DeviceCredentialBackend {
   read(signal?: AbortSignal): Promise<DeviceRecord | undefined>;
@@ -208,6 +215,8 @@ function assertFirstPairingAttempt(value: unknown): asserts value is FirstPairin
     typeof (value as Partial<FirstPairingAttempt>).devicePrivateKeyPem !== 'string' ||
     ((value as Partial<FirstPairingAttempt>).machineId !== undefined &&
       typeof (value as Partial<FirstPairingAttempt>).machineId !== 'string') ||
+    ((value as Partial<FirstPairingAttempt>).storeIdentity !== undefined &&
+      !/^[0-9a-f]{64}$/u.test(String((value as Partial<FirstPairingAttempt>).storeIdentity))) ||
     (value as FirstPairingAttempt).deviceName.length === 0 ||
     (value as FirstPairingAttempt).devicePublicKey.length === 0 ||
     (value as FirstPairingAttempt).devicePrivateKeyPem.length === 0
@@ -245,6 +254,7 @@ function freezeAttempt(attempt: FirstPairingAttempt): FirstPairingAttempt {
     devicePublicKey: attempt.devicePublicKey,
     devicePrivateKeyPem: attempt.devicePrivateKeyPem,
     ...(attempt.machineId === undefined ? {} : { machineId: attempt.machineId }),
+    ...(attempt.storeIdentity === undefined ? {} : { storeIdentity: attempt.storeIdentity }),
   });
 }
 

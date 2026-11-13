@@ -267,7 +267,8 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       inspect: async () => ({ state: 'foreign', unitPath, launcherPath }),
     });
     await expect(installation.install(await payload('1.0.0'))).rejects.toMatchObject({ code: 'service_unit_unmarked' });
-    await expect(fs.lstat(installRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+    // Only the empty root exists: it is created before the install-root gate (#2001).
+    expect(await fs.readdir(installRoot)).toEqual([]);
     expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
     expect(await fs.readFile(unitPath, 'utf8')).toBe('operator unit');
     expect(await fs.readFile(launcherPath, 'utf8')).toBe('operator launcher');
@@ -743,7 +744,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await installation.receipt()).toBeUndefined();
     });
 
-    it('takes the repair inventory under the store lease and refuses to choose between two repair snapshots', async () => {
+    it('lists install snapshots once under the install-root gate, refuses two repair snapshots, and holds the root against another installation (#2001)', async () => {
       const repairs = [`.install-repair-${randomUUID()}`, `.install-repair-${randomUUID()}`];
       for (const name of repairs) await fs.mkdir(path.join(installRoot, 'snapshots', name), { recursive: true });
       const error = await installation.install(await payload('2.0.0')).catch((caught: unknown) => caught);
@@ -755,54 +756,52 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
       for (const name of repairs) await fs.rm(path.join(installRoot, 'snapshots', name), { recursive: true });
 
-      // Owner gates under different gate roots do not exclude each other; owned() without the gate models
-      // that. B's restore fails and leaves a repair snapshot after A listed and before A takes the lease.
-      const ungated = (base: ManagedServiceLifecycle): ManagedServiceLifecycle => ({ ...base, owned: (operation) => operation({ install: base.install, uninstall: base.uninstall }) });
-      const migrate: ServiceInstallationOptions['migrate'] = (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] });
-      const b = installationOver(ungated(fakeLifecycle()), { migrate });
-      installation = installationOver({ ...ungated(fakeLifecycle()), stop: async () => {
-        await verdicts('migration-required');
-        const fault = failRestore();
-        try {
-          await expect(b.install(await payload('2.0.0', { 'migrate.cjs': `${MIGRATE}\nprocess.exit(1);` }))).rejects.toBeInstanceOf(AggregateError);
-        } finally {
-          fault.restore();
-        }
-        await verdicts('accepted');
-      } });
-      await installation.install(await payload('3.0.0'));
-      expect(await pointer('current')).toBe('3.0.0');
-      expect(await snapshotNames()).toEqual([]);
-      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+      // One repair snapshot and a stop that fails: the stores may be partial, so the marked unit is not started.
+      const repair = `.install-repair-${randomUUID()}`;
+      await fs.mkdir(path.join(installRoot, 'snapshots', repair), { recursive: true });
+      events.length = 0;
+      installation = installationOver({ ...fakeLifecycle(), stop: async () => { events.push('stop'); throw new Error('stop failed'); } });
+      await expect(installation.install(await payload('2.0.0'))).rejects.toThrow(`the snapshot is retained at ${path.join(installRoot, 'snapshots', repair)}`);
+      expect(events).not.toContain('start');
+      await fs.rm(path.join(installRoot, 'snapshots', repair), { recursive: true });
 
-      // B installs after A read `current` and before A holds the lease: A reads it again under the lease, refuses
-      // before its precheck, and keeps every version directory, which B may share (same id) or own.
-      for (const [ours, theirs] of [['5.0.0', '4.0.0'], ['5.0.0', '5.0.0']] as const) {
-        await installation.uninstall();
-        let prechecked = false;
-        installation = installationOver({ ...ungated(fakeLifecycle()), stop: async () => { await b.install(await payload(theirs)); } }, {
-          migrate,
-          precheck: (versionDir) => {
-            prechecked = true;
-            return { command: process.execPath, args: [path.join(versionDir, 'precheck.cjs'), path.join(root, 'verdicts.json')] };
-          },
-        });
-        // Same id: the refused install's own lease then fails to release; the version directory still stays.
-        vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockRestore();
-        const real = daemonOwner.acquireDaemonOwner;
-        let taken = 0;
-        const leaseFault = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementation(async (...args) => {
-          const lease = await real(...args);
-          return ours === theirs && taken++ === 1 ? { release: async () => { await lease.release(); throw new Error('injected release failure'); } } : lease;
-        });
-        const refused = await installation.install(await payload(ours)).catch((caught: unknown) => caught).finally(() => leaseFault.mockRestore());
-        // The refusal keeps its class and code; the release failure joins its cause (#1991).
-        expect(refused).toMatchObject({ code: 'installation_exists' });
-        expect(prechecked).toBe(false);
-        expect(await pointer('current')).toBe(theirs);
-        expect(await fs.readFile(path.join(installRoot, 'versions', theirs, 'host.js'), 'utf8')).toBe(`// ${theirs}`);
-        expect(await snapshotNames()).toEqual([]);
+      // Owner gates under different gate roots do not exclude each other; owned() without the gate models that.
+      // The install-root gate does: while A holds it, every operation of B is lifecycle_owner_busy and writes nothing.
+      const ungated = (base: ManagedServiceLifecycle): ManagedServiceLifecycle => ({ ...base, owned: (operation) => operation({ install: base.install, uninstall: base.uninstall }) });
+      // The root does not exist yet. On a case-insensitive volume B also spells it in another case.
+      await fs.rm(installRoot, { recursive: true, force: true });
+      const alias = installRoot.toUpperCase();
+      const b = installationOver(ungated(fakeLifecycle()), existsSync(path.dirname(alias)) ? { installRoot: alias } : {});
+      const [three, four] = [await payload('3.0.0'), await payload('4.0.0')];
+      let refusals: unknown[] = [];
+      // B runs while A holds the gate and before A stages anything.
+      installation = installationOver({ ...ungated(fakeLifecycle()), inspect: async () => {
+        const snap = async () => (existsSync(installRoot) ? tree(installRoot) : {});
+        const before = await snap();
+        refusals = await Promise.all([b.install(four), b.upgrade(four), b.rollback(), b.recover(), b.uninstall()].map((operation) => operation.catch((caught: unknown) => caught)));
+        expect(await snap()).toEqual(before);
+        return { state: 'exact', unitPath: 'unit', launcherPath: 'launcher' };
+      } });
+      await installation.install(three);
+      expect(refusals).toEqual(Array(5).fill(expect.objectContaining({ code: 'lifecycle_owner_busy' })));
+      expect(await pointer('current')).toBe('3.0.0');
+
+      // On POSIX an install root another user owns is refused before anything is written, also when
+      // it did not exist yet and the other user created it first.
+      await installation.uninstall();
+      await fs.rm(installRoot, { recursive: true, force: true });
+      if (process.geteuid === undefined) return;
+      const realStat = fs.stat.bind(fs);
+      const foreign = vi.spyOn(fs, 'stat').mockImplementation((async (file: string, ...rest: []) => {
+        const stat = await realStat(file, ...rest);
+        return file === installRoot ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 }) : stat;
+      }) as typeof fs.stat);
+      try {
+        await expect(installation.install(three)).rejects.toMatchObject({ code: 'install_root_foreign_owner' });
+      } finally {
+        foreign.mockRestore();
       }
+      expect(await tree(installRoot)).toEqual({});
     });
 
     it('uninstall refuses a symlinked snapshots/ and changes nothing behind it', async () => {

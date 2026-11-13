@@ -34,6 +34,7 @@ import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { SEALED_INLINE_MAX_PADDED_LENGTH, isSealedPayload } from '@byok-sdk/protocol';
 import {
+  assertTaskCancellationBinding,
   journalHash,
   type JournalIdentity,
   JournalClosedError,
@@ -265,6 +266,21 @@ DROP TABLE IF EXISTS local_storage_usage;
 CREATE INDEX IF NOT EXISTS journal_terminal_retention ON journal_terminal (truth_state, updated_at);
 `;
 
+/** Task-keyed envelope lookups (stored cancellation, prune) read through this instead of scanning the table. */
+const ENVELOPE_TASK_INDEX = 'CREATE INDEX IF NOT EXISTS journal_envelope_task ON journal_envelope (task_id, seq)';
+
+/**
+ * A received offer with no terminal or recovery marker whose task also has a
+ * stored `task.cancel` sequenced after it: the restart rule settles it as
+ * cancelled, so it ages out like a confirmed terminal. A cancellation at or
+ * below the offer sequence preceded the offer and never qualifies. Malformed
+ * bytes do not match; the prune transaction verifies the qualifying cancellation's hash.
+ */
+const CANCELLED_RECEIVED_TASK = `t.local_state = 'received' AND t.recovery_marker IS NULL
+  AND NOT EXISTS (SELECT 1 FROM journal_terminal term WHERE term.task_id = t.task_id)`;
+const LATER_CANCELLATION = `FROM journal_envelope c WHERE c.task_id = t.task_id AND c.seq > t.seq AND c.withheld_bytes IS NULL
+  AND CASE WHEN json_valid(c.bytes) THEN json_extract(c.bytes, '$.type') END = 'task.cancel'`;
+
 /** `local_state` for a task whose admission declined it — terminal for local purposes, and NOT something recovery should re-offer. */
 const DECLINED_STATE = 'declined';
 /** `local_state` a task starts in: its offer envelope is durable, nothing has been decided yet. */
@@ -428,6 +444,15 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     if (!envelopeColumns.some((column) => column.name === 'withheld_bytes')) {
       db.close();
       throw new JournalUnavailableError('journal written before the withheld-offer column (#826); preserve/export this journal and resolve it before starting this build');
+    }
+    // Built after the format checks so a refused predecessor is left byte-for-byte
+    // unchanged. A deployed store gains the index on its first open; a failure is
+    // a refusal to start, not corruption, so the file stays in place.
+    try {
+      db.exec(ENVELOPE_TASK_INDEX);
+    } catch (err) {
+      db.close();
+      throw new JournalUnavailableError(`journal task index could not be built: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
     }
     this.#db = db;
     try {
@@ -816,25 +841,34 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
 
   readTaskCancellation(taskId: string, identity: JournalIdentity, afterSeq: number) {
     return this.#enqueue('readTaskCancellation', () => {
-      const rows = this.#db.prepare(`SELECT tenant_id, product_id, device_id, seq, bytes, bytes_hash FROM journal_envelope
-        WHERE task_id = ? AND withheld_bytes IS NULL
-        ORDER BY seq, envelope_id`).all(taskId) as Record<string, unknown>[];
-      // Validate every candidate before its content can exclude it, including
-      // candidates after the first valid cancellation.
-      for (const row of rows) {
-        this.#assertIdentity(row, identity);
-        if (typeof row.bytes !== 'string' || journalHash(row.bytes) !== row.bytes_hash) {
-          throw new Error('durable cancellation candidate bytes/hash mismatch');
-        }
-      }
-      const row = rows.find((candidate) => (candidate.seq as number) > afterSeq
-        && JSON.parse(candidate.bytes as string).type === 'task.cancel');
-      if (!row) return undefined;
-      return {
-        identity: { tenantId: row.tenant_id as string, productId: row.product_id as string, deviceId: row.device_id as string },
-        bytes: row.bytes as string, bytesHash: row.bytes_hash as string,
-      };
+      return this.#taskCancellation(taskId, identity, afterSeq);
     });
+  }
+
+  /** Every non-withheld stored envelope of the task, in sequence order, after its enrollment and hash are verified. */
+  #taskEnvelopeRows(taskId: string, identity: JournalIdentity): Record<string, unknown>[] {
+    const rows = this.#db.prepare(`SELECT tenant_id, product_id, device_id, seq, bytes, bytes_hash, committed_at FROM journal_envelope
+      WHERE task_id = ? AND withheld_bytes IS NULL
+      ORDER BY seq, envelope_id`).all(taskId) as Record<string, unknown>[];
+    // Validate every candidate before its content can exclude it, including
+    // candidates after the first valid cancellation.
+    for (const row of rows) {
+      this.#assertIdentity(row, identity);
+      if (typeof row.bytes !== 'string' || journalHash(row.bytes) !== row.bytes_hash) {
+        throw new Error('durable cancellation candidate bytes/hash mismatch');
+      }
+    }
+    return rows;
+  }
+
+  #taskCancellation(taskId: string, identity: JournalIdentity, afterSeq: number) {
+    const row = this.#taskEnvelopeRows(taskId, identity).find((candidate) => (candidate.seq as number) > afterSeq
+      && JSON.parse(candidate.bytes as string).type === 'task.cancel');
+    if (!row) return undefined;
+    return {
+      identity: { tenantId: row.tenant_id as string, productId: row.product_id as string, deviceId: row.device_id as string },
+      bytes: row.bytes as string, bytesHash: row.bytes_hash as string,
+    };
   }
 
   listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]> {
@@ -990,12 +1024,15 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       const confirmed = this.#db.prepare(`SELECT COUNT(*) AS entries, MIN(term.updated_at) AS oldest
         FROM journal_terminal term JOIN journal_task task ON task.task_id = term.task_id
         WHERE term.truth_state = 'confirmed' AND task.recovery_marker IS NULL`).get() as { entries: number; oldest: string | null };
+      const cancelled = this.#db.prepare(`SELECT COUNT(*) AS entries, MIN(at) AS oldest FROM (SELECT (SELECT MIN(c.committed_at) ${LATER_CANCELLATION}) AS at
+        FROM journal_task t WHERE ${CANCELLED_RECEIVED_TASK}) WHERE at IS NOT NULL`).get() as { entries: number; oldest: string | null };
+      const oldest = [confirmed.oldest, cancelled.oldest].filter((at): at is string => at !== null).sort()[0];
       return {
         measuredAt: this.#clock().toISOString(),
         journalBytes: fileBytes(this.#dbPath) + fileBytes(`${this.#dbPath}-wal`) + fileBytes(`${this.#dbPath}-shm`),
         quarantineBytes: directoryBytes(join(this.#storeDir, JOURNAL_QUARANTINE_DIRNAME)),
-        journalEntries: Number(rows.entries), confirmedEntries: Number(confirmed.entries),
-        ...(confirmed.oldest === null ? {} : { oldestConfirmedAt: confirmed.oldest }),
+        journalEntries: Number(rows.entries), confirmedEntries: Number(confirmed.entries) + Number(cancelled.entries),
+        ...(oldest === undefined ? {} : { oldestConfirmedAt: oldest }),
       };
     });
   }
@@ -1003,15 +1040,24 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
   listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]> {
     if (!Number.isFinite(cutoff.getTime()) || !Number.isSafeInteger(limit) || limit <= 0) return Promise.reject(new TypeError('invalid journal retention bounds'));
     return this.#enqueue('listPrunableConfirmedTasks', () => {
-      const rows = this.#db.prepare(`SELECT task.task_id FROM journal_task task
-        JOIN journal_terminal term ON term.task_id = task.task_id
-        WHERE term.truth_state = 'confirmed' AND task.recovery_marker IS NULL AND term.updated_at < ?
-        ORDER BY term.updated_at, task.task_id LIMIT ?`).all(cutoff.toISOString(), limit) as { task_id: string }[];
+      // A cancelled received offer ages from its cancellation's commit. Once it
+      // is pruned, a conforming mailbox never redelivers the offer: it replays
+      // only above the acknowledged cursor and suppresses a cancelled task's
+      // offer through a task record it never deletes (spec, #1990).
+      const rows = this.#db.prepare(`SELECT task_id FROM (
+          SELECT task.task_id, term.updated_at AS at FROM journal_task task
+            JOIN journal_terminal term ON term.task_id = task.task_id
+           WHERE term.truth_state = 'confirmed' AND task.recovery_marker IS NULL
+          UNION ALL
+          SELECT t.task_id, (SELECT MIN(c.committed_at) ${LATER_CANCELLATION}) AS at FROM journal_task t WHERE ${CANCELLED_RECEIVED_TASK})
+        WHERE at < ? ORDER BY at, task_id LIMIT ?`).all(cutoff.toISOString(), limit) as { task_id: string }[];
       return rows.map(row => row.task_id);
     });
   }
 
-  pruneConfirmedJournalTask(taskId: string): Promise<boolean> {
+  pruneConfirmedJournalTask(taskId: string, cutoff: Date): Promise<boolean> {
+    if (!Number.isFinite(cutoff.getTime())) return Promise.reject(new TypeError('invalid journal retention bounds'));
+    const before = cutoff.toISOString();
     return this.#enqueue('pruneConfirmedJournalTask', () =>
       this.#transaction(() => {
         const eligible = this.#db
@@ -1021,10 +1067,11 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
                JOIN journal_terminal term ON term.task_id = t.task_id
               WHERE t.task_id = ?
                 AND t.recovery_marker IS NULL
-                AND term.truth_state = 'confirmed'`,
+                AND term.truth_state = 'confirmed'
+                AND term.updated_at < ?`,
           )
-          .get(taskId);
-        if (!eligible) return false;
+          .get(taskId, before);
+        if (!eligible && !this.#cancelledReceivedTask(taskId, before)) return false;
 
         // Child-first, so `foreign_keys=ON` is satisfied at every statement
         // rather than deferred to the commit — a deletion order the database
@@ -1038,6 +1085,26 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
         return true;
       }),
     );
+  }
+
+  /** Rechecks the cancelled-offer rule and its cutoff inside the prune transaction, verifying every stored envelope of the task first. */
+  #cancelledReceivedTask(taskId: string, before: string): boolean {
+    const task = this.#db.prepare(`SELECT t.tenant_id, t.product_id, t.device_id, t.seq FROM journal_task t
+      WHERE t.task_id = ? AND ${CANCELLED_RECEIVED_TASK}`).get(taskId) as Record<string, unknown> | undefined;
+    if (!task) return false;
+    const identity = { tenantId: task.tenant_id as string, productId: task.product_id as string, deviceId: task.device_id as string };
+    const cancellations = this.#taskEnvelopeRows(taskId, identity)
+      .filter((row) => JSON.parse(row.bytes as string).type === 'task.cancel');
+    // Pruning deletes every envelope of the task, so every cancellation row must
+    // pass the binding recovery applies, with bytes sequenced exactly at its row.
+    for (const row of cancellations) {
+      if (assertTaskCancellationBinding(row.bytes as string, taskId, Number(row.seq) - 1) !== Number(row.seq)) {
+        throw new Error('invalid durable cancellation binding');
+      }
+    }
+    const cancellation = cancellations.find((row) => Number(row.seq) > Number(task.seq));
+    // Fresh evidence under a reused task id, or a direct call, is not yet past retention.
+    return cancellation !== undefined && (cancellation.committed_at as string) < before;
   }
 
   /**

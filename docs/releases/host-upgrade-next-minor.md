@@ -35,6 +35,48 @@ try {
 
 A Host that already handles `PROVIDER_CONFIGURATION_BUSY` from `configure()` or `resolveDefaultModelProvider()` can reuse that handling. When one profile's credential read fails, `list()` now rejects with that failure only after the other reads have finished. No configuration change is needed.
 
+## One operation at a time per install root
+
+Every `install()`, `upgrade()`, `rollback()`, `recover()` and `uninstall()`
+now holds an install-root gate for its whole run (#2001). The gate does not
+use the lifecycle `gateRoot`, so installations under different gate roots
+that share one install root exclude each other: a second operation fails at
+once with `lifecycle_owner_busy`, which now also means the install root is
+in use, and writes nothing. Retry it after the first one ends. This resolves
+the 0.42.0 known issue about installations under different `gateRoot`s
+sharing one `installRoot`. A first install therefore no longer reads
+`current` again under the store leases or refuses with `installation_exists`
+after staging, and the install snapshots are listed once, after the gate is
+taken. Every operation creates a missing install root before taking the
+gate, so a refused operation can leave an empty install root behind; every
+spelling of the root takes the same gate. On macOS and Linux, an install root
+owned by another user (also one that user created first) is refused with the
+new `ServiceInstallationErrorCode` `install_root_foreign_owner` before
+anything is written in it; run the operation as the owner of the root. The
+gate and the owner check use the effective uid. These guarantees hold only
+while the install root's parent directory is writable by the installing user
+alone: another user who can write it can rename the root or replace it with a
+symlink after the check (#2028). Windows has no owner check, and two Windows
+users operating on one install root are not guaranteed to exclude each other.
+
+## Gate release failures join the thrown error
+
+A path mutation gate release that fails while another error is thrown is
+no longer dropped (#2002). A Host that matches `PathMutationGateBusyError`,
+`ServiceUnitError` codes or `LocalStateRelocationBusyError` keeps matching
+them: those classes and codes stay, and the release failure is in `cause`,
+an `AggregateError` of the original error and every release failure. A
+`LocalStateRelocationBusyError` from a partial gate acquisition has two
+levels: its `cause` is that `PathMutationGateBusyError`, whose own `cause` is
+the `AggregateError`. An
+error of another class that a managed service lifecycle operation throws
+becomes that `AggregateError` when the `service-lifecycle` gate also fails
+to release. `localStateRelocation.acquire()` reports a refusal whose gate
+release failed as `LocalStateRelocationIntegrityError`, as before, now with
+the refusal and the release failures in `cause`; its busy and integrity
+errors otherwise carry the original error as `cause`. A gate whose release
+failed may still be held until its process exits.
+
 ## Store migration failures are store_migration_failed
 
 Every failure after the store snapshot now throws `store_migration_failed`
@@ -96,9 +138,7 @@ need not name the snapshot, and is left to #1992.
 ## Store release failures name the next step
 
 A refused first install now removes only a version directory it created,
-and keeps one it reused, since another installation may be using it; after
-`installation_exists` every version directory stays until the next
-successful upgrade's prune or `uninstall()` removes it (#1991). When the next
+and keeps one it reused, which holds the version already staged (#1991). When the next
 first install cannot stop the service, take the leases, or restore or retire
 a repair snapshot, it starts nothing and removes a marked unit; nothing else
 changes.
@@ -157,3 +197,17 @@ A corrupted SDK entry (new code `KEYCHAIN_SECRET_CORRUPTED` on macOS and Linux, 
 Known limitation on Windows: Credential Manager reports a damaged entry as `CREDENTIAL_MANAGER_READ_FAILED`, the same code as other read failures. `replaceSecret()` cannot tell the two apart, so it refuses instead of overwriting the entry. To recover, delete the entry in Credential Manager (Windows Credentials, the generic credential `<servicePrefix>.model-<profile_ref>-api-key`, by default `com.byok.keys.model-<profile_ref>-api-key`), then configure the key again.
 
 Credential-store errors from these methods keep their code but carry a fixed SDK message and no cause, because an injected store may put a key in its own error. Match on `error.code`, not on the message text.
+
+## Stored cancellation pruning cutoff
+
+Custom implementations of `LocalTaskJournal` must accept the new `cutoff` argument of `pruneConfirmedJournalTask(taskId, cutoff)` (#1990). Inside its delete transaction, under the write lock, it returns `false` and deletes nothing when the task is valid but not prunable: a confirmed terminal last updated at or after `cutoff`, or a received offer whose first stored `task.cancel` sequenced above the offer was committed at or after `cutoff` (including evidence replaced under the same task id) or that has no such cancellation. For a received offer it throws and deletes nothing when the `task.cancel` that qualifies it is broken: that cancellation fails its hash or enrollment check, names another task id, or carries a `seq` different from its row's. No other row is part of this contract: a confirmed terminal's envelopes, withheld rows and the task's other envelopes may be deleted without verification (#2054). An implementation that ignores `cutoff` still compiles but can delete unexpired or replaced evidence; the SDK does not repeat these checks. Hosts using the SDK SQLite journal need no change.
+
+## Enrollment clear is scoped to its store (#1964)
+
+`clearDeviceEnrollment` and `Daemon.unpair()` no longer delete another store's credential or staged first pairing under the same `productId`. A Host that switches on `DeviceEnrollmentClearError.code` handles the new code `pairing_attempt_unattributed`: the OS entry holds a first-pairing attempt staged by 0.42.0, which names no store, and nothing was cleared. When no other store of this `productId` is pairing, call `clearDeviceEnrollment({ productId, storeDir, clearUnattributedAttempt: true })` once the daemon has exited. `store_not_bound` now also covers a first-pairing attempt another store staged. A first-pairing attempt now carries `storeIdentity`; an injected `DeviceCredentialBackend` must store and return every attempt field, or a clear refuses the store's own attempt as `pairing_attempt_unattributed`. Pairing applies the same rule (#2033): it reuses only its own store's staged attempt and otherwise throws the new `FirstPairingAttemptRefusedError`, with `store_not_bound` (another store's attempt; pair with `replaceOtherStore` to discard it) or `pairing_attempt_unattributed` (clear it as above, then pair again). A clear or pairing that waits more than 30 seconds for another store's clear or pairing of the same `productId` fails; the clear deletes nothing.
+
+## Renewal checks the enrollment binding (#2034)
+
+A running daemon renews its token only while the OS entry still holds this store's enrollment. When another store of the same `productId` paired over it, the renewal writes nothing and the daemon halts with `store_not_bound`; when another store cleared it, the daemon halts with `re_pair_required`. Both reasons were start-time halts before; a Host that handles `DaemonHaltError.reason` or the daemon's halted lifecycle at start handles them the same way when the daemon is running: pair the store again. A renewal that waits more than 30 seconds for another store's clear or pairing fails as busy and is retried; it is not reported as revocation.
+
+Pairing is one critical section of the same lock. It rereads the OS entry, `device.json` and any staged attempt under the lock, so a re-pair of a store that is already paired, or of a daemon that cached its record, now throws `DeviceStoreBindingMismatchError` when another store paired over it since (pair with `replaceOtherStore` to replace it), and `FirstPairingAttemptRefusedError` when another store's or an unattributed staged attempt sits beside its enrollment. The lock is held through the pairing's E2EE member entries and, when the daemon was running, its shutdown, so another store waits for them too. Only the network request has a deadline; each OS credential command has its own 15 s deadline, and a waiter gives up as busy after 30 seconds.
