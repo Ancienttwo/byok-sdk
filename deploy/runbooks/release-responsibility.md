@@ -79,7 +79,7 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 The current release is 0.42.0 for all ten packages, keys included.
 See the [release notes](../../docs/releases/v0.42.0.md).
-The registry read of TBD-after-publish:readback-date (UTC) reports `latest` 0.42.0 for all ten packages.
+The registry read of 2026-11-13 (UTC) reports `latest` 0.42.0 for all ten packages.
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
 Historical 0.27.0 preparation named train 0.27.0 and
@@ -95,7 +95,7 @@ A release set contains nine aligned packages plus keys: ten packages, since
 `@byok-sdk/bot-collaboration` was first published in 0.42.0 (#1845, #1910). From 0.28.2 all
 of them carry one version; `check:release-graph` fails when keys
 differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
-the dist-tag `latest`, observed at 0.42.0 for all ten packages on TBD-after-publish:readback-date (UTC).
+the dist-tag `latest`, observed at 0.42.0 for all ten packages on 2026-11-13 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
 still records the 0.42.0 baseline, not the current registry: the prior `latest`

@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## 0.42.0 — TBD-after-publish:date (published)
+## 0.42.0 — 2026-11-13 (published)
 
-0.42.0 is a MINOR release for all ten public packages, including the first publication of `@byok-sdk/bot-collaboration`. It keeps wire v6 and includes breaking public API cuts, Postgres migrations 0038/0039, embedded SQLite v9 and an explicit keys profile-store migration. The released [upgrade manifest](packages/client/upgrade-history/0.41.0-0.42.0.json) from 0.41.0 has 15 breaking entries and 15 additive entries. See the [release notes](docs/releases/v0.42.0.md) and [Host upgrade checklist](docs/releases/host-upgrade-0.42.0.md). All ten packages were published on TBD-after-publish:date with npm `latest` at 0.42.0; readback TBD-after-publish:readback-result. The release commit is `14e0628d2`; tag `v0.42.0` and the GitHub Release point to TBD-after-publish:tag-target. Publication does not establish platform or production acceptance.
+0.42.0 is a MINOR release for all ten public packages, including the first publication of `@byok-sdk/bot-collaboration`. It keeps wire v6 and includes breaking public API cuts, Postgres migrations 0038/0039, embedded SQLite v9 and an explicit keys profile-store migration. The released [upgrade manifest](packages/client/upgrade-history/0.41.0-0.42.0.json) from 0.41.0 has 15 breaking entries and 15 additive entries. See the [release notes](docs/releases/v0.42.0.md) and [Host upgrade checklist](docs/releases/host-upgrade-0.42.0.md). All ten packages were published on 2026-11-13 with npm `latest` at 0.42.0; readback passed for all ten packages. The release commit is `14e0628d2`; tag `v0.42.0` and the GitHub Release point to the release commit. Publication does not establish platform or production acceptance.
 
 - **Fixed (client; #1941, #1952):** Written Claude startup prompts and follow-ups wait for their stdin completion receipts, so an asynchronous write failure rejects the caller before success is reported. A held follow-up retains immediate queue acceptance.
 - **Fixed (Desktop; #1963):** Package smoke verifies the original signature and canonicalizes temporary ffmpeg comparison copies before hashing, accepting signed codec-free builds while rejecting stock Electron ffmpeg.

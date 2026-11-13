@@ -367,7 +367,7 @@ the widened `provider_kind` CHECK set. The owner approved the MINOR and
 publication followed the [release gates](https://github.com/Ancienttwo/byok-sdk/issues/1918).
 See the [0.42.0 release notes](releases/v0.42.0.md) and
 [Host upgrade checklist](releases/host-upgrade-0.42.0.md).
-All ten packages were published on TBD-after-publish:date; registry readback TBD-after-publish:readback-result.
+All ten packages were published on 2026-11-13; registry readback passed for all ten packages.
 
 0.41.0 moves the wire to v6: the runtime capability
 `isolation.userContext` is split into one bit per source, with no derived
@@ -480,7 +480,7 @@ included additive public APIs and new public behavior. See the
 its additive APIs and persistence changes. See the
 [0.28.1 release notes](releases/v0.28.1.md).
 
-The registry read of TBD-after-publish:readback-date (UTC) reports `latest` 0.42.0 for all ten
+The registry read of 2026-11-13 (UTC) reports `latest` 0.42.0 for all ten
 packages. The earlier published versions are 0.41.0, 0.40.0, 0.39.0, 0.38.0, 0.37.0, 0.36.0, 0.35.0, 0.34.0, 0.33.0, 0.32.0, 0.31.0, 0.30.2, 0.30.1,
 0.30.0, 0.29.0, 0.28.3, 0.28.2, 0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0. The registry publication times are 2026-10-20 (UTC) for
 0.28.0 / keys 0.13.0, 2026-10-21 (UTC) for 0.28.1 / keys 0.13.1, 2026-10-22

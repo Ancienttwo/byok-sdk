@@ -9,7 +9,7 @@ composition over Postgres and R2.
 
 The current stable release is **0.42.0** for all ten packages, a MINOR
 with breaking changes and the first publication of `@byok-sdk/bot-collaboration`,
-published on TBD-after-publish:date (UTC). It keeps wire v6.
+published on 2026-11-13 (UTC). It keeps wire v6.
 See the [release notes](docs/releases/v0.42.0.md) and
 [Host upgrade checklist](docs/releases/host-upgrade-0.42.0.md). Publication does not establish
 platform or production acceptance.
@@ -101,7 +101,7 @@ Another earlier stable release is **0.30.2** for all nine packages. See the
 notes do not say that 0.30.2, or a Host on it, is ready for production; the
 product loop gate (#977) moves to 0.34.0 with the Host upgrade checklist.
 
-A registry read on TBD-after-publish:readback-date (UTC) shows `latest` **0.42.0** for all ten
+A registry read on 2026-11-13 (UTC) shows `latest` **0.42.0** for all ten
 packages; `@byok-sdk/bot-collaboration` has no earlier version. The registry lists 0.41.0 (2026-11-09, UTC), 0.40.0 (2026-11-08, UTC), 0.39.0 (2026-11-06, UTC), 0.38.0 and 0.37.0 (2026-11-04, UTC), 0.36.0 (2026-11-03, UTC), 0.35.0 and 0.34.0 (2026-11-02, UTC), 0.33.0 and 0.32.0 (2026-11-01, UTC), 0.31.0 (2026-10-29,
 UTC), 0.30.2 (2026-10-26, UTC), 0.30.1 and 0.30.0 (2026-10-24, UTC), 0.29.0
 (2026-10-23, UTC), 0.28.3 and 0.28.2 (2026-10-22, UTC), 0.28.1 / keys 0.13.1

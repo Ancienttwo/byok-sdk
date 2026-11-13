@@ -1,6 +1,6 @@
 # Host upgrade to 0.42.0
 
-Checklist for a Host moving from 0.41.0 to the 0.42.0 MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Reviewed against source base `06a14462e0a0c6b30b9843d962072adff80a0d31`, including the release-notes audit (#1931). The release commit is main `14e0628d2`; tag `v0.42.0` points to TBD-after-publish:tag-target and all ten packages are on npm `latest` (TBD-after-publish:readback-date); see the [release notes](v0.42.0.md). Pin the Host's direct and resolved SDK dependencies to the released versions in its lockfile.
+Checklist for a Host moving from 0.41.0 to the 0.42.0 MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Reviewed against source base `06a14462e0a0c6b30b9843d962072adff80a0d31`, including the release-notes audit (#1931). The release commit is main `14e0628d2`; tag `v0.42.0` points to it and all ten packages are on npm `latest` (2026-11-13, UTC); see the [release notes](v0.42.0.md). Pin the Host's direct and resolved SDK dependencies to the released versions in its lockfile.
 
 ## Service install prepares kept stores
 
@@ -649,7 +649,7 @@ rules of #1851.
 
 ## Release and verification checklist
 
-- [x] Release commit recorded and the release manifest archived in [upgrade-history/0.41.0-0.42.0.json](../../packages/client/upgrade-history/0.41.0-0.42.0.json); tag and publication: TBD-after-publish:tag-and-readback.
+- [x] Release commit recorded and the release manifest archived in [upgrade-history/0.41.0-0.42.0.json](../../packages/client/upgrade-history/0.41.0-0.42.0.json); tag and publication recorded.
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.
 - [x] Before rebaselining, re-diff the 23 items of the `dts-node-next-specifiers` manifest entry against 0.41.0: the entry carries no per-item digest, so any change beyond the `.js` specifier spelling needs its own entry (#1828).
 - [ ] Run the H `unmigrated_dreams` and L `legacy_home` queries on v0.41.0; both must be 0 before the upgrade (#1669).

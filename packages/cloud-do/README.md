@@ -6,7 +6,7 @@ usage limits, settlement hooks, and transcript reads.
 
 The current stable release is 0.42.0, in the ten-package release set,
 published on npm `latest`. From 0.28.2, keys carries the same version. The npm
-registry read of TBD-after-publish:readback-date (UTC) lists 0.42.0 as `latest` for all ten
+registry read of 2026-11-13 (UTC) lists 0.42.0 as `latest` for all ten
 packages. See the [release notes](../../docs/releases/v0.42.0.md).
 The earlier stable releases were 0.41.0 (published 2026-11-09, UTC), 0.40.0 (published 2026-11-08, UTC), 0.39.0 (published 2026-11-06, UTC), 0.38.0 and 0.37.0 (published 2026-11-04,
 UTC), 0.36.0
