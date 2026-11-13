@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "82b2b176c1445c92e5f64b3539a13527a7dfec8b12e0c466cd8c7ebb8a3920b7"
+    "snapshotSha256": "044b2a28b76bfa91dd3574fdb36d2f9bfd89a1d2dba03b8d22e096145eef1dd8"
   },
   "configFields": {
     "status": "tracked",
@@ -104,6 +104,15 @@
         "export:@byok-sdk/client#LocalStateRelocationError",
         "export:@byok-sdk/client#LocalStateRelocationIntegrityError",
         "export:@byok-sdk/client#ServiceUnitError"
+      ]
+    },
+    {
+      "id": "service-command-timeout",
+      "impact": "breaking",
+      "summary": "ServiceUnitErrorCode gains service_command_timeout (#1971): a service manager command (launchctl, systemctl --user, WinSW, sc.exe, the Windows Startup launcher query and launch, the Host's Windows stop program) outlived its fixed bound and was stopped, and the lifecycle operation rejects with ServiceUnitError of that code where it could hang before. The service's state is then unknown, never \"the change did not happen\". ServiceUnitError gains exitConfirmed, set only with this code: true when the command is proven to have exited, false when it may still run and change the service, so a retry can race it. An exhaustive switch over ServiceUnitErrorCode needs the new case.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#service-manager-commands-time-out-1971",
+      "items": [
+        "export:@byok-sdk/client#ServiceUnitErrorCode"
       ]
     },
     {
@@ -337,6 +346,11 @@
       "item": "export:@byok-sdk/client#ServiceUnitError",
       "change": "changed",
       "entry": "path-gate-release-failures"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUnitErrorCode",
+      "change": "changed",
+      "entry": "service-command-timeout"
     },
     {
       "item": "export:@byok-sdk/client#ServiceUpgradeReceipt",

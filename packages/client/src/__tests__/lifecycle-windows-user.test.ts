@@ -129,7 +129,7 @@ describe('lifecycle/windows-user (#1337)', () => {
       await vi.advanceTimersByTimeAsync(COMMAND_TIMEOUT_MS.hostStop - 500);
       expect(settled).toBe(false);
       await vi.advanceTimersByTimeAsync(500);
-      expect(await stopped).toMatchObject({ constructor: PlatformCommandTimeoutError, exitConfirmed: true });
+      expect(await stopped).toMatchObject({ name: 'ServiceUnitError', code: 'service_command_timeout', exitConfirmed: true, cause: expect.any(PlatformCommandTimeoutError) });
     } finally {
       vi.useRealTimers();
     }

@@ -11324,7 +11324,7 @@ export interface ManagedServiceLifecycle extends ServiceLifecycle {
  * repair and uninstall run whole inside the store's owner gate, so the owner
  * they checked is still the owner when they write, deactivate or release.
  */
-export declare function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs?: ManagedLifecycleFs, gateRoot?: string): ManagedServiceLifecycle;
+export declare function createManagedLifecycle(def: ServiceDefinition, platform: PlatformUnit, fs?: ManagedLifecycleFs, gateRoot?: string): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/sdk-reserved-helper-command.d.ts ====
 /**
  * Product entrypoint seam for single-file/SEA hosts. Returns `false` without
@@ -11480,8 +11480,10 @@ export interface ServiceInstallationOptions {
      * 60000. On install, upgrade,
      * rollback and recover, this bounds only the health-check wait after start
      * returns, also against a check that ignores its abort signal. Unit writes,
-     * activation, start and cleanup stop run outside it; platform commands
-     * have no time bound today (#1971).
+     * activation, start and cleanup stop run outside it. Each service manager
+     * command has its own fixed bound (30 s; WinSW 120 s; the Host's Windows
+     * stop program 60 s); one that outlives it is stopped and the operation
+     * fails with `ServiceUnitError` `service_command_timeout` (#1971).
      */
     healthTimeoutMs?: number;
     /**
@@ -12095,12 +12097,35 @@ declare const ERROR_MESSAGES: {
     readonly invalid_owner: 'The lifecycle owner must be 1-32 characters: lowercase letters, digits and "-", starting with a letter or digit.';
     readonly service_unload_timeout: 'The service manager did not finish unloading the stopped service in time. Check the service manager, then run the operation again.';
     readonly service_stop_failed: 'The service stop program exited with a failure. The stop marker stays, so the service is not restarted; check the stop program, then run the operation again.';
+    readonly service_command_timeout: 'A service manager command did not finish in time; it was stopped. Whether it took effect is unknown. Check the service manager, then run the operation again.';
 };
 export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
-/** Closed codes only; the message never carries a path or OS text. */
+/**
+ * Closed codes only; the message never carries a path or OS text.
+ *
+ * `service_command_timeout` (#1971): a service manager command (`launchctl`,
+ * `systemctl`, WinSW, `sc.exe`, the Windows Startup launch or launcher
+ * query, the Host's Windows stop program) outlived its bound and was
+ * stopped. The service's state is UNKNOWN: the command may have taken
+ * effect before it was stopped, so the error never means the change did
+ * not happen. Read {@link ServiceUnitError.exitConfirmed} before running
+ * the operation again.
+ */
 export declare class ServiceUnitError extends Error {
     readonly code: ServiceUnitErrorCode;
-    constructor(code: ServiceUnitErrorCode, options?: ErrorOptions);
+    /**
+     * Set only with `service_command_timeout`. `true`: the timed-out command
+     * (its process tree, or the Startup launch's own `cmd`) is proven to have
+     * exited, so no part of it can still change the service. `false`: its
+     * cleanup failed or did not finish in time, so it may still be running and
+     * still change the service; a retry now can race it. The SDK keeps no
+     * later ownership of that process. `cause` names the command, for
+     * diagnostics only.
+     */
+    readonly exitConfirmed?: boolean;
+    constructor(code: ServiceUnitErrorCode, options?: ErrorOptions & {
+        exitConfirmed?: boolean | undefined;
+    });
 }
 export declare function assertServiceOwner(owner: unknown): asserts owner is string;
 /** `<storeDir>/service`: the SDK-owned directory for the launcher and the lifecycle owner record. */

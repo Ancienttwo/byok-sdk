@@ -207,7 +207,7 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
       if (args[1] === 'daemon-reload') throw timeout;
       return fail(1, '', 'Unit Acme-Agent-.service not loaded.');
     });
-    await expect(createSystemdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h' }).uninstall()).rejects.toBe(timeout);
+    await expect(createSystemdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h' }).uninstall()).rejects.toMatchObject({ name: 'ServiceUnitError', code: 'service_command_timeout', exitConfirmed: true, cause: timeout });
   });
 
   it('uninstall() throws and does NOT delete the unit file when disable --now fails for a real reason (P1 #7)', async () => {
