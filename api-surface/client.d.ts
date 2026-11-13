@@ -11288,7 +11288,10 @@ export interface ServiceInstallationOptions {
      * the snapshot when the precheck reports a store as `migration-required`;
      * exit 0 is success. The precheck then runs again and must report every
      * store `accepted` or `absent`. Without it, a `migration-required` store is
-     * `store_migration_required` and nothing is switched. The Host must make
+     * `store_migration_required` and nothing is switched. Any failure after the
+     * snapshot (a throw here, an exit other than 0, a failed or non-accepting
+     * second precheck) restores the snapshot and is `store_migration_failed`,
+     * with a thrown or precheck error as `cause`. The Host must make
      * this program safe to run again after interruption: install has no
      * write-ahead receipt for a process death during migration.
      */
@@ -11301,8 +11304,11 @@ export interface ServiceInstallationOptions {
      */
     healthCheck?(signal: AbortSignal): Promise<void>;
     /**
-     * How long the health check may take. Default 60000. On install, this
-     * bounds only the health-check wait after start returns. Unit writes,
+     * How long the health check may take: an integer from 1 to 2147483647
+     * (2^31-1) ms, or a TypeError when the installation is created. Default
+     * 60000. On install, upgrade,
+     * rollback and recover, this bounds only the health-check wait after start
+     * returns, also against a check that ignores its abort signal. Unit writes,
      * activation, start and cleanup stop run outside it; platform commands
      * have no time bound today (#1971).
      */
@@ -11379,7 +11385,10 @@ export interface ServiceInstallation {
      * is untouched until preparation succeeds; its live store owner causes
      * `store_busy`. An owned marked unit without a current version is stopped
      * before preparation and started again after preparation fails, once
-     * leases/gates are released and staging removed. After a failed store
+     * leases/gates are released and the version directory this call created
+     * is removed (one it reused, or any after `installation_exists`, is kept:
+     * another installation may use it; the next successful upgrade's prune or
+     * uninstall removes it). After a failed store
      * restore it is removed instead, and the next install writes it again.
      * OS credentials are never cleared. `precheck` is required.
      * The temporary snapshot `snapshots/.install-<uuid>` is removed after a
@@ -11394,8 +11403,8 @@ export interface ServiceInstallation {
      * error names it: the next first install restores it, under the store
      * leases and before its precheck. When it cannot stop the service, take
      * the leases, restore or retire the repair name, or when more than one
-     * repair snapshot exists, it fails without other changes, names the
-     * snapshots and starts nothing.
+     * repair snapshot exists, it fails, names the snapshots, starts nothing
+     * and removes a marked unit.
      */
     install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
     /**
@@ -11406,16 +11415,45 @@ export interface ServiceInstallation {
      * health. A store refusal stops before the switch and restarts the old
      * version; a failed migration restores the snapshot first; a failed health
      * check restores the old version and its snapshot together; a death after
-     * the receipt leaves `recover()` that work.
+     * the receipt leaves `recover()` that work. When the snapshot restore
+     * after a failed preparation (such as a failed migration) fails, the
+     * stores may be partial: the old version is not restarted, the receipt
+     * stays `pending`, and the error names the kept snapshot. Call `recover()`
+     * as soon as possible: the unit stays installed, so a reboot or login
+     * before it starts the old version on those stores. A failed restore
+     * after a failed health check is not covered: it throws the underlying
+     * error, which need not name the snapshot, and `current` may still point
+     * at the candidate (#1992).
      */
     upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt>;
     /**
      * Restores `previous` and the store snapshot taken when `current` was
      * switched to, under a `pending` receipt written first. Store writes since
      * that switch are discarded.
+     *
+     * The top-level code names the Host's next step, which follows where the
+     * receipt stops. On every exit where a store gate or lease failed to
+     * release and the receipt stays `pending` (a refusal whose `failed`
+     * receipt was not written, including one that is not a
+     * `ServiceInstallationError`; a failed pointer write or snapshot restore;
+     * the release after the pointer writes; a rollback after a failed health
+     * check), the error is `store_release_failed`. Its `cause` is one flat
+     * `AggregateError`: the failure that came first (such as
+     * `health_check_failed`, a preparation error or `store_busy`), every
+     * release failure, then a failed receipt write or restart. Call
+     * recover(); a lease that failed to release stays held until its process
+     * exits, so restart the Host process first when recover() reports
+     * `store_busy`. When an upgrade refusal's `failed` receipt cannot be
+     * written, the previous version also stays stopped, since recover()
+     * restores the snapshot over whatever it would write; without a release
+     * failure the refusal keeps its code and the receipt write joins its
+     * `cause`. A refusal whose final receipt was written keeps its code,
+     * and a later release or restart failure joins its `cause` the same way.
+     * A release failure after the final receipt would not reject a committed
+     * result; no path releases there today.
      */
     rollback(): Promise<ServiceUpgradeReceipt>;
-    /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. */
+    /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. Release failures follow the same rule as on `rollback()`. */
     recover(): Promise<ServiceUpgradeReceipt | undefined>;
     /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
     uninstall(): Promise<void>;
@@ -11432,6 +11470,7 @@ declare const ERROR_MESSAGES: {
     readonly version_conflict: 'A different payload with the same version id is already staged.';
     readonly upgrade_pending: 'An earlier upgrade or rollback was interrupted. Run recover() (CLI: byok-agent upgrade recover) first.';
     readonly store_busy: 'A daemon store still has a running owner after the stop. Stop every process that uses it and retry.';
+    readonly store_release_failed: 'The store gates or leases could not be released before the final receipt was written; the receipt stays pending. Run recover() (CLI: byok-agent upgrade recover); if it reports store_busy, restart the Host process first.';
     readonly daemon_stores_invalid: 'daemonStores() threw or listed an invalid store: each storeDir must be absolute and listed once, each productId not empty.';
     readonly owned_process_residue: 'Processes from the previous daemon run survived; resolve them before upgrading.';
     readonly precheck_failed: 'The candidate\'s store precheck did not produce a valid verdict.';
