@@ -725,9 +725,9 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     const error = await installation.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught);
     expect(error).toMatchObject({ code: 'health_check_failed', cause: { code: 'service_command_timeout', exitConfirmed: false } });
     expect((error as Error).cause).toBeInstanceOf(ServiceUnitError);
+    expect(await late!()).toBe('1.0.0');
     expect(events).toEqual(['stop', 'stop', 'start', 'health 1.0.0']);
     expect(await installation.receipt()).toMatchObject({ state: 'rolled-back', code: 'health_check_failed', from: '1.0.0', to: '2.0.0' });
-    expect(await late!()).toBe('1.0.0');
   });
 
   it('reports rollback_unhealthy when the restored version fails too', async () => {
