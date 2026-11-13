@@ -13,7 +13,7 @@ import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
 import { resolveRuntimeInvocation, runtimeInvocationHost } from '../runtime-invocation.js';
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
-import { haltGate, raceDeadline, RetainedRecordBudget, RetryableOnce } from '../session-kit.js';
+import { haltGate, raceDeadline, RetryableOnce } from '../session-kit.js';
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 import { agentPersona } from '../agent-persona.js';
 import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
@@ -125,7 +125,6 @@ class OpenCodeSession implements Session {
   private projection?: OpenCodeProjection;
   private model?: string;
   private prompting = false;
-  private readonly recordBudget: RetainedRecordBudget;
   private failure?: RuntimeExecutionFailure;
   private haltExit?: Promise<number | null>;
   private ending = false;
@@ -141,9 +140,7 @@ class OpenCodeSession implements Session {
   constructor(private readonly input: RuntimeOperationStartInput & { kind: 'instruction' }, private readonly options: OpenCodeAdapterOptions,
     private readonly command: string, private readonly version: string,
     private readonly mcpServers: readonly { name: string; command: string; args?: readonly string[]; env?: Readonly<Record<string, string>> }[],
-    maxRetainedBytes: number, private readonly interruptTimeoutMs: number, private readonly persona?: string) {
-    this.recordBudget = new RetainedRecordBudget(maxRetainedBytes, 'opencode');
-  }
+    private readonly maxRetainedBytes: number, private readonly interruptTimeoutMs: number, private readonly persona?: string) {}
 
   get exitedOnItsOwn(): boolean { return this.child?.exitedOnItsOwn === true; }
 
@@ -194,7 +191,7 @@ class OpenCodeSession implements Session {
       return spawnTerminal(invocation.command, [...invocation.args, ...args], opts);
     },
     { kind: 'available', via: 'executable', command: this.command, version: this.version }, {
-      cwd: this.input.manifest.cwd!, env: { ...this.input.env, ...this.input.scratch.env }, model: this.options.models[index]!,
+      cwd: this.input.manifest.cwd!, env: { ...this.input.env, ...this.input.scratch.env }, retainedBytes: this.maxRetainedBytes, model: this.options.models[index]!,
       ...(this.mcpServers.length === 0 ? {} : { mcpServers: this.mcpServers }),
       ...(expected === undefined ? {} : { resume: expected }),
       ...(this.persona === undefined ? {} : { appendSystemPrompt: this.persona }),
@@ -214,7 +211,6 @@ class OpenCodeSession implements Session {
   private record(record: AcpRecord, index: number): void {
     if (this.failure) return;
     try {
-      this.recordBudget.add(record);
       const body = object(record.body);
       if (record.kind === 'frame' && record.sessionId === this.sessionRef && Array.isArray(body?.events)) {
         for (const value of body.events) {

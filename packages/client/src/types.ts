@@ -669,6 +669,14 @@ export interface PreparedRuntimeOperation {
     kind: 'instruction' | 'prepared'; cwd: string; env: Readonly<Record<string, string | undefined>>;
     scratch: ExecutionScratch;
   }): Promise<RuntimeLaunchResources>;
+  /**
+   * Must resolve without waiting on anything a first-turn tool call produces.
+   * The startup deadline bounds the normal start path. Every `close()` during
+   * startup disposal has no bound. Memory calls pending at a startup failure are
+   * rejected before the offer disposes its startup owner, except for the closes
+   * that run inside the start path: incomplete-session close and memory-lane
+   * abort disposal (which awaits start).
+   */
   start(input: RuntimeOperationStartInput): Promise<Session>;
 }
 

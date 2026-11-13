@@ -6,7 +6,8 @@
  */
 import path from 'node:path';
 import type { Readable, Writable } from 'node:stream';
-import { bundledSdkHelperHost, resolveHostLayout, resolveSdkHosting, runSdkReservedHelperCommand, type SdkHostingOptions } from '@byok-sdk/client';
+import { bundledSdkHelperHost, resolveSdkHosting, runSdkReservedHelperCommand, type SdkHostingOptions } from '@byok-sdk/client';
+import { resolveHostLayout } from '@byok-sdk/client/host-layout';
 import brand from '../../brand.config.ts';
 import manifest from '../../package.json' with { type: 'json' };
 import { joinHandlers } from '../bridge/domain.ts';

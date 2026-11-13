@@ -5,15 +5,6 @@ function failure(reason: string): RuntimeExecutionFailure {
   return new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason });
 }
 
-export class RetainedRecordBudget {
-  private bytes = 0;
-  constructor(private readonly maxBytes: number, private readonly runtime: string) {}
-  add(record: unknown): void {
-    this.bytes += Buffer.byteLength(JSON.stringify(record), 'utf8');
-    if (this.bytes > this.maxBytes) throw failure(`${this.runtime} retained record byte budget exceeded`);
-  }
-}
-
 export function haltGate<T extends { onLine(handler: (line: string) => void): void }>(child: T, halted: () => boolean): T {
   return { ...child, onLine: (handler: (line: string) => void) => child.onLine((line) => {
     if (!halted()) handler(line);

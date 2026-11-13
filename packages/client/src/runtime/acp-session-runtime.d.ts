@@ -65,6 +65,8 @@ export type StartAcpSession = (
   options: {
     cwd: string;
     env: Readonly<Record<string, string>>;
+    /** OAR SessionOptions.retainedBytes: past it the kernel elides the oldest native payloads. */
+    retainedBytes: number;
     resume?: string;
     model?: string;
     /** OAR SessionOptions.appendSystemPrompt: session-local instructions added to the runtime's built-in ones. */

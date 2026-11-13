@@ -44,6 +44,12 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     agentBinding, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation,
     workspaceDir, blobAbort, payload, session, sessionMembers, messageRequirement, terminalProjection, toolAuthorization, residentMemoryStart,
   } = input;
+  const failActivation = (reason: string): Promise<boolean> => {
+    hostFor(this).dispatchSync({ type: 'runtime.activation_failed', taskId, atMs: Date.now(), reason });
+    return this['failClaimedAgent'](taskId, reason, false, {
+      binding: agentBinding, runtimeId: pick.descriptor.id, sessionRef: session.sessionRef,
+    });
+  };
   try {
   try {
     await agentBinding.lease.bindSession(session.sessionRef);
@@ -51,17 +57,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     const reason = `Agent session execution lease could not bind the runtime session: ${outboundErrorMessage(error)}`;
     // C8: bind/handoff/message failures are always a non-retryable failed
     // terminal, recorded before the legacy evidence/close/commit IO runs.
-    hostFor(this).dispatchSync({ type: 'runtime.activation_failed', taskId, atMs: Date.now(), reason });
-    await this['failClaimedAgent'](
-      taskId,
-      reason,
-      false,
-      {
-        binding: agentBinding,
-        runtimeId: pick.descriptor.id,
-        sessionRef: session.sessionRef,
-      },
-    );
+    await failActivation(reason);
     return;
   }
 
@@ -149,17 +145,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
       }));
   } catch (error) {
     const reason = `Agent session handoff could not be durably written before start: ${outboundErrorMessage(error)}`;
-    hostFor(this).dispatchSync({ type: 'runtime.activation_failed', taskId, atMs: Date.now(), reason });
-    await this['failClaimedAgent'](
-      taskId,
-      reason,
-      false,
-      {
-        binding: agentBinding,
-        runtimeId: pick.descriptor.id,
-        sessionRef: session.sessionRef,
-      },
-    );
+    await failActivation(reason);
     return;
   }
   const activatedMessageRecord = active.messageOutbox === undefined
@@ -244,9 +230,6 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     const reason = `runtime activation failed: ${outboundErrorMessage(error)}`;
     // C8 for the unexpected-throw path (message activation, or any error
     // outside the two explicit bind/handoff branches above).
-    hostFor(this).dispatchSync({ type: 'runtime.activation_failed', taskId, atMs: Date.now(), reason });
-    await this['failClaimedAgent'](taskId, reason, false, {
-      binding: agentBinding, runtimeId: pick.descriptor.id, sessionRef: session.sessionRef,
-    });
+    await failActivation(reason);
   }
 }

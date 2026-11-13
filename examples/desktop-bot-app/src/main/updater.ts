@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { cp, mkdir, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { resolveHostLayout } from '@byok-sdk/client';
+import { resolveHostLayout } from '@byok-sdk/client/host-layout';
 import { app, dialog } from 'electron';
 import electronUpdater from 'electron-updater';
 import brand from '../../brand.config.ts';
