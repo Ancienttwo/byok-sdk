@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "40c9201e88c77c9f4deb960e08c29a414e287fce9afa0fbe6f348d4247a18ff0"
+    "snapshotSha256": "e3dbbf58b9a00e8eca9b3cd6c3087dc07cd20c250656ffb186136aadbe056178"
   },
   "configFields": {
     "status": "tracked",
@@ -44,6 +44,18 @@
       "items": [
         "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES"
       ]
+    },
+    {
+      "id": "path-gate-release-failures",
+      "impact": "breaking",
+      "summary": "A path mutation gate release that fails while another error is thrown is kept: PathMutationGateBusyError, ServiceUnitError and LocalStateRelocation errors keep their class and code with an AggregateError of the original error and the release failures in cause, and an error of another class from a managed service lifecycle operation becomes that AggregateError. ServiceUnitError and the LocalStateRelocation error classes accept ErrorOptions. Hosts that read the original error of such a failure read it from cause.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#gate-release-failures-join-the-thrown-error",
+      "items": [
+        "export:@byok-sdk/client#LocalStateRelocationBusyError",
+        "export:@byok-sdk/client#LocalStateRelocationError",
+        "export:@byok-sdk/client#LocalStateRelocationIntegrityError",
+        "export:@byok-sdk/client#ServiceUnitError"
+      ]
     }
   ],
   "changes": [
@@ -68,9 +80,29 @@
       "entry": "bot-turn-instruction-host-kit"
     },
     {
+      "item": "export:@byok-sdk/client#LocalStateRelocationBusyError",
+      "change": "changed",
+      "entry": "path-gate-release-failures"
+    },
+    {
+      "item": "export:@byok-sdk/client#LocalStateRelocationError",
+      "change": "changed",
+      "entry": "path-gate-release-failures"
+    },
+    {
+      "item": "export:@byok-sdk/client#LocalStateRelocationIntegrityError",
+      "change": "changed",
+      "entry": "path-gate-release-failures"
+    },
+    {
       "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
       "change": "changed",
       "entry": "service-store-release-failures"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUnitError",
+      "change": "changed",
+      "entry": "path-gate-release-failures"
     },
     {
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",

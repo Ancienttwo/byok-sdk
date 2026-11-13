@@ -13,9 +13,11 @@ import {
   releaseServiceLifecycleOwner,
   SERVICE_UNIT_MARKER,
   ServiceUnitError,
+  withServiceOwnerGate,
   type ServiceOwnerFs,
 } from '../lifecycle/service-unit';
 import { acquireDaemonOwner, type DaemonOwnerLease } from '../util/daemon-owner';
+import * as mutationGate from '../util/path-mutation-gate';
 import { acquirePathMutationGate } from '../util/path-mutation-gate';
 import { DRIFTED_MARKED_UNIT, memoryServiceFs, UNMARKED_UNIT, type MemoryServiceFs } from './support/service-fs';
 import { useProductionGateRootForFile } from './support/production-gate-root';
@@ -362,6 +364,28 @@ describe('lifecycle (#1097) owner record mutations across a change of owner', ()
  * around activate would make the daemon's own acquire wait and fail.
  */
 describe('lifecycle (#1097) service-lifecycle gate and the daemon store gate', () => {
+  it('a gate release failure joins the operation error: a ServiceUnitError keeps its code, another error becomes an AggregateError (#2002)', async () => {
+    const fault = new Error('injected release failure');
+    const real = mutationGate.acquirePathMutationGate;
+    const spy = vi.spyOn(mutationGate, 'acquirePathMutationGate').mockImplementation(async (input, options) => {
+      const gate = await real(input, options);
+      return { ...gate, release: async () => { await gate.release(); throw fault; } };
+    });
+    try {
+      const typed = new ServiceUnitError('lifecycle_owner_conflict');
+      const refused = await withServiceOwnerGate(async () => { throw typed; }).catch((error: unknown) => error);
+      expect(refused).toBeInstanceOf(ServiceUnitError);
+      expect(refused).toMatchObject({ code: 'lifecycle_owner_conflict' });
+      expect(((refused as Error).cause as AggregateError).errors).toEqual([typed, fault]);
+      const raw = new Error('raw operation failure');
+      const other = await withServiceOwnerGate(async () => { throw raw; }).catch((error: unknown) => error);
+      expect(other).toBeInstanceOf(AggregateError);
+      expect((other as AggregateError).errors).toEqual([raw, fault]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('install, repair and uninstall run while the daemon they start and stop takes and releases its store gate: no busy, no deadlock', async () => {
     const storeDir = await nodeFs.mkdtemp(path.join(os.tmpdir(), 'byok-owner-order-'));
     try {

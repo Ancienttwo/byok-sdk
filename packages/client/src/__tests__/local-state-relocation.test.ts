@@ -140,6 +140,24 @@ describe('localStateRelocation', () => {
     expect(await ownerBusy()).toBe('claimed');
   });
 
+  it('a refusal whose gate release fails is an integrity error carrying the refusal and the release failure (#2002)', async () => {
+    const input = relocationInput(await makeRoot());
+    const fault = new Error('injected release failure');
+    const store = await mutationGate.acquirePathMutationGate({ scope: 'store', targetPath: input.sourceStoreDir });
+    vi.mocked(mutationGate.acquirePathMutationGate).mockImplementationOnce(async () => ({
+      scope: 'service-lifecycle', targetPath: '*', identity: 'service-lifecycle', release: async () => { throw fault; },
+    }));
+    try {
+      const refused = await localStateRelocation.acquire(input).catch((error: unknown) => error);
+      expect(refused).toBeInstanceOf(LocalStateRelocationIntegrityError);
+      const [busy, release] = ((refused as Error).cause as AggregateError).errors;
+      expect(busy).toBeInstanceOf(mutationGate.PathMutationGateBusyError);
+      expect(release).toBe(fault);
+    } finally {
+      await store.release();
+    }
+  });
+
   it('serializes reverse-order requests without deadlock', async () => {
     const root = await makeRoot();
     const leftStore = path.join(root, 'left-store');

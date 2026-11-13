@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { promises as nodeFs, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,6 +10,27 @@ import { acquirePathMutationGate, acquirePathMutationGates, PathMutationGateBusy
 import { useProductionGateRootForFile } from './support/production-gate-root';
 import { resolveBunBin } from './support/test-bun-bin';
 import { PrivateDirectoryRefusedError } from '../util/private-unix-socket';
+
+// #2002: the next gate unlock (darwin closeSync, linux server.close) releases for real, then rejects.
+const unlockFault = vi.hoisted(() => ({ next: false, take(): boolean { const on = this.next; this.next = false; return on; } }));
+vi.mock('node:fs', async (load) => {
+  const real = await load<typeof import('node:fs')>();
+  return { ...real, closeSync: (fd: number) => { real.closeSync(fd); if (unlockFault.take()) throw new Error('injected unlock failure'); } };
+});
+vi.mock('node:net', async (load) => {
+  const real = await load<typeof import('node:net')>();
+  return {
+    ...real,
+    createServer: ((...args: Parameters<typeof real.createServer>) => {
+      const server = real.createServer(...args);
+      const close = server.close.bind(server);
+      server.close = ((done?: (error?: Error) => void) => close((error) => done?.(error ?? (unlockFault.take() ? new Error('injected unlock failure') : undefined)))) as typeof server.close;
+      return server;
+    }) as typeof real.createServer,
+  };
+});
+// setup-gate-root.ts loads the gate before these mocks apply; a fresh copy sees them.
+const mockedGate = async () => { vi.resetModules(); return import('../util/path-mutation-gate'); };
 
 /**
  * #1149: the gate is an OS lock owned by one open handle, so no process can
@@ -188,6 +210,34 @@ describe.runIf(supported)('path-mutation gate: one OS lock per handle (#1149)', 
     const gates = await acquirePathMutationGates(inputs, { waitMs: 5_000 });
     held.push(...gates);
     expect(gates.map((gate) => gate.targetPath).sort()).toEqual([await nodeFs.realpath(first), await nodeFs.realpath(second)].sort());
+  });
+
+  it('a partial acquisition whose release fails keeps that failure: busy stays busy with both errors as cause (#2002)', async () => {
+    const targets = await Promise.all([target(), target()]);
+    const canonical = await Promise.all(targets.map((dir) => nodeFs.realpath(dir)));
+    const identity = (dir: string) => createHash('sha256').update(`store\0${dir}`).digest('hex');
+    const [, later] = [...canonical].sort((left, right) => identity(left).localeCompare(identity(right)));
+    await settle(acquirePathMutationGate({ scope: 'store', targetPath: later! }));
+    const gate = await mockedGate();
+    unlockFault.next = true;
+    const result = await gate.acquirePathMutationGates(canonical.map((dir) => ({ scope: 'store', targetPath: dir })), { waitMs: 0 }).catch((error: unknown) => error);
+    expect(result).toBeInstanceOf(gate.PathMutationGateBusyError);
+    expect(result).toMatchObject({ targetPath: later });
+    const cause = (result as Error).cause as AggregateError;
+    expect(cause).toBeInstanceOf(AggregateError);
+    expect(cause.errors.map((error: Error) => error.message)).toEqual([`store mutation gate is already held for ${later}`, 'injected unlock failure']);
+  });
+
+  it('a target that moves while the gate is taken, then an unlock failure, is one AggregateError of both (#2002)', async () => {
+    const targetPath = await nodeFs.realpath(await target());
+    const realpath = nodeFs.realpath;
+    let calls = 0;
+    vi.spyOn(nodeFs, 'realpath').mockImplementation((async (name: string) => (name === targetPath && ++calls > 1 ? `${targetPath}-moved` : realpath(name))) as typeof nodeFs.realpath);
+    const gate = await mockedGate();
+    unlockFault.next = true;
+    const result = await settle(gate.acquirePathMutationGate({ scope: 'store', targetPath }));
+    expect(result).toBeInstanceOf(AggregateError);
+    expect((result as AggregateError).errors.map((error: Error) => error.message)).toEqual([`path mutation gate target changed during acquisition: ${targetPath}`, 'injected unlock failure']);
   });
 
   it.runIf(process.platform === 'darwin')('darwin: the lock file keeps its inode over 100 acquire/release cycles', async () => {

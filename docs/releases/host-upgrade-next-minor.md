@@ -27,6 +27,21 @@ try {
 
 A Host that already handles `PROVIDER_CONFIGURATION_BUSY` from `configure()` or `resolveDefaultModelProvider()` can reuse that handling. When one profile's credential read fails, `list()` now rejects with that failure only after the other reads have finished. No configuration change is needed.
 
+## Gate release failures join the thrown error
+
+A path mutation gate release that fails while another error is thrown is
+no longer dropped (#2002). A Host that matches `PathMutationGateBusyError`,
+`ServiceUnitError` codes or `LocalStateRelocationBusyError` keeps matching
+them: those classes and codes stay, and the release failure is in `cause`,
+an `AggregateError` of the original error and every release failure. An
+error of another class that a managed service lifecycle operation throws
+becomes that `AggregateError` when the `service-lifecycle` gate also fails
+to release. `localStateRelocation.acquire()` reports a refusal whose gate
+release failed as `LocalStateRelocationIntegrityError`, as before, now with
+the refusal and the release failures in `cause`; its busy and integrity
+errors otherwise carry the original error as `cause`. A gate whose release
+failed may still be held until its process exits.
+
 ## Store migration failures are store_migration_failed
 
 Every failure after the store snapshot now throws `store_migration_failed`
