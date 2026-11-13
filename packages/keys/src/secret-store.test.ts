@@ -105,10 +105,14 @@ describe('Linux Secret Service', () => {
     expect(runner).not.toHaveBeenCalled();
   });
 
-  it.each(['unprefixed', 'byok-b64-v1:!!!', 'byok-b64-v1:'])(
-    'refuses malformed stored secrets (%s)', async (value) => {
+  it.each([
+    ['unprefixed', 'KEYCHAIN_SECRET_DECODE_FAILED'],
+    ['byok-b64-v1:!!!', 'KEYCHAIN_SECRET_CORRUPTED'],
+    ['byok-b64-v1:', 'KEYCHAIN_SECRET_CORRUPTED'],
+  ])(
+    'refuses malformed stored secrets (%s)', async (value, code) => {
       await expect(store(vi.fn<CommandRunner>().mockResolvedValue(result(0, value))).get(name))
-        .rejects.toMatchObject({ code: 'KEYCHAIN_SECRET_DECODE_FAILED' });
+        .rejects.toMatchObject({ code });
     },
   );
 });

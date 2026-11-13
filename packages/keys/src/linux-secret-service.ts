@@ -62,12 +62,16 @@ export class LinuxSecretServiceSecretStore<TName extends string = string>
     const result = await this.#invoke('lookup', name);
     if (result.exitCode === 1) return undefined;
     const stored = result.stdout.replace(/\r?\n$/u, '');
-    const decoded = stored.startsWith(this.#storagePrefix)
-      ? decodeStrictBase64Utf8(stored.slice(this.#storagePrefix.length))
-      : undefined;
-    if (decoded === undefined || decoded.length === 0) {
+    if (!stored.startsWith(this.#storagePrefix)) {
       throw new ByokKeysError(
         'KEYCHAIN_SECRET_DECODE_FAILED',
+        'Linux Secret Service returned a value without this store\'s storage prefix',
+      );
+    }
+    const decoded = decodeStrictBase64Utf8(stored.slice(this.#storagePrefix.length));
+    if (decoded === undefined || decoded.length === 0) {
+      throw new ByokKeysError(
+        'KEYCHAIN_SECRET_CORRUPTED',
         'Linux Secret Service returned an invalid encoded secret',
       );
     }
