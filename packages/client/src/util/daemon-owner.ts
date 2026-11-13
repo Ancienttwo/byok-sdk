@@ -450,7 +450,7 @@ export async function acquireDaemonOwner(
       if (!(await createOwner(reclaimPath, record))) {
         throw new DaemonOwnerReclaimingError();
       }
-      try {
+      await withRelease(async () => {
         const rechecked = await readOwner(ownerPath);
         if (rechecked && (await processOwnsRecord(rechecked))) throw new DaemonOwnerActiveError(rechecked.role);
         if (rechecked || (await fs.stat(ownerPath).then(() => true, (err: NodeJS.ErrnoException) => {
@@ -459,20 +459,15 @@ export async function acquireDaemonOwner(
         }))) {
           await fs.rm(ownerPath);
         }
-      } catch (error) {
-        try {
-          const currentReclaim = await readOwner(reclaimPath);
-          if (currentReclaim?.nonce === record.nonce) await fs.rm(reclaimPath, { force: true });
-        } catch (failure) { failures.push(failure); }
-        throw error;
-      }
-      const currentReclaim = await readOwner(reclaimPath);
-      if (currentReclaim?.nonce === record.nonce) await fs.rm(reclaimPath, { force: true });
+      }, async () => {
+        const currentReclaim = await readOwner(reclaimPath);
+        if (currentReclaim?.nonce === record.nonce) await fs.rm(reclaimPath, { force: true });
+      }, (error, errors) => { failures.push(...errors); return error; });
     }
   } catch (err) {
-    try { await liveness?.close(); } catch (failure) { failures.push(failure); }
-    try { await mutex?.close(); } catch (failure) { failures.push(failure); }
-    try { await pathGate?.release(); } catch (failure) { failures.push(failure); }
+    for (const close of [() => liveness?.close(), () => mutex?.close(), () => pathGate?.release()]) {
+      try { await close(); } catch (failure) { failures.push(failure); }
+    }
     throw withOwnerReleaseFailures(err, failures);
   }
 }

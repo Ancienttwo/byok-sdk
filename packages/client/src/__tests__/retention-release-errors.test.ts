@@ -85,6 +85,28 @@ it('keeps owner release operation and release gate failures together', async () 
   await lease.release();
 });
 
+it('preserves initialization and lease release failures in prepare', async () => {
+  const root = testScratchRoot();
+  const manager = new AgentHomeManager({ hostStorageRoot: root });
+  const primary = new Error('initialize');
+  const failure = new Error('release');
+  vi.spyOn(manager, 'acquire').mockResolvedValue({ lease: { release: async () => { throw failure; } } } as never);
+  vi.spyOn(manager, 'initialize').mockRejectedValue(primary);
+  const error = await manager.prepare({ agentId: 'agent', profileRevision: '1' }).catch(e => e);
+  expect(error).toBeInstanceOf(AggregateError);
+  expect(error.errors).toEqual([primary, failure]);
+});
+
+it('preserves maintenance work and release failures', async () => {
+  const manager = new AgentHomeManager({ hostStorageRoot: testScratchRoot() });
+  const primary = new Error('work');
+  const failure = new Error('release');
+  vi.spyOn(manager.leaseManager, 'acquireMaintenance').mockResolvedValue({ release: async () => { throw failure; } });
+  const error = await manager.withIdleHomeLease('agent', async () => { throw primary; }).catch(e => e);
+  expect(error).toBeInstanceOf(AggregateError);
+  expect(error.errors).toEqual([primary, failure]);
+});
+
 it('preserves owner publication failure and gate release failure', async () => {
   const root = testScratchRoot();
   const primary = new Error('clock');
