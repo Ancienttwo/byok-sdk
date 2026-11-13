@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "47d5ae4ed87551abbe8e30dc50c222a5aa80ee42ed3cb94b7137e6e65b617643"
+    "snapshotSha256": "ebca28d268b0e90f6f29c9c0f4f9d4894b2d6a746599eaea1ed5d2d710e4fd99"
   },
   "configFields": {
     "status": "tracked",
@@ -23,9 +23,31 @@
       "items": [
         "export:@byok-sdk/bot-collaboration/host-kit#botTurnInstruction",
         "export:@byok-sdk/bot-collaboration/host-kit#BotTurnInstructionOptions",
-        "export:@byok-sdk/bot-collaboration/host-kit#InstructionLimits"
+        "export:@byok-sdk/bot-collaboration/host-kit#InstructionLimits",
+        "export:@byok-sdk/bot-collaboration/rules#SyncOptions"
       ]
     }
   ],
-  "changes": []
+  "changes": [
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#BotTurnInstructionOptions",
+      "change": "added",
+      "entry": "bot-turn-instruction-host-kit"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#InstructionLimits",
+      "change": "added",
+      "entry": "bot-turn-instruction-host-kit"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#botTurnInstruction",
+      "change": "added",
+      "entry": "bot-turn-instruction-host-kit"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#SyncOptions",
+      "change": "changed",
+      "entry": "bot-turn-instruction-host-kit"
+    }
+  ]
 }
