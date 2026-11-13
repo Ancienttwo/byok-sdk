@@ -128,13 +128,14 @@ export type CheckProjectionInput = Assert<Assignable<RawEvent, Parameters<CodexP
 export type CheckHookRecord = Assert<Assignable<RawEvent, Parameters<NonNullable<NonNullable<BridgeArgs[4]>['onRecord']>>[0]>>;
 
 // The process-tree bridge re-exports the vendored OAR functions with their exact types.
-export type CheckTreeExports = Assert<Equal<keyof typeof TreeBridge, 'descendantsOf' | 'killEntries' | 'readProcessTable'>>;
-export type CheckTreeVendorExports = Assert<Equal<Exclude<keyof typeof VendorTree, 'ProcessEntry' | 'ProcessTable' | 'ProcessTableRead' | 'ProcessTableSource' | 'ProcessTableFailureReason' | 'ProcessTableFailure' | 'ProcessTableObservation' | 'InvalidProcessTableError' | 'parseProcessStat' | 'parseProcessPs' | 'parseProcessWindows' | 'observeProcessTable' | 'processTableFailure' | 'signalEntries'>, keyof typeof TreeBridge>>;
+export type CheckTreeExports = Assert<Equal<keyof typeof TreeBridge, 'descendantsOf' | 'killEntries' | 'parseProcessPs' | 'readProcessTable'>>;
+export type CheckTreeVendorExports = Assert<Equal<Exclude<keyof typeof VendorTree, 'ProcessEntry' | 'ProcessTable' | 'ProcessTableRead' | 'ProcessTableSource' | 'ProcessTableFailureReason' | 'ProcessTableFailure' | 'ProcessTableObservation' | 'InvalidProcessTableError' | 'parseProcessStat' | 'parseProcessWindows' | 'observeProcessTable' | 'processTableFailure' | 'signalEntries'>, keyof typeof TreeBridge>>;
 export type CheckTreeEntry = Assert<Equal<TreeBridge.ProcessEntry, VendorTree.ProcessEntry>>;
 export type CheckTreeTable = Assert<Equal<TreeBridge.ProcessTable, VendorTree.ProcessTable>>;
 export type CheckTreeRead = Assert<Equal<typeof TreeBridge.readProcessTable, typeof VendorTree.readProcessTable>>;
 export type CheckTreeWalk = Assert<Equal<typeof TreeBridge.descendantsOf, typeof VendorTree.descendantsOf>>;
 export type CheckTreeKill = Assert<Equal<typeof TreeBridge.killEntries, typeof VendorTree.killEntries>>;
+export type CheckTreeParsePs = Assert<Equal<typeof TreeBridge.parseProcessPs, typeof VendorTree.parseProcessPs>>;
 
 // The ACP bridge: one start signature for every vendored ACP runtime, with
 // the SDK-owned agent process, terminal processes and explicit environment.

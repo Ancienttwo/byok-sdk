@@ -1,5 +1,5 @@
 import type { RuntimeTaskInput } from '../types';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,7 +9,7 @@ import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { isRuntimeDisposalFailure } from '../runtime-failure';
-import { OWNED_TREE_OBSERVE_MS, adoptOwnedProcessTree, disposeOwnedProcessTree, withOwnedProcessTree } from '../adapters/process-tree';
+import { OWNED_TREE_OBSERVE_MS, adoptOwnedProcessTree, disposeOwnedProcessTree, readProcessTableBounded, withOwnedProcessTree } from '../adapters/process-tree';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
 const PI_FIXTURE = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
@@ -263,6 +263,34 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
       expect(processExists(child.pid!)).toBe(true);
     } finally {
       reapAll([child.pid!]);
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('a hung ps is killed at its deadline and the disposal is refused, not blocked (#2105)', async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-hung-ps-'));
+    // Ignores SIGTERM like a ps stuck reading a wedged process; only SIGKILL ends it.
+    const fakePs = path.join(workspaceDir, 'ps');
+    await fs.writeFile(fakePs, `#!/bin/sh\ntrap '' TERM\nwhile :; do :; done\n`, { mode: 0o755 });
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], withOwnedProcessTree({ stdio: 'ignore', env: {} }));
+    await new Promise((resolve) => child.once('spawn', resolve));
+    let ticks = 0;
+    const ticker = setInterval(() => { ticks += 1; }, 20);
+    const started = Date.now();
+    try {
+      await expect(disposeOwnedProcessTree({
+        child, waitClosed: () => new Promise(() => {}), isClosed: () => false, label: 'pi',
+        readProcessTableFn: () => readProcessTableBounded({ source: 'ps', command: fakePs, timeoutMs: 300 }),
+      })).rejects.toMatchObject({ name: 'RuntimeDisposalFailure', stage: 'signal', message: expect.stringContaining('timeout, exit unconfirmed') });
+      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(ticks).toBeGreaterThan(5);
+      const running = (): string[] => spawnSync('/bin/ps', ['-A', '-o', 'command='], { encoding: 'utf8' }).stdout.split('\n').filter((line) => line.includes(fakePs));
+      const deadline = Date.now() + 1_000;
+      while (running().length > 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(running()).toEqual([]);
+    } finally {
+      clearInterval(ticker);
+      reapAll([child.pid!]);
+      await fs.rm(workspaceDir, { recursive: true, force: true });
     }
   });
 });

@@ -188,14 +188,14 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
   it('an unreadable process table fails the adoption instead of skipping the record', async () => {
     attachRecorder();
     const tree = await spawnOwnedTree();
-    await expect(adoptOwnedProcessTree({ child: tree.child, label: 'fixture', readProcessTableFn: () => new Map() }))
+    await expect(adoptOwnedProcessTree({ child: tree.child, label: 'fixture', readProcessTableFn: async () => new Map() }))
       .rejects.toThrow('the process table is unreadable');
   });
 
   it('a running root missing from the table fails the adoption; an exited one records nothing', async () => {
     const seen = attachRecorder();
     const running = await spawnOwnedTree();
-    const withoutRoot = () => new Map([...readProcessTable()].filter(([pid]) => pid !== running.pgid));
+    const withoutRoot = async () => new Map([...readProcessTable()].filter(([pid]) => pid !== running.pgid));
     await expect(adoptOwnedProcessTree({ child: running.child, label: 'fixture', readProcessTableFn: withoutRoot }))
       .rejects.toThrow('its root is missing from the process table');
 

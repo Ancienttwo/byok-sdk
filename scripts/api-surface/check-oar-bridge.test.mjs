@@ -52,6 +52,7 @@ test('OAR process-tree JS bridge re-exports the checked vendored functions', () 
   assert.deepEqual(statement.specifiers.map(({ local, exported }) => [local.name, exported.name]), [
     ['descendantsOf', 'descendantsOf'],
     ['killEntries', 'killEntries'],
+    ['parseProcessPs', 'parseProcessPs'],
     ['readProcessTable', 'readProcessTable'],
   ]);
 });
