@@ -8,7 +8,7 @@ import { AGENT_RESULT_DIRECTORY, AGENT_RESULT_MAX_RETAINED, AGENT_RESULT_RECORD_
 import { sessionFileName, type AgentSessionHandoffStore } from '../agent-session-handoff-store.js';
 import type { InputPreparationService } from '../input-preparation-service.js';
 import type { JournalIdentity, LocalTaskJournal } from '../journal/journal.js';
-import { acquirePathMutationGate, PathMutationGateBusyError } from '../../util/path-mutation-gate.js';
+import { acquirePathMutationGate, PathMutationGateBusyError, withGateReleaseFailures } from '../../util/path-mutation-gate.js';
 import { readInstalledSkillPack, skillPacksRoot } from '../skill-pack-installer.js';
 import type { ResolvedStorageConfig } from './config.js';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_BOUNDS, PROTECTED_CLASS_IDS, RetentionRegistry, type ClassAuthority, type ProtectedClassId, type ClassUsage, type ExpiringClassId, type RetentionClassId, type SweepBudget } from './registry.js';
@@ -356,6 +356,11 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     let rebinding;
     try { rebinding = await acquirePiSessionRebinding(); }
     catch (error) { if (error instanceof PathMutationGateBusyError) return; throw error; }
+    const releaseFailures: unknown[] = [];
+    const releaseFailed = Symbol('release failed');
+    const release = async (gate: { release(): Promise<void> }) => {
+      try { await gate.release(); } catch (error) { releaseFailures.push(error); }
+    };
     try {
     // A fresh launch holds discovery until it knows and leases its real session id.
     // Resumes take their session lease before validating the home handoff. Both
@@ -368,13 +373,18 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
         let discovery;
         try { discovery = await acquirePiSessionDiscovery(piSessionDir); }
         catch (error) { if (error instanceof PathMutationGateBusyError) return true; throw error; }
+        let operationFailed = false;
         try {
           let session;
           try { session = await acquirePiSessionRetention(piSessionDir, sessionRef); }
           catch (error) { if (error instanceof PathMutationGateBusyError) return true; throw error; }
           let writer;
           try { writer = await acquirePiSessionWriter(file); }
-          catch (error) { await session.release(); if (error instanceof PathMutationGateBusyError) return true; throw error; }
+          catch (error) {
+            await release(session);
+            if (error instanceof PathMutationGateBusyError && releaseFailures.length === 0) return true;
+            throw error;
+          }
           try {
             // Selection happened before the gates; a completed turn may have refreshed the file.
             const stat = await fs.lstat(file).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
@@ -402,12 +412,19 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
               } finally { await handle.close(); }
               if (typeof headerId !== 'string' || headerId === sessionRef) await remove(piSessionDir, file, budget);
             }
-          } finally { await writer.release(); await session.release(); }
-        } finally { await discovery.release(); }
+          } finally { await release(writer); await release(session); }
+        } catch (error) { operationFailed = true; throw error; }
+        finally { await release(discovery); if (!operationFailed && releaseFailures.length) throw releaseFailed; }
         return true;
       },
     });
-    } finally { await rebinding.release(); }
+    } catch (error) {
+      await release(rebinding);
+      if (error === releaseFailed) throw withGateReleaseFailures(releaseFailures[0], releaseFailures.slice(1));
+      throw withGateReleaseFailures(error, releaseFailures);
+    }
+    await release(rebinding);
+    if (releaseFailures.length) throw withGateReleaseFailures(releaseFailures[0], releaseFailures.slice(1));
   }
   async function sweepAgySessions(budget: SweepBudget): Promise<void> {
     if (agySessionStore === undefined) return;

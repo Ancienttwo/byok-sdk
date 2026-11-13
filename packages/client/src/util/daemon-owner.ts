@@ -8,6 +8,7 @@ import { listenPrivateUnixSocket, privateSocketEndpoint, PrivateSocketInUseError
 import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
+  withGateReleaseFailures,
   type PathMutationGate,
 } from '../util/path-mutation-gate.js';
 
@@ -78,16 +79,16 @@ export function storeMutexEndpoint(
 }
 
 export class DaemonOwnerActiveError extends Error {
-  constructor(public readonly role: OwnerRecord['role'] | 'unknown') {
-    super(`store mutation lease is already held by an active ${role} process`);
+  constructor(public readonly role: OwnerRecord['role'] | 'unknown', options?: ErrorOptions) {
+    super(`store mutation lease is already held by an active ${role} process`, options);
     this.name = 'DaemonOwnerActiveError';
   }
 }
 
 /** Another process is reclaiming this store's stale lease; retry once it is done. */
 export class DaemonOwnerReclaimingError extends Error {
-  constructor() {
-    super('store mutation lease is being reclaimed; retry after the current operation finishes');
+  constructor(options?: ErrorOptions) {
+    super('store mutation lease is being reclaimed; retry after the current operation finishes', options);
     this.name = 'DaemonOwnerReclaimingError';
   }
 }
@@ -250,9 +251,7 @@ async function acquireStoreMutexOnce(canonicalStoreDir: string): Promise<StoreMu
   const endpoint = storeMutexEndpoint(canonicalStoreDir, identity);
   const server: Server = createServer((socket) => endOwnershipProbe(socket));
   try {
-    if (process.platform !== 'win32') {
-      await listenPrivateUnixSocket(server, endpoint);
-    } else {
+    if (process.platform === 'win32') {
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject);
         server.listen(endpoint, () => {
@@ -260,6 +259,8 @@ async function acquireStoreMutexOnce(canonicalStoreDir: string): Promise<StoreMu
           resolve();
         });
       });
+    } else {
+      await listenPrivateUnixSocket(server, endpoint);
     }
   } catch (err) {
     if (err instanceof PrivateSocketInUseError || (err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
@@ -428,9 +429,11 @@ export async function acquireDaemonOwner(
               await ownedMutex.close();
               await fs.rm(ownerPath);
               released = true;
-            } finally {
-              await releaseGate.release();
+            } catch (error) {
+              try { await releaseGate.release(); } catch (releaseError) { throw withGateReleaseFailures(error, [releaseError]); }
+              throw error;
             }
+            await releaseGate.release();
           },
         };
       }
@@ -458,7 +461,12 @@ export async function acquireDaemonOwner(
   } catch (err) {
     await liveness?.close().catch(() => undefined);
     await mutex?.close().catch(() => undefined);
-    await pathGate?.release().catch(() => undefined);
+    try { await pathGate?.release(); } catch (releaseError) {
+      const cause = new AggregateError([err, releaseError]);
+      if (err instanceof DaemonOwnerActiveError) throw new DaemonOwnerActiveError(err.role, { cause });
+      if (err instanceof DaemonOwnerReclaimingError) throw new DaemonOwnerReclaimingError({ cause });
+      throw withGateReleaseFailures(err, [releaseError]);
+    }
     throw err;
   }
 }

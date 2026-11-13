@@ -22,6 +22,7 @@ import {
 import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
+  withGateReleaseFailures,
   type PathMutationGate,
 } from './util/path-mutation-gate.js';
 
@@ -60,10 +61,19 @@ export class AgentHomeCollisionError extends AgentHomeResolutionError {
 }
 
 export class AgentHomeBusyError extends AgentHomeError {
-  constructor(message: string) {
+  constructor(message: string, options?: ErrorOptions) {
     super(message);
+    if (options?.cause !== undefined) this.cause = options.cause;
     this.name = 'AgentHomeBusyError';
   }
+}
+
+function withHomeReleaseFailures<T>(error: T, releaseFailures: readonly unknown[]): T | Error {
+  if (releaseFailures.length === 0) return error;
+  if (error instanceof AgentHomeBusyError) {
+    return new AgentHomeBusyError(error.message, { cause: new AggregateError([error, ...releaseFailures]) });
+  }
+  return withGateReleaseFailures(error, releaseFailures) as Error;
 }
 
 /**
@@ -801,11 +811,13 @@ export class AgentHomeLeaseManager {
       rootGate = undefined;
     } catch (error) {
       if (ownsMarker && lockPath !== undefined) await fs.rm(lockPath, { force: true }).catch(() => {});
-      await rootGate?.release().catch(() => {});
+      const releaseFailures: unknown[] = [];
+      try { await rootGate?.release(); } catch (releaseError) { releaseFailures.push(releaseError); }
       dropBaseLease(canonicalHome, leaseId);
       if (error instanceof PathMutationGateBusyError) {
-        throw new AgentHomeBusyError('Agent-home root is reserved for local-state relocation');
+        throw new AgentHomeBusyError('Agent-home root is reserved for local-state relocation', releaseFailures.length ? { cause: new AggregateError([error, ...releaseFailures]) } : undefined);
       }
+      if (releaseFailures.length) throw withHomeReleaseFailures(error, releaseFailures);
       if (error instanceof AgentHomeError) throw error;
       throw new AgentHomeError(`could not acquire Agent home lease: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -862,7 +874,7 @@ export class AgentHomeLeaseManager {
     try {
       await this.settleLeftoverCommitCopy(canonicalHome, homeIdentity);
     } catch (error) {
-      await lease.release().catch(() => {});
+      try { await lease.release(); } catch (releaseError) { throw withHomeReleaseFailures(error, [releaseError]); }
       throw error;
     }
     return lease;
@@ -891,10 +903,11 @@ export class AgentHomeLeaseManager {
       }
       await this.settleLeftoverCommitCopy(canonicalHome, { dev: stat.dev, ino: stat.ino });
     } catch (error) {
-      try { await gate?.release(); }
+      const releaseFailures: unknown[] = [];
+      try { await gate?.release(); } catch (releaseError) { releaseFailures.push(releaseError); }
       finally { dropBaseLease(canonicalHome, leaseId); }
-      if (error instanceof PathMutationGateBusyError) throw new AgentHomeBusyError('Agent-home root is reserved for another writer');
-      throw error;
+      if (error instanceof PathMutationGateBusyError) throw new AgentHomeBusyError('Agent-home root is reserved for another writer', releaseFailures.length ? { cause: new AggregateError([error, ...releaseFailures]) } : undefined);
+      throw withHomeReleaseFailures(error, releaseFailures);
     }
     const heldGate = gate;
     let released = false;
