@@ -2123,6 +2123,13 @@ name, version, tarball SHA-512 integrity, signed provenance and upstream commit 
 each of the ten official packages at the pinned release. It holds no file
 inventory. Acquisition verifies npm signatures and Sigstore provenance against
 the release workflow identity; the record includes the provenance bundles.
+The release graph (`check:release-graph`) verifies each retained bundle again,
+offline, with the collector's own verification function and the trusted root
+bundled in the pinned sigstore package: the Sigstore signature, the certificate
+issuer and Pi's `build-binaries.yml` workflow at `refs/tags/v<version>`, the
+upstream repository and commit, and a SHA-512 subject equal to the recorded and
+locked integrity. This binding is a release-time guarantee; at runtime the
+installation checks only the bundle digest.
 Isolated release/registry installs require each direct pin at exactly the pinned
 version with the locked integrity, prove the coding agent against its official
 tarball, and reject fork packages. They read and report the installed version of

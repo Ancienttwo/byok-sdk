@@ -1,19 +1,6 @@
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
-// Reuse sigstore's verifier with its npm-distributed trust root. No TUF,
-// transparency service or auth endpoints are contacted during collection.
-const require = createRequire(import.meta.url);
-const sigstoreRequire = createRequire(require.resolve('sigstore'));
-const { bundleFromJSON } = sigstoreRequire('@sigstore/bundle');
-const { Verifier, toTrustMaterial, toSignedEntity } = sigstoreRequire('@sigstore/verify');
-const { TrustedRoot } = sigstoreRequire('@sigstore/protobuf-specs');
-const seeds = sigstoreRequire(join(dirname(sigstoreRequire.resolve('@sigstore/tuf')), '../seeds.json'));
-const trustedRoot = TrustedRoot.fromJSON(JSON.parse(Buffer.from(seeds['https://tuf-repo-cdn.sigstore.dev'].targets['trusted_root.json'], 'base64')));
-const verifier = new Verifier(toTrustMaterial(trustedRoot), { ctlogThreshold: 1, tlogThreshold: 1 });
-const verifySigstore = (bundle, options) => verifier.verify(toSignedEntity(bundleFromJSON(bundle)), {
- subjectAlternativeName: options.certificateIdentityURI, extensions: { issuer: options.certificateIssuer },
-});
+// Provenance is verified offline by the same function the release graph runs.
+import { verifyPiProvenance } from './pi-runtime-identity.mjs';
 import { createHash, createPublicKey, verify } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -38,12 +25,7 @@ for (const name of names) {
  const attestations=await(await fetch(metadata.dist.attestations.url)).json();
  const attestation=attestations.attestations.find(a=>a.predicateType==='https://slsa.dev/provenance/v1');
  assert.ok(attestation);
- await verifySigstore(attestation.bundle,{certificateIssuer:'https://token.actions.githubusercontent.com',certificateIdentityURI:`https://github.com/earendil-works/pi/.github/workflows/build-binaries.yml@refs/tags/v${version}`});
- const statement=JSON.parse(Buffer.from(attestation.bundle.dsseEnvelope.payload,'base64'));
- assert.equal(statement.subject.length,1);assert.equal(statement.subject[0].name,`pkg:npm/%40earendil-works/${name.split('/')[1]}@${version}`);
- assert.equal(statement.subject[0].digest.sha512,Buffer.from(integrity.slice(7),'base64').toString('hex'));
- assert.equal(statement.predicate.buildDefinition.externalParameters.workflow.repository,'https://github.com/earendil-works/pi');
- assert.ok(statement.predicate.buildDefinition.resolvedDependencies.some(d=>d.digest.gitCommit===commit));
+ const statement=verifyPiProvenance({name,version,integrity,upstreamCommit:commit,bundle:attestation.bundle});
  const tarball=Buffer.from(await(await fetch(metadata.dist.tarball)).arrayBuffer());
  assert.equal('sha512-'+createHash('sha512').update(tarball).digest('base64'),integrity);
  const bundle=JSON.stringify(attestation.bundle);
