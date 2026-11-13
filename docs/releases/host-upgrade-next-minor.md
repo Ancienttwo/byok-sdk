@@ -232,3 +232,7 @@ Apply this import codemod (including type-only imports); split a mixed root impo
 -import { resolveHostLayout, HostLayoutInputError, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform } from '@byok-sdk/client';
 +import { resolveHostLayout, HostLayoutInputError, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform } from '@byok-sdk/client/host-layout';
 ```
+
+## When whenTaskSettled reports an unknown task (#2067)
+
+No code change. `whenTaskSettled(taskId)` rejects with `DaemonTaskUnknownError` only when, at the call, this `Daemon` instance holds no runtime and has no in-memory record for the task, the journal has no row for it, and this instance has not seen an offer for it. A task whose rows retention pruned (confirmed-journal TTL, default 30 days), a task never journaled on this device and an offer the server sent that has not reached this daemon yet are indistinguishable here, and the error carries no reason. A Host that needs to know whether an offer is still on its way asks its own server. A failed journal read (for example a closed or corrupt journal) rejects with the journal's own error, never with `DaemonTaskUnknownError`, so a Host can treat this error as "no runtime held by this Daemon for the task" and any other rejection as a fault.

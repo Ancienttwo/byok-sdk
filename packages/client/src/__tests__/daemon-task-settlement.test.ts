@@ -630,6 +630,13 @@ describe('Daemon.whenTaskSettled', () => {
       await expect(r.wait('task-refused')).rejects.toBeInstanceOf(DaemonTaskUnknownError);
     });
 
+    it('rejects with the journal error, not as unknown, when the journal read fails', async () => {
+      const r = new TaskSettlementRegistry();
+      const failure = new Error('journal read failed');
+      r.bindJournal({ readTask: async () => { throw failure; }, hasTaskCancellation: async () => false, unconfirmedTerminal: async () => undefined });
+      await expect(r.wait('task-unreadable')).rejects.toBe(failure);
+    });
+
     it('reads an offer as unknown once it is journaled without a row, not as seen', async () => {
       const { registry: r } = registry();
       r.offerSeen('task-gone');

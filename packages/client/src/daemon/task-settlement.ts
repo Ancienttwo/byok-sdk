@@ -39,7 +39,17 @@ export interface DaemonTaskSettlement {
   readonly disposal: 'disposed' | 'failed' | 'none';
 }
 
-/** `whenTaskSettled` was asked about a task with no journal row and no in-memory record. */
+/**
+ * `whenTaskSettled` rejects with this only when, at the call, all three hold:
+ * this Daemon instance has no in-memory record of the task (it holds no
+ * runtime for it and settled nothing for it in this run), the journal has no
+ * row for it, and this instance has not seen an offer for it. A task whose
+ * rows retention pruned, a task never journaled on this device and an offer
+ * the server sent that has not reached this daemon all look the same here;
+ * whether an offer is still on its way is a question for the Host's own
+ * server. A failed journal read is never reported as this error: the wait
+ * rejects with the journal's own error.
+ */
 export class DaemonTaskUnknownError extends Error {
   readonly code = 'daemon_task_unknown' as const;
   constructor(readonly taskId: string) {
