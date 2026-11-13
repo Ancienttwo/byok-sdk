@@ -132,8 +132,10 @@ export interface ServiceInstallationOptions {
    * 60000. On install, upgrade,
    * rollback and recover, this bounds only the health-check wait after start
    * returns, also against a check that ignores its abort signal. Unit writes,
-   * activation, start and cleanup stop run outside it; platform commands
-   * have no time bound today (#1971).
+   * activation, start and cleanup stop run outside it. Each service manager
+   * command has its own fixed bound (30 s; WinSW 120 s; the Host's Windows
+   * stop program 60 s); one that outlives it is stopped and the operation
+   * fails with `ServiceUnitError` `service_command_timeout` (#1971).
    */
   healthTimeoutMs?: number;
   /**
@@ -412,7 +414,7 @@ function joinLater(error: unknown, later: readonly unknown[]): unknown {
     joined.message = error.message;
     return joined;
   }
-  if (error instanceof ServiceUnitError) return new ServiceUnitError(error.code, { cause: new FailureList(all, error.message) });
+  if (error instanceof ServiceUnitError) return new ServiceUnitError(error.code, { cause: new FailureList(all, error.message), exitConfirmed: error.exitConfirmed });
   return new FailureList(all, 'Service installation failed, and a later step failed too.');
 }
 
@@ -1055,8 +1057,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let onAbort: (() => void) | undefined;
     try {
-      // Platform commands are outside the health-check deadline and
-      // currently have no timeout. Await start before checking health or
+      // Platform commands are outside the health-check deadline and have
+      // their own bounds (#1971). Await start before checking health or
       // cleaning up; abandoning it could start a service after its removal.
       await lifecycle.start();
       const check = opts.healthCheck ?? defaultServiceHealthCheck({ storeDir, productId: opts.productId });

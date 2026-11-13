@@ -46,15 +46,38 @@ const ERROR_MESSAGES = {
   invalid_owner: 'The lifecycle owner must be 1-32 characters: lowercase letters, digits and "-", starting with a letter or digit.',
   service_unload_timeout: 'The service manager did not finish unloading the stopped service in time. Check the service manager, then run the operation again.',
   service_stop_failed: 'The service stop program exited with a failure. The stop marker stays, so the service is not restarted; check the stop program, then run the operation again.',
+  service_command_timeout: 'A service manager command did not finish in time; it was stopped. Whether it took effect is unknown. Check the service manager, then run the operation again.',
 } as const;
 
 export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
 
-/** Closed codes only; the message never carries a path or OS text. */
+/**
+ * Closed codes only; the message never carries a path or OS text.
+ *
+ * `service_command_timeout` (#1971): a service manager command (`launchctl`,
+ * `systemctl`, WinSW, `sc.exe`, the Windows Startup launch or launcher
+ * query, the Host's Windows stop program) outlived its bound and was
+ * stopped. The service's state is UNKNOWN: the command may have taken
+ * effect before it was stopped, so the error never means the change did
+ * not happen. Read {@link ServiceUnitError.exitConfirmed} before running
+ * the operation again.
+ */
 export class ServiceUnitError extends Error {
-  constructor(readonly code: ServiceUnitErrorCode, options?: ErrorOptions) {
+  /**
+   * Set only with `service_command_timeout`. `true`: the timed-out command
+   * (its process tree, or the Startup launch's own `cmd`) is proven to have
+   * exited, so no part of it can still change the service. `false`: its
+   * cleanup failed or did not finish in time, so it may still be running and
+   * still change the service; a retry now can race it. The SDK keeps no
+   * later ownership of that process. `cause` names the command, for
+   * diagnostics only.
+   */
+  readonly exitConfirmed?: boolean;
+
+  constructor(readonly code: ServiceUnitErrorCode, options?: ErrorOptions & { exitConfirmed?: boolean | undefined }) {
     super(ERROR_MESSAGES[code], options);
     this.name = 'ServiceUnitError';
+    if (options?.exitConfirmed !== undefined) this.exitConfirmed = options.exitConfirmed;
   }
 }
 

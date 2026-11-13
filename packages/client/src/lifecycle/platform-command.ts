@@ -16,10 +16,14 @@ import { cmdQuote } from './service-unit.js';
  * the `disposal` bound. A cleanup that fails (taskkill cannot start, the
  * process table cannot be read, a process outlives SIGKILL) or does not
  * settle in time is unconfirmed, with any cleanup failure as `cause`.
- * Residual: on POSIX the cleanup reads the process table with a synchronous
- * `/bin/ps` call, which blocks the event loop while it runs; that read's own
- * bound is tracked in #2105, and until then a hung `ps` can hold this run
- * past every bound here. `platform` and `spawnFn` are the cleanup's test seams.
+ * On POSIX the cleanup reads the process table with synchronous `ps` runs,
+ * which block the event loop. Each is SIGKILLed after 2 s and a disposal
+ * makes at most 3 (6 s; `PROCESS_COMMAND_TIMEOUT_MS` in process-tree, #2105),
+ * within the `disposal` bound, so a run settles at most `timeoutMs` plus
+ * the `disposal` bound plus one `ps` limit (a read that straddles that
+ * bound) after it starts. Residual: a `ps` stuck in uninterruptible kernel
+ * sleep outlives SIGKILL, and `spawnSync` still waits for it. `platform`
+ * and `spawnFn` are the cleanup's test seams.
  */
 export function runBounded(
   executable: string,

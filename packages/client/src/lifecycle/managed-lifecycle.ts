@@ -1,5 +1,6 @@
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
+import { PlatformCommandTimeoutError } from '../util/command-timeouts.js';
 import { inspectServiceLogs } from './service-log.js';
 import {
   assertServiceOwner,
@@ -54,6 +55,33 @@ export interface ManagedServiceLifecycle extends ServiceLifecycle {
   owned<T>(operation: (held: HeldServiceLifecycle) => Promise<T>): Promise<T>;
 }
 
+/** A platform timeout as the public `service_command_timeout`; any other error unchanged. */
+function publicTimeout(error: unknown): never {
+  if (error instanceof PlatformCommandTimeoutError) throw new ServiceUnitError('service_command_timeout', { cause: error, exitConfirmed: error.exitConfirmed });
+  throw error;
+}
+
+/**
+ * `platform` with every step that runs a service manager command reporting
+ * a timeout as `service_command_timeout` (#1971). Inside the platform
+ * lifecycles it stays `PlatformCommandTimeoutError`; this is the one place
+ * it becomes public.
+ */
+function publicTimeouts(platform: PlatformUnit): PlatformUnit {
+  const { prepare, preparedArtifactsExact } = platform;
+  return {
+    ...platform,
+    activate: () => platform.activate().catch(publicTimeout),
+    deactivate: () => platform.deactivate().catch(publicTimeout),
+    removeFiles: () => platform.removeFiles().catch(publicTimeout),
+    start: () => platform.start().catch(publicTimeout),
+    stop: () => platform.stop().catch(publicTimeout),
+    query: () => platform.query().catch(publicTimeout),
+    ...(prepare && { prepare: () => prepare.call(platform).catch(publicTimeout) }),
+    ...(preparedArtifactsExact && { preparedArtifactsExact: () => preparedArtifactsExact.call(platform).catch(publicTimeout) }),
+  };
+}
+
 /**
  * The install, repair, uninstall and status rules all three platforms share
  * (#1097): a `foreign` unit is never changed (`install` replaces it only
@@ -62,8 +90,9 @@ export interface ManagedServiceLifecycle extends ServiceLifecycle {
  * repair and uninstall run whole inside the store's owner gate, so the owner
  * they checked is still the owner when they write, deactivate or release.
  */
-export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs: ManagedLifecycleFs = fsp, gateRoot?: string): ManagedServiceLifecycle {
+export function createManagedLifecycle(def: ServiceDefinition, platform: PlatformUnit, fs: ManagedLifecycleFs = fsp, gateRoot?: string): ManagedServiceLifecycle {
   assertServiceOwner(def.owner);
+  const unit = publicTimeouts(platform);
   const owner = def.owner;
   const gated = <T>(operation: () => Promise<T>): Promise<T> => withServiceOwnerGate(operation, gateRoot);
 

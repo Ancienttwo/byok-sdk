@@ -136,14 +136,47 @@ the previous version (`health_check_failed`), and a late check of the
 restored version leaves a `failed` receipt with `rollback_unhealthy`, as for
 any failed check; `upgrade()` then throws `health_check_failed` with that
 failure in its `cause` (#2010). The clock
-now starts after start returns, as on install; platform commands still have
-no time bound (#1971). A Host whose check is slower than `healthTimeoutMs`
+now starts after start returns, as on install; platform commands run
+outside it, under their own bounds (see
+[Service manager commands time out](#service-manager-commands-time-out-1971)). A Host whose check is slower than `healthTimeoutMs`
 raises it. `healthTimeoutMs` must now be an integer from 1 to 2147483647
 (2^31-1): any other value makes `createServiceInstallation()` throw a
 `TypeError`, the error it already throws for `daemonStores` without
 `healthCheck`. Before,
 0 or less still ran the check once, and a larger value made the timer fire
 at once.
+
+## Service manager commands time out (#1971)
+
+Every service manager command a service lifecycle runs now has a fixed bound:
+30 s for `launchctl`, `systemctl --user`, `sc.exe`, the Windows Startup
+launcher query and the Startup launch, 120 s for WinSW, and 60 s for the
+Host's Windows `stop` program. The bounds are not configurable. A command
+that outlives its bound is stopped (its process tree; for the Startup launch
+only its own `cmd`), and `install`, `repair`, `uninstall`, `start`, `stop`
+and `status` reject with `ServiceUnitError` code `service_command_timeout`.
+Before, such a command could hang the operation forever. Launchd's leading
+`bootout`, `kickstart -k` and systemd's `daemon-reload` after removal, which
+ignore a failure exit, still fail on a timeout.
+
+The code is new: an exhaustive switch over `ServiceUnitErrorCode` gains a
+case. A timeout means the service's state is unknown, never that the change
+did not happen. Branch on the error's `exitConfirmed`:
+
+- `true`: the command has exited. Read `status()`, then run the operation
+  again; each platform's next `install` or `uninstall` starts from the
+  service manager's own state.
+- `false`: the command's cleanup failed or did not finish in time, so it may
+  still be running and still change the service. Retrying now can race it;
+  check the service manager first. The SDK keeps no ownership of that
+  process.
+
+Inside a `ServiceInstallation`, a timed-out start or stop takes the failure
+path of the step it belongs to: a start of the candidate during `upgrade()`
+is `health_check_failed` with the `service_command_timeout` error as `cause`,
+and the previous version is restored. A late effect of the stopped command
+runs the launcher, which starts whatever `current` names then, so it never
+starts the refused version.
 
 ## Upgrade resolves when an old snapshot cannot be pruned
 
