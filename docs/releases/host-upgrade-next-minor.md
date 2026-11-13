@@ -237,3 +237,16 @@ Apply this import codemod (including type-only imports); split a mixed root impo
 -import { resolveHostLayout, HostLayoutInputError, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform } from '@byok-sdk/client';
 +import { resolveHostLayout, HostLayoutInputError, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform } from '@byok-sdk/client/host-layout';
 ```
+
+## launchd jobs run with the install's HOME (#2017)
+
+The plist an `install()` writes on macOS now sets `EnvironmentVariables.HOME` to the home the lifecycle resolved (`os.homedir()` of the installing process), which is the directory it placed the plist and its paths under. launchd previously started the job with the account's home. The public `generateLaunchdPlist()` writes no `HOME`, as before.
+
+Two HOME values matter, and the SDK pins only the first:
+
+- **Daemon HOME.** Under `--service` the daemon keeps the plist's `HOME` (and its own `BYOK_*`) after applying the login-shell snapshot, even when a shell startup file resets `HOME`. Paths the daemon resolves from its own `HOME` stay under the installed home.
+- **Task HOME.** Runtime children get the environment the runtime environment policy builds. With the default `base: 'login-shell'`, that is the startup snapshot, so a startup file that exports `HOME` (or derives `PATH`, `XDG_*` and other values from the real home) still sets them for tasks. Follow-up: #2084.
+
+A Host that installs under a scratch `HOME` to isolate a test install must also isolate tasks: put `HOME` in the policy's `pass` (`runtimeEnvironment: { pass: ['HOME', ...] }`, or the per-runtime `runtimes.<id>.runtimeEnvironment`) so tasks get the daemon's live `HOME`, or use `base: 'allowlist'` and supply `PATH`, `XDG_*` and other derived values itself. Do not rely on the startup snapshot for isolation.
+
+**Required step on macOS:** a plist written by an earlier SDK no longer matches the generated unit and inspects as `repairable`. Before the first `upgrade()` or `rollback()` on each macOS device, call `install()` again on the same installation (same service name and install root) with the payload that is installed now, to rewrite the unit, then upgrade. The reinstall must use the current payload id: `install()` with any other payload is refused with `installation_exists`. Read the id with `installation.currentVersion()` and keep the payload directory whose `readPayloadManifest(dir).id` equals it until this reinstall has run. No other platform is affected.

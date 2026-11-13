@@ -11304,14 +11304,21 @@ import { type ApplyLoginShellEnvironmentOptions, type ServiceEnvironmentStatus }
  * minimal environment. {@link applyLoginShellEnvironment} replaces this
  * process's `process.env` with the login-shell snapshot
  * (`../login-shell-environment.ts`, the base of every runtime environment)
- * and puts back the `BYOK_*` values this process had, so that the daemon
- * resolves its own config and binaries as the user's terminal would.
+ * and puts back the `HOME` and `BYOK_*` values this process had, so that the
+ * daemon resolves its own config and binaries as the user's terminal would.
+ *
+ * `HOME` is the home the service manager gave the job (the launchd plist pins
+ * the lifecycle's home, #2017), so an rc that resets it cannot move the daemon
+ * to another home. Only the daemon's `HOME` and `BYOK_*` are pinned: `PATH`,
+ * `XDG_*` and other values an rc derives from a different home stay as the rc
+ * set them, and a default runtime environment gives tasks the snapshot's
+ * `HOME` (#2084) unless its policy passes `HOME`.
  */
 /** The `byok-agent start` flag generated service definitions pass. */
 export declare const SERVICE_FLAG = "--service";
 /**
  * Replaces `process.env` with this process's login-shell snapshot, keeping
- * this process's own `BYOK_*` values. Runs once per process: later calls
+ * this process's own `HOME` and `BYOK_*` values. Runs once per process: later calls
  * return the first call's result. On failure `process.env` is left exactly as
  * inherited. Never throws.
  */

@@ -34,7 +34,8 @@ by side. See `packages/client/src/bin/commands/service.ts` for every flag
 ## What gets generated
 
 A plist along these lines (see `packages/client/src/lifecycle/launchd.ts`'s
-`generateLaunchdPlist` for the exact, unit-tested template):
+`createLaunchdLifecycle` for the exact, unit-tested template; the public
+`generateLaunchdPlist` renders the same plist without `EnvironmentVariables`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -50,6 +51,11 @@ A plist along these lines (see `packages/client/src/lifecycle/launchd.ts`'s
   </array>
   <key>WorkingDirectory</key>
   <string>/Users/you</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/you</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -73,6 +79,13 @@ A plist along these lines (see `packages/client/src/lifecycle/launchd.ts`'s
   A new Node or a moved binary rewrites the launcher, never the plist. The
   marker comment lets `service-status` classify the plist as `exact`,
   `repairable` or `foreign`; the SDK never changes a plist without it.
+- **`EnvironmentVariables.HOME`** (#2017) is the home the install resolved,
+  the same directory the plist and its paths were placed under; launchd would
+  otherwise start the job with the account's home. `--service` keeps this
+  `HOME` for the daemon even if your shell rc resets it. Tasks are built from
+  the login-shell snapshot by default, so they get the `HOME`, `PATH` and
+  `XDG_*` your rc sets (#2084); to isolate them, pass `HOME` in the runtime
+  environment policy's `pass` or use `base: 'allowlist'`.
 - **`KeepAlive.SuccessfulExit: false`** is the exit-code contract: launchd
   restarts the job after any exit but 0. This is delegated entirely to launchd
   — the SDK never runs its own in-process supervisor.
