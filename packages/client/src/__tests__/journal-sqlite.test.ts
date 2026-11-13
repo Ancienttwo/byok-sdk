@@ -14,7 +14,9 @@ import { promises as fs, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DatabaseSync } from 'node:sqlite';
+import { createEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
 import {
   JournalCorruptError,
   JournalRecordTooLargeError,
@@ -169,6 +171,35 @@ describe('SqliteLocalTaskJournal', () => {
         .toEqual([{ bytes_hash: journalHash(bytes) }]);
       expect((await journal.readTask('task-1', IDENTITY))?.localState).toBe('received');
       expect(await journal.listPendingTerminals(IDENTITY)).toEqual([]);
+    });
+
+    it('builds the task index on a store opened before it existed, and the cancellation read uses it', async () => {
+      const storeDir = await tmpStore();
+      await build(storeDir).close();
+      readRows(storeDir, 'DROP INDEX journal_envelope_task');
+      const journal = build(storeDir);
+      // Plan the statement the journal actually prepares, not a copy of its text.
+      const prepare = vi.spyOn(DatabaseSync.prototype, 'prepare');
+      let statements: string[];
+      try {
+        await journal.readTaskCancellation('task-1', IDENTITY, 0);
+        statements = prepare.mock.calls.map(([statement]) => statement).filter((statement) => statement.includes('FROM journal_envelope'));
+      } finally {
+        prepare.mockRestore();
+      }
+      expect(statements).toHaveLength(1);
+      const plan = readRows(storeDir, `EXPLAIN QUERY PLAN ${statements[0]}`).map((row) => String(row.detail));
+      expect(plan.join('\n')).toMatch(/SEARCH journal_envelope USING INDEX journal_envelope_task \(task_id=\?\)/);
+    });
+
+    it('refuses to open without changing the store when the task index cannot be built', async () => {
+      const storeDir = await tmpStore();
+      await build(storeDir).close();
+      readRows(storeDir, 'DROP INDEX journal_envelope_task');
+      readRows(storeDir, 'CREATE TABLE journal_envelope_task (x)');
+      expect(() => build(storeDir)).toThrow(JournalUnavailableError);
+      expect(readRows(storeDir, "SELECT type FROM sqlite_master WHERE name = 'journal_envelope_task'")).toEqual([{ type: 'table' }]);
+      await expect(fs.stat(path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME))).rejects.toMatchObject({ code: 'ENOENT' });
     });
 
     it.each(['tenantId', 'productId', 'deviceId'] as const)('refuses a cancellation read with another %s', async (field) => {
@@ -355,6 +386,8 @@ describe('SqliteLocalTaskJournal', () => {
       await journal.close();
       const db = openJournalDatabase(path.join(storeDir, JOURNAL_DB_FILENAME), DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
       db.prepare('ALTER TABLE journal_terminal DROP COLUMN bytes').run();
+      // A real predecessor predates the task index; refusal must not build it.
+      db.prepare('DROP INDEX journal_envelope_task').run();
       db.close();
       const dbPath = path.join(storeDir, JOURNAL_DB_FILENAME);
       const before = readRows(storeDir, "SELECT task_id, payload_hash, truth_state FROM journal_terminal");
@@ -367,6 +400,7 @@ describe('SqliteLocalTaskJournal', () => {
       expect(stableDbBytes(afterRefusalBytes)).toEqual(stableDbBytes(beforeRefusalBytes));
       expect(createHash('sha256').update(stableDbBytes(afterRefusalBytes)).digest('hex'))
         .toBe(createHash('sha256').update(stableDbBytes(beforeRefusalBytes)).digest('hex'));
+      expect(readRows(storeDir, "SELECT name FROM sqlite_master WHERE name = 'journal_envelope_task'")).toEqual([]);
       expect(await fs.stat(dbPath)).toBeTruthy();
       await expect(fs.stat(path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME))).rejects.toMatchObject({ code: 'ENOENT' });
     });
@@ -797,6 +831,98 @@ describe('SqliteLocalTaskJournal', () => {
         name.endsWith(JOURNAL_DB_FILENAME),
       );
       expect(quarantined).toHaveLength(2);
+    });
+  });
+
+  describe('cancelled offer retention', () => {
+    const at = (iso: string) => () => new Date(iso);
+    const cancel = (taskId: string, seq: number, bound: { taskId?: string; seq?: number } = {}) => {
+      const bytes = encodeEnvelope(createEnvelope('task.cancel', { reason: 'cancelled' }, { taskId: bound.taskId ?? taskId, seq: bound.seq ?? seq }));
+      return envelopeRecord({ envelopeId: `cancel-${taskId}-${seq}`, taskId, seq, bytes, bytesHash: journalHash(bytes), opensTask: false });
+    };
+    const offer = (taskId: string, seq: number) => envelopeRecord({ envelopeId: `offer-${taskId}`, taskId, seq,
+      bytes: JSON.stringify({ v: 1, id: `offer-${taskId}`, type: 'task.offer', task_id: taskId }),
+      bytesHash: journalHash(JSON.stringify({ v: 1, id: `offer-${taskId}`, type: 'task.offer', task_id: taskId })) });
+
+    it('prunes a received offer only after a later cancellation older than the cutoff', async () => {
+      const storeDir = await tmpStore();
+      const old = build(storeDir, { clock: at('2026-08-01T00:00:00.000Z') });
+      await old.appendEnvelope(offer('cancelled', 1));
+      await old.appendEnvelope(cancel('cancelled', 2));
+      await old.appendEnvelope(cancel('pre-cancel', 3));
+      await old.appendEnvelope(offer('pre-cancel', 4));
+      await old.appendEnvelope(offer('admitted', 5));
+      await old.recordAdmission({ taskId: 'admitted', admitted: true, decidedAt: '2026-08-01T00:00:00.000Z' });
+      await old.appendEnvelope(cancel('admitted', 6));
+      await old.appendEnvelope(offer('marked', 7));
+      await old.appendEnvelope(cancel('marked', 8));
+      await old.markRecovered('marked', { disposition: 'interrupted' });
+      await old.appendEnvelope(offer('recent', 9));
+      await old.appendEnvelope(offer('confirmed-recent', 11));
+      await old.close();
+      const journal = build(storeDir, { clock: at('2026-09-01T00:00:00.000Z') });
+      await journal.appendEnvelope(cancel('recent', 10));
+      const terminalBytes = 'confirmed-recent terminal';
+      await journal.recordTerminal({ taskId: 'confirmed-recent', terminalType: 'complete', bytes: terminalBytes, payloadHash: journalHash(terminalBytes),
+        truthState: 'confirmed', attempt: 1, recordedAt: '2026-09-01T00:00:00.000Z' });
+      const cutoff = new Date('2026-08-15T00:00:00.000Z');
+      expect(await journal.measureUsage()).toMatchObject({ confirmedEntries: 3, oldestConfirmedAt: '2026-08-01T00:00:00.000Z' });
+      await expect(journal.listPrunableConfirmedTasks(cutoff, 10)).resolves.toEqual(['cancelled']);
+      // Pruning rechecks the cutoff under the write lock, so a direct call cannot remove unexpired evidence.
+      for (const taskId of ['pre-cancel', 'admitted', 'marked', 'recent', 'confirmed-recent']) {
+        await expect(journal.pruneConfirmedJournalTask(taskId, cutoff)).resolves.toBe(false);
+      }
+      await expect(journal.pruneConfirmedJournalTask('cancelled', cutoff)).resolves.toBe(true);
+      for (const table of ['journal_envelope', 'journal_task', 'journal_idempotency']) {
+        expect(readRows(storeDir, `SELECT task_id FROM ${table} WHERE task_id = 'cancelled'`)).toEqual([]);
+      }
+      expect(readRows(storeDir, 'SELECT task_id FROM journal_task ORDER BY task_id').map((row) => row.task_id))
+        .toEqual(['admitted', 'confirmed-recent', 'marked', 'pre-cancel', 'recent']);
+    });
+
+    it('does not prune a listed candidate replaced by fresh evidence under the same task id', async () => {
+      const storeDir = await tmpStore();
+      const old = build(storeDir, { clock: at('2026-08-01T00:00:00.000Z') });
+      await old.appendEnvelope(offer('cancelled', 1));
+      await old.appendEnvelope(cancel('cancelled', 2));
+      const cutoff = new Date('2026-08-15T00:00:00.000Z');
+      await expect(old.listPrunableConfirmedTasks(cutoff, 10)).resolves.toEqual(['cancelled']);
+      // Another pass removes the listed task, then the same task id is offered and cancelled again.
+      await expect(old.pruneConfirmedJournalTask('cancelled', cutoff)).resolves.toBe(true);
+      await old.close();
+      const fresh = build(storeDir, { clock: at('2026-09-01T00:00:00.000Z') });
+      await fresh.appendEnvelope(offer('cancelled', 3));
+      await fresh.appendEnvelope(cancel('cancelled', 4));
+      await expect(fresh.pruneConfirmedJournalTask('cancelled', cutoff)).resolves.toBe(false);
+      expect(countRows(storeDir, 'journal_envelope')).toBe(2);
+    });
+
+    it.each([
+      ['task id', [{ taskId: 'other' }]],
+      ['earlier sequence', [{ seq: 1 }]],
+      // Hash-valid bytes whose sequence is later than, but not equal to, the row's.
+      ['row sequence', [{ seq: 3 }]],
+      // A valid cancellation does not excuse another cancellation row of the task.
+      ['second row', [{}, { taskId: 'other' }]],
+    ] as const)('refuses to prune when a cancellation row binds another %s, keeping all evidence', async (_kind, rows) => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      await journal.appendEnvelope(offer('cancelled', 1));
+      for (const [index, bound] of rows.entries()) await journal.appendEnvelope(cancel('cancelled', 2 + index, bound));
+      await expect(journal.pruneConfirmedJournalTask('cancelled', new Date(Date.now() + 60_000))).rejects.toThrow('invalid durable cancellation binding');
+      expect(countRows(storeDir, 'journal_envelope')).toBe(1 + rows.length);
+      expect(countRows(storeDir, 'journal_task')).toBe(1);
+    });
+
+    it('refuses to prune when a stored envelope of the cancelled task no longer matches its hash', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      await journal.appendEnvelope(offer('cancelled', 1));
+      await journal.appendEnvelope(cancel('cancelled', 2));
+      readRows(storeDir, "UPDATE journal_envelope SET bytes = replace(bytes, 'task.cancel', 'task.started') WHERE envelope_id = 'cancel-cancelled-2'");
+      await expect(journal.pruneConfirmedJournalTask('cancelled', new Date())).rejects.toThrow('durable cancellation candidate bytes/hash mismatch');
+      expect(countRows(storeDir, 'journal_envelope')).toBe(2);
+      expect((await journal.readTask('cancelled', IDENTITY))?.localState).toBe('received');
     });
   });
 

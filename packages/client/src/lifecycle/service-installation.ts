@@ -9,9 +9,9 @@ import { controlEndpointPath, controlTokenPath, type ControlStatusResult } from 
 import { daemonLifecycleHealth, type DaemonLifecycle } from '../daemon/daemon-lifecycle.js';
 import { acquireDaemonOwner, DaemonOwnerActiveError, DaemonOwnerReclaimingError, type DaemonOwnerLease } from '../util/daemon-owner.js';
 import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger.js';
-import { acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate.js';
+import { acquirePathMutationGate, acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate.js';
 import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle.js';
-import type { ManagedServiceLifecycle } from './managed-lifecycle.js';
+import type { HeldServiceLifecycle, ManagedServiceLifecycle } from './managed-lifecycle.js';
 import {
   isJsonObject, isPayloadPath, listPayloadFiles, SERVICE_PAYLOAD_MANIFEST, sha256File, SHA256_HEX, VERSION_ID, type ServicePayloadManifest,
 } from '../service-payload-manifest.js';
@@ -180,19 +180,17 @@ export interface ServiceInstallation {
    * `store_busy`. An owned marked unit without a current version is stopped
    * before preparation and started again after preparation fails, once
    * leases/gates are released and the version directory this call created
-   * is removed (one it reused, or any after `installation_exists`, is kept:
-   * another installation may use it; the next successful upgrade's prune or
-   * uninstall removes it). After a failed store
+   * is removed (one it reused is kept: it holds the version already
+   * staged). After a failed store
    * restore it is removed instead, and the next install writes it again.
    * OS credentials are never cleared. `precheck` is required.
    * The temporary snapshot `snapshots/.install-<uuid>` is removed after a
    * healthy start or a completed restore; a removal failure does not change
    * the outcome, and a leftover is kept, never restored automatically: the
    * next first install refuses with `install_snapshot_leftover`, listing it,
-   * and starts nothing until an operator removes it. Every check uses
-   * `current` and the snapshots read under the store leases: when another
-   * installation wrote `current` in between, it refuses with
-   * `installation_exists` and keeps every version directory. A
+   * and starts nothing until an operator removes it. Every operation holds
+   * the install-root gate (#2001), so no other installation changes
+   * `current` or the snapshots meanwhile. A
    * failed restore renames it `snapshots/.install-repair-<uuid>` and the
    * error names it: the next first install restores it, under the store
    * leases and before its precheck. When it cannot stop the service, take
@@ -279,6 +277,7 @@ const ERROR_MESSAGES = {
   rollback_unhealthy: 'The previous version was restored but failed its health check too.',
   no_rollback: 'There is no previous version with a store snapshot to roll back to.',
   install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.',
+  install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.',
   snapshots_symlinked: 'The install root\'s snapshots/ is a symbolic link. Uninstall does not follow it and changed nothing; replace it with a directory or remove the link, then retry.',
 } as const;
 
@@ -500,6 +499,55 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   const receiptPath = path.join(root, 'upgrade-receipt.json');
   const platform = opts.lifecycle?.platform ?? process.platform;
 
+  /**
+   * Runs one operation inside `owned()` holding the `install-root` gate for
+   * `root` (#2001). The gate always uses the default gate root, never the
+   * lifecycle's `gateRoot`, so installations under different gate roots that
+   * share an install root still exclude each other. A held gate is
+   * `lifecycle_owner_busy`. The root is created first, so the gate and the
+   * owner check act on an existing directory: the gate resolves its real
+   * path, one spelling for every alias (a symlink, or another letter case on
+   * a case-insensitive volume), and whoever creates a missing root owns it.
+   * The gate is per effective uid, so on POSIX a root another user owns is
+   * `install_root_foreign_owner` before anything is written under it. This
+   * holds only while the root's parent directory is writable by this user
+   * alone: otherwise the root can be renamed or replaced by a symlink after
+   * the check (#2028). Windows has no owner check.
+   */
+  function rootOwned<T>(operation: (held: HeldServiceLifecycle) => Promise<T>): Promise<T> {
+    return lifecycle.owned(async (held) => {
+      let gate: PathMutationGate;
+      await fs.mkdir(root, { recursive: true });
+      try {
+        gate = await acquirePathMutationGate({ scope: 'install-root', targetPath: root }, { waitMs: 0 });
+      } catch (error) {
+        if (error instanceof PathMutationGateBusyError) throw new ServiceUnitError('lifecycle_owner_busy', { cause: error });
+        throw error;
+      }
+      let result: T;
+      try {
+        await assertOwnInstallRoot();
+        result = await operation(held);
+      } catch (error) {
+        const failures: unknown[] = [];
+        await gate.release().catch((releaseError: unknown) => { failures.push(releaseError); });
+        throw failures.length === 0 ? error : joinFailure(error, failures, 'The install-root gate could not be released.');
+      }
+      await gate.release();
+      return result;
+    });
+  }
+
+  async function assertOwnInstallRoot(): Promise<void> {
+    const euid = process.geteuid?.();
+    if (euid === undefined) return;
+    if ((await fs.stat(root)).uid !== euid) {
+      const error = new ServiceInstallationError('install_root_foreign_owner');
+      error.message = `${error.message} (${root})`;
+      throw error;
+    }
+  }
+
   async function currentVersion(): Promise<string | undefined> {
     return readPointer('current');
   }
@@ -601,7 +649,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
 
   /** A same-id reinstall rewrites the unit and launcher and must pass the same health check as a first install. */
   function install(payloadDir: string, installOpts: ServiceInstallOptions = {}): Promise<void> {
-    return lifecycle.owned(async (held) => {
+    return rootOwned(async (held) => {
       await refusePending();
       // owned() has already checked the owner. Refuse foreign units before
       // staging or writing any installation artifact, not by error class
@@ -625,14 +673,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         } catch (error) {
           // Preparation released its leases. Remove staging before
           // restarting an owned marked unit, as upgrade does on refusal.
-          // After installation_exists every version directory stays: the
-          // other installation may use it. A later prune or uninstall
-          // removes what is left. Otherwise only a directory this call
-          // created is removed: another installation may have staged it.
-          // withReleaseFailure() puts the refusal first.
+          // Only a directory this call created is removed: a same-id
+          // directory it reused belongs to the version already staged.
           let failure = error;
-          const original = error instanceof AggregateError ? error.errors[0] : error;
-          if (created && !(original instanceof ServiceInstallationError && original.code === 'installation_exists')) {
+          if (created) {
             try {
               await fs.rm(path.join(versionsDir, id), { recursive: true, force: true });
             } catch (cleanup) {
@@ -872,9 +916,11 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
 
   /** One candidate store preparation sequence for install and upgrade, retaining the quiescent leases until the caller switches. */
   async function prepareStores(candidate: string, snapshotId: string, installing = false, stopService = !installing): Promise<{ stores: ServiceStoreVerdict[]; release: () => Promise<void> }> {
-    // Listed before quiescence only to decide what a failed stop or lease
-    // means: with an install snapshot pending the stores may be partial, so
-    // that failure starts nothing.
+    // Listed once, before quiescence (#2001). Only an installation operation
+    // holding the install-root gate writes snapshots/, and this one holds it,
+    // so the list cannot change before the leases. It decides what a failed
+    // stop or lease means (with an install snapshot pending the stores may be
+    // partial, so that failure starts nothing) and which repair to restore.
     const pending = installing ? await listInstallSnapshots() : [];
     // A first install stops only a marked unit of our owner. Absent and
     // allowed-unmarked units rely on the store lease alone.
@@ -887,13 +933,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
     let restoreOnFailure = false;
     try {
-      // Every decision uses `current` and the inventory read under the
-      // leases: until then another installation (an owner gate under another
-      // gate root) can still change them.
-      if (installing) {
-        if ((await currentVersion()) !== undefined) throw new ServiceInstallationError('installation_exists');
-        await restoreRepairSnapshots(checkInstallSnapshots(await listInstallSnapshots()));
-      }
+      if (installing) await restoreRepairSnapshots(checkInstallSnapshots(pending));
       let stores = await precheck(candidate);
       const refused = stores.find(isRefused);
       if (refused !== undefined) {
@@ -1159,7 +1199,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   function upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt> {
-    return lifecycle.owned(async () => {
+    return rootOwned(async () => {
       await refusePending();
       const from = await currentVersion();
       if (from === undefined) throw new ServiceInstallationError('installation_absent');
@@ -1231,7 +1271,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   function rollback(): Promise<ServiceUpgradeReceipt> {
-    return lifecycle.owned(async () => {
+    return rootOwned(async () => {
       await refusePending();
       const [current, previous] = [await currentVersion(), await readPointer('previous')];
       if (current === undefined || previous === undefined || !(await exists(path.join(snapshotsDir, current, 'snapshot.json')))) {
@@ -1244,7 +1284,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   function recover(): Promise<ServiceUpgradeReceipt | undefined> {
-    return lifecycle.owned(async () => {
+    return rootOwned(async () => {
       const last = await readReceipt();
       if (last?.state !== 'pending') return last;
       return restore(last.from, last.to, last.previous, 'upgrade_pending');
@@ -1252,7 +1292,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   function uninstall(): Promise<void> {
-    return lifecycle.owned(async (held) => {
+    return rootOwned(async (held) => {
       await refusePending();
       // snapshots/ is listed below; a link would lead the removal outside the root.
       try {

@@ -1023,6 +1023,7 @@ function buildDaemon(
       machineId: config.machineId ?? (() => resolveMachineId({ productId: config.productId })),
       // A proactive renewal can find the revocation while the poll is held.
       onRevoked: () => daemonState.connection?.noteDeviceRevoked(),
+      onBindingLost: (reason) => daemonState.connection?.noteBindingLost(reason),
     });
   }
   const daemonState: DaemonState = {

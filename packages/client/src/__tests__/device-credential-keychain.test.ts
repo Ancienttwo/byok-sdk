@@ -18,7 +18,7 @@ describe('explicit macOS device credential custody', () => {
   });
 
   it.each([null, undefined, {}])('requires a complete injected backend: %j', (backend) => {
-    expect(() => new DeviceStore('/unused', backend as never)).toThrow(TypeError);
+    expect(() => new DeviceStore('test-product', '/unused', backend as never)).toThrow(TypeError);
   });
 
   it('targets the same explicit keychain for read, atomic replace and verified deletion', async () => {

@@ -480,9 +480,8 @@ With no current version, preparation stops an SDK-marked unit of the
 recorded owner (including a payload-less CLI service) before taking the
 daemon-store leases and gates. On any preparation failure before writing
 `current`, it releases the leases/gates, removes the version directory it
-created (after `installation_exists` every version directory stays, since
-another installation may be using it; the next successful upgrade's prune or
-`uninstall` removes it), then starts that
+created (one it reused stays: it holds the version already staged), then
+starts that
 unit again, even if it was stopped before the call. The one exception is a
 failed store restore: the stores may then be partial, so the unit is not
 started and is removed, leaving only the repair snapshot, as after a failed
@@ -490,6 +489,20 @@ health check; otherwise a boot or login could start it on those stores. The
 next install writes the unit again. When that removal fails, the error names
 both the unit and the snapshot. Failures after preparation succeeds use the
 installation cleanup below.
+
+Every `install`, `upgrade`, `rollback`, `recover` and `uninstall` holds an
+install-root gate for its whole run (#2001). A second operation on the same
+install root, from any process of the same user and under any `gateRoot`,
+fails at once with `lifecycle_owner_busy` and writes nothing. The operation
+creates a missing install root first, so every spelling of the root (a
+symlink, or another letter case on a case-insensitive volume) takes the same
+gate and a refusal leaves at most that empty directory. On macOS and Linux an
+install root owned by another user, including one that user created first,
+is refused with `install_root_foreign_owner` before anything is written in
+it. These guarantees hold only while the install root's parent directory is
+writable by the installing user alone; otherwise another user can rename the
+root or replace it with a symlink after the check (#2028). Windows has no
+owner check, and exclusion between Windows users is not guaranteed.
 
 Preparation does not stop an absent unit or an allowed unmarked unit. It
 leases and gates the daemon stores instead. With `replaceUnmarked`, a
@@ -740,7 +753,10 @@ await clearDeviceEnrollment({
   later pairing reads because each pairing mints a new device id.
 - `DeviceEnrollmentClearError.code` is `store_owned` when another process holds
   the owner lease (nothing is read or cleared), `store_not_bound` when the OS
-  entry holds an enrollment another `storeDir` paired (it is left in place), or
+  entry holds an enrollment another `storeDir` paired or a first-pairing
+  attempt another `storeDir` staged (it is left in place),
+  `pairing_attempt_unattributed` when it holds a first-pairing attempt that
+  names no `storeDir` (staged by 0.42.0; it is left in place), or
   `clear_failed` with the provider or filesystem error as `cause`. A
   `device.json` that cannot be parsed is refused as `clear_failed` before
   anything is deleted; that store needs a re-pair. A credential provider
@@ -749,7 +765,37 @@ await clearDeviceEnrollment({
   store with no enrollment clears successfully.
 - It clears the OS credential set of the account it runs as. A Windows
   `LocalSystem` service's enrollment is out of an interactive user's reach.
-- Clearing acts on the productId-wide OS credential entry; with more than one store under one productId, do not clear one store while another is pairing or has an unresolved first pairing (#1964).
+- The OS credential entry is shared by every store of one `productId`. A store
+  clears its own staged first pairing, never another store's, and pairs only
+  with a staged attempt it made (#1964, #2033). Under
+  the store's owner lease the clear takes a per-user `productId` lock and holds
+  it from its validation through its deletion. A running daemon's token
+  renewal takes the same lock around validating and persisting the new token,
+  and never across a network request. A pairing is one critical section: it
+  takes the lock, rereads the OS entry, `device.json` and the staged attempt
+  (never a cached record), and holds the lock through its request, persisting
+  the enrollment, and the E2EE member entries, which are also shared per
+  `productId`. Re-pairing a running daemon also shuts it down inside the lock.
+  The pairing holds the lock across its request because the server's device
+  registration has no fencing (#2045 F1). Another store's pairing or renewal
+  therefore lands wholly before or wholly after the clear (#2034, #2030 F2).
+  Lock order is the store owner lease, then the `productId` lock.
+- The request deadline bounds only the network request, and each OS credential
+  command has its own 15 s deadline; nothing bounds the whole time a holder
+  keeps the lock. Each waiter waits up to 30 seconds: a clear that times out
+  fails as `clear_failed` and deletes nothing, a pairing fails as busy, and a
+  renewal fails as busy, not as revocation, and is retried (#2045 F5).
+- A pairing whose request times out releases the lock while the server may
+  still register it. Its outcome is unknown: the staged attempt stays, and
+  pairing again retries with the same key. If another store pairs with
+  `replaceOtherStore` meanwhile, the late registration can still supersede
+  it on the server; only server-side registration fencing closes that gap.
+- A renewal that finds the enrollment gone writes nothing and halts the
+  daemon: `store_not_bound` when another store paired over it,
+  `re_pair_required` when it was cleared.
+- `clearUnattributedAttempt: true` also deletes a first-pairing attempt that
+  names no `storeDir`. Set it only when no other store of this `productId` is
+  pairing.
 - Clear before deleting the data directory. The owner lease recreates
   `storeDir` if it is already gone.
 - `byok-agent unpair --yes --config <file>` runs `Daemon.unpair()`, which also
@@ -855,6 +901,16 @@ size bound. Older clients fail closed while the replacement attempt is pending;
 after promotion, the entry is an ordinary enrollment again. The public credential
 backend API shape is unchanged; injected backends must preserve the same staging
 and renewal semantics.
+
+**Staged first pairing of another store.** A pairing reuses a staged
+first-pairing attempt only when that attempt names this `storeDir` (#2033).
+Otherwise it throws `FirstPairingAttemptRefusedError` and writes nothing:
+`store_not_bound` when another store staged it (that store finishes or clears
+its pairing, or `pair --replace-other-store` discards the attempt and stages a
+fresh key), or `pairing_attempt_unattributed` when it names no store, as one
+staged by 0.42.0 does (when no other store of this `productId` is pairing,
+clear it with `clearDeviceEnrollment({ productId, storeDir,
+clearUnattributedAttempt: true })`, then pair again).
 
 **Provider unreachable on a slow IPv4 network.** Node tries each resolved
 address for 250 ms by default before it moves to the next one. When a device's

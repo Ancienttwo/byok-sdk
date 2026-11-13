@@ -3345,6 +3345,8 @@ export interface AuthManagerOptions {
     authRequestDeadlineMs?: number;
     /** Called once revocation is detected, so a caller (ConnectionManager) can stop retrying and surface the state instead of looping. */
     onRevoked?: () => void;
+    /** Called once a renewal finds the OS entry no longer holds this store's enrollment (#2034); the daemon halts with that reason. */
+    onBindingLost?: (reason: 'store_not_bound' | 're_pair_required') => void;
 }
 /**
  * Owns device pairing and the access token lifecycle (protocol §6):
@@ -3403,10 +3405,20 @@ export declare class AuthManager {
      * refuses with {@link DeviceStoreBindingMismatchError} while the OS entry
      * holds an enrollment this storeDir did not pair, unless
      * `replaceOtherStore` states the operator's intent to replace it; the
-     * replacement never reuses that enrollment's key.
+     * replacement never reuses that enrollment's key. A staged first-pairing
+     * attempt is reused only when it names this store; otherwise it refuses
+     * with {@link FirstPairingAttemptRefusedError}, and `replaceOtherStore`
+     * discards another store's attempt (#2033).
+     *
+     * The whole pairing is one critical section of the enrollment gate: it
+     * rereads the OS entry, `device.json` and the staged attempt after taking
+     * the gate, never trusting a cached record, and releases the gate only
+     * after `custody` has run.
      */
     pair(pairingCode: string, options?: {
         readonly replaceOtherStore?: boolean;
+        /** Internal daemon seam: runs once the enrollment is persisted, before the gate is released; the daemon writes its E2EE member custody here (#2030 F2). */
+        readonly custody?: (record: DeviceRecord) => Promise<void>;
     }): Promise<DeviceRecord>;
     /** The current, non-expired access token — renews first if it's expired or close to it. Throws {@link DeviceRevokedError} if the device has been revoked. */
     getValidAccessToken(): Promise<string>;
@@ -3423,6 +3435,20 @@ export declare class AuthManager {
     /** A typed revocation 401 halts now; any other 401 resolves `undefined` for the one recheck. */
     private readUnauthorized;
     private backOff;
+    /** The OS entry no longer holds this store's enrollment: drop the cached record, stop renewing and report it. Always throws `error`. */
+    private loseBinding;
+    private underEnrollmentGate;
+    /** Under the enrollment gate: the key and request facts a pairing proves, staging a new first-pairing attempt when this store has none. */
+    private pairingKey;
+    /**
+     * Under the enrollment gate, reread from the OS entry and `device.json`:
+     * this store's bound enrollment, or else its own staged first-pairing
+     * attempt (undefined when none, or when `replaceOtherStore` discards another
+     * store's). Another store's enrollment or attempt, or an attempt that names
+     * no store, is refused, also beside this store's enrollment: the pairing
+     * would consume that attempt (#2033, #2030 F1).
+     */
+    private pairingAuthority;
     /** Always throws — `never` return type lets call sites use `if (x === 401) this.markRevoked();` without an explicit `return`/`throw` of their own. */
     private markRevoked;
     private scheduleProactiveRenewal;
@@ -3799,7 +3825,7 @@ export declare const MAX_OUTBOX_EPHEMERAL_BYTES: number;
  */
 export type ConnectionState = 'connecting' | 'open';
 /** The remote conditions that end a session for good. */
-export type ConnectionHaltReason = Extract<DaemonHaltReason, 'device_revoked' | 'handshake_rejected' | 'replay_cursor_too_old'>;
+export type ConnectionHaltReason = Extract<DaemonHaltReason, 'device_revoked' | 'handshake_rejected' | 'replay_cursor_too_old' | 'store_not_bound' | 're_pair_required'>;
 export interface ConnectionManagerOptions {
     serverUrl: string;
     deviceId: string;
@@ -4082,6 +4108,8 @@ export declare class ConnectionManager {
     getHaltReason(): ConnectionHaltReason | undefined;
     /** The device was found revoked outside this session's own requests (proactive token renewal). */
     noteDeviceRevoked(): void;
+    /** A renewal found the OS entry no longer holds this store's enrollment (#2034). */
+    noteBindingLost(reason: 'store_not_bound' | 're_pair_required'): void;
     /**
      * Stops the long-poll transport and waits for every in-flight envelope handler
      * (the F3 FIFO chain) and the most recent cursor write to actually land on
@@ -5850,6 +5878,22 @@ export declare class DeviceStoreBindingMismatchError extends Error {
     } | undefined;
     constructor(stored: DeviceMetadata, bound: DeviceMetadata | undefined);
 }
+declare const PAIRING_ATTEMPT_MESSAGES: {
+    readonly store_not_bound: 'another storeDir staged the first-pairing attempt of this productId; nothing was written. Pair with replaceOtherStore (--replace-other-store) to discard it';
+    readonly pairing_attempt_unattributed: 'the first-pairing attempt of this productId names no storeDir; nothing was written. Clear it with clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }), then pair';
+};
+/**
+ * A pairing refused to reuse a staged first-pairing attempt this storeDir
+ * cannot prove it staged (#1964, #2033), by the same rule as an enrollment
+ * clear: `store_not_bound` when another storeDir staged it (pairing with
+ * `replaceOtherStore` discards it), `pairing_attempt_unattributed` when it
+ * names no storeDir (staged by 0.42.0; clear it with
+ * `clearUnattributedAttempt`, then pair). Nothing was written.
+ */
+export declare class FirstPairingAttemptRefusedError extends Error {
+    readonly code: keyof typeof PAIRING_ATTEMPT_MESSAGES;
+    constructor(code: keyof typeof PAIRING_ATTEMPT_MESSAGES);
+}
 /**
  * Why `Daemon.pairEmbedded` refused. Each reason leaves the local
  * enrollment and the server unchanged:
@@ -5864,6 +5908,7 @@ export declare class EmbeddedPairingError extends Error {
         cause?: unknown;
     });
 }
+export {};
 // ==== @byok-sdk/client dist/daemon/daemon-lifecycle.d.ts ====
 /**
  * The daemon's one lifecycle model (issues #391 and #394).
@@ -6265,6 +6310,12 @@ export interface FirstPairingAttempt {
     readonly devicePublicKey: string;
     readonly devicePrivateKeyPem: string;
     readonly machineId?: string;
+    /**
+     * `DeviceStore.identity` of the store that staged the attempt. An attempt
+     * staged by 0.42.0 has none; a clear refuses it as
+     * `pairing_attempt_unattributed` unless told to delete it (#1964).
+     */
+    readonly storeIdentity?: string;
 }
 export interface DeviceCommandResult {
     readonly exitCode: number;
@@ -6307,6 +6358,7 @@ export declare class DeviceCredentialCommandAbortedError extends DeviceCredentia
  * `replace()` retains that attempt when renewing the same deviceId, tenantId
  * and devicePublicKey; a different authenticated enrollment promotes the
  * replacement and discards the attempt. `clear()` removes both authorities.
+ * An attempt is kept with every field, including `storeIdentity`.
  */
 export interface DeviceCredentialBackend {
     read(signal?: AbortSignal): Promise<DeviceRecord | undefined>;
@@ -6479,7 +6531,8 @@ import { DeviceStore, type DeviceEnrollmentStatusOptions, type DeviceRecord } fr
 import type { DeviceCredentialBackend } from './device-credential-store.js';
 declare const CLEAR_MESSAGES: {
     readonly store_owned: 'another process holds this store\'s owner lease (a daemon, doctor or installer); the enrollment is unchanged';
-    readonly store_not_bound: 'the OS credential entry for this productId holds an enrollment this storeDir did not pair; nothing was cleared';
+    readonly store_not_bound: 'the OS credential entry for this productId holds an enrollment or pairing attempt of another storeDir; nothing was cleared';
+    readonly pairing_attempt_unattributed: 'the OS credential entry for this productId holds a first-pairing attempt that names no storeDir; nothing was cleared. If no other store of this productId is pairing, clear it with clearDeviceEnrollment({ ..., clearUnattributedAttempt: true })';
     readonly clear_failed: 'the device enrollment could not be cleared; see the cause';
 };
 export type DeviceEnrollmentClearErrorCode = keyof typeof CLEAR_MESSAGES;
@@ -6488,7 +6541,12 @@ export type DeviceEnrollmentClearErrorCode = keyof typeof CLEAR_MESSAGES;
  * - `store_owned`: another process holds the store's owner lease. It may be a
  *   running daemon, a doctor or an installer; nothing was read or cleared.
  * - `store_not_bound`: the OS entry holds an enrollment another storeDir
- *   paired; nothing was cleared.
+ *   paired, or a first-pairing attempt another storeDir staged; nothing was
+ *   cleared.
+ * - `pairing_attempt_unattributed`: the OS entry holds a first-pairing
+ *   attempt that names no storeDir (staged by 0.42.0), so nothing proves it is
+ *   this store's; nothing was cleared. `clearUnattributedAttempt: true`
+ *   deletes it.
  * - `clear_failed`: `cause` holds the error. A `device.json` that cannot be
  *   parsed (`DeviceRecordRePairRequiredError`) is refused before anything is
  *   deleted; the store needs a re-pair. A credential provider failure leaves
@@ -6509,20 +6567,24 @@ export interface EnrollmentCustody {
 }
 /**
  * The one enrollment clear, shared by `Daemon.unpair()` and
- * {@link clearDeviceEnrollment}; the caller holds the store's owner lease.
+ * {@link clearDeviceEnrollment}; the caller holds the store's owner lease,
+ * and the clear takes the productId gate ({@link acquireEnrollmentGate}).
  * `readCurrent` reads the bound enrollment under that lease, so another
  * store's OS entry is refused before anything is deleted. A `device.json`
  * that cannot be parsed is refused too, with its
  * `DeviceRecordRePairRequiredError`: nothing proves the productId-wide OS
  * entry is this store's, and `remove()` could never delete that file. A valid
  * projection without its credential (left by a failed metadata removal) is
- * cleared. The member entries
+ * cleared. A staged first-pairing attempt is deleted only when it names this
+ * store; another store's attempt is refused as `store_not_bound`, and one
+ * that names no store as `pairing_attempt_unattributed` unless
+ * `clearUnattributedAttempt` is set. The member entries
  * go first and the credential is read back after deletion: any failure up to
  * there leaves the device paired. `onCredentialCleared` runs once the
  * credential is gone, before `device.json` is removed. Returns the cleared
  * enrollment, or undefined when the store held no readable one.
  */
-export declare function clearEnrollmentUnderLease(custody: EnrollmentCustody, readCurrent: () => Promise<DeviceRecord | undefined>, onCredentialCleared?: () => void): Promise<DeviceRecord | undefined>;
+export declare function clearEnrollmentUnderLease(custody: EnrollmentCustody, readCurrent: () => Promise<DeviceRecord | undefined>, onCredentialCleared?: () => void, clearUnattributedAttempt?: boolean): Promise<DeviceRecord | undefined>;
 /**
  * Clears one store's device enrollment without a daemon: its member
  * entries, its OS credential (read back after deletion) and `device.json`,
@@ -6531,13 +6593,16 @@ export declare function clearEnrollmentUnderLease(custody: EnrollmentCustody, re
  * enrollment succeeds. Unlike `Daemon.unpair()` it leaves the delivery cursor
  * file, which no later pairing reads because each pairing mints a new device
  * id. It reads the calling process's OS credential set, so it clears the
- * enrollment of the account it runs as. Clearing acts on the productId-wide
- * OS credential entry; with more than one store under one productId, do not
- * clear one store while another is pairing or has an unresolved first pairing
- * (#1964).
+ * enrollment of the account it runs as. The OS credential entry is shared by
+ * every store of one productId: the clear never deletes another store's
+ * enrollment or staged first pairing, and it excludes their pairing and
+ * renewal writes while it runs (#1964, #2034). `clearUnattributedAttempt: true` also deletes a
+ * first-pairing attempt that names no store; set it only when no other store
+ * of this productId is pairing.
  */
 export declare function clearDeviceEnrollment(options: DeviceEnrollmentStatusOptions & {
     readonly storeDir: string;
+    readonly clearUnattributedAttempt?: boolean;
 }, overrides?: {
     readonly deviceCredentials?: DeviceCredentialBackend;
 }): Promise<void>;
@@ -6749,6 +6814,12 @@ export declare function resolveHostLayout(options: HostLayoutOptions): HostLayou
  * hex string is a hash of unknown provenance the day this changes.
  */
 export declare function journalHash(bytes: string): string;
+/**
+ * Decode stored cancellation bytes and require a `task.cancel` for `taskId`
+ * sequenced after the offer at `offerSeq`; returns the envelope's own sequence.
+ * Recovery and journal pruning share this so they accept the same evidence.
+ */
+export declare function assertTaskCancellationBinding(bytes: string, taskId: string, offerSeq: number): number;
 /**
  * Who this daemon is, as recorded on every journal row (§12.7.2's minimum
  * fact set, first three entries). Carried explicitly rather than captured at
@@ -7017,8 +7088,23 @@ export interface LocalTaskJournal {
     measureUsage(): Promise<LocalStorageUsage>;
     /** Confirmed terminals older than cutoff, without recovery markers, oldest first. */
     listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
-    /** Transactionally rechecks confirmation and recovery protection before pruning. */
-    pruneConfirmedJournalTask(taskId: string): Promise<boolean>;
+    /**
+     * Transactionally rechecks confirmation and recovery protection before
+     * pruning. Inside its delete transaction, under the write lock, it returns
+     * `false` and deletes nothing when the task is valid but not prunable: a
+     * confirmed terminal last updated at or after `cutoff`, or a received offer
+     * whose first stored `task.cancel` sequenced above the offer was committed
+     * at or after `cutoff` (including evidence replaced under the same task id)
+     * or that has no such cancellation. For a received offer it throws and
+     * deletes nothing when the `task.cancel` that qualifies it is broken: that
+     * cancellation fails its hash or enrollment check, names another task id,
+     * or carries a `seq` different from its row's. No other row is part of this
+     * contract: a confirmed terminal's envelopes, withheld rows and the task's
+     * other envelopes may be deleted without verification (#2054). An
+     * implementation that ignores `cutoff` still compiles but can delete
+     * unexpired or replaced evidence; the SDK does not repeat these checks.
+     */
+    pruneConfirmedJournalTask(taskId: string, cutoff: Date): Promise<boolean>;
     /** Bounded WAL checkpoint + incremental vacuum. Maintenance only; never on the envelope path. */
     compact(options: CompactOptions): Promise<CompactResult>;
     /**
@@ -7211,7 +7297,7 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
     /** Physical journal/quarantine footprint and confirmed-row inventory. */
     measureUsage(): Promise<LocalStorageUsage>;
     listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
-    pruneConfirmedJournalTask(taskId: string): Promise<boolean>;
+    pruneConfirmedJournalTask(taskId: string, cutoff: Date): Promise<boolean>;
     /**
      * WAL checkpoint plus a BOUNDED incremental vacuum. Maintenance only — it
      * goes through the same single-writer queue as everything else, so it can
@@ -8612,9 +8698,17 @@ export declare function assertStoreBound(projection: DeviceMetadata | undefined,
  * OS DeviceCredentialStore.
  */
 export declare class DeviceStore {
+    /** The productId whose OS credential entry this store shares; the one source of the enrollment lock's scope (#2034). */
+    readonly productId: string;
     readonly credentials: DeviceCredentialBackend;
     private readonly secureDirOptions?;
     private readonly filePath;
+    /**
+     * Non-secret identity of this storeDir, the SHA-256 hex of its resolved
+     * path: a first-pairing attempt records it so a clear deletes only its own
+     * store's attempt from the productId-wide OS entry (#1964).
+     */
+    readonly identity: string;
     /**
      * `secureDirOptions` is a test-only DI seam (mirrors `EnsureSecureDirOptions`'s
      * own `run`/`platform` overrides) — every real caller omits it, getting
@@ -8625,7 +8719,9 @@ export declare class DeviceStore {
      * ACL-unprotected credential") is verifiable from a real `darwin`/`linux`
      * CI/dev machine, not just asserted.
      */
-    constructor(storeDir: string, credentials: DeviceCredentialBackend, secureDirOptions?: EnsureSecureDirOptions | undefined);
+    constructor(
+    /** The productId whose OS credential entry this store shares; the one source of the enrollment lock's scope (#2034). */
+    productId: string, storeDir: string, credentials: DeviceCredentialBackend, secureDirOptions?: EnsureSecureDirOptions | undefined);
     /**
      * Resolve the one store pathname every daemon/CLI component must share.
      * A configured relative path is anchored once at process entry rather than
@@ -9753,7 +9849,7 @@ export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartu
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure.js';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon.js';
 export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema/index.js';
-export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, HostLayoutInputError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
+export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, FirstPairingAttemptRefusedError, HostLayoutInputError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
 export { resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout.js';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals.js';
@@ -11386,19 +11482,17 @@ export interface ServiceInstallation {
      * `store_busy`. An owned marked unit without a current version is stopped
      * before preparation and started again after preparation fails, once
      * leases/gates are released and the version directory this call created
-     * is removed (one it reused, or any after `installation_exists`, is kept:
-     * another installation may use it; the next successful upgrade's prune or
-     * uninstall removes it). After a failed store
+     * is removed (one it reused is kept: it holds the version already
+     * staged). After a failed store
      * restore it is removed instead, and the next install writes it again.
      * OS credentials are never cleared. `precheck` is required.
      * The temporary snapshot `snapshots/.install-<uuid>` is removed after a
      * healthy start or a completed restore; a removal failure does not change
      * the outcome, and a leftover is kept, never restored automatically: the
      * next first install refuses with `install_snapshot_leftover`, listing it,
-     * and starts nothing until an operator removes it. Every check uses
-     * `current` and the snapshots read under the store leases: when another
-     * installation wrote `current` in between, it refuses with
-     * `installation_exists` and keeps every version directory. A
+     * and starts nothing until an operator removes it. Every operation holds
+     * the install-root gate (#2001), so no other installation changes
+     * `current` or the snapshots meanwhile. A
      * failed restore renames it `snapshots/.install-repair-<uuid>` and the
      * error names it: the next first install restores it, under the store
      * leases and before its precheck. When it cannot stop the service, take
@@ -11484,6 +11578,7 @@ declare const ERROR_MESSAGES: {
     readonly rollback_unhealthy: 'The previous version was restored but failed its health check too.';
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
     readonly install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.';
+    readonly install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.';
     readonly snapshots_symlinked: 'The install root\'s snapshots/ is a symbolic link. Uninstall does not follow it and changed nothing; replace it with a directory or remove the link, then retry.';
 };
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
@@ -11896,7 +11991,7 @@ export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
 /** Closed codes only; the message never carries a path or OS text. */
 export declare class ServiceUnitError extends Error {
     readonly code: ServiceUnitErrorCode;
-    constructor(code: ServiceUnitErrorCode);
+    constructor(code: ServiceUnitErrorCode, options?: ErrorOptions);
 }
 export declare function assertServiceOwner(owner: unknown): asserts owner is string;
 /** `<storeDir>/service`: the SDK-owned directory for the launcher and the lifecycle owner record. */
@@ -12196,13 +12291,13 @@ export declare function generateWinswXml(def: {
 export declare function createWinswLifecycle(def: ServiceDefinition, deps?: WinswDeps, gateRoot?: string): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/local-state-relocation.d.ts ====
 export declare class LocalStateRelocationError extends Error {
-    constructor(message: string);
+    constructor(message: string, options?: ErrorOptions);
 }
 export declare class LocalStateRelocationBusyError extends LocalStateRelocationError {
-    constructor(message: string);
+    constructor(message: string, options?: ErrorOptions);
 }
 export declare class LocalStateRelocationIntegrityError extends LocalStateRelocationError {
-    constructor(message: string);
+    constructor(message: string, options?: ErrorOptions);
 }
 export interface LocalStateRelocationInput {
     readonly productId: string;

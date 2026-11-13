@@ -151,47 +151,53 @@ export async function pairUnderLease(
         (error instanceof DeviceStoreBindingMismatchError && replaceOtherStore);
       if (!replaceable) throw error;
     }
-    const record = await daemonState.auth.pair(pairingCode, { replaceOtherStore });
-    replacementPersisted = true;
-    // No stopped daemon operation may continue using a superseded binding
-    // between re-pair and the next start. startUnderLease will construct the
-    // bound controller only from the newly loaded DeviceRecord.
-    if (config.agentEgress !== undefined) {
-      // TaskRunner owns the previous controller by reference for this run;
-      // deactivate it before the new record can be followed by shutdown
-      // terminal/progress activity.
-      daemonState.agentEgress.deactivate();
-      daemonState.agentEgress = new AgentEgressController({ policy: egressPolicy });
-    }
-    if (wasRunning) {
-      // The pair response has replaced device.json, so the running daemon's
-      // closures are no longer allowed to handle work under the old record.
-      // Completing this shutdown before pair() resolves makes restart an
-      // explicit, fresh load of the new authenticated binding.
-      await runShutdownSequence('re-pairing enrollment binding');
-      daemonState.tenantRebinding = false;
-    }
-    if (previous && previous.deviceId !== record.deviceId) {
-      await cursorStore.clear(config.serverUrl, previous.deviceId);
-    }
-    observer.notePaired(record.deviceId);
-    // A new enrollment is a new member (§7.5); the previous one's entries are void (10b).
-    daemonState.carriedFreshness = undefined;
-    try {
-      await memberRecords?.clear();
-    } catch (error) {
-      throw new PairedWithoutMemberError(record.deviceId, 'the previous E2EE member entries could not be deleted', error);
-    }
-    if (verificationSecret !== undefined) {
-      try {
-        await enrollDeviceMember({
-          records: memberRecords!, client: memberClient(record), tenantId: record.tenantId, deviceId: record.deviceId,
-          verificationSecret, log: logMember,
-        });
-      } catch (error) {
-        throw new PairedWithoutMemberError(record.deviceId, 'its E2EE member enrollment failed; re-pair to enable E2EE', error);
+    // auth.pair() takes the enrollment gate after this owner lease and holds it
+    // from its validation through the member custody below, so no other
+    // store's pairing or clear interleaves with the shared member entries
+    // (#1964, #2030 F2). Re-pairing a running daemon shuts it down inside the
+    // gate too, so its member work has ended before the entries are replaced.
+    const record = await daemonState.auth.pair(pairingCode, { replaceOtherStore, custody: async (record) => {
+      replacementPersisted = true;
+      // No stopped daemon operation may continue using a superseded binding
+      // between re-pair and the next start. startUnderLease will construct the
+      // bound controller only from the newly loaded DeviceRecord.
+      if (config.agentEgress !== undefined) {
+        // TaskRunner owns the previous controller by reference for this run;
+        // deactivate it before the new record can be followed by shutdown
+        // terminal/progress activity.
+        daemonState.agentEgress.deactivate();
+        daemonState.agentEgress = new AgentEgressController({ policy: egressPolicy });
       }
-    }
+      if (wasRunning) {
+        // The pair response has replaced device.json, so the running daemon's
+        // closures are no longer allowed to handle work under the old record.
+        // Completing this shutdown before pair() resolves makes restart an
+        // explicit, fresh load of the new authenticated binding.
+        await runShutdownSequence('re-pairing enrollment binding');
+        daemonState.tenantRebinding = false;
+      }
+      if (previous && previous.deviceId !== record.deviceId) {
+        await cursorStore.clear(config.serverUrl, previous.deviceId);
+      }
+      observer.notePaired(record.deviceId);
+      // A new enrollment is a new member (§7.5); the previous one's entries are void (10b).
+      daemonState.carriedFreshness = undefined;
+      try {
+        await memberRecords?.clear();
+      } catch (error) {
+        throw new PairedWithoutMemberError(record.deviceId, 'the previous E2EE member entries could not be deleted', error);
+      }
+      if (verificationSecret !== undefined) {
+        try {
+          await enrollDeviceMember({
+            records: memberRecords!, client: memberClient(record), tenantId: record.tenantId, deviceId: record.deviceId,
+            verificationSecret, log: logMember,
+          });
+        } catch (error) {
+          throw new PairedWithoutMemberError(record.deviceId, 'its E2EE member enrollment failed; re-pair to enable E2EE', error);
+        }
+      }
+    } });
     if (acquiredHere) {
       await daemonState.daemonOwnerLease?.release();
       daemonState.daemonOwnerLease = undefined;

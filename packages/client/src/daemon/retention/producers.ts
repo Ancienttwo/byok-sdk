@@ -218,10 +218,11 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
   async function sweepJournal(budget: SweepBudget): Promise<void> {
     const journal = options.journal();
     if (journal === undefined) return;
-    const tasks = await journal.listPrunableConfirmedTasks(new Date(budget.now.getTime() - config.ttlMs['confirmed-journal']), budget.remaining());
+    const cutoff = new Date(budget.now.getTime() - config.ttlMs['confirmed-journal']);
+    const tasks = await journal.listPrunableConfirmedTasks(cutoff, budget.remaining());
     for (const taskId of tasks) {
       if (!budget.available()) break;
-      if (await journal.pruneConfirmedJournalTask(taskId)) budget.removed(0);
+      if (await journal.pruneConfirmedJournalTask(taskId, cutoff)) budget.removed(0);
     }
   }
   async function sweepPreparation(budget: SweepBudget): Promise<void> {

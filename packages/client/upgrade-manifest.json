@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "5385c1d42d3fbe350ea32b10ffb7d5355b834310f41b8ee2765888daf985624a"
+    "snapshotSha256": "a5db685b393645019dbeb94edcce0b5de26927c84915b88af5d051e87d8d4e0b"
   },
   "configFields": {
     "status": "tracked",
@@ -30,7 +30,7 @@
     {
       "id": "service-store-release-failures",
       "impact": "breaking",
-      "summary": "Store lease and gate release failures preserve a refused ServiceInstallationError and its code, with the refusal and all release failures in its AggregateError cause; Hosts that matched the 0.42.0 AggregateError on first install must read cause instead. When a release fails and an upgrade, rollback or recover receipt remains pending, the new store_release_failed code directs the Host to recover; restart the Host process first if the stuck lease causes store_busy.",
+      "summary": "Store lease and gate release failures preserve a refused ServiceInstallationError and its code, with the refusal and all release failures in its AggregateError cause; Hosts that matched the 0.42.0 AggregateError on first install must read cause instead. When a release fails and an upgrade, rollback or recover receipt remains pending, the new store_release_failed code directs the Host to recover; restart the Host process first if the stuck lease causes store_busy. The same type gains install_root_foreign_owner (#2001): every ServiceInstallation operation holds an install-root gate, so a second operation on one install root fails at once with lifecycle_owner_busy, and an install root owned by another user is refused before anything changes.",
       "migration": "docs/releases/host-upgrade-next-minor.md#store-release-failures-name-the-next-step",
       "items": [
         "export:@byok-sdk/client#ServiceInstallationErrorCode"
@@ -64,6 +64,43 @@
         "export:@byok-sdk/bot-collaboration#inspectLedger",
         "export:@byok-sdk/core#LocalStoreId",
         "store:bot-collaboration-ledger"
+      ]
+    },
+    {
+      "id": "journal-prune-cutoff",
+      "impact": "breaking",
+      "summary": "Custom LocalTaskJournal implementations must accept the new cutoff argument of pruneConfirmedJournalTask(taskId, cutoff) (#1990) and recheck it in the delete transaction under the write lock. It returns false and deletes nothing when the task is valid but not prunable: a confirmed terminal last updated at or after cutoff, or a received offer whose first stored task.cancel sequenced above the offer was committed at or after cutoff (including evidence replaced under the same task id) or that has no such cancellation. For a received offer it throws and deletes nothing when the task.cancel that qualifies it fails its hash or enrollment check, names another task id, or carries a seq different from its row's. A confirmed terminal's envelopes, withheld rows and the task's other envelopes are not verified before deletion. An implementation that ignores cutoff still compiles but can delete unexpired or replaced evidence; the SDK does not repeat these checks.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#stored-cancellation-pruning-cutoff",
+      "items": [
+        "export:@byok-sdk/client#LocalTaskJournal",
+        "export:@byok-sdk/client#SqliteLocalTaskJournal"
+      ]
+    },
+    {
+      "id": "path-gate-release-failures",
+      "impact": "breaking",
+      "summary": "A path mutation gate release that fails while another error is thrown is kept: PathMutationGateBusyError, ServiceUnitError and LocalStateRelocation errors keep their class and code with an AggregateError of the original error and the release failures in cause, and an error of another class from a managed service lifecycle operation becomes that AggregateError. ServiceUnitError and the LocalStateRelocation error classes accept ErrorOptions. Hosts that read the original error of such a failure read it from cause.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#gate-release-failures-join-the-thrown-error",
+      "items": [
+        "export:@byok-sdk/client#LocalStateRelocationBusyError",
+        "export:@byok-sdk/client#LocalStateRelocationError",
+        "export:@byok-sdk/client#LocalStateRelocationIntegrityError",
+        "export:@byok-sdk/client#ServiceUnitError"
+      ]
+    },
+    {
+      "id": "enrollment-clear-store-scope",
+      "impact": "breaking",
+      "summary": "clearDeviceEnrollment and Daemon.unpair() no longer delete another store's credential or staged first pairing under the same productId: they hold a per-user productId lock from validation through deletion, and pairing takes it across its credential writes, each waiting up to 30 seconds. FirstPairingAttempt gains storeIdentity (DeviceStore.identity, the SHA-256 hex of the resolved storeDir); an injected DeviceCredentialBackend keeps every attempt field, or the store's own attempt is refused. A clear refuses another store's attempt as store_not_bound and an attempt that names no store (staged by 0.42.0) with the new DeviceEnrollmentClearErrorCode pairing_attempt_unattributed; clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }) deletes it. Pairing applies the same rule (#2033): it reuses only its own store's staged attempt and otherwise throws the new FirstPairingAttemptRefusedError (store_not_bound, which replaceOtherStore discards, or pairing_attempt_unattributed). A running daemon's token renewal takes the same lock around its write and writes only while the OS entry still holds its store's enrollment; otherwise the daemon halts as store_not_bound or re_pair_required (#2034). A renewal never holds the lock across a network request. A pairing is one critical section: it rereads the enrollment and staged attempt under the lock, never a cached record, refuses another store's or an unattributed attempt even beside its own enrollment, and holds the lock across its own request, because server registration has no fencing, and through its E2EE member entries. BlobClient and InstallSkillPacksOptions change only through the types they reference (#1964).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#enrollment-clear-is-scoped-to-its-store-1964",
+      "items": [
+        "export:@byok-sdk/client#BlobClient",
+        "export:@byok-sdk/client#DeviceCredentialBackend",
+        "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
+        "export:@byok-sdk/client#FirstPairingAttemptRefusedError",
+        "export:@byok-sdk/client#InstallSkillPacksOptions",
+        "export:@byok-sdk/client#clearDeviceEnrollment",
+        "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend"
       ]
     }
   ],
@@ -104,9 +141,74 @@
       "entry": "bot-turn-instruction-host-kit"
     },
     {
+      "item": "export:@byok-sdk/client#BlobClient",
+      "change": "changed",
+      "entry": "enrollment-clear-store-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceCredentialBackend",
+      "change": "changed",
+      "entry": "enrollment-clear-store-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
+      "change": "changed",
+      "entry": "enrollment-clear-store-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client#FirstPairingAttemptRefusedError",
+      "change": "added",
+      "entry": "enrollment-clear-store-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client#InstallSkillPacksOptions",
+      "change": "changed",
+      "entry": "enrollment-clear-store-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client#LocalStateRelocationBusyError",
+      "change": "changed",
+      "entry": "path-gate-release-failures"
+    },
+    {
+      "item": "export:@byok-sdk/client#LocalStateRelocationError",
+      "change": "changed",
+      "entry": "path-gate-release-failures"
+    },
+    {
+      "item": "export:@byok-sdk/client#LocalStateRelocationIntegrityError",
+      "change": "changed",
+      "entry": "path-gate-release-failures"
+    },
+    {
+      "item": "export:@byok-sdk/client#LocalTaskJournal",
+      "change": "changed",
+      "entry": "journal-prune-cutoff"
+    },
+    {
       "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
       "change": "changed",
       "entry": "service-store-release-failures"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUnitError",
+      "change": "changed",
+      "entry": "path-gate-release-failures"
+    },
+    {
+      "item": "export:@byok-sdk/client#SqliteLocalTaskJournal",
+      "change": "changed",
+      "entry": "journal-prune-cutoff"
+    },
+    {
+      "item": "export:@byok-sdk/client#clearDeviceEnrollment",
+      "change": "changed",
+      "entry": "enrollment-clear-store-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
+      "change": "changed",
+      "entry": "enrollment-clear-store-scope"
     },
     {
       "item": "export:@byok-sdk/core#LocalStoreId",

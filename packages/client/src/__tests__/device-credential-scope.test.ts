@@ -21,7 +21,7 @@ describe('device credential identity', () => {
       return { exitCode: args[0] === 'find-generic-password' && !entries.has(service) ? 44 : 0,
         stdout: entries.get(service) ?? '', stderr: '' };
     };
-    const store = (storeDir: string, productId: string) => new DeviceStore(storeDir,
+    const store = (storeDir: string, productId: string) => new DeviceStore(productId, storeDir,
       new DeviceCredentialStore({ storeDir, productId, platform: 'darwin', commandRunner: run }));
     const productId = randomUUID();
     const first = store('/unused/first', productId);
