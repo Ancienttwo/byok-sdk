@@ -9,9 +9,10 @@ import { DaemonHaltError } from '../daemon/daemon-lifecycle';
 import { DeviceRecordRePairRequiredError, DeviceStore, readDeviceEnrollmentIdentity, readDeviceEnrollmentStatus } from '../daemon/store';
 import { DeviceStoreBindingMismatchError, FirstPairingAttemptRefusedError } from '../daemon/daemon-errors';
 import { acquireEnrollmentGate } from '../daemon/enrollment-gate';
-import { acquirePathMutationGate, type PathMutationGate } from '../util/path-mutation-gate';
+import { acquirePathMutationGate, type PathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { createTestDeviceStore, InMemoryDeviceCredentialBackend } from './fixtures/device-credentials';
 import { AuthManager } from '../daemon/auth-manager';
+import { DeviceMemberRecords } from '../daemon/device-member-custody';
 import { testDeviceCredentials } from './fixtures/credential-backend';
 import { clearDeviceEnrollment, DeviceEnrollmentClearError } from '../daemon/enrollment-clear';
 import { repairDeviceEnrollmentMetadata } from '../diagnostics/device-doctor';
@@ -67,6 +68,46 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
 
   async function startRejection(daemon: Daemon): Promise<unknown> {
     return daemon.start().then(() => undefined, (error: unknown) => error);
+  }
+
+  // Strictly under the 10 s test timeout, so each test settles and restores its mocks before the next starts.
+  const settle = { timeout: 5_000 };
+  const within = <T>(promise: Promise<T>): Promise<T> => Promise.race([
+    promise,
+    new Promise<never>((_, reject) => { setTimeout(() => reject(new Error('barrier not reached')), settle.timeout).unref(); }),
+  ]);
+
+  async function trackGate() {
+    const { acquireEnrollmentGate: acquire } = await vi.importActual<typeof import('../daemon/enrollment-gate')>('../daemon/enrollment-gate');
+    const gate = {
+      held: 0,
+      taken: 0,
+      scope: undefined as string | undefined,
+      onWait: undefined as (() => void) | undefined,
+      restore: () => { vi.mocked(acquireEnrollmentGate).mockReset().mockImplementation(acquire); },
+      /**
+       * Resolves once `pairing` has settled, or once it waits on the gate one
+       * holder has: the real lock then refuses a probe, so the pairing is
+       * blocked rather than merely late (#2030 F3).
+       */
+      excludes: async (pairing: Promise<unknown>) => {
+        const waiting = new Promise<boolean>((resolve) => { gate.onWait = () => resolve(true); });
+        const blocked = await within(Promise.race([pairing.then(() => false), waiting]));
+        gate.onWait = undefined;
+        if (!blocked) return;
+        expect(gate.held).toBe(1);
+        await expect(acquirePathMutationGate({ scope: gate.scope as `device-enrollment:${string}` })).rejects.toBeInstanceOf(PathMutationGateBusyError);
+      },
+    };
+    vi.mocked(acquireEnrollmentGate).mockImplementation(async (id, signal) => {
+      gate.onWait?.();
+      const acquired = await acquire(id, signal);
+      gate.held += 1;
+      gate.taken += 1;
+      gate.scope = acquired.scope;
+      return { ...acquired, release: async () => { gate.held -= 1; await acquired.release(); } };
+    });
+    return gate;
   }
 
   it('a normally paired store starts unchanged', async () => {
@@ -163,31 +204,6 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
   });
 
   describe('renewal and pairing take the enrollment lock (#2034)', () => {
-    // Strictly under the 10 s test timeout, so each test settles and restores its mocks before the next starts.
-    const settle = { timeout: 5_000 };
-    const within = <T>(promise: Promise<T>): Promise<T> => Promise.race([
-      promise,
-      new Promise<never>((_, reject) => { setTimeout(() => reject(new Error('barrier not reached')), settle.timeout).unref(); }),
-    ]);
-
-    async function trackGate() {
-      const { acquireEnrollmentGate: acquire } = await vi.importActual<typeof import('../daemon/enrollment-gate')>('../daemon/enrollment-gate');
-      const gate = {
-        held: 0,
-        taken: 0,
-        onWait: undefined as (() => void) | undefined,
-        restore: () => { vi.mocked(acquireEnrollmentGate).mockReset().mockImplementation(acquire); },
-      };
-      vi.mocked(acquireEnrollmentGate).mockImplementation(async (id, signal) => {
-        gate.onWait?.();
-        const acquired = await acquire(id, signal);
-        gate.held += 1;
-        gate.taken += 1;
-        return { ...acquired, release: async () => { gate.held -= 1; await acquired.release(); } };
-      });
-      return gate;
-    }
-
     it('a running daemon whose enrollment another store replaced halts as store_not_bound on renewal and writes nothing', async () => {
       const first = await storeConfig();
       const firstDaemon = daemonFor(first);
@@ -449,6 +465,31 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
       await expect(auth.pair('pairing-code')).rejects.toBeInstanceOf(DeviceStoreBindingMismatchError);
 
       expect(await readDeviceEnrollmentStatus(second)).toEqual({ state: 'paired', deviceId });
+    });
+
+    it('another store\'s pairing waits for a pairing\'s member custody (#2030 F2)', async () => {
+      const first = await storeConfig();
+      const firstDaemon = daemonFor(first);
+      const secondDaemon = daemonFor(await storeConfig());
+      const gate = await trackGate();
+      const order: string[] = [];
+      let pairing: Promise<unknown> = Promise.resolve();
+      const clearMembers = DeviceMemberRecords.prototype.clear;
+      vi.spyOn(DeviceMemberRecords.prototype, 'clear').mockImplementationOnce(async function (this: DeviceMemberRecords) {
+        pairing = secondDaemon.pair('pairing-code', { replaceOtherStore: true }).then(() => order.push('second paired'));
+        await gate.excludes(pairing);
+        await clearMembers.call(this);
+        order.push('first members written');
+      });
+
+      try {
+        await firstDaemon.pair('pairing-code');
+        await within(pairing);
+      } finally {
+        gate.restore();
+      }
+
+      expect(order).toEqual(['first members written', 'second paired']);
     });
 
     it('refuses a staged first pairing that names no store unless told to clear it (#1964)', async () => {

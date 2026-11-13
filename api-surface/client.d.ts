@@ -3409,9 +3409,16 @@ export declare class AuthManager {
      * attempt is reused only when it names this store; otherwise it refuses
      * with {@link FirstPairingAttemptRefusedError}, and `replaceOtherStore`
      * discards another store's attempt (#2033).
+     *
+     * The whole pairing is one critical section of the enrollment gate: it
+     * rereads the OS entry, `device.json` and the staged attempt after taking
+     * the gate, never trusting a cached record, and releases the gate only
+     * after `custody` has run.
      */
     pair(pairingCode: string, options?: {
         readonly replaceOtherStore?: boolean;
+        /** Internal daemon seam: runs once the enrollment is persisted, before the gate is released; the daemon writes its E2EE member custody here (#2030 F2). */
+        readonly custody?: (record: DeviceRecord) => Promise<void>;
     }): Promise<DeviceRecord>;
     /** The current, non-expired access token — renews first if it's expired or close to it. Throws {@link DeviceRevokedError} if the device has been revoked. */
     getValidAccessToken(): Promise<string>;
@@ -3434,10 +3441,12 @@ export declare class AuthManager {
     /** Under the enrollment gate: the key and request facts a pairing proves, staging a new first-pairing attempt when this store has none. */
     private pairingKey;
     /**
-     * Under the enrollment gate: this store's bound enrollment, or else its own
-     * staged first-pairing attempt (undefined when none, or when
-     * `replaceOtherStore` discards another store's). Another store's enrollment
-     * or attempt, or an attempt that names no store, is refused (#2033).
+     * Under the enrollment gate, reread from the OS entry and `device.json`:
+     * this store's bound enrollment, or else its own staged first-pairing
+     * attempt (undefined when none, or when `replaceOtherStore` discards another
+     * store's). Another store's enrollment or attempt, or an attempt that names
+     * no store, is refused, also beside this store's enrollment: the pairing
+     * would consume that attempt (#2033, #2030 F1).
      */
     private pairingAuthority;
     /** Always throws — `never` return type lets call sites use `if (x === 401) this.markRevoked();` without an explicit `return`/`throw` of their own. */
