@@ -1,10 +1,13 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { ownedProcessGroupRecord } from '../adapters/process-tree';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  createServiceInstallation,
+  installationHoldsStart,
   readServiceInstallationRecord,
   serviceInstallationOver,
   ServiceInstallationError,
@@ -106,6 +109,64 @@ function failRestore(active: () => boolean = () => true): { restoreError: Error;
     return originalCopy(from, to, mode);
   });
   return { restoreError, restore: () => spy.mockRestore() };
+}
+
+/**
+ * A process death after the `n`-th file system mutation (#2011): that
+ * mutation lands, and every later one, and every lifecycle call through
+ * {@link crashingLifecycle}, rejects without changing anything. `end()`
+ * restores the file system and frees the leases the dead run held, as the
+ * exit of its process would.
+ */
+function crashAt(n: number): { dead: () => boolean; end: () => Promise<void> } {
+  let count = 0;
+  let dead = false;
+  const spies = (['rename', 'rm', 'copyFile', 'cp', 'symlink', 'writeFile', 'mkdir', 'open', 'unlink'] as const).map((name) => {
+    const original = (fs[name] as (...args: unknown[]) => Promise<unknown>).bind(fs);
+    return vi.spyOn(fs, name).mockImplementation((async (...args: unknown[]) => {
+      if (dead || ++count > n) {
+        dead = true;
+        throw new Error('process killed');
+      }
+      return original(...args);
+    }) as never);
+  });
+  const leases: daemonOwner.DaemonOwnerLease[] = [];
+  const original = daemonOwner.acquireDaemonOwner;
+  const leasing = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementation(async (...args) => {
+    const lease = await original(...args);
+    leases.push(lease);
+    return lease;
+  });
+  crashState.dead = () => dead;
+  return {
+    dead: () => dead,
+    end: async () => {
+      for (const spy of [...spies, leasing]) spy.mockRestore();
+      crashState.dead = () => false;
+      for (const lease of leases) await lease.release().catch(() => undefined);
+    },
+  };
+}
+
+const crashState = { dead: (): boolean => false };
+let startedWithoutCurrent = false;
+
+/** The fake lifecycle, dead with the process after {@link crashAt}, noting any start while `current` is absent. */
+function crashingLifecycle(): ManagedServiceLifecycle {
+  const base = fakeLifecycle();
+  const alive = <A extends unknown[], R>(call: (...args: A) => Promise<R>) => async (...args: A): Promise<R> => {
+    if (crashState.dead()) throw new Error('process killed');
+    return call(...args);
+  };
+  return {
+    ...base,
+    start: alive(async () => {
+      if (!existsSync(path.join(installRoot, 'current'))) startedWithoutCurrent = true;
+      await base.start();
+    }),
+    stop: alive(base.stop), install: alive(base.install), uninstall: alive(base.uninstall),
+  };
 }
 
 /**
@@ -537,7 +598,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     const error = await installation.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ServiceInstallationError);
     expect(error).toMatchObject({ code: 'store_repair_required', stores: [{ verdict: 'new-path-repair', path: db }] });
-    expect(events).toEqual(['stop', 'start']);
+    expect(events).toEqual(['stop', 'start', 'health 1.0.0']);
     expect(await pointer('current')).toBe('1.0.0');
     expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_repair_required', from: '1.0.0', to: '2.0.0' });
   });
@@ -616,7 +677,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     // The state a crash leaves mid-switch to 2.0.0 on Windows: `current` moved
     // aside, the new pointer not yet renamed in, the store already written.
     await fs.writeFile(path.join(installRoot, 'upgrade-receipt.json'), JSON.stringify({
-      format: 'byok-service-upgrade-receipt', version: 1, state: 'pending', from: '1.0.0', to: '2.0.0', at: new Date().toISOString(),
+      format: 'byok-service-upgrade-receipt', version: 2, state: 'pending', kind: 'upgrade', from: '1.0.0', to: '2.0.0', at: new Date().toISOString(),
     }));
     await fs.rename(path.join(installRoot, 'current'), path.join(installRoot, 'current.old'));
     await fs.symlink(path.join('versions', '2.0.0'), path.join(installRoot, 'current.next'));
@@ -657,7 +718,8 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     events = [];
     const receipt = await installation.recover();
     expect(receipt).toMatchObject({ state: 'rolled-back', code: 'upgrade_pending', from: '2.0.0', to: '3.0.0' });
-    expect(events).toEqual(['stop', 'start', 'health 2.0.0']);
+    // `current` still names 2.0.0, so its stores are its own: recover() starts it as it is (#2011).
+    expect(events).toEqual(['start', 'health 2.0.0']);
     expect(await pointer('current')).toBe('2.0.0');
     expect(await fs.readFile(db, 'utf8')).toBe('v2 data');
   });
@@ -1456,7 +1518,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await expect(installation.upgrade(await payload('2.0.0', { 'migrate.cjs': MIGRATE }))).rejects.toMatchObject({
         code: 'store_migration_required', stores: [{ verdict: 'migration-required', path: db }],
       });
-      expect(events).toEqual(['stop', 'start']);
+      expect(events).toEqual(['stop', 'start', 'health 1.0.0']);
       expect(await pointer('current')).toBe('1.0.0');
       expect([await fs.readFile(db, 'utf8'), await fs.readFile(`${db}-wal`, 'utf8')]).toEqual(['v1 data', 'v1 wal']);
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_migration_required' });
@@ -1469,7 +1531,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await verdicts('migration-required');
       events = [];
       await expect(installation.upgrade(await payload('2.0.0', { 'migrate.cjs': MIGRATE }))).rejects.toMatchObject({ code: 'store_migration_failed' });
-      expect(events).toEqual(['stop', 'start']);
+      expect(events).toEqual(['stop', 'start', 'health 1.0.0']);
       expect(await pointer('current')).toBe('1.0.0');
       expect([await fs.readFile(db, 'utf8'), await fs.readFile(`${db}-wal`, 'utf8')]).toEqual(['v1 data', 'v1 wal']);
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_migration_failed' });
@@ -1493,7 +1555,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       const setupError = new Error('no migration program');
       const throwing = installationOver(fakeLifecycle(), { migrate: () => { throw setupError; } });
       await expect(throwing.upgrade(await payload('2.0.0', { 'migrate.cjs': MIGRATE }))).rejects.toMatchObject({ code: 'store_migration_failed', cause: setupError });
-      expect(events).toEqual(['stop', 'start']);
+      expect(events).toEqual(['stop', 'start', 'health 1.0.0']);
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_migration_failed' });
 
       // A restore that fails may leave partial stores (#1987): nothing starts, the receipt stays pending for recover().
@@ -1529,8 +1591,10 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
           const lease = await original(...args);
           return { release: async () => { await lease.release(); throw releaseError; } };
         }) : undefined;
+        // Writes: the pending intent, the migrate group's record (POSIX), then the refusal's pending code.
         let receiptWrites = 0;
-        const receiptFault = failRename((file) => file === receiptPath && ++receiptWrites === 2);
+        const refusalWrite = process.platform === 'win32' ? 2 : 3;
+        const receiptFault = failRename((file) => file === receiptPath && ++receiptWrites === refusalWrite);
         events = [];
         const failed = await writing.upgrade(await payload('2.0.0', { 'migrate.cjs': MIGRATE })).catch((caught: unknown) => caught)
           .finally(() => { receiptFault.restore(); leaseFault?.mockRestore(); });
@@ -1562,6 +1626,175 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await pointer('current')).toBe('1.0.0');
       expect([await fs.readFile(db, 'utf8'), await fs.readFile(`${db}-wal`, 'utf8')]).toEqual(['v1 data', 'v1 wal']);
     });
+  });
+
+  describe('the recover() table and the Host contract checks (#2011)', () => {
+    const receiptPath = () => path.join(installRoot, 'upgrade-receipt.json');
+    const journal = async (fields: Record<string, unknown>) => fs.writeFile(receiptPath(), JSON.stringify({ format: 'byok-service-upgrade-receipt', version: 2, state: 'pending', at: 'now', ...fields }));
+    beforeEach(async () => {
+      await installation.install(await payload('1.0.0'));
+      await installation.upgrade(await payload('2.0.0'));
+      await fs.writeFile(db, 'v2 data');
+      events = [];
+    });
+
+    it('a rollback journaled with the candidate still current is switch_unhealthy: nothing starts, the snapshot stays, rollback() works', async () => {
+      await journal({ kind: 'upgrade', from: '1.0.0', to: '2.0.0', code: 'health_check_failed' });
+      await expect(installation.recover()).resolves.toMatchObject({ state: 'failed', code: 'switch_unhealthy', from: '1.0.0', to: '2.0.0' });
+      expect(events).toEqual([]);
+      expect(await pointer('current')).toBe('2.0.0');
+      expect(await fs.readFile(db, 'utf8')).toBe('v2 data');
+      await expect(installation.rollback()).resolves.toMatchObject({ state: 'rolled-back', from: '1.0.0', to: '2.0.0' });
+      expect([await pointer('current'), await fs.readFile(db, 'utf8')]).toEqual(['1.0.0', 'v1 data']);
+    });
+
+    it.each([
+      ['a refusal code with the candidate current', { kind: 'upgrade', from: '1.0.0', to: '2.0.0', code: 'store_rejected' }],
+      ['a current version that is neither from nor to', { kind: 'upgrade', from: '1.0.0', to: '3.0.0' }],
+    ])('%s is receipt_state_inconsistent and changes nothing', async (_name, fields) => {
+      await journal(fields);
+      const before = await tree(root);
+      await expect(installation.recover()).rejects.toMatchObject({ code: 'receipt_state_inconsistent' });
+      expect(events).toEqual([]);
+      expect(await tree(root)).toEqual(before);
+    });
+
+    it('an interrupted repair puts back the receipt it replaced and is repair_interrupted; the repair then runs again', async () => {
+      const prior = await installation.receipt();
+      await journal({ kind: 'repair', from: '2.0.0', to: '2.0.0', prior });
+      await expect(installation.install(await payload('2.0.0'))).rejects.toMatchObject({ code: 'upgrade_pending' });
+      await expect(installation.recover()).rejects.toMatchObject({ code: 'repair_interrupted' });
+      expect(events).toEqual([]);
+      expect(await installation.receipt()).toEqual(prior);
+      await installation.install(await payload('2.0.0'));
+      // A repair records nothing: the last upgrade's receipt stays.
+      expect(await installation.receipt()).toEqual(prior);
+      expect(await pointer('current')).toBe('2.0.0');
+    });
+
+    it('a version 1 receipt: a pending one is refused untouched, a final one is rewritten by recover()', async () => {
+      const v1 = { ...(await installation.receipt()), version: 1 };
+      await fs.writeFile(receiptPath(), JSON.stringify({ ...v1, state: 'pending' }));
+      const before = await tree(root);
+      await expect(installation.recover()).rejects.toMatchObject({ code: 'receipt_upgrade_required' });
+      await expect(installation.receipt()).rejects.toMatchObject({ code: 'receipt_upgrade_required' });
+      expect(await tree(root)).toEqual(before);
+      await fs.writeFile(receiptPath(), JSON.stringify(v1));
+      await expect(installation.recover()).resolves.toMatchObject({ version: 2, state: 'switched' });
+      expect(await installation.receipt()).toMatchObject({ version: 2, state: 'switched' });
+    });
+
+    it.skipIf(process.platform === 'win32')('a migrate process group that still runs keeps recover() from touching anything', async () => {
+      const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { detached: true, stdio: 'ignore' });
+      try {
+        await new Promise((resolve) => child.once('spawn', resolve));
+        await fs.rm(path.join(installRoot, 'current'));
+        await journal({ kind: 'upgrade', from: '1.0.0', to: '2.0.0', migrate: ownedProcessGroupRecord(child, 'test') });
+        const before = await tree(root);
+        await expect(installation.recover()).rejects.toMatchObject({ code: 'upgrade_pending', message: expect.stringContaining(`process group ${child.pid}`) });
+        expect(events).toEqual([]);
+        expect(await tree(root)).toEqual(before);
+      } finally {
+        process.kill(-child.pid!, 'SIGKILL');
+        await new Promise((resolve) => child.once('exit', resolve));
+      }
+      await expect(installation.recover()).resolves.toMatchObject({ state: 'rolled-back', code: 'upgrade_pending' });
+      expect([await pointer('current'), await fs.readFile(db, 'utf8')]).toEqual(['1.0.0', 'v1 data']);
+    });
+
+    it('the program must run from <installRoot>/current, and upgrade() and rollback() need the exact unit', async () => {
+      const options = (program: string) => ({ service: { name: 'svc', storeDir, logDir: root, owner: 'app' }, productId: 'svc', installRoot,
+        program: () => ({ command: process.execPath, args: [program] }), precheck: () => ({ command: process.execPath, args: [] }) });
+      for (const program of [path.join(installRoot, 'current-old', 'host.js'), path.join(root, 'elsewhere.js')]) {
+        expect(() => createServiceInstallation(options(program))).toThrow(expect.objectContaining({ code: 'service_program_not_current' }));
+      }
+      const drifted = installationOver({ ...fakeLifecycle(), inspect: async () => ({ state: 'repairable', unitPath: 'unit', launcherPath: 'launcher' }) });
+      await expect(drifted.rollback()).rejects.toMatchObject({ code: 'service_program_not_current' });
+      await expect(drifted.upgrade(await payload('3.0.0'))).rejects.toMatchObject({ code: 'service_program_not_current' });
+      expect(events).toEqual([]);
+    });
+
+    it.each(['snapshots', path.join('snapshots', '2.0.0'), path.join('snapshots', '2.0.0', '0')])('rollback() refuses a link at %s before any side effect (#2061)', async (level) => {
+      const linked = path.join(installRoot, level);
+      await fs.rename(linked, `${linked}-moved`);
+      await fs.symlink(`${linked}-moved`, linked);
+      const before = await tree(root);
+      await expect(installation.rollback()).rejects.toMatchObject({ code: 'snapshots_symlinked', message: expect.stringContaining(linked) });
+      expect(events).toEqual([]);
+      expect(await tree(root)).toEqual(before);
+    });
+
+    it('a snapshot that cannot be removed after the final receipt keeps the outcome (#2062)', async () => {
+      unhealthy.add('3.0.0');
+      const originalRm = fs.rm.bind(fs);
+      const removal = vi.spyOn(fs, 'rm').mockImplementation(async (file, options) => {
+        if (String(file) === path.join(installRoot, 'snapshots', '3.0.0') && (await installation.receipt())?.state === 'rolled-back') throw new Error('cleanup denied');
+        return originalRm(file, options);
+      });
+      const error = await installation.upgrade(await payload('3.0.0')).catch((caught: unknown) => caught).finally(() => removal.mockRestore());
+      expect(error).toMatchObject({ code: 'health_check_failed' });
+      expect(await installation.receipt()).toMatchObject({ state: 'rolled-back', code: 'health_check_failed' });
+    });
+
+    it('a daemon must not start while its installation is mid-restore', async () => {
+      expect(await installationHoldsStart(storeDir)).toBe(false);
+      await journal({ kind: 'upgrade', from: '1.0.0', to: '2.0.0' });
+      expect(await installationHoldsStart(storeDir)).toBe(false);
+      await fs.rm(path.join(installRoot, 'current'));
+      expect(await installationHoldsStart(storeDir)).toBe(true);
+    });
+  });
+
+  describe('crash consistency: a process death after any write, then recover() (#2011)', () => {
+    const scenarios = {
+      'a healthy upgrade': { unhealthy: [], run: () => installation.upgrade(path.join(root, 'payloads', '2.0.0')) },
+      'an upgrade whose candidate fails its health check': { unhealthy: ['2.0.0'], run: () => installation.upgrade(path.join(root, 'payloads', '2.0.0')) },
+      'a rollback': { unhealthy: [], run: () => installation.rollback() },
+      'a migrating upgrade': { unhealthy: [], migrate: true, run: () => installation.upgrade(path.join(root, 'payloads', '2.0.0')) },
+    } as const;
+    it.each(Object.keys(scenarios) as (keyof typeof scenarios)[])('%s', async (name) => {
+      const scenario = scenarios[name];
+      const migrate: ServiceInstallationOptions['migrate'] = (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] });
+      const over = () => installationOver(crashingLifecycle(), 'migrate' in scenario ? { migrate } : {});
+      onHealth = async (version) => { if (version === '2.0.0') await fs.writeFile(db, 'v2 data'); };
+      // The state before the operation, prepared once and copied back for every crash point.
+      installation = over();
+      await installation.install(await payload('1.0.0'));
+      await payload('2.0.0', { 'migrate.cjs': MIGRATE });
+      if (name === 'a rollback') {
+        await installation.upgrade(path.join(root, 'payloads', '2.0.0'));
+        await fs.writeFile(db, 'v2 later');
+        onHealth = async () => undefined;
+      }
+      if ('migrate' in scenario) await verdicts('migration-required');
+      const template = path.join(root, 'template');
+      for (const dir of [installRoot, storeDir]) await fs.cp(dir, path.join(template, path.basename(dir)), { recursive: true, verbatimSymlinks: true });
+      for (let n = 1; ; n += 1) {
+        for (const dir of [installRoot, storeDir]) {
+          await fs.rm(dir, { recursive: true, force: true });
+          await fs.cp(path.join(template, path.basename(dir)), dir, { recursive: true, verbatimSymlinks: true });
+        }
+        unhealthy = new Set(scenario.unhealthy);
+        startedWithoutCurrent = false;
+        installation = over();
+        const crash = crashAt(n);
+        await scenario.run().catch(() => undefined);
+        const died = crash.dead();
+        await crash.end();
+        unhealthy = new Set();
+        installation = over();
+        const settled = await installation.recover();
+        // Never a start with `current` absent, and the stores always belong to the version `current` names.
+        expect(startedWithoutCurrent).toBe(false);
+        expect(settled?.state).not.toBe('pending');
+        const current = await pointer('current');
+        const data = await fs.readFile(db, 'utf8');
+        if (name === 'a rollback') expect(data).toBe(current === '1.0.0' ? 'v1 data' : 'v2 later');
+        else if (current === '1.0.0') expect(data).toBe('v1 data');
+        else expect([current, settled?.state === 'switched' || settled?.code === 'switch_unhealthy']).toEqual(['2.0.0', true]);
+        if (!died) break;
+      }
+    }, 120_000);
   });
 
   describe('crash consistency: every rename may fail, and recover() resolves what it leaves', () => {
@@ -1604,7 +1837,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await installation.install(await payload('1.0.0'));
       await installation.upgrade(await payload('2.0.0'));
       await fs.writeFile(path.join(installRoot, 'upgrade-receipt.json'), JSON.stringify({
-        format: 'byok-service-upgrade-receipt', version: 1, state: 'pending', from: '1.0.0', to: '2.0.0', at: new Date().toISOString(),
+        format: 'byok-service-upgrade-receipt', version: 2, state: 'pending', kind: 'upgrade', from: '1.0.0', to: '2.0.0', at: new Date().toISOString(),
       }));
       const reinstall = await payload('2.0.0');
       const before = await tree(root);
@@ -1656,9 +1889,10 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
           expect(step).toBeGreaterThan(5);
           break;
         }
-        await installation.recover();
+        const settled = await installation.recover();
         await expectConsistent({ '1.0.0': 'v1 data', '2.0.0': 'v2 data' });
-        expect(await pointer('current')).toBe('1.0.0');
+        // A fault after the rollback is journaled but before `current` is removed leaves 2.0.0 current and unhealthy (#2011).
+        expect(await pointer('current')).toBe(settled?.code === 'switch_unhealthy' ? '2.0.0' : '1.0.0');
       }
     });
   });
@@ -1711,7 +1945,16 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await installation.receipt()).toMatchObject({ state: 'pending', from: '1.0.0', to: '2.0.0' });
       await expect(fs.access(path.join(research, 'daemon-owner.json'))).rejects.toThrow();
 
-      // recover() runs into the same release failure before its final receipt; the receipt stays pending.
+      // `current` names 2.0.0: the switch is committed, so recover() starts it without a lease or a restore (#2011).
+      await expect(installation.recover()).resolves.toMatchObject({ state: 'switched', from: '1.0.0', to: '2.0.0' });
+      // A rollback journaled with `current` removed: recover() restores under the leases and runs into the same release failure.
+      const journalRollback = async () => {
+        await fs.writeFile(path.join(installRoot, 'upgrade-receipt.json'), JSON.stringify({
+          format: 'byok-service-upgrade-receipt', version: 2, state: 'pending', kind: 'rollback', from: '1.0.0', to: '2.0.0', at: new Date().toISOString(),
+        }));
+        await fs.rm(path.join(installRoot, 'current'), { force: true });
+      };
+      await journalRollback();
       const recoverFault = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementationOnce(async (...args) => {
         const lease = await original(...args);
         return { release: async () => { await lease.release(); throw new Error('injected recover release failure'); } };
@@ -1728,8 +1971,10 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         return { release: async () => { throw new Error('lease left held'); } };
       });
       const short = both({ stopTimeoutMs: 100 });
+      await journalRollback();
       await expect(short.recover()).rejects.toMatchObject({ code: 'upgrade_pending' });
       holdFault.mockRestore();
+      await journalRollback();
       await expect(short.recover()).rejects.toMatchObject({ code: 'upgrade_pending', cause: { errors: [expect.objectContaining({ code: 'store_busy' })] } });
       await stuck!.release();
       await expect(short.recover()).resolves.toMatchObject({ state: 'rolled-back' });
@@ -1815,7 +2060,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(typed).toMatchObject({ code: 'store_preparation_failed' });
       expect(causes(typed)).toEqual([expect.objectContaining({ code: 'store_preparation_failed', cause: precheckError }), releaseError]);
       expect(await raw.receipt()).toMatchObject({ state: 'failed', code: 'store_preparation_failed' });
-      expect(events.at(-1)).toBe('start');
+      expect(events.slice(-2)).toEqual(['start', 'health 1.0.0']);
     });
 
     it('a store with a live owner is store_busy and nothing is switched', async () => {
@@ -1825,7 +2070,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       events = [];
       try { await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'store_busy' }); }
       finally { await live.release(); }
-      expect(events).toEqual(['stop', 'start']);
+      expect(events).toEqual(['stop', 'start', 'health 1.0.0']);
       expect(await pointer('current')).toBe('1.0.0');
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_busy' });
 
@@ -1891,7 +2136,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await installation.install(await payload('1.0.0'));
       events = [];
       await expect(installationOver(fakeLifecycle(), { daemonStores }).upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'daemon_stores_invalid' });
-      expect(events).toEqual(['stop', 'start']);
+      expect(events).toEqual(['stop', 'start', 'health 1.0.0']);
       expect(await pointer('current')).toBe('1.0.0');
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'daemon_stores_invalid' });
     });
@@ -1959,8 +2204,10 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       const snapshot = JSON.parse(await fs.readFile(snapshotFile, 'utf8')) as { entries: Array<{ path: string }> };
       snapshot.entries[1]!.path = `${index}/.`; // The old persisted spelling; path.join would normalize it.
       await fs.writeFile(snapshotFile, JSON.stringify(snapshot));
-      const pending = { ...(await installation.receipt()), state: 'pending' };
+      // An upgrade stopped after its snapshot, with `current` removed: recover() restores (#2011).
+      const pending = { ...(await installation.receipt()), state: 'pending', kind: 'upgrade' };
       await fs.writeFile(path.join(installRoot, 'upgrade-receipt.json'), JSON.stringify(pending));
+      await fs.rm(path.join(installRoot, 'current'));
       await fs.writeFile(db, 'v2 data');
       if (symlink) {
         await fs.rename(index, `${index}-target`);
@@ -2031,7 +2278,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       events = [];
       try { await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'snapshot_failed', cause: { code: 'ENOSPC' } }); }
       finally { spy.mockRestore(); }
-      expect(events).toEqual(['stop', 'start']);
+      expect(events).toEqual(['stop', 'start', 'health 1.0.0']);
       expect(await pointer('current')).toBe('1.0.0');
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'snapshot_failed' });
       await expect(fs.access(path.join(installRoot, 'snapshots', '2.0.0'))).rejects.toThrow();

@@ -274,7 +274,7 @@ describe('bin/commands/service: run*Command (DI lifecycle)', () => {
 describe('#1097 slice 2: payload installations through the CLI', () => {
   function fakeInstallation(): ServiceInstallation & { calls: string[] } {
     const calls: string[] = [];
-    const receipt: ServiceUpgradeReceipt = { format: 'byok-service-upgrade-receipt', version: 1, state: 'switched', from: '1', to: '2', at: 'now' };
+    const receipt: ServiceUpgradeReceipt = { format: 'byok-service-upgrade-receipt', version: 2, state: 'switched', from: '1', to: '2', at: 'now' };
     return {
       calls,
       lifecycle: {} as ServiceLifecycle,
@@ -343,7 +343,7 @@ describe('#1097 slice 2: payload installations through the CLI', () => {
       expect(JSON.parse(lines[0]!)).toEqual({ current: null, receipt: null });
       await fs.mkdir(path.join(installRoot, 'versions', '2.0.0'), { recursive: true });
       await fs.symlink(path.join('versions', '2.0.0'), path.join(installRoot, 'current'));
-      const receipt: ServiceUpgradeReceipt = { format: 'byok-service-upgrade-receipt', version: 1, state: 'switched', from: '1.0.0', to: '2.0.0', at: 'now' };
+      const receipt: ServiceUpgradeReceipt = { format: 'byok-service-upgrade-receipt', version: 2, state: 'switched', from: '1.0.0', to: '2.0.0', at: 'now' };
       await fs.writeFile(path.join(installRoot, 'upgrade-receipt.json'), JSON.stringify(receipt));
       await runUpgradeStatusCommand(installRoot, { json: true, log: (line) => lines.push(line) });
       await runUpgradeStatusCommand(installRoot, { json: false, log: (line) => lines.push(line) });

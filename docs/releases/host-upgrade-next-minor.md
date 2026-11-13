@@ -130,12 +130,11 @@ restore fails too, the stores may be partial (#1987). `upgrade()` no longer
 starts the previous version on them: the service stays stopped, the receipt
 stays `pending`, `snapshots/<to>` is kept, and the error (an
 `AggregateError` carrying the preparation error and the restore error) names
-the snapshot path and `recover()`. On this error, call `recover()` as soon as
-possible and do not restart the machine first: the unit stays installed, so a
-reboot or login before `recover()` starts the previous version on the partial
-stores. This covers the restore after a failed preparation only; a failed
-restore after a failed health check still throws the underlying error, which
-need not name the snapshot, and is left to #1992.
+the snapshot path and `recover()`. On this error, call `recover()`.
+`current` is absent until then, so a reboot or login starts nothing on the
+partial stores, and a failed restore after a failed health check is covered
+the same way (#1992); see
+[Upgrades commit through current](#upgrades-commit-through-current-2011).
 
 ## Store release failures name the next step
 
@@ -166,10 +165,10 @@ upgrade refusal whose `failed` receipt could not be written), and an install
 whose stores could not be restored and left a repair snapshot (0.42.0 threw
 an `AggregateError` there). Call `recover()` next. A lease that failed to
 release stays held by its process, so `recover()` in the same process can
-fail with `store_busy` in its cause; restart the Host process first. When an
-upgrade refusal's `failed` receipt cannot be written, the previous version
-stays stopped until `recover()`, which would otherwise restore the snapshot
-over what the restarted service wrote. A preparation error that is not the
+fail with `store_busy` in its cause; restart the Host process first. An
+upgrade refusal starts the previous version before writing its `failed`
+receipt; when that write fails, `recover()` starts it again idempotently and
+writes the receipt. A preparation error that is not the
 SDK's own (a `precheck` launch that throws, a failed stop) is
 the new `ServiceInstallationErrorCode` `store_preparation_failed` with the
 original error as its cause: an upgrade records it in a `failed` receipt and
@@ -184,6 +183,60 @@ install's cleanup restored the stores but could not release their leases,
 the error lists `store lease release` as remaining and says the stores were
 restored; the install snapshot it names is then an ordinary leftover to
 remove before the next install.
+
+## Upgrades commit through current (#2011)
+
+The service unit and launcher run only `<installRoot>/current`, and
+`current` is absent whenever the stores may be partial. This resolves the
+0.42.0 known issue where `recover()` restored a snapshot over writes of a
+service that had already restarted.
+
+- **Before upgrading the SDK:** when `upgrade-receipt.json` is `pending`,
+  run `recover()` with SDK 0.42 first. The new SDK refuses a version 1
+  receipt with `receipt_upgrade_required`; `recover()` rewrites a final
+  one as version 2.
+- **Required on macOS: rewrite the unit before the first upgrade.** After
+  updating the SDK, call `install()` once with the payload of the version
+  `current` points at (the same version id). It rewrites the unit without
+  touching the stores. A unit written by an earlier SDK is not exactly the
+  one this SDK writes (#2017), so `upgrade()` and `rollback()` refuse it with
+  `service_program_not_current` until it is rewritten.
+- **`program` runs from `current`:** `createServiceInstallation` throws
+  `service_program_not_current` when neither the command nor an argument
+  lies under `<installRoot>/current` (compared by path segment, without case
+  on macOS and Windows). `upgrade()` and `rollback()` also require the
+  installed unit to be exactly the one the SDK writes; reinstall a unit
+  written another way. These are plausibility checks: a program that names
+  `current` but runs something else is the Host's contract.
+- **`recover()` follows the receipt:** a `pending` receipt journals its
+  `kind` (`upgrade`, `rollback` or `repair`). With `current` absent,
+  `recover()` restores the snapshot and starts `from`; with `current` at
+  `from` or `to` it starts that version as it is and writes the final
+  receipt. A pointer state no operation leaves is `receipt_state_inconsistent`
+  and nothing changes: inspect `current`, `previous` and the receipt.
+- **`switch_unhealthy`:** when `recover()` finds `current` at a candidate
+  already found unhealthy, it starts, stops and restores nothing and writes a
+  `failed` receipt with `switch_unhealthy`. The Host decides: call
+  `rollback()` to discard the candidate's store writes, or keep it.
+- **`repair_interrupted`:** a same-version reinstall journals a `repair`
+  receipt and never removes `current`. After an interruption, `recover()`
+  writes the earlier receipt back and throws `repair_interrupted`; call
+  `install()` again.
+- **Start gate:** `byok-agent start` and `createDaemon` refuse with
+  `store_owned` while a `pending` receipt has `current` absent. A Host
+  process that opens the stores without them checks the receipt itself.
+- **Migration:** an upgrade's `migrate` runs detached in its own process
+  group on POSIX, recorded in the `pending` receipt, and `recover()` changes
+  nothing while that group runs. A process that leaves the group (`setsid`)
+  and Windows migrations are not tracked: stop them before `recover()`.
+- **Links under `snapshots/`:** every operation refuses a symbolic link at
+  `snapshots/`, at a snapshot it is about to restore or at a file in it with
+  `snapshots_symlinked`, before its first side effect (#2061). A link swapped
+  in after that check is the Host's responsibility.
+- **Snapshot removal (#2062):** a snapshot that cannot be removed after the
+  final receipt no longer fails the call; it stays.
+- On systemd, a start runs `systemctl --user reset-failed` first, since the
+  unit may have hit its start limit while `current` was absent.
 
 ## Provider key changes roll back on failure (#1946)
 

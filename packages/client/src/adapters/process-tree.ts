@@ -375,7 +375,7 @@ export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOption
 
   if (platform !== 'win32') {
     observeOwnedRoot(options.child, pid);
-    await recordOwnedGroup(options.child, pid, options.label, options.readProcessTableFn ?? readProcessTable);
+    await recordOwnedGroup(options.child, options.label, options.readProcessTableFn ?? readProcessTable);
     return;
   }
   const job = await (options.jobObject ? options.jobObject.assign(pid) : defaultJobObject.assign(pid, options.nativeAssetRoot));
@@ -385,24 +385,34 @@ export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOption
   else treeJobs.set(options.child, job);
 }
 
-async function recordOwnedGroup(child: ChildProcess, pid: number, label: string, read: () => ProcessTable): Promise<void> {
-  if (ownedGroupLedgers.size === 0) return;
+/**
+ * POSIX: the record of the process group `child` leads, read from the
+ * process table now. `undefined` once `child` exited: our own child stays in
+ * the table until Node reaps it, and Node sets the exit status in the same
+ * step, so absent and not exited cannot both hold. Fails closed: an
+ * unreadable table, or a child missing while running or not leading its own
+ * group, throws, and nothing it owns is left unrecorded.
+ */
+export function ownedProcessGroupRecord(child: ChildProcess, label: string, read: () => ProcessTable = readProcessTable): OwnedProcessGroupRecord | undefined {
+  const pid = child.pid!;
   const table = read();
   const writer = table.get(process.pid);
-  // Fail closed: an owned tree whose record could not be written is refused,
-  // like a win32 tree whose job assignment failed.
-  if (writer === undefined) throw new Error(`${label} runtime process group could not be recorded: the process table is unreadable`);
+  if (writer === undefined) throw new Error(`${label} process group could not be recorded: the process table is unreadable`);
   const root = table.get(pid);
   if (root === undefined) {
-    // Our own child stays in the table until Node reaps it, and Node sets the
-    // exit status in the same step: absent and not exited cannot both hold.
-    if (!isRunning(child)) return;
-    throw new Error(`${label} runtime process group could not be recorded: its root is missing from the process table`);
+    if (!isRunning(child)) return undefined;
+    throw new Error(`${label} process group could not be recorded: its root is missing from the process table`);
   }
-  if (root.pgid !== pid) throw new Error(`${label} runtime root is not its own process-group leader`);
-  const record: OwnedProcessGroupRecord = {
-    pgid: pid, rootStart: root.start, bootId: currentBootId(), writerPid: process.pid, writerStart: writer.start,
-  };
+  if (root.pgid !== pid) throw new Error(`${label} root is not its own process-group leader`);
+  return { pgid: pid, rootStart: root.start, bootId: currentBootId(), writerPid: process.pid, writerStart: writer.start };
+}
+
+async function recordOwnedGroup(child: ChildProcess, label: string, read: () => ProcessTable): Promise<void> {
+  if (ownedGroupLedgers.size === 0) return;
+  // Fail closed: an owned tree whose record could not be written is refused,
+  // like a win32 tree whose job assignment failed.
+  const record = ownedProcessGroupRecord(child, `${label} runtime`, read);
+  if (record === undefined) return;
   ownedGroupRecords.set(child, record);
   await Promise.all([...ownedGroupLedgers].map((ledger) => ledger.adopted(record)));
 }
@@ -436,6 +446,39 @@ function startedAtOrAfter(start: string, rootStart: string): boolean {
   const at = Date.parse(start);
   const root = Date.parse(rootStart);
   return Number.isFinite(at) && Number.isFinite(root) && at >= root;
+}
+
+/**
+ * The processes of the run that recorded `group` still in `table`: its root
+ * and descendants, or what still carries its pgid once the root is gone.
+ * Empty when the pgid's leader is another process (the pid was reused) or
+ * the group holds a process older than its root (someone else's group).
+ */
+function groupProcesses(group: OwnedProcessGroupRecord, table: ProcessTable): ProcessEntry[] {
+  const leader = table.get(group.pgid);
+  if (leader !== undefined && leader.start !== group.rootStart) return [];
+  const members = [...table.values()].filter((entry) => entry.pgid === group.pgid);
+  if (leader === undefined && members.some((entry) => !startedAtOrAfter(entry.start, group.rootStart))) return [];
+  const entries = new Map<number, ProcessEntry>(members.map((entry) => [entry.pid, entry]));
+  if (leader !== undefined) {
+    entries.set(leader.pid, leader);
+    for (const descendant of descendantsOf(table, leader.pid)) entries.set(descendant.pid, descendant);
+  }
+  return [...entries.values()];
+}
+
+/**
+ * POSIX: whether a process of the run that recorded `group` may still run,
+ * by the same rules {@link reapOwnedProcessGroups} uses to find one. A
+ * record from an earlier boot names nothing that runs. win32 records no
+ * group, so nothing runs here. An unreadable process table throws: nothing
+ * is declared ended on a guess.
+ */
+export function ownedProcessGroupRuns(group: OwnedProcessGroupRecord, platform: NodeJS.Platform = process.platform): boolean {
+  if (platform === 'win32') return false;
+  const table = readProcessTable();
+  if (!table.has(process.pid)) throw new Error('the process table could not be read to check a recorded process group');
+  return group.bootId === currentBootId() && groupProcesses(group, table).length > 0;
 }
 
 /**
@@ -497,23 +540,9 @@ export async function reapOwnedProcessGroups(
       liveWriter += 1;
       continue;
     }
-    const leader = table.get(group.pgid);
-    if (leader !== undefined && leader.start !== group.rootStart) {
-      ended.push(group);
-      continue;
-    }
-    const members = [...table.values()].filter((entry) => entry.pgid === group.pgid);
-    if (leader === undefined && members.some((entry) => !startedAtOrAfter(entry.start, group.rootStart))) {
-      ended.push(group);
-      continue;
-    }
-    const entries = new Map<number, ProcessEntry>(members.map((entry) => [entry.pid, entry]));
-    if (leader !== undefined) {
-      entries.set(leader.pid, leader);
-      for (const descendant of descendantsOf(table, leader.pid)) entries.set(descendant.pid, descendant);
-    }
-    if (entries.size === 0) ended.push(group);
-    else found.push({ record: group, entries: [...entries.values()] });
+    const entries = groupProcesses(group, table);
+    if (entries.length === 0) ended.push(group);
+    else found.push({ record: group, entries });
   }
   for (const group of found) killEntries(group.entries, table);
   const held = (group: Found, current: ProcessTable): boolean =>
