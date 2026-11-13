@@ -8,7 +8,8 @@ import { AGENT_RESULT_DIRECTORY, AGENT_RESULT_MAX_RETAINED, AGENT_RESULT_RECORD_
 import { sessionFileName, type AgentSessionHandoffStore } from '../agent-session-handoff-store.js';
 import type { InputPreparationService } from '../input-preparation-service.js';
 import type { JournalIdentity, LocalTaskJournal } from '../journal/journal.js';
-import { acquirePathMutationGate, PathMutationGateBusyError } from '../../util/path-mutation-gate.js';
+import { withRelease } from '../../util/with-release.js';
+import { acquirePathMutationGate, PathMutationGateBusyError, withGateReleaseFailures } from '../../util/path-mutation-gate.js';
 import { readInstalledSkillPack, skillPacksRoot } from '../skill-pack-installer.js';
 import type { ResolvedStorageConfig } from './config.js';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_BOUNDS, PROTECTED_CLASS_IDS, RetentionRegistry, type ClassAuthority, type ProtectedClassId, type ClassUsage, type ExpiringClassId, type RetentionClassId, type SweepBudget } from './registry.js';
@@ -205,12 +206,11 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
         let lock: { release(): void };
         try { lock = await acquireReplicaLock(file, 'retention'); }
         catch { continue; } // Lock helper deliberately coalesces locked/invalid; both remain protected.
-        try {
+        await withRelease(async () => {
           let bytes = 0;
           for (const candidate of [file, `${file}-wal`, `${file}-shm`]) bytes += (await measureTree(candidate, budget.now)).bytes;
           await resetReplica(file); budget.removed(bytes);
-        }
-        finally { lock.release(); }
+        }, () => lock.release());
         await fs.rm(`${file}.lock.sqlite`, { force: true });
       }
     }
@@ -335,7 +335,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
       let gate;
       try { gate = await acquirePathMutationGate({ scope: 'skill-pack-store', targetPath: root }); }
       catch (error) { if (error instanceof PathMutationGateBusyError) continue; throw error; }
-      try {
+      await withRelease(async () => {
         for await (const entry of entries('skill-pack-old', root, budget)) {
           if (!entry.isDirectory()) continue;
           const pack = await readInstalledSkillPack(dataDir, entry.name);
@@ -348,7 +348,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
             if (budget.now.getTime() - stat.mtimeMs >= config.ttlMs['skill-pack-old']) await remove(packRoot, directory, budget);
           }
         }
-      } finally { await gate.release(); }
+      }, () => gate.release());
     }
   }
   async function sweepPiSessions(budget: SweepBudget): Promise<void> {
@@ -356,6 +356,10 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     let rebinding;
     try { rebinding = await acquirePiSessionRebinding(); }
     catch (error) { if (error instanceof PathMutationGateBusyError) return; throw error; }
+    const releaseFailures: unknown[] = [];
+    const release = async (gate: { release(): Promise<void> }) => {
+      try { await gate.release(); } catch (error) { releaseFailures.push(error); }
+    };
     try {
     // A fresh launch holds discovery until it knows and leases its real session id.
     // Resumes take their session lease before validating the home handoff. Both
@@ -368,13 +372,18 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
         let discovery;
         try { discovery = await acquirePiSessionDiscovery(piSessionDir); }
         catch (error) { if (error instanceof PathMutationGateBusyError) return true; throw error; }
+        let operationFailed = false;
         try {
           let session;
           try { session = await acquirePiSessionRetention(piSessionDir, sessionRef); }
           catch (error) { if (error instanceof PathMutationGateBusyError) return true; throw error; }
           let writer;
           try { writer = await acquirePiSessionWriter(file); }
-          catch (error) { await session.release(); if (error instanceof PathMutationGateBusyError) return true; throw error; }
+          catch (error) {
+            await release(session);
+            if (error instanceof PathMutationGateBusyError && releaseFailures.length === 0) return true;
+            throw error;
+          }
           try {
             // Selection happened before the gates; a completed turn may have refreshed the file.
             const stat = await fs.lstat(file).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
@@ -402,12 +411,18 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
               } finally { await handle.close(); }
               if (typeof headerId !== 'string' || headerId === sessionRef) await remove(piSessionDir, file, budget);
             }
-          } finally { await writer.release(); await session.release(); }
-        } finally { await discovery.release(); }
+          } finally { await release(writer); await release(session); }
+        } catch (error) { operationFailed = true; throw error; }
+        finally { await release(discovery); if (!operationFailed && releaseFailures.length) throw releaseFailures.shift(); }
         return true;
       },
     });
-    } finally { await rebinding.release(); }
+    } catch (error) {
+      await release(rebinding);
+      throw withGateReleaseFailures(error, releaseFailures);
+    }
+    await release(rebinding);
+    if (releaseFailures.length) throw withGateReleaseFailures(releaseFailures[0], releaseFailures.slice(1));
   }
   async function sweepAgySessions(budget: SweepBudget): Promise<void> {
     if (agySessionStore === undefined) return;
@@ -419,11 +434,11 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
         let lease;
         try { lease = await acquireAgySessionRetention(agySessionStore, sessionRef); }
         catch (error) { if (error instanceof PathMutationGateBusyError) return true; throw error; }
-        try {
+        await withRelease(async () => {
           // Selection happened before the gate; a turn that finished since may have refreshed the file.
           const stat = await fs.lstat(file).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
           if (stat !== undefined && nowMs - stat.mtimeMs >= maxAgeMs) for (const target of agySessionPaths(agySessionStore, sessionRef)) await remove(agySessionStore, target, budget);
-        } finally { await lease.release(); }
+        }, () => lease.release());
         return true;
       },
     });
