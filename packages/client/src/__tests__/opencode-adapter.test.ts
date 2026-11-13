@@ -337,6 +337,90 @@ it('normalizes startup failures to start while retaining native classification',
   }
 });
 
+it('reports a refused abort without sending native cancel', async () => {
+  const box = setup();
+  const adapter = new OpenCodeAdapter({ models, interruptTimeoutMs: 1_000, resolveBin: () => ({ command: fake, source: 'env' }),
+    runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_ACP_*'] } });
+  const session = await startPreparedOperation(adapter, { instruction: 'hold' }, { workspaceDir: box.cwd, env: box.env });
+  sessions.push(session);
+  await vi.waitFor(() => expect(box.facts().some(fact => fact.kind === 'prompt')).toBe(true));
+  const remember = processTree.rememberOwnedDescendants;
+  let observations = 0;
+  const spy = vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(child => {
+    if (++observations === 2) throw new Error('Process table ps: timeout after 5000 ms');
+    return remember(child);
+  });
+  try {
+    await expect(session.interrupt()).rejects.toMatchObject({ phase: 'run', retry: 'non-retryable',
+      message: 'opencode interrupt refused: Process table ps: timeout after 5000 ms' });
+    expect(box.facts().some(fact => fact.kind === 'cancel')).toBe(false);
+  } finally { spy.mockRestore(); }
+});
+
+it('preserves a completed turn when interrupted while native disposal is pending', async () => {
+  const box = setup();
+  const gate = Promise.withResolvers<void>();
+  let disposing = false;
+  const dispose = processTree.disposeOwnedProcessTree;
+  const spy = vi.spyOn(processTree, 'disposeOwnedProcessTree').mockImplementation(async options => {
+    if (options.label === 'opencode acp') { disposing = true; await gate.promise; }
+    return dispose(options);
+  });
+  try {
+    const session = await box.start('hello');
+    await vi.waitFor(() => expect(disposing).toBe(true));
+    const interrupted = session.interrupt().then(() => undefined, error => error);
+    gate.resolve();
+    expect(await interrupted).toBeUndefined();
+    expect((await collect(session)).at(-1)).toEqual({ type: 'turn_end' });
+    await expect(session.interrupt()).resolves.toBeUndefined();
+    expect(box.facts().some(fact => fact.kind === 'cancel')).toBe(false);
+  } finally { gate.resolve(); spy.mockRestore(); }
+});
+
+it.each(['1.18.35', 'opencode v2.0.26'])('does not start fallback after interrupt during %s cleanup', async version => {
+  const box = setup(version);
+  const rateGate = path.join(box.cwd, 'release-rate-limit');
+  box.env.FAKE_ACP_SESSION_STORE = path.join(box.cwd, 'native-session.json');
+  box.env.FAKE_ACP_RATE_GATE = rateGate;
+  const gate = Promise.withResolvers<void>();
+  let disposing = false;
+  const dispose = processTree.disposeOwnedProcessTree;
+  const spy = vi.spyOn(processTree, 'disposeOwnedProcessTree').mockImplementation(async options => {
+    if (options.label === 'opencode acp' && !disposing) { disposing = true; await gate.promise; }
+    return dispose(options);
+  });
+  try {
+    const session = await box.start('opencode-limit');
+    await vi.waitFor(() => expect(box.facts().some(fact => fact.kind === 'prompt')).toBe(true));
+    writeFileSync(rateGate, 'release');
+    await vi.waitFor(() => expect(disposing).toBe(true));
+    const interrupted = session.interrupt();
+    gate.resolve();
+    await expect(interrupted).resolves.toBeUndefined();
+    const events: AgentEvent[] = [];
+    let failure: unknown;
+    try { for await (const event of session.events) events.push(event as AgentEvent); }
+    catch (error) { failure = error; }
+    expect(failure).toMatchObject({ phase: 'run', failure: { class: 'rate_limited' } });
+    expect(events.some(event => event.type === 'error' && event.message.includes('model_switch'))).toBe(false);
+    expect(box.facts().filter(fact => fact.kind === 'prompt')).toHaveLength(1);
+    expect(box.facts().some(fact => fact.kind === 'cancel')).toBe(false);
+  } finally { gate.resolve(); spy.mockRestore(); }
+});
+
+it('settles an opening budget kill before disposing the native session', async () => {
+  const box = setup();
+  const adapter = new OpenCodeAdapter({ models, maxRetainedBytes: 1, resolveBin: () => ({ command: fake, source: 'env' }) });
+  const error = await startPreparedOperation(adapter, { instruction: 'hello' }, { workspaceDir: box.cwd, env: box.env })
+    .then(() => undefined, error => error);
+  expect(error).toMatchObject({ name: 'RuntimeExecutionFailure', phase: 'start',
+    message: 'opencode retained record byte budget exceeded' });
+  expect(box.facts().some(fact => fact.kind === 'prompt' || fact.kind === 'close')).toBe(false);
+  const started = box.facts().find(fact => fact.kind === 'start')!;
+  expect(() => process.kill(started.pid, 0)).toThrow();
+});
+
 it('retries a halt whose cleanup failed before signalling without retaining its rejected exit receipt', async () => {
   // The agent exits during the opening while its tree cleanup fails, so its exit receipt rejects and halts the session.
   const box = setup('1.18.35', { FAKE_ACP_INITIALIZE: 'exit' });
