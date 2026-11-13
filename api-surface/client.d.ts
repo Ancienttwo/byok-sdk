@@ -6750,6 +6750,12 @@ export declare function resolveHostLayout(options: HostLayoutOptions): HostLayou
  */
 export declare function journalHash(bytes: string): string;
 /**
+ * Decode stored cancellation bytes and require a `task.cancel` for `taskId`
+ * sequenced after the offer at `offerSeq`; returns the envelope's own sequence.
+ * Recovery and journal pruning share this so they accept the same evidence.
+ */
+export declare function assertTaskCancellationBinding(bytes: string, taskId: string, offerSeq: number): number;
+/**
  * Who this daemon is, as recorded on every journal row (§12.7.2's minimum
  * fact set, first three entries). Carried explicitly rather than captured at
  * construction because `deviceId` is only known after `AuthManager`
@@ -7017,8 +7023,23 @@ export interface LocalTaskJournal {
     measureUsage(): Promise<LocalStorageUsage>;
     /** Confirmed terminals older than cutoff, without recovery markers, oldest first. */
     listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
-    /** Transactionally rechecks confirmation and recovery protection before pruning. */
-    pruneConfirmedJournalTask(taskId: string): Promise<boolean>;
+    /**
+     * Transactionally rechecks confirmation and recovery protection before
+     * pruning. Inside its delete transaction, under the write lock, it returns
+     * `false` and deletes nothing when the task is valid but not prunable: a
+     * confirmed terminal last updated at or after `cutoff`, or a received offer
+     * whose first stored `task.cancel` sequenced above the offer was committed
+     * at or after `cutoff` (including evidence replaced under the same task id)
+     * or that has no such cancellation. For a received offer it throws and
+     * deletes nothing when the `task.cancel` that qualifies it is broken: that
+     * cancellation fails its hash or enrollment check, names another task id,
+     * or carries a `seq` different from its row's. No other row is part of this
+     * contract: a confirmed terminal's envelopes, withheld rows and the task's
+     * other envelopes may be deleted without verification (#2054). An
+     * implementation that ignores `cutoff` still compiles but can delete
+     * unexpired or replaced evidence; the SDK does not repeat these checks.
+     */
+    pruneConfirmedJournalTask(taskId: string, cutoff: Date): Promise<boolean>;
     /** Bounded WAL checkpoint + incremental vacuum. Maintenance only; never on the envelope path. */
     compact(options: CompactOptions): Promise<CompactResult>;
     /**
@@ -7211,7 +7232,7 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
     /** Physical journal/quarantine footprint and confirmed-row inventory. */
     measureUsage(): Promise<LocalStorageUsage>;
     listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
-    pruneConfirmedJournalTask(taskId: string): Promise<boolean>;
+    pruneConfirmedJournalTask(taskId: string, cutoff: Date): Promise<boolean>;
     /**
      * WAL checkpoint plus a BOUNDED incremental vacuum. Maintenance only — it
      * goes through the same single-writer queue as everything else, so it can

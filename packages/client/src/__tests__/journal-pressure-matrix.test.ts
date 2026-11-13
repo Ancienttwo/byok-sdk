@@ -215,7 +215,7 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
       // Export/read:
       expect(await journal.listRecoverable()).toEqual([]);
       // Delete:
-      expect(await journal.pruneConfirmedJournalTask('task-hard-finished')).toBe(true);
+      expect(await journal.pruneConfirmedJournalTask('task-hard-finished', new Date(Date.now() + 60_000))).toBe(true);
       expect(readRows(storeDir, "SELECT task_id FROM journal_task WHERE task_id = 'task-hard-finished'")).toEqual([]);
       // Still hard pressure throughout — none of the above needed the state to
       // relax first.
@@ -500,10 +500,10 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
         recordedAt: '2026-08-07T00:00:04.000Z',
       });
 
-      expect(await journal.pruneConfirmedJournalTask('task-protected')).toBe(false); // in flight, no terminal
-      expect(await journal.pruneConfirmedJournalTask('task-unconfirmed')).toBe(false);
-      expect(await journal.pruneConfirmedJournalTask('task-marked')).toBe(false);
-      expect(await journal.pruneConfirmedJournalTask('task-eligible')).toBe(true);
+      expect(await journal.pruneConfirmedJournalTask('task-protected', new Date(Date.now() + 60_000))).toBe(false); // in flight, no terminal
+      expect(await journal.pruneConfirmedJournalTask('task-unconfirmed', new Date(Date.now() + 60_000))).toBe(false);
+      expect(await journal.pruneConfirmedJournalTask('task-marked', new Date(Date.now() + 60_000))).toBe(false);
+      expect(await journal.pruneConfirmedJournalTask('task-eligible', new Date(Date.now() + 60_000))).toBe(true);
 
       expect(readRows(storeDir, 'SELECT task_id FROM journal_task ORDER BY task_id').map((r) => r.task_id)).toEqual([
         'task-marked',

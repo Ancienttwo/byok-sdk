@@ -1,5 +1,4 @@
-import { decodeEnvelope } from '@byok-sdk/protocol';
-import { journalHash, type JournalIdentity, type LocalTaskJournal, type TerminalTruthState } from './journal/journal.js';
+import { assertTaskCancellationBinding, journalHash, type JournalIdentity, type LocalTaskJournal, type TerminalTruthState } from './journal/journal.js';
 
 /**
  * Validate raw journal evidence in SDK code, including for Host-injected
@@ -13,10 +12,7 @@ export async function hasTaskCancellation(journal: Pick<LocalTaskJournal, 'readT
     throw new Error('journal cancellation enrollment identity mismatch');
   }
   if (journalHash(record.bytes) !== record.bytesHash) throw new Error('durable cancellation bytes/hash mismatch');
-  const envelope = decodeEnvelope(record.bytes);
-  if (envelope.type !== 'task.cancel' || envelope.task_id !== taskId || envelope.seq === undefined || envelope.seq <= offerSeq) {
-    throw new Error('invalid durable cancellation binding');
-  }
+  assertTaskCancellationBinding(record.bytes, taskId, offerSeq);
   return true;
 }
 
