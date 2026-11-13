@@ -531,9 +531,11 @@ export { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation }
 export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from './lifecycle/agent-service.js';
 // #1097 slice 2: versioned installs from a Host-verified payload, upgrade with
 // the candidate's store precheck and snapshot, health-checked switch, rollback.
-export { createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, ServiceInstallationError } from './lifecycle/service-installation.js';
+export { createServiceInstallation, readPayloadManifest, ServiceInstallationError } from './lifecycle/service-installation.js';
+export { readServiceInstallationRecord } from './util/service-installation-record.js';
+export type { ServiceInstallationRecord } from './util/service-installation-record.js';
 export type {
-  ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord,
+  ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions,
   ServiceStoreVerdict, ServiceUpgradeReceipt,
 } from './lifecycle/service-installation.js';
 export { SERVICE_PAYLOAD_MANIFEST } from './service-payload-manifest.js';

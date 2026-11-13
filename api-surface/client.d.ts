@@ -9970,8 +9970,10 @@ export { generateSystemdUnit } from './lifecycle/systemd.js';
 export { generateWinswXml } from './lifecycle/winsw.js';
 export { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from './lifecycle/agent-service.js';
 export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from './lifecycle/agent-service.js';
-export { createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, ServiceInstallationError } from './lifecycle/service-installation.js';
-export type { ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServiceStoreVerdict, ServiceUpgradeReceipt, } from './lifecycle/service-installation.js';
+export { createServiceInstallation, readPayloadManifest, ServiceInstallationError } from './lifecycle/service-installation.js';
+export { readServiceInstallationRecord } from './util/service-installation-record.js';
+export type { ServiceInstallationRecord } from './util/service-installation-record.js';
+export type { ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceStoreVerdict, ServiceUpgradeReceipt, } from './lifecycle/service-installation.js';
 export { SERVICE_PAYLOAD_MANIFEST } from './service-payload-manifest.js';
 export type { ServicePayloadManifest } from './service-payload-manifest.js';
 export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError, } from './lifecycle/service-unit.js';
@@ -11647,24 +11649,6 @@ export declare class ServiceInstallationError extends Error {
     readonly stores?: readonly ServiceStoreVerdict[] | undefined;
     constructor(code: ServiceInstallationErrorCode, stores?: readonly ServiceStoreVerdict[] | undefined, options?: ErrorOptions);
 }
-/** `<storeDir>/service/installation.json`: where this store's installation lives. */
-export interface ServiceInstallationRecord {
-    format: 'byok-service-installation';
-    version: 1;
-    installRoot: string;
-}
-export declare function serviceInstallationRecordPath(storeDir: string): string;
-/** The installation record of a store, or `undefined` when the service is not installed from payloads. */
-export declare function readServiceInstallationRecord(storeDir: string): Promise<ServiceInstallationRecord | undefined>;
-/**
- * @internal Whether a daemon on `storeDir` must not start (#2011): its
- * installation journals a pending operation with `current` absent, so the
- * stores may be mid-restore. The SDK's own entries (`byok-agent start`,
- * createDaemon) check it under the store lease; a process with no
- * installation record is outside this guarantee (the Host's contract). Any
- * receipt version counts: only the state is read.
- */
-export declare function installationHoldsStart(storeDir: string): Promise<boolean>;
 /**
  * @internal The running version and the last receipt of an install root,
  * read from disk only: no service definition, unit or service manager is
@@ -15194,6 +15178,28 @@ export declare function createPrivateTempDir(parent: string, prefix: string): Pr
  * scratch root gets. The caller removes it.
  */
 export declare function createPrivateSystemTempDir(prefix: string): Promise<string>;
+// ==== @byok-sdk/client dist/util/service-installation-record.d.ts ====
+export type InstallPointer = 'current' | 'previous';
+/** `<storeDir>/service/installation.json`: where this store's installation lives. */
+export interface ServiceInstallationRecord {
+    format: 'byok-service-installation';
+    version: 1;
+    installRoot: string;
+}
+export declare function serviceInstallationRecordPath(storeDir: string): string;
+/** The installation record of a store, or `undefined` when the service is not installed from payloads. */
+export declare function readServiceInstallationRecord(storeDir: string): Promise<ServiceInstallationRecord | undefined>;
+/** The version `<installRoot>/<name>` points at, or `undefined` when the pointer is absent. */
+export declare function readInstallPointer(installRoot: string, name: InstallPointer): Promise<string | undefined>;
+/**
+ * @internal Whether a daemon on `storeDir` must not start (#2011): its
+ * installation journals a pending operation with `current` absent, so the
+ * stores may be mid-restore. The SDK's own entries (`byok-agent start`,
+ * createDaemon) check it under the store lease; a process with no
+ * installation record is outside this guarantee (the Host's contract). Any
+ * receipt version counts: only the state is read.
+ */
+export declare function installationHoldsStart(storeDir: string): Promise<boolean>;
 // ==== @byok-sdk/client dist/util/sqlite-support.d.ts ====
 import type { DatabaseSync } from 'node:sqlite';
 /**
