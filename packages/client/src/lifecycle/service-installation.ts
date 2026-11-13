@@ -87,11 +87,13 @@ export interface ServiceInstallationOptions {
    * or a daemon store's `service/` directory, after resolving links and
    * without case on darwin and win32, is `store_overlaps_service_state`
    * (#2011). A store path with a `..` segment (either separator on win32)
-   * is `precheck_failed`: pass normalized absolute paths. Like every
-   * precheck refusal, both leave the stores untouched and take no snapshot:
-   * the staged candidate and its pending receipt give way to a failed
-   * receipt, `current` points at the previous version again and its service
-   * restarts.
+   * is `precheck_failed`: pass normalized absolute paths. On an upgrade's
+   * first precheck a refusal touches no store and takes no snapshot: the
+   * final receipt carries its code, `current` points at the previous version
+   * again and that service restarts. On a first install no receipt is
+   * written, a version directory this call staged is removed and a marked
+   * unit it stopped restarts. On the precheck after a migration the refusal
+   * is the cause of `store_migration_failed`, after the snapshot restores.
    */
   precheck(versionDir: string): ServiceProgram;
   /**
@@ -1098,8 +1100,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     if (overlaps(stores, paths, platform) || stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
     // A store that is, holds or lies in the install root or a daemon store's
     // service/ would have the versions, receipt, live leases or launcher
-    // replaced by a restore (#2011).
-    const guarded = await Promise.all([root, ...serviceDirs].map(canonical));
+    // replaced by a restore (#2011). Each is guarded both as its target and
+    // as the entry naming it, since a restore removes a link, not its target.
+    const guarded = (await Promise.all([root, ...serviceDirs].map(async (at) => [await canonical(at), path.join(await canonical(path.dirname(at)), path.basename(at))]))).flat();
     if (paths.some((a) => guarded.some((b) => within(a, b, platform) || within(b, a, platform)))) throw new ServiceInstallationError('store_overlaps_service_state');
     return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path) } : store);
   }
@@ -1228,7 +1231,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * `<index><suffix>`, a directory store's tree as `<index>.d`. Every store
    * is checked with `lstat` first, so nothing is followed through a symlink.
    * `snapshot.json` is written last and marks a complete snapshot; a copy
-   * that fails removes the partial snapshot.
+   * that fails removes the partial snapshot. Entries keep the listed paths,
+   * which a restore follows again. The migration is the Host's (trust model
+   * A): it must not change the link structure inside a store, and a restore
+   * after it did is the Host's responsibility (#2106).
    */
   async function snapshot(to: string, stores: readonly ServiceStoreVerdict[]): Promise<void> {
     const sources = await Promise.all(stores.map(storeSources));

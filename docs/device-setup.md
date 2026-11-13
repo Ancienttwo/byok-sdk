@@ -755,8 +755,8 @@ directory (compared after resolving links, and without case on macOS and
 Windows): such a store is refused with
 `store_overlaps_service_state` before anything is snapshotted. List
 normalized absolute paths: a path with a `..` segment is
-`precheck_failed`. Either refusal leaves the stores untouched and starts the
-previous version again. A snapshot taken before this check is not re-checked
+`precheck_failed`. On an upgrade's first precheck either refusal leaves the
+stores untouched and starts the previous version again. A snapshot taken before this check is not re-checked
 on restore (#2102); check old snapshots as
 [the upgrade notes](releases/host-upgrade-next-minor.md) describe before
 calling any installation method.

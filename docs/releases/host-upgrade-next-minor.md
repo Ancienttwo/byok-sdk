@@ -256,11 +256,16 @@ service that had already restarted.
   directory instead. List normalized absolute paths: a store path with a
   `..` segment (either separator on Windows) is `precheck_failed`, because
   `..` after a link resolves differently from how it is compared.
-- **What a precheck refusal does:** `store_overlaps_service_state`, the
-  `..` refusal and every other precheck refusal leave the stores
-  untouched and take no snapshot. The staged candidate gets a pending
-  receipt, the service stops, a failed receipt replaces the pending one,
-  `current` points at the previous version again and its service restarts.
+- **What a precheck refusal does:** it depends on which precheck refuses.
+  - An upgrade's first precheck (`store_overlaps_service_state`, the `..`
+    refusal, `store_rejected` and the rest): no store is touched and no
+    snapshot is taken. The final receipt carries the code, `current` points
+    at the previous version again and its service restarts.
+  - A first install's precheck: no receipt is written, a version directory
+    this call staged is removed, and a marked unit it stopped restarts.
+  - The precheck after a migration: the snapshot is already taken. The
+    refusal becomes the cause of `store_migration_failed`, the snapshot is
+    restored, and an upgrade then returns to the previous version as above.
 - **Snapshots taken before this check (#2102):** restore does not re-check
   them, so one taken by 0.42.0 or an earlier build of this train can list
   `service/` or the install root, and restoring it would replace the live
@@ -272,12 +277,25 @@ service that had already restarted.
      `.install-repair-*` snapshots included.
   3. Normalize each `entries[].path` (resolve links, and on macOS and
      Windows ignore case) and compare it with the install root and with each
-     daemon store's `<storeDir>/service/`. An entry that is, holds or lies in
-     one of them overlaps.
-  4. With no overlap, continue as usual. With one, keep the service stopped,
-     copy what the other entries need from the snapshot's `<index>` or
-     `<index>.d` files by hand, then remove that snapshot directory before
-     calling any installation method.
+     daemon store's `<storeDir>/service/`, each taken both resolved and as
+     the link entry that names it. An entry that is, holds or lies in one
+     of them overlaps.
+  4. With no overlap, continue as usual.
+  5. With one, keep the service stopped and back up the snapshot directory.
+     Then restore every entry by hand, in the order listed, as a restore
+     would:
+     - a directory entry (`"kind": "directory"`): remove the path, then copy
+       `files[""]` (`<index>.d`) back to it. With no `files[""]` the store
+       did not exist, so it stays removed. For the overlapping entry, skip
+       only what lies in the install root or a `service/` directory, and
+       restore the rest of its data;
+     - a file entry: remove the path and its `-wal`, `-journal` and `-shm`
+       files, then copy each `files` item back as `<path><suffix>` (an
+       SQLite file with the `-wal` and `-journal` the snapshot holds). A
+       suffix the snapshot lacks stays removed.
+  6. Only after every entry is restored, remove that snapshot directory,
+     then call `recover()`. When you cannot tell what an entry held, keep
+     the service stopped and the snapshot in place.
 - **Snapshot removal (#2062):** a snapshot that cannot be removed after the
   final receipt no longer fails the call; it stays.
 - On systemd, a start runs `systemctl --user reset-failed` first, since the

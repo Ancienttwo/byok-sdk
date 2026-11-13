@@ -1793,6 +1793,14 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         await expect(installation.upgrade(await payload('3.0.0'))).rejects.toMatchObject({ code: 'precheck_failed', message: expect.stringContaining('normalized') });
         expect(await fs.readFile(db, 'utf8')).toBe('v2 data');
       }
+      // An install root that is a link inside a directory store: a restore of that store would remove the link itself.
+      const holder = path.join(root, 'holder');
+      await fs.mkdir(holder);
+      await fs.symlink(installRoot, path.join(holder, 'app'), 'dir');
+      installation = installationOver(fakeLifecycle(), { installRoot: path.join(holder, 'app') });
+      await listed(holder, 'directory');
+      await expect(installation.upgrade(await payload('3.0.0'))).rejects.toMatchObject({ code: 'store_overlaps_service_state' });
+      expect([await pointer('current'), await fs.readlink(path.join(holder, 'app'))]).toEqual(['2.0.0', installRoot]);
     });
 
     it('a linked snapshots/<version> is refused before it is probed or removed (#2061)', async () => {
