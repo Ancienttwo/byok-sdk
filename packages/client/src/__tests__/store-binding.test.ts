@@ -11,6 +11,7 @@ import { DeviceStoreBindingMismatchError, FirstPairingAttemptRefusedError } from
 import { acquireEnrollmentGate } from '../daemon/enrollment-gate';
 import { acquirePathMutationGate, type PathMutationGate } from '../util/path-mutation-gate';
 import { createTestDeviceStore, InMemoryDeviceCredentialBackend } from './fixtures/device-credentials';
+import { AuthManager } from '../daemon/auth-manager';
 import { testDeviceCredentials } from './fixtures/credential-backend';
 import { clearDeviceEnrollment, DeviceEnrollmentClearError } from '../daemon/enrollment-clear';
 import { repairDeviceEnrollmentMetadata } from '../diagnostics/device-doctor';
@@ -419,6 +420,35 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
       expect(refused).toBeInstanceOf(FirstPairingAttemptRefusedError);
       expect(refused).toMatchObject({ code: owner === 'another store' ? 'store_not_bound' : 'pairing_attempt_unattributed' });
       expect(await credentials.readFirstPairingAttempt()).toEqual(staged);
+    });
+
+    it.each(['another store', 'no store'] as const)('a paired store refuses to re-pair beside a staged first pairing of %s and leaves both (#2030 F1)', async (owner) => {
+      const first = await storeConfig();
+      const firstDaemon = daemonFor(first);
+      const { deviceId } = await firstDaemon.pair('pairing-code');
+      const credentials = testDeviceCredentials(productId);
+      if (owner === 'another store') await expect(daemonFor(unreachable(await storeConfig())).pair('pairing-code', { replaceOtherStore: true })).rejects.toThrow();
+      else await credentials.saveFirstPairingAttempt({ kind: 'first-pairing-attempt-v1', deviceName: 'legacy', devicePublicKey: 'legacy-public-key', devicePrivateKeyPem: 'legacy-private-key' });
+      const staged = await credentials.readFirstPairingAttempt();
+
+      const refused: unknown = await firstDaemon.pair('pairing-code').catch((error: unknown) => error);
+
+      expect(refused).toMatchObject({ name: 'FirstPairingAttemptRefusedError', code: owner === 'another store' ? 'store_not_bound' : 'pairing_attempt_unattributed' });
+      expect(await credentials.readFirstPairingAttempt()).toEqual(staged);
+      expect(await readDeviceEnrollmentStatus(first)).toEqual({ state: 'paired', deviceId });
+    });
+
+    it('a re-pair rereads the enrollment under the gate instead of its cached record (#2045 F4)', async () => {
+      const first = await storeConfig();
+      const credentials = testDeviceCredentials(productId);
+      const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(productId, DeviceStore.resolveDir(productId, first.storeDir), credentials) });
+      await auth.pair('pairing-code');
+      const second = await storeConfig();
+      const { deviceId } = await daemonFor(second).pair('pairing-code', { replaceOtherStore: true });
+
+      await expect(auth.pair('pairing-code')).rejects.toBeInstanceOf(DeviceStoreBindingMismatchError);
+
+      expect(await readDeviceEnrollmentStatus(second)).toEqual({ state: 'paired', deviceId });
     });
 
     it('refuses a staged first pairing that names no store unless told to clear it (#1964)', async () => {

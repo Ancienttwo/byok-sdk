@@ -505,9 +505,7 @@ export class AuthManager {
     observedDeviceName: string,
     observedMachineId: string | undefined,
   ): Promise<{ readonly keyPair: ReturnType<typeof generateDeviceKeyPair>; readonly pairingDeviceName: string; readonly pairingMachineId: string | undefined }> {
-    const { existing, attempt } = this.record === undefined
-      ? await this.pairingAuthority(signal, replaceOtherStore)
-      : { existing: this.record, attempt: undefined };
+    const { existing, attempt } = await this.pairingAuthority(signal, replaceOtherStore);
     if (existing) {
       return {
         keyPair: { privateKey: importPrivateKeyPem(existing.devicePrivateKeyPem), publicKeyBase64Url: existing.devicePublicKey },
@@ -537,18 +535,20 @@ export class AuthManager {
   }
 
   /**
-   * Under the enrollment gate: this store's bound enrollment, or else its own
-   * staged first-pairing attempt (undefined when none, or when
-   * `replaceOtherStore` discards another store's). Another store's enrollment
-   * or attempt, or an attempt that names no store, is refused (#2033).
+   * Under the enrollment gate, reread from the OS entry and `device.json`:
+   * this store's bound enrollment, or else its own staged first-pairing
+   * attempt (undefined when none, or when `replaceOtherStore` discards another
+   * store's). Another store's enrollment or attempt, or an attempt that names
+   * no store, is refused, also beside this store's enrollment: the pairing
+   * would consume that attempt (#2033, #2030 F1).
    */
   private async pairingAuthority(
     signal: AbortSignal,
     replaceOtherStore: boolean,
   ): Promise<{ readonly existing: DeviceRecord | undefined; readonly attempt: FirstPairingAttempt | undefined }> {
+    let existing: DeviceRecord | undefined;
     try {
-      const existing = await this.loadRecord(signal);
-      if (existing) return { existing, attempt: undefined };
+      existing = await this.loadRecord(signal);
     } catch (error) {
       // Explicit pairing is the one authorized replacement path for a
       // legacy/tampered enrollment file. It never reads through it: a fresh
@@ -560,10 +560,12 @@ export class AuthManager {
       if (!replaceable) throw error;
     }
     const staged = await this.credentials.readFirstPairingAttempt(signal);
-    if (staged === undefined || staged.storeIdentity === this.opts.store.identity) return { existing: undefined, attempt: staged };
-    if (staged.storeIdentity === undefined) throw new FirstPairingAttemptRefusedError('pairing_attempt_unattributed');
-    if (!replaceOtherStore) throw new FirstPairingAttemptRefusedError('store_not_bound');
-    return { existing: undefined, attempt: undefined };
+    if (staged !== undefined && staged.storeIdentity !== this.opts.store.identity) {
+      if (staged.storeIdentity === undefined) throw new FirstPairingAttemptRefusedError('pairing_attempt_unattributed');
+      if (!replaceOtherStore) throw new FirstPairingAttemptRefusedError('store_not_bound');
+      return { existing, attempt: undefined };
+    }
+    return { existing, attempt: existing ? undefined : staged };
   }
 
   /** Always throws — `never` return type lets call sites use `if (x === 401) this.markRevoked();` without an explicit `return`/`throw` of their own. */
