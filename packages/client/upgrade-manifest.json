@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "a5db685b393645019dbeb94edcce0b5de26927c84915b88af5d051e87d8d4e0b"
+    "snapshotSha256": "a1b94aa80e3b4e0e09c883edef7a6565808d9ef5f178b6ac5846f7ca446c8f5a"
   },
   "configFields": {
     "status": "tracked",
@@ -229,6 +229,16 @@
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
       "change": "changed",
       "entry": "keys-secret-corrupted-code"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",
+      "change": "changed",
+      "entry": "committed-cancel-wake-pending"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#WakeDispatchError",
+      "change": "added",
+      "entry": "committed-cancel-wake-pending"
     },
     {
       "item": "store:bot-collaboration-ledger",
