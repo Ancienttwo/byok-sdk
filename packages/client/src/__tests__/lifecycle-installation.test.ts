@@ -725,7 +725,16 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
             return { command: process.execPath, args: [path.join(versionDir, 'precheck.cjs'), path.join(root, 'verdicts.json')] };
           },
         });
-        await expect(installation.install(await payload(ours))).rejects.toMatchObject({ code: 'installation_exists' });
+        // Same id: the refused install's own lease then fails to release; the version directory still stays.
+        vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockRestore();
+        const real = daemonOwner.acquireDaemonOwner;
+        let taken = 0;
+        const leaseFault = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementation(async (...args) => {
+          const lease = await real(...args);
+          return ours === theirs && taken++ === 1 ? { release: async () => { await lease.release(); throw new Error('injected release failure'); } } : lease;
+        });
+        const refused = await installation.install(await payload(ours)).catch((caught: unknown) => caught).finally(() => leaseFault.mockRestore());
+        expect(ours === theirs ? (refused as AggregateError).errors[0] : refused).toMatchObject({ code: 'installation_exists' });
         expect(prechecked).toBe(false);
         expect(await pointer('current')).toBe(theirs);
         expect(await fs.readFile(path.join(installRoot, 'versions', theirs, 'host.js'), 'utf8')).toBe(`// ${theirs}`);

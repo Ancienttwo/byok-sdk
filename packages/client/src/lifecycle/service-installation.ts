@@ -537,8 +537,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           // After installation_exists every version directory stays: the
           // other installation may use it. A later prune or uninstall
           // removes what is left.
+          // withReleaseFailure() puts the refusal first.
           let failure = error;
-          if (!(error instanceof ServiceInstallationError && error.code === 'installation_exists')) {
+          const original = error instanceof AggregateError ? error.errors[0] : error;
+          if (!(original instanceof ServiceInstallationError && original.code === 'installation_exists')) {
             try {
               await fs.rm(path.join(versionsDir, id), { recursive: true, force: true });
             } catch (cleanup) {
