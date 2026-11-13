@@ -32,7 +32,7 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | agy | Claude | Codex | dsh | Grok | OpenCode | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.77` | `2.2.6` | `1.5.2` | `1.5.2` |
+| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.5.2` | `1.5.2` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | yes | no |
 | Display-only message draft | `messageDraft` | no | yes | yes | no | yes | no | yes | yes |
@@ -95,7 +95,7 @@ workspace refused, a refused permission request, cancellation of a running
 shell tool, and no surviving OpenCode process after close. They passed on macOS
 arm64 and Windows x64, and the Windows legs run in CI (`opencode-real-windows`).
 Evidence and commands are in the [research note](researches/2026-11-09-opencode-platform-qualification.md). The compatibility floors are v1 1.18.35 and v2 2.0.26. The
-default version policy qualifies `2.2.6` and warns on any other accepted
+default version policy qualifies `2.3.0` and warns on any other accepted
 version (`OPENCODE_VERSION_POLICY`, `unqualified: 'warn'`); only a Host may
 declare `block`. Unrecognized, below-floor and prerelease tokens still fail the
 executable compatibility gate.

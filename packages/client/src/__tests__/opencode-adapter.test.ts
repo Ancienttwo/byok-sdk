@@ -58,7 +58,7 @@ async function collect(session: Session) {
 }
 
 it.each([
-  ['1.18.35', '1.18.35'], ['opencode v2.0.26', '2.0.26'], ['1.19.5', '1.19.5'], ['opencode v2.2.6', '2.2.6'],
+  ['1.18.35', '1.18.35'], ['opencode v2.0.26', '2.0.26'], ['1.19.5', '1.19.5'], ['opencode v2.3.0', '2.3.0'],
   ['1.18.34', undefined], ['2.0.25', undefined], ['2.0.26-rc.1', undefined], ['opencode v3.0.0', undefined], ['garbage 1.18.35', undefined], ['1.18.35\n2.0.26', undefined],
 ])('normalizes only a complete supported release token %s', (raw, expected) => expect(opencodeVersionToken(raw)).toBe(expected));
 
@@ -157,12 +157,12 @@ it('cleans a detached descendant before reporting success', async () => {
 it('registers an opt-in adapter with truthful capabilities', async () => {
   const box = setup();
   const [adapter] = createRuntimeAdapters({ runtimeAllowlist: ['opencode'], runtimes: { opencode: { models, executable: fake } } });
-  expect(adapter!.descriptor).toEqual(expect.objectContaining({ id: 'opencode', platforms: ['darwin', 'win32'], capabilities: OPENCODE_RUNTIME_CAPABILITIES, versionPolicy: { qualifiedVersion: '2.2.6', unqualified: 'warn' } }));
+  expect(adapter!.descriptor).toEqual(expect.objectContaining({ id: 'opencode', platforms: ['darwin', 'win32'], capabilities: OPENCODE_RUNTIME_CAPABILITIES, versionPolicy: { qualifiedVersion: '2.3.0', unqualified: 'warn' } }));
   expect(validateRuntimeDetectResult(await box.adapter.detect())).toMatchObject({ kind: 'available', version: '1.18.35', rawVersion: '1.18.35\n', executableSource: 'config' });
   expect(OPENCODE_RUNTIME_CAPABILITIES.mcpToolsets).toBe(true);
 });
 
-it.each(['1.19.5', 'opencode v2.2.6'])('passes admitted MCP servers on new and resumed %s sessions', async version => {
+it.each(['1.19.5', 'opencode v2.3.0'])('passes admitted MCP servers on new and resumed %s sessions', async version => {
   const box = setup(version);
   const server = { command: '/fixture/mcp', args: ['--stdio'], env: { TASK_SECRET: 'fixture-secret' } };
   const resources = { workspaceDir: box.cwd, env: box.env, mcpServers: { host: server } };
@@ -175,7 +175,7 @@ it.each(['1.19.5', 'opencode v2.2.6'])('passes admitted MCP servers on new and r
   for (const open of opens) expect(open.params.mcpServers).toEqual([{ name: 'host', command: server.command, args: server.args, env: [{ name: 'TASK_SECRET', value: 'fixture-secret' }] }]);
 });
 
-it.each(['1.19.5', 'opencode v2.2.6'])('uses MCP servers supplied at start on %s', async version => {
+it.each(['1.19.5', 'opencode v2.3.0'])('uses MCP servers supplied at start on %s', async version => {
   const box = setup(version);
   const prepare = box.adapter.prepare.bind(box.adapter);
   vi.spyOn(box.adapter, 'prepare').mockImplementation(async input => {
