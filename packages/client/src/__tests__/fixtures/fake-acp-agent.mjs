@@ -154,6 +154,13 @@ async function prompt(message) {
     send({ method: '_x.ai/queue/changed', params: { sessionId: SESSION, runningPromptId: '', entries: [] } });
     return;
   }
+  // A history queue report (session/load replay) naming another prompt, then a prompt that waits for its cancel.
+  if (input === 'replayed-queue') {
+    send({ method: '_x.ai/queue/changed', params: { sessionId: SESSION, runningPromptId: 'old-1', entries: [], _meta: { isReplay: true } } });
+    text('first');
+    pending.set(message.id, 'hold');
+    return;
+  }
   // Grok's end report for a turn it never said was running.
   if (input === 'stray-end') {
     text('first');

@@ -157,6 +157,8 @@ export class GrokProjection {
    */
   private observeRunning(body: Record<string, unknown> | undefined, events: readonly unknown[]): void {
     if (this.sdkTurn === undefined || body?.type !== '_x.ai/queue/changed') return;
+    // A replayed report is history, as the vendored native-turn tracker reads it (native-turns.ts).
+    if (record(record(body.native)?._meta)?.isReplay === true) return;
     const running = record(body.native)?.runningPromptId;
     const id = typeof running === 'string' ? running : '';
     const sdkStart = events.some((value) => {
