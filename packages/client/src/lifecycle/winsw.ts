@@ -123,7 +123,7 @@ async function rmWithImageLockRetry(fs: Pick<typeof fsp, 'rm'>, p: string): Prom
   }
 }
 
-/** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. `run` replaces both the WinSW and the `sc.exe` runner. */
+/** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface WinswDeps {
   run?: Runner;
   fs?: ManagedLifecycleFs & Pick<typeof fsp, 'copyFile'>;

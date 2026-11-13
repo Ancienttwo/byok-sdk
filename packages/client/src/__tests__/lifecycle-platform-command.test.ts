@@ -4,8 +4,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import type { ChildProcess, spawn } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { runBounded } from '../lifecycle/platform-command';
-import { launchUnit } from '../lifecycle/windows-user';
+import { launchUnit, runBounded } from '../lifecycle/platform-command';
 import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError, stopRoot } from '../util/command-timeouts';
 
 const dirs: string[] = [];

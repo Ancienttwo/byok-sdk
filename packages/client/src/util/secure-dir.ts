@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { resolveSystemTool } from '@byok-sdk/core/system-tool';
 import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError, stopRoot } from './command-timeouts.js';
-import type { Runner } from './exec-runner.js';
+import { type Runner } from './exec-runner.js';
 
 /**
  * Runs `icacls` within the `platform` bound (#1971); past it the process is

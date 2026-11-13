@@ -1,10 +1,8 @@
-import { spawn, type SpawnOptions } from 'node:child_process';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError, stopRoot } from '../util/command-timeouts.js';
-import type { Runner } from '../util/exec-runner.js';
-import { defaultRunner, runBounded } from './platform-command.js';
-import { resolveSystemTool } from '@byok-sdk/core/system-tool';
+import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError } from '../util/command-timeouts.js';
+import { type Runner } from '../util/exec-runner.js';
+import { defaultRunner, launchUnit, runBounded } from './platform-command.js';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types.js';
 import { cmdQuote, generateWindowsUserLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath, serviceStateDir, ServiceUnitError } from './service-unit.js';
@@ -61,44 +59,6 @@ async function runStopProgram(program: ServiceProgram): Promise<number | null> {
     if (error instanceof PlatformCommandTimeoutError) throw error;
     return null;
   }
-}
-
-/**
- * Runs the unit the way Explorer does; the launcher it starts outlives this
- * process. After the `launch` bound only the unit's own
- * `cmd` is terminated, never its tree: the launcher `start` made is that
- * `cmd`'s child and is the service itself. The rejection then means the
- * launcher may or may not be running; `start()` and `status()` ask the
- * launcher query again. A `cmd` whose exit is not confirmed may still start
- * one (`exitConfirmed: false`). `spawnCmd` is a test seam.
- *
- * @internal
- */
-export function launchUnit(unitPath: string, spawnCmd = (args: string[], options: SpawnOptions) => spawn(resolveSystemTool('cmd'), args, options)): Promise<void> {
-  return new Promise((resolve, reject) => {
-    // cmd /c strips the outer pair of quotes, leaving the quoted path.
-    const child = spawnCmd(['/d', '/c', `"${cmdQuote(unitPath)}"`], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-      windowsVerbatimArguments: true,
-    });
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      void stopRoot(child, unitPath).then(reject);
-    }, COMMAND_TIMEOUT_MS.launch);
-    child.once('error', (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.once('exit', (code) => {
-      if (timedOut) return;
-      clearTimeout(timer);
-      if (code === 0) resolve();
-      else reject(new Error(`Startup unit ${unitPath} exited ${code}`));
-    });
-  });
 }
 
 /** PowerShell that prints the pid of every `cmd.exe` whose command line names `launcherPath`. */

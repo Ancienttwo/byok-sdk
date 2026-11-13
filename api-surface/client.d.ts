@@ -12193,8 +12193,7 @@ export declare function checkUpgradeFrom(fromVersion: string, options?: {
     readonly resolveFrom?: string;
 }): UpgradeFromReport;
 // ==== @byok-sdk/client dist/lifecycle/windows-user.d.ts ====
-import { type SpawnOptions } from 'node:child_process';
-import type { Runner } from '../util/exec-runner.js';
+import { type Runner } from '../util/exec-runner.js';
 import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { type ServiceDefinition, type ServiceProgram } from './service-types.js';
 /** DI seams for tests; the real ones start Windows processes. */
@@ -12223,18 +12222,6 @@ export declare function windowsStartupDir(appData: string): string;
  */
 export declare function generateWindowsStartupUnit(launcherPath: string): string;
 /**
- * Runs the unit the way Explorer does; the launcher it starts outlives this
- * process. After the `launch` bound only the unit's own
- * `cmd` is terminated, never its tree: the launcher `start` made is that
- * `cmd`'s child and is the service itself. The rejection then means the
- * launcher may or may not be running; `start()` and `status()` ask the
- * launcher query again. A `cmd` whose exit is not confirmed may still start
- * one (`exitConfirmed: false`). `spawnCmd` is a test seam.
- *
- * @internal
- */
-export declare function launchUnit(unitPath: string, spawnCmd?: (args: string[], options: SpawnOptions) => import("child_process").ChildProcess): Promise<void>;
-/**
  * Windows logon autostart without the SCM or an administrator (#1337,
  * probe: `docs/researches/2026-11-02-windows-user-autostart-probe.md`).
  * The unit is `<name>.cmd` in the user's Startup folder; it starts the batch
@@ -12254,7 +12241,7 @@ import { promises as fsp } from 'node:fs';
 import { type Runner } from '../util/exec-runner.js';
 import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { type ServiceDefinition, type ServiceProgram } from './service-types.js';
-/** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. `run` replaces both the WinSW and the `sc.exe` runner. */
+/** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface WinswDeps {
     run?: Runner;
     fs?: ManagedLifecycleFs & Pick<typeof fsp, 'copyFile'>;
@@ -14959,7 +14946,7 @@ export declare function isIdempotentAbsence(result: RunResult, absence: Idempote
  */
 export declare function runIdempotent(run: Runner, command: string, args: string[], label: string, absence: IdempotentAbsence): Promise<RunResult>;
 // ==== @byok-sdk/client dist/util/secure-dir.d.ts ====
-import type { Runner } from './exec-runner.js';
+import { type Runner } from './exec-runner.js';
 /**
  * Pure command-construction seam (finding F7) — kept separate from the
  * actual `icacls` invocation below so it's unit-testable on ANY host OS,

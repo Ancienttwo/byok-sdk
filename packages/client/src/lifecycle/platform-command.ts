@@ -1,8 +1,9 @@
-import { spawn } from 'node:child_process';
-import { systemExecutable } from '@byok-sdk/core/system-tool';
+import { spawn, type SpawnOptions } from 'node:child_process';
+import { resolveSystemTool, systemExecutable } from '@byok-sdk/core/system-tool';
 import { disposeOwnedProcessTree, withOwnedProcessTree } from '../adapters/process-tree.js';
-import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError } from '../util/command-timeouts.js';
+import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError, stopRoot } from '../util/command-timeouts.js';
 import type { RunResult, Runner } from '../util/exec-runner.js';
+import { cmdQuote } from './service-unit.js';
 
 /**
  * Runs `executable` directly (never a shell) as the root of an owned process
@@ -84,3 +85,41 @@ export function runBounded(
  * without a shell.
  */
 export const defaultRunner: Runner = async (command, args) => runBounded(systemExecutable(command), args, COMMAND_TIMEOUT_MS.platform);
+
+/**
+ * Runs the unit the way Explorer does; the launcher it starts outlives this
+ * process. After the `launch` bound only the unit's own
+ * `cmd` is terminated, never its tree: the launcher `start` made is that
+ * `cmd`'s child and is the service itself. The rejection then means the
+ * launcher may or may not be running; `start()` and `status()` ask the
+ * launcher query again. A `cmd` whose exit is not confirmed may still start
+ * one (`exitConfirmed: false`). `spawnCmd` is a test seam.
+ *
+ * @internal
+ */
+export function launchUnit(unitPath: string, spawnCmd = (args: string[], options: SpawnOptions) => spawn(resolveSystemTool('cmd'), args, options)): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // cmd /c strips the outer pair of quotes, leaving the quoted path.
+    const child = spawnCmd(['/d', '/c', `"${cmdQuote(unitPath)}"`], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      windowsVerbatimArguments: true,
+    });
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      void stopRoot(child, unitPath).then(reject);
+    }, COMMAND_TIMEOUT_MS.launch);
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('exit', (code) => {
+      if (timedOut) return;
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else reject(new Error(`Startup unit ${unitPath} exited ${code}`));
+    });
+  });
+}
