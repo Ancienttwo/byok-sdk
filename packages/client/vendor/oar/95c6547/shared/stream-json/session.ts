@@ -68,7 +68,9 @@ export async function streamJsonSession<S extends StreamJsonProjectionState>(
     const lines = heldLines;
     heldLines = null;
     for (const [index, line] of lines.entries()) {
-      if (heldLines !== null) { heldLines.push(...lines.slice(index)); return; }
+      // receive can hold again, for a new abort's interrupt.
+      const again = heldLines as string[] | null;
+      if (again !== null) { again.push(...lines.slice(index)); return; }
       receive(line);
     }
   };
