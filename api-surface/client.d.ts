@@ -11395,11 +11395,15 @@ export interface ServiceInstallationOptions {
      * `store_migration_required` and nothing is switched. Any failure after the
      * snapshot (a throw here, an exit other than 0, a failed or non-accepting
      * second precheck) restores the snapshot and is `store_migration_failed`,
-     * with a thrown or precheck error as `cause`. On upgrade its process
-     * group (detached on POSIX) is recorded in the pending receipt before it
-     * is awaited, and recover() changes nothing while that group still runs
-     * (#2011). A process that leaves the group (setsid), a death between
-     * spawn and record, and Windows stay the Host's responsibility. The Host
+     * with a thrown or precheck error as `cause`. On upgrade it is recorded
+     * in the pending receipt before it is awaited (#2011): on POSIX the
+     * process group it leads, on Windows its pid and start time. Until that
+     * group (on Windows, the root) has ended, nothing restores or starts on
+     * the stores: upgrade() throws `upgrade_pending` and recover() changes
+     * nothing. A pgid reused by another group also reads as running; recover()
+     * then refuses until that group ends or the machine restarts. A process
+     * that leaves the group (setsid), what a Windows root starts, and a death
+     * between spawn and record stay the Host's responsibility. The Host
      * must make this program safe to run again after interruption: install
      * has no write-ahead receipt for a process death during migration.
      */
@@ -11504,8 +11508,10 @@ export interface ServiceInstallation {
      * then throws `install_health_check_failed`. A same-id reinstall only
      * repairs the service and checks health, as before; it does not prepare
      * stores or change earlier rollback snapshots; it journals a pending
-     * `repair` receipt with the prior receipt, never deletes `current`, and
-     * an interrupted one leaves recover() to write the prior receipt back and
+     * `repair` receipt with the prior receipt and never replaces `current`.
+     * A failed repair keeps the payload, `current` and the unit, writes the
+     * prior receipt back and throws `install_health_check_failed`; an
+     * interrupted one leaves recover() to write the prior receipt back and
      * throw `repair_interrupted`, after which install() runs again. An allowed unmarked unit
      * is untouched until preparation succeeds; its live store owner causes
      * `store_busy`. An owned marked unit without a current version is stopped
@@ -11626,7 +11632,7 @@ declare const ERROR_MESSAGES: {
     readonly receipt_state_inconsistent: 'The receipt does not match the version pointers. Nothing was changed.';
     readonly switch_unhealthy: 'The new version stays current but is unhealthy. Call rollback(), or keep it.';
     readonly repair_interrupted: 'A same-version reinstall was interrupted. Run install() again.';
-    readonly service_program_not_current: 'The service unit must be the one this SDK writes, running from <installRoot>/current. Run install() with the same version id to rewrite the unit, then retry.';
+    readonly service_program_not_current: 'The service unit must be the one this SDK writes, running from <installRoot>/current. Reinstall the payload installed now (install() with the current version id) to rewrite the unit, then retry.';
     readonly install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.';
     readonly snapshots_symlinked: 'A path under the install root\'s snapshots/ is a symbolic link. Nothing changed; replace the link, then retry.';
 };
