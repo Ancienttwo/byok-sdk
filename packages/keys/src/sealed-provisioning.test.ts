@@ -381,7 +381,8 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       const checked = await apply(await replaceSecretRequest(sealingKey, KEY_B, { requestId: 'r3', generation: 3, expected: await expectedOf() }), { keyCheck: { fetchImpl: vi.fn() } })
         .catch((thrown: unknown) => thrown as Error);
       for (const error of [updated, checked]) {
-        expect(error).toMatchObject({ code: 'KEYCHAIN_UNAVAILABLE', cause: undefined });
+        expect(error).toMatchObject({ code: 'KEYCHAIN_UNAVAILABLE' });
+        expect((error as Error).cause).toBeUndefined();
         expect(`${(error as Error).message} ${(error as Error).stack}`).not.toContain(KEY_A);
       }
     });

@@ -69,7 +69,8 @@ describe('DeviceSealingKeyStore', () => {
     const store = new DeviceSealingKeyStore({ secretStore: secrets });
     for (const [call, code] of [[() => store.loadOrCreate(ENROLLMENT), 'KEYCHAIN_UNAVAILABLE'], [() => store.rotate(ENROLLMENT), 'PROVIDER_SECRET_STORE_FAILED']] as const) {
       const error = await call().then(() => undefined, (thrown: unknown) => thrown as Error);
-      expect(error).toMatchObject({ code, cause: undefined });
+      expect(error).toMatchObject({ code });
+      expect(error!.cause).toBeUndefined();
       expect(`${error!.message} ${error!.stack}`).not.toContain(echo);
     }
   });
