@@ -1,6 +1,8 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { ownedProcessGroupRecord } from '../adapters/process-tree';
 import { createHash, randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -2090,6 +2092,21 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await installation.upgrade(c.payload);
     `;
     const hook = new URL('./fixtures/ts-source-resolve-hook.mjs', import.meta.url).href;
+    // This source has parameter properties, which type stripping cannot erase,
+    // and Node 26 removed --experimental-transform-types: esbuild transforms it.
+    const esbuild = pathToFileURL(createRequire(import.meta.url).resolve('esbuild')).href;
+    const transform = `data:text/javascript,${encodeURIComponent(`
+      import { registerHooks } from 'node:module';
+      import { readFileSync } from 'node:fs';
+      import { fileURLToPath } from 'node:url';
+      const { transformSync } = (await import(${JSON.stringify(esbuild)})).default;
+      registerHooks({
+        load(url, context, nextLoad) {
+          if (!url.startsWith('file:') || !url.endsWith('.ts')) return nextLoad(url, context);
+          return { format: 'module', source: transformSync(readFileSync(fileURLToPath(url), 'utf8'), { loader: 'ts', format: 'esm' }).code, shortCircuit: true };
+        },
+      });
+    `)}`;
     const source = (relative: string) => new URL(relative, import.meta.url).href;
 
     it.each([false, true])('every kill point (migrating: %s) leaves stores that belong to the version current names, and nothing started without current', async (migrate) => {
@@ -2110,7 +2127,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
           installation: source('../lifecycle/service-installation.ts'), unit: source('../lifecycle/service-unit.ts'), gate: source('../util/path-mutation-gate.ts'),
           gates: path.join(root, `gates-${killAt}`), killAt, installRoot, storeDir, db, payload: candidate, startedWithoutCurrent, verdicts: path.join(root, 'verdicts.json'),
         };
-        const child = spawn(process.execPath, ['--experimental-transform-types', '--no-warnings', '--import', hook, '--input-type=module', '-e', CHILD], { env: { ...process.env, BYOK_KILL_CHILD: JSON.stringify(config) }, stdio: ['ignore', 'ignore', 'pipe'] });
+        const child = spawn(process.execPath, ['--no-warnings', '--import', transform, '--import', hook, '--input-type=module', '-e', CHILD], { env: { ...process.env, BYOK_KILL_CHILD: JSON.stringify(config) }, stdio: ['ignore', 'ignore', 'pipe'] });
         let stderr = '';
         child.stderr!.on('data', (chunk) => { stderr += String(chunk); });
         const [code, signal] = await new Promise<[number | null, NodeJS.Signals | null]>((resolve) => child.once('exit', (...result) => resolve(result)));
