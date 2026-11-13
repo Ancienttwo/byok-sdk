@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed (client; #1964)** — Clearing one store's device enrollment no longer deletes another store's credential or staged first pairing under the same `productId`. `clearDeviceEnrollment` and `Daemon.unpair()` hold a per-user `productId` lock from validation through deletion, and pairing takes it across its credential writes. A first-pairing attempt now records the store that staged it: a clear deletes only its own store's attempt, refuses another store's as `store_not_bound`, and refuses one staged by 0.42.0, which names no store, with the new `DeviceEnrollmentClearError` code `pairing_attempt_unattributed`; `clearDeviceEnrollment({ ..., clearUnattributedAttempt: true })` deletes it. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#enrollment-clear-is-scoped-to-its-store-1964).
 - **Fixed (client; #1949)** — Every SDK Pi RPC session caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings, so it warms its prompt cache at most during an active run: Pi cancels the warmer at settlement and revalidates a pending decision before dispatch, so no warming request is sent after the run settled, even for a late `"warm"` answer. No Host action is needed. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#pi-cache-warming-stops-at-settlement-1949).
 
 ## 0.42.0 — 2026-11-13 (published)

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { resolveExistingAncestor } from './existing-ancestor.js';
 import { ensureOwnedPrivateDirectory } from './private-unix-socket.js';
 
-export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'service-lifecycle' | 'pi-session-discovery' | `agy-session:${string}` | `pi-session-admission:${string}` | `pi-session-writer:${string}`;
+export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'service-lifecycle' | 'pi-session-discovery' | `agy-session:${string}` | `pi-session-admission:${string}` | `pi-session-writer:${string}` | `device-enrollment:${string}`;
 
 /**
  * Scopes with one fixed identity and no target path.
@@ -14,8 +14,11 @@ export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-st
  * - `service-lifecycle`: the OS service manager's per-user namespace (#1097).
  *   An owner-record change or a managed install/repair/uninstall holds it,
  *   and local-state relocation takes it before any store gate.
+ * - `device-enrollment:<productId>`: the productId-wide OS credential entry
+ *   (#1964). Taken after the store owner lease, by an enrollment clear across
+ *   its validate and delete and by a pairing across its credential writes.
  */
-type PathlessScope = 'pi-session-rebinding' | 'service-lifecycle';
+type PathlessScope = 'pi-session-rebinding' | 'service-lifecycle' | `device-enrollment:${string}`;
 
 export type PathMutationGateInput = {
   readonly scope: Exclude<PathMutationGateScope, PathlessScope>;
@@ -26,7 +29,7 @@ export type PathMutationGateInput = {
 };
 
 function isPathless(input: PathMutationGateInput): input is Extract<PathMutationGateInput, { readonly scope: PathlessScope }> {
-  return input.scope === 'pi-session-rebinding' || input.scope === 'service-lifecycle';
+  return input.scope === 'pi-session-rebinding' || input.scope === 'service-lifecycle' || input.scope.startsWith('device-enrollment:');
 }
 
 export interface PathMutationGateAcquireOptions {

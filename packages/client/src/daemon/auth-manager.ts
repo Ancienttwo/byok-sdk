@@ -275,6 +275,7 @@ export class AuthManager {
               devicePublicKey: keyPair.publicKeyBase64Url,
               devicePrivateKeyPem: exportPrivateKeyPem(keyPair.privateKey),
               ...(pairingMachineId === undefined ? {} : { machineId: pairingMachineId }),
+              storeIdentity: this.opts.store.identity,
             }, signal);
           }
         }

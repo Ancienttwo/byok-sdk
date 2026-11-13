@@ -202,6 +202,57 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
       expect(await readDeviceEnrollmentStatus(first)).toEqual({ state: 'paired', deviceId });
     });
 
+    // A pairing whose server cannot be reached keeps its staged attempt, as after a lost response.
+    const unreachable = (config: DaemonConfig): DaemonConfig => ({ ...config, serverUrl: 'http://127.0.0.1:1' });
+
+    it.each(['credential', 'staged attempt'] as const)('another store pairing between the validation and the deletion keeps its %s (#1964)', async (kept) => {
+      const first = await storeConfig();
+      await daemonFor(first).pair('pairing-code');
+      const second = await storeConfig();
+      const secondDaemon = daemonFor(kept === 'credential' ? second : unreachable(second));
+      const credentials = testDeviceCredentials(productId);
+      const deleteEntry = credentials.clear.bind(credentials);
+      let pairing: Promise<unknown> = Promise.resolve();
+      vi.spyOn(credentials, 'clear').mockImplementationOnce(async () => {
+        pairing = secondDaemon.pair('pairing-code', { replaceOtherStore: true }).catch((error: unknown) => error);
+        // Without the productId gate the pairing completes inside this window.
+        await Promise.race([pairing, new Promise((resolve) => setTimeout(resolve, 500))]);
+        return deleteEntry();
+      });
+
+      await clear(first);
+      await pairing;
+
+      if (kept === 'credential') expect(await readDeviceEnrollmentStatus(second)).toMatchObject({ state: 'paired' });
+      else expect(await credentials.readFirstPairingAttempt()).toBeDefined();
+    });
+
+    it('an unpaired store clears its own staged first pairing and refuses another store\'s (#1964, #1767)', async () => {
+      const staging = await storeConfig();
+      await expect(daemonFor(unreachable(staging)).pair('pairing-code')).rejects.toThrow();
+      const credentials = testDeviceCredentials(productId);
+
+      expect(await clear(await storeConfig()).catch((error: unknown) => error)).toMatchObject({ code: 'store_not_bound' });
+      expect(await credentials.readFirstPairingAttempt()).toBeDefined();
+
+      await clear(staging);
+      expect(await credentials.readFirstPairingAttempt()).toBeUndefined();
+    });
+
+    it('refuses a staged first pairing that names no store unless told to clear it (#1964)', async () => {
+      const config = await storeConfig();
+      const credentials = testDeviceCredentials(productId);
+      await credentials.saveFirstPairingAttempt({
+        kind: 'first-pairing-attempt-v1', deviceName: 'legacy', devicePublicKey: 'legacy-public-key', devicePrivateKeyPem: 'legacy-private-key',
+      });
+
+      expect(await clear(config).catch((error: unknown) => error)).toMatchObject({ code: 'pairing_attempt_unattributed' });
+      expect(await credentials.readFirstPairingAttempt()).toBeDefined();
+
+      await clearDeviceEnrollment({ productId, storeDir: config.storeDir!, clearUnattributedAttempt: true }, { deviceCredentials: credentials });
+      expect(await credentials.readFirstPairingAttempt()).toBeUndefined();
+    });
+
     it('Daemon.unpair reports a credential that cannot be deleted as clear_failed and stays paired', async () => {
       const config = await storeConfig();
       const credentials = new InMemoryDeviceCredentialBackend();

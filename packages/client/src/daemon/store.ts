@@ -6,7 +6,7 @@ import {
   unlinkSync,
   promises as fs,
 } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
 import { atomicWriteFile } from '../util/atomic-write.js';
@@ -184,6 +184,12 @@ function parseDeviceMetadata(raw: string): DeviceMetadata {
  */
 export class DeviceStore {
   private readonly filePath: string;
+  /**
+   * Non-secret identity of this storeDir, the SHA-256 hex of its resolved
+   * path: a first-pairing attempt records it so a clear deletes only its own
+   * store's attempt from the productId-wide OS entry (#1964).
+   */
+  readonly identity: string;
 
   /**
    * `secureDirOptions` is a test-only DI seam (mirrors `EnsureSecureDirOptions`'s
@@ -206,6 +212,7 @@ export class DeviceStore {
       throw new TypeError('device credential backend must implement complete enrollment custody');
     }
     this.filePath = path.join(storeDir, 'device.json');
+    this.identity = createHash('sha256').update(path.resolve(storeDir), 'utf8').digest('hex');
   }
 
   /**
