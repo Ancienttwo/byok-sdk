@@ -91,8 +91,7 @@ require `runtimeEntry` and moves the pi-rpc key to private IPC (#385). Keep
 manifests, lock workspace records, version documents and packed internal
 dependencies consistent.
 
-A release set contains nine aligned packages plus keys: ten packages, since
-`@byok-sdk/bot-collaboration` was first published in 0.42.0 (#1845, #1910). From 0.28.2 all
+A release set contains eight aligned packages plus keys: nine packages. From 0.28.2 all
 of them carry one version; `check:release-graph` fails when keys
 differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
 the dist-tag `latest`, observed at 0.42.0 for all ten packages on 2026-11-13 (UTC).
@@ -142,6 +141,8 @@ separate evidence and authorization; see the
 [gate split](../../docs/releases/v0.24.0.md#release-gates-and-downstream-acceptance).
 
 ## Release checklist
+
+At the next MINOR release, the owner deprecates published `@byok-sdk/cloud-do` versions on npm after the archive merges (#1959).
 
 1. Pin exact source commit and dependency lockfile; run repository typecheck/test/build, conformance, tenant-isolation I1-I9, credential audit and packageability/service smokes.
 2. Build separately for each supported OS/architecture. Sign/notarize with host-controlled keys and retain signer/audit evidence.

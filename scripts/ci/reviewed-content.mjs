@@ -6,10 +6,10 @@ import { parseBunLock } from '../release/pi-runtime-identity.mjs';
 import { dependencyLockImpact, normalizeDependencyVersions } from './dependency-impact.mjs';
 import { admitDocumentationScripts } from './documentation-checks.mjs';
 
-// The ten published manifests. A contract test keeps this list equal to the
+// The nine published manifests. A contract test keeps this list equal to the
 // non-private packages/*/package.json files.
 export const publicManifests = Object.freeze([
-  'bot-collaboration', 'client', 'cloud', 'cloud-dataplane', 'cloud-do', 'core', 'keys', 'protocol', 'server', 'ui-runtime',
+  'bot-collaboration', 'client', 'cloud', 'cloud-dataplane', 'core', 'keys', 'protocol', 'server', 'ui-runtime',
 ].map(name => `packages/${name}/package.json`));
 
 // #1102: the upgrade-manifest gate, its test in test:scripts, and the client
@@ -20,13 +20,11 @@ const CLIENT_FILES = Object.freeze(['dist', 'README.md', 'LICENSE']);
 // #1103: the runtime contract suite's own run, exactly; the runtime-contract CI family invokes it.
 export const RUNTIME_CONTRACT_SCRIPT = 'vitest run --config src/__tests__/runtime-contract/vitest.config.ts';
 
-// #927 drops the protocol version from the server description and declares
-// the cloud-do test edge to client (its tests import client source).
+// #927 drops the protocol version from the server description.
 const SERVER_DESCRIPTION = Object.freeze({
   from: 'BYOK SDK server: single-product, single-tenant embedded coordinator over @byok-sdk/cloud — wake-driven HTTP long-poll, protocol v2, memory or single-process SQLite storage.',
   to: 'BYOK SDK server: single-product, single-tenant embedded coordinator over @byok-sdk/cloud — wake-driven HTTP long-poll, memory or single-process SQLite storage.',
 });
-const CLOUD_DO_CLIENT_EDGE = '@byok-sdk/client';
 
 const version = value => typeof value === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value);
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -502,12 +500,6 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
         && isDeepStrictEqual(after.exports?.[key], SERVER_EXECUTION_CORE_EXPORTS[key]))) {
         for (const key of Object.keys(SERVER_EXECUTION_CORE_EXPORTS)) delete after.exports[key];
       }
-    }
-    if (path === 'packages/cloud-do/package.json'
-      && before.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === undefined
-      && after.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === 'workspace:*') {
-      delete after.devDependencies[CLOUD_DO_CLIENT_EDGE];
-      qualify.push('packages/cloud-do');
     }
     // #702 raises the public Node floor with the Node 24.22.1 pin. Admit only
     // this exact engines.node edit in a public manifest. Any other engines value

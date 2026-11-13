@@ -52,6 +52,10 @@
 
 决策 1、2、3、5：**Accepted（owner，2026-10-13）**。决策 4、6–13：**Proposed（2026-10-13）**，PR 合并即视为 owner 接受。仅记录决策；实现未开始。
 
+## 修订说明（2026-11-13，#1959）
+
+决策 4 的 `cloud-do` SDK 实现已归档，最后发布为 `v0.42.0`；AiphaBee 的 `/ask` 保持使用自身 runtime。重启条件见 [ADR-036 修订](adr-2026-10-03-cloud-generic-agent.md)。
+
 ## 修订记录
 
 - **2026-10-29（owner 批准 Q7，#1106）**：决策 7 原文是「核心以 copy-and-own 参考实现交付，不进 SDK API」，改为「K4 是 SDK 的一部分」。AiphaBee 原样复制了 K4，又自写 `PROVENANCE.json` 逐文件核对版本，每次修复都要重新复制才到达下游，所以收回 SDK。

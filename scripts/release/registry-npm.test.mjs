@@ -7,7 +7,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
 
-const name = '@byok-sdk/cloud-do';
+const name = '@byok-sdk/bot-collaboration';
 const version = '0.24.0-rc.1';
 const moduleUrl = new URL('./registry-contract.mjs', import.meta.url).href;
 

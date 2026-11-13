@@ -220,13 +220,11 @@ resources during `prepare()`; reject unsupported input before claim instead.
 ## Install sets
 
 Install the scoped packages your composition uses and import each one under
-its own name. Pick one of the three sets below. Each set lists its direct
+its own name. Pick one of the two sets below. Each set lists its direct
 packages; npm installs the rest of the `@byok-sdk` graph through runtime
 dependencies. `scripts/release/install-matrix.test.mjs` checks each set's
-versions and its "Also installed" list against the package manifests. It
-checks the Worker set against the Worker consumer that the
-`check:release-pack` smoke installs. The Self-hosted and Hosted sets are
-fixed by the #535 ruling.
+versions and its "Also installed" list against the package manifests. The
+Self-hosted and Hosted sets are fixed by the #535 ruling.
 
 <!-- BEGIN install-matrix -->
 
@@ -250,34 +248,18 @@ import { createByokServer } from '@byok-sdk/server';
 
 Use it for a hosted service: `cloud` for the device routes, `cloud-dataplane`
 for the Postgres + R2 data plane (`@byok-sdk/cloud-dataplane/runtime` on
-Workers through Hyperdrive), `cloud-do` for Agent sessions in Cloudflare
-Durable Objects, and `ui-runtime` for the Live Activity Timeline. On a
-Node/VPS host without Durable Objects, leave out `@byok-sdk/cloud-do`.
+Workers through Hyperdrive), and `ui-runtime` for the Live Activity Timeline.
 
 ```sh
-npm install @byok-sdk/cloud@0.42.0 @byok-sdk/cloud-dataplane@0.42.0 @byok-sdk/cloud-do@0.42.0 @byok-sdk/ui-runtime@0.42.0
+npm install @byok-sdk/cloud@0.42.0 @byok-sdk/cloud-dataplane@0.42.0 @byok-sdk/ui-runtime@0.42.0
 ```
 
 Also installed: `@byok-sdk/core`, `@byok-sdk/protocol`.
 
-### Worker
-
-Use it for a Cloudflare Worker that only hosts Agent sessions in Durable
-Objects (no `nodejs_compat`): `cloud-do` for the session runtime and
-`protocol` for the shared outcome validator. See
-[the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
-
-```sh
-npm install @byok-sdk/cloud-do@0.42.0 @byok-sdk/protocol@0.42.0
-npm install --save-dev @cloudflare/workers-types
-```
-
-Also installed: none.
-
 <!-- END install-matrix -->
 
 The public dispatch packages are `@byok-sdk/client`, `@byok-sdk/server`,
-`@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`, `@byok-sdk/core`,
+`@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/core`,
 `@byok-sdk/protocol`, `@byok-sdk/ui-runtime` and `@byok-sdk/bot-collaboration`
 (K8 Bot collaboration, first published in 0.42.0), all on the same train.
 `@byok-sdk/implementation-identity` is retired and no later train publishes it.
@@ -504,8 +486,6 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/cloud-dataplane` | Postgres stores and Node operations | `@cfworker/json-schema`, `@nodable/entities`, `anynum`, `aws4fetch`, `fast-xml-builder`, `fast-xml-parser`, `hono`, `is-unsafe`, `path-expression-matcher`, `pg`, `pg-connection-string`, `pg-int8`, `pg-pool`, `pg-protocol`, `pg-types`, `postgres-array`, `postgres-bytea`, `postgres-date`, `postgres-interval`, `strnum`, `xml-naming`, `xtend`, `zod` | allowed | 800251 B |
 | `@byok-sdk/cloud-dataplane/package.json` | Package metadata | — | forbidden | 1794 B |
 | `@byok-sdk/cloud-dataplane/runtime` | Worker online stores; pg requires nodejs_compat | `@cfworker/json-schema`, `@nodable/entities`, `anynum`, `aws4fetch`, `fast-xml-builder`, `fast-xml-parser`, `hono`, `is-unsafe`, `path-expression-matcher`, `pg`, `pg-connection-string`, `pg-int8`, `pg-pool`, `pg-protocol`, `pg-types`, `postgres-array`, `postgres-bytea`, `postgres-date`, `postgres-interval`, `strnum`, `xml-naming`, `xtend`, `zod` | allowed | 759543 B |
-| `@byok-sdk/cloud-do` | Durable Object session runtime | `@earendil-works/chord`, `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, `@earendil-works/pi-schema`, `@earendil-works/pi-telemetry`, `partial-json` | forbidden | 140460 B |
-| `@byok-sdk/cloud-do/package.json` | Package metadata | — | forbidden | 1630 B |
 | `@byok-sdk/cloud/package.json` | Package metadata | — | forbidden | 1272 B |
 | `@byok-sdk/core` | Shared contracts and validation | `zod` | allowed | 100849 B |
 | `@byok-sdk/core/package.json` | Package metadata | — | forbidden | 1542 B |

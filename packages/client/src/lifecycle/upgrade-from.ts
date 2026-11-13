@@ -11,7 +11,7 @@ import path from 'node:path';
 
 /** The ten public packages released together as one train; client stays first. */
 const UPGRADE_TRAIN_PACKAGES = [
-  '@byok-sdk/client', '@byok-sdk/bot-collaboration', '@byok-sdk/cloud', '@byok-sdk/cloud-dataplane', '@byok-sdk/cloud-do', '@byok-sdk/core',
+  '@byok-sdk/client', '@byok-sdk/bot-collaboration', '@byok-sdk/cloud', '@byok-sdk/cloud-dataplane', '@byok-sdk/core',
   '@byok-sdk/keys', '@byok-sdk/protocol', '@byok-sdk/server', '@byok-sdk/ui-runtime',
 ] as const;
 
