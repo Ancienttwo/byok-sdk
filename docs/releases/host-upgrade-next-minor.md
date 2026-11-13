@@ -223,7 +223,8 @@ service that had already restarted.
   `failed` receipt with `switch_unhealthy`. The Host decides: call
   `rollback()` to discard the candidate's store writes, or keep it.
 - **`repair_interrupted`:** a same-version reinstall journals a `repair`
-  receipt and never replaces `current`. A failed one now keeps the payload,
+  receipt, stops the service before rewriting the unit, and never replaces
+  `current`. A failed one now keeps the payload,
   `current` and the unit and puts the earlier receipt back (0.42.0 removed
   the installation). After an interruption, `recover()`
   writes the earlier receipt back and throws `repair_interrupted`; call
@@ -235,7 +236,9 @@ service that had already restarted.
   receipt: on POSIX the process group it leads (it runs detached), on
   Windows its pid and start time. Until that group (on Windows, the root)
   ends, nothing restores or starts: `upgrade()` fails with `upgrade_pending`
-  when the root exits first, and `recover()` changes nothing. A pgid reused
+  when the root exits first, and `recover()` changes nothing. When the record
+  cannot be written, the group gets SIGTERM, then SIGKILL, and nothing
+  restores until it is proved gone. A pgid reused
   by another group also counts as running; when `recover()` keeps refusing
   with no migration process left, end the group it names or restart the
   machine. A process that leaves the group (`setsid`), and what a Windows

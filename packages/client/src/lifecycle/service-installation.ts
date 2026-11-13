@@ -97,7 +97,9 @@ export interface ServiceInstallationOptions {
    * process group it leads, on Windows its pid and start time. Until that
    * group (on Windows, the root) has ended, nothing restores or starts on
    * the stores: upgrade() throws `upgrade_pending` and recover() changes
-   * nothing. A pgid reused by another group also reads as running; recover()
+   * nothing. When the record cannot be written, the group gets SIGTERM, then
+   * SIGKILL after a second; only once it is proved gone (ESRCH) is anything
+   * restored, else the call is `upgrade_pending` with `current` absent. A pgid reused by another group also reads as running; recover()
    * then refuses until that group ends or the machine restarts. A process
    * that leaves the group (setsid), what a Windows root starts, and a death
    * between spawn and record stay the Host's responsibility. The Host
@@ -208,7 +210,8 @@ export interface ServiceInstallation {
    * then throws `install_health_check_failed`. A same-id reinstall only
    * repairs the service and checks health, as before; it does not prepare
    * stores or change earlier rollback snapshots; it journals a pending
-   * `repair` receipt with the prior receipt and never replaces `current`.
+   * `repair` receipt with the prior receipt, stops the service before it
+   * rewrites the unit, and never replaces `current`.
    * A failed repair keeps the payload, `current` and the unit, writes the
    * prior receipt back and throws `install_health_check_failed`; an
    * interrupted one leaves recover() to write the prior receipt back and
@@ -445,7 +448,19 @@ const STOP_NOTE = 'The service could not be stopped and its stores leased.';
 /** A migrate group that outlived its root (#2011): nothing is restored or started, and the record stays. */
 class MigrateRunning extends Error {}
 
-const migrateNote = (group: OwnedProcessGroupRecord): string => `The store migration may still run (process group ${group.pgid}); nothing was restored or started. Run recover() once it has ended.`;
+const migrateNote = (pgid: number): string => `The store migration may still run (process group ${pgid}); nothing was restored or started. Run recover() once it has ended.`;
+
+/** POSIX: whether process group `pgid` ends within `timeoutMs`. Only ESRCH proves it; any other answer does not. */
+async function groupGone(pgid: number, timeoutMs = 5000): Promise<boolean> {
+  for (const until = Date.now() + timeoutMs; Date.now() < until; await delay(50)) {
+    try {
+      process.kill(-pgid, 0);
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ESRCH';
+    }
+  }
+  return false;
+}
 
 /** A preparation exit is typed (#2010): an error that is not ours becomes `store_preparation_failed`. */
 function preparationError(error: unknown): unknown {
@@ -859,7 +874,11 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       // put back when it settles, so the receipt records only upgrades (#2011).
       // A failed repair keeps all of that: there is no earlier state to restore.
       const prior = installed === undefined ? undefined : await readReceipt();
-      if (installed !== undefined) await writePending({ kind: 'repair', from: id, to: id, ...(prior === undefined ? {} : { prior }) });
+      if (installed !== undefined) {
+        await writePending({ kind: 'repair', from: id, to: id, ...(prior === undefined ? {} : { prior }) });
+        // A unit rewrite interrupted part way must not run (#2011): stop first, start once it is whole.
+        await lifecycle.stop();
+      }
       // An install snapshot must not replace a same-id reinstall's earlier
       // upgrade snapshot, which still belongs to its previous version.
       const snapshotId = `${INSTALL_SNAPSHOT_PREFIX}${randomUUID()}`;
@@ -1192,15 +1211,28 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         migrate = ownedProcessGroupRecord(child, 'migrate', undefined, platform);
         if (migrate !== undefined) await writePending({ ...journal, migrate });
       } catch (error) {
-        // Nothing unrecorded may outlive this call.
+        // Nothing unrecorded may outlive this call, and nothing restores until
+        // the whole group is gone (#2011). win32 ends only the root.
         if (platform === 'win32') child.kill('SIGKILL');
-        else process.kill(-child.pid, 'SIGKILL');
+        else {
+          const pgid = child.pid;
+          const signal = (name: NodeJS.Signals): void => {
+            try {
+              process.kill(-pgid, name);
+            } catch {
+              // The group already ended.
+            }
+          };
+          signal('SIGTERM');
+          if (!(await groupGone(pgid, 1000))) signal('SIGKILL');
+          if (!(await groupGone(pgid))) throw new MigrateRunning(migrateNote(pgid));
+        }
         await exit;
         throw error;
       }
     }
     const code = await exit;
-    if (migrate !== undefined && ownedProcessGroupRuns(migrate, platform)) throw new MigrateRunning(migrateNote(migrate));
+    if (migrate !== undefined && ownedProcessGroupRuns(migrate, platform)) throw new MigrateRunning(migrateNote(migrate.pgid));
     return code;
   }
 
@@ -1479,6 +1511,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
 
       // A failed attempt after its snapshot leaves snapshots/<to>. Remove it
       // before the intent: recover() restores any snapshot it finds for `to`.
+      await refuseLinkedSnapshots(path.join(snapshotsDir, to));
       await fs.rm(path.join(snapshotsDir, to), { recursive: true, force: true });
       // Write-ahead: the service may be stopped and `current` removed from here on.
       await writePending(journal);
@@ -1531,11 +1564,11 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     return rootOwned(async () => {
       await refusePending();
       const [current, previous] = [await currentVersion(), await readPointer('previous')];
+      if (current !== undefined) await refuseLinkedSnapshot(current);
       if (current === undefined || previous === undefined || !(await exists(path.join(snapshotsDir, current, 'snapshot.json')))) {
         throw new ServiceInstallationError('no_rollback');
       }
       await requireExactUnit();
-      await refuseLinkedSnapshot(current);
       return (await rollBack({ kind: 'rollback', from: previous, to: current }, [])).receipt;
     });
   }
@@ -1555,14 +1588,17 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         return last;
       }
       if (last.migrate !== undefined && ownedProcessGroupRuns(last.migrate, platform)) {
-        throw unfinishedFailure([], migrateNote(last.migrate));
+        throw unfinishedFailure([], migrateNote(last.migrate.pgid));
       }
       const current = await currentVersion();
       const at = current === undefined ? 'absent' : current === last.from ? 'from' : current === last.to ? 'to' : 'other';
       const codeClass = last.code === undefined ? 'none' : last.code === 'health_check_failed' ? 'health' : 'refusal';
       let action = RECOVER[`${last.kind} ${codeClass} ${at}`] ?? 'inconsistent';
-      // A migration runs only after a complete snapshot.
-      if (action === 'restore' && last.migrate !== undefined && !(await exists(path.join(snapshotsDir, last.to, 'snapshot.json')))) action = 'inconsistent';
+      if (action === 'restore') {
+        await refuseLinkedSnapshot(last.to);
+        // A migration runs only after a complete snapshot.
+        if (last.migrate !== undefined && !(await exists(path.join(snapshotsDir, last.to, 'snapshot.json')))) action = 'inconsistent';
+      }
       const journal = last as Journal;
       switch (action) {
         case 'inconsistent':
@@ -1575,7 +1611,6 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           // The candidate's writes are kept, and so is the snapshot rollback() restores: the Host decides.
           return writeReceipt({ state: 'failed', from: last.from, to: last.to, ...(last.previous === undefined ? {} : { previous: last.previous }), code: 'switch_unhealthy' });
         case 'restore': {
-          await refuseLinkedSnapshot(last.to);
           let release: () => Promise<unknown[]>;
           try {
             release = await stopQuiescent();

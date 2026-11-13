@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createServiceInstallation,
@@ -16,6 +17,9 @@ import {
 } from '../lifecycle/service-installation';
 import { SERVICE_PAYLOAD_MANIFEST, writeServicePayloadManifest, type ServicePayloadManifest } from '../service-payload-manifest';
 import { createManagedLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
+import { createLaunchdLifecycle } from '../lifecycle/launchd';
+import type { Runner } from '../util/exec-runner';
+import { DRIFTED_MARKED_UNIT, memoryServiceFs } from './support/service-fs';
 import { SERVICE_UNIT_MARKER, ServiceUnitError, withServiceOwnerGate } from '../lifecycle/service-unit';
 import * as daemonOwner from '../util/daemon-owner';
 import { acquireDaemonOwner } from '../util/daemon-owner';
@@ -273,9 +277,9 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(await fs.readFile(path.join(installRoot, 'versions', '1.0.0', 'host.js'), 'utf8')).toBe('// 1.0.0');
     expect(await readServiceInstallationRecord(storeDir)).toEqual({ format: 'byok-service-installation', version: 1, installRoot });
     expect(events).toEqual(['stop', 'install', 'start', 'health 1.0.0']);
-    // A same-id reinstall must confirm health too; another version must be upgraded.
+    // A same-id reinstall stops first and must confirm health too; another version must be upgraded.
     await installation.install(await payload('1.0.0'));
-    expect(events).toEqual(['stop', 'install', 'start', 'health 1.0.0', 'install', 'start', 'health 1.0.0']);
+    expect(events).toEqual(['stop', 'install', 'start', 'health 1.0.0', 'stop', 'install', 'start', 'health 1.0.0']);
     const refused = await payload('2.0.0');
     await expect(installation.install(refused)).rejects.toMatchObject({ code: 'installation_exists' });
     expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual(['1.0.0']);
@@ -328,29 +332,73 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(await fs.readFile(hostStore, 'utf8')).toBe('Host data');
   });
 
-  it('a unit an earlier SDK wrote (#2017 plist): upgrade() is refused until install() of the current payload rewrites it', async () => {
-    const unitPath = path.join(root, 'service.unit');
-    let content = `${SERVICE_UNIT_MARKER} written by an earlier SDK`;
+  it('a plist an earlier SDK wrote (#2017): upgrade() is refused until install() of the current payload rewrites it', async () => {
+    const calls: string[] = [];
+    const run = vi.fn<Runner>().mockImplementation(async (command, args) => {
+      calls.push(`${command} ${args.join(' ')}`);
+      return args[0] === 'print' ? { code: 113, stdout: '', stderr: 'Could not find service' } : { code: 0, stdout: '', stderr: '' };
+    });
+    const unitFs = memoryServiceFs();
     const def = { name: 'svc', storeDir, logDir: path.join(storeDir, 'service-logs'), owner: 'app', program: { command: process.execPath, args: [] } };
-    const unit: PlatformUnit = {
-      serviceName: 'svc', unitPath, launcherPath: unitPath,
-      files: () => [{ path: unitPath, content }],
-      activate: async () => undefined, deactivate: async () => undefined, removeFiles: async () => { await fs.rm(unitPath); },
-      start: async () => undefined, stop: async () => undefined,
-      query: async () => ({ running: true, determinate: true, detail: 'fake' }),
-    };
-    installation = installationOver(createManagedLifecycle(def, unit));
+    installation = installationOver(createLaunchdLifecycle(def, { run, fs: unitFs, homedir: () => '/h', getuid: () => 501 }));
     const installed = await payload('1.0.0');
     await installation.install(installed);
-    content = `${SERVICE_UNIT_MARKER} with HOME`;
+    unitFs.files.set('/h/Library/LaunchAgents/svc.plist', DRIFTED_MARKED_UNIT);
     expect(await installation.lifecycle.inspect()).toMatchObject({ state: 'repairable' });
+    calls.length = 0;
     const candidate = await payload('2.0.0');
     await expect(installation.upgrade(candidate)).rejects.toMatchObject({ code: 'service_program_not_current', message: expect.stringContaining('Reinstall the payload installed now') });
-    expect([await pointer('current'), await installation.receipt()]).toEqual(['1.0.0', undefined]);
+    expect([calls, await pointer('current'), await installation.receipt()]).toEqual([[], '1.0.0', undefined]);
     await installation.install(installed);
+    expect(calls).toEqual(expect.arrayContaining(['launchctl bootstrap gui/501 /h/Library/LaunchAgents/svc.plist', 'launchctl kickstart -k gui/501/svc']));
     expect(await installation.lifecycle.inspect()).toMatchObject({ state: 'exact' });
+    calls.length = 0;
     await expect(installation.upgrade(candidate)).resolves.toMatchObject({ state: 'switched', from: '1.0.0', to: '2.0.0' });
+    // Stopped for the switch, then started from `current`: the job had left the domain, so it is bootstrapped again.
+    expect(calls).toEqual(['launchctl bootout gui/501/svc', 'launchctl print gui/501/svc', 'launchctl print gui/501/svc', 'launchctl bootstrap gui/501 /h/Library/LaunchAgents/svc.plist']);
   });
+
+  it('a same-version repair stops the service before it rewrites a multi-file unit; an interruption at any write recovers and reruns', async () => {
+    const unitDir = path.join(root, 'unit');
+    let running = false;
+    let generation = 'old';
+    const files = () => ['unit', 'launcher'].map((name) => ({ path: path.join(unitDir, name), content: `${SERVICE_UNIT_MARKER} ${name} ${generation}` }));
+    const def = { name: 'svc', storeDir, logDir: path.join(storeDir, 'service-logs'), owner: 'app', program: { command: process.execPath, args: [] } };
+    const unit: PlatformUnit = {
+      serviceName: 'svc', unitPath: files()[0]!.path, launcherPath: files()[1]!.path, files,
+      activate: async () => { running = true; }, deactivate: async () => { running = false; },
+      removeFiles: async () => { for (const file of files()) await fs.rm(file.path, { force: true }); },
+      start: async () => { running = true; }, stop: async () => { running = false; },
+      query: async () => ({ running, determinate: true, detail: 'fake' }),
+    };
+    const over = () => installationOver(createManagedLifecycle(def, unit));
+    await fs.mkdir(unitDir);
+    installation = over();
+    await installation.install(await payload('1.0.0'));
+    generation = 'new';
+    const template = path.join(root, 'template');
+    for (const dir of [installRoot, storeDir, unitDir]) await fs.cp(dir, path.join(template, path.basename(dir)), { recursive: true, verbatimSymlinks: true });
+    for (let n = 1; ; n += 1) {
+      for (const dir of [installRoot, storeDir, unitDir]) {
+        await fs.rm(dir, { recursive: true, force: true });
+        await fs.cp(path.join(template, path.basename(dir)), dir, { recursive: true, verbatimSymlinks: true });
+      }
+      running = true;
+      installation = over();
+      const crash = crashAt(n);
+      await installation.install(path.join(root, 'payloads', '1.0.0')).catch(() => undefined);
+      const died = crash.dead();
+      await crash.end();
+      const generations = new Set(await Promise.all(files().map(async (file) => (await fs.readFile(file.path, 'utf8')).split(' ').pop())));
+      // A unit left half old, half new never runs.
+      if (generations.size > 1) expect(running).toBe(false);
+      installation = over();
+      await installation.recover().catch((error: unknown) => expect(error).toMatchObject({ code: 'repair_interrupted' }));
+      await installation.install(path.join(root, 'payloads', '1.0.0'));
+      expect([(await installation.lifecycle.inspect()).state, running, await pointer('current')]).toEqual(['exact', true, '1.0.0']);
+      if (!died) break;
+    }
+  }, 60_000);
 
   it('refuses a foreign unit before staging or writing installation artifacts (#1966)', async () => {
     const unitPath = path.join(root, 'foreign.unit');
@@ -1719,6 +1767,66 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await vi.waitFor(async () => expect(await installation.recover()).toMatchObject({ state: 'rolled-back' }));
       expect([await pointer('current'), await fs.readFile(db, 'utf8')]).toEqual(['2.0.0', 'v2 data']);
     });
+
+    it('a linked snapshots/<version> is refused before it is probed or removed (#2061)', async () => {
+      const elsewhere = path.join(root, 'elsewhere');
+      await fs.mkdir(elsewhere);
+      await fs.writeFile(path.join(elsewhere, 'kept'), 'kept');
+      const ofCurrent = path.join(installRoot, 'snapshots', '2.0.0');
+      await fs.rm(ofCurrent, { recursive: true });
+      await fs.symlink(elsewhere, ofCurrent);
+      await expect(installation.rollback()).rejects.toMatchObject({ code: 'snapshots_symlinked' });
+      await fs.rm(ofCurrent);
+      await fs.symlink(elsewhere, path.join(installRoot, 'snapshots', '3.0.0'));
+      await expect(installation.upgrade(await payload('3.0.0'))).rejects.toMatchObject({ code: 'snapshots_symlinked' });
+      expect([events, await fs.readdir(elsewhere), await installation.receipt()]).toEqual([[], ['kept'], expect.objectContaining({ state: 'switched' })]);
+    });
+
+    it.skipIf(process.platform === 'win32')('when the migrate record cannot be written, nothing restores until the whole group has ended', async () => {
+      const pidFile = path.join(root, 'member.pid');
+      const member = `const fs = require('node:fs'); fs.writeFileSync(process.argv[3], String(process.pid)); setInterval(() => fs.writeFileSync(process.argv[2], 'member'), 20); process.on('SIGTERM', () => setTimeout(() => process.exit(0), 200));`;
+      const lingering = `${MIGRATE}\nrequire('node:child_process').spawn(process.execPath, [require('node:path').join(__dirname, 'member.cjs'), process.argv[3], ${JSON.stringify(pidFile)}], { stdio: 'ignore' }).unref();`;
+      installation = installationOver(fakeLifecycle(), { migrate: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] }) });
+      const original = fs.rename.bind(fs);
+      // The record write fails once the root has exited and a group member still writes the store.
+      const rename = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+        if (String(to) === receiptPath() && (await fs.readFile(from, 'utf8')).includes('"migrate"')) {
+          await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 5000 });
+          await delay(200);
+          throw Object.assign(new Error('no space left'), { code: 'ENOSPC' });
+        }
+        return original(from, to);
+      });
+      const candidate = await payload('3.0.0', { 'migrate.cjs': lingering, 'member.cjs': member });
+      try {
+        await verdicts('migration-required');
+        await expect(installation.upgrade(candidate)).rejects.toMatchObject({ code: 'store_migration_failed' });
+        const pid = Number(await fs.readFile(pidFile, 'utf8'));
+        expect(() => process.kill(pid, 0)).toThrow();
+        // Restored after the member ended: nothing it wrote survives.
+        expect([await pointer('current'), await fs.readFile(db, 'utf8')]).toEqual(['2.0.0', 'v2 data']);
+
+        // A group that cannot be proved gone fails closed: nothing restores or starts.
+        await fs.rm(pidFile);
+        await verdicts('migration-required');
+        events = [];
+        const kill = process.kill.bind(process);
+        const unproven = vi.spyOn(process, 'kill').mockImplementation(((target: number, signal?: string | number) => {
+          if (signal === 0 && target < 0) throw Object.assign(new Error('not permitted'), { code: 'EPERM' });
+          return kill(target, signal);
+        }) as typeof process.kill);
+        try {
+          await expect(installation.upgrade(candidate)).rejects.toMatchObject({ code: 'upgrade_pending', message: expect.stringContaining('may still run') });
+        } finally {
+          unproven.mockRestore();
+        }
+        expect([await pointer('current'), events.includes('start'), await installation.receipt()]).toEqual([undefined, false, expect.objectContaining({ state: 'pending' })]);
+        expect(await fs.readFile(db, 'utf8')).not.toBe('v2 data');
+      } finally {
+        rename.mockRestore();
+        if (existsSync(pidFile)) try { process.kill(Number(await fs.readFile(pidFile, 'utf8')), 'SIGKILL'); } catch { /* it has ended */ }
+      }
+    }, 30_000);
 
     it('a version 1 receipt: a pending one is refused untouched, a final one is rewritten by recover()', async () => {
       const v1 = { ...(await installation.receipt()), version: 1 };

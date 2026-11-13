@@ -661,8 +661,11 @@ process group it leads (it runs detached in a group of its own), on Windows
 its pid and start time. Until that group (on Windows, the root) has ended,
 nothing restores or starts on the stores: when the root exits and its group
 still runs, `upgrade apply` fails with `upgrade_pending` and keeps the
-record, and `recover()` changes nothing and says so; run it again once the
-migration has ended. A pgid the system has given to another group since
+record. When the record itself cannot be written, the group gets SIGTERM,
+then SIGKILL after a second, and nothing is restored until it is proved
+gone; otherwise `upgrade apply` fails with `upgrade_pending`, `current`
+absent. While a recorded group runs, `recover()` changes nothing and says
+so; run it again once the migration has ended. A pgid the system has given to another group since
 also counts as running: when `recover()` keeps refusing and no migration
 process is left, end the group it names or restart the machine. A process
 that leaves the group (`setsid`), and what a Windows migration starts, are
