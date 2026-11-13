@@ -13,7 +13,7 @@ import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
 import { resolveRuntimeInvocation, runtimeInvocationHost } from '../runtime-invocation.js';
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
-import { haltGate, oarCancelSettled, raceDeadline, RetainedRecordBudget, RetryableOnce } from '../session-kit.js';
+import { haltGate, oarCancelSettled, raceDeadline, RetryableOnce } from '../session-kit.js';
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 import { agentPersona } from '../agent-persona.js';
 import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';

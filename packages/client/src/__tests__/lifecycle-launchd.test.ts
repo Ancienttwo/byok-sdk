@@ -85,7 +85,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     const fs = fakeFs();
     await createLaunchdLifecycle(def(), { run, fs, homedir: () => '/tmp/scratch-home', getuid: () => 501 }).install();
 
-    const plist = vi.mocked(fs.writeFile).mock.calls.find(([file]) => file === '/tmp/scratch-home/Library/LaunchAgents/Acme-Agent-.plist')?.[1];
+    const plist = fs.files.get('/tmp/scratch-home/Library/LaunchAgents/Acme-Agent-.plist');
     expect(plist).toContain('<key>EnvironmentVariables</key>\n  <dict>\n    <key>HOME</key>\n    <string>/tmp/scratch-home</string>\n  </dict>');
   });
 

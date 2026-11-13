@@ -15208,9 +15208,10 @@ export declare function buildProjectionIcaclsArgs(dir: string, username: string)
 export declare function ensurePiProjectionDir(dir: string, opts?: EnsureSecureDirOptions): Promise<void>;
 /**
  * Whether `dir` breaks the POSIX 0700 rule for `role`, without changing it.
- * Nothing to report on a platform without getuid, or for a store root another
- * user owns. stat, not lstat: a symlinked directory root stays supported, and
- * its target's mode is the one that matters.
+ * Nothing to report on a platform without geteuid, or for a store root another
+ * user owns. Ownership is compared with the effective uid, the one that owns
+ * the files this process creates (#2016). stat, not lstat: a symlinked
+ * directory root stays supported, and its target's mode is the one that matters.
  */
 export declare function isModeNot0700(dir: string, role: 'owned' | 'store-root'): Promise<boolean>;
 /** Re-asserts 0600 on POSIX and a non-inherited owner/SYSTEM/Admin DACL on Windows. */

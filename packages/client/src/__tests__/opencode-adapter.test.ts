@@ -409,14 +409,12 @@ it.each(['1.18.35', 'opencode v2.0.26'])('does not start fallback after interrup
   } finally { gate.resolve(); spy.mockRestore(); }
 });
 
-it('settles an opening budget kill before disposing the native session', async () => {
+it('disposes the native session after running with a small retained-record budget', async () => {
   const box = setup();
   const adapter = new OpenCodeAdapter({ models, maxRetainedBytes: 1, resolveBin: () => ({ command: fake, source: 'env' }) });
-  const error = await startPreparedOperation(adapter, { instruction: 'hello' }, { workspaceDir: box.cwd, env: box.env })
-    .then(() => undefined, error => error);
-  expect(error).toMatchObject({ name: 'RuntimeExecutionFailure', phase: 'start',
-    message: 'opencode retained record byte budget exceeded' });
-  expect(box.facts().some(fact => fact.kind === 'prompt' || fact.kind === 'close')).toBe(false);
+  const session = await startPreparedOperation(adapter, { instruction: 'hello' }, { workspaceDir: box.cwd, env: box.env });
+  sessions.push(session);
+  expect((await collect(session)).at(-1)).toEqual({ type: 'turn_end' });
   const started = box.facts().find(fact => fact.kind === 'start')!;
   expect(() => process.kill(started.pid, 0)).toThrow();
 });
