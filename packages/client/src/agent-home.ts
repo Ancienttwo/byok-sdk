@@ -14,14 +14,15 @@ import { atomicWriteFile } from './util/atomic-write.js';
 import { type ExistingAncestor, resolveExistingAncestor } from './util/existing-ancestor.js';
 import { ConfiguredPathLinkError, foldNameAliases } from './util/fold-name-aliases.js';
 import {
-  AGENT_HOME_READER_RUN_MAX_RETAINED,
   AGENT_HOME_READER_RUNS_DIRECTORY,
   isReaderRunName,
   type AgentHomeAccessMode,
 } from './agent-home-readers.js';
+import { releaseAfterFailure, withRelease } from './util/with-release.js';
 import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
+  withGateReleaseFailures,
   type PathMutationGate,
 } from './util/path-mutation-gate.js';
 
@@ -64,6 +65,17 @@ export class AgentHomeBusyError extends AgentHomeError {
     super(message);
     this.name = 'AgentHomeBusyError';
   }
+}
+
+function withHomeReleaseFailures<T>(error: T, releaseFailures: readonly unknown[]): T | Error {
+  if (releaseFailures.length === 0) return error;
+  if (error instanceof AgentHomeError) {
+    const originalClass = error.constructor as new (message: string) => AgentHomeError;
+    const rebuilt = new originalClass(error.message);
+    rebuilt.cause = new AggregateError([error, ...releaseFailures]);
+    return rebuilt;
+  }
+  return withGateReleaseFailures(error, releaseFailures) as Error;
 }
 
 /**
@@ -457,7 +469,7 @@ export class AgentHomeLayout {
 
   async resolve(agentRefInput: AgentRef): Promise<AgentHomeResolution> {
     const gate = await this.acquireRootMutationGate();
-    try {
+    return withRelease(async () => {
       const agentRef = validateAgentRef(agentRefInput);
       const hostStorageRoot = await this.resolveRoot();
       const agentsRoot = await ensureDirectoryNoSymlink(
@@ -483,9 +495,7 @@ export class AgentHomeLayout {
         homeDir: canonicalHome,
         canonicalHome,
       });
-    } finally {
-      await gate.release();
-    }
+    }, () => gate.release(), withHomeReleaseFailures);
   }
 
   /**
@@ -532,29 +542,29 @@ export class AgentHomeLayout {
     let probePath: string | undefined;
     let handle: fs.FileHandle | undefined;
     let created = false;
-    try {
-      const hostStorageRoot = await this.resolveRoot();
-      const agentsRoot = await ensureDirectoryNoSymlink(
-        hostStorageRoot,
-        path.join(hostStorageRoot, AGENT_HOME_DIRECTORY),
-      );
-      probePath = path.join(agentsRoot, `.byok-agent-home-preflight-${randomUUID()}`);
-      handle = await fs.open(probePath, 'wx', 0o600);
-      created = true;
-      await handle.sync();
-      await handle.close();
-      handle = undefined;
-      await fs.rm(probePath);
-      created = false;
-    } catch (error) {
-      await handle?.close().catch(() => {});
-      if (created && probePath !== undefined) await fs.rm(probePath, { force: true }).catch(() => {});
-      throw new AgentHomeResolutionError(
-        `agentHome.hostStorageRoot preflight failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    } finally {
-      await gate.release();
-    }
+    await withRelease(async () => {
+      try {
+        const hostStorageRoot = await this.resolveRoot();
+        const agentsRoot = await ensureDirectoryNoSymlink(
+          hostStorageRoot,
+          path.join(hostStorageRoot, AGENT_HOME_DIRECTORY),
+        );
+        probePath = path.join(agentsRoot, `.byok-agent-home-preflight-${randomUUID()}`);
+        handle = await fs.open(probePath, 'wx', 0o600);
+        created = true;
+        await handle.sync();
+        await handle.close();
+        handle = undefined;
+        await fs.rm(probePath);
+        created = false;
+      } catch (error) {
+        await handle?.close().catch(() => {});
+        if (created && probePath !== undefined) await fs.rm(probePath, { force: true }).catch(() => {});
+        throw new AgentHomeResolutionError(
+          `agentHome.hostStorageRoot preflight failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }, () => gate.release(), withHomeReleaseFailures);
   }
 
   /**
@@ -801,13 +811,18 @@ export class AgentHomeLeaseManager {
       rootGate = undefined;
     } catch (error) {
       if (ownsMarker && lockPath !== undefined) await fs.rm(lockPath, { force: true }).catch(() => {});
-      await rootGate?.release().catch(() => {});
+      const releaseFailures: unknown[] = [];
+      try { await rootGate?.release(); } catch (releaseError) { releaseFailures.push(releaseError); }
       dropBaseLease(canonicalHome, leaseId);
       if (error instanceof PathMutationGateBusyError) {
         throw new AgentHomeBusyError('Agent-home root is reserved for local-state relocation');
       }
-      if (error instanceof AgentHomeError) throw error;
-      throw new AgentHomeError(`could not acquire Agent home lease: ${error instanceof Error ? error.message : String(error)}`);
+      const primary = error instanceof AgentHomeError ? error : new AgentHomeError(`could not acquire Agent home lease: ${error instanceof Error ? error.message : String(error)}`);
+      if (primary !== error && releaseFailures.length) {
+        primary.cause = new AggregateError([error, ...releaseFailures]);
+        throw primary;
+      }
+      throw withHomeReleaseFailures(primary, releaseFailures);
     }
     const acquiredLockPath = lockPath;
     if (acquiredLockPath === undefined) throw new AgentHomeError('Agent home lease marker path was not established');
@@ -862,8 +877,7 @@ export class AgentHomeLeaseManager {
     try {
       await this.settleLeftoverCommitCopy(canonicalHome, homeIdentity);
     } catch (error) {
-      await lease.release().catch(() => {});
-      throw error;
+      return releaseAfterFailure(error, () => lease.release(), withHomeReleaseFailures);
     }
     return lease;
   }
@@ -891,10 +905,13 @@ export class AgentHomeLeaseManager {
       }
       await this.settleLeftoverCommitCopy(canonicalHome, { dev: stat.dev, ino: stat.ino });
     } catch (error) {
-      try { await gate?.release(); }
+      const releaseFailures: unknown[] = [];
+      try { await gate?.release(); } catch (releaseError) { releaseFailures.push(releaseError); }
       finally { dropBaseLease(canonicalHome, leaseId); }
-      if (error instanceof PathMutationGateBusyError) throw new AgentHomeBusyError('Agent-home root is reserved for another writer');
-      throw error;
+      if (error instanceof PathMutationGateBusyError) {
+        throw new AgentHomeBusyError('Agent-home root is reserved for another writer');
+      }
+      throw withHomeReleaseFailures(error, releaseFailures);
     }
     const heldGate = gate;
     let released = false;
@@ -1411,12 +1428,9 @@ export class AgentHomeManager {
 
   async prepare(agentRef: AgentRef): Promise<AgentHomeBinding> {
     const binding = await this.acquire(agentRef);
-    try {
-      await this.initialize(binding);
-      return binding;
-    } catch (error) {
-      await binding.lease.release().catch(() => {});
-      throw error;
+    try { await this.initialize(binding); return binding; }
+    catch (error) {
+      return releaseAfterFailure(error, () => binding.lease.release(), withHomeReleaseFailures);
     }
   }
 
@@ -1438,8 +1452,7 @@ export class AgentHomeManager {
     let lease: { release(): Promise<void> };
     try { lease = await this.leaseManager.acquireMaintenance(agentsRoot, home); }
     catch (error) { if (error instanceof AgentHomeBusyError || error instanceof AgentHomeCommitCopyError) return false; throw error; }
-    try { await work(home); return true; }
-    finally { await lease.release(); }
+    return withRelease(async () => { await work(home); return true; }, () => lease.release(), withHomeReleaseFailures);
   }
 
   /** Resolve and lease without applying downstream projection side effects. */
@@ -1510,7 +1523,7 @@ export class AgentHomeManager {
         }
         return;
       }
-      const runsRoot = await ensureDirectoryNoSymlink(resolution.canonicalHome, path.dirname(lease.cwd));
+      await ensureDirectoryNoSymlink(resolution.canonicalHome, path.dirname(lease.cwd));
       const created = await fs.mkdir(lease.cwd, { mode: 0o700 }).then(() => true, (error: NodeJS.ErrnoException) => {
         if (error.code === 'EEXIST') return false;
         throw error;
@@ -1601,7 +1614,7 @@ export class AgentHomeManager {
   async project(input: AgentHomeProjectionPayload): Promise<AgentHomeProjectionOutcome> {
     const payload = AgentHomeProjectionPayloadSchema.parse(input);
     const binding = await this.acquire(payload.agentRef);
-    try {
+    return withRelease(async () => {
       const { resolution, lease } = binding;
       await initializeAgentHome(resolution);
       const applyProjection = async (): Promise<void> => {
@@ -1648,12 +1661,8 @@ export class AgentHomeManager {
       await applyProjection();
       await writeProjectionState(resolution, payload);
       return 'applied';
-    } finally {
-      // A release failure is itself ack-critical: do not let the caller post a
-      // completion or advance the mailbox cursor while writer ownership is
-      // uncertain.
-      await binding.lease.release();
-    }
+    // Release failure is ack-critical: do not acknowledge while ownership is uncertain.
+    }, () => binding.lease.release(), withHomeReleaseFailures);
   }
 }
 

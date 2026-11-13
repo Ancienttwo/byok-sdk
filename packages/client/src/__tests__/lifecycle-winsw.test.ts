@@ -155,7 +155,7 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     await lifecycle.install();
 
     expect(fs.copyFile).toHaveBeenCalledWith('C:\\bundled\\WinSW.exe', 'C:\\acme\\logs/Acme-Agent-.exe');
-    expect(fs.writeFile).toHaveBeenCalledWith('C:\\acme\\logs/Acme-Agent-.xml', expect.any(String), 'utf8');
+    expect(fs.rename).toHaveBeenCalledWith(expect.stringMatching(/\.tmp$/u), 'C:\\acme\\logs/Acme-Agent-.xml');
     expect(calls).toEqual(['C:\\acme\\logs/Acme-Agent-.exe install', 'C:\\acme\\logs/Acme-Agent-.exe start']);
   });
 

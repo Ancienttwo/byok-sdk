@@ -8834,15 +8834,33 @@ export interface DaemonTaskSettlement {
     readonly delivery: 'accepted' | 'rejected' | 'not-required';
     /**
      * `failed` exactly when `runtime-disposal-failed` was emitted for the task's
-     * runtime; a failed release of an offer-owned scratch (`runtimeId: 'scratch'`)
-     * can race the decline or failure settlement and is not covered.
+     * runtime, including a custom harness whose id is `scratch`. A failed
+     * release of an offer-owned scratch emits that event with
+     * `runtimeId: 'scratch'` but never sets `failed`.
      * `none`: this daemon holds no runtime for the task and has no disposal
      * receipt, as for a decline, a failure before start, or any task that
      * finished before a restart.
      */
     readonly disposal: 'disposed' | 'failed' | 'none';
 }
-/** `whenTaskSettled` was asked about a task with no journal row and no in-memory record. */
+/**
+ * `whenTaskSettled` rejects with this when an earlier journal read returned
+ * no row for the task and, once that read finished, this Daemon instance had
+ * no in-memory record of the task (no held runtime, nothing settled or
+ * awaited for it in this run) and no offer for it marked as seen. The read
+ * and those checks are not atomic: an offer appended while the read was
+ * pending ends the mark, so the wait can report unknown although the row now
+ * exists (#2097). The mark also ends when the offer's append is refused, so a
+ * refused offer with no row reads as unknown too. A task whose rows retention
+ * pruned, a task never journaled on this device and an offer still on its way
+ * look the same. Unknown does not prove the task is over or will never start:
+ * an offer may still arrive, and whether one is on its way is for the Host's
+ * own server to answer. Other failures are not reported as this error: a
+ * failed journal read rejects with the journal's error, stored evidence that
+ * fails an SDK check (cancellation identity, hash or binding, or an unknown
+ * terminal state) with an SDK `Error`, a refused offer append with that
+ * append's error, and an abort with `signal.reason`.
+ */
 export declare class DaemonTaskUnknownError extends Error {
     readonly taskId: string;
     readonly code: 'daemon_task_unknown';
@@ -9975,8 +9993,10 @@ export { generateSystemdUnit } from './lifecycle/systemd.js';
 export { generateWinswXml } from './lifecycle/winsw.js';
 export { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from './lifecycle/agent-service.js';
 export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from './lifecycle/agent-service.js';
-export { createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, ServiceInstallationError } from './lifecycle/service-installation.js';
-export type { ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServiceStoreVerdict, ServiceUpgradeReceipt, } from './lifecycle/service-installation.js';
+export { createServiceInstallation, readPayloadManifest, ServiceInstallationError } from './lifecycle/service-installation.js';
+export { readServiceInstallationRecord } from './util/service-installation-record.js';
+export type { ServiceInstallationRecord } from './util/service-installation-record.js';
+export type { ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceStoreVerdict, ServiceUpgradeReceipt, } from './lifecycle/service-installation.js';
 export { SERVICE_PAYLOAD_MANIFEST } from './service-payload-manifest.js';
 export type { ServicePayloadManifest } from './service-payload-manifest.js';
 export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError, } from './lifecycle/service-unit.js';
@@ -11378,7 +11398,15 @@ export interface ServiceInstallationOptions {
      * `current`, `previous`, `snapshots/` and `upgrade-receipt.json` in it.
      */
     installRoot: string;
-    /** The service program, run from `versionDir`. */
+    /**
+     * The service program, run from `versionDir` (`<installRoot>/current`):
+     * the command or an argument must lie under it, or creating the
+     * installation is `service_program_not_current` (#2011). upgrade() and
+     * rollback() also require the installed unit to be exactly the one this
+     * SDK writes. Both are plausibility checks: a removed `current` gates
+     * every start only if the program really runs from it, which is the
+     * Host's contract.
+     */
     program(versionDir: string): ServiceProgram;
     /**
      * The candidate's store precheck, run from its staged `versionDir` while
@@ -11399,9 +11427,19 @@ export interface ServiceInstallationOptions {
      * `store_migration_required` and nothing is switched. Any failure after the
      * snapshot (a throw here, an exit other than 0, a failed or non-accepting
      * second precheck) restores the snapshot and is `store_migration_failed`,
-     * with a thrown or precheck error as `cause`. The Host must make
-     * this program safe to run again after interruption: install has no
-     * write-ahead receipt for a process death during migration.
+     * with a thrown or precheck error as `cause`. On upgrade it is recorded
+     * in the pending receipt before it is awaited (#2011): on POSIX the
+     * process group it leads, on Windows its pid and start time. Until that
+     * group (on Windows, the root) has ended, nothing restores or starts on
+     * the stores: upgrade() throws `upgrade_pending` and recover() changes
+     * nothing. When the record cannot be written, the group gets SIGTERM, then
+     * SIGKILL after a second; only once it is proved gone (ESRCH) is anything
+     * restored, else the call is `upgrade_pending` with `current` absent. A pgid reused by another group also reads as running; recover()
+     * then refuses until that group ends or the machine restarts. A process
+     * that leaves the group (setsid), what a Windows root starts, and a death
+     * between spawn and record stay the Host's responsibility. The Host
+     * must make this program safe to run again after interruption: install
+     * has no write-ahead receipt for a process death during migration.
      */
     migrate?(versionDir: string): ServiceProgram;
     /**
@@ -11446,23 +11484,28 @@ export interface ServiceInstallationOptions {
     lifecycle?: CreateServiceLifecycleOptions;
 }
 /**
- * The upgrade receipt a Host UI reads (`upgrade-receipt.json`):
+ * The upgrade receipt a Host UI reads (`upgrade-receipt.json`, version 2,
+ * #2011):
  *
- * - `pending`: an upgrade or a rollback began and has not been confirmed.
- *   It is written before the service is stopped, so it also covers a death
- *   before the snapshot: `recover()` then starts `from` again without a
- *   store restore. Only `recover()` resolves a pending receipt, by
- *   restoring `from` with the snapshot taken for `to` when one exists. A
- *   rollback journals its target as `from`, so recover completes it.
+ * - `pending`: an operation of `kind` began and has not settled. Only
+ *   `recover()` resolves it, from the receipt and where `current` points:
+ *   a payload starts only through `current`, so the stores are restored
+ *   only while `current` is absent, and a present `current` always runs as
+ *   it is. A rollback journals its target as `from`.
  * - `switched`: `to` runs and passed the health check.
  * - `rolled-back`: `from` runs again with its store snapshot; `code` says why.
  * - `failed`: nothing was switched (`code` and, for a store refusal,
- *   `stores` say why), or a rollback could not bring `from` back to health.
+ *   `stores` say why), a restored `from` failed its health check
+ *   (`rollback_unhealthy`), or `to` stays current but failed its health
+ *   check after an interruption (`switch_unhealthy`): the Host decides
+ *   whether to call rollback() or keep it.
  */
 export interface ServiceUpgradeReceipt {
     format: 'byok-service-upgrade-receipt';
-    version: 1;
+    version: 2;
     state: 'pending' | 'switched' | 'rolled-back' | 'failed';
+    /** What a `pending` receipt journals: an upgrade, a rollback, or a same-id reinstall (`repair`, `from` = `to`). */
+    kind?: 'upgrade' | 'rollback' | 'repair';
     from: string;
     to: string;
     /** Where `previous` pointed before this upgrade; a restore of `from` puts it back, so an earlier upgrade can still be rolled back. */
@@ -11476,6 +11519,16 @@ export interface ServiceUpgradeReceipt {
  * passes the lifecycle's owner check: when another owner is recorded for the
  * store it throws `ServiceUnitError` `lifecycle_owner_conflict` and changes
  * nothing.
+ *
+ * A payload starts only through `current` (#2011): while a pending receipt
+ * has `current` absent the stores may be mid-restore, and the SDK's own
+ * daemon start (`byok-agent start`, createDaemon) refuses with
+ * `store_owned`. A symbolic link anywhere under `snapshots/` (the directory,
+ * a snapshot, a snapshot file) is `snapshots_symlinked` before any side
+ * effect; a link swapped in after that check is the Host's responsibility.
+ * A pending version 1 receipt (SDK 0.42) is `receipt_upgrade_required`:
+ * recover it with SDK 0.42 first. A final one reads as version 2, and the
+ * next write stores version 2.
  */
 export interface ServiceInstallation {
     /** The service lifecycle whose program runs `<installRoot>/current`. */
@@ -11489,7 +11542,13 @@ export interface ServiceInstallation {
      * removes the installation and restores the prepared store snapshot,
      * then throws `install_health_check_failed`. A same-id reinstall only
      * repairs the service and checks health, as before; it does not prepare
-     * stores or change earlier rollback snapshots. An allowed unmarked unit
+     * stores or change earlier rollback snapshots; it journals a pending
+     * `repair` receipt with the prior receipt, stops the service before it
+     * rewrites the unit, and never replaces `current`.
+     * A failed repair keeps the payload, `current` and the unit, writes the
+     * prior receipt back and throws `install_health_check_failed`; an
+     * interrupted one leaves recover() to write the prior receipt back and
+     * throw `repair_interrupted`, after which install() runs again. An allowed unmarked unit
      * is untouched until preparation succeeds; its live store owner causes
      * `store_busy`. An owned marked unit without a current version is stopped
      * before preparation and started again after preparation fails, once
@@ -11526,17 +11585,21 @@ export interface ServiceInstallation {
      * after a failed preparation (such as a failed migration) fails, the
      * stores may be partial: the old version is not restarted, the receipt
      * stays `pending`, and the error names the kept snapshot. Call `recover()`
-     * as soon as possible: the unit stays installed, so a reboot or login
-     * before it starts the old version on those stores. A failed restore
-     * after a failed health check is not covered: it throws the underlying
-     * error, which need not name the snapshot, and `current` may still point
-     * at the candidate (#1992).
+     * as soon as possible; `current` is absent meanwhile, so no payload
+     * starts on those stores. A failed health check journals
+     * `health_check_failed` in the pending receipt before `current` is
+     * removed, so a failed restore after it is `upgrade_pending` too and
+     * recover() finishes it (#1992). The unit must be the exact one this SDK
+     * writes, or the call is `service_program_not_current` before anything
+     * changes.
      */
     upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt>;
     /**
      * Restores `previous` and the store snapshot taken when `current` was
      * switched to, under a `pending` receipt written first. Store writes since
-     * that switch are discarded.
+     * that switch are discarded. It also resolves a `switch_unhealthy`
+     * receipt. The unit must be the exact one this SDK writes, as on
+     * upgrade().
      *
      * The top-level code follows the outcome (#2010). A call that wrote its
      * final receipt throws its first failure's own class and code; later
@@ -11547,17 +11610,32 @@ export interface ServiceInstallation {
      * snapshot remains) throws `upgrade_pending`, whose `cause` lists every
      * failure in order; call recover() next. A lease that failed to release
      * stays held until its process exits, so restart the Host process first
-     * when recover() fails with `store_busy` in its cause. When an upgrade
-     * refusal's `failed` receipt cannot be written, the previous version
-     * stays stopped, since recover() restores the snapshot over whatever it
-     * would write. A preparation error that is neither a
+     * when recover() fails with `store_busy` in its cause. An upgrade
+     * refusal points `current` back at the previous version and starts it
+     * before its `failed` receipt; when that write fails, recover() starts it
+     * again idempotently and writes the receipt. A preparation error that is neither a
      * ServiceInstallationError nor a ServiceUnitError is
      * `store_preparation_failed`, with the original error as its cause.
      */
     rollback(): Promise<ServiceUpgradeReceipt>;
-    /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. Release failures follow the same rule as on `rollback()`. */
+    /**
+     * Resolves a `pending` receipt from its `kind`, code and where `current`
+     * points (#2011). With `current` absent no payload ran since the
+     * snapshot, so it restores the snapshot and starts `from`; with `current`
+     * at `from` or `to` the stores belong to that version, which starts as it
+     * is (idempotently). A candidate found unhealthy settles `failed`
+     * `switch_unhealthy` with nothing started, stopped or restored: the Host
+     * calls rollback() or keeps it. An interrupted same-version reinstall
+     * writes the prior receipt back and throws `repair_interrupted`. A
+     * receipt that no operation leaves for those pointers is
+     * `receipt_state_inconsistent` and nothing changes. It does not check the
+     * unit: a pending receipt is only written after upgrade() or rollback()
+     * checked it. A final version 1 receipt is rewritten as version 2.
+     * Returns the receipt, or `undefined` when there is none. Release
+     * failures follow the same rule as on `rollback()`.
+     */
     recover(): Promise<ServiceUpgradeReceipt | undefined>;
-    /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
+    /** Removes `current` first, so no payload starts even if the unit stays; uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
     uninstall(): Promise<void>;
     /** The last receipt, or `undefined`. */
     receipt(): Promise<ServiceUpgradeReceipt | undefined>;
@@ -11586,8 +11664,13 @@ declare const ERROR_MESSAGES: {
     readonly rollback_unhealthy: 'The previous version was restored but failed its health check too.';
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
     readonly install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.';
+    readonly receipt_upgrade_required: 'Pending SDK 0.42 receipt: run recover() with SDK 0.42 first.';
+    readonly receipt_state_inconsistent: 'The receipt does not match the version pointers. Nothing was changed.';
+    readonly switch_unhealthy: 'The new version stays current but is unhealthy. Call rollback(), or keep it.';
+    readonly repair_interrupted: 'A same-version reinstall was interrupted. Run install() again.';
+    readonly service_program_not_current: 'The service unit must be the one this SDK writes, running from <installRoot>/current. Reinstall the payload installed now (install() with the current version id) to rewrite the unit, then retry.';
     readonly install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.';
-    readonly snapshots_symlinked: 'The install root\'s snapshots/ is a symbolic link. It was not followed and nothing changed; replace it with a directory or remove the link, then retry.';
+    readonly snapshots_symlinked: 'A path under the install root\'s snapshots/ is a symbolic link. Nothing changed; replace the link, then retry.';
 };
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
 /** Closed codes; a store refusal carries the precheck verdicts, and `snapshot_failed` the copy error as `cause`. */
@@ -11596,15 +11679,6 @@ export declare class ServiceInstallationError extends Error {
     readonly stores?: readonly ServiceStoreVerdict[] | undefined;
     constructor(code: ServiceInstallationErrorCode, stores?: readonly ServiceStoreVerdict[] | undefined, options?: ErrorOptions);
 }
-/** `<storeDir>/service/installation.json`: where this store's installation lives. */
-export interface ServiceInstallationRecord {
-    format: 'byok-service-installation';
-    version: 1;
-    installRoot: string;
-}
-export declare function serviceInstallationRecordPath(storeDir: string): string;
-/** The installation record of a store, or `undefined` when the service is not installed from payloads. */
-export declare function readServiceInstallationRecord(storeDir: string): Promise<ServiceInstallationRecord | undefined>;
 /**
  * @internal The running version and the last receipt of an install root,
  * read from disk only: no service definition, unit or service manager is
@@ -11613,6 +11687,7 @@ export declare function readServiceInstallationRecord(storeDir: string): Promise
 export declare function readServiceInstallationState(installRoot: string): Promise<{
     current: string | undefined;
     receipt: ServiceUpgradeReceipt | undefined;
+    receiptError?: 'receipt_upgrade_required';
 }>;
 export declare function createServiceInstallation(opts: ServiceInstallationOptions): ServiceInstallation;
 /**
@@ -15093,9 +15168,10 @@ export declare function buildProjectionIcaclsArgs(dir: string, username: string)
 export declare function ensurePiProjectionDir(dir: string, opts?: EnsureSecureDirOptions): Promise<void>;
 /**
  * Whether `dir` breaks the POSIX 0700 rule for `role`, without changing it.
- * Nothing to report on a platform without getuid, or for a store root another
- * user owns. stat, not lstat: a symlinked directory root stays supported, and
- * its target's mode is the one that matters.
+ * Nothing to report on a platform without geteuid, or for a store root another
+ * user owns. Ownership is compared with the effective uid, the one that owns
+ * the files this process creates (#2016). stat, not lstat: a symlinked
+ * directory root stays supported, and its target's mode is the one that matters.
  */
 export declare function isModeNot0700(dir: string, role: 'owned' | 'store-root'): Promise<boolean>;
 /** Re-asserts 0600 on POSIX and a non-inherited owner/SYSTEM/Admin DACL on Windows. */
@@ -15117,6 +15193,28 @@ export declare function createPrivateTempDir(parent: string, prefix: string): Pr
  * scratch root gets. The caller removes it.
  */
 export declare function createPrivateSystemTempDir(prefix: string): Promise<string>;
+// ==== @byok-sdk/client dist/util/service-installation-record.d.ts ====
+export type InstallPointer = 'current' | 'previous';
+/** `<storeDir>/service/installation.json`: where this store's installation lives. */
+export interface ServiceInstallationRecord {
+    format: 'byok-service-installation';
+    version: 1;
+    installRoot: string;
+}
+export declare function serviceInstallationRecordPath(storeDir: string): string;
+/** The installation record of a store, or `undefined` when the service is not installed from payloads. */
+export declare function readServiceInstallationRecord(storeDir: string): Promise<ServiceInstallationRecord | undefined>;
+/** The version `<installRoot>/<name>` points at, or `undefined` when the pointer is absent. */
+export declare function readInstallPointer(installRoot: string, name: InstallPointer): Promise<string | undefined>;
+/**
+ * @internal Whether a daemon on `storeDir` must not start (#2011): its
+ * installation journals a pending operation with `current` absent, so the
+ * stores may be mid-restore. The SDK's own entries (`byok-agent start`,
+ * createDaemon) check it under the store lease; a process with no
+ * installation record is outside this guarantee (the Host's contract). Any
+ * receipt version counts: only the state is read.
+ */
+export declare function installationHoldsStart(storeDir: string): Promise<boolean>;
 // ==== @byok-sdk/client dist/util/sqlite-support.d.ts ====
 import type { DatabaseSync } from 'node:sqlite';
 /**

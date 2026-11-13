@@ -60,7 +60,7 @@ async function idleHome(files=0){
 const exists=(file:string)=>fs.lstat(file).then(()=>true,(error:NodeJS.ErrnoException)=>{if(error.code==='ENOENT')return false;throw error;});
 async function old(file:string){const when=new Date('2026-10-01T00:00:00Z');await fs.utimes(file,when,when);}
 async function terminal(journal:SqliteLocalTaskJournal,taskId:string,state:'pending'|'confirmed',at='2026-09-01T00:00:00.000Z') {
- const bytes=JSON.stringify({taskId});await journal.appendEnvelope({identity,taskId,envelopeId:taskId,seq:1,bytes,bytesHash:journalHash(bytes),receivedAt:at,opensTask:true});
+ const bytes=JSON.stringify({task_id:taskId});await journal.appendEnvelope({identity,taskId,envelopeId:taskId,seq:1,bytes,bytesHash:journalHash(bytes),receivedAt:at,opensTask:true});
  await journal.recordTerminal({taskId,terminalType:'complete',bytes,payloadHash:journalHash(bytes),truthState:state,attempt:1,recordedAt:at});
 }
 it('disposal deletes SDK secrets before receipt and runtime residue expires exactly at its TTL',async()=>{

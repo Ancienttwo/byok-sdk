@@ -76,7 +76,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
 
     await lifecycle.install();
 
-    expect(fs.writeFile).toHaveBeenCalledWith('/Users/tester/Library/LaunchAgents/Acme-Agent-.plist', expect.any(String), 'utf8');
+    expect(fs.rename).toHaveBeenCalledWith(expect.stringMatching(/\.tmp$/u), '/Users/tester/Library/LaunchAgents/Acme-Agent-.plist');
     expect(run).toHaveBeenCalledWith('launchctl', ['bootstrap', 'gui/501', '/Users/tester/Library/LaunchAgents/Acme-Agent-.plist']);
     expect(run).toHaveBeenCalledWith('launchctl', ['enable', 'gui/501/Acme-Agent-']);
   });
@@ -86,7 +86,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     const fs = fakeFs();
     await createLaunchdLifecycle(def(), { run, fs, homedir: () => '/tmp/scratch-home', getuid: () => 501 }).install();
 
-    const plist = vi.mocked(fs.writeFile).mock.calls.find(([file]) => file === '/tmp/scratch-home/Library/LaunchAgents/Acme-Agent-.plist')?.[1];
+    const plist = fs.files.get('/tmp/scratch-home/Library/LaunchAgents/Acme-Agent-.plist');
     expect(plist).toContain('<key>EnvironmentVariables</key>\n  <dict>\n    <key>HOME</key>\n    <string>/tmp/scratch-home</string>\n  </dict>');
   });
 
@@ -145,7 +145,8 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
       { run, fs, homedir: () => '/h', getuid: () => 501 },
     ).install();
     expect(fs.files.get(LAUNCHER)).toBe(`#!/bin/sh\n# ${SERVICE_UNIT_MARKER}\nexec '/opt/host/bin/host-agent' 'run' '--profile' 'default'\n`);
-    expect(fs.chmod).toHaveBeenCalledWith(LAUNCHER, 0o755);
+    // The mode is set before the rename replaces the launcher.
+    expect(fs.chmod).toHaveBeenCalledWith(expect.stringMatching(/launcher\.sh\.\d+\.tmp$/u), 0o755);
     const plist = fs.files.get(PLIST);
 
     await createLaunchdLifecycle(

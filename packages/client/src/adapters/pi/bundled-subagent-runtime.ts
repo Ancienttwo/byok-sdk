@@ -121,7 +121,7 @@ export async function prepareBundledSubagents(root: string, assetRoot: string, t
 /** Refuse explicit async and every workflow; preserve upstream resolution of omitted async. */
 export const refuseBundledBackground: ExtensionFactory = pi => {
   const reason = isNodeSea()
-    ? 'pi_background_unavailable: Node SEA cannot run background Pi subagents or workflows: pi-subagents 0.87.0 uses resolveNodeExecutable for its background runner and fork on process.execPath for its workflow supervisor; a SEA binary cannot stand in for Node. Foreground non-workflow subagents work; use a Bun-compiled product with shipped assets for background subagents and workflows.'
+    ? 'pi_background_unavailable: Node SEA cannot run background Pi subagents or workflows: pi-subagents 0.88.1 uses resolveNodeExecutable for its background runner and fork on process.execPath for its workflow supervisor; a SEA binary cannot stand in for Node. Foreground non-workflow subagents work; use a Bun-compiled product with shipped assets for background subagents and workflows.'
     : isBunExecutable()
       ? MISSING_BUN_ASSETS
       : 'pi_background_unavailable: the background runner cannot re-enter a bundle run by an interpreter. Foreground non-workflow subagents work; use a Bun-compiled product with shipped assets for background subagents and workflows.';

@@ -11,6 +11,7 @@ import { CanonicalBase64Url32 } from './canonical-base64url.js';
 import { ByokKeysError } from './errors.js';
 import { assertSecretName } from './secret-name.js';
 import type { SecretStore } from './secret-store.js';
+import { secretStoreCall } from './secret-store-call.js';
 
 /**
  * Credential-store entry holding this device's long-lived P-256 sealing key
@@ -124,7 +125,7 @@ export class DeviceSealingKeyStore {
   }
 
   async #read(): Promise<StoredSealingKey | undefined> {
-    const raw = await this.#secrets.get(DEVICE_SEALING_SECRET_NAME);
+    const raw = await secretStoreCall(() => this.#secrets.get(DEVICE_SEALING_SECRET_NAME), 'device_sealing_key');
     if (raw === undefined) return undefined;
     let json: unknown;
     try {
@@ -148,7 +149,7 @@ export class DeviceSealingKeyStore {
       jwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, d: jwk.d },
     });
     if (!record.success) throw invalidStoredKey();
-    await this.#secrets.set(DEVICE_SEALING_SECRET_NAME, canonicalizeJson(record.data));
+    await secretStoreCall(() => this.#secrets.set(DEVICE_SEALING_SECRET_NAME, canonicalizeJson(record.data)), 'device_sealing_key');
     // Read back: if another process replaced the entry concurrently, the
     // stored key — not the one generated here — is the device's key.
     const stored = await this.#read();

@@ -217,6 +217,12 @@ export interface TaskRunnerDeps {
     reason: string;
   }) => void;
   /**
+   * Local-only evidence that an offer-owned scratch release failed. Separate
+   * from {@link onRuntimeDisposalFailure}: that scratch is not the task's
+   * runtime, and a custom harness may itself be named `scratch`.
+   */
+  onOfferScratchDisposalFailure?: (event: { taskId: string; reason: string }) => void;
+  /**
    * Local-only diagnostic: one {@link ExecutionRecord} per started execution,
    * after the first terminal finalization attempt settles, including failure.
    * It never changes the

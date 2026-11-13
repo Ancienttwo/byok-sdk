@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { createServiceLifecycle, type DaemonConfig, type ServiceDefinition, type ServiceLifecycle } from '../../index.js';
 import { agentServiceDefinition, agentServiceInstallation } from '../../lifecycle/agent-service.js';
-import { createServiceInstallation, readServiceInstallationRecord, ServiceInstallationError, type ServiceInstallation } from '../../lifecycle/service-installation.js';
+import { createServiceInstallation, ServiceInstallationError, type ServiceInstallation } from '../../lifecycle/service-installation.js';
+import { readServiceInstallationRecord } from '../../util/service-installation-record.js';
 import { readLastLifecycleRecord } from '../../daemon/audit-log.js';
 import { argValue, hasFlag, resolveStoreDir } from '../config.js';
 import { formatLifecycle, formatLifecycleRemedy } from '../../diagnostics/format.js';

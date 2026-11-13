@@ -56,7 +56,7 @@ export async function loadPrivateTeamDocument(file: string): Promise<unknown> {
   const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const stat = await handle.stat();
-    if (!stat.isFile() || stat.size < 1 || stat.size > 16_384 || (stat.mode & 0o077) !== 0 || stat.uid !== process.getuid!()) throw new Error('bindings must be an owner-only regular file of at most 16384 bytes');
+    if (!stat.isFile() || stat.size < 1 || stat.size > 16_384 || (stat.mode & 0o077) !== 0 || stat.uid !== process.geteuid!()) throw new Error('bindings must be an owner-only regular file of at most 16384 bytes');
     const contents = await handle.readFile('utf8');
     if (Buffer.byteLength(contents) > 16_384) throw new Error('bindings file exceeds size limit');
     let parsed: unknown;

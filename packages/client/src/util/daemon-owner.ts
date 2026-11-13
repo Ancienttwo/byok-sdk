@@ -5,9 +5,11 @@ import path from 'node:path';
 import { sameContent } from './file-state.js';
 import { ensureSecureStoreRoot } from './secure-dir.js';
 import { listenPrivateUnixSocket, privateSocketEndpoint, PrivateSocketInUseError, reclaimPrivateSocketFallbackDirectory } from './private-unix-socket.js';
+import { withRelease } from './with-release.js';
 import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
+  withGateReleaseFailures,
   type PathMutationGate,
 } from '../util/path-mutation-gate.js';
 
@@ -78,18 +80,26 @@ export function storeMutexEndpoint(
 }
 
 export class DaemonOwnerActiveError extends Error {
-  constructor(public readonly role: OwnerRecord['role'] | 'unknown') {
-    super(`store mutation lease is already held by an active ${role} process`);
+  constructor(public readonly role: OwnerRecord['role'] | 'unknown', options?: ErrorOptions) {
+    super(`store mutation lease is already held by an active ${role} process`, options);
     this.name = 'DaemonOwnerActiveError';
   }
 }
 
 /** Another process is reclaiming this store's stale lease; retry once it is done. */
 export class DaemonOwnerReclaimingError extends Error {
-  constructor() {
-    super('store mutation lease is being reclaimed; retry after the current operation finishes');
+  constructor(options?: ErrorOptions) {
+    super('store mutation lease is being reclaimed; retry after the current operation finishes', options);
     this.name = 'DaemonOwnerReclaimingError';
   }
+}
+
+function withOwnerReleaseFailures<T>(error: T, failures: readonly unknown[]): T | Error {
+  if (failures.length === 0) return error;
+  const cause = new AggregateError([error, ...failures]);
+  if (error instanceof DaemonOwnerActiveError) return new DaemonOwnerActiveError(error.role, { cause });
+  if (error instanceof DaemonOwnerReclaimingError) return new DaemonOwnerReclaimingError({ cause });
+  return withGateReleaseFailures(error, failures) as Error;
 }
 
 function isOwnerRecord(value: unknown): value is OwnerRecord {
@@ -250,9 +260,7 @@ async function acquireStoreMutexOnce(canonicalStoreDir: string): Promise<StoreMu
   const endpoint = storeMutexEndpoint(canonicalStoreDir, identity);
   const server: Server = createServer((socket) => endOwnershipProbe(socket));
   try {
-    if (process.platform !== 'win32') {
-      await listenPrivateUnixSocket(server, endpoint);
-    } else {
+    if (process.platform === 'win32') {
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject);
         server.listen(endpoint, () => {
@@ -260,6 +268,8 @@ async function acquireStoreMutexOnce(canonicalStoreDir: string): Promise<StoreMu
           resolve();
         });
       });
+    } else {
+      await listenPrivateUnixSocket(server, endpoint);
     }
   } catch (err) {
     if (err instanceof PrivateSocketInUseError || (err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
@@ -373,6 +383,7 @@ export async function acquireDaemonOwner(
   }
   let mutex: StoreMutexLock | undefined;
   let liveness: LivenessListener | undefined;
+  const failures: unknown[] = [];
   try {
     // No target path is created until the fixed OS-temp path gate is held.
     // Relocation uses the same gate and therefore cannot pass inspection
@@ -419,7 +430,7 @@ export async function acquireDaemonOwner(
               scope: 'store',
               targetPath: canonicalStoreDir,
             }, { waitMs: 2_000 });
-            try {
+            await withRelease(async () => {
               const current = await readOwner(ownerPath);
               if (current?.nonce !== record.nonce) {
                 throw new Error('store mutation lease identity changed before release');
@@ -428,9 +439,7 @@ export async function acquireDaemonOwner(
               await ownedMutex.close();
               await fs.rm(ownerPath);
               released = true;
-            } finally {
-              await releaseGate.release();
-            }
+            }, () => releaseGate.release(), withOwnerReleaseFailures);
           },
         };
       }
@@ -441,7 +450,7 @@ export async function acquireDaemonOwner(
       if (!(await createOwner(reclaimPath, record))) {
         throw new DaemonOwnerReclaimingError();
       }
-      try {
+      await withRelease(async () => {
         const rechecked = await readOwner(ownerPath);
         if (rechecked && (await processOwnsRecord(rechecked))) throw new DaemonOwnerActiveError(rechecked.role);
         if (rechecked || (await fs.stat(ownerPath).then(() => true, (err: NodeJS.ErrnoException) => {
@@ -450,15 +459,15 @@ export async function acquireDaemonOwner(
         }))) {
           await fs.rm(ownerPath);
         }
-      } finally {
+      }, async () => {
         const currentReclaim = await readOwner(reclaimPath);
         if (currentReclaim?.nonce === record.nonce) await fs.rm(reclaimPath, { force: true });
-      }
+      }, (error, errors) => { failures.push(...errors); return error; });
     }
   } catch (err) {
-    await liveness?.close().catch(() => undefined);
-    await mutex?.close().catch(() => undefined);
-    await pathGate?.release().catch(() => undefined);
-    throw err;
+    for (const close of [() => liveness?.close(), () => mutex?.close(), () => pathGate?.release()]) {
+      try { await close(); } catch (failure) { failures.push(failure); }
+    }
+    throw withOwnerReleaseFailures(err, failures);
   }
 }

@@ -1,5 +1,6 @@
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../../util/daemon-owner.js';
 import { DaemonHaltError } from '../daemon-lifecycle.js';
+import { installationHoldsStart } from '../../util/service-installation-record.js';
 import { AuthRequestAbortedError } from '../auth-manager.js';
 import { DeviceCredentialCommandAbortedError } from '../device-credential-store.js';
 import path from 'node:path';
@@ -31,6 +32,8 @@ export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch:
     }
   }
   try {
+  // An installation mid-restore owns the stores even after its installer died (#2011).
+  if (await installationHoldsStart(storeDir)) throw new DaemonHaltError('store_owned');
   const run = await openStartRun(daemonScope, requestEpoch);
   if (run === undefined) return;
   const {

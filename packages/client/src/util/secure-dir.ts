@@ -281,12 +281,13 @@ async function secureDir(dir: string, buildArgs: (dir: string, username: string)
 
 /**
  * Whether `dir` breaks the POSIX 0700 rule for `role`, without changing it.
- * Nothing to report on a platform without getuid, or for a store root another
- * user owns. stat, not lstat: a symlinked directory root stays supported, and
- * its target's mode is the one that matters.
+ * Nothing to report on a platform without geteuid, or for a store root another
+ * user owns. Ownership is compared with the effective uid, the one that owns
+ * the files this process creates (#2016). stat, not lstat: a symlinked
+ * directory root stays supported, and its target's mode is the one that matters.
  */
 export async function isModeNot0700(dir: string, role: 'owned' | 'store-root'): Promise<boolean> {
-  const uid = process.getuid?.();
+  const uid = process.geteuid?.();
   if (uid === undefined) return false;
   const stat = await fs.stat(dir);
   if (role === 'store-root' && stat.uid !== uid) return false;

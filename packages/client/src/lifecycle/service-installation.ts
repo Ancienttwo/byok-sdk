@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { createConnection } from 'node:net';
@@ -9,13 +9,15 @@ import { controlEndpointPath, controlTokenPath, type ControlStatusResult } from 
 import { daemonLifecycleHealth, type DaemonLifecycle } from '../daemon/daemon-lifecycle.js';
 import { acquireDaemonOwner, DaemonOwnerActiveError, DaemonOwnerReclaimingError, type DaemonOwnerLease } from '../util/daemon-owner.js';
 import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger.js';
+import { ownedProcessGroupRecord, ownedProcessGroupRuns, type OwnedProcessGroupRecord } from '../adapters/process-tree.js';
 import { acquirePathMutationGate, acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate.js';
 import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle.js';
 import type { HeldServiceLifecycle, ManagedServiceLifecycle } from './managed-lifecycle.js';
 import {
   isJsonObject, isPayloadPath, listPayloadFiles, SERVICE_PAYLOAD_MANIFEST, sha256File, SHA256_HEX, VERSION_ID, type ServicePayloadManifest,
 } from '../service-payload-manifest.js';
-import { serviceStateDir, ServiceUnitError } from './service-unit.js';
+import { ServiceUnitError } from './service-unit.js';
+import { readInstallPointer, readServiceInstallationRecord, serviceInstallationRecordPath, type InstallPointer, type ServiceInstallationRecord } from '../util/service-installation-record.js';
 import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types.js';
 
 /**
@@ -62,7 +64,15 @@ export interface ServiceInstallationOptions {
    * `current`, `previous`, `snapshots/` and `upgrade-receipt.json` in it.
    */
   installRoot: string;
-  /** The service program, run from `versionDir`. */
+  /**
+   * The service program, run from `versionDir` (`<installRoot>/current`):
+   * the command or an argument must lie under it, or creating the
+   * installation is `service_program_not_current` (#2011). upgrade() and
+   * rollback() also require the installed unit to be exactly the one this
+   * SDK writes. Both are plausibility checks: a removed `current` gates
+   * every start only if the program really runs from it, which is the
+   * Host's contract.
+   */
   program(versionDir: string): ServiceProgram;
   /**
    * The candidate's store precheck, run from its staged `versionDir` while
@@ -83,9 +93,19 @@ export interface ServiceInstallationOptions {
    * `store_migration_required` and nothing is switched. Any failure after the
    * snapshot (a throw here, an exit other than 0, a failed or non-accepting
    * second precheck) restores the snapshot and is `store_migration_failed`,
-   * with a thrown or precheck error as `cause`. The Host must make
-   * this program safe to run again after interruption: install has no
-   * write-ahead receipt for a process death during migration.
+   * with a thrown or precheck error as `cause`. On upgrade it is recorded
+   * in the pending receipt before it is awaited (#2011): on POSIX the
+   * process group it leads, on Windows its pid and start time. Until that
+   * group (on Windows, the root) has ended, nothing restores or starts on
+   * the stores: upgrade() throws `upgrade_pending` and recover() changes
+   * nothing. When the record cannot be written, the group gets SIGTERM, then
+   * SIGKILL after a second; only once it is proved gone (ESRCH) is anything
+   * restored, else the call is `upgrade_pending` with `current` absent. A pgid reused by another group also reads as running; recover()
+   * then refuses until that group ends or the machine restarts. A process
+   * that leaves the group (setsid), what a Windows root starts, and a death
+   * between spawn and record stay the Host's responsibility. The Host
+   * must make this program safe to run again after interruption: install
+   * has no write-ahead receipt for a process death during migration.
    */
   migrate?(versionDir: string): ServiceProgram;
   /**
@@ -131,23 +151,28 @@ export interface ServiceInstallationOptions {
 }
 
 /**
- * The upgrade receipt a Host UI reads (`upgrade-receipt.json`):
+ * The upgrade receipt a Host UI reads (`upgrade-receipt.json`, version 2,
+ * #2011):
  *
- * - `pending`: an upgrade or a rollback began and has not been confirmed.
- *   It is written before the service is stopped, so it also covers a death
- *   before the snapshot: `recover()` then starts `from` again without a
- *   store restore. Only `recover()` resolves a pending receipt, by
- *   restoring `from` with the snapshot taken for `to` when one exists. A
- *   rollback journals its target as `from`, so recover completes it.
+ * - `pending`: an operation of `kind` began and has not settled. Only
+ *   `recover()` resolves it, from the receipt and where `current` points:
+ *   a payload starts only through `current`, so the stores are restored
+ *   only while `current` is absent, and a present `current` always runs as
+ *   it is. A rollback journals its target as `from`.
  * - `switched`: `to` runs and passed the health check.
  * - `rolled-back`: `from` runs again with its store snapshot; `code` says why.
  * - `failed`: nothing was switched (`code` and, for a store refusal,
- *   `stores` say why), or a rollback could not bring `from` back to health.
+ *   `stores` say why), a restored `from` failed its health check
+ *   (`rollback_unhealthy`), or `to` stays current but failed its health
+ *   check after an interruption (`switch_unhealthy`): the Host decides
+ *   whether to call rollback() or keep it.
  */
 export interface ServiceUpgradeReceipt {
   format: 'byok-service-upgrade-receipt';
-  version: 1;
+  version: 2;
   state: 'pending' | 'switched' | 'rolled-back' | 'failed';
+  /** What a `pending` receipt journals: an upgrade, a rollback, or a same-id reinstall (`repair`, `from` = `to`). */
+  kind?: 'upgrade' | 'rollback' | 'repair';
   from: string;
   to: string;
   /** Where `previous` pointed before this upgrade; a restore of `from` puts it back, so an earlier upgrade can still be rolled back. */
@@ -162,6 +187,16 @@ export interface ServiceUpgradeReceipt {
  * passes the lifecycle's owner check: when another owner is recorded for the
  * store it throws `ServiceUnitError` `lifecycle_owner_conflict` and changes
  * nothing.
+ *
+ * A payload starts only through `current` (#2011): while a pending receipt
+ * has `current` absent the stores may be mid-restore, and the SDK's own
+ * daemon start (`byok-agent start`, createDaemon) refuses with
+ * `store_owned`. A symbolic link anywhere under `snapshots/` (the directory,
+ * a snapshot, a snapshot file) is `snapshots_symlinked` before any side
+ * effect; a link swapped in after that check is the Host's responsibility.
+ * A pending version 1 receipt (SDK 0.42) is `receipt_upgrade_required`:
+ * recover it with SDK 0.42 first. A final one reads as version 2, and the
+ * next write stores version 2.
  */
 export interface ServiceInstallation {
   /** The service lifecycle whose program runs `<installRoot>/current`. */
@@ -175,7 +210,13 @@ export interface ServiceInstallation {
    * removes the installation and restores the prepared store snapshot,
    * then throws `install_health_check_failed`. A same-id reinstall only
    * repairs the service and checks health, as before; it does not prepare
-   * stores or change earlier rollback snapshots. An allowed unmarked unit
+   * stores or change earlier rollback snapshots; it journals a pending
+   * `repair` receipt with the prior receipt, stops the service before it
+   * rewrites the unit, and never replaces `current`.
+   * A failed repair keeps the payload, `current` and the unit, writes the
+   * prior receipt back and throws `install_health_check_failed`; an
+   * interrupted one leaves recover() to write the prior receipt back and
+   * throw `repair_interrupted`, after which install() runs again. An allowed unmarked unit
    * is untouched until preparation succeeds; its live store owner causes
    * `store_busy`. An owned marked unit without a current version is stopped
    * before preparation and started again after preparation fails, once
@@ -212,17 +253,21 @@ export interface ServiceInstallation {
    * after a failed preparation (such as a failed migration) fails, the
    * stores may be partial: the old version is not restarted, the receipt
    * stays `pending`, and the error names the kept snapshot. Call `recover()`
-   * as soon as possible: the unit stays installed, so a reboot or login
-   * before it starts the old version on those stores. A failed restore
-   * after a failed health check is not covered: it throws the underlying
-   * error, which need not name the snapshot, and `current` may still point
-   * at the candidate (#1992).
+   * as soon as possible; `current` is absent meanwhile, so no payload
+   * starts on those stores. A failed health check journals
+   * `health_check_failed` in the pending receipt before `current` is
+   * removed, so a failed restore after it is `upgrade_pending` too and
+   * recover() finishes it (#1992). The unit must be the exact one this SDK
+   * writes, or the call is `service_program_not_current` before anything
+   * changes.
    */
   upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt>;
   /**
    * Restores `previous` and the store snapshot taken when `current` was
    * switched to, under a `pending` receipt written first. Store writes since
-   * that switch are discarded.
+   * that switch are discarded. It also resolves a `switch_unhealthy`
+   * receipt. The unit must be the exact one this SDK writes, as on
+   * upgrade().
    *
    * The top-level code follows the outcome (#2010). A call that wrote its
    * final receipt throws its first failure's own class and code; later
@@ -233,17 +278,32 @@ export interface ServiceInstallation {
    * snapshot remains) throws `upgrade_pending`, whose `cause` lists every
    * failure in order; call recover() next. A lease that failed to release
    * stays held until its process exits, so restart the Host process first
-   * when recover() fails with `store_busy` in its cause. When an upgrade
-   * refusal's `failed` receipt cannot be written, the previous version
-   * stays stopped, since recover() restores the snapshot over whatever it
-   * would write. A preparation error that is neither a
+   * when recover() fails with `store_busy` in its cause. An upgrade
+   * refusal points `current` back at the previous version and starts it
+   * before its `failed` receipt; when that write fails, recover() starts it
+   * again idempotently and writes the receipt. A preparation error that is neither a
    * ServiceInstallationError nor a ServiceUnitError is
    * `store_preparation_failed`, with the original error as its cause.
    */
   rollback(): Promise<ServiceUpgradeReceipt>;
-  /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. Release failures follow the same rule as on `rollback()`. */
+  /**
+   * Resolves a `pending` receipt from its `kind`, code and where `current`
+   * points (#2011). With `current` absent no payload ran since the
+   * snapshot, so it restores the snapshot and starts `from`; with `current`
+   * at `from` or `to` the stores belong to that version, which starts as it
+   * is (idempotently). A candidate found unhealthy settles `failed`
+   * `switch_unhealthy` with nothing started, stopped or restored: the Host
+   * calls rollback() or keeps it. An interrupted same-version reinstall
+   * writes the prior receipt back and throws `repair_interrupted`. A
+   * receipt that no operation leaves for those pointers is
+   * `receipt_state_inconsistent` and nothing changes. It does not check the
+   * unit: a pending receipt is only written after upgrade() or rollback()
+   * checked it. A final version 1 receipt is rewritten as version 2.
+   * Returns the receipt, or `undefined` when there is none. Release
+   * failures follow the same rule as on `rollback()`.
+   */
   recover(): Promise<ServiceUpgradeReceipt | undefined>;
-  /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
+  /** Removes `current` first, so no payload starts even if the unit stays; uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
   uninstall(): Promise<void>;
   /** The last receipt, or `undefined`. */
   receipt(): Promise<ServiceUpgradeReceipt | undefined>;
@@ -273,8 +333,13 @@ const ERROR_MESSAGES = {
   rollback_unhealthy: 'The previous version was restored but failed its health check too.',
   no_rollback: 'There is no previous version with a store snapshot to roll back to.',
   install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.',
+  receipt_upgrade_required: 'Pending SDK 0.42 receipt: run recover() with SDK 0.42 first.',
+  receipt_state_inconsistent: 'The receipt does not match the version pointers. Nothing was changed.',
+  switch_unhealthy: 'The new version stays current but is unhealthy. Call rollback(), or keep it.',
+  repair_interrupted: 'A same-version reinstall was interrupted. Run install() again.',
+  service_program_not_current: 'The service unit must be the one this SDK writes, running from <installRoot>/current. Reinstall the payload installed now (install() with the current version id) to rewrite the unit, then retry.',
   install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.',
-  snapshots_symlinked: 'The install root\'s snapshots/ is a symbolic link. It was not followed and nothing changed; replace it with a directory or remove the link, then retry.',
+  snapshots_symlinked: 'A path under the install root\'s snapshots/ is a symbolic link. Nothing changed; replace the link, then retry.',
 } as const;
 
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
@@ -287,35 +352,6 @@ export class ServiceInstallationError extends Error {
   }
 }
 
-/** `<storeDir>/service/installation.json`: where this store's installation lives. */
-export interface ServiceInstallationRecord {
-  format: 'byok-service-installation';
-  version: 1;
-  installRoot: string;
-}
-
-export function serviceInstallationRecordPath(storeDir: string): string {
-  return path.join(serviceStateDir(storeDir), 'installation.json');
-}
-
-/** The installation record of a store, or `undefined` when the service is not installed from payloads. */
-export async function readServiceInstallationRecord(storeDir: string): Promise<ServiceInstallationRecord | undefined> {
-  let text: string;
-  try {
-    text = await fs.readFile(serviceInstallationRecordPath(storeDir), 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw error;
-  }
-  const record = JSON.parse(text) as Partial<ServiceInstallationRecord>;
-  if (record.format !== 'byok-service-installation' || record.version !== 1 || typeof record.installRoot !== 'string' || !path.isAbsolute(record.installRoot)) {
-    throw new Error(`service installation record ${serviceInstallationRecordPath(storeDir)} is not a version 1 record`);
-  }
-  return record as ServiceInstallationRecord;
-}
-
-const POINTERS = ['current', 'previous'] as const;
-type Pointer = (typeof POINTERS)[number];
 /** A SQLite store is its main file plus a WAL or a hot rollback journal; `-shm` is rebuilt and is removed on restore. */
 const STORE_FILE_SUFFIXES = ['', '-wal', '-journal'] as const;
 const STORE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/u;
@@ -379,6 +415,30 @@ function unfinishedFailure(errors: readonly unknown[], note: string): ServiceIns
   return error;
 }
 
+const RELEASE_NOTE = 'The store gates or leases could not be released.';
+const STOP_NOTE = 'The service could not be stopped and its stores leased.';
+
+/** A migrate group that outlived its root (#2011): nothing is restored or started, and the record stays. */
+class MigrateRunning extends Error {}
+
+const migrateNote = (pgid: number): string => `Migrate process group ${pgid} may still run; nothing restored or started. Run recover() after it ends.`;
+
+/**
+ * POSIX: whether process group `pgid` ends within `timeoutMs`. Only ESRCH
+ * proves it; any other answer is asked again (darwin answers EPERM while the
+ * group's last process exits).
+ */
+async function groupGone(pgid: number, timeoutMs = 5000): Promise<boolean> {
+  for (const until = Date.now() + timeoutMs; Date.now() < until; await delay(50)) {
+    try {
+      process.kill(-pgid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true;
+    }
+  }
+  return false;
+}
+
 /** A preparation exit is typed (#2010): an error that is not ours becomes `store_preparation_failed`. */
 function preparationError(error: unknown): unknown {
   return error instanceof ServiceInstallationError || error instanceof ServiceUnitError
@@ -403,22 +463,55 @@ class PreparationFailure extends Error {
   }
 }
 
-/** The version `<installRoot>/<name>` points at, or `undefined` when the pointer is absent. */
-async function readInstallPointer(installRoot: string, name: Pointer): Promise<string | undefined> {
-  const link = path.join(installRoot, name);
-  let target: string;
-  try {
-    target = await fs.readlink(link);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw error;
-  }
-  const id = path.basename(target.replace(/[\\/]+$/u, ''));
-  if (!VERSION_ID.test(id)) throw new Error(`${link} does not point into ${path.join(installRoot, 'versions')}`);
-  return id;
+/** A receipt as stored: a pending one also keeps what recover() needs. */
+interface StoredReceipt extends ServiceUpgradeReceipt {
+  /** The migrate program's process group while it may run (#2011). */
+  migrate?: OwnedProcessGroupRecord;
+  /** A pending repair: the final receipt it replaced, written back when it settles. */
+  prior?: ServiceUpgradeReceipt;
 }
 
-async function readUpgradeReceipt(installRoot: string): Promise<ServiceUpgradeReceipt | undefined> {
+/** What a pending receipt journals: everything recover() needs, with `kind` set. */
+type Journal = Omit<StoredReceipt, 'format' | 'version' | 'at' | 'state' | 'kind'> & { kind: NonNullable<StoredReceipt['kind']> };
+
+const PENDING_KINDS: ReadonlySet<unknown> = new Set(['upgrade', 'rollback', 'repair']);
+/** Codes a restored `from` settles as `rolled-back`; a refusal's code settles as `failed`. */
+const ROLLED_BACK_CODES: ReadonlySet<ServiceInstallationErrorCode> = new Set(['health_check_failed', 'upgrade_pending']);
+
+/**
+ * recover()'s whole decision (#2011): a pending receipt's `kind`, its code
+ * (none, `health_check_failed`, or a refusal's) and where `current` points
+ * (absent, `from`, `to`, another version) select one action. A cell no
+ * operation leaves is missing here and is `receipt_state_inconsistent`.
+ *
+ * - `restore`: `current` is absent, so no payload ran since the snapshot:
+ *   restore it when complete, put back `previous`, point `current` at
+ *   `from`, start it and settle.
+ * - `from` / `to`: `current` is present, so the stores belong to it: start
+ *   it as it is (idempotently) and settle.
+ * - `unhealthy`: the candidate was found unhealthy and may have run since:
+ *   nothing starts, stops or is restored; `switch_unhealthy`.
+ * - `repair`: an interrupted same-version reinstall: its prior receipt is
+ *   written back and `repair_interrupted` thrown; nothing starts.
+ */
+const RECOVER: Readonly<Record<string, 'restore' | 'from' | 'to' | 'unhealthy' | 'repair'>> = {
+  'upgrade none absent': 'restore', 'upgrade none from': 'from', 'upgrade none to': 'to',
+  'upgrade refusal absent': 'restore', 'upgrade refusal from': 'from',
+  'upgrade health absent': 'restore', 'upgrade health from': 'from', 'upgrade health to': 'unhealthy',
+  'rollback none absent': 'restore', 'rollback none from': 'from', 'rollback none to': 'to',
+  'repair none absent': 'repair', 'repair none from': 'repair',
+};
+
+async function readUpgradeReceipt(installRoot: string): Promise<StoredReceipt | undefined> {
+  return (await readStoredReceipt(installRoot))?.receipt;
+}
+
+/**
+ * Reads the receipt (#2011). A pending version 1 receipt is
+ * `receipt_upgrade_required`; a final one has the same fields and meaning in
+ * version 2 and reads as one, and the next write stores version 2.
+ */
+async function readStoredReceipt(installRoot: string): Promise<{ receipt: StoredReceipt; v1: boolean } | undefined> {
   const receiptPath = path.join(installRoot, 'upgrade-receipt.json');
   let text: string;
   try {
@@ -427,9 +520,16 @@ async function readUpgradeReceipt(installRoot: string): Promise<ServiceUpgradeRe
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
-  const receipt = JSON.parse(text) as Partial<ServiceUpgradeReceipt>;
-  if (receipt.format !== 'byok-service-upgrade-receipt' || receipt.version !== 1) throw new Error(`${receiptPath} is not a version 1 upgrade receipt`);
-  return receipt as ServiceUpgradeReceipt;
+  const receipt = JSON.parse(text) as Omit<Partial<StoredReceipt>, 'version'> & { version?: unknown };
+  if (receipt.format === 'byok-service-upgrade-receipt' && receipt.version === 1) {
+    // A v1 pending receipt is restored only by the SDK that wrote it.
+    if (receipt.state === 'pending') throw new ServiceInstallationError('receipt_upgrade_required');
+    return { receipt: { ...receipt, version: 2 } as StoredReceipt, v1: true };
+  }
+  if (receipt.format !== 'byok-service-upgrade-receipt' || receipt.version !== 2 || (receipt.state === 'pending' && !PENDING_KINDS.has(receipt.kind))) {
+    throw new Error(`${receiptPath} is not a version 2 upgrade receipt`);
+  }
+  return { receipt: receipt as StoredReceipt, v1: false };
 }
 
 /**
@@ -437,14 +537,37 @@ async function readUpgradeReceipt(installRoot: string): Promise<ServiceUpgradeRe
  * read from disk only: no service definition, unit or service manager is
  * involved, so a status read needs none of their inputs (WinSW paths).
  */
-export async function readServiceInstallationState(installRoot: string): Promise<{ current: string | undefined; receipt: ServiceUpgradeReceipt | undefined }> {
+export async function readServiceInstallationState(installRoot: string): Promise<{ current: string | undefined; receipt: ServiceUpgradeReceipt | undefined; receiptError?: 'receipt_upgrade_required' }> {
   const root = path.resolve(installRoot);
-  return { current: await readInstallPointer(root, 'current'), receipt: await readUpgradeReceipt(root) };
+  const current = await readInstallPointer(root, 'current');
+  try {
+    return { current, receipt: await readUpgradeReceipt(root) };
+  } catch (error) {
+    // A version 1 receipt is reported, never read or rewritten here (#2011).
+    if (error instanceof ServiceInstallationError && error.code === 'receipt_upgrade_required') return { current, receipt: undefined, receiptError: error.code };
+    throw error;
+  }
 }
 
 export function createServiceInstallation(opts: ServiceInstallationOptions): ServiceInstallation {
-  const program = opts.program(path.join(path.resolve(opts.installRoot), 'current'));
+  const current = path.join(path.resolve(opts.installRoot), 'current');
+  const program = opts.program(current);
+  if (!runsFromCurrent(program, current, opts.lifecycle?.platform ?? process.platform)) throw new ServiceInstallationError('service_program_not_current');
   return serviceInstallationOver(opts, createManagedServiceLifecycle({ ...opts.service, program }, opts.lifecycle));
+}
+
+/**
+ * Whether the command or an argument lies under `current`, compared by path
+ * segment (`current-old/x` is not under it), without case on darwin and
+ * win32 (#2011). A plausibility check only: a program that names the path
+ * but runs something else is the Host's responsibility.
+ */
+function runsFromCurrent(program: ServiceProgram, current: string, platform: NodeJS.Platform): boolean {
+  const fold = (value: string): string => platform === 'darwin' || platform === 'win32' ? value.toLowerCase() : value;
+  return [program.command, ...program.args].some((value) => {
+    const relative = path.relative(fold(current), fold(path.resolve(value)));
+    return relative === '' || (relative.split(path.sep)[0] !== '..' && !path.isAbsolute(relative));
+  });
 }
 
 /** The live daemon's lifecycle, or `undefined` while its control socket does not answer. */
@@ -530,6 +653,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       let result: T;
       try {
         await assertOwnInstallRoot();
+        // Every operation reads or writes snapshots/: a link would lead it outside the root.
+        await refuseLinkedSnapshots();
         await restoreRepairs(held);
         result = await operation(held);
       } catch (error) {
@@ -556,7 +681,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     return readPointer('current');
   }
 
-  function readPointer(name: Pointer): Promise<string | undefined> {
+  function readPointer(name: InstallPointer): Promise<string | undefined> {
     return readInstallPointer(root, name);
   }
 
@@ -567,7 +692,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * the service is stopped, and a pending receipt makes `recover()` set every
    * pointer again, so the window with no `current` is never observed by a run.
    */
-  async function setPointer(name: Pointer, id: string | undefined): Promise<void> {
+  async function setPointer(name: InstallPointer, id: string | undefined): Promise<void> {
     const link = path.join(root, name);
     const next = `${link}.next`;
     const old = `${link}.old`;
@@ -588,8 +713,23 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
   }
 
-  function readReceipt(): Promise<ServiceUpgradeReceipt | undefined> {
+  function readReceipt(): Promise<StoredReceipt | undefined> {
     return readUpgradeReceipt(root);
+  }
+
+  function writePending(journal: Journal): Promise<ServiceUpgradeReceipt> {
+    return writeReceipt({ state: 'pending', ...journal });
+  }
+
+  /** Puts back the final receipt a repair journaled, or removes the receipt when there was none. */
+  async function writeBack(prior: ServiceUpgradeReceipt | undefined): Promise<void> {
+    if (prior === undefined) await fs.rm(receiptPath, { force: true });
+    else await writeFileAtomic(receiptPath, `${JSON.stringify(prior, null, 2)}\n`);
+  }
+
+  /** upgrade() and rollback() rely on `current` gating every start, so the unit must be the one this SDK writes (#2011). */
+  async function requireExactUnit(): Promise<void> {
+    if ((await lifecycle.inspect()).state !== 'exact') throw new ServiceInstallationError('service_program_not_current');
   }
 
   /** Only `recover()` may act while a receipt is `pending`. */
@@ -597,8 +737,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     if ((await readReceipt())?.state === 'pending') throw new ServiceInstallationError('upgrade_pending');
   }
 
-  async function writeReceipt(fields: Omit<ServiceUpgradeReceipt, 'format' | 'version' | 'at'>): Promise<ServiceUpgradeReceipt> {
-    const receipt: ServiceUpgradeReceipt = { format: 'byok-service-upgrade-receipt', version: 1, ...fields, at: new Date().toISOString() };
+  async function writeReceipt(fields: Omit<StoredReceipt, 'format' | 'version' | 'at'>): Promise<ServiceUpgradeReceipt> {
+    const receipt: StoredReceipt = { format: 'byok-service-upgrade-receipt', version: 2, ...fields, at: new Date().toISOString() };
     await writeFileAtomic(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
     return receipt;
   }
@@ -675,6 +815,17 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         throw error;
       }
       const { id, created } = await stage(payloadDir, payload);
+      // A same-version reinstall (repair) touches no store, no payload byte and not
+      // `current`: stage() only verifies `versions/<id>`, and the unit files are
+      // replaced by rename. Its pending receipt keeps the final receipt it replaces,
+      // put back when it settles, so the receipt records only upgrades (#2011).
+      // A failed repair keeps all of that: there is no earlier state to restore.
+      const prior = installed === undefined ? undefined : await readReceipt();
+      if (installed !== undefined) {
+        await writePending({ kind: 'repair', from: id, to: id, ...(prior === undefined ? {} : { prior }) });
+        // A unit rewrite interrupted part way must not run (#2011): stop first, start once it is whole.
+        await lifecycle.stop();
+      }
       // An install snapshot must not replace a same-id reinstall's earlier
       // upgrade snapshot, which still belongs to its previous version.
       const snapshotId = `${INSTALL_SNAPSHOT_PREFIX}${randomUUID()}`;
@@ -709,19 +860,24 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       let activationAttempted = false;
       let health: Awaited<ReturnType<typeof startHealthy>>;
       try {
-        await setPointer('current', id);
+        if (installed === undefined) await setPointer('current', id);
         await writeRecord();
         if (prepared !== undefined) {
           // A failed release cannot prove the stores are still all held.
           storesHeld = false;
           const released = await prepared.release();
-          if (released.length > 0) throw new FailureList(released, 'The store gates or leases could not be released.');
+          if (released.length > 0) throw new FailureList(released, RELEASE_NOTE);
         }
         activationAttempted = true;
         await held.install(installOpts);
         health = await startHealthy();
       } catch (cause) {
         health = { ok: false, cause };
+      }
+      if (installed !== undefined) {
+        await writeBack(prior);
+        if (health.ok) return;
+        throw new ServiceInstallationError('install_health_check_failed', undefined, { cause: health.cause });
       }
       if (health.ok) {
         // Health commits the installation. Garbage collection cannot turn
@@ -741,7 +897,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         { name: 'service unit and launcher', remove: async () => {
           // A first install that failed before activation has not touched
           // the allowed foreign unit. Never try to uninstall that unit.
-          if (activationAttempted || installed !== undefined || stopMarked) await held.uninstall();
+          if (activationAttempted || stopMarked) await held.uninstall();
         } },
         { name: 'current pointer', remove: () => setPointer('current', undefined) },
         { name: 'installation record', remove: () => fs.rm(serviceInstallationRecordPath(storeDir), { force: true }) },
@@ -759,7 +915,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           releaseRestored = release;
         } }, { name: 'store lease release', remove: async () => {
           const released = await releaseRestored!();
-          if (released.length > 0) throw new FailureList(released, 'The store gates or leases could not be released.');
+          if (released.length > 0) throw new FailureList(released, RELEASE_NOTE);
         } },
         { name: 'install snapshot directory', remove: () => fs.rm(path.join(snapshotsDir, snapshotId), { recursive: true, force: true }) }]),
       ];
@@ -909,7 +1065,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   /** One candidate store preparation sequence for install and upgrade, retaining the quiescent leases until the caller switches. */
-  async function prepareStores(candidate: string, snapshotId: string, installing = false, stopService = !installing): Promise<{ stores: ServiceStoreVerdict[]; release: () => Promise<unknown[]> }> {
+  async function prepareStores(candidate: string, snapshotId: string, installing = false, stopService = !installing, journal?: Journal): Promise<{ stores: ServiceStoreVerdict[]; release: () => Promise<unknown[]> }> {
     // A first install stops only a marked unit of our owner. Absent and
     // allowed-unmarked units rely on the store lease alone.
     let release: () => Promise<unknown[]>;
@@ -920,6 +1076,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
     let restoreOnFailure = false;
     try {
+      // An upgrade removes `current` before the snapshot: from here no unit starts a payload (#2011).
+      if (journal !== undefined) await setPointer('current', undefined);
       let stores = await precheck(candidate);
       const refused = stores.find(isRefused);
       if (refused !== undefined) {
@@ -928,13 +1086,14 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       await snapshot(snapshotId, stores);
       if (stores.some((store) => store.verdict === 'migration-required')) {
         restoreOnFailure = opts.migrate !== undefined;
-        stores = await migrateStores(candidate, stores);
+        stores = await migrateStores(candidate, stores, journal);
       }
       return { stores, release };
     } catch (error) {
       const errors = typedParts(error);
       let unfinished: string | undefined;
-      if (restoreOnFailure) {
+      if (error instanceof MigrateRunning) unfinished = error.message;
+      else if (restoreOnFailure) {
         const failed = installing ? await restoreInstallSnapshot(snapshotId) : await restoreSnapshot(snapshotId).then(() => undefined, (restoreError: unknown) => ({ errors: [restoreError], kept: path.join(snapshotsDir, snapshotId) }));
         if (failed !== undefined) {
           errors.push(...failed.errors);
@@ -957,22 +1116,71 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * or a failed precheck is its cause. A program the OS cannot start (exit
    * code null) or that exits nonzero has no cause.
    */
-  async function migrateStores(to: string, stores: readonly ServiceStoreVerdict[]): Promise<ServiceStoreVerdict[]> {
+  async function migrateStores(to: string, stores: readonly ServiceStoreVerdict[], journal?: Journal): Promise<ServiceStoreVerdict[]> {
     if (opts.migrate === undefined) throw new ServiceInstallationError('store_migration_required', stores);
     let code: number | null;
     let migrated: ServiceStoreVerdict[];
     try {
-      ({ code } = await runProgram(opts.migrate(path.join(versionsDir, to))));
+      code = await runMigrate(opts.migrate(path.join(versionsDir, to)), journal);
       if (code !== 0) throw new ServiceInstallationError('store_migration_failed', stores);
       migrated = await precheck(to);
     } catch (error) {
-      if (error instanceof ServiceInstallationError && error.code === 'store_migration_failed') throw error;
+      if (error instanceof MigrateRunning || (error instanceof ServiceInstallationError && error.code === 'store_migration_failed')) throw error;
       throw new ServiceInstallationError('store_migration_failed', stores, { cause: error });
     }
     if (!migrated.every((store) => store.verdict === 'accepted' || store.verdict === 'absent')) {
       throw new ServiceInstallationError('store_migration_failed', migrated);
     }
     return migrated;
+  }
+
+  /**
+   * Runs `migrate` and resolves to its exit code (`null` when it cannot
+   * start). Under an upgrade's journal (#2011) it is recorded in the pending
+   * receipt (written and synced) before the wait: on POSIX the process group
+   * it leads, on win32 its pid and start time. When the root exits while its
+   * group still runs, nothing may restore or start on the stores, so this
+   * throws {@link MigrateRunning} and the record stays. Not covered, the
+   * Host's responsibility: the moment between spawn and the synced record, a
+   * process that leaves the group (setsid, a daemon), and on win32 what the
+   * root started.
+   */
+  async function runMigrate(program: ServiceProgram, journal?: Journal): Promise<number | null> {
+    const tracked = journal !== undefined;
+    const child = spawn(program.command, program.args, { cwd: program.cwd, stdio: 'ignore', detached: tracked && platform !== 'win32', windowsHide: true });
+    const exit = new Promise<number | null>((resolve) => {
+      child.once('error', () => resolve(null));
+      child.once('exit', (code) => resolve(code));
+    });
+    let migrate: OwnedProcessGroupRecord | undefined;
+    if (tracked && child.pid !== undefined) {
+      try {
+        migrate = ownedProcessGroupRecord(child, 'migrate', undefined, platform);
+        if (migrate !== undefined) await writePending({ ...journal, migrate });
+      } catch (error) {
+        // Nothing unrecorded may outlive this call, and nothing restores until
+        // the whole group is gone (#2011). win32 ends only the root.
+        if (platform === 'win32') child.kill('SIGKILL');
+        else {
+          const pgid = child.pid;
+          const signal = (name: NodeJS.Signals): void => {
+            try {
+              process.kill(-pgid, name);
+            } catch {
+              // The group already ended.
+            }
+          };
+          signal('SIGTERM');
+          if (!(await groupGone(pgid, 1000))) signal('SIGKILL');
+          if (!(await groupGone(pgid))) throw new MigrateRunning(migrateNote(pgid));
+        }
+        await exit;
+        throw error;
+      }
+    }
+    const code = await exit;
+    if (migrate !== undefined && ownedProcessGroupRuns(migrate, platform)) throw new MigrateRunning(migrateNote(migrate.pgid));
+    return code;
   }
 
   /**
@@ -1053,13 +1261,35 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
   }
 
-  /** A symlinked `snapshots/` is `snapshots_symlinked`, checked before anything under it is read or changed. */
-  async function refuseLinkedSnapshots(): Promise<void> {
-    const stat = await fs.lstat(snapshotsDir).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+  /**
+   * A symbolic link at `file` (`snapshots/` by default) is
+   * `snapshots_symlinked` (#2061): each level a restore reads is checked
+   * before anything under it is read or changed. A cheap fail-closed check:
+   * a link swapped in after it is checked is the Host's responsibility,
+   * like any other write to the install root during an operation.
+   */
+  async function refuseLinkedSnapshots(file = snapshotsDir): Promise<void> {
+    const stat = await fs.lstat(file).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
     if (stat?.isSymbolicLink()) {
       const error = new ServiceInstallationError('snapshots_symlinked');
-      error.message = `${error.message} (${snapshotsDir})`;
+      error.message = `${error.message} (${file})`;
       throw error;
+    }
+  }
+
+  /** Checks `snapshots/<name>` and every copy in it a restore reads, before the operation's first side effect. */
+  async function refuseLinkedSnapshot(name: string): Promise<void> {
+    const dir = path.join(snapshotsDir, name);
+    const index = path.join(dir, 'snapshot.json');
+    await refuseLinkedSnapshots(dir);
+    await refuseLinkedSnapshots(index);
+    if (!(await exists(index))) return;
+    const { entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: SnapshotEntry[] };
+    for (const entry of entries) {
+      for (const file of Object.values(entry.files)) {
+        let at = dir;
+        for (const part of file.split(/[\\/]/u)) await refuseLinkedSnapshots(at = path.join(at, part));
+      }
     }
   }
 
@@ -1082,11 +1312,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    */
   async function restoreRepairs(held: HeldServiceLifecycle): Promise<void> {
     if ((await currentVersion()) !== undefined) return;
-    // Nothing under a linked snapshots/ is read: its stores may lie anywhere.
-    await refuseLinkedSnapshots();
     const repairs = (await listInstallSnapshots()).filter((name) => name.startsWith(REPAIR_SNAPSHOT_PREFIX));
     if (repairs.length === 0) return;
     const kept = repairs.map((name) => path.join(snapshotsDir, name)).join(', ');
+    for (const name of repairs) await refuseLinkedSnapshot(name);
     let inspection: Awaited<ReturnType<typeof lifecycle.inspect>> | undefined;
     let note = `The stores of an earlier failed install were not restored; the snapshot is retained at ${kept}.`;
     try {
@@ -1132,43 +1361,75 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   /**
-   * Brings `from` back under a `pending` receipt: stops whatever runs,
-   * restores the snapshot taken for `to`, points `current` at `from` and
-   * `previous` at `previous`, then starts `from` and checks its health. The
-   * snapshot is removed only after the final receipt is written, so until
-   * then `recover()` can run every step again from what is on disk.
+   * Starts the version `current` points at and writes the final receipt
+   * (#2011): `to` is `switched`, or `failed` with `switch_unhealthy`; `from`
+   * is `failed` with a refusal's code, `rolled-back` with any other code
+   * (`fallback` when the journal has none), or `failed` with
+   * `rollback_unhealthy`. Until the final write the pending receipt stays,
+   * and recover() starts the same version again. Removing a restored
+   * snapshot afterwards is best effort: the outcome is written (#2062).
    */
-  async function restore(from: string, to: string, previous: string | undefined, code?: ServiceInstallationErrorCode, prior: readonly unknown[] = []): Promise<{ receipt: ServiceUpgradeReceipt; unhealthy?: unknown }> {
-    // The receipt is pending until the final write: every exit before it is upgrade_pending.
+  async function settle(journal: Journal, running: string, prior: readonly unknown[], fallback?: ServiceInstallationErrorCode, started?: Awaited<ReturnType<typeof startHealthy>>): Promise<{ receipt: ServiceUpgradeReceipt; unhealthy?: unknown }> {
+    const health = started ?? await startHealthy();
+    const code = journal.code ?? fallback;
+    const fields = { from: journal.from, to: journal.to, ...(journal.previous === undefined ? {} : { previous: journal.previous }), ...(journal.stores === undefined ? {} : { stores: journal.stores }) };
+    const final: Omit<StoredReceipt, 'format' | 'version' | 'at'> = running === journal.to
+      ? (health.ok ? { state: 'switched', ...fields } : { state: 'failed', ...fields, code: 'switch_unhealthy' })
+      : !health.ok ? { state: 'failed', ...fields, code: 'rollback_unhealthy' }
+        : { state: code === undefined || ROLLED_BACK_CODES.has(code) ? 'rolled-back' : 'failed', ...fields, ...(code === undefined ? {} : { code }) };
+    let receipt: ServiceUpgradeReceipt;
+    try {
+      receipt = await writeReceipt(final);
+    } catch (error) {
+      throw unfinishedFailure([...prior, ...(health.ok ? [] : [health.cause]), error], 'The final receipt could not be written.');
+    }
+    if (receipt.state === 'switched') await prune(journal.to, journal.from);
+    else if (running === journal.from) await fs.rm(path.join(snapshotsDir, journal.to), { recursive: true, force: true }).catch(() => undefined);
+    return health.ok ? { receipt } : { receipt, unhealthy: health.cause };
+  }
+
+  /**
+   * With the service stopped, the stores leased and `current` absent,
+   * restores the snapshot taken for `to` when it is complete, puts back
+   * `previous`, then points `current` at `from` and settles. Any failure
+   * before `current` is written leaves it absent, so nothing starts on
+   * partial stores (#1992).
+   */
+  async function restoreFrom(journal: Journal, release: () => Promise<unknown[]>, prior: readonly unknown[], fallback?: ServiceInstallationErrorCode): Promise<{ receipt: ServiceUpgradeReceipt; unhealthy?: unknown }> {
+    try {
+      if (await exists(path.join(snapshotsDir, journal.to, 'snapshot.json'))) await restoreSnapshot(journal.to);
+      await setPointer('previous', journal.previous);
+      await setPointer('current', journal.from);
+    } catch (error) {
+      throw unfinishedFailure([...prior, error, ...await release()], `The stores or version pointers could not be restored; the snapshot is retained at ${path.join(snapshotsDir, journal.to)}.`);
+    }
+    const released = await release();
+    if (released.length > 0) throw unfinishedFailure([...prior, ...released], RELEASE_NOTE);
+    return settle(journal, journal.from, prior, fallback);
+  }
+
+  /**
+   * Discards what `journal.to` wrote: stops it, leases the stores, journals
+   * the rollback, removes `current`, then restores `from`. A rollback that
+   * fails before its journal is written changed nothing but the stop.
+   */
+  async function rollBack(journal: Journal, prior: readonly unknown[]): Promise<{ receipt: ServiceUpgradeReceipt; unhealthy?: unknown }> {
     let release: () => Promise<unknown[]>;
     try {
       release = await stopQuiescent();
     } catch (error) {
-      throw unfinishedFailure([...prior, error], 'The service could not be stopped and its stores leased; the receipt stays pending.');
+      throw prior.length === 0 ? error : unfinishedFailure([...prior, error], STOP_NOTE);
     }
+    let journaled = prior.length > 0;
     try {
-      // The write-ahead pending receipt may predate the snapshot: nothing was
-      // switched or rewritten then, so `from` only needs to run again.
-      if (await exists(path.join(snapshotsDir, to, 'snapshot.json'))) await restoreSnapshot(to);
-      await setPointer('current', from);
-      await setPointer('previous', previous);
+      await writePending(journal);
+      journaled = true;
+      await setPointer('current', undefined);
     } catch (error) {
-      throw unfinishedFailure([...prior, error, ...await release()], `The stores or version pointers could not be restored; the receipt stays pending and the snapshot is retained at ${path.join(snapshotsDir, to)}.`);
+      const later = await release();
+      throw journaled ? unfinishedFailure([...prior, error, ...later], 'The rollback could not begin.') : joinLater(error, later);
     }
-    const released = await release();
-    if (released.length > 0) throw unfinishedFailure([...prior, ...released], 'The store gates or leases could not be released before the restored version started; the receipt stays pending.');
-    const kept = previous === undefined ? {} : { previous };
-    const health = await startHealthy();
-    let receipt: ServiceUpgradeReceipt;
-    try {
-      receipt = health.ok
-        ? await writeReceipt({ state: 'rolled-back', from, to, ...kept, ...(code === undefined ? {} : { code }) })
-        : await writeReceipt({ state: 'failed', from, to, ...kept, code: 'rollback_unhealthy' });
-    } catch (receiptError) {
-      throw unfinishedFailure([...prior, ...(health.ok ? [] : [health.cause]), receiptError], 'The final receipt could not be written; the receipt stays pending.');
-    }
-    await fs.rm(path.join(snapshotsDir, to), { recursive: true, force: true });
-    return health.ok ? { receipt } : { receipt, unhealthy: health.cause };
+    return restoreFrom(journal, release, prior);
   }
 
   /** Keeps `current` and `previous`, the snapshot of the last switch and every install snapshot; removes every other version and snapshot. */
@@ -1189,69 +1450,60 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       await refusePending();
       const from = await currentVersion();
       if (from === undefined) throw new ServiceInstallationError('installation_absent');
+      await requireExactUnit();
       const { id: to } = await stage(payloadDir, await readPayload(payloadDir));
       if (to === from) throw new ServiceInstallationError('version_current');
       const previous = await readPointer('previous');
-      const kept = previous === undefined ? {} : { previous };
+      const journal: Journal = { kind: 'upgrade', from, to, ...(previous === undefined ? {} : { previous }) };
 
       // A failed attempt after its snapshot leaves snapshots/<to>. Remove it
-      // before the intent: recover() restores any snapshot it finds for `to`,
-      // and an old one would overwrite what `from` wrote since.
+      // before the intent: recover() restores any snapshot it finds for `to`.
+      await refuseLinkedSnapshots(path.join(snapshotsDir, to));
       await fs.rm(path.join(snapshotsDir, to), { recursive: true, force: true });
-      // Write-ahead: the service may be stopped from here on, so the intent
-      // must be on disk before the stop. A death between this write and the
-      // switch leaves recover() a pending receipt to finish or roll back;
-      // before it, nothing has changed and a failure restarts `from`.
-      await writeReceipt({ state: 'pending', from, to, ...kept });
+      // Write-ahead: the service may be stopped and `current` removed from here on.
+      await writePending(journal);
       let stores: ServiceStoreVerdict[];
       let release: () => Promise<unknown[]>;
       try {
-        ({ stores, release } = await prepareStores(to, to));
+        ({ stores, release } = await prepareStores(to, to, false, true, journal));
       } catch (error) {
         if (!(error instanceof PreparationFailure)) throw error;
         const [primary, ...later] = error.errors;
-        // Partial stores, or a refusal without an installation code for the
-        // receipt: the receipt stays pending and `from` stays stopped.
+        // Partial stores, or a refusal without an installation code: `current` stays absent.
         if (error.unfinished !== undefined || !(primary instanceof ServiceInstallationError)) {
-          throw unfinishedFailure(error.errors, error.unfinished ?? 'Store preparation failed; the previous version stays stopped and the receipt stays pending.');
+          throw unfinishedFailure(error.errors, error.unfinished ?? 'Store preparation failed; the previous version stays stopped.');
         }
+        // The refusal's code is journaled before `current` is back, so recover() can finish it.
+        const refused: Journal = { ...journal, code: primary.code, ...(primary.stores ? { stores: [...primary.stores] } : {}) };
         try {
-          await writeReceipt({ state: 'failed', from, to, code: primary.code, ...(primary.stores ? { stores: [...primary.stores] } : {}) });
-        } catch (receiptError) {
-          // recover() restores the snapshot, which would overwrite what a
-          // restarted service wrote: `from` stays stopped.
-          throw unfinishedFailure([...error.errors, receiptError], 'Its failed receipt could not be written: the previous version stays stopped and the receipt stays pending.');
+          await writePending(refused);
+          await setPointer('current', from);
+        } catch (pointerError) {
+          throw unfinishedFailure([...error.errors, pointerError], 'The previous version could not be made current again.');
         }
-        await lifecycle.start().catch((startError: unknown) => { later.push(startError); });
-        throw joinLater(primary, later);
+        const { unhealthy } = await settle(refused, from, error.errors);
+        throw joinLater(primary, unhealthy === undefined ? later : [...later, unhealthy]);
       }
 
-      // From here a crash leaves the pending receipt, which recover() resolves.
-      // The leases and gates are held through the switch.
+      // The commit point is `current` = `to`: the stores are journaled first, then `previous`.
+      const committed: Journal = { ...journal, stores };
       try {
+        await writePending(committed);
         await setPointer('previous', from);
         await setPointer('current', to);
       } catch (error) {
-        throw unfinishedFailure([error, ...await release()], 'The version pointers could not be switched; the receipt stays pending.');
+        throw unfinishedFailure([error, ...await release()], 'The version pointers could not be switched.');
       }
-      // Before the switched receipt: the receipt stays pending for recover().
       const released = await release();
-      if (released.length > 0) throw unfinishedFailure(released, 'The store gates or leases could not be released before the new version started; the receipt stays pending.');
+      if (released.length > 0) throw unfinishedFailure(released, RELEASE_NOTE);
       const health = await startHealthy();
       if (!health.ok) {
-        const failure = new ServiceInstallationError('health_check_failed', undefined, { cause: health.cause });
         // The final receipt is written: the first failure keeps its code, and the restored version's failed check joins it.
-        const { unhealthy } = await restore(from, to, previous, 'health_check_failed', [failure]);
+        const failure = new ServiceInstallationError('health_check_failed', undefined, { cause: health.cause });
+        const { unhealthy } = await rollBack({ ...committed, code: 'health_check_failed' }, [failure]);
         throw joinLater(failure, unhealthy === undefined ? [] : [unhealthy]);
       }
-      let receipt: ServiceUpgradeReceipt;
-      try {
-        receipt = await writeReceipt({ state: 'switched', from, to, stores });
-      } catch (error) {
-        throw unfinishedFailure([error], 'The new version is healthy, but its switched receipt could not be written; the receipt stays pending.');
-      }
-      await prune(to, from);
-      return receipt;
+      return (await settle(committed, to, [], undefined, health)).receipt;
     });
   }
 
@@ -1259,30 +1511,74 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     return rootOwned(async () => {
       await refusePending();
       const [current, previous] = [await currentVersion(), await readPointer('previous')];
+      if (current !== undefined) await refuseLinkedSnapshot(current);
       if (current === undefined || previous === undefined || !(await exists(path.join(snapshotsDir, current, 'snapshot.json')))) {
         throw new ServiceInstallationError('no_rollback');
       }
-      // The pending receipt is what recover() completes: the same restore of `previous` with this snapshot.
-      await writeReceipt({ state: 'pending', from: previous, to: current });
-      return (await restore(previous, current, undefined)).receipt;
+      await requireExactUnit();
+      return (await rollBack({ kind: 'rollback', from: previous, to: current }, [])).receipt;
     });
   }
 
+  /**
+   * Resolves a pending receipt by {@link RECOVER}. A recorded migrate group
+   * that still runs is left alone. A version 1 final receipt is rewritten
+   * as version 2; a version 1 pending one is refused.
+   */
   function recover(): Promise<ServiceUpgradeReceipt | undefined> {
     return rootOwned(async () => {
-      const last = await readReceipt();
-      if (last?.state !== 'pending') return last;
-      return (await restore(last.from, last.to, last.previous, 'upgrade_pending')).receipt;
+      const read = await readStoredReceipt(root);
+      if (read === undefined) return undefined;
+      const { receipt: last, v1 } = read;
+      if (last.state !== 'pending') {
+        if (v1) await writeFileAtomic(receiptPath, `${JSON.stringify(last, null, 2)}\n`);
+        return last;
+      }
+      if (last.migrate !== undefined && ownedProcessGroupRuns(last.migrate, platform)) {
+        throw unfinishedFailure([], migrateNote(last.migrate.pgid));
+      }
+      const current = await currentVersion();
+      const at = current === undefined ? 'absent' : current === last.from ? 'from' : current === last.to ? 'to' : 'other';
+      const codeClass = last.code === undefined ? 'none' : last.code === 'health_check_failed' ? 'health' : 'refusal';
+      let action = RECOVER[`${last.kind} ${codeClass} ${at}`] ?? 'inconsistent';
+      if (action === 'restore') {
+        await refuseLinkedSnapshot(last.to);
+        // A migration runs only after a complete snapshot.
+        if (last.migrate !== undefined && !(await exists(path.join(snapshotsDir, last.to, 'snapshot.json')))) action = 'inconsistent';
+      }
+      const journal = last as Journal;
+      switch (action) {
+        case 'inconsistent':
+          throw new ServiceInstallationError('receipt_state_inconsistent');
+        case 'repair':
+          // Clearing the pending receipt first lets the Host run the repair again.
+          await writeBack(last.prior);
+          throw new ServiceInstallationError('repair_interrupted');
+        case 'unhealthy':
+          // The candidate's writes are kept, and so is the snapshot rollback() restores: the Host decides.
+          return writeReceipt({ state: 'failed', from: last.from, to: last.to, ...(last.previous === undefined ? {} : { previous: last.previous }), code: 'switch_unhealthy' });
+        case 'restore': {
+          let release: () => Promise<unknown[]>;
+          try {
+            release = await stopQuiescent();
+          } catch (error) {
+            throw unfinishedFailure([error], STOP_NOTE);
+          }
+          return (await restoreFrom(journal, release, [], 'upgrade_pending')).receipt;
+        }
+        default:
+          return (await settle(journal, current!, [], 'upgrade_pending')).receipt;
+      }
     });
   }
 
   function uninstall(): Promise<void> {
     return rootOwned(async (held) => {
       await refusePending();
-      // snapshots/ is listed below; a link would lead the removal outside the root.
-      await refuseLinkedSnapshots();
+      // Without `current` no unit starts a payload, even one this uninstall fails to remove (#2011).
+      await setPointer('current', undefined);
       await held.uninstall();
-      for (const name of POINTERS) await setPointer(name, undefined);
+      await setPointer('previous', undefined);
       await fs.rm(versionsDir, { recursive: true, force: true });
       // Install snapshots stay, and so does `snapshots/` around them.
       const snapshots = await listDir(snapshotsDir);
@@ -1486,7 +1782,13 @@ async function listDir(dir: string): Promise<string[]> {
 async function writeFileAtomic(file: string, content: string): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });
   const temp = `${file}.${randomUUID()}.tmp`;
-  await fs.writeFile(temp, content, 'utf8');
+  const handle = await fs.open(temp, 'w');
+  try {
+    await handle.writeFile(content, 'utf8');
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
   await fs.rename(temp, file);
 }
 

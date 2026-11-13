@@ -14,6 +14,16 @@ Other errors can still reject after commit. In particular, a drain that also enc
 
 The OpenCode adapter's default policy qualifies 2.3.0. A device still running 2.2.6 reports the `runtime_version_unqualified` advisory with `qualifiedVersion: '2.3.0'` through detect; hello and presence report `state: 'warn'` with the same qualified version. The default policy remains `warn`, so tasks can still run. Upgrade the device's OpenCode to 2.3.0 to clear the advisory, or keep 2.2.6 and show the advisory while planning the upgrade. A Host that supplies its own OpenCode `versionPolicy` keeps that policy; review it separately before changing versions. See the [qualification evidence](../researches/2026-11-13-opencode-2.3.0-qualification.md).
 
+## Undici in the Host dependency tree (#2081)
+
+The client now depends on `undici` 8.12.4. Pi 1.5.2 still declares 8.12.3 exactly, so a Host install can retain a separate vulnerable copy. To use 8.12.4 throughout the npm dependency tree, add the line for your package manager to the root `package.json` and reinstall:
+
+- npm: `"overrides": { "undici": "8.12.4" }`
+- Bun: `"overrides": { "undici": "8.12.4" }`
+- pnpm: `"pnpm": { "overrides": { "undici": "8.12.4" } }`
+
+Merge these entries into any existing overrides. After reinstalling, inspect the dependency tree with `npm ls undici --all`, `bun pm why undici`, or `pnpm why -r undici`, respectively; every listed undici version should be 8.12.4. Pi's upstream pin is tracked in [#2098](https://github.com/Ancienttwo/byok-sdk/issues/2098). This does not update Node's built-in undici or copies bundled inside other packages; update those runtimes and packages separately.
+
 ## Cancel selected Host intents without a pass (#2003)
 
 `BotCollaboration.cancelHostIntents(keys)` atomically cancels a chosen set of unsubmitted Host intents without draining. It returns settled conclusions on replay and refuses the whole set when any key is unknown, a Bot Turn or in flight. `HostIntentError.rejected` lists every refused key and code; exhaustive switches over `HostIntentError.code` add `inflight`. Existing single cancellation and switch APIs retain their other behavior, and the store format is unchanged; see the wake-dispatch change above. A Host may replace freeze → individual cancels → abort with this call; keep the freeze when other work on the device must also be held. Successors start on the next pass, or call `drain()` to start them.
@@ -148,12 +158,11 @@ restore fails too, the stores may be partial (#1987). `upgrade()` no longer
 starts the previous version on them: the service stays stopped, the receipt
 stays `pending`, `snapshots/<to>` is kept, and the error (an
 `AggregateError` carrying the preparation error and the restore error) names
-the snapshot path and `recover()`. On this error, call `recover()` as soon as
-possible and do not restart the machine first: the unit stays installed, so a
-reboot or login before `recover()` starts the previous version on the partial
-stores. This covers the restore after a failed preparation only; a failed
-restore after a failed health check still throws the underlying error, which
-need not name the snapshot, and is left to #1992.
+the snapshot path and `recover()`. On this error, call `recover()`.
+`current` is absent until then, so a reboot or login starts nothing on the
+partial stores, and a failed restore after a failed health check is covered
+the same way (#1992); see
+[Upgrades commit through current](#upgrades-commit-through-current-2011).
 
 ## Store release failures name the next step
 
@@ -184,10 +193,10 @@ upgrade refusal whose `failed` receipt could not be written), and an install
 whose stores could not be restored and left a repair snapshot (0.42.0 threw
 an `AggregateError` there). Call `recover()` next. A lease that failed to
 release stays held by its process, so `recover()` in the same process can
-fail with `store_busy` in its cause; restart the Host process first. When an
-upgrade refusal's `failed` receipt cannot be written, the previous version
-stays stopped until `recover()`, which would otherwise restore the snapshot
-over what the restarted service wrote. A preparation error that is not the
+fail with `store_busy` in its cause; restart the Host process first. An
+upgrade refusal starts the previous version before writing its `failed`
+receipt; when that write fails, `recover()` starts it again idempotently and
+writes the receipt. A preparation error that is not the
 SDK's own (a `precheck` launch that throws, a failed stop) is
 the new `ServiceInstallationErrorCode` `store_preparation_failed` with the
 original error as its cause: an upgrade records it in a `failed` receipt and
@@ -202,6 +211,71 @@ install's cleanup restored the stores but could not release their leases,
 the error lists `store lease release` as remaining and says the stores were
 restored; the install snapshot it names is then an ordinary leftover to
 remove before the next install.
+
+## Upgrades commit through current (#2011)
+
+The service unit and launcher run only `<installRoot>/current`, and
+`current` is absent whenever the stores may be partial. This resolves the
+0.42.0 known issue where `recover()` restored a snapshot over writes of a
+service that had already restarted.
+
+- **Before upgrading the SDK:** when `upgrade-receipt.json` is `pending`,
+  run `recover()` with SDK 0.42 first. The new SDK refuses a pending
+  version 1 receipt with `receipt_upgrade_required`; a final one reads as
+  version 2, and the next write stores version 2. `byok-agent upgrade
+  status` still exits normally on a pending version 1 receipt: `--json` prints `receipt: null` and the new field
+  `receiptError: { code: 'receipt_upgrade_required', message }`, and the
+  text output prints `receipt: refused code=receipt_upgrade_required`. The
+  file is not read further or changed.
+- **Required on macOS:** rewrite the unit before the first upgrade or
+  rollback as described in [launchd jobs run with the install's HOME](#launchd-jobs-run-with-the-installs-home-2017).
+- **`program` runs from `current`:** `createServiceInstallation` throws
+  `service_program_not_current` when neither the command nor an argument
+  lies under `<installRoot>/current` (compared by path segment, without case
+  on macOS and Windows). `upgrade()` and `rollback()` also require the
+  installed unit to be exactly the one the SDK writes; reinstall a unit
+  written another way. These are plausibility checks: a program that names
+  `current` but runs something else is the Host's contract.
+- **`recover()` follows the receipt:** a `pending` receipt journals its
+  `kind` (`upgrade`, `rollback` or `repair`). With `current` absent,
+  `recover()` restores the snapshot and starts `from`; with `current` at
+  `from` or `to` it starts that version as it is and writes the final
+  receipt. A pointer state no operation leaves is `receipt_state_inconsistent`
+  and nothing changes: inspect `current`, `previous` and the receipt.
+- **`switch_unhealthy`:** when `recover()` finds `current` at a candidate
+  already found unhealthy, it starts, stops and restores nothing and writes a
+  `failed` receipt with `switch_unhealthy`. The Host decides: call
+  `rollback()` to discard the candidate's store writes, or keep it.
+- **`repair_interrupted`:** a same-version reinstall journals a `repair`
+  receipt, stops the service before rewriting the unit, and never replaces
+  `current`. A failed one now keeps the payload,
+  `current` and the unit and puts the earlier receipt back (0.42.0 removed
+  the installation). After an interruption, `recover()`
+  writes the earlier receipt back and throws `repair_interrupted`; call
+  `install()` again.
+- **Start gate:** `byok-agent start` and `createDaemon` refuse with
+  `store_owned` while a `pending` receipt has `current` absent. A Host
+  process that opens the stores without them checks the receipt itself.
+- **Migration:** an upgrade's `migrate` is recorded in the `pending`
+  receipt: on POSIX the process group it leads (it runs detached), on
+  Windows its pid and start time. Until that group (on Windows, the root)
+  ends, nothing restores or starts: `upgrade()` fails with `upgrade_pending`
+  when the root exits first, and `recover()` changes nothing. When the record
+  cannot be written, the group gets SIGTERM, then SIGKILL, and nothing
+  restores until it is proved gone. A pgid reused
+  by another group also counts as running; when `recover()` keeps refusing
+  with no migration process left, end the group it names or restart the
+  machine. A process that leaves the group (`setsid`), and what a Windows
+  migration starts, are not tracked: stop them before `recover()`.
+- **Links under `snapshots/`:** every operation refuses a symbolic link at
+  `snapshots/`, at a snapshot it is about to restore, at its `snapshot.json`
+  or at any path segment of a file it lists, with
+  `snapshots_symlinked`, before its first side effect (#2061). A link swapped
+  in after that check is the Host's responsibility.
+- **Snapshot removal (#2062):** a snapshot that cannot be removed after the
+  final receipt no longer fails the call; it stays.
+- On systemd, a start runs `systemctl --user reset-failed` first, since the
+  unit may have hit its start limit while `current` was absent.
 
 ## Provider key changes roll back on failure (#1946)
 
@@ -219,7 +293,8 @@ A corrupted SDK entry (new code `KEYCHAIN_SECRET_CORRUPTED` on macOS and Linux, 
 
 Known limitation on Windows: Credential Manager reports a damaged entry as `CREDENTIAL_MANAGER_READ_FAILED`, the same code as other read failures. `replaceSecret()` cannot tell the two apart, so it refuses instead of overwriting the entry. To recover, delete the entry in Credential Manager (Windows Credentials, the generic credential `<servicePrefix>.model-<profile_ref>-api-key`, by default `com.byok.keys.model-<profile_ref>-api-key`), then configure the key again.
 
-Credential-store errors from every `ProviderRegistry` method (`get()`, `list()`, `configure()`, `replaceSecret()`, `delete()`, `setDefaultModelProvider()` and `resolveDefaultModelProvider()`, #2029) keep a keychain, Credential Manager or secret-shape code with a fixed SDK message and no cause. Any other store error becomes `PROVIDER_SECRET_STORE_FAILED`, because an injected store may put a key in its own error. Match on `error.code`, not on the message text. `configure()`, `replaceSecret()`, `setDefaultModelProvider()` and `delete()` never read the stores after their commit (#2023). The status they return is the state the call committed, which may be stale once the call returns. A call that resolves has committed its change. A call that rejects with the new `PROVIDER_CHANGE_COMMITTED` has also committed it, but a later step failed: either deleting the previous key after `configure()` switched a profile to `auth_mode: 'none'`, in which case that key stays in the credential store until a later `configure()` or `delete()` removes it, a profile store that wrote the change but could not confirm it, or releasing the configuration lock. Its `cause` carries only the failed step's code, never the step's own message. Treat that code as success, read the status again with `get()`, and, for the `auth_mode: 'none'` case, retry the `configure()` to remove the leftover key. A rejection with any other code committed nothing. `configure()` without a secret now reuses the stored key only when the committed profile already authenticates against the same `base_url`; switching a profile from `auth_mode: 'none'` back to authentication, or changing its `base_url`, rejects with `PROVIDER_SECRET_MISSING` until the Host supplies the key again.
+Credential-store errors from every `ProviderRegistry` method (`get()`, `list()`, `configure()`, `replaceSecret()`, `delete()`, `setDefaultModelProvider()` and `resolveDefaultModelProvider()`, #2029) keep a keychain, Credential Manager or secret-shape code with a fixed SDK message and no cause. Any other store error becomes `PROVIDER_SECRET_STORE_FAILED`, because an injected store may put a key in its own error. Match on `error.code`, not on the message text. `applySealedProviderProvisioning()` and `DeviceSealingKeyStore` use the same boundary (#2051): sealed provisioning, which used to report every store error as `PROVIDER_SECRET_STORE_FAILED`, now keeps those codes too, so handle them wherever you handle `PROVIDER_SECRET_STORE_FAILED`. `configure()`, `replaceSecret()`, `setDefaultModelProvider()` and `delete()` never read the stores after their commit (#2023). The status they return is the state the call committed, which may be stale once the call returns. A call that resolves has committed its change. A call that rejects with the new `PROVIDER_CHANGE_COMMITTED` has also committed it, but a later step failed: either deleting the previous key after `configure()` switched a profile to `auth_mode: 'none'`, in which case that key stays in the credential store until a later `configure()` or `delete()` removes it, a profile store that wrote the change but could not confirm it, or releasing the configuration lock. Its `cause` carries only the failed step's code, never the step's own message. Treat that code as success, read the status again with `get()`, and, for the `auth_mode: 'none'` case, retry the `configure()` to remove the leftover key. A rejection with any other code committed nothing. `configure()` without a secret now reuses the stored key only when the committed profile already authenticates against the same `base_url`; switching a profile from `auth_mode: 'none'` back to authentication, or changing its `base_url`, rejects with `PROVIDER_SECRET_MISSING` until the Host supplies the key again.
+
 
 ## Stored cancellation pruning cutoff
 
@@ -231,7 +306,7 @@ Custom implementations of `LocalTaskJournal` must accept the new `cutoff` argume
 
 ## Renewal checks the enrollment binding (#2034)
 
-A running daemon renews its token only while the OS entry still holds this store's enrollment. When another store of the same `productId` paired over it, the renewal writes nothing and the daemon halts with `store_not_bound`; when another store cleared it, the daemon halts with `re_pair_required`. Both reasons were start-time halts before; a Host that handles `DaemonHaltError.reason` or the daemon's halted lifecycle at start handles them the same way when the daemon is running: pair the store again. A renewal that waits more than 30 seconds for another store's clear or pairing fails as busy and is retried; it is not reported as revocation.
+A running daemon renews its token only while the OS entry still holds this store's enrollment. When another store of the same `productId` paired over it, the renewal writes nothing and the daemon halts with `store_not_bound`; when another store cleared it, the daemon halts with `re_pair_required`. Both reasons were start-time halts before; a Host that handles `DaemonHaltError.reason` or the daemon's halted lifecycle at start handles them the same way when the daemon is running: pair the store again. A renewal that waits more than 30 seconds for another store's clear or pairing fails as busy and is retried; it is not reported as revocation. A running daemon's E2EE member writes (member resume, KEM rotation) follow the same rule (#2055): when another store has paired over or cleared the enrollment, they write nothing and the daemon halts with the same reasons.
 
 Pairing is one critical section of the same lock. It rereads the OS entry, `device.json` and any staged attempt under the lock, so a re-pair of a store that is already paired, or of a daemon that cached its record, now throws `DeviceStoreBindingMismatchError` when another store paired over it since (pair with `replaceOtherStore` to replace it), and `FirstPairingAttemptRefusedError` when another store's or an unattributed staged attempt sits beside its enrollment. The lock is held through the pairing's E2EE member entries and, when the daemon was running, its shutdown, so another store waits for them too. Only the network request has a deadline; each OS credential command has its own 15 s deadline, and a waiter gives up as busy after 30 seconds.
 
@@ -268,3 +343,19 @@ Two HOME values matter, and the SDK pins only the first:
 A Host that installs under a scratch `HOME` to isolate a test install must also isolate tasks: put `HOME` in the policy's `pass` (`runtimeEnvironment: { pass: ['HOME', ...] }`, or the per-runtime `runtimes.<id>.runtimeEnvironment`) so tasks get the daemon's live `HOME`, or use `base: 'allowlist'` and supply `PATH`, `XDG_*` and other derived values itself. Do not rely on the startup snapshot for isolation.
 
 **Required step on macOS:** a plist written by an earlier SDK no longer matches the generated unit and inspects as `repairable`. Before the first `upgrade()` or `rollback()` on each macOS device, call `install()` again on the same installation (same service name and install root) with the payload that is installed now, to rewrite the unit, then upgrade. The reinstall must use the current payload id: `install()` with any other payload is refused with `installation_exists`. Read the id with `installation.currentVersion()` and keep the payload directory whose `readPayloadManifest(dir).id` equals it until this reinstall has run. No other platform is affected.
+
+## When whenTaskSettled reports an unknown task (#2067)
+
+No code change. `whenTaskSettled(taskId)` rejects with `DaemonTaskUnknownError` when an earlier journal read returned no row for the task and, once that read finished, this `Daemon` instance had no in-memory record for it (no held runtime, nothing settled or awaited for it in this run) and no offer for it marked as seen. The read and those checks are not atomic. An offer appended while the read was pending ends the mark, so the wait can report unknown although the row now exists ([#2097](https://github.com/Ancienttwo/byok-sdk/issues/2097)). The mark also ends when the offer's append is refused, so a refused offer with no row reads as unknown too. A task whose rows retention pruned (confirmed-journal TTL, default 30 days), a task never journaled on this device and an offer the server sent that has not reached this daemon yet look the same, and the error carries no reason.
+
+Unknown does not prove the task is over or will never start: an offer may still be on its way and start a runtime later. Do not delete a Host attach record on this error alone. Keep the record, or settle it from your own server's terminal state and delivery guarantees.
+
+Every other rejection has its own source, and none of them is `DaemonTaskUnknownError`:
+
+- **Abort:** a `signal` already aborted at the call rejects with `signal.reason`, and so does an abort after the journal read succeeded, while the wait is registered. The task is untouched. The wait does not listen during the journal read: a pending read delays the abort, and a failed read rejects with the journal's error instead ([#2097](https://github.com/Ancienttwo/byok-sdk/issues/2097)).
+- **Not started:** a call before `start()` rejects as `approve()` does.
+- **Journal read failure:** the journal's own error, for example a closed or corrupt journal, or a Host-injected journal row the SDK refuses as malformed.
+- **Stored evidence fails an SDK check:** an SDK `Error` when a stored cancellation fails its enrollment identity, hash or task binding check, or a task row carries an unknown terminal state.
+- **Offer append refused:** the waiters of an offer whose journal append failed reject with that append's error (for example `LocalStorageEmergencyError`). A redelivery starts a new wait.
+
+The last three are faults.
