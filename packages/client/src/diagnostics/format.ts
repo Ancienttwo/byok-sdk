@@ -44,6 +44,8 @@ export function formatAgentEvent(event: AgentEvent): string {
       return 'turn_end';
     case 'error':
       return `error: ${quote(event.message)}`;
+    case 'steer_refused':
+      return `steer_refused: ${event.reason}`;
     case 'usage': {
       const parts: string[] = [];
       if (event.inputTokens !== undefined) parts.push(`in=${event.inputTokens}`);

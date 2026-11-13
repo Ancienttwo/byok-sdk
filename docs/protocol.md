@@ -4121,6 +4121,23 @@ authorization decision.
 Additive-minor, like §11.6: an optional field on two existing variants, no
 `PROTOCOL_VERSION` bump.
 
+### 11.8 `steer_refused` AgentEvent — a dropped steer (additive)
+
+```
+{ type: 'steer_refused', messageId: uuid, reason: 'input_too_large' | 'steer_unsupported' }
+```
+
+The device emits it in the task's `task.progress` batch when it acks a
+`task.steer` without delivering it, so the Host learns of a steer that would
+otherwise vanish (#2009). `messageId` is the envelope id of that `task.steer`.
+`input_too_large`: the runtime refused the text before delivery (OAR's
+per-runtime input bound, agy 185,000 bytes). `steer_unsupported`: the claimed
+runtime has no steering channel, which the cloud steer gate normally refuses
+first. The task keeps running and the steer is not redelivered. Any other steer
+failure keeps the cursor stall and redelivery. There is no wire bound on
+`task.steer` text: the limit belongs to the runtime. A sealed task seals the
+event with its batch. Additive-minor, like §11.3: no `PROTOCOL_VERSION` bump.
+
 ## 12. Historical task lease (M2; superseded by WP3B Step 2)
 
 > Historical (pre-WP3B Step 2; non-normative): the lease/reaper contract in

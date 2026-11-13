@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "47d5ae4ed87551abbe8e30dc50c222a5aa80ee42ed3cb94b7137e6e65b617643"
+    "snapshotSha256": "a04f2a195e3a9fa783b6610659af297b3a93b88373b3354f1c9df0357c225062"
   },
   "configFields": {
     "status": "tracked",
@@ -725,6 +725,20 @@
         "export:@byok-sdk/bot-collaboration/testing#settlementVectors",
         "export:@byok-sdk/bot-collaboration/testing#syncVectors",
         "export:@byok-sdk/bot-collaboration/testing#template"
+      ]
+    },
+    {
+      "id": "steer-refused-event",
+      "impact": "additive",
+      "summary": "A task.steer the device drops without delivering it now reaches the Host as a steer_refused AgentEvent in the task's task.progress batch (#2009): { type: 'steer_refused', messageId, reason }. messageId is the envelope id of the refused task.steer (EnqueuedAgentControl.envelope.id); reason is input_too_large (the runtime refused the text before delivery, such as agy's 185,000-byte bound) or steer_unsupported (the claimed runtime has no steering channel). The steer is still acked without retry and the task keeps running. Strip-safe: no wire version change; an older Host skips it as an unknown event. A Host with an exhaustive switch over AgentEvent.type adds the case.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#a-dropped-steer-reaches-the-host-2009",
+      "items": [
+        "export:@byok-sdk/cloud#ActivityAppendRequestSchema",
+        "export:@byok-sdk/cloud#TimelineEventSchema",
+        "export:@byok-sdk/protocol#AgentEventOrUnknownSchema",
+        "export:@byok-sdk/protocol#AgentEventSchema",
+        "export:@byok-sdk/protocol#TaskProgressPayloadSchema",
+        "union:agent-event#steer_refused"
       ]
     }
   ],
@@ -2757,6 +2771,11 @@
       "entry": "testing-in-memory-device-credential-backend"
     },
     {
+      "item": "export:@byok-sdk/cloud#ActivityAppendRequestSchema",
+      "change": "changed",
+      "entry": "steer-refused-event"
+    },
+    {
       "item": "export:@byok-sdk/cloud#ByokCloud",
       "change": "changed",
       "entry": "scope-key-package-v1-removed"
@@ -2800,6 +2819,11 @@
       "item": "export:@byok-sdk/cloud#TenantBoundTaskAttempts",
       "change": "changed",
       "entry": "task-attempt-agent-ref-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TimelineEventSchema",
+      "change": "changed",
+      "entry": "steer-refused-event"
     },
     {
       "item": "export:@byok-sdk/cloud#taskArchiveInput",
@@ -2922,6 +2946,16 @@
       "entry": "agent-memory-start-refusal-classes"
     },
     {
+      "item": "export:@byok-sdk/protocol#AgentEventOrUnknownSchema",
+      "change": "changed",
+      "entry": "steer-refused-event"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEventSchema",
+      "change": "changed",
+      "entry": "steer-refused-event"
+    },
+    {
       "item": "export:@byok-sdk/protocol#AgentHomeProjectionPayloadSchema",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
@@ -3032,6 +3066,11 @@
       "entry": "dts-node-next-specifiers"
     },
     {
+      "item": "export:@byok-sdk/protocol#TaskProgressPayloadSchema",
+      "change": "changed",
+      "entry": "steer-refused-event"
+    },
+    {
       "item": "export:@byok-sdk/protocol#offerSelectionViolation",
       "change": "added",
       "entry": "offer-selection-rules"
@@ -3088,6 +3127,11 @@
       "before": "schema_version=8",
       "after": "schema_version=9",
       "entry": "task-attempt-agent-ref-required"
+    },
+    {
+      "item": "union:agent-event#steer_refused",
+      "change": "added",
+      "entry": "steer-refused-event"
     }
   ]
 }

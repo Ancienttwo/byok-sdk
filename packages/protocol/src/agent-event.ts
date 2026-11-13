@@ -98,6 +98,17 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('turn_end') }),
   z.object({ type: z.literal('error'), message: z.string() }),
   /**
+   * The device dropped the `task.steer` whose envelope id is `messageId`
+   * without delivering it, and acked it so it is not redelivered. The task
+   * keeps running. `input_too_large`: the runtime refused the text before
+   * delivery. `steer_unsupported`: the claimed runtime has no steering channel.
+   */
+  z.object({
+    type: z.literal('steer_refused'),
+    messageId: z.uuid(),
+    reason: z.enum(['input_too_large', 'steer_unsupported']),
+  }),
+  /**
    * Token usage reported by a runtime turn — maps from codex
    * `turn.completed.usage` and claude `result` usage (adapters wired up in a
    * later wave; this is just the variant + schema). All fields optional

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { CursorStore } from '../daemon/cursor-store';
+import type { TaskHandle } from '@byok-sdk/server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { SteerUnsupportedError } from '../types';
 import { RuntimeExecutionFailure } from '../runtime-failure';
@@ -181,6 +182,7 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
       await new Promise((resolve) => setTimeout(resolve, 600));
       expect(errors.mock.calls.filter(([value]) => value === message)).toHaveLength(1);
       expect(session.steerAttempts).toBe(0);
+      await expectSteerRefused(handle, 'steer_unsupported');
       session.emit({ type: 'turn_end' });
       expect((await handle.result()).state).toBe('Complete');
     } finally {
@@ -199,12 +201,12 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
    */
   // An input_too_large steer refusal (OAR's agy input bound) is as deterministic as a missing steering channel.
   it.each([
-    ['SteerUnsupportedError', () => new SteerUnsupportedError('stub', 'stub runtime cannot steer'), 'no steering channel', '"stub"'],
+    ['SteerUnsupportedError', () => new SteerUnsupportedError('stub', 'stub runtime cannot steer'), 'no steering channel', '"stub"', 'steer_unsupported'],
     ['an input_too_large refusal', () => new RuntimeExecutionFailure({
       phase: 'run', retry: 'non-retryable', failure: { class: 'input_too_large' },
       reason: "input is 185001 bytes, over OAR's 185000-byte bound for one input to this runtime, which cuts a longer one without saying so",
-    }), '185000-byte bound', '"pi"'],
-  ] as const)('a polled task.steer whose handler throws %s is recorded and acked: the cursor advances and it is never redelivered', async (_name, steerError, logged, runtime) => {
+    }), '185000-byte bound', '"pi"', 'input_too_large'],
+  ] as const)('a polled task.steer whose handler throws %s is recorded and acked: the cursor advances and it is never redelivered', async (_name, steerError, logged, runtime, reason) => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
     const storeDir = await tmpDir('byok-e2e-store-');
@@ -280,6 +282,7 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
           (call) => typeof call[0] === 'string' && call[0].includes(logged) && call[0].includes(runtime),
         ),
       ).toBe(true);
+      await expectSteerRefused(handle, reason);
 
       session.emit({ type: 'turn_end' });
       const result = await handle.result();
@@ -289,3 +292,9 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
     }
   }, 15000);
 });
+
+/** The Host sees the dropped steer as one `steer_refused` event naming its envelope id (#2009). */
+async function expectSteerRefused(handle: TaskHandle, reason: 'input_too_large' | 'steer_unsupported'): Promise<void> {
+  const event = await waitForTaskEvent(handle, (e) => e.kind === 'agent' && e.event.type === 'steer_refused');
+  expect(event).toEqual({ kind: 'agent', event: { type: 'steer_refused', messageId: expect.stringMatching(/^[0-9a-f-]{36}$/), reason } });
+}

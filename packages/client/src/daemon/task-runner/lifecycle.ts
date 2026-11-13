@@ -288,29 +288,28 @@ export async function handleCancel(this: TaskRunner, taskId: string, reason: str
   await receipt;
 }
 
-export async function handleSteer(this: TaskRunner, taskId: string, text: string): Promise<void> {
+export async function handleSteer(this: TaskRunner, taskId: string, messageId: string, text: string): Promise<void> {
   const active = this['tasks'].get(taskId);
   if (!active) return;
+  // A refused steer is acked without retry, so the Host learns of it only from this event (#2009).
+  const refuse = (reason: 'input_too_large' | 'steer_unsupported', log: string): void => {
+    console.error(`[byok/client] inbound task.steer for task ${taskId} ${log}`);
+    active.batcher.push({ type: 'steer_refused', messageId, reason });
+  };
   if (active.adapter.descriptor.capabilities.steer !== true) {
-    console.error(
-      `[byok/client] inbound task.steer for task ${taskId} rejected: runtime "${active.adapter.descriptor.id}" declares no steering channel — acked without retry; this envelope should have been gated server-side`,
-    );
+    refuse('steer_unsupported', `rejected: runtime "${active.adapter.descriptor.id}" declares no steering channel — acked without retry; this envelope should have been gated server-side`);
     return;
   }
   try {
     await active.session.steer(text);
   } catch (err) {
     if (err instanceof SteerUnsupportedError) {
-      console.error(
-        `[byok/client] inbound task.steer for task ${taskId} rejected: runtime "${err.runtimeId}" has no steering channel (${err.message}) — acked without retry; this envelope should have been gated server-side`,
-      );
+      refuse('steer_unsupported', `rejected: runtime "${err.runtimeId}" has no steering channel (${err.message}) — acked without retry; this envelope should have been gated server-side`);
       return;
     }
     // OAR refuses an input over the runtime's byte bound (agy) before sending it; a redelivery would be refused the same way.
     if (isRuntimeExecutionFailure(err) && err.failure.class === 'input_too_large') {
-      console.error(
-        `[byok/client] inbound task.steer for task ${taskId} dropped: runtime "${active.adapter.descriptor.id}" refused it before delivery (${err.message}) — acked without retry`,
-      );
+      refuse('input_too_large', `dropped: runtime "${active.adapter.descriptor.id}" refused it before delivery (${err.message}) — acked without retry`);
       return;
     }
     throw err;

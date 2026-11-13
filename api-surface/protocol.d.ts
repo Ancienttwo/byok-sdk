@@ -290,6 +290,13 @@ export declare const AgentEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     type: z.ZodLiteral<"error">;
     message: z.ZodString;
 }, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"steer_refused">;
+    messageId: z.ZodUUID;
+    reason: z.ZodEnum<{
+        input_too_large: "input_too_large";
+        steer_unsupported: "steer_unsupported";
+    }>;
+}, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"usage">;
     inputTokens: z.ZodOptional<z.ZodNumber>;
     cachedInputTokens: z.ZodOptional<z.ZodNumber>;
@@ -429,6 +436,13 @@ export declare const AgentEventOrUnknownSchema: z.ZodUnion<readonly [z.ZodDiscri
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"error">;
     message: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"steer_refused">;
+    messageId: z.ZodUUID;
+    reason: z.ZodEnum<{
+        input_too_large: "input_too_large";
+        steer_unsupported: "steer_unsupported";
+    }>;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"usage">;
     inputTokens: z.ZodOptional<z.ZodNumber>;
@@ -7424,6 +7438,13 @@ export declare const TaskProgressPayloadSchema: z.ZodUnion<readonly [z.ZodObject
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"error">;
         message: z.ZodString;
+    }, z.core.$strip>, z.ZodObject<{
+        type: z.ZodLiteral<"steer_refused">;
+        messageId: z.ZodUUID;
+        reason: z.ZodEnum<{
+            input_too_large: "input_too_large";
+            steer_unsupported: "steer_unsupported";
+        }>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"usage">;
         inputTokens: z.ZodOptional<z.ZodNumber>;

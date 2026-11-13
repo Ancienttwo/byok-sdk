@@ -942,7 +942,7 @@ export class TaskRunner {
             return;
           }
           if (!this.tasks.has(taskId)) return;
-          await this.deps.sealedTasks.applySteer(envelope, (text) => this.handleSteer(taskId, text));
+          await this.deps.sealedTasks.applySteer(envelope, (text) => this.handleSteer(taskId, envelope.id, text));
           return;
         }
         // #654 §6.2: a task that seals its input takes no plaintext steer.
@@ -950,7 +950,7 @@ export class TaskRunner {
           console.error(`[byok/client] plaintext task.steer for task ${taskId} dropped: the task seals its input`);
           return;
         }
-        await this.handleSteer(taskId, envelope.payload.text);
+        await this.handleSteer(taskId, envelope.id, envelope.payload.text);
         return;
       }
       case 'task.approve':
@@ -1260,11 +1260,12 @@ export class TaskRunner {
    *
    * A steering-capable session can throw {@link SteerUnsupportedError}, or a
    * run failure of class `input_too_large`, to reject a particular steer
-   * without retry. Other errors propagate and keep the existing cursor stall
-   * and redelivery behavior.
+   * without retry. Each such refusal reaches the Host as a `steer_refused`
+   * event naming the steer's envelope id. Other errors propagate and keep the
+   * existing cursor stall and redelivery behavior.
    */
-  private handleSteer(taskId: string, text: string): Promise<void> {
-    return handleSteer.call(this, taskId, text);
+  private handleSteer(taskId: string, messageId: string, text: string): Promise<void> {
+    return handleSteer.call(this, taskId, messageId, text);
   }
 
   /**
