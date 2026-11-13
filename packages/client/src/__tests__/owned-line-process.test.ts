@@ -4,6 +4,7 @@ import { createOwnedLineProcessSpawn, spawnOwnedLineProcess } from '../runtime/o
 import { __hostExitBackstopForTests } from '../adapters/process-tree';
 import { createOwnedTerminalSpawn } from '../runtime/owned-terminal-process';
 import { PiRpcClient } from '../adapters/pi/rpc-client';
+import { McpStdioClient } from '../mcp/client';
 import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/95c6547/runtimes/codex/app-server-client';
 
 const checkedSpawn: SpawnLineProcess = spawnOwnedLineProcess;
@@ -50,11 +51,14 @@ describe('BYOK owned line process', () => {
     await child.spawned; expect(await line).toBe('你好'); expect(await child.exited).toBe(7); expect(exited).toHaveBeenCalledWith(7);
   });
 
-  it('rejects a NUL-bearing env value by name on every owned spawn', () => {
-    const env = { BYOK_TEST_KEY: 'fake-key\0tail' };
+  it('rejects NUL-bearing spawn input by position or env name on every spawn, never echoing it', async () => {
+    const env = Object.create({ BYOK_TEST_KEY: 'fake-key\0tail' }) as Record<string, string>; // Node reads inherited keys too
     for (const start of [() => createOwnedLineProcessSpawn()(process.execPath, [], { env }),
       () => createOwnedTerminalSpawn()(process.execPath, [], { cwd: '.', env, shell: false }),
       () => new PiRpcClient({ command: process.execPath, args: [], cwd: '.', env })]) expect.soft(start).toThrow(/^spawn env variable BYOK_TEST_KEY contains a NUL byte$/);
+    expect.soft(() => createOwnedTerminalSpawn()(process.execPath, ['-e', 'fake-key\0tail'], { cwd: '.', env: {}, shell: false })).toThrow(/^spawn argument 1 contains a NUL byte$/);
+    expect.soft(() => createOwnedLineProcessSpawn()(process.execPath, [], { env: { 'fake-key\0tail': '' } })).toThrow(/^spawn env variable name contains a NUL byte$/);
+    await expect.soft(new McpStdioClient({ command: process.execPath }, { env: { BYOK_TEST_KEY: 'fake-key\0tail' } }).connect()).rejects.toThrow(/failed to spawn: spawn env variable BYOK_TEST_KEY contains a NUL byte$/);
   });
 
   it('rejects spawn failure and still settles its exit receipt', async () => {

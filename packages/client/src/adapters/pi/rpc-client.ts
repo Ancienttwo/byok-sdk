@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { AsyncQueue } from '../../util/async-queue.js';
 import { createJsonlLineDecoder } from '../../util/jsonl-lines.js';
 import { observePiRpcSettlement, closePiRpcSettlement } from './interrupt-settlement.js';
-import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree.js';
+import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree, assertNoNulSpawnInput } from '../process-tree.js';
 
 export type SpawnFn = typeof spawn;
 
@@ -98,6 +98,7 @@ export class PiRpcClient {
 
   constructor(private readonly options: PiRpcClientOptions) {
     const spawnFn = options.spawnFn ?? spawn;
+    assertNoNulSpawnInput(options.command, options.args, options.env);
     this.child = spawnFn(options.command, options.args, withOwnedProcessTree({
       cwd: options.cwd,
       env: options.env,

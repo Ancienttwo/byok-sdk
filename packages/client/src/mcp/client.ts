@@ -15,6 +15,7 @@ import {
 } from '@modelcontextprotocol/client';
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/client/validators/cf-worker';
 import { McpAuthorityError } from './authority-error.js';
+import { assertNoNulSpawnInput } from '../adapters/process-tree.js';
 
 export { McpAuthorityError };
 
@@ -223,14 +224,18 @@ class BoundedStdioTransport implements Transport {
     if (this.child !== undefined) throw new Error(`${this.label} transport already started`);
     let child: ChildProcessWithoutNullStreams;
     try {
+      assertNoNulSpawnInput(this.server.command, this.server.args ?? [], this.childEnv);
       child = spawn(this.server.command, [...(this.server.args ?? [])], {
         env: this.childEnv,
         ...(this.options.cwd === undefined ? {} : { cwd: this.options.cwd }),
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       });
-    } catch (cause) {
-      throw new McpTransportError(`${this.label} failed to spawn`, { cause });
+    } catch (error) {
+      // Node's own spawn exceptions can quote input values, so only their code crosses;
+      // the NUL rejection carries a code-less message that names the slot alone.
+      const code = (error as NodeJS.ErrnoException).code;
+      throw new McpTransportError(`${this.label} failed to spawn: ${code ?? (error as Error).message}`);
     }
     this.child = child;
 

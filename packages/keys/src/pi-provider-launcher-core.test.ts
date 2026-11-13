@@ -3,7 +3,7 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
-import { ChildProcess } from 'node:child_process';
+import { ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import { InMemorySecretStore, modelProviderSecretName } from './secret-store';
 import {
@@ -662,6 +662,9 @@ describe('the prepared runtime entry spawn', () => {
       expect(JSON.stringify(written)).not.toContain(CANARY);
       await launched.cleanup();
       expect(await fs.readdir(projection)).toEqual([]);
+      vi.spyOn(store, 'get').mockResolvedValue('fake-key\0tail'); // a custom SecretStore; the built-in ones refuse NUL
+      await expect(startPiProvider(provider, options, { ambient: {}, createSecretStore: () => store, spawn: nodeSpawn, profiles: await profilesWith(provider) }))
+        .rejects.toThrow(/^spawn env variable PI_PROVIDER_API_KEY contains a NUL byte$/);
     } finally { await fs.rm(root, { recursive: true, force: true }); }
   });
 
