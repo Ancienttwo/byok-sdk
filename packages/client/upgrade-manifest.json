@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "5ff0f556b11b924a1a350f5d7beaaf3094cd6c2177346cac3aa58d1916b245f6"
+    "snapshotSha256": "ec6056583ccd9cc6d41c6054c681c12efeb740a22748e6d649a19cdf2687c3d5"
   },
   "configFields": {
     "status": "tracked",
@@ -30,7 +30,7 @@
     {
       "id": "service-store-release-failures",
       "impact": "breaking",
-      "summary": "Store lease and gate release failures preserve a refused ServiceInstallationError and its code, with the refusal and all release failures in its AggregateError cause; Hosts that matched the 0.42.0 AggregateError on first install must read cause instead. When a release fails and an upgrade, rollback or recover receipt remains pending, the new store_release_failed code directs the Host to recover; restart the Host process first if the stuck lease causes store_busy. The same type gains install_root_foreign_owner (#2001): every ServiceInstallation operation holds an install-root gate, so a second operation on one install root fails at once with lifecycle_owner_busy, and an install root owned by another user is refused before anything changes.",
+      "summary": "Store lease and gate release failures preserve a refused ServiceInstallationError and its code, with the refusal and all release failures in its AggregateError cause; Hosts that matched the 0.42.0 AggregateError on first install must read cause instead. The code follows the outcome (#2010): a call that leaves its receipt pending or its stores unrestored throws upgrade_pending with every failure in its cause, so the Host runs recover(), first restarting the Host process if a stuck lease makes it fail with store_busy; a preparation error that is not the SDK's own is the new store_preparation_failed with the original error as its cause. The same type gains install_root_foreign_owner (#2001): every ServiceInstallation operation holds an install-root gate, so a second operation on one install root fails at once with lifecycle_owner_busy, and an install root owned by another user is refused before anything changes.",
       "migration": "docs/releases/host-upgrade-next-minor.md#store-release-failures-name-the-next-step",
       "items": [
         "export:@byok-sdk/client#ServiceInstallationErrorCode"
@@ -39,7 +39,7 @@
     {
       "id": "keys-secret-corrupted-code",
       "impact": "breaking",
-      "summary": "macOS Keychain and Linux Secret Service report an SDK entry that does not decode as the new KEYCHAIN_SECRET_CORRUPTED instead of KEYCHAIN_SECRET_DECODE_FAILED, and ProviderRegistry.replaceSecret/configure overwrite it with a new key. KEYCHAIN_SECRET_DECODE_FAILED now means an entry the SDK did not write; the registry never overwrites it and refuses before any write. A Host that offered 'enter the key again' for KEYCHAIN_SECRET_DECODE_FAILED offers it for KEYCHAIN_SECRET_CORRUPTED and shows delete, rename or other-profile guidance for KEYCHAIN_SECRET_DECODE_FAILED.",
+      "summary": "macOS Keychain and Linux Secret Service report an SDK entry that does not decode as the new KEYCHAIN_SECRET_CORRUPTED instead of KEYCHAIN_SECRET_DECODE_FAILED, and ProviderRegistry.replaceSecret/configure overwrite it with a new key. KEYCHAIN_SECRET_DECODE_FAILED now means an entry the SDK did not write; the registry never overwrites it and refuses before any write. A Host that offered 'enter the key again' for KEYCHAIN_SECRET_DECODE_FAILED offers it for KEYCHAIN_SECRET_CORRUPTED and shows delete, rename or other-profile guidance for KEYCHAIN_SECRET_DECODE_FAILED. ProviderRegistry.configure/replaceSecret/setDefaultModelProvider/delete reject with the new PROVIDER_CHANGE_COMMITTED when the change committed but a later step (the auth-none key delete, an unconfirmed profile-store write or the lock release) failed; treat it as success and read the status again. ProviderRegistry.configure without a secret reuses the stored key only for an authenticating profile with an unchanged base_url and otherwise rejects with PROVIDER_SECRET_MISSING.",
       "migration": "docs/releases/host-upgrade-next-minor.md#provider-key-changes-roll-back-on-failure-1946",
       "items": [
         "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES"
@@ -48,7 +48,7 @@
     {
       "id": "bot-collaboration-cancel-host-intents",
       "impact": "breaking",
-      "summary": "cancelHostIntents atomically cancels selected unsubmitted Host intents without a pass. HostIntentError.rejected lists all refused keys and code gains inflight; update exhaustive switches. Existing cancelHostIntent, drainForSwitch and abortSwitch behavior and store format are unchanged. Hosts may replace freeze, individual cancels and abort with this call, retaining freeze when other device work must be held. Successors wait for a later pass or an explicit drain().",
+      "summary": "cancelHostIntents atomically cancels selected unsubmitted Host intents without a pass. HostIntentError.rejected lists all refused keys and code gains inflight; update exhaustive switches. Existing cancelHostIntent, drainForSwitch and abortSwitch retain their other behavior, and the store format is unchanged; see committed-cancel-wake-pending for the wake-dispatch change. Hosts may replace freeze, individual cancels and abort with this call, retaining freeze when other device work must be held. Successors wait for a later pass or an explicit drain().",
       "migration": "docs/releases/host-upgrade-next-minor.md#cancel-selected-host-intents-without-a-pass-2003",
       "items": [
         "export:@byok-sdk/bot-collaboration#BotCollaboration",
@@ -133,6 +133,55 @@
         "export:@byok-sdk/client#resolveHostLayout",
         "export:@byok-sdk/client/host-layout#resolveHostLayout"
       ]
+    },
+    {
+      "id": "committed-cancel-wake-pending",
+      "impact": "breaking",
+      "summary": "HostExecutionCore.cancel returns an object; BotCollaboration.cancelTurn and abortSwitch may return wakePending: true when wake dispatch fails after commit. The durable outbox records lastError and retries; drain and wake hooks still reject WakeDispatchError, an AggregateError. Update callers expecting cancel to return void.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#committed-cancellation-with-a-pending-wake-2004",
+      "items": [
+        "export:@byok-sdk/server/execution-core#HostExecutionCore",
+        "export:@byok-sdk/server/execution-core#WakeDispatchError"
+      ]
+    },
+    {
+      "id": "cloud-do-archived",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud-do is archived after 0.42.0 and leaves the release train. Remove the dependency or pin it to exactly 0.42.0; no later fixes will be published and its npm versions will be deprecated.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#cloud-do-archived",
+      "items": [
+        "entry:@byok-sdk/cloud-do",
+        "entry:@byok-sdk/cloud-do/package.json",
+        "export:@byok-sdk/cloud-do#AgentDO",
+        "export:@byok-sdk/cloud-do#AgentIdentity",
+        "export:@byok-sdk/cloud-do#CLOUD_LIVE_IPO_TOOLS",
+        "export:@byok-sdk/cloud-do#CLOUD_SAFE_REPLAY_TOOLS",
+        "export:@byok-sdk/cloud-do#CloudDispatchContext",
+        "export:@byok-sdk/cloud-do#CloudEventMeta",
+        "export:@byok-sdk/cloud-do#CloudEventRow",
+        "export:@byok-sdk/cloud-do#CloudRenewRequest",
+        "export:@byok-sdk/cloud-do#CloudRenewResult",
+        "export:@byok-sdk/cloud-do#CloudRunSettlement",
+        "export:@byok-sdk/cloud-do#CloudToolCallContext",
+        "export:@byok-sdk/cloud-do#CloudToolDefinition",
+        "export:@byok-sdk/cloud-do#CloudToolDispatcher",
+        "export:@byok-sdk/cloud-do#CloudToolResult",
+        "export:@byok-sdk/cloud-do#CloudWakeAdmission",
+        "export:@byok-sdk/cloud-do#DurableObjectSqliteDatabase",
+        "export:@byok-sdk/cloud-do#InboxRow",
+        "export:@byok-sdk/cloud-do#RunRow",
+        "export:@byok-sdk/cloud-do#SessionIdentity",
+        "export:@byok-sdk/cloud-do#TranscriptCursor",
+        "export:@byok-sdk/cloud-do#TranscriptItem",
+        "export:@byok-sdk/cloud-do#TranscriptRun",
+        "export:@byok-sdk/cloud-do#TranscriptTurn",
+        "export:@byok-sdk/cloud-do#agentObjectName",
+        "export:@byok-sdk/cloud-do#default",
+        "export:@byok-sdk/cloud-do#getAgentObject",
+        "export:@byok-sdk/cloud-do#getSessionObject",
+        "export:@byok-sdk/cloud-do#openDurableObjectStorage",
+        "export:@byok-sdk/cloud-do#sessionObjectName"
+      ]
     }
   ],
   "changes": [
@@ -140,6 +189,16 @@
       "item": "entry:@byok-sdk/client/host-layout",
       "change": "added",
       "entry": "host-layout-subpath"
+    },
+    {
+      "item": "entry:@byok-sdk/cloud-do",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "entry:@byok-sdk/cloud-do/package.json",
+      "change": "removed",
+      "entry": "cloud-do-archived"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
@@ -317,6 +376,151 @@
       "entry": "enrollment-clear-store-scope"
     },
     {
+      "item": "export:@byok-sdk/cloud-do#AgentDO",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#AgentIdentity",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CLOUD_LIVE_IPO_TOOLS",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CLOUD_SAFE_REPLAY_TOOLS",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudDispatchContext",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudEventMeta",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudEventRow",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudRenewRequest",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudRenewResult",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudRunSettlement",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudToolCallContext",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudToolDefinition",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudToolDispatcher",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudToolResult",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudWakeAdmission",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#DurableObjectSqliteDatabase",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#InboxRow",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#RunRow",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#SessionIdentity",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#TranscriptCursor",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#TranscriptItem",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#TranscriptRun",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#TranscriptTurn",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#agentObjectName",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#default",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#getAgentObject",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#getSessionObject",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#openDurableObjectStorage",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#sessionObjectName",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
       "item": "export:@byok-sdk/core#LocalStoreId",
       "change": "changed",
       "entry": "bot-collaboration-ledger-precheck"
@@ -325,6 +529,16 @@
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
       "change": "changed",
       "entry": "keys-secret-corrupted-code"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",
+      "change": "changed",
+      "entry": "committed-cancel-wake-pending"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#WakeDispatchError",
+      "change": "added",
+      "entry": "committed-cancel-wake-pending"
     },
     {
       "item": "store:bot-collaboration-ledger",

@@ -94,7 +94,7 @@ export function openCodeContract(
       const resumeRequests = provider.requests.slice(secondEnd).filter(item => item.model);
       for (const request of resumeRequests) expect(mcpTool('host', 'submit_result')(request.tools)).toBeUndefined();
       if (runtime === 'opencode2') {
-        expect(resumeRequests.some(request => request.text.includes('tools are no longer available') && request.text.includes('tools.host.submit_result'))).toBe(true);
+        expect(resumeRequests.some(request => request.text.includes('The following tool namespaces are no longer available and must not be used: `host`.'))).toBe(true);
         expect(resumeRequests.some(request => request.text.includes("Unknown tool 'host.submit_result'"))).toBe(true);
       }
       expect(provider.requests.slice(firstEnd, secondEnd).some(item => item.model)).toBe(true);

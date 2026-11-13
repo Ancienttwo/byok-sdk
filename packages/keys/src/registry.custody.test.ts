@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { InMemoryTruthStore, tenantId } from '@byok-sdk/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PROVIDER_CUSTODY_RECEIPT_LIMIT } from './custody';
@@ -17,6 +18,7 @@ import type { CommandRunner } from './command-runner';
 import { LinuxSecretServiceSecretStore } from './linux-secret-service';
 import { InMemorySecretStore, type ModelProviderSecretName, modelProviderSecretName } from './secret-store';
 import { SqliteProviderProfileStore, providerConfigurationLockPath } from './sqlite-profile-store';
+import { TruthStoreProviderProfileStore } from './truth-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
 
 const OLD_KEY = 'sk-registry-custody-old-0a1f';
@@ -242,9 +244,112 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       inFlight -= 1;
       return has(name);
     });
-    await expect(registry().list()).rejects.toThrow('store refused');
+    await expect(registry().list()).rejects.toMatchObject({ code: 'PROVIDER_SECRET_STORE_FAILED' });
     expect(inFlight).toBe(0);
     expect(held).toBe(0);
+  });
+
+  it('no public method passes on a store error that echoes a key (#2029)', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    const echo = async () => { throw new Error(`echo ${OLD_KEY}`, { cause: new Error(NEW_KEY) }); };
+    const echoing = Object.assign(Object.create(secrets) as InMemorySecretStore, { get: echo, has: echo, set: echo, delete: echo });
+    const subject = new ProviderRegistry({ now: () => new Date(clock), profileStore: profiles, secretStore: echoing });
+    const calls = [
+      () => subject.get('openai'), () => subject.list(), () => subject.configure(OPENAI, NEW_KEY),
+      () => subject.configure({ ...OPENAI, model: 'gpt-5.2-mini' }), () => subject.replaceSecret('openai', NEW_KEY),
+      () => subject.setDefaultModelProvider('openai'), () => subject.resolveDefaultModelProvider(), () => subject.delete('openai'),
+    ];
+    for (const call of calls) {
+      const error = await call().then(() => undefined, (thrown: unknown) => thrown as Error);
+      expect(error).toMatchObject({ code: 'PROVIDER_SECRET_STORE_FAILED' });
+      expect(JSON.stringify([error!.message, error!.stack, String(error!.cause)])).not.toMatch(new RegExp(`${OLD_KEY}|${NEW_KEY}`, 'u'));
+    }
+  });
+
+  it('a committed change is returned even when a later read would fail (#2023)', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    let committed = false;
+    const commit = profiles.commitCustody.bind(profiles);
+    vi.spyOn(profiles, 'commitCustody').mockImplementation(async (change) => { await commit(change); committed = true; });
+    const setEnabled = profiles.setEnabled.bind(profiles);
+    vi.spyOn(profiles, 'setEnabled').mockImplementation(async (ref) => { const profile = await setEnabled(ref); committed = true; return profile; });
+    const failAfterCommit = <T extends object>(target: T, method: keyof T) => {
+      const original = (target[method] as (...args: unknown[]) => unknown).bind(target);
+      vi.spyOn(target, method as never).mockImplementation((async (...args: unknown[]) => {
+        if (committed) throw new Error('read after commit');
+        return original(...args);
+      }) as never);
+    };
+    failAfterCommit(secrets, 'has');
+    failAfterCommit(profiles, 'get');
+    failAfterCommit(profiles, 'getPending');
+
+    await expect(registry().replaceSecret('openai', NEW_KEY)).resolves.toMatchObject({ secret_configured: true, configuration_pending: false });
+    committed = false;
+    await expect(registry().configure({ ...OPENAI, model: 'gpt-5.2-mini' }, OLD_KEY))
+      .resolves.toMatchObject({ model: 'gpt-5.2-mini', secret_configured: true, configuration_pending: false });
+    committed = false;
+    await expect(registry().setDefaultModelProvider('openai')).resolves.toMatchObject({ enabled: true, secret_configured: true });
+  });
+
+  it('a failure after the commit rejects as PROVIDER_CHANGE_COMMITTED (#2023)', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    vi.spyOn(secrets, 'delete').mockRejectedValueOnce(new Error('store refused'));
+    const local = { ...OPENAI, auth_mode: 'none' as const, base_url: 'http://127.0.0.1:11434/v1', provider_kind: 'custom' as const };
+    await expect(registry().configure(local)).rejects.toMatchObject({ code: 'PROVIDER_CHANGE_COMMITTED' });
+    await expect(profiles.get('openai')).resolves.toMatchObject({ auth_mode: 'none' });
+    await expect(profiles.getPending('openai')).resolves.toBeUndefined();
+    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+    // The leftover key never follows the profile back to authentication.
+    await expect(registry().configure({ ...OPENAI, base_url: 'https://elsewhere.example/v1' })).rejects.toMatchObject({ code: 'PROVIDER_SECRET_MISSING' });
+    await expect(registry().configure(OPENAI)).rejects.toMatchObject({ code: 'PROVIDER_SECRET_MISSING' });
+
+    await registry().configure(OPENAI, OLD_KEY);
+    await expect(registry().configure({ ...OPENAI, base_url: 'https://elsewhere.example/v1' })).rejects.toMatchObject({ code: 'PROVIDER_SECRET_MISSING' });
+    const acquire = profiles.acquireConfigurationLock.bind(profiles);
+    vi.spyOn(profiles, 'acquireConfigurationLock').mockImplementationOnce(async () => {
+      const lock = await acquire();
+      return { release: async () => {
+        await lock.release();
+        throw new ByokKeysError('PROVIDER_PROFILE_INVALID', `release ${NEW_KEY}`, { cause: new Error(NEW_KEY) });
+      } };
+    });
+    const released = await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error as Error);
+    expect(released).toMatchObject({ code: 'PROVIDER_CHANGE_COMMITTED', cause: { code: 'PROVIDER_PROFILE_INVALID' } });
+    const chain = (error: unknown): string => (error instanceof Error ? `${error.message} ${error.stack} ${chain(error.cause)}` : String(error));
+    expect(chain(released)).not.toContain(NEW_KEY);
+    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
+
+    // A lock connection that fails to close still frees the process-local lock.
+    vi.spyOn(process.getBuiltinModule('node:sqlite').DatabaseSync.prototype, 'close').mockImplementationOnce(() => { throw new Error('close failed'); });
+    await expect(registry().replaceSecret('openai', OLD_KEY)).rejects.toMatchObject({ code: 'PROVIDER_CHANGE_COMMITTED' });
+    await expect(registry().get('openai')).resolves.toMatchObject({ secret_configured: true });
+
+    // A read inside the store after its commit cannot report the switch as failed.
+    await registry().configure({ ...OPENAI, profile_ref: 'other', enabled: false }, OLD_KEY);
+    const get = profiles.get.bind(profiles);
+    vi.spyOn(profiles, 'get').mockImplementation(async (ref) => {
+      const profile = await get(ref);
+      if (profile?.enabled === true && ref === 'other') throw new Error('read after commit');
+      return profile;
+    });
+    await expect(registry().setDefaultModelProvider('other')).resolves.toMatchObject({ enabled: true });
+    vi.mocked(profiles.get).mockRestore();
+
+    // A TruthStore write that lands but is not confirmed is committed: no rollback, no marker.
+    const truth = new InMemoryTruthStore({ now: () => new Date(clock) });
+    const truthProfiles = new TruthStoreProviderProfileStore({ tenant: tenantId('custody'), truthStore: truth });
+    const truthRegistry = new ProviderRegistry({ now: () => new Date(clock), profileStore: truthProfiles, secretStore: secrets });
+    await truthRegistry.configure(OPENAI, OLD_KEY);
+    const write = truth.writeSnapshot.bind(truth);
+    vi.spyOn(truth, 'writeSnapshot').mockImplementationOnce(async (...args) => ({ ...(await write(...args)), body: { kind: 'inline', body: '{}' } }));
+    await expect(truthRegistry.configure({ ...OPENAI, model: 'gpt-5.2-mini' }, NEW_KEY)).rejects.toMatchObject({ code: 'PROVIDER_CHANGE_COMMITTED' });
+    await expect(truthProfiles.get('openai')).resolves.toMatchObject({ model: 'gpt-5.2-mini' });
+    await expect(truthProfiles.getPending('openai')).resolves.toBeUndefined();
+    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
+
+    vi.spyOn(secrets, 'has').mockRejectedValueOnce(new Error('store refused'));
+    await expect(registry().setDefaultModelProvider('missing')).rejects.toMatchObject({ code: 'PROVIDER_NOT_CONFIGURED' });
   });
 
   it('remove goes through the same pending path and keeps the watermark tombstone', async () => {

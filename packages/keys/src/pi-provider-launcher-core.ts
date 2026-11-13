@@ -606,6 +606,21 @@ export interface PiProviderLaunchDependencies {
   }) => ChildProcess;
 }
 
+/**
+ * 与 client util/spawn-input 的 NUL 检查同语义，core 下次加公开面时合成一份 (#2043).
+ * Node's rejection quotes a NUL-bearing input escaped, which credential redaction misses,
+ * so only the argument position or env name is reported; `for...in` matches Node's
+ * inclusion of inherited enumerable env keys.
+ */
+function assertNoNulSpawnInput(command: string, args: readonly string[], env: NodeJS.ProcessEnv): void {
+  if (command.includes('\0')) throw new Error('spawn command contains a NUL byte');
+  args.forEach((arg, index) => { if (arg.includes('\0')) throw new Error(`spawn argument ${index} contains a NUL byte`); });
+  for (const name in env) {
+    if (name.includes('\0')) throw new Error('spawn env variable name contains a NUL byte');
+    if (env[name]?.includes('\0')) throw new Error(`spawn env variable ${name} contains a NUL byte`);
+  }
+}
+
 /** Owns the credential-to-spawn sequence; the client retains directory ownership. */
 export async function startPiProvider(
   profile: ModelProviderProfile,
@@ -660,6 +675,7 @@ export async function startPiProvider(
     });
     if (ipcLane === undefined && secret !== undefined) env[PI_PROJECTED_KEY_ENV] = secret;
     const childArgs = [...(options.piEntry === undefined ? [] : [options.piEntry]), ...options.piFixedArgs, `--config-digest=${configDigest}`, ...delegated];
+    assertNoNulSpawnInput(options.piBin, childArgs, env);
     const spawnChild = dependencies.spawn ?? spawn;
     const child = spawnChild(options.piBin, childArgs, { env, cwd: piCwd,
       stdio: ipcLane === undefined ? 'inherit' : ['inherit', 'inherit', 'inherit', 'ipc'],

@@ -309,7 +309,7 @@ describeSqlite('byok-agent upgrade check --store', () => {
 });
 
 describe('upgrade check --from (#1316)', () => {
-  const TRAIN = ['client', 'bot-collaboration', 'cloud', 'cloud-dataplane', 'cloud-do', 'core', 'keys', 'protocol', 'server', 'ui-runtime'];
+  const TRAIN = ['client', 'bot-collaboration', 'cloud', 'cloud-dataplane', 'core', 'keys', 'protocol', 'server', 'ui-runtime'];
 
   /** A Host directory with an installed 0.34.0 train: the archived manifests and an in-development 0.34.0 one. */
   function host(options: { readonly versions?: Record<string, string>; readonly history?: boolean } = {}): string {
@@ -356,16 +356,16 @@ describe('upgrade check --from (#1316)', () => {
     const { code, report } = command('0.34.0', host());
     expect(code).toBe(0);
     expect(report).toMatchObject({ from: '0.34.0', to: '0.34.0', breaking: [], additiveCount: 0, verdict: 'pass' });
-    expect(report.train.packages).toHaveLength(10);
+    expect(report.train.packages).toHaveLength(9);
   });
 
   it('refuses a train with another @byok-sdk version; an absent package is only listed', () => {
     const root = host({ versions: { core: '0.33.0' } });
-    rmSync(join(root, 'node_modules/@byok-sdk/cloud-do'), { recursive: true });
+    rmSync(join(root, 'node_modules/@byok-sdk/cloud-dataplane'), { recursive: true });
     const { code, report } = command('0.34.0', root);
     expect(code).toBe(UPGRADE_CHECK_REFUSED_EXIT_CODE);
     expect(report.train.packages).toContainEqual({ name: '@byok-sdk/core', version: '0.33.0' });
-    expect(report.train.packages).toContainEqual({ name: '@byok-sdk/cloud-do', version: 'absent' });
+    expect(report.train.packages).toContainEqual({ name: '@byok-sdk/cloud-dataplane', version: 'absent' });
     expect(report.refusal).toBeUndefined();
   });
 

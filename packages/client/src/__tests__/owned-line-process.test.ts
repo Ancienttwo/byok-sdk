@@ -7,6 +7,11 @@ import { PiRpcClient } from '../adapters/pi/rpc-client';
 import { McpStdioClient } from '../mcp/client';
 import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/95c6547/runtimes/codex/app-server-client';
 
+// Pass-through spy: every spawn below, including MCP's direct one, is observable.
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
 /** Walks message, stack, cause and every nested own property, not only their string forms. */
 const carriesSecret = (value: unknown, depth = 0): boolean => typeof value === 'string' ? value.includes('fake-key')
   : depth < 5 && typeof value === 'object' && value !== null && Object.getOwnPropertyNames(value).some(key => carriesSecret((value as Record<string, unknown>)[key], depth + 1));
@@ -54,11 +59,33 @@ describe('BYOK owned line process', () => {
     await child.spawned; expect(await line).toBe('你好'); expect(await child.exited).toBe(7); expect(exited).toHaveBeenCalledWith(7);
   });
 
-  it('rejects a NUL-bearing env value by name on every owned spawn', () => {
-    const env = { BYOK_TEST_KEY: 'fake-key\0tail' };
-    for (const start of [() => createOwnedLineProcessSpawn()(process.execPath, [], { env }),
-      () => createOwnedTerminalSpawn()(process.execPath, [], { cwd: '.', env, shell: false }),
-      () => new PiRpcClient({ command: process.execPath, args: [], cwd: '.', env })]) expect.soft(start).toThrow(/^spawn env variable BYOK_TEST_KEY contains a NUL byte$/);
+  it('rejects NUL-bearing spawn input on every client spawn before starting it, naming only the slot', async () => {
+    const secret = 'fake-key\0tail';
+    const cases: Array<{ command: string; args: string[]; env: Record<string, string>; message: string; inherited?: boolean }> = [
+      { command: `/bin/${secret}`, args: [], env: {}, message: 'spawn command contains a NUL byte' },
+      { command: process.execPath, args: ['-e', secret], env: {}, message: 'spawn argument 1 contains a NUL byte' },
+      { command: process.execPath, args: [], env: { [secret]: '' }, message: 'spawn env variable name contains a NUL byte' },
+      { command: process.execPath, args: [], env: { BYOK_TEST_KEY: secret }, message: 'spawn env variable BYOK_TEST_KEY contains a NUL byte' },
+      // Node reads inherited enumerable keys too; MCP copies own keys only, so it is not handed one.
+      { command: process.execPath, args: [], env: Object.create({ BYOK_TEST_KEY: secret }), message: 'spawn env variable BYOK_TEST_KEY contains a NUL byte', inherited: true },
+    ];
+    for (const { command, args, env, message, inherited } of cases) {
+      vi.mocked(spawn).mockClear();
+      const entries: Array<[string, () => unknown]> = [
+        ['line', () => createOwnedLineProcessSpawn()(command, args, { env })],
+        ['terminal', () => createOwnedTerminalSpawn()(command, args, { cwd: '.', env, shell: false })],
+        ['pi rpc', () => new PiRpcClient({ command, args, cwd: '.', env })],
+        ...(inherited ? [] : [['mcp', () => new McpStdioClient({ command, args }, { env }).connect()] as [string, () => unknown]]),
+      ];
+      for (const [entry, start] of entries) {
+        const error = await (async () => { try { await start(); } catch (caught) { return caught as Error; } })();
+        expect.soft(error?.message, entry).toBe(entry === 'mcp' ? `MCP server failed to spawn: ${message}` : message);
+        expect.soft(carriesSecret(error), entry).toBe(false);
+      }
+      expect.soft(vi.mocked(spawn), message).not.toHaveBeenCalled();
+    }
+    // A synchronous Node rejection keeps its code, without the raw exception.
+    await expect(new McpStdioClient({ command: '' }, { env: {} }).connect()).rejects.toThrow(/^MCP server failed to spawn: ERR_INVALID_ARG_VALUE$/);
   });
 
   it('rejects spawn failure with only its code on every client spawn and still settles its exit receipt', async () => {

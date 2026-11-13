@@ -1,5 +1,4 @@
 import { readRegistryExpectations, runtimeDependencyMetadata } from './registry-contract.mjs';
-import { cloudDoConsumerSmoke } from './cloud-do-consumer-smoke.mjs';
 import { nodeNextConsumerProbe } from './node-next-consumer-probe.mjs';
 import { assertNoStorePaths } from './published-store-paths.mjs';
 import { runtimeSmokeImports } from '../api-surface/entry-closure.mjs';
@@ -36,7 +35,6 @@ const packages = [
   { name: '@byok-sdk/cloud', directory: 'packages/cloud' },
   { name: '@byok-sdk/client', directory: 'packages/client' },
   { name: '@byok-sdk/cloud-dataplane', directory: 'packages/cloud-dataplane' },
-  { name: '@byok-sdk/cloud-do', directory: 'packages/cloud-do' },
   { name: '@byok-sdk/ui-runtime', directory: 'packages/ui-runtime' },
   { name: '@byok-sdk/bot-collaboration', directory: 'packages/bot-collaboration' },
   { name: '@byok-sdk/keys', directory: 'packages/keys' },
@@ -484,7 +482,7 @@ try {
         `  rmSync(piAssets, { recursive: true, force: true });\n` +
         `}\n` +
         `console.log('[release-pack] installed copyPiRuntimeAssets builds a Pi asset root');\n` +
-        `for (const [name, version] of [['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/cloud-do','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/bot-collaboration','${releaseVersion}'],['@byok-sdk/keys','${releaseVersion}']]) {\n` +
+        `for (const [name, version] of [['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/bot-collaboration','${releaseVersion}'],['@byok-sdk/keys','${releaseVersion}']]) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
         `  assert.equal(manifest.version, version, name);\n` +
         `}\n` +
@@ -509,7 +507,6 @@ try {
         `console.log('[release-pack] isolated imports OK');\n`,
     );
     run(nodeBin, ['smoke.mjs'], smokeDir);
-    await cloudDoConsumerSmoke(smokeDir, smokeImports.worker);
     nodeNextConsumerProbe(smokeDir);
     copyFileSync(path.join(repoRoot, 'scripts/release/execution-submit-smoke.mjs'), path.join(smokeDir, 'execution-submit-smoke.mjs'));
     run(nodeBin, ['execution-submit-smoke.mjs'], smokeDir);

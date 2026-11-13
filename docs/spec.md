@@ -645,9 +645,9 @@ published and read back as `latest` on 2026-10-09 from the `v0.25.0` tag
 authority on what has shipped — read it back with `npm view @byok-sdk/core version`
 and `npm view @byok-sdk/keys version`.
 
-The public package set is exactly ten packages: the nine aligned train
+The public package set is exactly nine packages: the eight aligned train
 packages `@byok-sdk/core`, `@byok-sdk/protocol`, `@byok-sdk/client`,
-`@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`,
+`@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`,
 `@byok-sdk/ui-runtime` and `@byok-sdk/bot-collaboration`, plus `@byok-sdk/keys`.
 From 0.28.2 all of them carry the same version. `@byok-sdk/bot-collaboration`
 (K8, #1845, #1910) was first published in 0.42.0; through 0.41.0 the set was
@@ -2039,8 +2039,7 @@ next to them. It holds no scope key in plaintext, so it cannot open them.
   [docs/migrations/1045-e2ee-v2.md](./migrations/1045-e2ee-v2.md) lists what a
   Host does to use v2.
 - `@byok-sdk/server` has no sealed dispatch: it refuses `sealing` and
-  `sealed` with `coordination_input_invalid`. A sealed task must not go to
-  `@byok-sdk/cloud-do`, which reads task content in plaintext.
+  `sealed` with `coordination_input_invalid`.
 - The Host's truth route stores a `task.terminal` record as the product
   writes it and does not check sealing. A product that records a sealed
   task's terminal there must write sealed content only.
@@ -3714,7 +3713,7 @@ The old mailbox façade, `collectRetired`, replay `deleteExpired`, public
 Worker-loadable dataplane runtime entry. Operator
 dead-letter, reconciliation and usage-rebuild APIs remain. Installed
 `cleanup_job` rows are historical; no current code writes them. Client artifact
-retention and cloud-do alarms retain their own ownership boundaries.
+retention retains its own ownership boundary.
 
 ## Durable execution recovery
 

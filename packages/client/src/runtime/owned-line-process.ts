@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams, type ChildProcess, type Spa
 import {
   adoptOwnedProcessTree, disposeOwnedProcessTree, rememberOwnedDescendants, withOwnedProcessTree, spawnStartError,
 } from '../adapters/process-tree.js';
+import { assertNoNulSpawnInput } from '../util/spawn-input.js';
 import { createJsonlLineDecoder } from '../util/jsonl-lines.js';
 
 const MAX_LINE_BYTES = 1024 * 1024;
@@ -25,6 +26,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
   const label = deps.label ?? 'codex app-server';
   return (command: string, args: readonly string[], options: { readonly env: Readonly<Record<string, string>>; readonly cwd?: string }) => {
     if (options.env === undefined) throw new Error('owned line process requires an explicit filtered environment');
+    assertNoNulSpawnInput(command, args, options.env);
     const child = (deps.spawnFn ?? spawn)(command, [...args], withOwnedProcessTree({
       ...('cwd' in options ? { cwd: options.cwd } : {}), env: options.env,
       stdio: ['pipe', 'pipe', 'pipe'],

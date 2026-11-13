@@ -76,11 +76,6 @@ export function spawnStartError(error: NodeJS.ErrnoException): Error & { code?: 
  * the runtime outlive the daemon. Windows uses taskkill's `/T` tree authority.
  */
 export function withOwnedProcessTree<T extends SpawnOptions>(options: T): T {
-  // Node rejects a NUL-bearing env value with an error that quotes it escaped, which
-  // literal credential redaction misses, so only the variable is named (#2008).
-  for (const [name, value] of Object.entries(options.env ?? {})) {
-    if (value?.includes('\0')) throw new Error(`spawn env variable ${name} contains a NUL byte`);
-  }
   return {
     ...options,
     ...(process.platform === 'win32' ? { windowsHide: true } : { detached: true }),
