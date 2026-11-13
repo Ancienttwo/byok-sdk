@@ -290,6 +290,28 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     await expect(registry().setDefaultModelProvider('openai')).resolves.toMatchObject({ enabled: true, secret_configured: true });
   });
 
+  it('a failure after the commit rejects as PROVIDER_CHANGE_COMMITTED (#2023)', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    vi.spyOn(secrets, 'delete').mockRejectedValueOnce(new Error('store refused'));
+    const local = { ...OPENAI, auth_mode: 'none' as const, base_url: 'http://127.0.0.1:11434/v1', provider_kind: 'custom' as const };
+    await expect(registry().configure(local)).rejects.toMatchObject({ code: 'PROVIDER_CHANGE_COMMITTED' });
+    await expect(profiles.get('openai')).resolves.toMatchObject({ auth_mode: 'none' });
+    await expect(profiles.getPending('openai')).resolves.toBeUndefined();
+    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+
+    await registry().configure(OPENAI, OLD_KEY);
+    const acquire = profiles.acquireConfigurationLock.bind(profiles);
+    vi.spyOn(profiles, 'acquireConfigurationLock').mockImplementationOnce(async () => {
+      const lock = await acquire();
+      return { release: async () => { await lock.release(); throw new Error('release failed'); } };
+    });
+    await expect(registry().replaceSecret('openai', NEW_KEY)).rejects.toMatchObject({ code: 'PROVIDER_CHANGE_COMMITTED' });
+    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
+
+    vi.spyOn(secrets, 'has').mockRejectedValueOnce(new Error('store refused'));
+    await expect(registry().setDefaultModelProvider('missing')).rejects.toMatchObject({ code: 'PROVIDER_NOT_CONFIGURED' });
+  });
+
   it('remove goes through the same pending path and keeps the watermark tombstone', async () => {
     await registry().configure(OPENAI, OLD_KEY);
     await profiles.commitCustody({

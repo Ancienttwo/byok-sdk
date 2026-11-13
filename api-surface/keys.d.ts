@@ -369,6 +369,8 @@ export declare class ByokKeysError extends Error {
  * `PROVIDER_CONFIGURATION_PENDING`, `PROVIDER_CUSTODY_STATE_INVALID`,
  * `PROVIDER_SECRET_STORE_FAILED`) and `DEVICE_SEALING_KEY_INVALID` belong to
  * sealed provider provisioning and likewise have no source counterpart.
+ * `PROVIDER_CHANGE_COMMITTED` marks a registry write that committed before a
+ * later step (a follow-up key delete or the lock release) failed.
  * `KEYCHAIN_SECRET_CORRUPTED` narrows the decode failure to an entry that
  * carries this store's storage prefix (one the SDK wrote) but whose payload
  * does not decode; `KEYCHAIN_SECRET_DECODE_FAILED` remains the code for a
@@ -407,6 +409,7 @@ export declare const BYOK_KEYS_ERROR_CODES: {
     readonly MODEL_PROVIDER_MODEL_NOT_FOUND: 'MODEL_PROVIDER_MODEL_NOT_FOUND';
     readonly MODEL_PROVIDER_RATE_LIMITED: 'MODEL_PROVIDER_RATE_LIMITED';
     readonly MODEL_RESPONSE_INVALID: 'MODEL_RESPONSE_INVALID';
+    readonly PROVIDER_CHANGE_COMMITTED: 'PROVIDER_CHANGE_COMMITTED';
     readonly PROVIDER_CONFIGURATION_BUSY: 'PROVIDER_CONFIGURATION_BUSY';
     readonly PROVIDER_CONFIGURATION_PENDING: 'PROVIDER_CONFIGURATION_PENDING';
     readonly PROVIDER_CUSTODY_STATE_INVALID: 'PROVIDER_CUSTODY_STATE_INVALID';
@@ -1948,7 +1951,12 @@ export interface ProviderStatus {
     /** SHA-256 of the normalized non-secret local record. */
     profile_hash: string;
     provider_kind: ModelProviderKind;
-    /** Whether the credential store currently holds this profile's key. */
+    /**
+     * Whether the credential store holds this profile's key. From `get` and
+     * `list` it is read under the configuration lock; from `configure`,
+     * `replaceSecret` and `setDefaultModelProvider` it is the state the call
+     * committed. Either way it may be stale once the lock is released.
+     */
     secret_configured: boolean;
     /**
      * Whether an unfinished credential change is recorded for this profile. While
@@ -2020,12 +2028,24 @@ export declare class ProviderRegistry {
      * secret, then commit the profile and clear the marker in one store
      * transaction. An unfinished earlier change (a pending marker) can only be
      * resolved by a call that supplies a new secret.
+     *
+     * The returned status is the state this call committed, built without a
+     * read after the commit; once the lock is released another writer may
+     * already have changed it. A rejection with `PROVIDER_CHANGE_COMMITTED` means
+     * the change is in effect but a later step failed: for an `auth_mode: 'none'`
+     * profile, deleting the previous key, which then stays in the store; or
+     * releasing the lock. Any other rejection means nothing was committed.
      */
     configure(configuration: ProviderConfiguration, secret?: string): Promise<ProviderStatus>;
     /**
      * Replace only the credential of an existing authenticating profile. The
      * profile record is untouched, so its revision and hash — and every exact
      * binding a Host holds — stay valid (plan D4).
+     *
+     * Like {@link configure}, it returns the state it committed, which may be
+     * stale once the lock is released, and rejects with
+     * `PROVIDER_CHANGE_COMMITTED` only when the new key is in effect but
+     * releasing the lock failed.
      */
     replaceSecret(profileRef: ProviderProfileRef, secret: string): Promise<ProviderStatus>;
     /** Remove a profile and its secret together, through the same pending/commit path. */
@@ -2051,7 +2071,12 @@ export declare class ProviderRegistry {
      * read under one configuration lock.
      */
     resolveDefaultModelProvider(): Promise<ModelProviderClient | undefined>;
-    /** Switch which configured profile is the default. */
+    /**
+     * Switch which configured profile is the default. The returned status is
+     * the state at the switch, which may be stale once the lock is released; a
+     * rejection with `PROVIDER_CHANGE_COMMITTED` means the switch is in effect
+     * but releasing the lock failed.
+     */
     setDefaultModelProvider(profileRef: ProviderProfileRef): Promise<ProviderStatus>;
 }
 // ==== @byok-sdk/keys dist/sealed-provisioning.d.ts ====

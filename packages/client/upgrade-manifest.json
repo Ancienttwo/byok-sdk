@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "5f21bedda85a145bd322f958526ab2c0a8ba1a56bbb884fd964d81864f235f4d"
+    "snapshotSha256": "0644c75a1e957e1f2e3402cef6d41fe2a4bb26f29ac495f62c7a2144dc3db9c4"
   },
   "configFields": {
     "status": "tracked",
@@ -30,7 +30,7 @@
     {
       "id": "keys-secret-corrupted-code",
       "impact": "breaking",
-      "summary": "macOS Keychain and Linux Secret Service report an SDK entry that does not decode as the new KEYCHAIN_SECRET_CORRUPTED instead of KEYCHAIN_SECRET_DECODE_FAILED, and ProviderRegistry.replaceSecret/configure overwrite it with a new key. KEYCHAIN_SECRET_DECODE_FAILED now means an entry the SDK did not write; the registry never overwrites it and refuses before any write. A Host that offered 'enter the key again' for KEYCHAIN_SECRET_DECODE_FAILED offers it for KEYCHAIN_SECRET_CORRUPTED and shows delete, rename or other-profile guidance for KEYCHAIN_SECRET_DECODE_FAILED.",
+      "summary": "macOS Keychain and Linux Secret Service report an SDK entry that does not decode as the new KEYCHAIN_SECRET_CORRUPTED instead of KEYCHAIN_SECRET_DECODE_FAILED, and ProviderRegistry.replaceSecret/configure overwrite it with a new key. KEYCHAIN_SECRET_DECODE_FAILED now means an entry the SDK did not write; the registry never overwrites it and refuses before any write. A Host that offered 'enter the key again' for KEYCHAIN_SECRET_DECODE_FAILED offers it for KEYCHAIN_SECRET_CORRUPTED and shows delete, rename or other-profile guidance for KEYCHAIN_SECRET_DECODE_FAILED. ProviderRegistry.configure/replaceSecret/setDefaultModelProvider/delete reject with the new PROVIDER_CHANGE_COMMITTED when the change committed but a later step (the auth-none key delete or the lock release) failed; treat it as success and read the status again.",
       "migration": "docs/releases/host-upgrade-next-minor.md#provider-key-changes-roll-back-on-failure-1946",
       "items": [
         "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES"

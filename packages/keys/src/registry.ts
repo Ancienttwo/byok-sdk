@@ -82,7 +82,12 @@ export interface ProviderStatus {
   /** SHA-256 of the normalized non-secret local record. */
   profile_hash: string;
   provider_kind: ModelProviderKind;
-  /** Whether the credential store currently holds this profile's key. */
+  /**
+   * Whether the credential store holds this profile's key. From `get` and
+   * `list` it is read under the configuration lock; from `configure`,
+   * `replaceSecret` and `setDefaultModelProvider` it is the state the call
+   * committed. Either way it may be stale once the lock is released.
+   */
   secret_configured: boolean;
   /**
    * Whether an unfinished credential change is recorded for this profile. While
@@ -250,12 +255,19 @@ export class ProviderRegistry {
    * secret, then commit the profile and clear the marker in one store
    * transaction. An unfinished earlier change (a pending marker) can only be
    * resolved by a call that supplies a new secret.
+   *
+   * The returned status is the state this call committed, built without a
+   * read after the commit; once the lock is released another writer may
+   * already have changed it. A rejection with `PROVIDER_CHANGE_COMMITTED` means
+   * the change is in effect but a later step failed: for an `auth_mode: 'none'`
+   * profile, deleting the previous key, which then stays in the store; or
+   * releasing the lock. Any other rejection means nothing was committed.
    */
   async configure(
     configuration: ProviderConfiguration,
     secret?: string,
   ): Promise<ProviderStatus> {
-    return withConfigurationLock(this.#profiles, async () => {
+    return this.#write(async (committed) => {
       const profileRef = configuration.profile_ref;
       const previous = await this.#profiles.get(profileRef);
       const profile = buildConfiguredProfile(previous, configuration, this.#now);
@@ -291,6 +303,7 @@ export class ProviderRegistry {
         secret,
         { profileRef, mutation: { kind: 'save', profile }, clearPending: true },
       );
+      committed();
       if (profile.auth_mode === 'none') {
         await secretStoreCall(() => this.#secrets.delete(secretName));
       }
@@ -302,9 +315,14 @@ export class ProviderRegistry {
    * Replace only the credential of an existing authenticating profile. The
    * profile record is untouched, so its revision and hash — and every exact
    * binding a Host holds — stay valid (plan D4).
+   *
+   * Like {@link configure}, it returns the state it committed, which may be
+   * stale once the lock is released, and rejects with
+   * `PROVIDER_CHANGE_COMMITTED` only when the new key is in effect but
+   * releasing the lock failed.
    */
   async replaceSecret(profileRef: ProviderProfileRef, secret: string): Promise<ProviderStatus> {
-    return withConfigurationLock(this.#profiles, async () => {
+    return this.#write(async (committed) => {
       const profile = await this.#profiles.get(profileRef);
       if (profile === undefined) throw providerNotConfigured(profileRef);
       if (profile.auth_mode === 'none') {
@@ -323,13 +341,14 @@ export class ProviderRegistry {
         secret,
         { profileRef, mutation: { kind: 'none' }, clearPending: true },
       );
+      committed();
       return committedStatus(profile, true);
     });
   }
 
   /** Remove a profile and its secret together, through the same pending/commit path. */
   async delete(profileRef: ProviderProfileRef): Promise<boolean> {
-    return withConfigurationLock(this.#profiles, async () => {
+    return this.#write(async (committed) => {
       const existed = (await this.#profiles.get(profileRef)) !== undefined;
       await this.#profiles.markPending({
         profileRef,
@@ -341,6 +360,7 @@ export class ProviderRegistry {
       });
       await secretStoreCall(() => this.#secrets.delete(modelProviderSecretName(profileRef)));
       await this.#profiles.commitCustody({ profileRef, mutation: { kind: 'delete' }, clearPending: true });
+      committed();
       return existed;
     });
   }
@@ -400,16 +420,44 @@ export class ProviderRegistry {
       : new OpenAiCompatibleChatClient(options);
   }
 
-  /** Switch which configured profile is the default. */
+  /**
+   * Switch which configured profile is the default. The returned status is
+   * the state at the switch, which may be stale once the lock is released; a
+   * rejection with `PROVIDER_CHANGE_COMMITTED` means the switch is in effect
+   * but releasing the lock failed.
+   */
   async setDefaultModelProvider(
     profileRef: ProviderProfileRef,
   ): Promise<ProviderStatus> {
-    return withConfigurationLock(this.#profiles, async () => {
+    return this.#write(async (committed) => {
+      if ((await this.#profiles.get(profileRef)) === undefined) throw providerNotConfigured(profileRef);
       // Switching the default changes neither the key nor the marker, so both
       // are read before the commit and nothing fallible runs after it.
       const state = await this.#state(profileRef);
-      return providerStatusOf(await this.#profiles.setEnabled(profileRef), state);
+      const profile = await this.#profiles.setEnabled(profileRef);
+      committed();
+      return providerStatusOf(profile, state);
     });
+  }
+
+  /**
+   * Run a write under the configuration lock. Once `body` reports its commit,
+   * any later failure (a follow-up write or the lock release) rejects as
+   * `PROVIDER_CHANGE_COMMITTED`, so a caller can tell a change in effect from
+   * one that never happened.
+   */
+  async #write<T>(body: (committed: () => void) => Promise<T>): Promise<T> {
+    let done = false;
+    try {
+      return await withConfigurationLock(this.#profiles, () => body(() => { done = true; }));
+    } catch (cause) {
+      if (!done) throw cause;
+      throw new ByokKeysError(
+        'PROVIDER_CHANGE_COMMITTED',
+        'The provider change was committed, but a step after the commit failed; read the provider status again',
+        { cause },
+      );
+    }
   }
 
   /**
