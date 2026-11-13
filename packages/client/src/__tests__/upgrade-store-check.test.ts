@@ -31,7 +31,7 @@ const REPO = fileURLToPath(new URL('../../../../', import.meta.url));
 const FIXTURES = join(REPO, 'scripts/release/fixtures/stores');
 const DAEMON_STORES = ['client-journal', 'pi-durable'] as const;
 /** Every `LocalStoreId`, exactly once: the type rejects a missing or an unknown id. */
-const LOCAL_STORE_IDS: Record<LocalStoreId, true> = { 'server-sqlite': true, 'client-journal': true, 'keys-profile-store': true, 'pi-durable': true };
+const LOCAL_STORE_IDS: Record<LocalStoreId, true> = { 'server-sqlite': true, 'client-journal': true, 'keys-profile-store': true, 'pi-durable': true, 'bot-collaboration-ledger': true };
 
 interface FixtureIndex {
   readonly fixtures: Record<string, { readonly stores: Record<string, string>; readonly expected?: Record<string, string> }>;

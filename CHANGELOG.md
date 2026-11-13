@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Breaking (bot-collaboration; #2003)** — `cancelHostIntents(keys)` atomically cancels selected unsubmitted Host intents without a pass; `HostIntentError.rejected` reports all refused keys and `code` adds `inflight`. Successors wait for a pass or an explicit `drain()`. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#cancel-selected-host-intents-without-a-pass-2003).
+
+- **Breaking (bot-collaboration; #1981)** — `inspectLedger(path, tenant)` on the local Host entry returns a store compatibility verdict from a private copy. `LocalStoreId` includes `bot-collaboration-ledger`; update exhaustive switches and records. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#ledger-precheck-and-store-id-1981).
+
 - **Added (bot-collaboration; #1978)** — `./host-kit` exports `botTurnInstruction` with an options object and `InstructionLimits`, so Hosts can compute the instruction K8 freezes for a Turn.
 
 - **Fixed (client; #1949)** — Every SDK Pi RPC session caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings, so it warms its prompt cache at most during an active run: Pi cancels the warmer at settlement and revalidates a pending decision before dispatch, so no warming request is sent after the run settled, even for a late `"warm"` answer. No Host action is needed. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#pi-cache-warming-stops-at-settlement-1949).

@@ -5,6 +5,7 @@
  * package's own open path run on a private copy of the files, so the store's
  * code stays the one authority on what it accepts:
  *
+ * - `bot-collaboration-ledger`: `inspectLedger` in `@byok-sdk/bot-collaboration`
  * - `server-sqlite`: `inspectSqliteStore` in `@byok-sdk/server`
  * - `keys-profile-store`: `inspectProviderProfileStore` in `@byok-sdk/keys`
  * - `client-journal` and `pi-durable`: `inspectDaemonStores` in `@byok-sdk/client`
@@ -13,7 +14,7 @@
  * (`docs/upgrade-manifest.md`). The hosted Postgres store is checked by
  * `release-pack-migrate`, not here.
  */
-export type LocalStoreId = 'server-sqlite' | 'client-journal' | 'keys-profile-store' | 'pi-durable';
+export type LocalStoreId = 'server-sqlite' | 'client-journal' | 'keys-profile-store' | 'pi-durable' | 'bot-collaboration-ledger';
 
 /**
  * What the build that ran the check does when it opens the store:

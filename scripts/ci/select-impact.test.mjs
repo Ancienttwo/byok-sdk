@@ -580,6 +580,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
   assert.deepEqual(Object.keys(reviewedScripts).sort(), [
     'scripts/api-surface/check-api-surface.mjs',
     'scripts/api-surface/check-version-authority.mjs', 'scripts/api-surface/check-version-authority.test.mjs',
+    'scripts/api-surface/entry-closure.test.mjs',
     'scripts/architecture/dependency-baseline.json', 'scripts/architecture/dependency-graph.mjs', 'scripts/architecture/dependency-graph.test.mjs',
     'scripts/ci/with-secret-service.sh',
     'scripts/codemod/relative-js-specifiers.mjs',
@@ -611,6 +612,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
       if (file !== path) assert.ok(readFileSync(new URL(file, root), 'utf8').includes(path.split('/').pop()), `${file} does not run ${path}`);
     }
   }
+  assert.deepEqual(reviewedScripts['scripts/api-surface/entry-closure.test.mjs'], { tests: ['scripts/api-surface/entry-closure.test.mjs'], install: true });
   // pack-and-smoke.mjs selects exactly the family jobs that run it.
   assert.equal(scripts['check:release-pack'], 'node scripts/release/pack-and-smoke.mjs');
   const workflow = readFileSync(new URL('.github/workflows/ci.yml', root), 'utf8');

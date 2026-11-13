@@ -37,6 +37,13 @@ function fixture(t) {
   return { root, write, json, policies, loadZod, read: file => readFileSync(path.join(root, file), 'utf8') };
 }
 
+test('host-kit closure retains its pre-existing builtin set', () => {
+  const entries = JSON.parse(readFileSync(new URL('../../api-surface/entries.json', import.meta.url), 'utf8'));
+  const builtins = entries['@byok-sdk/bot-collaboration/host-kit'].facts.nodeBuiltins;
+  assert.deepEqual(builtins.workspace, ['async_hooks', 'crypto', 'fs', 'path']);
+  assert.deepEqual(builtins.thirdParty, []);
+});
+
 test('token scanner distinguishes escaped imports, lazy edges, code and ordinary data', () => {
   const scanned = scanModule("// import 'node:fs'; new Function('x');\n"
     + "const data = 'eval('; import {x} from '@byok-sdk/proto\\u0063ol';\n"
