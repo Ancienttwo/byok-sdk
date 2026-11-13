@@ -268,3 +268,19 @@ Two HOME values matter, and the SDK pins only the first:
 A Host that installs under a scratch `HOME` to isolate a test install must also isolate tasks: put `HOME` in the policy's `pass` (`runtimeEnvironment: { pass: ['HOME', ...] }`, or the per-runtime `runtimes.<id>.runtimeEnvironment`) so tasks get the daemon's live `HOME`, or use `base: 'allowlist'` and supply `PATH`, `XDG_*` and other derived values itself. Do not rely on the startup snapshot for isolation.
 
 **Required step on macOS:** a plist written by an earlier SDK no longer matches the generated unit and inspects as `repairable`. Before the first `upgrade()` or `rollback()` on each macOS device, call `install()` again on the same installation (same service name and install root) with the payload that is installed now, to rewrite the unit, then upgrade. The reinstall must use the current payload id: `install()` with any other payload is refused with `installation_exists`. Read the id with `installation.currentVersion()` and keep the payload directory whose `readPayloadManifest(dir).id` equals it until this reinstall has run. No other platform is affected.
+
+## When whenTaskSettled reports an unknown task (#2067)
+
+No code change. `whenTaskSettled(taskId)` rejects with `DaemonTaskUnknownError` when an earlier journal read returned no row for the task and, once that read finished, this `Daemon` instance had no in-memory record for it (no held runtime, nothing settled or awaited for it in this run) and no offer for it marked as seen. The read and those checks are not atomic. An offer appended while the read was pending ends the mark, so the wait can report unknown although the row now exists ([#2097](https://github.com/Ancienttwo/byok-sdk/issues/2097)). The mark also ends when the offer's append is refused, so a refused offer with no row reads as unknown too. A task whose rows retention pruned (confirmed-journal TTL, default 30 days), a task never journaled on this device and an offer the server sent that has not reached this daemon yet look the same, and the error carries no reason.
+
+Unknown does not prove the task is over or will never start: an offer may still be on its way and start a runtime later. Do not delete a Host attach record on this error alone. Keep the record, or settle it from your own server's terminal state and delivery guarantees.
+
+Every other rejection has its own source, and none of them is `DaemonTaskUnknownError`:
+
+- **Abort:** a `signal` already aborted at the call rejects with `signal.reason`, and so does an abort after the journal read succeeded, while the wait is registered. The task is untouched. The wait does not listen during the journal read: a pending read delays the abort, and a failed read rejects with the journal's error instead ([#2097](https://github.com/Ancienttwo/byok-sdk/issues/2097)).
+- **Not started:** a call before `start()` rejects as `approve()` does.
+- **Journal read failure:** the journal's own error, for example a closed or corrupt journal, or a Host-injected journal row the SDK refuses as malformed.
+- **Stored evidence fails an SDK check:** an SDK `Error` when a stored cancellation fails its enrollment identity, hash or task binding check, or a task row carries an unknown terminal state.
+- **Offer append refused:** the waiters of an offer whose journal append failed reject with that append's error (for example `LocalStorageEmergencyError`). A redelivery starts a new wait.
+
+The last three are faults.
