@@ -6,6 +6,8 @@
 
 - **Breaking (server, bot-collaboration; #2004)** — `HostExecutionCore.cancel`, `BotCollaboration.cancelTurn` and `abortSwitch` resolve with `wakePending: true` when a wake dispatch fails after the operation commits. The durable outbox retains the failure for retry; wake hooks and explicit drains still reject. `HostExecutionCore.cancel` now returns an object instead of `void`. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#committed-cancellation-with-a-pending-wake-2004).
 
+
+- **Changed (client; #1972)** — The OpenCode adapter's qualified version moves from 2.2.6 to 2.3.0. Detect now reports the unqualified-version advisory for other versions, including 2.2.6. The runtime contract checks the namespace-level notice sent when Host MCP tools disappear on resume. See the [qualification evidence](docs/researches/2026-11-13-opencode-2.3.0-qualification.md).
 - **Breaking (bot-collaboration; #2003)** — `cancelHostIntents(keys)` atomically cancels selected unsubmitted Host intents without a pass; `HostIntentError.rejected` reports all refused keys and `code` adds `inflight`. Successors wait for a pass or an explicit `drain()`. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#cancel-selected-host-intents-without-a-pass-2003).
 
 - **Breaking (bot-collaboration; #1981)** — `inspectLedger(path, tenant)` on the local Host entry returns a store compatibility verdict from a private copy. `LocalStoreId` includes `bot-collaboration-ledger`; update exhaustive switches and records. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#ledger-precheck-and-store-id-1981).
