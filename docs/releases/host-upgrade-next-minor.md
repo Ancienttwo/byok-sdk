@@ -211,3 +211,13 @@ Custom implementations of `LocalTaskJournal` must accept the new `cutoff` argume
 A running daemon renews its token only while the OS entry still holds this store's enrollment. When another store of the same `productId` paired over it, the renewal writes nothing and the daemon halts with `store_not_bound`; when another store cleared it, the daemon halts with `re_pair_required`. Both reasons were start-time halts before; a Host that handles `DaemonHaltError.reason` or the daemon's halted lifecycle at start handles them the same way when the daemon is running: pair the store again. A renewal that waits more than 30 seconds for another store's clear or pairing fails as busy and is retried; it is not reported as revocation.
 
 Pairing is one critical section of the same lock. It rereads the OS entry, `device.json` and any staged attempt under the lock, so a re-pair of a store that is already paired, or of a daemon that cached its record, now throws `DeviceStoreBindingMismatchError` when another store paired over it since (pair with `replaceOtherStore` to replace it), and `FirstPairingAttemptRefusedError` when another store's or an unattributed staged attempt sits beside its enrollment. The lock is held through the pairing's E2EE member entries and, when the daemon was running, its shutdown, so another store waits for them too. Only the network request has a deadline; each OS credential command has its own 15 s deadline, and a waiter gives up as busy after 30 seconds.
+
+## Retained records elide past the limit (#1932)
+
+`maxRetainedBytes` (default 16 MiB) bounds only native and tool payloads. Past it the oldest are elided in place and the task keeps running. The limit also covers the native payload of a runtime request and its reply. Text and reasoning are kept whole, because the folds read them, so `maxRetainedBytes` is not a bound on total retained bytes (#2056). `ClaudeAdapterOptions` gains `maxRetainedBytes` with the same validation and default.
+
+For Claude this is the existing behavior (since #1892). For Codex, Grok, Antigravity, OpenCode and dsh it changes: their text used to count toward the 16 MiB total and passing it failed the task with `<runtime> retained record byte budget exceeded`. That failure no longer occurs, and their text now has no byte bound.
+
+- A task's text grows with the provider's per-turn output limit times the number of turns. A Host that needs a hard bound sets `maxDurationMs`: the offer's `limits.maxDurationMs`, or `DaemonConfig.defaultMaxDurationMs`.
+- A Host that matched the failure message drops that match; it no longer occurs.
+- A Host that passes no `maxRetainedBytes` needs no change.

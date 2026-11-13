@@ -26,7 +26,7 @@ import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
 import { AsyncQueue } from '../../util/async-queue.js';
-import { RetainedRecordBudget, haltGate, SettleWaiters, raceDeadline, oarCancelSettled, RetryableOnce } from '../session-kit.js';
+import { haltGate, SettleWaiters, raceDeadline, oarCancelSettled, RetryableOnce } from '../session-kit.js';
 import { comparablePath } from '../../util/comparable-path.js';
 import { agentPersona } from '../agent-persona.js';
 import { agyEndpointOf } from './agy-endpoint.js';
@@ -179,7 +179,6 @@ export class AgyAdapter implements RuntimeAdapter {
       input.scratch,
       this.options.model,
       this.interruptTimeoutMs,
-      this.maxRetainedBytes,
       agyMcpEventIdentities(input.mcpToolsetTools),
       resume,
       reader,
@@ -206,6 +205,7 @@ export class AgyAdapter implements RuntimeAdapter {
         {
           cwd,
           env,
+          retainedBytes: this.maxRetainedBytes,
           // Without it agy reports to play.googleapis.com, the one host beside the model endpoint it contacts.
           launchArgs: ['--disable-telemetry'],
           ...(persona === undefined ? {} : { appendSystemPrompt: persona }),
@@ -258,7 +258,6 @@ class AgySession implements Session {
   private readonly turnWaiters = new SettleWaiters();
   private stopping = false;
   private readonly closeOnce = new RetryableOnce();
-  private readonly recordBudget: RetainedRecordBudget;
   /** Set when the record consumer failed: no later line reaches the ACP stream, so the kernel retains no more of them. */
   halted?: RuntimeExecutionFailure;
 
@@ -266,11 +265,10 @@ class AgySession implements Session {
     private readonly scratch: ExecutionScratch,
     private readonly model: string | undefined,
     private readonly interruptMs: number,
-    maxRetainedBytes: number,
     private readonly identities: McpEventIdentities,
     private readonly expectedSessionRef?: string,
     private readonly reader?: AgyReaderScope,
-  ) { this.recordBudget = new RetainedRecordBudget(maxRetainedBytes, 'agy'); }
+  ) {}
 
   useProxy(proxy: AgyGeminiProxy): void {
     this.proxy = proxy;
@@ -293,8 +291,6 @@ class AgySession implements Session {
   record(record: AcpRecord): void {
     if (this.halted !== undefined) return;
     try {
-      // The observer receives the redacted, retained record: measure what the kernel keeps.
-      this.recordBudget.add(record);
       this.projection?.consume(record, (event) => this.emit(event), (turn) => this.turnEnded(turn));
     } catch (error) {
       this.fail(error);

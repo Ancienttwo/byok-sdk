@@ -972,8 +972,8 @@ dependency.
   model is the `model` adapter option (`session/set_model`).
 - Ownership: the SDK spawns, adopts and reaps the agent process and every
   `terminal/create` command Grok asks the client to run. Each gets the explicit
-  task environment. The retained records have the same 16 MiB default budget
-  as Codex.
+  task environment. Retained records follow the one rule in
+  [Retained records](#retained-records-1932).
 - Permissions: Grok runs in its own approve-all mode. A permission request
   that still reaches the client (a user's own shell `ask` rule or `ask` hook)
   is answered `cancelled` and recorded. Grok 1.0.52 then ends the turn as
@@ -1264,6 +1264,33 @@ optional `model` and `versionPolicy`). The other options stay on the
 Evidence: the `AgyAdapter` cases in `grok-adapter.test.ts` (synthetic
 `fake-acp-agent.mjs`, offline) and the [runtime contract suite](runtime-contract.md)
 against the real qualified agy, including a Windows leg.
+
+## Retained records (#1932)
+
+One rule for Claude, Codex, Grok, agy, OpenCode and dsh. The adapter option
+`maxRetainedBytes` (default 16 MiB) is the session kernel's retention limit.
+When the native payloads it keeps pass the limit, the oldest are elided in
+place: a frame loses its `native` and its tool input and output, and a runtime
+request or its reply loses its `native`. Each elided record carries
+`elided: true`. Elision runs after every observer has the complete record, so
+live events, the closing reply and usage are unchanged, and the newest frame
+keeps its payload. The task keeps running; exceeding the limit is not a
+failure.
+
+The limit bounds only native and tool payloads. Text and reasoning, envelopes
+and event kinds are kept whole, because the folds read them, so
+`maxRetainedBytes` is not a bound on total retained bytes (#2056). A task's
+text grows with the provider's per-turn output limit times the number of turns;
+a Host that needs a hard bound sets `maxDurationMs` (the offer's
+`limits.maxDurationMs`, or `DaemonConfig.defaultMaxDurationMs`). For Claude
+this is the behavior since #1892. Codex, Grok, agy, OpenCode and dsh used to
+count their text toward the limit and fail the task past it.
+
+Limit: Grok classifies a failed prompt from the turn's retained frames. If more
+than `maxRetainedBytes` of frame payload arrives between a failed
+`retry_state` with `context_length` and the final error, the failure class
+falls back to text classification and can be less specific than
+`input_too_large`.
 
 ## Selection and platforms
 

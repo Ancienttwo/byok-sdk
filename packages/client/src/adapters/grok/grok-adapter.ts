@@ -29,7 +29,7 @@ import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process.js';
 import type { AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime.js';
 import { AsyncQueue } from '../../util/async-queue.js';
-import { RetainedRecordBudget, haltGate, SettleWaiters, raceDeadline, oarCancelSettled, RetryableOnce } from '../session-kit.js';
+import { haltGate, SettleWaiters, raceDeadline, oarCancelSettled, RetryableOnce } from '../session-kit.js';
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 import { agentPersona } from '../agent-persona.js';
 import { GROK_USER_MCP_SERVERS_OFF, grokUserMcpServersRefusal } from './agent-user-mcp-servers.js';
@@ -210,7 +210,6 @@ export class GrokAdapter implements RuntimeAdapter {
       input.scratch,
       this.options.model,
       this.interruptTimeoutMs,
-      this.maxRetainedBytes,
       input.manifest.sessionRef,
     );
     try {
@@ -227,6 +226,7 @@ export class GrokAdapter implements RuntimeAdapter {
           cwd,
           ...(persona === undefined ? {} : { appendSystemPrompt: persona }),
           env,
+          retainedBytes: this.maxRetainedBytes,
           ...(this.options.model === undefined ? {} : { model: this.options.model }),
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
           ...(input.manifest.sessionRef === undefined ? {} : { resume: input.manifest.sessionRef }),
@@ -282,7 +282,6 @@ class GrokSession implements Session {
   private readonly turnWaiters = new SettleWaiters();
   private stopping = false;
   private readonly closeOnce = new RetryableOnce();
-  private readonly recordBudget: RetainedRecordBudget;
   /** Set when the record consumer failed: no later line reaches the ACP stream, so the kernel retains no more of them. */
   halted?: RuntimeExecutionFailure;
 
@@ -290,9 +289,8 @@ class GrokSession implements Session {
     private readonly scratch: ExecutionScratch,
     private readonly model: string | undefined,
     private readonly interruptMs: number,
-    maxRetainedBytes: number,
     private readonly expectedSessionRef?: string,
-  ) { this.recordBudget = new RetainedRecordBudget(maxRetainedBytes, 'grok'); }
+  ) {}
 
   own(child: { dispose(): Promise<void>; kill(): void; readonly exitedOnItsOwn: boolean }): void {
     this.child = child;
@@ -312,8 +310,6 @@ class GrokSession implements Session {
   record(record: AcpRecord): void {
     if (this.halted !== undefined) return;
     try {
-      // The observer receives the redacted, retained record: measure what the kernel keeps.
-      this.recordBudget.add(record);
       this.projection?.consume(record, (event) => this.queue.push(event), (turn) => this.turnEnded(turn));
     } catch (error) {
       this.fail(error);
