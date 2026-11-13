@@ -14854,55 +14854,31 @@ export interface RunResult {
  * verification requirement, without ever shelling out for real in tests.
  */
 export type Runner = (command: string, args: string[]) => Promise<RunResult>;
-/** The bound on one service-manager query or change (`launchctl`, `systemctl`, `sc.exe`, PowerShell, `icacls`) (#1971). */
-export declare const PLATFORM_COMMAND_TIMEOUT_MS = 30000;
 /**
- * A platform command did not exit within its bound, and its process tree was
- * terminated (SIGTERM, then SIGKILL; `taskkill /T /F` on Windows). Its effect
- * is UNKNOWN: the command may have completed its change before it was stopped
- * (a job bootstrapped, a service registered), done part of it, or nothing. It
- * is never evidence that the change did not happen, and never an idempotent
- * "already absent". The next install or uninstall starts again from the
- * service manager's own state. `cause` is set when the tree could not be
- * proved gone within the disposal grace.
+ * A platform command outlived its bound and its process tree was stopped.
+ * Whether it took effect is UNKNOWN (a job may have been bootstrapped or a
+ * service registered before the stop); it never means the change did not
+ * happen and is never idempotent absence. The next install or uninstall
+ * starts again from the service manager's own state.
  */
 export declare class PlatformCommandTimeoutError extends Error {
-    readonly command: string;
-    readonly timeoutMs: number;
-    constructor(command: string, timeoutMs: number, options?: ErrorOptions);
-}
-/** {@link runBounded}'s result: `code` is `null` when the process ended on a signal. */
-export interface BoundedRunResult {
-    code: number | null;
-    stdout: string;
-    stderr: string;
 }
 /**
  * Runs `executable` directly (never a shell) as the root of an owned process
  * tree and resolves with its exit code and output, whatever the code. It
- * rejects when the executable cannot be started, when its output exceeds
- * 1 MiB, or, after `timeoutMs`, with {@link PlatformCommandTimeoutError} once
- * the tree has been terminated and waited for (bounded by the disposal grace
- * of `adapters/process-tree.ts`), so no timed-out command is left running.
+ * rejects when the executable cannot start, ends on a signal or prints more
+ * than 1 MiB, and after `timeoutMs` with {@link PlatformCommandTimeoutError},
+ * once `disposeOwnedProcessTree` has stopped the tree (SIGTERM, then SIGKILL;
+ * `taskkill /T /F` on Windows) and waited for it within its bounded grace.
  */
-export declare function runBounded(executable: string, args: readonly string[], options: {
-    timeoutMs: number;
-    cwd?: string;
-}): Promise<BoundedRunResult>;
+export declare function runBounded(executable: string, args: readonly string[], timeoutMs: number, cwd?: string): Promise<RunResult>;
 /**
- * A {@link Runner} over {@link runBounded} with bound `timeoutMs`. A bare
- * `command` is a system tool and starts from its trusted location, never from
- * `PATH`; one that has none rejects with `SystemToolUnavailableError`
- * (`@byok-sdk/core/system-tool`, #1304). A process that ends on a signal
- * rejects: it has no exit code to report.
- */
-export declare function boundedRunner(timeoutMs: number): Runner;
-/**
- * The real {@link Runner}: {@link boundedRunner} at
- * {@link PLATFORM_COMMAND_TIMEOUT_MS}. Never a shell, so a service name,
- * config path or install directory with spaces or special characters needs
- * no quoting; every command it runs is a native executable, never a
- * `.cmd`/`.bat` script, which Windows cannot start without a shell.
+ * The real {@link Runner}: {@link runBounded} at the `platform` bound. A bare
+ * `command` is a system tool and starts from its trusted location, never
+ * from `PATH`; one that has none rejects with `SystemToolUnavailableError`
+ * (`@byok-sdk/core/system-tool`, #1304). Every command it runs is a native
+ * executable, never a `.cmd`/`.bat` script, which Windows cannot start
+ * without a shell.
  */
 export declare const defaultRunner: Runner;
 /**
@@ -14994,7 +14970,7 @@ export declare function isIdempotentAbsence(result: RunResult, absence: Idempote
  */
 export declare function runIdempotent(run: Runner, command: string, args: string[], label: string, absence: IdempotentAbsence): Promise<RunResult>;
 // ==== @byok-sdk/client dist/util/secure-dir.d.ts ====
-import { type Runner } from './exec-runner.js';
+import type { Runner } from './exec-runner.js';
 /**
  * Pure command-construction seam (finding F7) — kept separate from the
  * actual `icacls` invocation below so it's unit-testable on ANY host OS,
@@ -15049,7 +15025,7 @@ export declare function buildIcaclsArgs(dir: string, username: string): string[]
 /** Restrictive ACL for one already-created file; no inheritance flags because the target cannot contain children. */
 export declare function buildIcaclsFileArgs(filePath: string, username: string): string[];
 export interface EnsureSecureDirOptions {
-    /** DI for tests — see `util/exec-runner.ts`'s identical `Runner` seam. Defaults to `defaultRunner` (real `execFile`, never a shell). */
+    /** DI for tests — see `util/exec-runner.ts`'s identical `Runner` seam. Defaults to a bounded `icacls` run (real `execFile`, never a shell). */
     run?: Runner;
     /** DI for tests — lets the win32 branch below be exercised (with a fake `run`) from any host OS, mirroring `control-protocol.ts`'s `controlEndpointPath` platform-override convention. Defaults to `process.platform`. */
     platform?: NodeJS.Platform;
