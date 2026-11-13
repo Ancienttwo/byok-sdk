@@ -124,7 +124,9 @@ terminal again; `failStuckIntent` below is the way out.
 `cancelHostIntents(keys)` cancels a chosen set atomically without a pass (#2003).
 It refuses the entire set if any key is unknown, a Bot Turn or in flight;
 `HostIntentError.rejected` lists every refused key and code in input order.
-Settled keys return their earlier conclusion. No handler runs for cancelled keys.
+Settled keys return their earlier conclusion. After K4 compacts an intent, a
+replay of that key returns `unknown_intent` instead of `already_settled`.
+No handler runs for cancelled keys.
 Successors wait for a later pass; call `drain()` to start them immediately.
 A frozen device accepts this call. Duplicate keys and non-owner calls are refused.
 
