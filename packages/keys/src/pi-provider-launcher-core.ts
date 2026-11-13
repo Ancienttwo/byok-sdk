@@ -24,6 +24,7 @@ import {
   type ExactProviderProfileBinding,
 } from './provider-profile-binding.js';
 import { type SecretStore, modelProviderSecretName } from './secret-store.js';
+import { secretStoreCall } from './secret-store-call.js';
 
 export interface PiProviderLauncherOptions {
   piBin: string;
@@ -32,6 +33,7 @@ export interface PiProviderLauncherOptions {
   /**
    * The fixed argv after the entry. A single-file product re-enters itself
    * with `__byok_sdk_helper <kind>`. Empty for the installed SDK package.
+   * Do not put credentials in argv; use environment variables or files instead.
    */
   piFixedArgs: string[];
   /** The cwd the Pi child starts in. Required for a launch. */
@@ -296,7 +298,7 @@ export async function resolvePiProviderSecret(
       `${secrets.providerLabel} is unavailable`,
     );
   }
-  const secret = await secrets.get(modelProviderSecretName(profile.profile_ref));
+  const secret = await secretStoreCall(() => secrets.get(modelProviderSecretName(profile.profile_ref)));
   if (!secret) {
     throw new ByokKeysError(
       'PROVIDER_SECRET_MISSING',
@@ -621,6 +623,12 @@ function assertNoNulSpawnInput(command: string, args: readonly string[], env: No
   }
 }
 
+// 与 client util/spawn-input 的 spawnStartError 同语义，core 下次加公开面时合成一份 (#2043).
+function sanitizedSpawnError(error: unknown): Error {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return Object.assign(new Error(`spawn failed: ${code ?? 'unknown'}`), { code });
+}
+
 /** Owns the credential-to-spawn sequence; the client retains directory ownership. */
 export async function startPiProvider(
   profile: ModelProviderProfile,
@@ -677,10 +685,15 @@ export async function startPiProvider(
     const childArgs = [...(options.piEntry === undefined ? [] : [options.piEntry]), ...options.piFixedArgs, `--config-digest=${configDigest}`, ...delegated];
     assertNoNulSpawnInput(options.piBin, childArgs, env);
     const spawnChild = dependencies.spawn ?? spawn;
-    const child = spawnChild(options.piBin, childArgs, { env, cwd: piCwd,
-      stdio: ipcLane === undefined ? 'inherit' : ['inherit', 'inherit', 'inherit', 'ipc'],
-      ...(ipcLane === undefined ? {} : { serialization: 'json' as const }),
-    });
+    let child: ChildProcess;
+    try {
+      child = spawnChild(options.piBin, childArgs, { env, cwd: piCwd,
+        stdio: ipcLane === undefined ? 'inherit' : ['inherit', 'inherit', 'inherit', 'ipc'],
+        ...(ipcLane === undefined ? {} : { serialization: 'json' as const }),
+      });
+    } catch (error) {
+      throw sanitizedSpawnError(error);
+    }
     if (ipcLane !== undefined) {
       // Private launcher->host channel. stdio belongs exclusively to the blind daemon.
       child.once('message', message => {
@@ -792,7 +805,7 @@ export async function runPiProviderLauncher(
     process.on('SIGTERM', onSigterm);
     try {
       return await new Promise<number>((resolve, reject) => {
-        child.once('error', reject);
+        child.once('error', error => reject(sanitizedSpawnError(error)));
         child.once('close', (code, signal) => {
           resolve(code ?? (signal ? 1 : 0));
         });

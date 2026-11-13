@@ -1177,6 +1177,7 @@ export interface PiProviderLauncherOptions {
     /**
      * The fixed argv after the entry. A single-file product re-enters itself
      * with `__byok_sdk_helper <kind>`. Empty for the installed SDK package.
+     * Do not put credentials in argv; use environment variables or files instead.
      */
     piFixedArgs: string[];
     /** The cwd the Pi child starts in. Required for a launch. */
