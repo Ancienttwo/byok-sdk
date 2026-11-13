@@ -88,6 +88,11 @@ function plistString(value: string): string {
  *   first `onfailure` delay.
  * - `StandardOutPath`/`StandardErrorPath` receive only early-boot crash
  *   output; the daemon writes its own rotated log (`service-log.ts`).
+ * - `workingDirectory` is the job's home: `EnvironmentVariables.HOME` is set
+ *   to it (#2017). launchd otherwise starts a `gui/<uid>` job with the
+ *   account's home, so an install under another HOME (a scratch test
+ *   install) would run against the account's real home-relative paths. The
+ *   `--service` login-shell step seeds the shell with this HOME and keeps it.
  */
 export function generateLaunchdPlist(def: { label: string; launcherPath: string; workingDirectory: string; logDir: string }): string {
   const { label, launcherPath, workingDirectory, logDir } = def;
@@ -106,6 +111,11 @@ export function generateLaunchdPlist(def: { label: string; launcherPath: string;
   </array>
   <key>WorkingDirectory</key>
   ${plistString(workingDirectory)}
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    ${plistString(workingDirectory)}
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>

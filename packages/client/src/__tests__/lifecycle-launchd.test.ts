@@ -28,10 +28,11 @@ describe('lifecycle/launchd: generateLaunchdPlist', () => {
 
     expect(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>\n<!-- byok-sdk-service-unit:')).toBe(true);
     expect(xml).toContain('<key>Label</key>\n  <string>com.acme.agent</string>');
-    // #1097: the unit names only the stable launcher — no versioned path, no args, no env.
+    // #1097: the unit names only the stable launcher — no versioned path, no args.
     expect(xml).toContain('<key>ProgramArguments</key>\n  <array>\n    <string>/Users/t/.byok/acme/service/com.acme.agent.launcher.sh</string>\n  </array>');
-    expect(xml).not.toContain('EnvironmentVariables');
     expect(xml).toContain('<key>WorkingDirectory</key>\n  <string>/Users/t</string>');
+    // #2017: HOME is the only variable the plist sets.
+    expect(xml).toContain('<key>EnvironmentVariables</key>\n  <dict>\n    <key>HOME</key>\n    <string>/Users/t</string>\n  </dict>');
     expect(xml).toContain('<key>RunAtLoad</key>\n  <true/>');
     // Exit-code contract: only exit 0 stops (see exit-codes.ts).
     expect(xml).toContain('<key>KeepAlive</key>\n  <dict>\n    <key>SuccessfulExit</key>\n    <false/>\n  </dict>');
@@ -77,6 +78,15 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     expect(fs.writeFile).toHaveBeenCalledWith('/Users/tester/Library/LaunchAgents/Acme-Agent-.plist', expect.any(String), 'utf8');
     expect(run).toHaveBeenCalledWith('launchctl', ['bootstrap', 'gui/501', '/Users/tester/Library/LaunchAgents/Acme-Agent-.plist']);
     expect(run).toHaveBeenCalledWith('launchctl', ['enable', 'gui/501/Acme-Agent-']);
+  });
+
+  it('#2017: the job runs with the HOME the lifecycle installed under, not the account home', async () => {
+    const run = vi.fn<Runner>().mockImplementation(async (_cmd, args) => (args[0] === 'print' ? ABSENT : ok()));
+    const fs = fakeFs();
+    await createLaunchdLifecycle(def(), { run, fs, homedir: () => '/tmp/scratch-home', getuid: () => 501 }).install();
+
+    const plist = vi.mocked(fs.writeFile).mock.calls.find(([file]) => file === '/tmp/scratch-home/Library/LaunchAgents/Acme-Agent-.plist')?.[1];
+    expect(plist).toContain('<key>EnvironmentVariables</key>\n  <dict>\n    <key>HOME</key>\n    <string>/tmp/scratch-home</string>\n  </dict>');
   });
 
   it('install() writes the plist, then bootout(best-effort)+bootstrap+enable+kickstart in order', async () => {

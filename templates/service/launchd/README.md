@@ -50,6 +50,11 @@ A plist along these lines (see `packages/client/src/lifecycle/launchd.ts`'s
   </array>
   <key>WorkingDirectory</key>
   <string>/Users/you</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/you</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -73,6 +78,10 @@ A plist along these lines (see `packages/client/src/lifecycle/launchd.ts`'s
   A new Node or a moved binary rewrites the launcher, never the plist. The
   marker comment lets `service-status` classify the plist as `exact`,
   `repairable` or `foreign`; the SDK never changes a plist without it.
+- **`EnvironmentVariables.HOME`** (#2017) is the home the install resolved,
+  the same directory the plist and its paths were placed under. launchd would
+  otherwise start the job with the account's home, so an install run under a
+  scratch `HOME` keeps its service on the scratch tree.
 - **`KeepAlive.SuccessfulExit: false`** is the exit-code contract: launchd
   restarts the job after any exit but 0. This is delegated entirely to launchd
   — the SDK never runs its own in-process supervisor.
