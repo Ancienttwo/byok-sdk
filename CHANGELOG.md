@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed (client; #1957)** — On the ACP runtimes (Grok, Antigravity), an abort whose cancel write fails leaves the turn as it was: retrying the abort sends the cancel again and arms the kill fallback, instead of reporting `accepted` without sending anything, and a later prompt error is reported as that failure instead of as an aborted turn. An abort made while the cancel write is pending gets that write's result. No Host action is needed.
 - **Fixed (client; #1949)** — Every SDK Pi RPC session caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings, so it warms its prompt cache at most during an active run: Pi cancels the warmer at settlement and revalidates a pending decision before dispatch, so no warming request is sent after the run settled, even for a late `"warm"` answer. No Host action is needed. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#pi-cache-warming-stops-at-settlement-1949).
 
 ## 0.42.0 — 2026-11-13 (published)

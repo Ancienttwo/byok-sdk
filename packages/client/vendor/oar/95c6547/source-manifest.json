@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.103.0",
-    "commit": "2f5c24860825eed2461d1ac57803c443abcfc6a5"
+    "commit": "eaa26e9343d4771540889374924a22e48fba095b"
   },
   "release": {
     "ecosystem": "npm",
@@ -697,8 +697,8 @@
       "path": "shared/acp/turns.ts",
       "sourcePath": "packages/oar/src/shared/acp/turns.ts",
       "upstreamSha256": "81e82230a2047bf0c8f5d91cef053c7b71ff47351061c1509a350093ea4720fa",
-      "vendoredSha256": "d81df30c61f42f594d49f6850ae6b69e6cadb81d20803ab9db3d27270599b1e5",
-      "delta": "Failed-prompt settle: a rejected session/prompt yields one event-loop turn before it reads its turn frames, so a notification from the same pipe read (grok's retry_state) is recorded first and the failure reader sees it. The success path already yields in promptAcp. abort has no upstream observation window (pendingCancellation is absent): it calls runtime.observeDescendants() synchronously before the native cancel, so a tool the cancel orphans stays known to the SDK process-tree authority, which kills it at dispose while it is the same process. A failed read rejects the abort with code error and sends no cancel."
+      "vendoredSha256": "3c648ddc9e4e7cf6358aa2263ee5c1cc284e21cff8e7b8f66c94b6535f3e7993",
+      "delta": "Failed-prompt settle: a rejected session/prompt yields one event-loop turn before it reads its turn frames, so a notification from the same pipe read (grok's retry_state) is recorded first and the failure reader sees it. The success path already yields in promptAcp. abort has no upstream observation window (pendingCancellation is absent): it calls runtime.observeDescendants() synchronously before the native cancel, so a tool the cancel orphans stays known to the SDK process-tree authority, which kills it at dispose while it is the same process. A failed read rejects the abort with code error and sends no cancel. A rejected cancel write clears the aborting mark, so a retry writes the cancel again and a later prompt error stays a failure; an abort during the pending write gets that write's answer."
     },
     {
       "path": "shared/acp/usage-wait.ts",

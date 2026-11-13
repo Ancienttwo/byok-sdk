@@ -92,6 +92,49 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     expect(request).toHaveBeenCalledTimes(1);
     expect(kernel.records().flatMap(record => record.kind === 'frame' ? record.body.events : []).filter(event => event.kind === 'turn_ended')).toHaveLength(1);
   });
+  it('leaves the turn as it was when the cancel write rejects (#1957)', async () => {
+    const reply = Promise.withResolvers<{ stopReason: string }>();
+    const write = Promise.withResolvers<void>();
+    const notify = vi.fn().mockReturnValueOnce(write.promise).mockResolvedValue(undefined);
+    const runtime = {
+      spawned: Promise.resolve(), closed: false, exitCode: null,
+      connection: { agent: { request: vi.fn(() => reply.promise), notify } },
+      observeDescendants: () => {}, kill: vi.fn(),
+    } as unknown as AcpProcess;
+    const kernel = createSessionKernel('cancel-write');
+    const turns = createAcpTurns({ kernel, runtime, profile: { ...antigravityAcpProfile, abortTimeoutMs: 60_000 },
+      usageGate: createUsageUpdateGate(), capabilities: { images: false }, promptUsage: () => null });
+    expect(turns.begin(null, 'first').kind).toBe('accepted');
+    const state = turns.active()!;
+    const first = turns.abort(state);
+    const during = turns.abort(state);
+    write.reject(new Error('cancel write failed'));
+    const rejected = { kind: 'rejected', code: 'error', reason: 'cancel write failed' };
+    expect([await first, await during]).toEqual([rejected, rejected]);
+    expect(state.abortRequested).toBe(false);
+    reply.reject(new Error('unrelated prompt error'));
+    await vi.waitFor(() => expect(turns.active()).toBeNull());
+    const ended = kernel.records().flatMap(record => record.kind === 'frame' ? record.body.events : []).find(event => event.kind === 'turn_ended');
+    expect(ended?.kind === 'turn_ended' && ended.outcome.kind).not.toBe('aborted');
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+  it('retries a cancel whose first write rejected (#1957)', async () => {
+    const notify = vi.fn().mockRejectedValueOnce(new Error('cancel write failed')).mockResolvedValue(undefined);
+    const runtime = {
+      spawned: Promise.resolve(), closed: false, exitCode: null,
+      connection: { agent: { request: vi.fn(() => new Promise(() => {})), notify } },
+      observeDescendants: () => {}, kill: vi.fn(),
+    } as unknown as AcpProcess;
+    const turns = createAcpTurns({ kernel: createSessionKernel('cancel-retry'), runtime, profile: { ...antigravityAcpProfile, abortTimeoutMs: 60_000 },
+      usageGate: createUsageUpdateGate(), capabilities: { images: false }, promptUsage: () => null });
+    expect(turns.begin(null, 'first').kind).toBe('accepted');
+    const state = turns.active()!;
+    expect((await turns.abort(state)).kind).toBe('rejected');
+    expect(await turns.abort(state)).toEqual({ kind: 'accepted' });
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(state.fallback).not.toBeNull();
+    clearTimeout(state.fallback!);
+  });
   it('passes exactly the explicit env to the agent and to hosted terminals', async () => {
     vi.stubEnv('BYOK_ACP_AMBIENT_SECRET', 'must not inherit');
     const { dir, log } = workspace();
