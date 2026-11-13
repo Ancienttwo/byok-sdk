@@ -332,7 +332,7 @@ const ERROR_MESSAGES = {
   rollback_unhealthy: 'The previous version was restored but failed its health check too.',
   no_rollback: 'There is no previous version with a store snapshot to roll back to.',
   install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.',
-  receipt_upgrade_required: 'A pending receipt from SDK 0.42 remains: run recover() with SDK 0.42 first.',
+  receipt_upgrade_required: 'Pending SDK 0.42 receipt: run recover() with SDK 0.42 first.',
   receipt_state_inconsistent: 'The receipt does not match the version pointers. Nothing was changed.',
   switch_unhealthy: 'The new version stays current but is unhealthy. Call rollback(), or keep it.',
   repair_interrupted: 'A same-version reinstall was interrupted. Run install() again.',
@@ -448,7 +448,7 @@ const STOP_NOTE = 'The service could not be stopped and its stores leased.';
 /** A migrate group that outlived its root (#2011): nothing is restored or started, and the record stays. */
 class MigrateRunning extends Error {}
 
-const migrateNote = (pgid: number): string => `The store migration may still run (process group ${pgid}); nothing was restored or started. Run recover() once it has ended.`;
+const migrateNote = (pgid: number): string => `Migrate process group ${pgid} may still run; nothing restored or started. Run recover() after it ends.`;
 
 /** POSIX: whether process group `pgid` ends within `timeoutMs`. Only ESRCH proves it; any other answer does not. */
 async function groupGone(pgid: number, timeoutMs = 5000): Promise<boolean> {
