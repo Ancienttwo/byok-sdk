@@ -213,6 +213,7 @@
 
 - **Agent memory startup and cleanup (#1943):** A runtime whose start waits for an Agent memory tool result fails at the startup deadline; an activation failure with a pending memory call can block offer cleanup.
 - **Offer scratch disposal (#1944):** When an offer declines or fails before any runtime starts and the release of its own scratch throws, `whenTaskSettled` reports `disposal: 'failed'` or `disposal: 'none'` depending on timing. An offer's own scratch is outside the meaning of `disposal`; Hosts must not act on `disposal` in this case.
+- **Pending receipt after a started service (#2011):** When writing the final receipt of an upgrade, rollback or `recover()` fails, or the process stops after the service starts and before that receipt is written, the receipt stays `pending` while the service may already have restarted and written to its stores. The next `recover()` restores the snapshot and overwrites those writes. A Host that finds a `pending` receipt calls `recover()` promptly and does not leave the service running under it. This is present since 0.41.0.
 - **Failed key replacement (#1946):** A refused OS credential-store write or another replacement failure leaves the profile marked as having an unfinished key change until a replacement succeeds.
 - **Desktop key form (#1947):** A typed key remains in renderer state while the configure form's save is pending.
 - **Desktop start fresh (#1948):** An inaccessible store is treated as absent, and the operation can report success without proving the store was cleared.
