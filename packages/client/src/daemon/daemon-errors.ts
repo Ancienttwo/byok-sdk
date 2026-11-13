@@ -106,8 +106,8 @@ export class DeviceStoreBindingMismatchError extends Error {
 }
 
 const PAIRING_ATTEMPT_MESSAGES = {
-  store_not_bound: 'the OS credential entry for this productId holds a first-pairing attempt another storeDir staged; nothing was changed. That store finishes or clears its pairing, or pair this store with replaceOtherStore (--replace-other-store), which discards the attempt',
-  pairing_attempt_unattributed: 'the OS credential entry for this productId holds a first-pairing attempt that names no storeDir; nothing was changed. If no other store of this productId is pairing, clear it with clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }), then pair again',
+  store_not_bound: 'another storeDir staged the first-pairing attempt of this productId; nothing was written. Pair with replaceOtherStore (--replace-other-store) to discard it',
+  pairing_attempt_unattributed: 'the first-pairing attempt of this productId names no storeDir; nothing was written. Clear it with clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }), then pair',
 } as const;
 
 /**

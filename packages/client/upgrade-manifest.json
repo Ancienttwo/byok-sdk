@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "507aa1cd38587f765ec01a5a6f0c2eb02d5c4a5315ca2549e99c2b6759d67281"
+    "snapshotSha256": "d978735496549d6e47c09547772b471273ad7e9cc660a2bb3c27a7cb1c0035c8"
   },
   "configFields": {
     "status": "tracked",
@@ -18,12 +18,13 @@
     {
       "id": "enrollment-clear-store-scope",
       "impact": "breaking",
-      "summary": "clearDeviceEnrollment and Daemon.unpair() no longer delete another store's credential or staged first pairing under the same productId: they hold a per-user productId lock from validation through deletion, and pairing takes it across its credential writes, each waiting up to 30 seconds. FirstPairingAttempt gains storeIdentity (DeviceStore.identity, the SHA-256 hex of the resolved storeDir); an injected DeviceCredentialBackend keeps every attempt field, or the store's own attempt is refused. A clear refuses another store's attempt as store_not_bound and an attempt that names no store (staged by 0.42.0) with the new DeviceEnrollmentClearErrorCode pairing_attempt_unattributed; clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }) deletes it. BlobClient and InstallSkillPacksOptions change only through the types they reference (#1964).",
+      "summary": "clearDeviceEnrollment and Daemon.unpair() no longer delete another store's credential or staged first pairing under the same productId: they hold a per-user productId lock from validation through deletion, and pairing takes it across its credential writes, each waiting up to 30 seconds. FirstPairingAttempt gains storeIdentity (DeviceStore.identity, the SHA-256 hex of the resolved storeDir); an injected DeviceCredentialBackend keeps every attempt field, or the store's own attempt is refused. A clear refuses another store's attempt as store_not_bound and an attempt that names no store (staged by 0.42.0) with the new DeviceEnrollmentClearErrorCode pairing_attempt_unattributed; clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }) deletes it. Pairing applies the same rule (#2033): it reuses only its own store's staged attempt and otherwise throws the new FirstPairingAttemptRefusedError (store_not_bound, which replaceOtherStore discards, or pairing_attempt_unattributed). A running daemon's token renewal does not take the lock yet (#2034). BlobClient and InstallSkillPacksOptions change only through the types they reference (#1964).",
       "migration": "docs/releases/host-upgrade-next-minor.md#enrollment-clear-is-scoped-to-its-store-1964",
       "items": [
         "export:@byok-sdk/client#BlobClient",
         "export:@byok-sdk/client#DeviceCredentialBackend",
         "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
+        "export:@byok-sdk/client#FirstPairingAttemptRefusedError",
         "export:@byok-sdk/client#InstallSkillPacksOptions",
         "export:@byok-sdk/client#clearDeviceEnrollment",
         "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend"
@@ -44,6 +45,11 @@
     {
       "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
       "change": "changed",
+      "entry": "enrollment-clear-store-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client#FirstPairingAttemptRefusedError",
+      "change": "added",
       "entry": "enrollment-clear-store-scope"
     },
     {

@@ -120,7 +120,8 @@ export async function clearEnrollmentUnderLease(
  * enrollment of the account it runs as. The OS credential entry is shared by
  * every store of one productId: the clear never deletes another store's
  * enrollment or staged first pairing, and it excludes their pairing writes
- * while it runs (#1964). `clearUnattributedAttempt: true` also deletes a
+ * while it runs (#1964). A running daemon's token renewal does not take that
+ * lock yet (#2034), so a renewal written back while the clear runs is deleted. `clearUnattributedAttempt: true` also deletes a
  * first-pairing attempt that names no store; set it only when no other store
  * of this productId is pairing.
  */

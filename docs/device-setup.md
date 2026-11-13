@@ -711,13 +711,17 @@ await clearDeviceEnrollment({
 - It clears the OS credential set of the account it runs as. A Windows
   `LocalSystem` service's enrollment is out of an interactive user's reach.
 - The OS credential entry is shared by every store of one `productId`. A store
-  clears its own staged first pairing, never another store's (#1964). Under
+  clears its own staged first pairing, never another store's, and pairs only
+  with a staged attempt it made (#1964, #2033). Under
   the store's owner lease the clear takes a per-user `productId` lock and holds
   it from its validation through its deletion; a pairing takes the same lock,
   after its own owner lease, across its credential writes, so a pairing of
   another store runs wholly before or wholly after the clear. Either side waits
   up to 30 seconds for the other; a clear that times out fails as
-  `clear_failed` and deletes nothing.
+  `clear_failed` and deletes nothing. A running daemon's token renewal does
+  not take the lock yet (#2034): a daemon whose enrollment another store
+  replaced can write its renewed credential back while that store clears, and
+  the clear deletes it.
 - `clearUnattributedAttempt: true` also deletes a first-pairing attempt that
   names no `storeDir`. Set it only when no other store of this `productId` is
   pairing.
@@ -826,6 +830,16 @@ size bound. Older clients fail closed while the replacement attempt is pending;
 after promotion, the entry is an ordinary enrollment again. The public credential
 backend API shape is unchanged; injected backends must preserve the same staging
 and renewal semantics.
+
+**Staged first pairing of another store.** A pairing reuses a staged
+first-pairing attempt only when that attempt names this `storeDir` (#2033).
+Otherwise it throws `FirstPairingAttemptRefusedError` and writes nothing:
+`store_not_bound` when another store staged it (that store finishes or clears
+its pairing, or `pair --replace-other-store` discards the attempt and stages a
+fresh key), or `pairing_attempt_unattributed` when it names no store, as one
+staged by 0.42.0 does (when no other store of this `productId` is pairing,
+clear it with `clearDeviceEnrollment({ productId, storeDir,
+clearUnattributedAttempt: true })`, then pair again).
 
 **Provider unreachable on a slow IPv4 network.** Node tries each resolved
 address for 250 ms by default before it moves to the next one. When a device's

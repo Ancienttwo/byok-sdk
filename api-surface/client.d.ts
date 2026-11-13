@@ -3403,7 +3403,10 @@ export declare class AuthManager {
      * refuses with {@link DeviceStoreBindingMismatchError} while the OS entry
      * holds an enrollment this storeDir did not pair, unless
      * `replaceOtherStore` states the operator's intent to replace it; the
-     * replacement never reuses that enrollment's key.
+     * replacement never reuses that enrollment's key. A staged first-pairing
+     * attempt is reused only when it names this store; otherwise it refuses
+     * with {@link FirstPairingAttemptRefusedError}, and `replaceOtherStore`
+     * discards another store's attempt (#2033).
      */
     pair(pairingCode: string, options?: {
         readonly replaceOtherStore?: boolean;
@@ -5850,6 +5853,22 @@ export declare class DeviceStoreBindingMismatchError extends Error {
     } | undefined;
     constructor(stored: DeviceMetadata, bound: DeviceMetadata | undefined);
 }
+declare const PAIRING_ATTEMPT_MESSAGES: {
+    readonly store_not_bound: 'another storeDir staged the first-pairing attempt of this productId; nothing was written. Pair with replaceOtherStore (--replace-other-store) to discard it';
+    readonly pairing_attempt_unattributed: 'the first-pairing attempt of this productId names no storeDir; nothing was written. Clear it with clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }), then pair';
+};
+/**
+ * A pairing refused to reuse a staged first-pairing attempt this storeDir
+ * cannot prove it staged (#1964, #2033), by the same rule as an enrollment
+ * clear: `store_not_bound` when another storeDir staged it (pairing with
+ * `replaceOtherStore` discards it), `pairing_attempt_unattributed` when it
+ * names no storeDir (staged by 0.42.0; clear it with
+ * `clearUnattributedAttempt`, then pair). Nothing was written.
+ */
+export declare class FirstPairingAttemptRefusedError extends Error {
+    readonly code: keyof typeof PAIRING_ATTEMPT_MESSAGES;
+    constructor(code: keyof typeof PAIRING_ATTEMPT_MESSAGES);
+}
 /**
  * Why `Daemon.pairEmbedded` refused. Each reason leaves the local
  * enrollment and the server unchanged:
@@ -5864,6 +5883,7 @@ export declare class EmbeddedPairingError extends Error {
         cause?: unknown;
     });
 }
+export {};
 // ==== @byok-sdk/client dist/daemon/daemon-lifecycle.d.ts ====
 /**
  * The daemon's one lifecycle model (issues #391 and #394).
@@ -6552,7 +6572,8 @@ export declare function clearEnrollmentUnderLease(custody: EnrollmentCustody, re
  * enrollment of the account it runs as. The OS credential entry is shared by
  * every store of one productId: the clear never deletes another store's
  * enrollment or staged first pairing, and it excludes their pairing writes
- * while it runs (#1964). `clearUnattributedAttempt: true` also deletes a
+ * while it runs (#1964). A running daemon's token renewal does not take that
+ * lock yet (#2034), so a renewal written back while the clear runs is deleted. `clearUnattributedAttempt: true` also deletes a
  * first-pairing attempt that names no store; set it only when no other store
  * of this productId is pairing.
  */
@@ -9780,7 +9801,7 @@ export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartu
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure.js';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon.js';
 export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema/index.js';
-export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, HostLayoutInputError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
+export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, FirstPairingAttemptRefusedError, HostLayoutInputError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
 export { resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout.js';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals.js';
