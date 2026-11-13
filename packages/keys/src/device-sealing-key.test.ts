@@ -3,9 +3,10 @@ import {
   openProviderProvisioningSecret,
   sealProviderProvisioningRequest,
 } from '@byok-sdk/core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key';
+import { ByokKeysError } from './errors';
 import { InMemorySecretStore } from './secret-store';
 import { assertSecretName } from './secret-name';
 
@@ -58,6 +59,19 @@ describe('DeviceSealingKeyStore', () => {
     expect(repaired.keyId).not.toBe(first.keyId);
     expect(repaired.epoch).toBe(2);
     expect(repaired.enrollment).toEqual({ tenantId: 'tenant-1', deviceId: 'device-2' });
+  });
+
+  it('passes a credential-store error on only in its fixed form (#2051)', async () => {
+    const secrets = new InMemorySecretStore();
+    const echo = 'stored-sealing-key-canary';
+    vi.spyOn(secrets, 'get').mockRejectedValueOnce(new ByokKeysError('KEYCHAIN_UNAVAILABLE', echo, { cause: new Error(echo) }));
+    vi.spyOn(secrets, 'set').mockRejectedValueOnce(new Error(echo));
+    const store = new DeviceSealingKeyStore({ secretStore: secrets });
+    for (const [call, code] of [[() => store.loadOrCreate(ENROLLMENT), 'KEYCHAIN_UNAVAILABLE'], [() => store.rotate(ENROLLMENT), 'PROVIDER_SECRET_STORE_FAILED']] as const) {
+      const error = await call().then(() => undefined, (thrown: unknown) => thrown as Error);
+      expect(error).toMatchObject({ code, cause: undefined });
+      expect(`${error!.message} ${error!.stack}`).not.toContain(echo);
+    }
   });
 
   it('rotate replaces the private key and advances the epoch', async () => {
