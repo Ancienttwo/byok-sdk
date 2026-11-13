@@ -13,8 +13,6 @@ import {
   assertRecordedPiClosureIntegrity, piCertificateIdentityPattern, readLockedPiClosure,
 } from './pi-runtime-identity.mjs';
 import { assertNoStorePaths } from './published-store-paths.mjs';
-import { assertWorkerConsumerImports } from './cloud-do-consumer-smoke.mjs';
-import { workerConsumerImports, workerSource } from './cloud-do-consumer-worker.mjs';
 
 const releasePackSource = readFileSync(
   fileURLToPath(new URL('./pack-and-smoke.mjs', import.meta.url)),
@@ -40,13 +38,6 @@ test('release pack includes keys and verifies its packed core edge', () => {
   assert.doesNotMatch(releasePackSource, /keysVersion/, 'keys has no version of its own to pack against');
 });
 
-test('the Worker consumer import list fails when it drifts from the Worker source', () => {
-  assertWorkerConsumerImports();
-  assert.throws(
-    () => assertWorkerConsumerImports(`import { KeyStore } from '@byok-sdk/keys';\n${workerSource}`, workerConsumerImports),
-    /workerConsumerImports must equal the imports of workerSource/,
-  );
-});
 
 test('a published file that names the install store fails the release pack', () => {
   const tarball = (body) => [
@@ -111,7 +102,7 @@ test('release graph requires keys to carry the release train version', (t) => {
 
   const aligned = runGraph(releaseVersion);
   assert.equal(aligned.status, 0, aligned.stderr);
-  assert.match(aligned.stdout, /\[release-graph\] OK: published set is exactly 10 packages at /);
+  assert.match(aligned.stdout, /\[release-graph\] OK: published set is exactly 9 packages at /);
 
   const split = runGraph('0.13.1');
   assert.equal(split.status, 1);
@@ -386,7 +377,7 @@ test('the installed closure gates the direct pins and reports newer indirect pac
 test('published manifests carry the same direct Pi pins without relying on workspace overrides', () => {
   const root = fileURLToPath(new URL('../..', import.meta.url));
   const identity = parsePiRuntimeIdentity(JSON.parse(readFileSync(path.join(root, 'packages/client/package.json'), 'utf8')));
-  for (const directory of ['client', 'cloud-do']) {
+  for (const directory of ['client']) {
     const manifest = JSON.parse(readFileSync(path.join(root, 'packages', directory, 'package.json'), 'utf8'));
     for (const [name, version] of Object.entries(manifest.dependencies ?? {})) {
       if (PI_RUNTIME_CLOSURE.includes(name)) assert.equal(version, identity.version, `${directory}: ${name} must match the installed closure`);

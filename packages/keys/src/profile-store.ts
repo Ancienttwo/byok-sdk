@@ -68,7 +68,11 @@ export interface ProviderProfileStore {
   getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined>;
   /** Stored receipt for a provisioning request id, if still retained. */
   getReceipt(requestId: string): Promise<ProviderCustodyReceipt | undefined>;
-  /** Apply a custody commit atomically (see {@link ProviderCustodyCommit}). */
+  /**
+   * Apply a custody commit atomically (see {@link ProviderCustodyCommit}).
+   * A store whose write landed but cannot be confirmed applies the rest of
+   * the commit and throws `PROVIDER_CHANGE_COMMITTED`, never another code.
+   */
   commitCustody(commit: ProviderCustodyCommit): Promise<void>;
   /**
    * Record a key-check outcome on a receipt, only if that receipt's

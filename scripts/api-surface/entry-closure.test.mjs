@@ -37,11 +37,12 @@ function fixture(t) {
   return { root, write, json, policies, loadZod, read: file => readFileSync(path.join(root, file), 'utf8') };
 }
 
-test('host-kit closure retains its pre-existing builtin set', () => {
+test('host-kit closure excludes filesystem and path builtins', () => {
   const entries = JSON.parse(readFileSync(new URL('../../api-surface/entries.json', import.meta.url), 'utf8'));
-  const builtins = entries['@byok-sdk/bot-collaboration/host-kit'].facts.nodeBuiltins;
-  assert.deepEqual(builtins.workspace, ['async_hooks', 'crypto', 'fs', 'path']);
-  assert.deepEqual(builtins.thirdParty, []);
+  const { policy, facts } = entries['@byok-sdk/bot-collaboration/host-kit'];
+  assert.deepEqual(policy.nodeBuiltins.forbidden, ['fs', 'path']);
+  assert.deepEqual(facts.nodeBuiltins.workspace, ['async_hooks', 'crypto']);
+  assert.deepEqual(facts.nodeBuiltins.thirdParty, []);
 });
 
 test('token scanner distinguishes escaped imports, lazy edges, code and ordinary data', () => {
@@ -122,6 +123,27 @@ for (const source of ["import 'node:fs';", "import 'fs';", "export const fs = ()
     f.policies(entries => { entries['@byok-sdk/client'].policy.nodeBuiltins.workspace = false; });
     assert.ok(checkEntryClosure(f.root, { update: true }).failures.some(error => /Node builtins are forbidden/.test(error)));
   });
+}
+
+for (const specifier of ['fs', 'node:fs', 'path', 'node:path']) {
+  for (const layer of ['workspace', 'thirdParty']) {
+    test(`specific builtin policy rejects ${specifier} in ${layer}`, t => {
+      const f = fixture(t);
+      if (layer === 'workspace') {
+        f.write('packages/client/dist/index.js', `import '${specifier}';\n`);
+      } else {
+        f.json('packages/client/package.json', { name: '@byok-sdk/client', type: 'module',
+          exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } }, dependencies: { dep: '*' } });
+        f.json('node_modules/dep/package.json', { name: 'dep', type: 'module', exports: './index.js' });
+        f.write('node_modules/dep/index.js', `import '${specifier}';\n`);
+        f.write('packages/client/dist/index.js', "import 'dep';\n");
+      }
+      f.policies(entries => { entries['@byok-sdk/client'].policy.nodeBuiltins.forbidden = ['node:fs', 'path']; });
+      for (const update of [false, true]) {
+        assert.ok(checkEntryClosure(f.root, { update }).failures.some(error => error.includes(`Node builtins are forbidden in ${layer}: ${specifier}`)));
+      }
+    });
+  }
 }
 
 test('missing policies and orphan policies fail under --update', t => {

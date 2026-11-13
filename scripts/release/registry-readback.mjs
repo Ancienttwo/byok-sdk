@@ -35,7 +35,6 @@ const packages = [
   '@byok-sdk/cloud',
   '@byok-sdk/client',
   '@byok-sdk/cloud-dataplane',
-  '@byok-sdk/cloud-do',
   '@byok-sdk/ui-runtime',
   '@byok-sdk/bot-collaboration',
   '@byok-sdk/keys',
@@ -241,7 +240,7 @@ try {
       `await import('@byok-sdk/client/adapters');\n` +
       `await import('@byok-sdk/cloud-dataplane/runtime');\n` +
       `await import('@byok-sdk/keys');\n` +
-      `for (const name of ${JSON.stringify(packages.filter(name => name !== '@byok-sdk/cloud-do'))}) await import(name);\n` +
+      `for (const name of ${JSON.stringify(packages)}) await import(name);\n` +
       `console.log('[registry-readback] exact registry imports OK');\n`,
   );
   run(nodeBin, ['readback.mjs'], smokeDir);

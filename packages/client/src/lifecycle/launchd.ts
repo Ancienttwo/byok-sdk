@@ -91,7 +91,24 @@ function plistString(value: string): string {
  *   output; the daemon writes its own rotated log (`service-log.ts`).
  */
 export function generateLaunchdPlist(def: { label: string; launcherPath: string; workingDirectory: string; logDir: string }): string {
+  return renderLaunchdPlist(def, undefined);
+}
+
+/**
+ * {@link generateLaunchdPlist} plus, when `home` is given,
+ * `EnvironmentVariables.HOME` (#2017). launchd otherwise starts a `gui/<uid>`
+ * job with the account's home, so an install under another HOME (a scratch
+ * test install) would run against the account's real home-relative paths.
+ * Only the lifecycle passes `home`: the home it placed the plist under.
+ */
+function renderLaunchdPlist(def: { label: string; launcherPath: string; workingDirectory: string; logDir: string }, home: string | undefined): string {
   const { label, launcherPath, workingDirectory, logDir } = def;
+  const environment = home === undefined ? '' : `
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    ${plistString(home)}
+  </dict>`;
   const outLog = path.join(logDir, SERVICE_REDIRECT_STDOUT_FILENAME);
   const errLog = path.join(logDir, SERVICE_REDIRECT_STDERR_FILENAME);
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -106,7 +123,7 @@ export function generateLaunchdPlist(def: { label: string; launcherPath: string;
     ${plistString(launcherPath)}
   </array>
   <key>WorkingDirectory</key>
-  ${plistString(workingDirectory)}
+  ${plistString(workingDirectory)}${environment}
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -195,7 +212,7 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
     unitPath: plistPath,
     launcherPath,
     files: () => [
-      { path: plistPath, content: generateLaunchdPlist({ label, launcherPath, workingDirectory: homedir(), logDir: def.logDir }) },
+      { path: plistPath, content: renderLaunchdPlist({ label, launcherPath, workingDirectory: homedir(), logDir: def.logDir }, homedir()) },
       { path: launcherPath, content: generateServiceLauncher(def.program), mode: 0o755 },
     ],
     async activate() {

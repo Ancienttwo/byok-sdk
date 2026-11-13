@@ -1127,8 +1127,13 @@ export declare class BotCollaboration {
      * Owner API. Cancels a Turn, an input batch by its id or a member input id, or B's chain Turn through its delegation.
      * Idempotent (#1405): a Turn whose K4 intent already has a cancel gives `cancel_pending`, and an ended Turn
      * `already_settled`; neither writes or calls `core.cancel`.
+     * After commit, a wake-only dispatch failure resolves with `wakePending: true`; the outbox retains failed wakes for retry.
+     * The failure may concern another wake or already be retried before return. Other failures, including a Host job or
+     * outbox capacity failure, can still reject after commit (#2072).
      */
-    cancelTurn(id: string, ...by: PrincipalArg): Promise<TurnCancelResult>;
+    cancelTurn(id: string, ...by: PrincipalArg): Promise<TurnCancelResult & {
+        wakePending?: true;
+    }>;
     private cancelOneTurn;
     /** The L owner record of a device (#957, §4.1). A device with no record is L at revision 0. */
     topology(deviceId: string): DeviceTopology;
@@ -1168,8 +1173,13 @@ export declare class BotCollaboration {
      * A failed export or check: clears the freeze on the frozen revision, so L owns the device again and held Turns run. An
      * abort of a device of the export ends the export, and the new owner discards its import. After the commit every device
      * of the export is owned by H, so none aborts.
+     * After commit, a wake-only dispatch failure resolves with `wakePending: true`; the outbox retains failed wakes for retry.
+     * The failure may concern another wake or already be retried before return. Other failures, including a Host job or
+     * outbox capacity failure, can still reject after commit (#2072).
      */
-    abortSwitch(deviceId: string, expectedRevision: number): Promise<DeviceTopology>;
+    abortSwitch(deviceId: string, expectedRevision: number): Promise<DeviceTopology & {
+        wakePending?: true;
+    }>;
     /**
      * Explicit retention (#798). Moves every row of each acknowledged settled root out of the state, and retires its ids.
      * A root that is still in use throws `RetentionRefused`, and nothing changes. Never runs on its own.

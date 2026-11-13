@@ -4,15 +4,8 @@
 // deliberate wrong-type assignment per consumer must fail with TS2322; that
 // failure proves the imports carry real types, not `any` from an unresolved
 // specifier.
-//
-// cloud-do loads the Workers types, whose globals clash with the Node types in
-// library checking under every resolution mode, so its consumer keeps
-// `skipLibCheck: true`. There an unresolved specifier in a transitive
-// declaration would silently become `any`, so that lane also reads every
-// installed declaration of its packages and refuses an extensionless relative
-// specifier.
 import assert from 'node:assert/strict';
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -26,10 +19,6 @@ const LANES = {
     skipLibCheck: false,
     wrong: { from: '@byok-sdk/client', name: 'createDaemonWithAdapters' },
   },
-  worker: {
-    skipLibCheck: true,
-    wrong: { from: '@byok-sdk/cloud-do', name: 'AgentDO' },
-  },
 };
 
 /** The runtime smoke lanes, kept to the exports entries that carry declarations. */
@@ -37,31 +26,7 @@ export function typesBearingEntries(root = repoRoot) {
   const entries = JSON.parse(readFileSync(path.join(root, 'api-surface', 'entries.json'), 'utf8'));
   const lanes = runtimeSmokeImports(root);
   const typed = specifier => entries[specifier]?.facts?.types?.length > 0;
-  return { node: lanes.node.filter(typed), worker: lanes.worker.filter(typed) };
-}
-
-const RELATIVE_SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s*)(['"])(\.\.?(?:\/[^'"\n]*)?)\1/gm;
-
-function* declarationFiles(directory) {
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const file = path.join(directory, entry.name);
-    if (entry.isDirectory()) yield* declarationFiles(file);
-    else if (/\.d\.[cm]?ts$/.test(entry.name)) yield file;
-  }
-}
-
-/** Fails on any relative specifier without a runtime extension in the installed declarations of these packages. */
-export function assertExplicitDeclarationSpecifiers(installRoot, specifiers) {
-  const packages = [...new Set(specifiers.map(specifier => specifier.split('/').slice(0, 2).join('/')))];
-  const offenders = [];
-  for (const name of packages) {
-    for (const file of declarationFiles(path.join(installRoot, 'node_modules', ...name.split('/'), 'dist'))) {
-      for (const match of readFileSync(file, 'utf8').matchAll(RELATIVE_SPECIFIER)) {
-        if (!/\.(?:[cm]?js|json)$/.test(match[2])) offenders.push(`${path.relative(installRoot, file)}: ${match[2]}`);
-      }
-    }
-  }
-  assert.deepEqual(offenders, [], `[node-next-consumer] extensionless relative specifiers in installed declarations:\n${offenders.join('\n')}`);
+  return { node: lanes.node.filter(typed) };
 }
 
 function probeSource(specifiers, wrong) {
@@ -100,13 +65,8 @@ function compilerOptions(lane) {
   return { ...options, types: [] };
 }
 
-function workerTypeFiles() {
-  const require = createRequire(path.join(repoRoot, 'packages/cloud-do/package.json'));
-  return [path.join(path.dirname(require.resolve('@cloudflare/workers-types/package.json')), 'index.d.ts')];
-}
-
 export function nodeNextConsumerProbe(installRoot, entries = typesBearingEntries()) {
-  for (const lane of ['node', 'worker']) {
+  for (const lane of ['node']) {
     const consumer = path.join(installRoot, `node-next-consumer-${lane}`);
     mkdirSync(consumer);
     const { source, wrongLine } = probeSource(entries[lane], LANES[lane].wrong);
@@ -114,10 +74,8 @@ export function nodeNextConsumerProbe(installRoot, entries = typesBearingEntries
     writeFileSync(path.join(consumer, 'probe.ts'), source);
     writeFileSync(path.join(consumer, 'tsconfig.json'), `${JSON.stringify({
       compilerOptions: compilerOptions(lane),
-      ...(lane === 'worker' ? { files: workerTypeFiles() } : {}),
       include: ['probe.ts'],
     }, null, 2)}\n`);
-    if (LANES[lane].skipLibCheck) assertExplicitDeclarationSpecifiers(installRoot, entries[lane]);
     const result = spawnSync(process.execPath, [tscEntry(), '--project', 'tsconfig.json', '--pretty', 'false'], {
       cwd: consumer, encoding: 'utf8', timeout: 300_000,
     });

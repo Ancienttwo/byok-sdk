@@ -11,13 +11,6 @@ import { planCi } from './plan-ci.mjs';
 import { requireCiPlan } from './require-ci-plan.mjs';
 import { publicManifests, RUNTIME_CONTRACT_SCRIPT } from './reviewed-content.mjs';
 
-test('cloud-do installed-consumer smoke selects exactly its release-pack execution families', t => {
-  const f = fixture(t);
-  const plan = selectImpact(['scripts/release/cloud-do-consumer-smoke.mjs'], f);
-  assert.deepEqual(plan.families, ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate']);
-  assert.deepEqual(plan.dirs, []);
-});
-
 function fixture(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-reviewed-content-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -154,8 +147,8 @@ test('a bin API entry selects the package that declares the bin; an undeclared b
   const f = fixture(t);
   f.write('packages/client/package.json', { ...f.manifest, bin: { 'byok-agent-memory-mcp': './dist/bin/byok-agent-memory-mcp.js' } });
   f.write('api-surface/entries.json', { '@byok-sdk/client': { policy: { budgetBytes: 1 } }, '@byok-sdk/core': { policy: { budgetBytes: 1 } }, 'bin:byok-agent-memory-mcp': { policy: { budgetBytes: 2 } } });
-  // The owner, then its package dependents: K8 (#1845) and cloud-do, whose tests import client source (#927).
-  assert.deepEqual(selectImpact(['api-surface/entries.json'], f).dirs.filter(dir => dir.startsWith('packages/')), ['packages/bot-collaboration', 'packages/client', 'packages/cloud-do']);
+  // The owner and its package dependent K8 (#1845).
+  assert.deepEqual(selectImpact(['api-surface/entries.json'], f).dirs.filter(dir => dir.startsWith('packages/')), ['packages/bot-collaboration', 'packages/client']);
   f.write('api-surface/entries.json', { '@byok-sdk/client': { policy: { budgetBytes: 1 } }, '@byok-sdk/core': { policy: { budgetBytes: 1 } }, 'bin:byok-unknown': {} });
   assert.throws(() => selectImpact(['api-surface/entries.json'], f), /unmapped API entry bin:byok-unknown/);
 });
@@ -608,32 +601,6 @@ test('#927: the server manifest admits only the reviewed description without a p
   }
 });
 
-test('#927: the cloud-do client test edge is admitted only as a workspace spec, in manifest and lock', t => {
-  const f = fixture(t);
-  const path = 'packages/cloud-do/package.json';
-  const manifest = { name: '@byok-sdk/cloud-do', version: '0.30.1', devDependencies: { '@byok-sdk/keys': 'workspace:*' } };
-  f.write(path, manifest);
-  f.lock.workspaces['packages/cloud-do'] = { name: manifest.name, version: manifest.version, devDependencies: { '@byok-sdk/keys': 'workspace:*' } };
-  f.write('bun.lock', f.lock); rebase(f, 'cloud-do without the client edge');
-  const edge = { '@byok-sdk/client': 'workspace:*', '@byok-sdk/keys': 'workspace:*' };
-  f.write(path, { ...manifest, devDependencies: edge });
-  f.lock.workspaces['packages/cloud-do'].devDependencies = edge; f.write('bun.lock', f.lock);
-  const plan = selectImpact([path, 'bun.lock'], f);
-  assert.ok(plan.dirs.includes('packages/cloud-do')); assert.deepEqual(plan.families, ['npm-release-pack']);
-  for (const spec of ['^0.30.1', 'workspace:^']) {
-    f.write(path, { ...manifest, devDependencies: { ...edge, '@byok-sdk/client': spec } });
-    assert.throws(() => selectImpact([path], f), /more than/, spec);
-  }
-  f.write(path, { ...manifest, dependencies: { '@byok-sdk/client': 'workspace:*' } });
-  assert.throws(() => selectImpact([path], f), /more than/, 'a runtime edge');
-  // The lock row must match the manifest: a reviewed manifest does not admit another lock spec.
-  f.write(path, { ...manifest, devDependencies: edge });
-  f.lock.workspaces['packages/cloud-do'].devDependencies = { ...edge, '@byok-sdk/client': '^0.30.1' }; f.write('bun.lock', f.lock);
-  assert.throws(() => selectImpact(['bun.lock'], f), /differs from manifest/, 'a lock range under a workspace manifest');
-  f.write(path, manifest);
-  f.lock.workspaces['packages/cloud-do'].devDependencies = edge; f.write('bun.lock', f.lock);
-  assert.throws(() => selectImpact(['bun.lock'], f), /differs from manifest/, 'a lock edge the manifest does not declare');
-});
 
 test('keys model-route subpath admits the exact addition only', t => {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-keys-model-route-'));
