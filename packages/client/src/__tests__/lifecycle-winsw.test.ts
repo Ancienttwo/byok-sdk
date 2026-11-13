@@ -1,4 +1,8 @@
+import { promises as nodeFs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError } from '../util/command-timeouts';
 import { createWinswLifecycle, generateWinswXml } from '../lifecycle/winsw';
 import type { RunResult, Runner } from '../util/exec-runner';
 import { nodeAgentProgram, type ServiceDefinition } from '../lifecycle/service-types';
@@ -75,6 +79,27 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
       ...overrides,
     };
   }
+
+  it.runIf(process.platform !== 'win32')('#1971: WinSW commands run within the winsw bound, not the platform one', async () => {
+    const dir = await nodeFs.mkdtemp(path.join(os.tmpdir(), 'winsw-bound-'));
+    // A stand-in `<id>.exe` that never exits.
+    const exe = path.join(dir, 'Acme-Agent-.exe');
+    await nodeFs.writeFile(exe, `#!${process.execPath}\nsetInterval(() => {}, 1000);\n`, { mode: 0o755 });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    try {
+      let settled = false;
+      const stopped = createWinswLifecycle(def({ windows: { winswBin: exe, installDir: dir } })).stop().catch((error: unknown) => error).finally(() => (settled = true));
+      // The bound is armed once the command has started.
+      await vi.waitUntil(() => vi.getTimerCount() > 0);
+      await vi.advanceTimersByTimeAsync(COMMAND_TIMEOUT_MS.winsw - 500);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(await stopped).toMatchObject({ constructor: PlatformCommandTimeoutError, exitConfirmed: true });
+    } finally {
+      vi.useRealTimers();
+      await nodeFs.rm(dir, { recursive: true, force: true });
+    }
+  });
 
   const XML = 'C:\\acme\\logs/Acme-Agent-.xml';
   const EXE = 'C:\\acme\\logs/Acme-Agent-.exe';

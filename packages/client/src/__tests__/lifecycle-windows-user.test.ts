@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createServiceLifecycle } from '../lifecycle/create-service-lifecycle';
+import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError } from '../util/command-timeouts';
 import { SERVICE_UNIT_MARKER, ServiceUnitError } from '../lifecycle/service-unit';
 import type { ServiceDefinition } from '../lifecycle/service-types';
 import type { RunResult } from '../util/exec-runner';
@@ -111,5 +112,26 @@ describe('lifecycle/windows-user (#1337)', () => {
   it('reports service_unload_timeout when the launcher outlives the stop deadline', async () => {
     const { lifecycle } = harness([true]);
     await expect(lifecycle.stop()).rejects.toEqual(new ServiceUnitError('service_unload_timeout'));
+  });
+
+  it('#1971: the default Host stop program runs within the hostStop bound', async () => {
+    const stop = { command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] };
+    const lifecycle = createServiceLifecycle(def({ windows: { scope: 'user', stop } }), {
+      platform: 'win32',
+      deps: { fs: memoryServiceFs(), run: vi.fn(async () => ({ code: 0, stdout: '', stderr: '' })), appData: () => 'C:\\Users\\Jo Smith\\AppData\\Roaming' },
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    try {
+      let settled = false;
+      const stopped = lifecycle.stop().catch((error: unknown) => error).finally(() => (settled = true));
+      // The bound is armed once the command has started.
+      await vi.waitUntil(() => vi.getTimerCount() > 0);
+      await vi.advanceTimersByTimeAsync(COMMAND_TIMEOUT_MS.hostStop - 500);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(await stopped).toMatchObject({ constructor: PlatformCommandTimeoutError, exitConfirmed: true });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

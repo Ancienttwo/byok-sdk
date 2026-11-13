@@ -1,8 +1,8 @@
-import { execFile, spawn } from 'node:child_process';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { defaultRunner, type Runner } from '../util/exec-runner.js';
-import { resolveSystemTool } from '@byok-sdk/core/system-tool';
+import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError } from '../util/command-timeouts.js';
+import { type Runner } from '../util/exec-runner.js';
+import { defaultRunner, launchUnit, runBounded } from './platform-command.js';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types.js';
 import { cmdQuote, generateWindowsUserLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath, serviceStateDir, ServiceUnitError } from './service-unit.js';
@@ -46,30 +46,19 @@ export function generateWindowsStartupUnit(launcherPath: string): string {
   return `@REM ${SERVICE_UNIT_MARKER}\r\n@start "" /min cmd.exe /d /c "${cmdQuote(launcherPath)}"\r\n`;
 }
 
-function runStopProgram(program: ServiceProgram): Promise<number | null> {
-  return new Promise((resolve) => {
-    execFile(program.command, program.args, { cwd: program.cwd, windowsHide: true }, (error) => {
-      resolve(error === null ? 0 : typeof error.code === 'number' ? error.code : null);
-    });
-  });
-}
-
-/** Runs the unit the way Explorer does; the launcher it starts outlives this process. */
-function launchUnit(unitPath: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    // cmd /c strips the outer pair of quotes, leaving the quoted path.
-    const child = spawn(resolveSystemTool('cmd'), ['/d', '/c', `"${cmdQuote(unitPath)}"`], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-      windowsVerbatimArguments: true,
-    });
-    child.once('error', reject);
-    child.once('exit', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`Startup unit ${unitPath} exited ${code}`));
-    });
-  });
+/**
+ * The Host's stop program's exit code; `null` when it could not run or ended
+ * on a signal. One that outlives its bound has its tree terminated and
+ * rejects with `PlatformCommandTimeoutError`: whether it stopped the service
+ * is unknown.
+ */
+async function runStopProgram(program: ServiceProgram): Promise<number | null> {
+  try {
+    return (await runBounded(program.command, program.args, COMMAND_TIMEOUT_MS.hostStop, { cwd: program.cwd })).code;
+  } catch (error) {
+    if (error instanceof PlatformCommandTimeoutError) throw error;
+    return null;
+  }
 }
 
 /** PowerShell that prints the pid of every `cmd.exe` whose command line names `launcherPath`. */
