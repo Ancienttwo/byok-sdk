@@ -8,10 +8,10 @@ import { createDaemonWithAdapters, type Daemon, type DaemonConfig, type Embedded
 import { DaemonHaltError } from '../daemon/daemon-lifecycle';
 import { DeviceRecordRePairRequiredError, DeviceStore, readDeviceEnrollmentIdentity, readDeviceEnrollmentStatus } from '../daemon/store';
 import { DeviceStoreBindingMismatchError, FirstPairingAttemptRefusedError } from '../daemon/daemon-errors';
-import { acquireEnrollmentGate } from '../daemon/enrollment-gate';
+import { acquireEnrollmentGate, writeUnderBinding } from '../daemon/enrollment-gate';
 import { acquirePathMutationGate, type PathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { createTestDeviceStore, InMemoryDeviceCredentialBackend } from './fixtures/device-credentials';
-import { AuthManager, writeUnderBinding } from '../daemon/auth-manager';
+import { AuthManager } from '../daemon/auth-manager';
 import { DeviceMemberKeyStore, DeviceMemberRecords } from '../daemon/device-member-custody';
 import { testDeviceCredentials, testDeviceMemberCustody } from './fixtures/credential-backend';
 import { clearDeviceEnrollment, DeviceEnrollmentClearError } from '../daemon/enrollment-clear';
@@ -28,7 +28,7 @@ vi.mock('../util/path-mutation-gate', async (importOriginal) => {
 });
 vi.mock('../daemon/enrollment-gate', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../daemon/enrollment-gate')>();
-  return { acquireEnrollmentGate: vi.fn(actual.acquireEnrollmentGate) };
+  return { ...actual, acquireEnrollmentGate: vi.fn(actual.acquireEnrollmentGate) };
 });
 
 /**
@@ -321,7 +321,7 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
       let unblock!: () => void;
       const blocked = new Promise<void>((resolve) => { unblock = resolve; });
       const read = credentials.read.bind(credentials);
-      vi.spyOn(credentials, 'read').mockImplementationOnce(async (signal) => { await blocked; return read(signal); });
+      vi.spyOn(credentials, 'read').mockImplementationOnce(async () => { await blocked; return read(); });
       const order: string[] = [];
       // Stands in for a renewal that waits on the gate a re-pair holds while the re-pair aborts its member run.
       const predecessor = auth.readCurrent().then(() => order.push('predecessor'));

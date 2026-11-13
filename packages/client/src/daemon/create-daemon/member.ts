@@ -1,5 +1,5 @@
 import { type DeviceRecord, enrollmentIdentityOf } from '../store.js';
-import { writeUnderBinding } from '../auth-manager.js';
+import { writeUnderBinding } from '../enrollment-gate.js';
 import { E2eeMemberClient } from '../e2ee-member-client.js';
 import { StoredDeviceProofSigner } from '../device-proof-signer.js';
 import { resumeDeviceMember } from '../device-member.js';

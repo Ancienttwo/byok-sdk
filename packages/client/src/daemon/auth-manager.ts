@@ -16,7 +16,7 @@ import {
   type DeviceRecord,
 } from './store.js';
 import type { DeviceCredentialBackend, FirstPairingAttempt } from './device-credential-store.js';
-import { acquireEnrollmentGate } from './enrollment-gate.js';
+import { acquireEnrollmentGate, registerMemberWrites } from './enrollment-gate.js';
 import type { PathMutationGate } from '../util/path-mutation-gate.js';
 import { DeviceStoreBindingMismatchError, FirstPairingAttemptRefusedError } from './daemon-errors.js';
 import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys.js';
@@ -140,20 +140,6 @@ export interface AuthManagerOptions {
 
 /** Under the enrollment gate: the OS entry still holds `record`, or the binding is lost. Set by {@link AuthManager}'s static block. */
 let checkBinding: (auth: AuthManager, record: DeviceRecord | undefined, signal: AbortSignal) => Promise<void>;
-let underBinding: <T>(auth: AuthManager, write: () => Promise<T>, signal: AbortSignal) => Promise<T>;
-
-/**
- * Package-internal daemon seam, not part of `AuthManager`'s public type
- * (#2055): runs `write` of the shared E2EE member entries under the
- * enrollment gate, after rereading that the OS entry and `device.json` still
- * hold this run's enrollment. Otherwise it writes nothing and loses the
- * binding as a renewal does. `signal` also ends its wait in the credential
- * mutation queue, so a member run aborted at a re-pair never waits behind a
- * renewal that waits for the re-pair's gate. Never hold it across network I/O.
- */
-export function writeUnderBinding<T>(auth: AuthManager, write: () => Promise<T>, signal: AbortSignal): Promise<T> {
-  return underBinding(auth, write, signal);
-}
 
 /** `predecessor`, or `cancel`'s reason once it aborts first. */
 function queuedBehind(predecessor: Promise<void>, cancel: AbortSignal | undefined): Promise<void> {
@@ -178,7 +164,7 @@ function queuedBehind(predecessor: Promise<void>, cancel: AbortSignal | undefine
  */
 export class AuthManager {
   static {
-    checkBinding = async (auth, record, signal) => {
+    checkBinding = async (auth: AuthManager, record: DeviceRecord | undefined, signal: AbortSignal): Promise<void> => {
       let current: DeviceRecord | undefined;
       try {
         current = await auth.loadRecord(signal);
@@ -191,13 +177,13 @@ export class AuthManager {
         auth.loseBinding(new DeviceStoreBindingMismatchError(current, record));
       }
     };
-    underBinding = (auth, write, signal) => auth.runCredentialMutation((mutationSignal) => {
+    registerMemberWrites(<T>(auth: AuthManager, write: () => Promise<T>, signal: AbortSignal) => auth.runCredentialMutation((mutationSignal) => {
       const both = AbortSignal.any([mutationSignal, signal]);
       return auth.underEnrollmentGate(both, async () => {
         await checkBinding(auth, auth.record, both);
         return write();
       });
-    }, signal);
+    }, signal));
   }
 
   private record: DeviceRecord | undefined;
