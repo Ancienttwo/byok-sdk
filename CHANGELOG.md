@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (client; #1949)** — Every SDK Pi RPC session caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings, so it warms its prompt cache at most during an active run: Pi cancels the warmer at settlement and revalidates a pending decision before dispatch, so no warming request is sent after the run settled, even for a late `"warm"` answer. No Host action is needed. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#pi-cache-warming-stops-at-settlement-1949).
+
 ## 0.42.0 - 2026-11-12 (draft source candidate)
 
 0.42.0 is the proposed MINOR for all ten public packages, including the first publication of `@byok-sdk/bot-collaboration`. It keeps wire v6 and includes breaking public API cuts, Postgres migrations 0038/0039, embedded SQLite v9 and an explicit keys profile-store migration. The upgrade manifest from 0.41.0 has 15 breaking entries and 15 additive entries. See the [release notes](docs/releases/v0.42.0.md) and [Host upgrade checklist](docs/releases/host-upgrade-0.42.0.md). The owner approved the 0.42.0 MINOR; publication needs the owner's separate authorization after the release gates in #1918 pass.
