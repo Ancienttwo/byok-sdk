@@ -727,8 +727,11 @@ values. Captured `BYOK_*` names are dropped and, under `--service`, the
 daemon's own pre-capture `BYOK_*` values are restored, so rc files cannot set
 SDK control variables; task children still receive no `BYOK_*` at all. The
 daemon's pre-capture `HOME` is restored the same way (#2017), so an rc cannot
-move the service to another home; values an rc derives from `$HOME` are not
-corrected. Only
+move the daemon to another home. This pins the daemon's `HOME` only: a
+default (`login-shell` base) runtime environment is built from the snapshot,
+so task children get the `HOME`, `PATH` and `XDG_*` values the rc set
+(#2084). A Host that needs task isolation passes `HOME` with the policy's
+`pass` or builds tasks from `base: 'allowlist'`. Only
 the source, a closed failure code and the shell's basename are recorded
 (`environment-resolved` in `audit.jsonl`, shown by `status`, `doctor` and the
 support bundle) — never variable values or paths. Variable names leave the

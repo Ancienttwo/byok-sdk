@@ -80,11 +80,12 @@ A plist along these lines (see `packages/client/src/lifecycle/launchd.ts`'s
   marker comment lets `service-status` classify the plist as `exact`,
   `repairable` or `foreign`; the SDK never changes a plist without it.
 - **`EnvironmentVariables.HOME`** (#2017) is the home the install resolved,
-  the same directory the plist and its paths were placed under. launchd would
-  otherwise start the job with the account's home, so an install run under a
-  scratch `HOME` keeps its service on the scratch tree. `--service` keeps this
-  `HOME` even if your shell rc resets it; `PATH` and `XDG_*` values your rc
-  derives from `$HOME` are not corrected.
+  the same directory the plist and its paths were placed under; launchd would
+  otherwise start the job with the account's home. `--service` keeps this
+  `HOME` for the daemon even if your shell rc resets it. Tasks are built from
+  the login-shell snapshot by default, so they get the `HOME`, `PATH` and
+  `XDG_*` your rc sets (#2084); to isolate them, pass `HOME` in the runtime
+  environment policy's `pass` or use `base: 'allowlist'`.
 - **`KeepAlive.SuccessfulExit: false`** is the exit-code contract: launchd
   restarts the job after any exit but 0. This is delegated entirely to launchd
   — the SDK never runs its own in-process supervisor.
