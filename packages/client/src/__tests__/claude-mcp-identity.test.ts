@@ -119,7 +119,7 @@ describe('Claude mcp_status control request', () => {
   it('returns the body, and undefined on an error answer or the process exit', async () => {
     const claude = memoryClaude();
     const stream = new ClaudeStreamSession(claude.child as never);
-    await stream.open({ env: {}, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+    await stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
     const respond = (index: number, subtype: string, response?: unknown) =>
       claude.send({ type: 'control_response', response: { subtype, request_id: claude.written[index]!.request_id, response } });
     const body = status({ name: 'market', tools: ['quote'] });

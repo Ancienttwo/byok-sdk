@@ -97,8 +97,8 @@ export class DaemonOwnerReclaimingError extends Error {
 function withOwnerReleaseFailures<T>(error: T, failures: readonly unknown[]): T | Error {
   if (failures.length === 0) return error;
   const cause = new AggregateError([error, ...failures]);
-  if (error instanceof DaemonOwnerActiveError) return new DaemonOwnerActiveError(error.role, { cause });
-  if (error instanceof DaemonOwnerReclaimingError) return new DaemonOwnerReclaimingError({ cause });
+  if (error instanceof DaemonOwnerActiveError && Object.getPrototypeOf(error) === DaemonOwnerActiveError.prototype) return new DaemonOwnerActiveError(error.role, { cause });
+  if (error instanceof DaemonOwnerReclaimingError && Object.getPrototypeOf(error) === DaemonOwnerReclaimingError.prototype) return new DaemonOwnerReclaimingError({ cause });
   return withGateReleaseFailures(error, failures) as Error;
 }
 

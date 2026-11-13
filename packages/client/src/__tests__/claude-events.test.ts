@@ -14,6 +14,8 @@ import {
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { memoryClaude } from './fixtures/memory-claude';
+import { foldStreamJsonStdout } from '../../vendor/oar/95c6547/shared/stream-json/projection';
+import { claudeProjectionProfile, initialClaudeProjection } from '../../vendor/oar/95c6547/runtimes/claude/projection';
 
 async function tmpWorkspace(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-events-test-'));
@@ -562,7 +564,7 @@ describe('Claude context window reserved for S4', () => {
   it('the session reads the window of the root init model, not a subagent init model', async () => {
     const claude = memoryClaude();
     const stream = new ClaudeStreamSession(claude.child as never);
-    await stream.open({ env: {}, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+    await stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
     expect((await stream.raw.prompt('go')).response.body.kind).toBe('accepted');
     claude.send({ type: 'system', subtype: 'init', model: 'root-model', session_id: 'session-1' });
     claude.send({ type: 'system', subtype: 'init', model: 'child-model', session_id: 'session-1', parent_tool_use_id: 'toolu_task' });
@@ -575,7 +577,7 @@ describe('Claude context window reserved for S4', () => {
     const claude = memoryClaude();
     const stream = new ClaudeStreamSession(claude.child as never);
     const read: number[] = [];
-    await stream.open({ env: {}, mcpServers: {}, onFrame: frame => { read.push(JSON.stringify(frame).length); }, onExit: () => {}, onAppRequest: () => {} });
+    await stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, onFrame: frame => { read.push(JSON.stringify(frame).length); }, onExit: () => {}, onAppRequest: () => {} });
     expect((await stream.raw.prompt('go')).response.body.kind).toBe('accepted');
     const text = 'x'.repeat(7 * 1024 * 1024);
     for (const id of ['a', 'b', 'c']) claude.send({ type: 'assistant', message: { id, role: 'assistant', content: [{ type: 'text', text }] } });
@@ -584,6 +586,24 @@ describe('Claude context window reserved for S4', () => {
     expect(frames.at(-1)!.body.native).not.toBeNull();
     expect(read.every(length => length > text.length)).toBe(true);
     expect((await stream.raw.prompt('busy')).response.body).toMatchObject({ kind: 'rejected', code: 'busy' });
+  });
+  it('remembers only tool uses inside an agent, with unchanged attribution (#1940)', () => {
+    let state = initialClaudeProjection;
+    const fold = (message: Record<string, unknown>) => {
+      const folded = foldStreamJsonStdout(claudeProjectionProfile, state, message);
+      state = folded.state;
+      return folded.commands.find(command => command.kind === 'frame')?.agentPath;
+    };
+    const toolUse = (id: string, parent: string | null) => ({ type: 'assistant', parent_tool_use_id: parent, message: { id: `m-${id}`, role: 'assistant', content: [{ type: 'tool_use', id, name: 'Task', input: {} }] } });
+    for (let i = 0; i < 100; i++) fold(toolUse(`root-${i}`, null));
+    expect(state.agents.size).toBe(0);
+    expect(fold(toolUse('nested', 'root-7'))).toEqual(['root-7']);
+    expect([...state.agents]).toEqual([['nested', ['root-7']]]);
+    expect(fold({ type: 'assistant', parent_tool_use_id: 'nested', message: { id: 'm-x', role: 'assistant', content: [{ type: 'text', text: 'deep' }] } })).toEqual(['root-7', 'nested']);
+    // A root tool use that reuses the id drops the old ancestors.
+    fold(toolUse('nested', null));
+    expect(state.agents.size).toBe(0);
+    expect(fold({ type: 'assistant', parent_tool_use_id: 'nested', message: { id: 'm-y', role: 'assistant', content: [{ type: 'text', text: 'again' }] } })).toEqual(['nested']);
   });
   it('traverses values and leaves inconsistent or invalid windows unknown', () => {
     expect(

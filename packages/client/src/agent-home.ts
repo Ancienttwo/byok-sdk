@@ -18,7 +18,7 @@ import {
   isReaderRunName,
   type AgentHomeAccessMode,
 } from './agent-home-readers.js';
-import { withRelease } from './util/with-release.js';
+import { releaseAfterFailure, withRelease } from './util/with-release.js';
 import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
@@ -70,10 +70,15 @@ export class AgentHomeBusyError extends AgentHomeError {
 function withHomeReleaseFailures<T>(error: T, releaseFailures: readonly unknown[]): T | Error {
   if (releaseFailures.length === 0) return error;
   if (error instanceof AgentHomeError) {
-    const originalClass = error.constructor as new (message: string) => AgentHomeError;
-    const rebuilt = new originalClass(error.message);
-    rebuilt.cause = new AggregateError([error, ...releaseFailures]);
-    return rebuilt;
+    const prototype = Object.getPrototypeOf(error);
+    const originalClass = [AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError,
+      AgentHomeBusyError, AgentHomeReaderRunMissingError, AgentHomeCommitCopyError, AgentHomeLeaseCorruptError]
+      .find(type => type.prototype === prototype);
+    if (originalClass !== undefined) {
+      const rebuilt = new originalClass(error.message);
+      rebuilt.cause = new AggregateError([error, ...releaseFailures]);
+      return rebuilt;
+    }
   }
   return withGateReleaseFailures(error, releaseFailures) as Error;
 }
@@ -543,27 +548,27 @@ export class AgentHomeLayout {
     let handle: fs.FileHandle | undefined;
     let created = false;
     await withRelease(async () => {
-    try {
-      const hostStorageRoot = await this.resolveRoot();
-      const agentsRoot = await ensureDirectoryNoSymlink(
-        hostStorageRoot,
-        path.join(hostStorageRoot, AGENT_HOME_DIRECTORY),
-      );
-      probePath = path.join(agentsRoot, `.byok-agent-home-preflight-${randomUUID()}`);
-      handle = await fs.open(probePath, 'wx', 0o600);
-      created = true;
-      await handle.sync();
-      await handle.close();
-      handle = undefined;
-      await fs.rm(probePath);
-      created = false;
-    } catch (error) {
-      await handle?.close().catch(() => {});
-      if (created && probePath !== undefined) await fs.rm(probePath, { force: true }).catch(() => {});
-      throw new AgentHomeResolutionError(
-        `agentHome.hostStorageRoot preflight failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+      try {
+        const hostStorageRoot = await this.resolveRoot();
+        const agentsRoot = await ensureDirectoryNoSymlink(
+          hostStorageRoot,
+          path.join(hostStorageRoot, AGENT_HOME_DIRECTORY),
+        );
+        probePath = path.join(agentsRoot, `.byok-agent-home-preflight-${randomUUID()}`);
+        handle = await fs.open(probePath, 'wx', 0o600);
+        created = true;
+        await handle.sync();
+        await handle.close();
+        handle = undefined;
+        await fs.rm(probePath);
+        created = false;
+      } catch (error) {
+        await handle?.close().catch(() => {});
+        if (created && probePath !== undefined) await fs.rm(probePath, { force: true }).catch(() => {});
+        throw new AgentHomeResolutionError(
+          `agentHome.hostStorageRoot preflight failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }, () => gate.release(), withHomeReleaseFailures);
   }
 
@@ -874,8 +879,7 @@ export class AgentHomeLeaseManager {
     try {
       await this.settleLeftoverCommitCopy(canonicalHome, homeIdentity);
     } catch (error) {
-      try { await lease.release(); } catch (releaseError) { throw withHomeReleaseFailures(error, [releaseError]); }
-      throw error;
+      return releaseAfterFailure(error, () => lease.release(), withHomeReleaseFailures);
     }
     return lease;
   }
@@ -1428,8 +1432,7 @@ export class AgentHomeManager {
     const binding = await this.acquire(agentRef);
     try { await this.initialize(binding); return binding; }
     catch (error) {
-      try { await binding.lease.release(); } catch (failure) { throw withHomeReleaseFailures(error, [failure]); }
-      throw error;
+      return releaseAfterFailure(error, () => binding.lease.release(), withHomeReleaseFailures);
     }
   }
 
@@ -1660,6 +1663,7 @@ export class AgentHomeManager {
       await applyProjection();
       await writeProjectionState(resolution, payload);
       return 'applied';
+    // Release failure is ack-critical: do not acknowledge while ownership is uncertain.
     }, () => binding.lease.release(), withHomeReleaseFailures);
   }
 }
