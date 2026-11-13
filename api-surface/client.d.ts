@@ -11386,19 +11386,17 @@ export interface ServiceInstallation {
      * `store_busy`. An owned marked unit without a current version is stopped
      * before preparation and started again after preparation fails, once
      * leases/gates are released and the version directory this call created
-     * is removed (one it reused, or any after `installation_exists`, is kept:
-     * another installation may use it; the next successful upgrade's prune or
-     * uninstall removes it). After a failed store
+     * is removed (one it reused is kept: it holds the version already
+     * staged). After a failed store
      * restore it is removed instead, and the next install writes it again.
      * OS credentials are never cleared. `precheck` is required.
      * The temporary snapshot `snapshots/.install-<uuid>` is removed after a
      * healthy start or a completed restore; a removal failure does not change
      * the outcome, and a leftover is kept, never restored automatically: the
      * next first install refuses with `install_snapshot_leftover`, listing it,
-     * and starts nothing until an operator removes it. Every check uses
-     * `current` and the snapshots read under the store leases: when another
-     * installation wrote `current` in between, it refuses with
-     * `installation_exists` and keeps every version directory. A
+     * and starts nothing until an operator removes it. Every operation holds
+     * the install-root gate (#2001), so no other installation changes
+     * `current` or the snapshots meanwhile. A
      * failed restore renames it `snapshots/.install-repair-<uuid>` and the
      * error names it: the next first install restores it, under the store
      * leases and before its precheck. When it cannot stop the service, take
@@ -11484,6 +11482,7 @@ declare const ERROR_MESSAGES: {
     readonly rollback_unhealthy: 'The previous version was restored but failed its health check too.';
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
     readonly install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.';
+    readonly install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.';
     readonly snapshots_symlinked: 'The install root\'s snapshots/ is a symbolic link. Uninstall does not follow it and changed nothing; replace it with a directory or remove the link, then retry.';
 };
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;

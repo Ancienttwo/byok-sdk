@@ -5,7 +5,7 @@ import path from 'node:path';
 import { resolveExistingAncestor } from './existing-ancestor.js';
 import { ensureOwnedPrivateDirectory } from './private-unix-socket.js';
 
-export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'service-lifecycle' | 'pi-session-discovery' | `agy-session:${string}` | `pi-session-admission:${string}` | `pi-session-writer:${string}`;
+export type PathMutationGateScope = 'store' | 'install-root' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'service-lifecycle' | 'pi-session-discovery' | `agy-session:${string}` | `pi-session-admission:${string}` | `pi-session-writer:${string}`;
 
 /**
  * Scopes with one fixed identity and no target path.

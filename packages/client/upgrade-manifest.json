@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "e3dbbf58b9a00e8eca9b3cd6c3087dc07cd20c250656ffb186136aadbe056178"
+    "snapshotSha256": "7122b34a25fa2b9dd98bbeda763b1b84b57d15ed387cca739ef6aa37a2f615cc"
   },
   "configFields": {
     "status": "tracked",
@@ -30,7 +30,7 @@
     {
       "id": "service-store-release-failures",
       "impact": "breaking",
-      "summary": "Store lease and gate release failures preserve a refused ServiceInstallationError and its code, with the refusal and all release failures in its AggregateError cause; Hosts that matched the 0.42.0 AggregateError on first install must read cause instead. When a release fails and an upgrade, rollback or recover receipt remains pending, the new store_release_failed code directs the Host to recover; restart the Host process first if the stuck lease causes store_busy.",
+      "summary": "Store lease and gate release failures preserve a refused ServiceInstallationError and its code, with the refusal and all release failures in its AggregateError cause; Hosts that matched the 0.42.0 AggregateError on first install must read cause instead. When a release fails and an upgrade, rollback or recover receipt remains pending, the new store_release_failed code directs the Host to recover; restart the Host process first if the stuck lease causes store_busy. The same type gains install_root_foreign_owner (#2001): every ServiceInstallation operation holds an install-root gate, so a second operation on one install root fails at once with lifecycle_owner_busy, and an install root owned by another user is refused before anything changes.",
       "migration": "docs/releases/host-upgrade-next-minor.md#store-release-failures-name-the-next-step",
       "items": [
         "export:@byok-sdk/client#ServiceInstallationErrorCode"
