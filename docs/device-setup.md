@@ -536,12 +536,13 @@ letter or digit).
 
 A restore that fails renames the snapshot to
 `<installRoot>/snapshots/.install-repair-<uuid>` and the error names that
-path. The next first install restores it before anything else, under the
-store leases and before its precheck: the stores return to how they were
-before the failed install, and anything written to them since is replaced.
-It then retires the repair name and continues. When that install cannot
+path; the error is `upgrade_pending`. The next operation (install, upgrade,
+rollback, `recover` or uninstall) restores it before anything else, while no
+version is current, under the store leases: the stores return to how they
+were before the failed install, and anything written to them since is
+replaced. It then retires the repair name and continues. When it cannot
 stop the service, take the store leases, restore the snapshot or retire its
-name, it throws the same kind of error, starts nothing and removes a marked
+name, it fails with `upgrade_pending`, starts nothing and removes a marked
 unit; nothing else changes. When more than one repair snapshot exists it restores none of them
 and lists them all: their names do not order them in time, so an operator
 keeps the one to restore and removes the others.
@@ -562,9 +563,8 @@ retried. The cost: when a successful install could not remove its own
 snapshot, an install after `uninstall()` is refused until that directory is
 removed by hand.
 
-A first install decides from the snapshots it lists after it holds the
-store leases, so a repair snapshot or leftover written by another
-installation before that point is seen.
+Only operations that hold the install-root gate write `snapshots/`, so the
+snapshots an operation lists after taking the gate stay as listed.
 Unlike upgrade, install has no write-ahead receipt: if the process dies
 during migration, `recover()` does not complete that install. The next
 install prechecks the stores as migration left them. The Host must make
@@ -658,25 +658,23 @@ until `byok-agent upgrade recover` finishes it: it restores the receipt's
 to). A snapshot is removed only after the receipt that ends the operation is
 written.
 
-The top-level error code names the next step, which follows where the
-receipt stops. Whenever a store gate or lease fails to release and the
-receipt stays `pending` (a refusal whose `failed` receipt could not be
-written, a failed pointer write or snapshot restore, the release after the
-pointer writes, a rollback after a failed health check), the error is
-`store_release_failed`. Its `cause` is one flat list: the failure that came
-first (such as `health_check_failed` or `store_busy`), every release failure,
-then a failed receipt write or restart. Run `byok-agent upgrade recover`. A
+The top-level error code follows the outcome. A call that wrote its final
+receipt throws its first failure with that failure's own code; later release
+or restart failures join its `cause`, one flat list with the first failure
+first. A call that leaves its work unfinished (the receipt stays `pending`
+after a failed stop, pointer write, snapshot restore, release or final
+receipt write, or a repair snapshot remains) throws `upgrade_pending`, whose
+`cause` lists every failure in order: run `byok-agent upgrade recover`. A
 lease that failed to release stays held until the process that took it
-exits, so a `recover` in that process can get `store_busy`; restart the Host
-process, then recover. The same holds for an install whose lease is stuck:
-its cleanup reports `store_busy` until the Host process restarts, and the
-next install or `recover` runs after that restart. When an upgrade refusal's
+exits, so a `recover` in that process can fail with `store_busy` in its
+cause; restart the Host process, then recover. When an upgrade refusal's
 `failed` receipt cannot be written, the receipt stays `pending` and the old
 version stays stopped until `recover`, since recover's snapshot restore would
-overwrite what a restarted service wrote. A refusal whose final
-receipt was written keeps its code, with later release or restart failures
-in its `cause`. A release failure after the final receipt would not reject a
-committed result (the rule for prune failures); no path releases there today.
+overwrite what a restarted service wrote. A preparation error that is not
+the SDK's own (a throwing `precheck` or `daemonStores` setup, a failed stop)
+is `store_preparation_failed` with the original error as its cause: the
+receipt records it as `failed` and the old version starts again, since the
+stores are intact.
 
 Upgrade, rollback, recover, install and uninstall run only for the store's
 recorded lifecycle owner: another owner gets `lifecycle_owner_conflict`, and
