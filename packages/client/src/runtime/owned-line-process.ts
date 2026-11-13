@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import {
-  adoptOwnedProcessTree, disposeOwnedProcessTree, rememberOwnedDescendants, withOwnedProcessTree,
+  adoptOwnedProcessTree, disposeOwnedProcessTree, rememberOwnedDescendants, withOwnedProcessTree, spawnStartError,
 } from '../adapters/process-tree.js';
 import { createJsonlLineDecoder } from '../util/jsonl-lines.js';
 
@@ -102,7 +102,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     child.stdin.on('error', fail);
     child.stdout.on('error', fail);
     child.stderr.on('error', fail);
-    child.once('error', fail);
+    child.once('error', (error: NodeJS.ErrnoException) => fail(spawnStartError(error)));
     child.once('spawn', () => {
       void adoptOwnedProcessTree({ child, label, platform: deps.platform, jobObject: deps.jobObject, nativeAssetRoot: deps.nativeAssetRoot }).then(() => {
         adopted = true;

@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import {
-  adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree,
+  adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree, spawnStartError,
 } from '../adapters/process-tree.js';
 
 const LABEL = 'acp terminal';
@@ -36,7 +36,7 @@ export function createOwnedTerminalSpawn(deps: SpawnDependencies = {}) {
       return disposal;
     };
     const spawned = new Promise<void>((resolve, reject) => {
-      child.once('error', reject);
+      child.once('error', (error: NodeJS.ErrnoException) => reject(spawnStartError(error)));
       child.once('spawn', () => {
         // Fail closed: a tree nothing owns is ended before the agent hears of it.
         adoptOwnedProcessTree({ child, label: LABEL, platform: deps.platform, jobObject: deps.jobObject, nativeAssetRoot: deps.nativeAssetRoot })

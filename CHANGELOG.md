@@ -38,6 +38,8 @@
 
 - **Fixed (client; #2008)** — An agent, agent terminal tool or Pi RPC spawn whose environment holds a value containing a NUL byte now fails before the process starts, with an error that names the variable and never its value. Previously Node's rejection quoted the value in escaped form, which credential redaction did not match, so a credential could reach the start failure reason. No Host action is needed.
 
+- **Fixed (client; #2065)** — When an MCP server, agent runtime, agent terminal tool or Pi RPC process fails to start, the error now carries only Node's error code (`spawn failed: ENOENT`) and no longer keeps Node's original error, whose `spawnargs` could carry a credential passed as an argument. MCP start-failure reasons now read `failed to start: spawn failed: <code>` instead of naming the command path. No Host action is needed.
+
 ## 0.42.0 — 2026-11-13 (published)
 
 0.42.0 is a MINOR release for all ten public packages, including the first publication of `@byok-sdk/bot-collaboration`. It keeps wire v6 and includes breaking public API cuts, Postgres migrations 0038/0039, embedded SQLite v9 and an explicit keys profile-store migration. The released [upgrade manifest](packages/client/upgrade-history/0.41.0-0.42.0.json) from 0.41.0 has 15 breaking entries and 15 additive entries. See the [release notes](docs/releases/v0.42.0.md) and [Host upgrade checklist](docs/releases/host-upgrade-0.42.0.md). All ten packages were published on 2026-11-13 with npm `latest` at 0.42.0; readback passed for all ten packages. The release commit is `14e0628d2`; tag `v0.42.0` and the GitHub Release point to the release commit. Publication does not establish platform or production acceptance.

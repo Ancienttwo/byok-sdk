@@ -15,6 +15,7 @@ import {
 } from '@modelcontextprotocol/client';
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/client/validators/cf-worker';
 import { McpAuthorityError } from './authority-error.js';
+import { spawnStartError } from '../adapters/process-tree.js';
 
 export { McpAuthorityError };
 
@@ -234,8 +235,8 @@ class BoundedStdioTransport implements Transport {
     }
     this.child = child;
 
-    child.once('error', (error) => {
-      this.fail(new McpTransportError(`${this.label} failed to start: ${error.message}`, { cause: error }));
+    child.once('error', (error: NodeJS.ErrnoException) => {
+      this.fail(new McpTransportError(`${this.label} failed to start: ${spawnStartError(error).message}`));
     });
     child.once('exit', (code, signal) => {
       if (this.closed) return;

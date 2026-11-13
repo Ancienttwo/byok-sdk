@@ -63,6 +63,14 @@ const spawnSyncSystemTool = ((command: string, args: readonly string[], options:
   spawnSync(resolveSystemTool(command), args, options)) as typeof spawnSync;
 
 /**
+ * Node's spawn `error` carries `spawnargs` and `path`, so an argument credential would ride
+ * any log or serialization of it; only the code crosses (#2065).
+ */
+export function spawnStartError(error: NodeJS.ErrnoException): Error & { code?: string } {
+  return Object.assign(new Error(`spawn failed: ${error.code ?? 'unknown'}`), { code: error.code });
+}
+
+/**
  * Every bundled runtime root is an owned process-group leader on POSIX. Pipes
  * remain referenced, so `detached` changes ownership topology without making
  * the runtime outlive the daemon. Windows uses taskkill's `/T` tree authority.

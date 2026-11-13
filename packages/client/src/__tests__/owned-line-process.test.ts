@@ -4,8 +4,12 @@ import { createOwnedLineProcessSpawn, spawnOwnedLineProcess } from '../runtime/o
 import { __hostExitBackstopForTests } from '../adapters/process-tree';
 import { createOwnedTerminalSpawn } from '../runtime/owned-terminal-process';
 import { PiRpcClient } from '../adapters/pi/rpc-client';
+import { McpStdioClient } from '../mcp/client';
 import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/95c6547/runtimes/codex/app-server-client';
 
+/** Walks message, stack, cause and every nested own property, not only their string forms. */
+const carriesSecret = (value: unknown, depth = 0): boolean => typeof value === 'string' ? value.includes('fake-key')
+  : depth < 5 && typeof value === 'object' && value !== null && Object.getOwnPropertyNames(value).some(key => carriesSecret((value as Record<string, unknown>)[key], depth + 1));
 const checkedSpawn: SpawnLineProcess = spawnOwnedLineProcess;
 const live: LineProcess[] = [];
 afterEach(async () => { for (const child of live.splice(0)) { child.kill(); await child.exited.catch(() => {}); } vi.unstubAllEnvs(); });
@@ -57,10 +61,17 @@ describe('BYOK owned line process', () => {
       () => new PiRpcClient({ command: process.execPath, args: [], cwd: '.', env })]) expect.soft(start).toThrow(/^spawn env variable BYOK_TEST_KEY contains a NUL byte$/);
   });
 
-  it('rejects spawn failure and still settles its exit receipt', async () => {
-    const child = checkedSpawn('/nonexistent/byok-s2a-binary', [], { env: {} }); live.push(child);
+  it('rejects spawn failure with only its code on every client spawn and still settles its exit receipt', async () => {
+    const command = '/nonexistent/byok-s2a-binary', args = ['--token=fake-key-2065'];
+    const child = checkedSpawn(command, args, { env: {} }); live.push(child);
     const exited = child.exited.catch(error => error); const onExit = vi.fn(); child.onExit(onExit);
-    await expect(child.spawned).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(await exited).toMatchObject({ code: 'ENOENT' }); expect(onExit).toHaveBeenCalledTimes(1);
+    const pi = new PiRpcClient({ command, args, cwd: '.', env: {} });
+    const errors = [await child.spawned.catch(error => error), await exited, await createOwnedTerminalSpawn()(command, args, { cwd: '.', env: {}, shell: false }).spawned.catch(error => error),
+      await pi.waitClosed().then(() => pi.terminalError), await new McpStdioClient({ command, args }, { env: {} }).connect().catch(error => error)];
+    // Node's own error carries the arguments in `spawnargs`; nothing nested may.
+    expect(errors.filter(error => carriesSecret(error))).toEqual([]);
+    expect(errors.slice(0, 4)).toEqual(Array(4).fill(expect.objectContaining({ message: 'spawn failed: ENOENT', code: 'ENOENT' })));
+    expect(errors[4]).toMatchObject({ message: 'MCP server failed to start: spawn failed: ENOENT' });
+    expect(onExit).toHaveBeenCalledTimes(1);
   });
 });

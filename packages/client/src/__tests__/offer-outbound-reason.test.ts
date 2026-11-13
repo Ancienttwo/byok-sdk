@@ -158,7 +158,7 @@ describe('local paths in outbound handleOffer reasons', () => {
     await taskRunner.handleEnvelope(messageOffer('helper-path', 1));
 
     const reason = reasonOf(sent, 'task.decline', 'helper-path');
-    expect(reason).toBe('required Agent message helper preflight failed: helper failed to start: spawn <local path> ENOENT');
+    expect(reason).toBe('required Agent message helper preflight failed: helper failed to start: spawn failed: ENOENT');
     expectNoLocalPath(reason, localRoots, 'message mcp');
   });
 
@@ -176,7 +176,7 @@ describe('local paths in outbound handleOffer reasons', () => {
 
     const reason = reasonOf(sent, 'task.decline', 'toolset-path');
     expect(reason).toBe(
-      'required MCP toolset server "team" could not be observed: MCP toolset server "team" failed to start: spawn <local path> ENOENT',
+      'required MCP toolset server "team" could not be observed: MCP toolset server "team" failed to start: spawn failed: ENOENT',
     );
     expectNoLocalPath(reason, localRoots, 'mcp server');
   });
