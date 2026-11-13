@@ -1768,9 +1768,15 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect([await pointer('current'), await fs.readFile(db, 'utf8')]).toEqual(['2.0.0', 'v2 data']);
     });
 
-    it('a store that is, holds or lies in a daemon store\'s service/ directory is store_overlaps_service_state (#2011)', async () => {
+    it('a store that is, holds or lies in the install root or a daemon store\'s service/ directory, through a link or another case, is store_overlaps_service_state (#2011)', async () => {
       const service = path.join(storeDir, 'service');
-      for (const [kind, at] of [['directory', service], ['directory', storeDir], [undefined, path.join(service, 'host.db')]] as const) {
+      const alias = path.join(root, 'alias');
+      await fs.symlink(service, alias);
+      const cases: [string | undefined, string][] = [['directory', service], ['directory', storeDir], [undefined, path.join(service, 'host.db')],
+        // A link to service/, a store under the install root, and (where names ignore case) another spelling of service/.
+        [undefined, path.join(alias, 'host.db')], ['directory', path.join(installRoot, 'versions')],
+        ...(process.platform === 'darwin' || process.platform === 'win32' ? [['directory', path.join(storeDir, 'SERVICE')] as [string, string]] : [])];
+      for (const [kind, at] of cases) {
         await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([{ store: 'host', path: at, verdict: 'accepted', reason: 'accepted', ...(kind ? { kind } : {}) }]));
         await expect(installation.upgrade(await payload('3.0.0'))).rejects.toMatchObject({ code: 'store_overlaps_service_state' });
         expect([await pointer('current'), existsSync(path.join(installRoot, 'snapshots', '3.0.0'))]).toEqual(['2.0.0', false]);
@@ -1880,6 +1886,10 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       for (const program of [path.join(installRoot, 'current-old', 'host.js'), path.join(root, 'elsewhere.js')]) {
         expect(() => createServiceInstallation(options(program))).toThrow(expect.objectContaining({ code: 'service_program_not_current' }));
       }
+      // Another spelling of current is current where names ignore case.
+      const respelled = () => createServiceInstallation(options(path.join(installRoot, 'CURRENT', 'host.js')));
+      if (process.platform === 'darwin' || process.platform === 'win32') expect(respelled).not.toThrow();
+      else expect(respelled).toThrow(expect.objectContaining({ code: 'service_program_not_current' }));
       const drifted = installationOver({ ...fakeLifecycle(), inspect: async () => ({ state: 'repairable', unitPath: 'unit', launcherPath: 'launcher' }) });
       await expect(drifted.rollback()).rejects.toMatchObject({ code: 'service_program_not_current' });
       await expect(drifted.upgrade(await payload('3.0.0'))).rejects.toMatchObject({ code: 'service_program_not_current' });

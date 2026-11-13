@@ -249,9 +249,10 @@ service that had already restarted.
   `snapshots_symlinked`, before its first side effect (#2061). A link swapped
   in after that check is the Host's responsibility.
 - **`store_overlaps_service_state`:** a store your precheck lists must not
-  be, hold or lie in a daemon store's `service/` directory (its leases,
-  launcher and records). Such a store is refused before anything is
-  snapshotted; list the store's own files or directory instead. A snapshot
+  be, hold or lie in the install root or a daemon store's `service/`
+  directory (its leases, launcher and records), compared after resolving
+  symbolic links and, on macOS and Windows, without case. Such a store is
+  refused before anything is snapshotted; list the store's own files or directory instead. A snapshot
   taken before this check is not re-checked on restore (#2102): before
   rolling back one, compare its `snapshot.json` with your stores.
 - **Snapshot removal (#2062):** a snapshot that cannot be removed after the
