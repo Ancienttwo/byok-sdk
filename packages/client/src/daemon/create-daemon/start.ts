@@ -1,6 +1,6 @@
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../../util/daemon-owner.js';
 import { DaemonHaltError } from '../daemon-lifecycle.js';
-import { installationHoldsStart } from '../../lifecycle/service-installation.js';
+import { installationHoldsStart } from '../../util/service-installation-record.js';
 import { AuthRequestAbortedError } from '../auth-manager.js';
 import { DeviceCredentialCommandAbortedError } from '../device-credential-store.js';
 import path from 'node:path';

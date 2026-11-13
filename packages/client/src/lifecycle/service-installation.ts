@@ -16,7 +16,8 @@ import type { HeldServiceLifecycle, ManagedServiceLifecycle } from './managed-li
 import {
   isJsonObject, isPayloadPath, listPayloadFiles, SERVICE_PAYLOAD_MANIFEST, sha256File, SHA256_HEX, VERSION_ID, type ServicePayloadManifest,
 } from '../service-payload-manifest.js';
-import { serviceStateDir, ServiceUnitError } from './service-unit.js';
+import { ServiceUnitError } from './service-unit.js';
+import { readInstallPointer, readServiceInstallationRecord, serviceInstallationRecordPath, type InstallPointer, type ServiceInstallationRecord } from '../util/service-installation-record.js';
 import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types.js';
 
 /**
@@ -351,34 +352,6 @@ export class ServiceInstallationError extends Error {
   }
 }
 
-/** `<storeDir>/service/installation.json`: where this store's installation lives. */
-export interface ServiceInstallationRecord {
-  format: 'byok-service-installation';
-  version: 1;
-  installRoot: string;
-}
-
-export function serviceInstallationRecordPath(storeDir: string): string {
-  return path.join(serviceStateDir(storeDir), 'installation.json');
-}
-
-/** The installation record of a store, or `undefined` when the service is not installed from payloads. */
-export async function readServiceInstallationRecord(storeDir: string): Promise<ServiceInstallationRecord | undefined> {
-  let text: string;
-  try {
-    text = await fs.readFile(serviceInstallationRecordPath(storeDir), 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw error;
-  }
-  const record = JSON.parse(text) as Partial<ServiceInstallationRecord>;
-  if (record.format !== 'byok-service-installation' || record.version !== 1 || typeof record.installRoot !== 'string' || !path.isAbsolute(record.installRoot)) {
-    throw new Error(`service installation record ${serviceInstallationRecordPath(storeDir)} is not a version 1 record`);
-  }
-  return record as ServiceInstallationRecord;
-}
-
-type Pointer = 'current' | 'previous';
 /** A SQLite store is its main file plus a WAL or a hot rollback journal; `-shm` is rebuilt and is removed on restore. */
 const STORE_FILE_SUFFIXES = ['', '-wal', '-journal'] as const;
 const STORE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/u;
@@ -490,21 +463,6 @@ class PreparationFailure extends Error {
   }
 }
 
-/** The version `<installRoot>/<name>` points at, or `undefined` when the pointer is absent. */
-async function readInstallPointer(installRoot: string, name: Pointer): Promise<string | undefined> {
-  const link = path.join(installRoot, name);
-  let target: string;
-  try {
-    target = await fs.readlink(link);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw error;
-  }
-  const id = path.basename(target.replace(/[\\/]+$/u, ''));
-  if (!VERSION_ID.test(id)) throw new Error(`${link} does not point into ${path.join(installRoot, 'versions')}`);
-  return id;
-}
-
 /** A receipt as stored: a pending one also keeps what recover() needs. */
 interface StoredReceipt extends ServiceUpgradeReceipt {
   /** The migrate program's process group while it may run (#2011). */
@@ -572,21 +530,6 @@ async function readStoredReceipt(installRoot: string): Promise<{ receipt: Stored
     throw new Error(`${receiptPath} is not a version 2 upgrade receipt`);
   }
   return { receipt: receipt as StoredReceipt, v1: false };
-}
-
-/**
- * @internal Whether a daemon on `storeDir` must not start (#2011): its
- * installation journals a pending operation with `current` absent, so the
- * stores may be mid-restore. The SDK's own entries (`byok-agent start`,
- * createDaemon) check it under the store lease; a process with no
- * installation record is outside this guarantee (the Host's contract). Any
- * receipt version counts: only the state is read.
- */
-export async function installationHoldsStart(storeDir: string): Promise<boolean> {
-  const record = await readServiceInstallationRecord(storeDir);
-  if (record === undefined || (await readInstallPointer(record.installRoot, 'current')) !== undefined) return false;
-  const text = await fs.readFile(path.join(record.installRoot, 'upgrade-receipt.json'), 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
-  return text !== undefined && (JSON.parse(text) as { state?: unknown }).state === 'pending';
 }
 
 /**
@@ -738,7 +681,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     return readPointer('current');
   }
 
-  function readPointer(name: Pointer): Promise<string | undefined> {
+  function readPointer(name: InstallPointer): Promise<string | undefined> {
     return readInstallPointer(root, name);
   }
 
@@ -749,7 +692,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * the service is stopped, and a pending receipt makes `recover()` set every
    * pointer again, so the window with no `current` is never observed by a run.
    */
-  async function setPointer(name: Pointer, id: string | undefined): Promise<void> {
+  async function setPointer(name: InstallPointer, id: string | undefined): Promise<void> {
     const link = path.join(root, name);
     const next = `${link}.next`;
     const old = `${link}.old`;
