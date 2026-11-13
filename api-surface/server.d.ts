@@ -23,6 +23,9 @@ export type ExecutionServer = {
     /** Embedded process-local hints; reads from tasks remain authoritative. */
     events?: ByokServer['events'];
 };
+export declare class WakeDispatchError extends AggregateError {
+    constructor(failures: unknown[]);
+}
 export interface OutcomeTransaction {
     readonly intent: Readonly<Intent>;
     readonly terminal: Terminal;
@@ -135,7 +138,9 @@ export declare class HostExecutionCore {
     /** The one path for routine commands. */
     private routineCommands;
     lifecycle(id: string, lifecycle: Routine['lifecycle']): Promise<void>;
-    cancel(key: string): Promise<void>;
+    cancel(key: string): Promise<{
+        wakePending?: true;
+    }>;
     readonly consume: (wake: DueWake, signal: AbortSignal) => Promise<void>;
     /** The hook shares the occurrence commit: both persist, or neither does. */
     private runOccurrenceHook;
@@ -188,7 +193,7 @@ export declare class HostExecutionCore {
     flushProjections(deliver: (id: string, value: Json) => Promise<void>): Promise<void>;
 }
 // ==== @byok-sdk/server dist/execution-core/index.d.ts ====
-export { HostExecutionCore } from './core.js';
+export { HostExecutionCore, WakeDispatchError } from './core.js';
 export type { ExecutionServer, HostOptions, OutcomeTransaction, OccurrenceHook, OccurrenceTransaction, AgentMessageInput, MessageDecision, MessageTransaction } from './core.js';
 export { CompactVetoError, HostLedger, OutboxFullError, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError } from './ledger.js';
 export type { ApplicationRows, CompactionOptions, CompactionResult, CompactVeto, TombstoneKind, HostLedgerOptions, ProjectionOutboxLimits, ProjectionOutboxUsage, LedgerDump, LedgerDumpMemoryTombstone, LedgerDumpRow, LedgerDumpTombstone } from './ledger.js';

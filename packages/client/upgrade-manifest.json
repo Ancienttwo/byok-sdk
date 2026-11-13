@@ -28,6 +28,16 @@
       ]
     },
     {
+      "id": "committed-cancel-wake-pending",
+      "impact": "breaking",
+      "summary": "HostExecutionCore.cancel returns an object; BotCollaboration.cancelTurn and abortSwitch may return wakePending: true when wake dispatch fails after commit. The durable outbox records lastError and retries; drain and wake hooks still reject WakeDispatchError, an AggregateError. Update callers expecting cancel to return void.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2004",
+      "items": [
+        "export:@byok-sdk/server/execution-core#HostExecutionCore",
+        "export:@byok-sdk/server/execution-core#WakeDispatchError"
+      ]
+    },
+    {
       "id": "service-store-release-failures",
       "impact": "breaking",
       "summary": "Store lease and gate release failures preserve a refused ServiceInstallationError and its code, with the refusal and all release failures in its AggregateError cause; Hosts that matched the 0.42.0 AggregateError on first install must read cause instead. When a release fails and an upgrade, rollback or recover receipt remains pending, the new store_release_failed code directs the Host to recover; restart the Host process first if the stuck lease causes store_busy. The same type gains install_root_foreign_owner (#2001): every ServiceInstallation operation holds an install-root gate, so a second operation on one install root fails at once with lifecycle_owner_busy, and an install root owned by another user is refused before anything changes.",

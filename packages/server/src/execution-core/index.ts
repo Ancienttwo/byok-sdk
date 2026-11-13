@@ -1,4 +1,4 @@
-export { HostExecutionCore } from './core.js';
+export { HostExecutionCore, WakeDispatchError } from './core.js';
 export type { ExecutionServer, HostOptions, OutcomeTransaction, OccurrenceHook, OccurrenceTransaction, AgentMessageInput, MessageDecision,
   MessageTransaction } from './core.js';
 export { CompactVetoError, HostLedger, OutboxFullError, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError } from './ledger.js';
