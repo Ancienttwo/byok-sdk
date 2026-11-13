@@ -11,6 +11,7 @@ import { acquireDaemonOwner, DaemonOwnerActiveError, DaemonOwnerReclaimingError,
 import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger.js';
 import { ownedProcessGroupRecord, ownedProcessGroupRuns, type OwnedProcessGroupRecord } from '../adapters/process-tree.js';
 import { acquirePathMutationGate, acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate.js';
+import { resolveExistingAncestor } from '../util/existing-ancestor.js';
 import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle.js';
 import type { HeldServiceLifecycle, ManagedServiceLifecycle } from './managed-lifecycle.js';
 import {
@@ -82,7 +83,17 @@ export interface ServiceInstallationOptions {
    * 0 otherwise. Every store the candidate rewrites must be
    * listed, Host stores included: the snapshot covers exactly the listed
    * stores. Output that breaks {@link ServiceStoreVerdict}'s rules is
-   * `precheck_failed`.
+   * `precheck_failed`; a store that is, holds or lies in the install root
+   * or a daemon store's `service/` directory, after resolving links and
+   * without case on darwin and win32, is `store_overlaps_service_state`
+   * (#2011). A store path with a `..` segment (either separator on win32)
+   * is `precheck_failed`: pass normalized absolute paths. On an upgrade's
+   * first precheck a refusal touches no store and takes no snapshot: the
+   * final receipt carries its code, `current` points at the previous version
+   * again and that service restarts. On a first install no receipt is
+   * written, a version directory this call staged is removed and a marked
+   * unit it stopped restarts. On the precheck after a migration the refusal
+   * is the cause of `store_migration_failed`, after the snapshot restores.
    */
   precheck(versionDir: string): ServiceProgram;
   /**
@@ -340,6 +351,7 @@ const ERROR_MESSAGES = {
   service_program_not_current: 'The service unit must be the one this SDK writes, running from <installRoot>/current. Reinstall the payload installed now (install() with the current version id) to rewrite the unit, then retry.',
   install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.',
   snapshots_symlinked: 'A path under the install root\'s snapshots/ is a symbolic link. Nothing changed; replace the link, then retry.',
+  store_overlaps_service_state: 'A store overlaps the install root or a daemon store\'s service/ directory.',
 } as const;
 
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
@@ -557,17 +569,30 @@ export function createServiceInstallation(opts: ServiceInstallationOptions): Ser
 }
 
 /**
- * Whether the command or an argument lies under `current`, compared by path
- * segment (`current-old/x` is not under it), without case on darwin and
- * win32 (#2011). A plausibility check only: a program that names the path
- * but runs something else is the Host's responsibility.
+ * Whether `child` is `parent` or lies under it, compared by path segment
+ * (`current-old/x` is not under `current`) and, on darwin and win32, without
+ * case (#2011). The one path containment rule of this module.
+ */
+function within(child: string, parent: string, platform: NodeJS.Platform): boolean {
+  const fold = (value: string): string => platform === 'darwin' || platform === 'win32' ? value.toLowerCase() : value;
+  const relative = path.relative(fold(parent), fold(child));
+  return relative === '' || (relative.split(path.sep)[0] !== '..' && !path.isAbsolute(relative));
+}
+
+/** `at` with the symbolic links of its deepest existing ancestor resolved and the missing rest appended, so an alias compares as its target (#2011). */
+async function canonical(at: string): Promise<string> {
+  const found = await resolveExistingAncestor(at);
+  return found === undefined ? path.resolve(at) : path.join(found.canonical, ...found.tail);
+}
+
+/**
+ * Whether the command or an argument lies under `current` (#2011). A
+ * plausibility check only, without resolving links: the factory is
+ * synchronous, and a program that names the path but runs something else
+ * is the Host's responsibility.
  */
 function runsFromCurrent(program: ServiceProgram, current: string, platform: NodeJS.Platform): boolean {
-  const fold = (value: string): string => platform === 'darwin' || platform === 'win32' ? value.toLowerCase() : value;
-  return [program.command, ...program.args].some((value) => {
-    const relative = path.relative(fold(current), fold(path.resolve(value)));
-    return relative === '' || (relative.split(path.sep)[0] !== '..' && !path.isAbsolute(relative));
-  });
+  return [program.command, ...program.args].some((value) => within(path.resolve(value), current, platform));
 }
 
 /** The live daemon's lifecycle, or `undefined` while its control socket does not answer. */
@@ -982,6 +1007,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * release takes its store gate), and resolves to every release failure.
    * A failure here is thrown with the release failures joined to it.
    */
+  /** The `service/` directories (leases, launcher, records) of the daemon stores the last stop quiesced; the precheck that follows reads them. */
+  let serviceDirs: string[] = [];
+
   async function stopQuiescent(stopService = true): Promise<() => Promise<unknown[]>> {
     if (stopService) await lifecycle.stop();
     const deadline = Date.now() + (opts.stopTimeoutMs ?? 30_000);
@@ -995,6 +1023,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     };
     try {
       const stores = await readDaemonStores();
+      serviceDirs = stores.map((store) => path.join(store.storeDir, 'service'));
       for (const store of stores) {
         leases.push(await leaseStore(store.storeDir, deadline));
         await removeStaleControlToken(store);
@@ -1059,8 +1088,22 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     } catch {
       throw new ServiceInstallationError('precheck_failed');
     }
-    if (!Array.isArray(stores) || !stores.every(isServiceStoreVerdict) || overlaps(stores)) throw new ServiceInstallationError('precheck_failed');
-    if (stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
+    if (!Array.isArray(stores) || !stores.every(isServiceStoreVerdict)) throw new ServiceInstallationError('precheck_failed');
+    // The one boundary where store paths enter (#2011): `..` after a link
+    // resolves differently from how it is compared; `.` cannot (#1350).
+    if (stores.some((store) => store.path.split(platform === 'win32' ? /[\\/]/u : '/').includes('..'))) {
+      const error = new ServiceInstallationError('precheck_failed');
+      error.message += ' A store path must not contain .. segments; pass a normalized absolute path.';
+      throw error;
+    }
+    const paths = await Promise.all(stores.map((store) => canonical(store.path)));
+    if (overlaps(stores, paths, platform) || stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
+    // A store that is, holds or lies in the install root or a daemon store's
+    // service/ would have the versions, receipt, live leases or launcher
+    // replaced by a restore (#2011). Each is guarded both as its target and
+    // as the entry naming it, since a restore removes a link, not its target.
+    const guarded = (await Promise.all([root, ...serviceDirs].map(async (at) => [await canonical(at), path.join(await canonical(path.dirname(at)), path.basename(at))]))).flat();
+    if (paths.some((a) => guarded.some((b) => within(a, b, platform) || within(b, a, platform)))) throw new ServiceInstallationError('store_overlaps_service_state');
     return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path) } : store);
   }
 
@@ -1188,7 +1231,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * `<index><suffix>`, a directory store's tree as `<index>.d`. Every store
    * is checked with `lstat` first, so nothing is followed through a symlink.
    * `snapshot.json` is written last and marks a complete snapshot; a copy
-   * that fails removes the partial snapshot.
+   * that fails removes the partial snapshot. Entries keep the listed paths,
+   * which a restore follows again. The migration is the Host's (trust model
+   * A): it must not change the link structure inside a store, and a restore
+   * after it did is the Host's responsibility (#2106).
    */
   async function snapshot(to: string, stores: readonly ServiceStoreVerdict[]): Promise<void> {
     const sources = await Promise.all(stores.map(storeSources));
@@ -1702,11 +1748,10 @@ function isRefused(store: ServiceStoreVerdict): boolean {
   return store.verdict === 'new-path-repair' || store.verdict === 'rejected';
 }
 
-/** Whether two stores share a path or one lies inside a directory store. */
-function overlaps(stores: readonly ServiceStoreVerdict[]): boolean {
-  const paths = stores.map((store) => path.resolve(store.path));
+/** Whether two stores (at their canonical `paths`) share a path or one lies inside a directory store. */
+function overlaps(stores: readonly ServiceStoreVerdict[], paths: readonly string[], platform: NodeJS.Platform): boolean {
   return stores.some((store, index) => paths.some((other, at) => at !== index
-    && (other === paths[index] || (store.kind === 'directory' && other.startsWith(`${paths[index]}${path.sep}`)))));
+    && within(other, paths[index]!, platform) && (store.kind === 'directory' || within(paths[index]!, other, platform))));
 }
 
 /**

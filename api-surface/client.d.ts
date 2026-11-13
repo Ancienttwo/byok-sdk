@@ -11431,7 +11431,17 @@ export interface ServiceInstallationOptions {
      * 0 otherwise. Every store the candidate rewrites must be
      * listed, Host stores included: the snapshot covers exactly the listed
      * stores. Output that breaks {@link ServiceStoreVerdict}'s rules is
-     * `precheck_failed`.
+     * `precheck_failed`; a store that is, holds or lies in the install root
+     * or a daemon store's `service/` directory, after resolving links and
+     * without case on darwin and win32, is `store_overlaps_service_state`
+     * (#2011). A store path with a `..` segment (either separator on win32)
+     * is `precheck_failed`: pass normalized absolute paths. On an upgrade's
+     * first precheck a refusal touches no store and takes no snapshot: the
+     * final receipt carries its code, `current` points at the previous version
+     * again and that service restarts. On a first install no receipt is
+     * written, a version directory this call staged is removed and a marked
+     * unit it stopped restarts. On the precheck after a migration the refusal
+     * is the cause of `store_migration_failed`, after the snapshot restores.
      */
     precheck(versionDir: string): ServiceProgram;
     /**
@@ -11686,6 +11696,7 @@ declare const ERROR_MESSAGES: {
     readonly service_program_not_current: 'The service unit must be the one this SDK writes, running from <installRoot>/current. Reinstall the payload installed now (install() with the current version id) to rewrite the unit, then retry.';
     readonly install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.';
     readonly snapshots_symlinked: 'A path under the install root\'s snapshots/ is a symbolic link. Nothing changed; replace the link, then retry.';
+    readonly store_overlaps_service_state: 'A store overlaps the install root or a daemon store\'s service/ directory.';
 };
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
 /** Closed codes; a store refusal carries the precheck verdicts, and `snapshot_failed` the copy error as `cause`. */
