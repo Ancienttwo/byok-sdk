@@ -1,6 +1,6 @@
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner.js';
+import { boundedRunner, defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner.js';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { SERVICE_REDIRECT_LIMITS } from './service-log.js';
 import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types.js';
@@ -121,7 +121,14 @@ async function rmWithImageLockRetry(fs: Pick<typeof fsp, 'rm'>, p: string): Prom
   }
 }
 
-/** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
+/**
+ * The bound on one WinSW command (#1971): `start`, `stop` and `stopwait` wait
+ * on the SCM, `stop` for up to the service's own `stoptimeout` plus the SCM's
+ * wait hints. `sc.exe` queries keep `exec-runner.ts`'s `PLATFORM_COMMAND_TIMEOUT_MS`.
+ */
+export const WINSW_COMMAND_TIMEOUT_MS = 120_000;
+
+/** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. `run` replaces both the WinSW and the `sc.exe` runner. */
 export interface WinswDeps {
   run?: Runner;
   fs?: ManagedLifecycleFs & Pick<typeof fsp, 'copyFile'>;
@@ -201,6 +208,7 @@ ${argXml}${cwdXml}
  */
 export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {}, gateRoot?: string): ManagedServiceLifecycle {
   const run = deps.run ?? defaultRunner;
+  const runWinsw = deps.run ?? boundedRunner(WINSW_COMMAND_TIMEOUT_MS);
   const fs = deps.fs ?? fsp;
 
   const windows = def.windows;
@@ -249,7 +257,7 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
     const match = result.code === 0 ? /\bSTATE\s*:\s*(\d+)\s+(\w+)/i.exec(detail) : null;
     const state = match ? `${match[1]} ${match[2]!.toUpperCase()}` : undefined;
     if (!denied && wrapper === 'differs' && state === '4 RUNNING') {
-      await runIdempotent(run, exePath, ['stopwait'], 'winsw stopwait', WINSW_ALREADY_STOPPED);
+      await runIdempotent(runWinsw, exePath, ['stopwait'], 'winsw stopwait', WINSW_ALREADY_STOPPED);
       return;
     }
     if (!denied && (state === '1 STOPPED' || result.code === 1060)) return;
@@ -272,7 +280,7 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
       // is never run unless the SCM reports it running.
       const wrapper = await installedWrapper();
       if (await fileExists(xmlPath)) {
-        if (wrapper === 'exact') await runIdempotent(run, exePath, ['stopwait'], 'winsw stopwait', WINSW_ALREADY_STOPPED);
+        if (wrapper === 'exact') await runIdempotent(runWinsw, exePath, ['stopwait'], 'winsw stopwait', WINSW_ALREADY_STOPPED);
         else await stopForWrapperReplacement(wrapper);
       }
       await fs.mkdir(installDir, { recursive: true });
@@ -282,28 +290,28 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
       return (await installedWrapper()) === 'exact';
     },
     async activate() {
-      await runIdempotent(run, exePath, ['install'], 'winsw install', WINSW_ALREADY_INSTALLED);
-      await runOrThrow(run, exePath, ['start'], 'winsw start');
+      await runIdempotent(runWinsw, exePath, ['install'], 'winsw install', WINSW_ALREADY_INSTALLED);
+      await runOrThrow(runWinsw, exePath, ['start'], 'winsw start');
     },
     async deactivate() {
       // Tolerant of "wasn't running/installed", but a REAL failure (access
       // denied, the exe locked/busy, a WinSW/SCM fault) at EITHER step must
       // NOT be masked: the exe+xml are only deleted once the service is
       // stopped and unregistered (cross-model-review P1 #7).
-      await runIdempotent(run, exePath, ['stop'], 'winsw stop', WINSW_NOT_INSTALLED);
-      await runIdempotent(run, exePath, ['uninstall'], 'winsw uninstall', WINSW_NOT_INSTALLED);
+      await runIdempotent(runWinsw, exePath, ['stop'], 'winsw stop', WINSW_NOT_INSTALLED);
+      await runIdempotent(runWinsw, exePath, ['uninstall'], 'winsw uninstall', WINSW_NOT_INSTALLED);
     },
     async removeFiles() {
       await rmWithImageLockRetry(fs, exePath);
       await rmWithImageLockRetry(fs, xmlPath);
     },
     async start() {
-      await runOrThrow(run, exePath, ['start'], 'winsw start');
+      await runOrThrow(runWinsw, exePath, ['start'], 'winsw start');
     },
     async stop() {
       // Tolerant of "already stopped/not installed", but a REAL failure
       // must be surfaced rather than reported as "stopped" (P1 #7, round 2).
-      await runIdempotent(run, exePath, ['stop'], 'winsw stop', WINSW_ALREADY_STOPPED);
+      await runIdempotent(runWinsw, exePath, ['stop'], 'winsw stop', WINSW_ALREADY_STOPPED);
     },
     async query() {
       const result = await run('sc.exe', ['query', id]);

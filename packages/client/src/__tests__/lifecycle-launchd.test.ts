@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createLaunchdLifecycle, generateLaunchdPlist, LAUNCHD_UNLOAD_TIMEOUT_MS } from '../lifecycle/launchd';
-import type { RunResult, Runner } from '../util/exec-runner';
+import { PlatformCommandTimeoutError, type RunResult, type Runner } from '../util/exec-runner';
 import { nodeAgentProgram, type ServiceDefinition } from '../lifecycle/service-types';
 import { SERVICE_UNIT_MARKER, ServiceUnitError } from '../lifecycle/service-unit';
 import { DRIFTED_MARKED_UNIT, memoryServiceFs } from './support/service-fs';
@@ -105,6 +105,16 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     const run = vi.fn<Runner>().mockImplementation(async (_cmd, args) => (args[0] === 'bootout' ? fail(3, 'Could not find service') : args[0] === 'print' ? ABSENT : ok()));
     const lifecycle = createLaunchdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h', getuid: () => 501 });
     await expect(lifecycle.install()).resolves.toBeUndefined();
+  });
+
+  it('#1971: a timed-out best-effort bootout fails install() before bootstrap', async () => {
+    const timeout = new PlatformCommandTimeoutError('launchctl', 30_000);
+    const run = vi.fn<Runner>().mockImplementation(async (_cmd, args) => {
+      if (args[0] === 'bootout') throw timeout;
+      return args[0] === 'print' ? ABSENT : ok();
+    });
+    await expect(createLaunchdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h', getuid: () => 501 }).install()).rejects.toBe(timeout);
+    expect(run.mock.calls.map(([, args]) => args[0])).toEqual(['bootout']);
   });
 
   it('install() throws a clear error when bootstrap itself fails', async () => {

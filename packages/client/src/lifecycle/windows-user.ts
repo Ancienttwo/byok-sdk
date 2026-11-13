@@ -1,7 +1,7 @@
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { defaultRunner, type Runner } from '../util/exec-runner.js';
+import { defaultRunner, PlatformCommandTimeoutError, runBounded, type Runner } from '../util/exec-runner.js';
 import { resolveSystemTool } from '@byok-sdk/core/system-tool';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types.js';
@@ -46,15 +46,36 @@ export function generateWindowsStartupUnit(launcherPath: string): string {
   return `@REM ${SERVICE_UNIT_MARKER}\r\n@start "" /min cmd.exe /d /c "${cmdQuote(launcherPath)}"\r\n`;
 }
 
-function runStopProgram(program: ServiceProgram): Promise<number | null> {
-  return new Promise((resolve) => {
-    execFile(program.command, program.args, { cwd: program.cwd, windowsHide: true }, (error) => {
-      resolve(error === null ? 0 : typeof error.code === 'number' ? error.code : null);
-    });
-  });
+/** The bound on the Host's `stop` program (#1971). */
+export const WINDOWS_USER_STOP_PROGRAM_TIMEOUT_MS = 60_000;
+/** The bound on running the Startup unit, whose `start` returns at once (#1971). */
+export const WINDOWS_USER_LAUNCH_TIMEOUT_MS = 30_000;
+/** How long a timed-out unit run's `cmd` may take to exit after it is terminated. */
+const LAUNCH_KILL_GRACE_MS = 2_000;
+
+/**
+ * The Host's stop program's exit code; `null` when it could not run or ended
+ * on a signal. One that outlives its bound has its tree terminated and
+ * rejects with `PlatformCommandTimeoutError`: whether it stopped the service
+ * is unknown.
+ */
+async function runStopProgram(program: ServiceProgram): Promise<number | null> {
+  try {
+    return (await runBounded(program.command, program.args, { timeoutMs: WINDOWS_USER_STOP_PROGRAM_TIMEOUT_MS, cwd: program.cwd })).code;
+  } catch (error) {
+    if (error instanceof PlatformCommandTimeoutError) throw error;
+    return null;
+  }
 }
 
-/** Runs the unit the way Explorer does; the launcher it starts outlives this process. */
+/**
+ * Runs the unit the way Explorer does; the launcher it starts outlives this
+ * process. After {@link WINDOWS_USER_LAUNCH_TIMEOUT_MS} only the unit's own
+ * `cmd` is terminated, never its tree: the launcher `start` made is that
+ * `cmd`'s child and is the service itself. The rejection then means the
+ * launcher may or may not be running; `start()` and `status()` ask the
+ * launcher query again.
+ */
 function launchUnit(unitPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     // cmd /c strips the outer pair of quotes, leaving the quoted path.
@@ -64,8 +85,24 @@ function launchUnit(unitPath: string): Promise<void> {
       windowsHide: true,
       windowsVerbatimArguments: true,
     });
-    child.once('error', reject);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+      const timeout = new PlatformCommandTimeoutError('cmd', WINDOWS_USER_LAUNCH_TIMEOUT_MS);
+      const grace = setTimeout(() => reject(timeout), LAUNCH_KILL_GRACE_MS);
+      child.once('exit', () => {
+        clearTimeout(grace);
+        reject(timeout);
+      });
+    }, WINDOWS_USER_LAUNCH_TIMEOUT_MS);
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
     child.once('exit', (code) => {
+      if (timedOut) return;
+      clearTimeout(timer);
       if (code === 0) resolve();
       else reject(new Error(`Startup unit ${unitPath} exited ${code}`));
     });

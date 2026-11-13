@@ -200,14 +200,16 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
     async activate() {
       // Best-effort: clear any stale prior load first (e.g. a re-install)
       // — "not currently loaded" is an expected, ignorable outcome, not a
-      // real failure (see `exec-runner.ts`'s `RunResult` doc comment).
+      // real failure (see `exec-runner.ts`'s `RunResult` doc comment). A
+      // timeout is not an exit code and still fails the install (#1971).
       await run('launchctl', ['bootout', serviceTarget()]);
       await untilUnloaded();
       await runOrThrow(run, 'launchctl', ['bootstrap', domainTarget(), plistPath], 'launchctl bootstrap');
       await runOrThrow(run, 'launchctl', ['enable', serviceTarget()], 'launchctl enable');
       // RunAtLoad already starts it on bootstrap; kickstart -k guarantees a
       // fresh start even if bootstrap raced with a leftover instance.
-      // Best-effort: RunAtLoad is the load-bearing guarantee here.
+      // Best-effort on its exit code: RunAtLoad is the load-bearing
+      // guarantee here. A timeout still fails the install (#1971).
       await run('launchctl', ['kickstart', '-k', serviceTarget()]);
     },
     async deactivate() {
