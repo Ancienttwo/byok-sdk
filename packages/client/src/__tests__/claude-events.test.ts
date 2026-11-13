@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AssistantMessageTracker,
   createToolUseCorrelation,
@@ -698,5 +698,82 @@ describe('Claude context window reserved for S4', () => {
           workspaceDir: '/workspace',
         }).terminalFailure,
       ).toBeDefined();
+  });
+});
+
+describe('a refused or unwritten interrupt leaves the turn as it was (#2037)', () => {
+  afterEach(() => { vi.useRealTimers(); });
+  const outcome = (stream: ClaudeStreamSession) => (stream.raw.records() as unknown as Array<{ kind: string; body?: { events?: Array<{ kind: string; outcome?: { kind: string } }> } }>)
+    .flatMap(record => record.kind === 'frame' ? record.body?.events ?? [] : []).find(event => event.kind === 'turn_ended')?.outcome?.kind;
+  async function opened(...args: Parameters<typeof memoryClaude>) {
+    vi.useFakeTimers();
+    const claude = memoryClaude(...args);
+    const stream = new ClaudeStreamSession(claude.child as never);
+    await stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+    expect((await stream.raw.prompt('go')).response.body.kind).toBe('accepted');
+    return { claude, stream };
+  }
+  const answer = (claude: ReturnType<typeof memoryClaude>, n: number, subtype: 'success' | 'error') => {
+    claude.send({ type: 'control_response', response: { subtype, request_id: `interrupt-${n}`, ...(subtype === 'error' ? { error: 'interrupt refused' } : { response: {} }) } });
+  };
+  const success = { type: 'result', subtype: 'success', is_error: false, usage: {} };
+  it.each([
+    ['an interrupt write that throws', ['interrupt', 'throw'], () => {}],
+    ['an interrupt write that rejects later', ['interrupt', 'reject'], () => {}],
+    ['an interrupt Claude refuses after its result', [], (claude: ReturnType<typeof memoryClaude>) => { answer(claude, 1, 'error'); }],
+  ] as const)('%s: the abort is rejected, no fallback kill, and the result that arrived meanwhile completes', async (_label, args, settle) => {
+    const { claude, stream } = await opened(...args);
+    const abort = stream.raw.abort();
+    claude.send(success);
+    expect(outcome(stream)).toBeUndefined();
+    settle(claude);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect((await abort).response.body.kind).toBe('rejected');
+    expect(claude.kills()).toBe(0);
+    expect(outcome(stream)).toBe('completed');
+  });
+  it('an interrupt never answered after its result is accepted at the fallback and the turn ends aborted (#2094)', async () => {
+    const { claude, stream } = await opened();
+    const abort = stream.raw.abort();
+    claude.send(success);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect((await abort).response.body.kind).toBe('accepted');
+    expect(claude.kills()).toBe(1);
+    claude.exit(null);
+    expect(outcome(stream)).toBe('aborted');
+  });
+  it('a fallback kill with queued input does not dispatch the next turn to the killed process', async () => {
+    const { claude, stream } = await opened();
+    expect((await stream.raw.queue('next', { inputId: 'next' })).response.body.kind).toBe('accepted');
+    const abort = stream.raw.abort();
+    claude.send(success);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect((await abort).response.body.kind).toBe('accepted');
+    expect(claude.kills()).toBe(1);
+    claude.exit(null);
+    expect(outcome(stream)).toBe('aborted');
+    expect(claude.written.filter(frame => (frame as { type?: string }).type === 'user')).toHaveLength(1);
+  });
+  it.each([
+    ['unanswered', () => {}],
+    ['answered before its acknowledgement', (claude: ReturnType<typeof memoryClaude>) => { answer(claude, 1, 'success'); }],
+  ] as const)('an interrupt write never acknowledged and %s counts as written: the abort is accepted and the fallback kills', async (_label, settle) => {
+    const { claude, stream } = await opened('interrupt', 'hang');
+    const abort = stream.raw.abort();
+    settle(claude);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect((await abort).response.body.kind).toBe('accepted');
+    expect(claude.kills()).toBe(1);
+  });
+  it('a refused second interrupt keeps the mark of an accepted first one', async () => {
+    const { claude, stream } = await opened();
+    const first = stream.raw.abort();
+    answer(claude, 1, 'success');
+    expect((await first).response.body.kind).toBe('accepted');
+    const second = stream.raw.abort();
+    answer(claude, 2, 'error');
+    expect((await second).response.body.kind).toBe('rejected');
+    claude.send({ type: 'result', subtype: 'error_during_execution', terminal_reason: 'aborted_streaming', is_error: true, usage: {} });
+    expect(outcome(stream)).toBe('aborted');
   });
 });
