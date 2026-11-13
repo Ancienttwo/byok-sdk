@@ -340,7 +340,7 @@ const ERROR_MESSAGES = {
   service_program_not_current: 'The service unit must be the one this SDK writes, running from <installRoot>/current. Reinstall the payload installed now (install() with the current version id) to rewrite the unit, then retry.',
   install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.',
   snapshots_symlinked: 'A path under the install root\'s snapshots/ is a symbolic link. Nothing changed; replace the link, then retry.',
-  store_overlaps_service_state: 'A store overlaps a daemon store\'s service/ directory, which a restore would replace.',
+  store_overlaps_service_state: 'A store overlaps a daemon store\'s service/ directory.',
 } as const;
 
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
