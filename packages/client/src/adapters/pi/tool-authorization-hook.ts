@@ -6,7 +6,7 @@ import { requestToolAuthorization, type ToolAuthorizationIpcConfig } from '../..
 const PI_SUBAGENT_LAUNCH_TOOL = 'subagent_launch';
 const UNADMITTED_LAUNCH = 'tool_authorization_denied: subagent_launch is admitted only as the workflow child check of an allowed subagent call';
 const MALFORMED_LAUNCH = 'tool_authorization_denied: subagent_launch input does not have its pinned shape';
-// The pinned `subagent_launch` parameters (pi-subagents 0.87.0
+// The pinned `subagent_launch` parameters (pi-subagents 0.88.1
 // bundle/chunk-EYGBK6CE.js:8201-8216): `workflowRunId` and `key` are required
 // strings; the rest are optional. Paths must be non-empty.
 type FieldCheck = (value: unknown) => boolean;

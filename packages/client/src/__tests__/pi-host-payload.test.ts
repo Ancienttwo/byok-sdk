@@ -55,7 +55,7 @@ describe('copyPiRuntimeAssets', () => {
     expect(files.filter(file => !subagentFiles.includes(file))).toEqual(expectedInventory(form));
     // The client's pi-subagents with its runtime dependencies, and the SDK child extensions.
     const subagents = JSON.parse(await fs.readFile(path.join(outDir, 'pi-subagents/package.json'), 'utf8'));
-    expect([subagents.name, subagents.version]).toEqual(['pi-subagents', '0.87.0']);
+    expect([subagents.name, subagents.version]).toEqual(['pi-subagents', '0.88.1']);
     for (const dependency of [...Object.keys(subagents.dependencies), 'jsbi']) expect(subagentFiles).toContain(`pi-subagents/node_modules/${dependency}/package.json`);
     expect(subagentFiles.filter(file => file.startsWith('pi-subagent-extensions/'))).toEqual(['pi-subagent-extensions/pi-subagent-file-scope.js', 'pi-subagent-extensions/pi-subagent-gate.js']);
     const written = await fs.readdir(outDir, { recursive: true, withFileTypes: true });
@@ -65,12 +65,12 @@ describe('copyPiRuntimeAssets', () => {
     expect([pinned.name, pinned.version]).toEqual([sdk.PI_PACKAGE_NAME, '1.5.2']);
   });
 
-  it('pins the published 0.87.0 bootstrap paths and both runner argv shapes', async () => {
+  it('pins the published 0.88.1 bootstrap paths and both runner argv shapes', async () => {
     const sdk = await loadClient();
     const root = path.join(await tempRoot('byok-pi-runner-pin-'), 'pi');
     await sdk.copyPiRuntimeAssets({ outDir: root, form: 'interpreter+bundle' });
     const pkg = path.join(root, 'pi-subagents');
-    expect(JSON.parse(await fs.readFile(path.join(pkg, 'package.json'), 'utf8')).version).toBe('0.87.0');
+    expect(JSON.parse(await fs.readFile(path.join(pkg, 'package.json'), 'utf8')).version).toBe('0.88.1');
     for (const file of ['src/runs/background/subagent-runner-bootstrap.js', 'src/runs/background/binary-bootstrap.js',
       'runner-peer-preload.mjs', 'workflow-script-process.cjs', 'workflow-script-worker.cjs']) {
       expect((await fs.stat(path.join(pkg, file))).isFile()).toBe(true);
@@ -527,7 +527,7 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
           if (index === 0 || (missing && (index === 3 || index === 5))) continue;
           expect(result).toContain('pi_background_unavailable');
           expect(result).toContain('Foreground non-workflow subagents work');
-          if (form === 'node-sea') for (const text of ['Node SEA', '0.87.0', 'resolveNodeExecutable',
+          if (form === 'node-sea') for (const text of ['Node SEA', '0.88.1', 'resolveNodeExecutable',
             'fork on process.execPath', 'cannot stand in for Node', 'Bun-compiled product']) expect(result).toContain(text);
           else if (form === 'compiled-executable (configured assets)') {
             expect(result).toContain('assets beside the real executable');
