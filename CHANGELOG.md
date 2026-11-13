@@ -211,6 +211,7 @@
 - **Grok turn attribution and interrupt (#1942):** A Grok-own turn that starts while an SDK turn's answer is being published can have its text and usage attributed to that SDK turn, and an interrupt in that window cancels the Grok-own turn.
 
 - **Agent memory startup and cleanup (#1943):** A runtime whose start waits for an Agent memory tool result fails at the startup deadline; an activation failure with a pending memory call can block offer cleanup.
+- **Offer scratch disposal (#1944):** When an offer declines or fails before any runtime starts and the release of its own scratch throws, `whenTaskSettled` reports `disposal: 'failed'` or `disposal: 'none'` depending on timing. An offer's own scratch is outside the meaning of `disposal`; Hosts must not act on `disposal` in this case.
 - **Failed key replacement (#1946):** A refused OS credential-store write or another replacement failure leaves the profile marked as having an unfinished key change until a replacement succeeds.
 - **Desktop key form (#1947):** A typed key remains in renderer state while the configure form's save is pending.
 - **Desktop start fresh (#1948):** An inaccessible store is treated as absent, and the operation can report success without proving the store was cleared.
