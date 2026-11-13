@@ -1019,6 +1019,14 @@ export declare class BotCollaboration {
      */
     cancelHostIntent(key: string, ...by: PrincipalArg): Promise<HostIntentCancelResult>;
     /**
+     * Cancel selected Host intents atomically without a pass. A submitted intent refuses the whole set; after a successful
+     * call, successors wait for the next pass, or the Host can call `drain()`. Results keep input order and are replayable.
+     */
+    cancelHostIntents(keys: readonly string[], ...by: PrincipalArg): Promise<(HostIntentCancelResult & {
+        result: 'cancelled' | 'already_settled';
+        conclusion: Conclusion;
+    })[]>;
+    /**
      * Owner API (#882): settles as `failed` an open intent whose K4 terminal K8 refuses with `IntentOutcomeError`, so its FIFO
      * moves on. A fresh K4 drain decides that the intent is stuck, so the call also works right after a restart. One transaction
      * settles it and writes the audit row. The settle runs no handler, and the intent records no terminal; the server task
@@ -3266,12 +3274,20 @@ export declare class DelegationError extends Error {
 /**
  * A refused intent key. `cancelHostIntent` (#1320): `unknown_intent` for a key with no Host intent, or `not_host_intent` for a
  * Bot Turn. `failStuckIntent` (#1405): `unknown_intent` for a key with no K4 intent, `already_settled`, or `not_stuck` for an
- * intent whose terminal K8 did not refuse.
+ * intent whose terminal K8 did not refuse. `cancelHostIntents` (#2003) also refuses `inflight`, and `rejected` lists every
+ * refused key in input order. `key` and `code` name the first refusal.
  */
 export declare class HostIntentError extends Error {
     readonly key: string;
-    readonly code: 'unknown_intent' | 'not_host_intent' | 'already_settled' | 'not_stuck';
-    constructor(key: string, code: 'unknown_intent' | 'not_host_intent' | 'already_settled' | 'not_stuck', message: string);
+    readonly code: 'unknown_intent' | 'not_host_intent' | 'already_settled' | 'not_stuck' | 'inflight';
+    readonly rejected: readonly {
+        key: string;
+        code: HostIntentError['code'];
+    }[];
+    constructor(key: string, code: 'unknown_intent' | 'not_host_intent' | 'already_settled' | 'not_stuck' | 'inflight', message: string, rejected?: readonly {
+        key: string;
+        code: HostIntentError['code'];
+    }[]);
 }
 /**
  * `cancelled`: the intent was not submitted and settled as `cancelled`. `cancel_pending`: the SDK cancel went out, and K4

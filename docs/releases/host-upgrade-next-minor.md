@@ -2,6 +2,10 @@
 
 Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Cancel selected Host intents without a pass (#2003)
+
+`BotCollaboration.cancelHostIntents(keys)` atomically cancels a chosen set of unsubmitted Host intents without draining. It returns settled conclusions on replay and refuses the whole set when any key is unknown, a Bot Turn or in flight. `HostIntentError.rejected` lists every refused key and code; exhaustive switches over `HostIntentError.code` add `inflight`. Existing single cancellation and switch APIs keep their behavior, and the store format is unchanged. A Host may replace freeze → individual cancels → abort with this call; keep the freeze when other work on the device must also be held. Successors start on the next pass, or call `drain()` to start them.
+
 ## Ledger precheck and store ID (#1981)
 
 The local bot-collaboration entry exports `inspectLedger(path, tenant)`, a precheck that reads a private copy of the stopped L ledger. If it reports `migration-required`, run `migrateWouldDo` after taking a snapshot and before serving. A valid exported ledger is accepted; if its switch is aborted, run the precheck again before serving. `LocalStoreId` adds `bot-collaboration-ledger`: update exhaustive switches and `Record<LocalStoreId, ...>` mappings to include the new member.

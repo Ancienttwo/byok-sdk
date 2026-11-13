@@ -352,11 +352,14 @@ export class DelegationError extends Error {
 /**
  * A refused intent key. `cancelHostIntent` (#1320): `unknown_intent` for a key with no Host intent, or `not_host_intent` for a
  * Bot Turn. `failStuckIntent` (#1405): `unknown_intent` for a key with no K4 intent, `already_settled`, or `not_stuck` for an
- * intent whose terminal K8 did not refuse.
+ * intent whose terminal K8 did not refuse. `cancelHostIntents` (#2003) also refuses `inflight`, and `rejected` lists every
+ * refused key in input order. `key` and `code` name the first refusal.
  */
 export class HostIntentError extends Error {
-  constructor(readonly key: string, readonly code: 'unknown_intent' | 'not_host_intent' | 'already_settled' | 'not_stuck', message: string) {
-    super(message); this.name = 'HostIntentError';
+  readonly rejected: readonly { key: string; code: HostIntentError['code'] }[];
+  constructor(readonly key: string, readonly code: 'unknown_intent' | 'not_host_intent' | 'already_settled' | 'not_stuck' | 'inflight', message: string,
+    rejected: readonly { key: string; code: HostIntentError['code'] }[] = [{ key, code }]) {
+    super(message); this.name = 'HostIntentError'; this.rejected = rejected;
   }
 }
 /**

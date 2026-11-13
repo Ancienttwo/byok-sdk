@@ -16,6 +16,16 @@
   },
   "entries": [
     {
+      "id": "bot-collaboration-cancel-host-intents",
+      "impact": "breaking",
+      "summary": "cancelHostIntents atomically cancels selected unsubmitted Host intents without a pass. HostIntentError.rejected lists all refused keys and code gains inflight; update exhaustive switches. Existing cancelHostIntent, drainForSwitch and abortSwitch behavior and store format are unchanged. Hosts may replace freeze, individual cancels and abort with this call, retaining freeze when other device work must be held. Successors wait for a later pass or an explicit drain().",
+      "migration": "docs/releases/host-upgrade-next-minor.md#cancel-selected-host-intents-without-a-pass-2003",
+      "items": [
+        "export:@byok-sdk/bot-collaboration#BotCollaboration",
+        "export:@byok-sdk/bot-collaboration/host-kit#HostIntentError"
+      ]
+    },
+    {
       "id": "bot-collaboration-ledger-precheck",
       "impact": "breaking",
       "summary": "The local bot-collaboration entry exports inspectLedger(path, tenant), a read-only precheck returning StoreCompatibility. It reports migration-required for would-do rows without turnId; run migrateWouldDo after snapshot and before serving. LocalStoreId gains bot-collaboration-ledger; Hosts with exhaustive switches or Record<LocalStoreId, ...> must add this member.",
@@ -50,6 +60,11 @@
   ],
   "changes": [
     {
+      "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
+      "change": "changed",
+      "entry": "bot-collaboration-cancel-host-intents"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration#inspectLedger",
       "change": "added",
       "entry": "bot-collaboration-ledger-precheck"
@@ -58,6 +73,11 @@
       "item": "export:@byok-sdk/bot-collaboration/host-kit#BotTurnInstructionOptions",
       "change": "added",
       "entry": "bot-turn-instruction-host-kit"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#HostIntentError",
+      "change": "changed",
+      "entry": "bot-collaboration-cancel-host-intents"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#InstructionLimits",

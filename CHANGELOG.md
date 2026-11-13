@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Added (bot-collaboration; #2003)** — `cancelHostIntents(keys)` atomically cancels selected unsubmitted Host intents without a pass; `HostIntentError.rejected` reports all refused keys and `code` adds `inflight`. Successors wait for a pass or an explicit `drain()`. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#cancel-selected-host-intents-without-a-pass-2003).
+
 - **Breaking (bot-collaboration; #1981)** — `inspectLedger(path, tenant)` on the local Host entry returns a store compatibility verdict from a private copy. `LocalStoreId` includes `bot-collaboration-ledger`; update exhaustive switches and records. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#ledger-precheck-and-store-id-1981).
 
 - **Added (bot-collaboration; #1978)** — `./host-kit` exports `botTurnInstruction` with an options object and `InstructionLimits`, so Hosts can compute the instruction K8 freezes for a Turn.
