@@ -82,6 +82,42 @@ use, which its leg declares as an egress host. The v1 version is not the
 adapter's qualified version, so its leg expects the unqualified-version
 advisory.
 
+### OpenCode native free-model canary
+
+The loopback contract and the native free-model canary supply different
+qualification evidence. Run the committed observer on the OS and architecture
+being qualified, with the candidate OpenCode executable and a free OpenCode
+model available. This is an operator-run probe; CI does not invoke it. It uses
+OpenCode's native user environment and model service, so it requires network
+access and an available free allowance. No paid-model fallback is configured.
+Run it without another OpenCode ACP or service process starting concurrently:
+its process-cleanup observation compares snapshots of the machine.
+
+After `bun ci` and `bun run build`, from the repository root:
+
+```sh
+OC_EXECUTABLE=/absolute/path/to/opencode \
+OC_CANARY_ROOT=/absolute/path/to/canary-output \
+  bun scripts/qualification/opencode-native-canary.ts
+```
+
+`OC_EXECUTABLE` selects the candidate without changing the installed CLI; when
+omitted the adapter uses its normal executable resolution. `OC_CANARY_ROOT`
+holds `result.json`, workspaces and SDK scratch, including retained runtime
+artifacts; use a volume with enough space. Its default is `_ops/oc-canary`.
+The observer uses `opencode/deepseek-v4.1-flash-free` as its first candidate and
+checks native model readback, first completion, same-session resume and refusal
+of a different workspace. The refusal must report `phase: 'start'`,
+`retry: 'non-retryable'` and the original-workspace reason. It also attempts
+permission refusal, immediate interruption and repeated disposal, recording
+process and service counts. An immediate interruption does not prove a tool
+had started; use the loopback contract for the running-tool cancellation case.
+A permission request that the model does not make is a failed canary gate, not
+permission-refusal evidence; the observer continues its later cleanup checks
+and exits nonzero. A 180-second watchdog records a timeout. The remote 24-hour
+scratch sweep is not observed. Review and redact the result before publishing
+it; preserve the exit status and blocked gates in qualification evidence.
+
 dsh publishes only prereleases, so the installer accepts an exact semver
 prerelease (`0.2.1-rc.5`) as an exact version.
 

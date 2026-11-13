@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { familyOwners, knownFamilies, reviewedScripts, selectImpact, vitestTmpRootConsumers, workspaceGraph } from './select-impact.mjs';
+import { needsBuild } from './plan-ci.mjs';
+import { isCwdRefusal } from '../qualification/opencode-native-canary.ts';
 const root = new URL('../../', import.meta.url);
 const sorted = values => [...values].sort();
 
@@ -563,6 +565,24 @@ test('the W5 power-cut harness selects the helper job that runs it (#605)', () =
   for (const path of ['packages/client/src/__tests__/agent-memory-powercut.test.ts', 'packages/client/src/__tests__/agent-memory-powercut/drivers.ts']) {
     assert.ok(selectImpact([path]).families.includes('agent-memory-helper'), path);
   }
+});
+
+test('the native canary validates the current different-workspace refusal', () => {
+  const refusal = { phase: 'start', retry: 'non-retryable', message: 'session resumes it only there' };
+  assert.equal(isCwdRefusal(refusal), true);
+  for (const invalid of [null, 'error', { ...refusal, phase: 'run' }, { ...refusal, retry: 'retryable' },
+    { ...refusal, message: 'unrelated error' }, { ...refusal, message: undefined },
+    { phase: 'start', category: 'authority', message: refusal.message }]) {
+    assert.equal(isCwdRefusal(invalid), false);
+  }
+});
+
+test('the operator-only OpenCode canary selects a built client without admitting sibling scripts', () => {
+  const path = 'scripts/qualification/opencode-native-canary.ts';
+  const plan = selectImpact([path]);
+  assert.ok(plan.dirs.includes('packages/client'));
+  assert.equal(needsBuild(plan), true);
+  assert.throws(() => selectImpact(['scripts/qualification/unreviewed.ts']), /reviewed CI mapping required/i);
 });
 
 test('unknown, broad policy/dependency inputs and malformed paths fail closed', () => {
