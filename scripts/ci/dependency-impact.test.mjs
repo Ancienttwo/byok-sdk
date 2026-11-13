@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { selectImpact, knownFamilies } from './select-impact.mjs';
 import { planCi, needsBuild, assertTargetedScope } from './plan-ci.mjs';
-import { LOCKFILE_VERSION_REASON } from './dependency-impact.mjs';
+import { dependencyLockImpact, LOCKFILE_VERSION_REASON, WORKSPACE_REMOVED_REASON } from './dependency-impact.mjs';
 import { requireCiPlan } from './require-ci-plan.mjs';
 
 function fixture(t) {
@@ -134,6 +134,28 @@ test('other metadata and malformed format versions remain refused, including bes
     f.write('bun.lock', { ...f.lock, lockfileVersion });
     assert.throws(() => selectImpact(['bun.lock'], f), /positive integer/);
   }
+  const removed = fixture(t);
+  delete removed.lock.workspaces['packages/ui-runtime'];
+  removed.write('bun.lock', removed.lock);
+  assert.throws(() => selectImpact(['bun.lock'], removed), /removed workspace still exists/);
+  rmSync(join(removed.cwd, 'packages/ui-runtime'), { recursive: true });
+  removed.write('bun.lock', removed.lock);
+  const plan = planCi({ ...removed, event: 'push', sha: 'a'.repeat(40), paths: ['bun.lock'] });
+  assert.equal(plan.reason, WORKSPACE_REMOVED_REASON);
+  assert.deepEqual(plan.families, [...knownFamilies].sort());
+  const added = fixture(t);
+  const addedLock = structuredClone(added.lock);
+  addedLock.workspaces['packages/new'] = { name: '@byok-sdk/new', version: '1.0.0' };
+  assert.throws(() => dependencyLockImpact(structuredClone(added.lock), addedLock, { cwd: added.cwd }), /workspace topology changed/);
+  const depended = fixture(t);
+  depended.client.dependencies['@byok-sdk/ui-runtime'] = 'workspace:*';
+  depended.write('packages/client/package.json', depended.client);
+  depended.write('bun.lock', depended.lock);
+  depended.base = commit(depended.cwd, 'add workspace dependency');
+  delete depended.lock.workspaces['packages/ui-runtime'];
+  rmSync(join(depended.cwd, 'packages/ui-runtime'), { recursive: true });
+  depended.write('bun.lock', depended.lock);
+  assert.throws(() => selectImpact(['bun.lock'], depended), /remaining workspace depends on a removed workspace/);
 });
 
 test('the targeted full-matrix guard admits exactly the verified format reason', () => {

@@ -26,8 +26,8 @@ import { packageSurface, sha256, splitGolden, splitStatements } from './dts-surf
 
 export const SNAPSHOT_SCHEMA_VERSION = 1;
 
-/** The ten published packages, by `packages/<dir>`. */
-export const PUBLIC_PACKAGES = ['bot-collaboration', 'client', 'cloud', 'cloud-dataplane', 'cloud-do', 'core', 'protocol', 'server', 'ui-runtime', 'keys'];
+/** The nine published packages, by `packages/<dir>`. */
+export const PUBLIC_PACKAGES = ['bot-collaboration', 'client', 'cloud', 'cloud-dataplane', 'core', 'protocol', 'server', 'ui-runtime', 'keys'];
 
 /**
  * Host-visible unions. Each one is read from a declaration in the gated

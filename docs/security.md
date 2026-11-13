@@ -917,12 +917,6 @@ Drafts, egress payloads, truth `memory` records and routing metadata are not sea
 The Host refuses a draft for a sealed task.
 [Sealed tasks](#sealed-tasks) states what a sealed task still shows the Host and what sealing does not protect.
 
-`@byok-sdk/cloud-do` is not on this surface.
-It is a session host in a Durable Object (`packages/cloud-do/README.md:3-5`).
-It runs the model with platform keys (`packages/cloud-do/README.md:104-105`), so it must read plaintext.
-Tenant erasure does not reach its storage.
-A sealed task must not go to `@byok-sdk/cloud-do`, because it would read the sealed content in plaintext.
-
 ### Readers by data category
 
 The categories are the ones that the #654 design uses (§6.1).
@@ -987,7 +981,7 @@ Sealing does not protect against:
 - **The device's own storage.** The daemon's local journal and the runtime's files are plaintext on the device.
 - **Revocation.** Removing a member does not take back plaintext that it already opened.
 - **Backups.** A backup keeps the key packages and the ciphertext. See [Scope shred](#scope-shred).
-- **Other hosts.** `@byok-sdk/server` has no sealed dispatch and refuses `sealing` and `sealed`. `@byok-sdk/cloud-do` reads task content in plaintext, so a sealed task must not go to it.
+- **Other hosts.** `@byok-sdk/server` has no sealed dispatch and refuses `sealing` and `sealed`.
 
 ### Deletion paths
 

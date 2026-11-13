@@ -5,6 +5,89 @@ import { verifyReviewedContent, changedApiOwners, publicManifests } from './revi
 import { documentationChecks } from './documentation-checks.mjs';
 import { resolveScriptChecks, scriptTestInputs } from './script-test-inputs.mjs';
 
+// #1959: archived cloud-do paths; a PR that deletes them still lists them.
+const ARCHIVED_CLOUD_DO_FILES = new Set([
+  'api-surface/cloud-do.d.ts',
+  'packages/cloud-do/.gitignore',
+  'packages/cloud-do/LICENSE',
+  'packages/cloud-do/README.md',
+  'packages/cloud-do/package.json',
+  'packages/cloud-do/scripts/check-dist.mjs',
+  'packages/cloud-do/src/admission.ts',
+  'packages/cloud-do/src/agent-do.ts',
+  'packages/cloud-do/src/cloud-state.ts',
+  'packages/cloud-do/src/errors.ts',
+  'packages/cloud-do/src/event-stream.ts',
+  'packages/cloud-do/src/identity.ts',
+  'packages/cloud-do/src/inbox-admission.ts',
+  'packages/cloud-do/src/index.ts',
+  'packages/cloud-do/src/input-guard.ts',
+  'packages/cloud-do/src/invocation-ledger.ts',
+  'packages/cloud-do/src/leak-guard.ts',
+  'packages/cloud-do/src/platform-credentials.ts',
+  'packages/cloud-do/src/platform-provider.ts',
+  'packages/cloud-do/src/provider-fetch.ts',
+  'packages/cloud-do/src/session-config.ts',
+  'packages/cloud-do/src/session-runtime.ts',
+  'packages/cloud-do/src/storage.ts',
+  'packages/cloud-do/src/tools.ts',
+  'packages/cloud-do/src/wake-runner.ts',
+  'packages/cloud-do/test/admission.test.ts',
+  'packages/cloud-do/test/assertions.ts',
+  'packages/cloud-do/test/auth-boundary-worker.ts',
+  'packages/cloud-do/test/auth-boundary.test.ts',
+  'packages/cloud-do/test/check-dist.node.mjs',
+  'packages/cloud-do/test/cloud-state-worker.ts',
+  'packages/cloud-do/test/cloud-state.test.ts',
+  'packages/cloud-do/test/credentials-first-event.ts',
+  'packages/cloud-do/test/credentials-worker.ts',
+  'packages/cloud-do/test/credentials.test.ts',
+  'packages/cloud-do/test/errors.test.ts',
+  'packages/cloud-do/test/fix-durable-object-delivery-output-worker.ts',
+  'packages/cloud-do/test/fix-durable-object-delivery-output.test.ts',
+  'packages/cloud-do/test/fix-durable-object-delivery-worker.ts',
+  'packages/cloud-do/test/fix-durable-object-delivery.test.ts',
+  'packages/cloud-do/test/fixtures/financial-analysis.md',
+  'packages/cloud-do/test/fixtures/mock-provider.ts',
+  'packages/cloud-do/test/harness-settings.test.ts',
+  'packages/cloud-do/test/hooks-worker.ts',
+  'packages/cloud-do/test/hooks.test.ts',
+  'packages/cloud-do/test/input-guard.test.ts',
+  'packages/cloud-do/test/invocation-ledger-worker.ts',
+  'packages/cloud-do/test/invocation-ledger.test.ts',
+  'packages/cloud-do/test/leak-guard.test.ts',
+  'packages/cloud-do/test/mock-provider.test.ts',
+  'packages/cloud-do/test/operation-guard.test.ts',
+  'packages/cloud-do/test/platform-credentials.test.ts',
+  'packages/cloud-do/test/recovery-walltime.node.mjs',
+  'packages/cloud-do/test/request-body.test.ts',
+  'packages/cloud-do/test/request-body.ts',
+  'packages/cloud-do/test/routine-schedule-worker.ts',
+  'packages/cloud-do/test/routine-schedule.test.ts',
+  'packages/cloud-do/test/session-config.test.ts',
+  'packages/cloud-do/test/session-runtime-worker.ts',
+  'packages/cloud-do/test/session-runtime.test.ts',
+  'packages/cloud-do/test/sse-reader.test.ts',
+  'packages/cloud-do/test/sse-reader.ts',
+  'packages/cloud-do/test/storage-contract.ts',
+  'packages/cloud-do/test/storage.test.ts',
+  'packages/cloud-do/test/structural-type-compat.test.ts',
+  'packages/cloud-do/test/tools-policy.test.ts',
+  'packages/cloud-do/test/transport-tools.test.ts',
+  'packages/cloud-do/test/wake-alarm-retry.node.mjs',
+  'packages/cloud-do/test/wake-events-walltime.node.mjs',
+  'packages/cloud-do/test/wake-inbox-worker.ts',
+  'packages/cloud-do/test/wake-inbox.test.ts',
+  'packages/cloud-do/test/worker.ts',
+  'packages/cloud-do/tsconfig.build.json',
+  'packages/cloud-do/tsconfig.json',
+  'packages/cloud-do/tsup.config.ts',
+  'packages/cloud-do/vitest.config.ts',
+  'packages/cloud-do/wrangler.jsonc',
+  'scripts/release/cloud-do-consumer-smoke.mjs',
+  'scripts/release/cloud-do-consumer-worker.mjs',
+]);
+
 // #1316: the archived upgrade manifests, one exact path each.
 const UPGRADE_HISTORY_FILES = new Set(['0.31.0-0.32.0', '0.32.0-0.33.0', '0.33.0-0.34.0', '0.34.0-0.35.0', '0.35.0-0.36.0', '0.36.0-0.37.0', '0.37.0-0.38.0', '0.38.0-0.39.0', '0.39.0-0.40.0', '0.40.0-0.41.0', '0.41.0-0.42.0'].map(name => `packages/client/upgrade-history/${name}.json`));
 
@@ -137,13 +220,6 @@ export const workspaceGraph = {
       "@byok-sdk/conformance",
       "@byok-sdk/core",
       "@byok-sdk/protocol"
-    ]
-  },
-  "packages/cloud-do": {
-    "name": "@byok-sdk/cloud-do",
-    "dependencies": [
-      "@byok-sdk/client",
-      "@byok-sdk/keys"
     ]
   },
   "packages/conformance": {
@@ -413,16 +489,6 @@ export const reviewedScripts = Object.freeze({
     tests: ['scripts/release/pack-and-smoke.test.mjs', 'scripts/release/agent-memory-helper-source.test.mjs'],
     install: true, families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
   },
-  // Each of these ci.yml families runs pack-and-smoke.mjs, which calls this installed-consumer fixture.
-  'scripts/release/cloud-do-consumer-smoke.mjs': {
-    tests: [], families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
-  },
-  // #1386: the installed consumer's Worker source and its import list, without
-  // dependencies so install-matrix.test.mjs runs on a README-only change.
-  'scripts/release/cloud-do-consumer-worker.mjs': {
-    tests: ['scripts/release/install-matrix.test.mjs', 'scripts/release/pack-and-smoke.test.mjs'],
-    families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
-  },
   // #1828: each of the same families runs pack-and-smoke.mjs, which runs this NodeNext probe on the installed tarballs.
   'scripts/release/node-next-consumer-probe.mjs': {
     tests: [], families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
@@ -461,6 +527,7 @@ export const reviewedScripts = Object.freeze({
   },
   'scripts/release/publish.test.mjs': { tests: ['scripts/release/publish.test.mjs'], install: true },
   'scripts/release/publish-recovery.test.mjs': { tests: ['scripts/release/publish-recovery.test.mjs'], install: true },
+  'scripts/release/registry-npm.test.mjs': { tests: ['scripts/release/registry-npm.test.mjs'] },
   'scripts/release/publish.mjs': {
     tests: [
       'scripts/release/publish.test.mjs', 'scripts/release/publish-recovery.test.mjs', 'scripts/release/beta-release.test.mjs',
@@ -477,7 +544,10 @@ export const reviewedScripts = Object.freeze({
   'scripts/release/upgrade-manifest/manifest.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/upgrade-manifest/snapshot.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
 });
-export const scriptChecksForPaths = paths => resolveScriptChecks(paths, reviewedScripts);
+export const scriptChecksForPaths = paths => resolveScriptChecks(
+  paths.some(path => ARCHIVED_CLOUD_DO_FILES.has(path))
+    ? [...paths, 'scripts/api-surface/check-api-surface.mjs', 'scripts/release/check-package-graph.mjs', 'scripts/release/pack-and-smoke.mjs']
+    : paths, reviewedScripts);
 
 // An OAR or rpiv-todo re-vendor adds one snapshot directory and deletes the
 // previous one. A snapshot path is reviewed only when that snapshot's
@@ -509,15 +579,13 @@ function todoSnapshotListed(path, context) {
 export const vitestTmpRootConsumers = Object.freeze([
   'examples/basic', 'examples/byok-mcp-server', 'examples/codex-interaction-host',
   'examples/host-execution-core', 'examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker',
-  'examples/packaging', 'examples/service-upgrade', 'packages/bot-collaboration', 'packages/client', 'packages/cloud-dataplane', 'packages/cloud-do', 'packages/keys', 'packages/server',
+  'examples/packaging', 'examples/service-upgrade', 'packages/bot-collaboration', 'packages/client', 'packages/cloud-dataplane', 'packages/keys', 'packages/server',
 ]);
 // Reviewed M build inputs: exact paths retain workspace consumers and packed-artifact checks.
 const reviewedBuildConfigOwners = Object.freeze({
   'packages/bot-collaboration/tsup.config.ts': 'packages/bot-collaboration',
   'packages/client/tsup.sealed.config.ts': 'packages/client', // retired by #1589; a deleting PR still lists it
   'packages/cloud-dataplane/tsup.config.ts': 'packages/cloud-dataplane',
-  'packages/cloud-do/tsup.config.ts': 'packages/cloud-do',
-  'packages/cloud-do/scripts/check-dist.mjs': 'packages/cloud-do',
   'packages/cloud/tsup.config.ts': 'packages/cloud',
   'packages/protocol/tsup.config.ts': 'packages/protocol',
   'packages/server/tsup.config.ts': 'packages/server',
@@ -582,6 +650,10 @@ export function selectImpact(paths, context = {}) {
       verifyReviewedContent(path, context);
       for (const id of knownFamilies) if (id !== 'build-test' && id !== 'macos-client') families.add(id);
       continue;
+    }
+    if (ARCHIVED_CLOUD_DO_FILES.has(path)) {
+      if (existsSync(resolve(context.cwd ?? process.cwd(), path))) requireMapping(path);
+      scripts = true; continue;
     }
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
     if (path === 'package.json' || path === 'bun.lock' || /^(?:packages|examples)\/[^/]+\/package\.json$/.test(path)) {
@@ -656,6 +728,12 @@ export function selectImpact(paths, context = {}) {
     }
     if (path === 'api-surface/entries.json') {
       for (const dir of changedApiOwners(context)) {
+        // #1959: only removed cloud-do entries are covered by the deleted-path checks.
+        if (dir === 'packages/cloud-do') {
+          const entries = JSON.parse(readFileSync(resolve(context.cwd ?? process.cwd(), path), 'utf8'));
+          if (Object.keys(entries).some(key => /^@byok-sdk\/cloud-do(?:[/#]|$)/.test(key))) requireMapping(path);
+          continue;
+        }
         if (!workspaceGraph[dir]) requireMapping(path);
         dirs.add(dir);
       }

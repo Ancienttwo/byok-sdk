@@ -1878,11 +1878,9 @@ or 429, except a 401 or 403 from the signed content URL, which the device
 retries with a new reservation. §7.1 answers 401 for a missing, malformed or
 expired signature; an external presigned store may answer 403 instead.
 
-**Drafts and `cloud-do`.** An `agent.message.draft` is plaintext. So the Host
+**Drafts.** An `agent.message.draft` is plaintext. So the Host
 refuses a draft for a task whose offer has any `sealing`, with
-`agent_message_draft_invalid`. A sealed task must not go to
-`@byok-sdk/cloud-do`: it runs the model with platform keys, so it reads the
-instruction and the output in plaintext.
+`agent_message_draft_invalid`.
 
 **Sealed payload v2 (#1045, gated addition).** v2 adds two categories on the
 v1 suite, keys and binding rules. The design is

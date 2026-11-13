@@ -408,7 +408,7 @@ Throttle last-sync timestamp writes to the sync interval.
 
 Do not meter executions. An idle device makes at most one lightweight Host service call per 60 seconds.
 Batch command pulling with existing sync. Local SDK reconciliation is not a cloud request.
-Use no official shared model key, service-side user key custody or cloud-do BYOK execution.
+Use no official shared model key or service-side user key custody.
 Keep user model keys out of Host logs and result storage.
 
 ## 11. Host checklist (platform PRD section 12.10)

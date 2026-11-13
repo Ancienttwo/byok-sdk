@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
 export const LOCKFILE_VERSION_REASON = 'lockfile-version-change';
+export const WORKSPACE_REMOVED_REASON = 'workspace-removed';
 
 const fields = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -70,7 +71,16 @@ function packageName(row) {
  */
 export function dependencyLockImpact(before, after, { cwd, admitted = [] }) {
   if (![before, after].every(lock => plain(lock.workspaces) && plain(lock.packages))) fail('invalid Bun lock shape');
-  if (!isDeepStrictEqual(Object.keys(before.workspaces).sort(), Object.keys(after.workspaces).sort())) fail('workspace topology changed');
+  const removed = Object.keys(before.workspaces).filter(dir => !Object.hasOwn(after.workspaces, dir));
+  if (removed.includes('') || Object.keys(after.workspaces).some(dir => !Object.hasOwn(before.workspaces, dir))) fail('workspace topology changed');
+  if (removed.some(dir => existsSync(resolve(cwd, dir, 'package.json')))) fail('workspace topology changed: removed workspace still exists');
+  const removedRecords = removed.map(dir => before.workspaces[dir]);
+  const removedNames = new Set(removedRecords.map(record => record.name));
+  if (removedRecords.some(record => typeof record.name !== 'string')
+    || Object.values(after.workspaces).some(record => Object.keys(specs(record)).some(name => removedNames.has(name)))) {
+    fail('workspace topology changed: remaining workspace depends on a removed workspace');
+  }
+  for (const dir of removed) delete before.workspaces[dir];
   const versionChanged = !isDeepStrictEqual(before.lockfileVersion, after.lockfileVersion);
   if (versionChanged && ![before.lockfileVersion, after.lockfileVersion].every(value => Number.isSafeInteger(value) && value > 0)) {
     fail('lockfileVersion transition requires positive integer versions');
@@ -126,7 +136,8 @@ export function dependencyLockImpact(before, after, { cwd, admitted = [] }) {
     for (const dep of edges.get(name) ?? []) visit(dep);
   };
   // A reviewed new workspace, already checked and removed from the lock, still declares its rows.
-  for (const record of [...Object.values(before.workspaces), ...Object.values(after.workspaces), ...admitted]) {
+  for (const record of [...Object.values(before.workspaces), ...Object.values(after.workspaces), ...admitted, ...removedRecords]) {
+    if (removedRecords.includes(record)) visit(record.name);
     for (const name of Object.keys(specs(record))) visit(name);
   }
   if ([...changedPackages].some(name => !reachable.has(name))) fail('changed resolved packages have no declaring workspace');
@@ -139,5 +150,5 @@ export function dependencyLockImpact(before, after, { cwd, admitted = [] }) {
   if (versionChanged) { delete before.lockfileVersion; delete after.lockfileVersion; }
   if (!isDeepStrictEqual(before, after)) fail('lock changes more than dependency fields');
   return { dirs: [...(roots.has('') ? workspaces(cwd) : roots)].sort(),
-    fullMatrixReason: versionChanged ? LOCKFILE_VERSION_REASON : undefined };
+    fullMatrixReason: removed.length ? WORKSPACE_REMOVED_REASON : versionChanged ? LOCKFILE_VERSION_REASON : undefined };
 }

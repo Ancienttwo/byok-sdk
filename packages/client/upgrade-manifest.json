@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "023b0be05de2de4cc5755d34c5d6a457ca77ada804720d1cab9f8a42c4c1d803"
+    "snapshotSha256": "ec6056583ccd9cc6d41c6054c681c12efeb740a22748e6d649a19cdf2687c3d5"
   },
   "configFields": {
     "status": "tracked",
@@ -143,6 +143,45 @@
         "export:@byok-sdk/server/execution-core#HostExecutionCore",
         "export:@byok-sdk/server/execution-core#WakeDispatchError"
       ]
+    },
+    {
+      "id": "cloud-do-archived",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud-do is archived after 0.42.0 and leaves the release train. Remove the dependency or pin it to exactly 0.42.0; no later fixes will be published and its npm versions will be deprecated.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#cloud-do-archived",
+      "items": [
+        "entry:@byok-sdk/cloud-do",
+        "entry:@byok-sdk/cloud-do/package.json",
+        "export:@byok-sdk/cloud-do#AgentDO",
+        "export:@byok-sdk/cloud-do#AgentIdentity",
+        "export:@byok-sdk/cloud-do#CLOUD_LIVE_IPO_TOOLS",
+        "export:@byok-sdk/cloud-do#CLOUD_SAFE_REPLAY_TOOLS",
+        "export:@byok-sdk/cloud-do#CloudDispatchContext",
+        "export:@byok-sdk/cloud-do#CloudEventMeta",
+        "export:@byok-sdk/cloud-do#CloudEventRow",
+        "export:@byok-sdk/cloud-do#CloudRenewRequest",
+        "export:@byok-sdk/cloud-do#CloudRenewResult",
+        "export:@byok-sdk/cloud-do#CloudRunSettlement",
+        "export:@byok-sdk/cloud-do#CloudToolCallContext",
+        "export:@byok-sdk/cloud-do#CloudToolDefinition",
+        "export:@byok-sdk/cloud-do#CloudToolDispatcher",
+        "export:@byok-sdk/cloud-do#CloudToolResult",
+        "export:@byok-sdk/cloud-do#CloudWakeAdmission",
+        "export:@byok-sdk/cloud-do#DurableObjectSqliteDatabase",
+        "export:@byok-sdk/cloud-do#InboxRow",
+        "export:@byok-sdk/cloud-do#RunRow",
+        "export:@byok-sdk/cloud-do#SessionIdentity",
+        "export:@byok-sdk/cloud-do#TranscriptCursor",
+        "export:@byok-sdk/cloud-do#TranscriptItem",
+        "export:@byok-sdk/cloud-do#TranscriptRun",
+        "export:@byok-sdk/cloud-do#TranscriptTurn",
+        "export:@byok-sdk/cloud-do#agentObjectName",
+        "export:@byok-sdk/cloud-do#default",
+        "export:@byok-sdk/cloud-do#getAgentObject",
+        "export:@byok-sdk/cloud-do#getSessionObject",
+        "export:@byok-sdk/cloud-do#openDurableObjectStorage",
+        "export:@byok-sdk/cloud-do#sessionObjectName"
+      ]
     }
   ],
   "changes": [
@@ -150,6 +189,16 @@
       "item": "entry:@byok-sdk/client/host-layout",
       "change": "added",
       "entry": "host-layout-subpath"
+    },
+    {
+      "item": "entry:@byok-sdk/cloud-do",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "entry:@byok-sdk/cloud-do/package.json",
+      "change": "removed",
+      "entry": "cloud-do-archived"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
@@ -325,6 +374,151 @@
       "item": "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
       "change": "changed",
       "entry": "enrollment-clear-store-scope"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#AgentDO",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#AgentIdentity",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CLOUD_LIVE_IPO_TOOLS",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CLOUD_SAFE_REPLAY_TOOLS",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudDispatchContext",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudEventMeta",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudEventRow",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudRenewRequest",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudRenewResult",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudRunSettlement",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudToolCallContext",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudToolDefinition",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudToolDispatcher",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudToolResult",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#CloudWakeAdmission",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#DurableObjectSqliteDatabase",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#InboxRow",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#RunRow",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#SessionIdentity",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#TranscriptCursor",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#TranscriptItem",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#TranscriptRun",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#TranscriptTurn",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#agentObjectName",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#default",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#getAgentObject",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#getSessionObject",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#openDurableObjectStorage",
+      "change": "removed",
+      "entry": "cloud-do-archived"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#sessionObjectName",
+      "change": "removed",
+      "entry": "cloud-do-archived"
     },
     {
       "item": "export:@byok-sdk/core#LocalStoreId",
