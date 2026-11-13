@@ -70,15 +70,10 @@ export class AgentHomeBusyError extends AgentHomeError {
 function withHomeReleaseFailures<T>(error: T, releaseFailures: readonly unknown[]): T | Error {
   if (releaseFailures.length === 0) return error;
   if (error instanceof AgentHomeError) {
-    const prototype = Object.getPrototypeOf(error);
-    const originalClass = [AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError,
-      AgentHomeBusyError, AgentHomeReaderRunMissingError, AgentHomeCommitCopyError, AgentHomeLeaseCorruptError]
-      .find(type => type.prototype === prototype);
-    if (originalClass !== undefined) {
-      const rebuilt = new originalClass(error.message);
-      rebuilt.cause = new AggregateError([error, ...releaseFailures]);
-      return rebuilt;
-    }
+    const originalClass = error.constructor as new (message: string) => AgentHomeError;
+    const rebuilt = new originalClass(error.message);
+    rebuilt.cause = new AggregateError([error, ...releaseFailures]);
+    return rebuilt;
   }
   return withGateReleaseFailures(error, releaseFailures) as Error;
 }
@@ -822,9 +817,7 @@ export class AgentHomeLeaseManager {
       if (error instanceof PathMutationGateBusyError) {
         throw new AgentHomeBusyError('Agent-home root is reserved for local-state relocation');
       }
-      if (releaseFailures.length) throw withHomeReleaseFailures(error, releaseFailures);
-      if (error instanceof AgentHomeError) throw error;
-      throw new AgentHomeError(`could not acquire Agent home lease: ${error instanceof Error ? error.message : String(error)}`);
+      throw withHomeReleaseFailures(error instanceof AgentHomeError ? error : new AgentHomeError(`could not acquire Agent home lease: ${error instanceof Error ? error.message : String(error)}`), releaseFailures);
     }
     const acquiredLockPath = lockPath;
     if (acquiredLockPath === undefined) throw new AgentHomeError('Agent home lease marker path was not established');
