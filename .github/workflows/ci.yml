@@ -2248,6 +2248,13 @@ jobs:
       - name: Bridge test
         if: runner.os == 'Linux'
         run: bun run --filter @byok-sdk/example-desktop-bot-app test
+      # #1947: the keys forms must clear typed keys before the bridge call, checked in a real browser.
+      - name: Install Playwright Chromium
+        if: runner.os == 'Linux'
+        run: node_modules/.bin/playwright install --with-deps chromium
+      - name: Keys browser regression
+        if: runner.os == 'Linux'
+        run: node examples/desktop-bot-app/scripts/keys-submit.browser.mjs
       - name: Flip the app fuses on a copy of Electron and read them back
         if: runner.os == 'Linux'
         working-directory: examples/desktop-bot-app

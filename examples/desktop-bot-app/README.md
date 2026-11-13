@@ -17,6 +17,12 @@ bun run --filter @byok-sdk/example-desktop-bot-app dev
 The first run downloads the Electron binary (Electron 45 fetches it on first use,
 not at install). Set `electron_config_cache` to keep the download cache off a small disk.
 
+The mounted keys-form regression check uses Playwright's Chromium. After installing
+it with `bunx playwright install chromium`, run
+`bun run --filter @byok-sdk/example-desktop-bot-app test:keys-browser`.
+Set `PLAYWRIGHT_CHANNEL=chrome` to use an installed Google Chrome instead. This
+check uses a synthetic bridge and no Host or credential backend.
+
 ## Processes
 
 | Process | Code | Loads |
@@ -99,8 +105,24 @@ bridge and composes the Host after main's hello (`src/host/compose.ts`):
 - K8's model catalog is the `brand.config.ts` entries, then one Pi entry `pi:<profile_ref>`
   per keys profile that has `pi_model`, pinned to that profile (`catalogEntryFor`, lane
   `byok-profile`). The enabled profile is not read as a default. The catalog is built from
-  the keys store at Host start and rebuilt after every custody receipt; a profile edited
-  since is refused by the Pi launcher until then.
+  the keys store at Host start and rebuilt after each custody receipt and provider-list
+  Reload. Reconciliation reads persisted profiles without repeating a key write; while
+  no Host is running, a key change returns its receipt, Reload only lists them, and the
+  next start loads the catalog. Both
+  custody and the following Host refresh have 30-second deadlines. A custody timeout
+  ends only the window's wait: the custody child keeps running and holds the
+  configuration lock until its OS credential write has settled (`security` on macOS and
+  `secret-tool` on Linux run as its child processes; Windows writes in process), so a
+  late write cannot land after a newer change commits. Until then another key change is
+  refused as busy, with a hint to answer a pending system unlock prompt or restart the
+  computer. Quitting the app does not kill it. A provider list takes no lock and
+  writes nothing, so a list that times out is killed and reports that nothing changed. A custody timeout may have saved the change; `catalog_refresh_timeout` after a receipt confirms the
+  save but leaves Host application unconfirmed. Reload rebuilds the catalog from
+  whatever was committed. A timeout during the key write itself can leave the provider
+  marked as an unfinished key change, which stays unusable until its key is entered
+  again. Residual risk: if something outside the app kills only the custody child while
+  its `security` or `secret-tool` process keeps running, the lock is released early and
+  that process's write can still land after a newer change.
 
 A stopped Host keeps answering `status` with its reason and is not restarted. It still
 answers `settings.exportDiagnostics`, with the daemon config it would have run with.

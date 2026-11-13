@@ -4,27 +4,14 @@ import { constants } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { acquirePiSessionDiscovery, acquirePiSessionRebinding, acquirePiSessionWriter, type PiSessionRetentionLease } from '../util/pi-session-retention.js';
 import { resolvePathWithoutCreate, type PathMutationGate } from '../util/path-mutation-gate.js';
+import { createPiSubagentAbortBoundary } from '../adapters/pi/subagent-interruption.js';
 import {
   createAgentSession, createAgentSessionRuntime, createAgentSessionServices, createCodingTools,
   getAgentDir, ModelRuntime, resolveCliModel, runRpcMode, SessionManager, SettingsManager,
-  type CreateAgentSessionOptions, type CreateAgentSessionResult, type CreateAgentSessionRuntimeFactory, type ExtensionFactory,
+  type CreateAgentSessionOptions, type CreateAgentSessionResult, type CreateAgentSessionRuntimeFactory,
 } from '@earendil-works/pi-coding-agent';
 
 function fail(message: string): never { throw new Error(`byok-pi-rpc: ${message}`); }
-
-/**
- * Pi 1.5.1 made `cacheWarming: "idle"` the default: a session keeps re-sending
- * its last request with a one-token cap for up to 30 minutes after its run
- * settled. That is spend on the user's key with no task running, which a Host
- * can neither see nor bound. Pi reads the mode only from global settings (the
- * user's file), and asks extensions before every refresh, so the SDK stops a
- * refresh whenever the session is idle: warming runs at most during an active
- * run, as Pi's "streaming" mode does. A mode of "off" never asks; under
- * `excluded` the in-memory settings below have no mode, so Pi's default applies.
- */
-const stopIdleCacheWarming: ExtensionFactory = (pi) => {
-  pi.on('cache_warming_decision', (_event, context) => (context.isIdle() ? { action: 'stop' } : undefined));
-};
 
 /** Native path normalization only: no file is opened and no session identity is claimed. */
 function resolveNativePiSessionPath(raw: string): string {
@@ -203,17 +190,25 @@ export async function runPiSessionRuntime(options: {
     for (const path of options.resourceLoaderOptions?.additionalSkillPaths ?? []) {
       await access(path, constants.R_OK);
     }
+    const settingsManager = selection !== undefined
+      ? SettingsManager.inMemory({
+        defaultProvider: selection.getDefaultProvider(), defaultModel: selection.getDefaultModel(),
+        defaultThinkingLevel: selection.getDefaultThinkingLevel(),
+      }, { projectTrusted: false })
+      : SettingsManager.create(options.cwd, agentDir, { projectTrusted: true });
+    // Idle checks inside async extension decisions can become stale before Pi
+    // dispatches a refresh. Native streaming mode cancels warming at settlement
+    // and revalidates after decisions, so even a late "warm" cannot spend a key.
+    // Cap this instance's public read; preserve "off" and never persist the cap.
+    const getCacheWarmingMode = settingsManager.getCacheWarmingMode.bind(settingsManager);
+    settingsManager.getCacheWarmingMode = () => getCacheWarmingMode() === 'off' ? 'off' : 'streaming';
+    const subagentAbort = createPiSubagentAbortBoundary();
     const services = await createAgentSessionServices({
       cwd: options.cwd, agentDir, modelRuntimeSignal: AbortSignal.timeout(15_000),
       ...(modelRuntime === undefined ? {} : { modelRuntime }),
-      settingsManager: selection !== undefined
-        ? SettingsManager.inMemory({
-          defaultProvider: selection.getDefaultProvider(), defaultModel: selection.getDefaultModel(),
-          defaultThinkingLevel: selection.getDefaultThinkingLevel(),
-        }, { projectTrusted: false })
-        : SettingsManager.create(options.cwd, agentDir, { projectTrusted: true }),
+      settingsManager,
       resourceLoaderOptions: { ...options.resourceLoaderOptions,
-        extensionFactories: [...(options.resourceLoaderOptions?.extensionFactories ?? []), { name: 'byok-cache-warming', factory: stopIdleCacheWarming }] },
+        extensionFactories: [...(options.resourceLoaderOptions?.extensionFactories ?? []), { name: 'byok-subagent-interruption', factory: subagentAbort.factory }] },
     });
     if (options.credentialSource === 'keys-profile' && services.modelRuntime.getError() !== undefined) {
       options.reject('keys_profile_model_composition_failed: launcher provider projection could not be composed');
@@ -250,6 +245,7 @@ export async function runPiSessionRuntime(options: {
       model: resolved?.model, thinkingLevel: options.thinking ?? resolved?.thinkingLevel,
       tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools, customTools: options.customTools,
     });
+    subagentAbort.bind(created.session);
     options.configureSession?.(created.session);
     if (options.tools === undefined && options.noTools === undefined) resetResumedPiTools(created.session, services.settingsManager, options.cwd);
     // A replacement is visible to RPC while session_start is awaiting. Keep

@@ -147,6 +147,7 @@ const REGISTERED_PRIVATE_ADDITIONS = Object.freeze({
       dev: 'bun run build && bun run build:host && electron dist/src/main/index.js',
       // #1811: the platform packages (electron-builder, #1499 D9).
       package: 'bun run build && node scripts/package/build.mjs',
+      'test:keys-browser': 'node --test scripts/keys-submit.browser.mjs',
     }),
     dependencies: Object.freeze({ 'electron-updater': '6.8.11' }),
     devDependencies: Object.freeze({
