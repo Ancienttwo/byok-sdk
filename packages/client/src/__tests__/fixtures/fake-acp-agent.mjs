@@ -142,6 +142,18 @@ async function prompt(message) {
     send({ method: '_x.ai/queue/changed', params: { sessionId: SESSION, runningPromptId: '', entries: [] } });
     return;
   }
+  // Grok ends the prompt and starts its own turn before the prompt's answer goes out (#1942).
+  if (input === 'own-turn-switch') {
+    text('first');
+    send({ method: '_x.ai/queue/changed', params: { sessionId: SESSION, runningPromptId: 'bash-completed-1', entries: [] } });
+    log({ kind: 'switched' });
+    const gate = process.env.FAKE_ACP_OWN_TURN_GATE;
+    while (gate && !existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
+    result(message.id, answer());
+    vendor({ sessionUpdate: 'turn_completed', prompt_id: 'bash-completed-1', stop_reason: 'end_turn' });
+    send({ method: '_x.ai/queue/changed', params: { sessionId: SESSION, runningPromptId: '', entries: [] } });
+    return;
+  }
   // Grok's end report for a turn it never said was running.
   if (input === 'stray-end') {
     text('first');

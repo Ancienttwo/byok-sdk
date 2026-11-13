@@ -302,6 +302,19 @@ describe('GrokAdapter sessions', () => {
     expect(await turn(s)).toEqual([{ type: 'progress', text: 'echo:hello' }, { ...usage, contextTokens: 1002 }, { type: 'turn_end' }]);
   });
 
+  it('sends no cancel once Grok runs another prompt, and ends the task turn with its own answer (#1942)', async () => {
+    const gate = path.join(await tempDir(), 'gate');
+    const resources = await ctx({ FAKE_ACP_OWN_TURN_GATE: gate });
+    const s = await open(adapter(), { instruction: 'own-turn-switch' }, resources);
+    const projection = (s as unknown as { projection: { sdkPromptSuperseded: boolean } }).projection;
+    await vi.waitFor(() => expect(projection.sdkPromptSuperseded).toBe(true));
+    const interrupted = s.interrupt();
+    await fs.writeFile(gate, '');
+    await interrupted;
+    expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(false);
+    expect((await turn(s)).at(-1)).toEqual({ type: 'turn_end' });
+  });
+
   it('cancels a held follow-up that the drain already sent', async () => {
     const gate = path.join(await tempDir(), 'gate');
     const resources = await ctx({ FAKE_ACP_OWN_TURN_GATE: gate });

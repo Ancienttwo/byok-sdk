@@ -46,15 +46,23 @@ export class GrokProjection {
   /** OAR adopted a turn Grok runs on its own (a background command or sub-agent wake) as the active turn. */
   private grokTurn = false;
   private closedGrokTurns = 0;
+  /** Grok's id for the SDK prompt it runs, and whether a later queue report names another running prompt (#1942). */
+  private sdkPrompt?: { id: string; superseded: boolean };
 
   constructor(private readonly rootSessionId: string) {}
 
   /** The SDK sends a prompt named `inputId`, directly or through OAR's held input. */
   beginSdkTurn(inputId: string): void {
     this.sdkTurn = { inputId, drained: false };
+    this.sdkPrompt = undefined;
   }
   endSdkTurn(): void {
     this.sdkTurn = undefined;
+    this.sdkPrompt = undefined;
+  }
+  /** Grok reported a running prompt other than the SDK's while the SDK turn is still open: it has ended that prompt. */
+  get sdkPromptSuperseded(): boolean {
+    return this.sdkPrompt?.superseded === true;
   }
   /** OAR holds a prompt as busy while this is true. */
   get grokTurnOpen(): boolean {
@@ -85,6 +93,7 @@ export class GrokProjection {
       this.buffered.observe(updateId, input, update?.rawInput !== undefined, events.some(value => record(value)?.kind === 'tool_call_input') || ['in_progress', 'completed', 'failed', 'cancelled'].includes(String(update?.status)), emit);
     };
     if (!events.some(value => record(value)?.kind === 'tool_call_ended')) observe();
+    this.observeRunning(body, events);
     // The prompt answer's frame lists `turn_ended` before its `usage`: end the turn after every other event.
     let ended: Record<string, unknown> | undefined;
     // OAR reports a Grok turn deferred by an SDK turn on that turn's closing frame, after its turn_ended.
@@ -138,6 +147,24 @@ export class GrokProjection {
     }
     if (ended !== undefined) this.endTurn(ended, emit, outcome);
     if (grokTurnAfterEnd) this.grokTurn = true;
+  }
+
+  /**
+   * Grok runs one prompt at a time and names it in `_x.ai/queue/changed`. The
+   * report that carries the SDK turn's `turn_active` names the SDK prompt; a
+   * later one naming another prompt, or none, means Grok ended the SDK prompt
+   * although its answer is not published yet.
+   */
+  private observeRunning(body: Record<string, unknown> | undefined, events: readonly unknown[]): void {
+    if (this.sdkTurn === undefined || body?.type !== '_x.ai/queue/changed') return;
+    const running = record(body.native)?.runningPromptId;
+    const id = typeof running === 'string' ? running : '';
+    const sdkStart = events.some((value) => {
+      const event = record(value);
+      return event?.kind === 'turn_active' && (event.inputId === this.sdkTurn!.inputId || (event.inputId === undefined && this.sdkTurn!.drained));
+    });
+    if (sdkStart && id !== '') this.sdkPrompt = { id, superseded: false };
+    else if (this.sdkPrompt !== undefined && id !== this.sdkPrompt.id) this.sdkPrompt.superseded = true;
   }
 
   private endTurn(turn: Record<string, unknown>, emit: (event: AgentEvent) => void, outcome: (turn: GrokTurnOutcome) => void): void {
