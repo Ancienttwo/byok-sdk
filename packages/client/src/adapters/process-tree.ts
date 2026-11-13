@@ -370,7 +370,7 @@ export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOption
 
   if (platform !== 'win32') {
     observeOwnedRoot(options.child, pid);
-    await recordOwnedGroup(options.child, pid, options.label, options.readProcessTableFn ?? readProcessTable);
+    await recordOwnedGroup(options.child, options.label, options.readProcessTableFn ?? readProcessTable);
     return;
   }
   const job = await (options.jobObject ? options.jobObject.assign(pid) : defaultJobObject.assign(pid, options.nativeAssetRoot));
@@ -380,24 +380,39 @@ export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOption
   else treeJobs.set(options.child, job);
 }
 
-async function recordOwnedGroup(child: ChildProcess, pid: number, label: string, read: () => ProcessTable): Promise<void> {
-  if (ownedGroupLedgers.size === 0) return;
+/**
+ * POSIX: the record of the process group `child` leads, read from the
+ * process table now. `undefined` once `child` exited: our own child stays in
+ * the table until Node reaps it, and Node sets the exit status in the same
+ * step, so absent and not exited cannot both hold. Fails closed: an
+ * unreadable table, or a child missing while running or not leading its own
+ * group, throws, and nothing it owns is left unrecorded.
+ */
+export function ownedProcessGroupRecord(child: ChildProcess, label: string, read: () => ProcessTable = readProcessTable, platform: NodeJS.Platform = process.platform): OwnedProcessGroupRecord | undefined {
+  const pid = child.pid!;
+  if (platform === 'win32') {
+    // win32 has no group: the root alone, named by its pid and start time.
+    const start = win32ProcessStart(pid);
+    return start === undefined ? undefined : { pgid: pid, rootStart: start, bootId: '', writerPid: process.pid, writerStart: '' };
+  }
   const table = read();
   const writer = table.get(process.pid);
-  // Fail closed: an owned tree whose record could not be written is refused,
-  // like a win32 tree whose job assignment failed.
-  if (writer === undefined) throw new Error(`${label} runtime process group could not be recorded: the process table is unreadable`);
+  if (writer === undefined) throw new Error(`${label} process group could not be recorded: the process table is unreadable`);
   const root = table.get(pid);
   if (root === undefined) {
-    // Our own child stays in the table until Node reaps it, and Node sets the
-    // exit status in the same step: absent and not exited cannot both hold.
-    if (!isRunning(child)) return;
-    throw new Error(`${label} runtime process group could not be recorded: its root is missing from the process table`);
+    if (!isRunning(child)) return undefined;
+    throw new Error(`${label} process group could not be recorded: its root is missing from the process table`);
   }
-  if (root.pgid !== pid) throw new Error(`${label} runtime root is not its own process-group leader`);
-  const record: OwnedProcessGroupRecord = {
-    pgid: pid, rootStart: root.start, bootId: currentBootId(), writerPid: process.pid, writerStart: writer.start,
-  };
+  if (root.pgid !== pid) throw new Error(`${label} root is not its own process-group leader`);
+  return { pgid: pid, rootStart: root.start, bootId: currentBootId(), writerPid: process.pid, writerStart: writer.start };
+}
+
+async function recordOwnedGroup(child: ChildProcess, label: string, read: () => ProcessTable): Promise<void> {
+  if (ownedGroupLedgers.size === 0) return;
+  // Fail closed: an owned tree whose record could not be written is refused,
+  // like a win32 tree whose job assignment failed.
+  const record = ownedProcessGroupRecord(child, `${label} runtime`, read);
+  if (record === undefined) return;
   ownedGroupRecords.set(child, record);
   await Promise.all([...ownedGroupLedgers].map((ledger) => ledger.adopted(record)));
 }
@@ -431,6 +446,35 @@ function startedAtOrAfter(start: string, rootStart: string): boolean {
   const at = Date.parse(start);
   const root = Date.parse(rootStart);
   return Number.isFinite(at) && Number.isFinite(root) && at >= root;
+}
+
+/**
+ * Whether a recorded migrate group may still run (#2011); anything that
+ * cannot be read counts as running. POSIX: a group recorded in an earlier
+ * boot has ended; otherwise `kill(-pgid, 0)` decides and only ESRCH means
+ * ended. A pgid the system has handed to a new group since then also counts
+ * as running: recover() refuses until that group ends or the machine
+ * restarts. win32: the root alone, by pid and start time; what it started
+ * is the Host's.
+ */
+export function ownedProcessGroupRuns(group: OwnedProcessGroupRecord, platform: NodeJS.Platform, kill: (pid: number, signal: number) => void = process.kill): boolean {
+  try {
+    if (platform === 'win32') return win32ProcessStart(group.pgid) === group.rootStart;
+    if (group.bootId !== currentBootId()) return false;
+    kill(-group.pgid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+/** win32: when process `pid` started (UTC ticks), or `undefined` when no process has that pid. An unreadable answer throws. */
+export function win32ProcessStart(pid: number, run: typeof spawnSync = spawnSyncSystemTool): string | undefined {
+  const result = run('powershell', ['-NoProfile', '-NonInteractive', '-Command', `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p) { $p.StartTime.ToUniversalTime().Ticks } else { 'none' }`], { encoding: 'utf8', windowsHide: true, timeout: 30_000 });
+  const out = String(result.stdout ?? '').trim();
+  if (result.status === 0 && out === 'none') return undefined;
+  if (result.status !== 0 || !/^\d+$/u.test(out)) throw new Error(`the start time of process ${pid} could not be read`);
+  return out;
 }
 
 /**

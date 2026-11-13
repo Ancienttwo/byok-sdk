@@ -459,6 +459,12 @@ byok-agent upgrade rollback --config device.json
 byok-agent upgrade status --json --config device.json
 ```
 
+`upgrade status` prints `current` and the receipt. A `pending` receipt
+written by SDK 0.42 is not read: status exits normally with `receipt: null` and
+`receiptError: { "code": "receipt_upgrade_required", "message": ... }` (in
+text, `receipt: refused code=receipt_upgrade_required`), and the file is
+left as it is.
+
 The install root is yours and lies outside the store. The SDK owns
 `versions/<id>`, the `current` and `previous` pointers (symlinks; directory
 junctions on Windows), `snapshots/` and `upgrade-receipt.json` in it, and
@@ -549,9 +555,11 @@ keeps the one to restore and removes the others.
 
 Later upgrades never prune `.install-*` directories, and `uninstall()` keeps
 them: it removes every other snapshot but leaves `snapshots/` in place while
-one exists. `uninstall()` refuses a `snapshots/` that is a symbolic link
-with `ServiceInstallationError` `snapshots_symlinked` before it changes
-anything. A leftover `.install-<uuid>` (a removal that failed, a rename
+one exists. Every operation refuses a symbolic link under `snapshots/` (the directory,
+a snapshot it is about to restore, its `snapshot.json`, or any path segment
+of a file it lists) with
+`ServiceInstallationError` `snapshots_symlinked` before it changes
+anything; a link swapped in after that check is the Host's responsibility. A leftover `.install-<uuid>` (a removal that failed, a rename
 that failed, an installer that was killed) is never restored automatically,
 because nothing shows whether it is still needed. It may hold the only copy
 of the stores, so the next first install refuses with
@@ -593,8 +601,9 @@ a start that could restart the service after removal.
 If the service fails to install, activate, start or pass its health check,
 install removes the unit and launcher, `current`, the installation record and
 the staged `versions/<id>` directory, then throws `ServiceInstallationError`
-with code `install_health_check_failed` and the original error as `cause`. This also applies when reinstalling
-the same id: a failed repair leaves no service installed. After a first
+with code `install_health_check_failed` and the original error as `cause`. A failed same-id reinstall
+(repair) is different: it keeps the payload, `current` and the unit, and the
+receipt it replaced, so run `install` again once the cause is fixed. After a first
 install that prepared stores, cleanup restores the prepared snapshot last,
 once the unit, `current`, the record and the staged directory are gone,
 including Host and daemon stores changed by migration or startup. A failed
@@ -628,16 +637,39 @@ reinstall into the same root to record it again before CLI uninstall.
 5. points `previous` at the old version and `current` at the new one, starts
    it and waits for the same live daemon lifecycle on its control endpoint
    (`running` or `awaiting-enrollment`; the cloud connection is not required);
-6. if that health check fails, restores the old version and its store
-   snapshot together and fails with `health_check_failed`.
+6. if that health check fails, stops it, records `health_check_failed` in the
+   `pending` receipt, removes `current`, restores the store snapshot, points
+   `current` back at the old version, starts it and fails with
+   `health_check_failed`.
 
-When a migration fails and its snapshot restore fails too, the stores may be
-partial. `upgrade apply` then leaves the old version stopped, keeps the
-`pending` receipt and `snapshots/<id>`, and the error names the snapshot path
-and says to run `recover()` (CLI: `byok-agent upgrade recover`). Run it as soon as
-possible, before restarting the machine: the service unit stays installed,
-so a reboot or login before `recover()` starts the old version on those
-partial stores.
+The service unit and launcher always run `<installRoot>/current`, and
+`current` is absent whenever the stores may be partial, so no payload
+starts on them, after a reboot or login included. A failed snapshot
+restore (after a failed migration or a failed health check) leaves
+`current` absent, keeps the `pending` receipt and `snapshots/<id>`, and the
+error, `upgrade_pending`, names the snapshot path: run `recover()` (CLI:
+`byok-agent upgrade recover`). `byok-agent start` and `createDaemon` refuse
+to start meanwhile (`store_owned`); a Host process that opens the stores
+without them must check the receipt itself. Upgrade and rollback require
+the installed unit to be exactly the one this SDK writes and the service
+program to run from `current`, or fail with `service_program_not_current`
+before anything changes; `install` with the same version id rewrites the
+unit, then retry.
+
+While `migrate` runs, it is recorded in the `pending` receipt: on POSIX the
+process group it leads (it runs detached in a group of its own), on Windows
+its pid and start time. Until that group (on Windows, the root) has ended,
+nothing restores or starts on the stores: when the root exits and its group
+still runs, `upgrade apply` fails with `upgrade_pending` and keeps the
+record. When the record itself cannot be written, the group gets SIGTERM,
+then SIGKILL after a second, and nothing is restored until it is proved
+gone; otherwise `upgrade apply` fails with `upgrade_pending`, `current`
+absent. While a recorded group runs, `recover()` changes nothing and says
+so; run it again once the migration has ended. A pgid the system has given to another group since
+also counts as running: when `recover()` keeps refusing and no migration
+process is left, end the group it names or restart the machine. A process
+that leaves the group (`setsid`), and what a Windows migration starts, are
+not tracked: the Host stops them before `recover()`.
 
 `upgrade rollback` writes a `pending` receipt, then restores `previous` and the
 snapshot taken when `current` was switched to; store writes since then are
@@ -653,12 +685,32 @@ cleanup diagnostic hook.
 
 `upgrade-receipt.json` is what a Host UI reads: `switched`, `rolled-back`,
 `failed` (with `code`, and `stores` for a store refusal) or `pending`. A
-`pending` receipt means an upgrade or a rollback stopped part way; every other
-operation, `install` and `uninstall` included, refuses with `upgrade_pending`
-until `byok-agent upgrade recover` finishes it: it restores the receipt's
-`from` version and snapshot (for a rollback, the version it was going back
-to). A snapshot is removed only after the receipt that ends the operation is
-written.
+`pending` receipt means an upgrade, a rollback or a same-version reinstall
+stopped part way; every other operation, `install` and `uninstall` included,
+refuses with `upgrade_pending` until `byok-agent upgrade recover` finishes it.
+The receipt's `kind` and where `current` points decide what recover does:
+
+- `current` absent: no payload ran since the snapshot, so it restores the
+  snapshot, points `current` at the receipt's `from` version (for a
+  rollback, the version it was going back to) and starts it.
+- `current` at `from` or `to`: the stores belong to that version, so it
+  starts it as it is (a start of a running service changes nothing) and
+  writes the final receipt.
+- `current` at a candidate already found unhealthy: nothing starts, stops or
+  is restored, and the receipt becomes `failed` with `switch_unhealthy`. The
+  candidate's store writes and the snapshot are kept; the Host decides
+  between `upgrade rollback` and keeping it.
+- an interrupted same-version reinstall: it writes the earlier receipt back
+  and fails with `repair_interrupted`; run `install` again. A reinstall
+  never removes `current` or snapshots stores.
+- anything no operation leaves (for example `current` at a third version)
+  fails with `receipt_state_inconsistent` and changes nothing.
+
+A snapshot is removed only after the receipt that ends the operation is
+written; when that removal fails, the receipt stands and the snapshot stays.
+A `pending` receipt written by SDK 0.42 (version 1) is refused with
+`receipt_upgrade_required`: recover it with SDK 0.42 before upgrading the
+SDK. A final one reads as version 2, and the next write stores version 2.
 
 The top-level error code follows the outcome. A call that wrote its final
 receipt throws its first failure with that failure's own code; later release
@@ -669,10 +721,10 @@ receipt write, or a repair snapshot remains) throws `upgrade_pending`, whose
 `cause` lists every failure in order: run `byok-agent upgrade recover`. A
 lease that failed to release stays held until the process that took it
 exits, so a `recover` in that process can fail with `store_busy` in its
-cause; restart the Host process, then recover. When an upgrade refusal's
-`failed` receipt cannot be written, the receipt stays `pending` and the old
-version stays stopped until `recover`, since recover's snapshot restore would
-overwrite what a restarted service wrote. A preparation error that is not
+cause; restart the Host process, then recover. An upgrade refusal points
+`current` back at the old version and starts it before writing its `failed`
+receipt; when that write fails, `recover` starts it again and writes the
+receipt. A preparation error that is not
 the SDK's own (a `precheck` launch that throws, a failed stop)
 is `store_preparation_failed` with the original error as its cause: the
 receipt records it as `failed` and the old version starts again, since the

@@ -236,6 +236,9 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
       await run('systemctl', ['--user', 'daemon-reload']); // best-effort — no control file left to protect at this point
     },
     async start() {
+      // While `current` was absent the launcher failed on every restart and may
+      // have hit the start limit (#2011); a failed unit refuses `start` until reset.
+      await run('systemctl', ['--user', 'reset-failed', unitName]);
       await runOrThrow(run, 'systemctl', ['--user', 'start', unitName], 'systemctl start');
     },
     async stop() {

@@ -136,11 +136,7 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
 
     await lifecycle.install();
 
-    expect(fs.writeFile).toHaveBeenCalledWith(
-      '/home/tester/.config/systemd/user/Acme-Agent-.service',
-      expect.any(String),
-      'utf8',
-    );
+    expect(fs.rename).toHaveBeenCalledWith(expect.stringMatching(/\.tmp$/u), '/home/tester/.config/systemd/user/Acme-Agent-.service');
     expect(run).toHaveBeenCalledWith('systemctl', ['--user', 'enable', 'Acme-Agent-.service']);
   });
 
@@ -281,7 +277,11 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
     const runOk = vi.fn<Runner>().mockResolvedValue(ok());
     const lifecycleOk = createSystemdLifecycle(def(), { run: runOk, fs, homedir: () => '/h' });
     await lifecycleOk.start();
-    expect(runOk).toHaveBeenCalledWith('systemctl', ['--user', 'start', 'Acme-Agent-.service']);
+    // A unit that hit the start limit while `current` was absent refuses `start` until reset (#2011).
+    expect(runOk.mock.calls.map((call) => call[1])).toEqual([
+      ['--user', 'reset-failed', 'Acme-Agent-.service'],
+      ['--user', 'start', 'Acme-Agent-.service'],
+    ]);
 
     const runFail = vi.fn<Runner>().mockResolvedValue(fail(1));
     const lifecycleFail = createSystemdLifecycle(def(), { run: runFail, fs, homedir: () => '/h' });
