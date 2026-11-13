@@ -155,6 +155,8 @@ export class DeviceCredentialCommandAbortedError extends DeviceCredentialStoreEr
  * and devicePublicKey; a different authenticated enrollment promotes the
  * replacement and discards the attempt. `clear()` removes both authorities.
  * An attempt is kept with every field, including `storeIdentity`.
+ * An error it throws reaches the Host unchanged, as the `cause` of a public
+ * error such as `DeviceEnrollmentClearError`, so it must not carry a secret.
  */
 export interface DeviceCredentialBackend {
   read(signal?: AbortSignal): Promise<DeviceRecord | undefined>;
