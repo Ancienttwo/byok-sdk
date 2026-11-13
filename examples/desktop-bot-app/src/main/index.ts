@@ -1,6 +1,6 @@
 import { join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { resolveHostLayout } from '@byok-sdk/client';
+import { resolveHostLayout } from '@byok-sdk/client/host-layout';
 import { app, BrowserWindow, dialog, ipcMain, net, powerSaveBlocker, protocol, session, shell, type IpcMainInvokeEvent, type WebFrameMain } from 'electron';
 import brand from '../../brand.config.ts';
 import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, STATE_HINT_CHANNEL, type BridgeMethods, type BridgeOutcome, type MainMethod, type SupervisedHostState } from '../bridge/protocol.ts';

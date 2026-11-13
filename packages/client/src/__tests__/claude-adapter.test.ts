@@ -16,6 +16,7 @@ import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { observationOf } from './fixtures/mcp-observation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
+import type { RawEvent } from '../../vendor/oar/95c6547/contracts/session';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
@@ -395,7 +396,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   ] as const)('settles %s as not interrupted, so the owner terminates', async (_label, refuse, during) => {
     const claude = memoryClaude(refuse);
     const stream = new ClaudeStreamSession(claude.child as never);
-    await stream.open({ env: {}, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+    await stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
     expect((await stream.raw.prompt('go')).response.body.kind).toBe('accepted');
     const settled = stream.interruptAndSettle(1_000);
     during(claude);
@@ -542,7 +543,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     } })(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { env: {} });
     const stream = new ClaudeStreamSession(child);
     try {
-      await stream.open({ env: {}, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+      await stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
       native.stdin.emit('error', new Error('stdin already failed'));
       const control = await stream.prompt('must not be accepted');
       expect(control.response.body).toMatchObject({ kind: 'rejected', code: 'error', reason: 'stdin already failed' });
@@ -639,13 +640,22 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
 
   it('followUp() during a turn Claude runs on its own is held and sent when that turn ends', async () => {
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_OWN_TURN: '1' });
+    const gate = path.join(ctx.workspaceDir, 'own-turn-release');
+    ctx.env.FAKE_CLAUDE_OWN_TURN_GATE = gate;
     const session = await startAdapter(fakeClaudeAdapter(), baseTask, ctx);
     openSessions.push(session);
+    const records = () => (session as unknown as { stream: { raw: { records(): readonly RawEvent[] } } }).stream.raw.records();
     await takeTurn(session);
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Claude's own turn has started: its system/init is the second one.
+    await vi.waitFor(() => expect(records().filter(record => record.kind === 'frame' && (record.body.native as { subtype?: unknown } | null)?.subtype === 'init')).toHaveLength(2));
     await expect(session.followUp({ instruction: 'next' })).resolves.toBeUndefined();
+    expect(records().filter(record => record.kind === 'request' && record.body.kind === 'queue')).toHaveLength(1);
+    await fs.writeFile(gate, '');
     expect((await takeTurn(session)).filter(event => event.type === 'progress')).toEqual([{ type: 'progress', text: 'own turn' }]);
     expect((await takeTurn(session)).filter(event => event.type === 'progress')).toEqual([{ type: 'progress', text: 'reply-2:next' }]);
+    // The delivered follow-up is no longer held: a later interrupt has nothing to withdraw (#1940).
+    await session.interrupt();
+    expect(records().filter(record => record.kind === 'request' && record.body.kind === 'withdraw')).toEqual([]);
   });
 
   it('interrupt() withdraws a follow-up held during a Claude-own turn: the instruction is never written', async () => {

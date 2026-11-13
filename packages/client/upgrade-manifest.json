@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "a5db685b393645019dbeb94edcce0b5de26927c84915b88af5d051e87d8d4e0b"
+    "snapshotSha256": "5ff0f556b11b924a1a350f5d7beaaf3094cd6c2177346cac3aa58d1916b245f6"
   },
   "configFields": {
     "status": "tracked",
@@ -102,9 +102,45 @@
         "export:@byok-sdk/client#clearDeviceEnrollment",
         "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend"
       ]
+    },
+    {
+      "id": "retained-records-one-policy",
+      "impact": "breaking",
+      "summary": "maxRetainedBytes (default 16 MiB) bounds only native and tool payloads: past it the oldest are elided in place and the task keeps running; it also covers runtime request and reply native payloads. Text and reasoning are kept whole because the folds read them, so it is not a bound on total retained bytes (#2056). For Claude this is the existing behavior (since #1892). For Codex, Grok, Antigravity, OpenCode and dsh it changes: their text used to count toward the 16 MiB total and passing it failed the task ('<runtime> retained record byte budget exceeded'); that failure no longer occurs and their text has no byte bound. ClaudeAdapterOptions gains maxRetainedBytes. A task's text grows with the provider's per-turn output limit times the number of turns; a Host that needs a hard bound sets maxDurationMs (the offer's limits.maxDurationMs, or DaemonConfig.defaultMaxDurationMs).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retained-records-elide-past-the-limit-1932",
+      "items": [
+        "export:@byok-sdk/client#ClaudeAdapter",
+        "export:@byok-sdk/client#ClaudeAdapterOptions",
+        "export:@byok-sdk/client/adapters#ClaudeAdapter",
+        "export:@byok-sdk/client/adapters#ClaudeAdapterOptions"
+      ]
+    },
+    {
+      "id": "host-layout-subpath",
+      "impact": "breaking",
+      "summary": "Move resolveHostLayout, HostLayoutInputError, HostLayout, HostLayoutOptions and HostLayoutPlatform imports from @byok-sdk/client to @byok-sdk/client/host-layout, including type-only imports. Split mixed imports and leave other symbols at the root. The new pure entry avoids loading Pi and provider SDKs in a shell or installer; paths, error codes and existing stores are unchanged (#1925).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-layout-import-moves-to-a-subpath",
+      "items": [
+        "entry:@byok-sdk/client/host-layout",
+        "export:@byok-sdk/client#HostLayout",
+        "export:@byok-sdk/client/host-layout#HostLayout",
+        "export:@byok-sdk/client#HostLayoutInputError",
+        "export:@byok-sdk/client/host-layout#HostLayoutInputError",
+        "export:@byok-sdk/client#HostLayoutOptions",
+        "export:@byok-sdk/client/host-layout#HostLayoutOptions",
+        "export:@byok-sdk/client#HostLayoutPlatform",
+        "export:@byok-sdk/client/host-layout#HostLayoutPlatform",
+        "export:@byok-sdk/client#resolveHostLayout",
+        "export:@byok-sdk/client/host-layout#resolveHostLayout"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "entry:@byok-sdk/client/host-layout",
+      "change": "added",
+      "entry": "host-layout-subpath"
+    },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
       "change": "changed",
@@ -146,6 +182,16 @@
       "entry": "enrollment-clear-store-scope"
     },
     {
+      "item": "export:@byok-sdk/client#ClaudeAdapter",
+      "change": "changed",
+      "entry": "retained-records-one-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#ClaudeAdapterOptions",
+      "change": "changed",
+      "entry": "retained-records-one-policy"
+    },
+    {
       "item": "export:@byok-sdk/client#DeviceCredentialBackend",
       "change": "changed",
       "entry": "enrollment-clear-store-scope"
@@ -159,6 +205,26 @@
       "item": "export:@byok-sdk/client#FirstPairingAttemptRefusedError",
       "change": "added",
       "entry": "enrollment-clear-store-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayout",
+      "change": "removed",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayoutInputError",
+      "change": "removed",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayoutOptions",
+      "change": "removed",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayoutPlatform",
+      "change": "removed",
+      "entry": "host-layout-subpath"
     },
     {
       "item": "export:@byok-sdk/client#InstallSkillPacksOptions",
@@ -204,6 +270,46 @@
       "item": "export:@byok-sdk/client#clearDeviceEnrollment",
       "change": "changed",
       "entry": "enrollment-clear-store-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client#resolveHostLayout",
+      "change": "removed",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#ClaudeAdapter",
+      "change": "changed",
+      "entry": "retained-records-one-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#ClaudeAdapterOptions",
+      "change": "changed",
+      "entry": "retained-records-one-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/host-layout#HostLayout",
+      "change": "added",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client/host-layout#HostLayoutInputError",
+      "change": "added",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client/host-layout#HostLayoutOptions",
+      "change": "added",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client/host-layout#HostLayoutPlatform",
+      "change": "added",
+      "entry": "host-layout-subpath"
+    },
+    {
+      "item": "export:@byok-sdk/client/host-layout#resolveHostLayout",
+      "change": "added",
+      "entry": "host-layout-subpath"
     },
     {
       "item": "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",

@@ -178,7 +178,7 @@ const OPTION_SOURCES = {
   } satisfies Record<keyof PiAdapterOptions, OptionSource>,
   claude: {
     nativeAssetRoot: 'nativeAssetRoot', runtimeEnvironment: 'runtimeEnvironment', resolveBin: 'embedded-only', spawnFn: 'embedded-only',
-    interruptTimeoutMs: 'embedded-only', nativeInteractions: 'embedded-only', agentUserContext: 'runtimes.claude.agentUserContext',
+    interruptTimeoutMs: 'embedded-only', maxRetainedBytes: 'embedded-only', nativeInteractions: 'embedded-only', agentUserContext: 'runtimes.claude.agentUserContext',
     agentSessionPersistence: 'runtimes.claude.agentSessionPersistence', versionPolicy: 'runtimes.claude.versionPolicy',
   } satisfies Record<keyof ClaudeAdapterOptions, OptionSource>,
   codex: {

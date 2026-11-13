@@ -14,6 +14,7 @@ import { createAcpTurns } from '../../vendor/oar/95c6547/shared/acp/turns';
 import { createUsageUpdateGate } from '../../vendor/oar/95c6547/shared/acp/profile';
 import type { AcpProcess } from '../../vendor/oar/95c6547/shared/acp/process';
 import { createSessionKernel } from '../../vendor/oar/95c6547/shared/session-kernel';
+import { recordRetention } from '../../vendor/oar/95c6547/shared/record-retention';
 import { antigravityAcpProfile } from '../../vendor/oar/95c6547/runtimes/antigravity/session';
 
 const FAKE = path.join(import.meta.dirname, 'fixtures/fake-acp-agent.mjs');
@@ -254,6 +255,31 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     await vi.waitFor(() => expect(facts(log).some(fact => fact.kind === 'prompt')).toBe(true));
     await session.dispose();
     expect(facts(log).some(fact => fact.kind === 'cancel')).toBe(false);
+  });
+  it('elides the native payload of an old runtime request and its reply past the retention limit (#1932)', async () => {
+    const { dir, log } = workspace();
+    const records: RawEvent[] = [];
+    const session = await start(spawnOwnedLineProcess, spawnOwnedTerminalProcess, { kind: 'available', via: 'executable', command: FAKE },
+      { cwd: dir, env: { PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log }, retainedBytes: 1 }, { onRecord: record => records.push(record) });
+    live.push(session);
+    await turn(session, records, 'permission');
+    const live_ = records.find((record): record is RequestRecord => record.kind === 'request' && record.body.kind === 'native' && record.body.type === 'session/request_permission')!;
+    expect(live_.body).toMatchObject({ native: expect.anything() });
+    const retained = session.records();
+    const request = retained.find(record => record.kind === 'request' && record.id === live_.id)!;
+    const reply = retained.find(record => record.kind === 'response' && record.requestId === live_.id)!;
+    expect(request.body).toMatchObject({ kind: 'native', native: null, elided: true });
+    expect(reply.body).toMatchObject({ kind: 'answered', native: null, elided: true });
+  });
+  // Native payloads of 100 B (`"…"` is 98 characters plus quotes) against a 150 B limit.
+  const reply = (seq: number) => ({ kind: 'response', seq, requestId: `r${seq}`, body: { kind: 'answered', native: 'x'.repeat(98) } }) as unknown as RawEvent;
+  const retain = (log: RawEvent[]) => { recordRetention(150)(log, log.length); return log.map(record => (record.body as { elided?: true }).elided === true); };
+  it('elides consecutive large replies in a log with no frame (#1932)', () => {
+    expect(retain([reply(0), reply(1), reply(2)])).toEqual([true, true, false]);
+  });
+  it('elides consecutive large replies after the last frame and keeps that frame (#1932)', () => {
+    const frame = { kind: 'frame', seq: 0, body: { type: 'x', native: {}, events: [] } } as unknown as RawEvent;
+    expect(retain([frame, reply(1), reply(2), reply(3)])).toEqual([false, true, true, false]);
   });
   it('reaps a hosted terminal tree when the session is disposed mid-turn', async () => {
     const { dir, log } = workspace();

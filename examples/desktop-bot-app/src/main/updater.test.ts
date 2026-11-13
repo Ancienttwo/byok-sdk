@@ -7,7 +7,7 @@ let root: string;
 
 vi.mock('electron', () => ({ app: {}, dialog: {} }));
 vi.mock('electron-updater', () => ({ default: {} }));
-vi.mock('@byok-sdk/client', () => ({
+vi.mock('@byok-sdk/client/host-layout', () => ({
   resolveHostLayout: () => ({
     storeDir: path.join(root, 'store'),
     scratchRoot: { path: path.join(root, 'store', 'tmp') },

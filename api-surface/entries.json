@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2760131,
+      "budgetBytes": 2760301,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -286,7 +286,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3212214,
+      "budgetBytes": 3212384,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -460,7 +460,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2429842,
+      "budgetBytes": 2430012,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -577,7 +577,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 550883,
+      "budgetBytes": 551053,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -760,6 +760,46 @@
       ]
     }
   },
+  "@byok-sdk/client/host-layout": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Pure Host directory layout for shells and installers; no client daemon or runtime SDKs",
+      "budgetBytes": 4171,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/client/dist/host-layout.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/client/dist/host-layout.d.ts"
+      ],
+      "bareImports": [
+        "node:crypto",
+        "node:os",
+        "node:path"
+      ],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "node:crypto",
+          "node:os",
+          "node:path"
+        ],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
   "@byok-sdk/client/mcp-server": {
     "kind": "exports",
     "policy": {
@@ -834,7 +874,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 4618,
+      "budgetBytes": 4730,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -908,7 +948,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 513261,
+      "budgetBytes": 513431,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -978,7 +1018,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private ACP runtime stack (Grok, agy, OpenCode)",
-      "budgetBytes": 123307,
+      "budgetBytes": 125256,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2589,7 +2629,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2420918,
+      "budgetBytes": 2421088,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
