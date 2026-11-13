@@ -546,6 +546,10 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
    * exactly what the cursor needed.
    */
   appendEnvelope(record: ReceivedEnvelopeRecord): Promise<JournalReceipt> {
+    // A string cannot change after the check; a Buffer from untyped callers could.
+    if (typeof record.bytes !== 'string') {
+      return Promise.reject(new TypeError('ReceivedEnvelopeRecord.bytes must be a string'));
+    }
     // The write runs after the queue drains, so it and the checks below read
     // one copy the caller cannot change in between.
     const entry: ReceivedEnvelopeRecord = Object.freeze({ ...record, identity: Object.freeze({ ...record.identity }) });

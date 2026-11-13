@@ -396,6 +396,16 @@ describe('SqliteLocalTaskJournal', () => {
       for (const table of ['journal_envelope', 'journal_task', 'journal_idempotency']) expect(countRows(storeDir, table)).toBe(0);
     });
 
+    it('refuses bytes that are not a string, writing no row', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      const bytes = Buffer.from(JSON.stringify({ v: 1, id: 'env-1', type: 'task.offer', task_id: 'task-1' }));
+
+      await expect(journal.appendEnvelope(envelopeRecord({ bytes: bytes as unknown as string })))
+        .rejects.toBeInstanceOf(TypeError);
+      for (const table of ['journal_envelope', 'journal_task', 'journal_idempotency']) expect(countRows(storeDir, table)).toBe(0);
+    });
+
     it('writes the task id it checked when the caller changes the record before the append runs', async () => {
       const storeDir = await tmpStore();
       const journal = build(storeDir);
