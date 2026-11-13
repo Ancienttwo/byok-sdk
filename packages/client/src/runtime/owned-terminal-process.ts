@@ -2,6 +2,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import {
   adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree,
 } from '../adapters/process-tree.js';
+import { assertNoNulSpawnInput } from '../util/spawn-input.js';
 
 const LABEL = 'acp terminal';
 
@@ -22,6 +23,7 @@ interface SpawnDependencies {
 export function createOwnedTerminalSpawn(deps: SpawnDependencies = {}) {
   return (command: string, args: readonly string[], options: { readonly cwd: string; readonly env: Readonly<Record<string, string>>; readonly shell: boolean }) => {
     if (options.env === undefined) throw new Error('owned terminal process requires an explicit filtered environment');
+    assertNoNulSpawnInput(command, args, options.env);
     const child = (deps.spawnFn ?? spawn)(command, [...args], withOwnedProcessTree({
       cwd: options.cwd, env: options.env, shell: options.shell, stdio: ['ignore', 'pipe', 'pipe'],
     }));
