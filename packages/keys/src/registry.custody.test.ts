@@ -114,15 +114,38 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     await expect(registry().resolveDefaultModelProvider()).resolves.toBeDefined();
   });
 
-  it('status reads wait for a held configuration lock (#2012)', async () => {
+  it('every status read holds the configuration lock until its credential reads finish (#2012)', async () => {
     await registry().configure(OPENAI, OLD_KEY);
-    const lock = await profiles.acquireConfigurationLock();
-    let settled = false;
-    const reads = Promise.all([registry().list(), registry().get('openai')]).finally(() => { settled = true; });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(settled).toBe(false);
-    await lock.release();
-    await expect(reads).resolves.toMatchObject([[{ secret_configured: true }], { configuration_pending: false }]);
+    await registry().configure({ ...OPENAI, profile_ref: 'second' }, NEW_KEY);
+    let held = 0;
+    const acquire = profiles.acquireConfigurationLock.bind(profiles);
+    vi.spyOn(profiles, 'acquireConfigurationLock').mockImplementation(async () => {
+      const lock = await acquire();
+      held += 1;
+      return { release: async () => { held -= 1; await lock.release(); } };
+    });
+    const lockedReads: boolean[] = [];
+    const has = secrets.has.bind(secrets);
+    const hasSpy = vi.spyOn(secrets, 'has').mockImplementation(async (name) => { lockedReads.push(held === 1); return has(name); });
+    for (const read of [() => registry().get('openai'), () => registry().list(), () => registry().setDefaultModelProvider('openai')]) {
+      lockedReads.length = 0;
+      await read();
+      expect(lockedReads.length).toBeGreaterThan(0);
+      expect(lockedReads.every(Boolean)).toBe(true);
+    }
+
+    // One failed read: the lock is released only after the other read settled.
+    let inFlight = 0;
+    hasSpy.mockImplementation(async (name) => {
+      if (name === modelProviderSecretName('openai')) throw new Error('store refused');
+      inFlight += 1;
+      await new Promise((resolve) => setImmediate(resolve));
+      inFlight -= 1;
+      return has(name);
+    });
+    await expect(registry().list()).rejects.toThrow('store refused');
+    expect(inFlight).toBe(0);
+    expect(held).toBe(0);
   });
 
   it('remove goes through the same pending path and keeps the watermark tombstone', async () => {

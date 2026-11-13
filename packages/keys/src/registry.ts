@@ -351,6 +351,8 @@ export class ProviderRegistry {
    * configuration. While a writer holds the lock, a status read waits for it
    * (the store's bounded wait) and then fails closed with
    * `PROVIDER_CONFIGURATION_BUSY`; it never reports an unlocked guess.
+   * `list` releases the lock only after every profile's reads have finished,
+   * then throws the first failure.
    */
   async get(profileRef: ProviderProfileRef): Promise<ProviderStatus | undefined> {
     return withConfigurationLock(this.#profiles, async () => {
@@ -360,9 +362,14 @@ export class ProviderRegistry {
   }
 
   async list(): Promise<ProviderStatus[]> {
-    return withConfigurationLock(this.#profiles, async () => Promise.all(
-      (await this.#profiles.list()).map((profile) => this.#status(profile)),
-    ));
+    return withConfigurationLock(this.#profiles, async () => {
+      const reads = await Promise.allSettled(
+        (await this.#profiles.list()).map((profile) => this.#status(profile)),
+      );
+      const failed = reads.find((read): read is PromiseRejectedResult => read.status === 'rejected');
+      if (failed !== undefined) throw failed.reason;
+      return reads.map((read) => (read as PromiseFulfilledResult<ProviderStatus>).value);
+    });
   }
 
   /**
