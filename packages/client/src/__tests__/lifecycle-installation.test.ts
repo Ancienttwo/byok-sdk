@@ -1328,6 +1328,37 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await fs.readdir(moved)).toEqual([repair]);
     });
 
+    it.each(['its removal', 'its removal and the lease release'] as const)('a retired repair snapshot whose cleanup fails is reported, in order: %s (#2010)', async (mode) => {
+      const migrate: ServiceInstallationOptions['migrate'] = (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] });
+      installation = installationOver(fakeLifecycle(), { migrate });
+      await verdicts('migration-required');
+      const fault = failRestore();
+      const candidate = await payload('2.0.0', { 'migrate.cjs': `${MIGRATE}\nprocess.exit(1);` });
+      await installation.install(candidate).catch(() => undefined).finally(() => fault.restore());
+      const removalError = Object.assign(new Error('retired snapshot removal denied'), { code: 'EACCES' });
+      const originalRm = fs.rm.bind(fs);
+      const removal = vi.spyOn(fs, 'rm').mockImplementation(async (file, options) => {
+        if (path.basename(String(file)).startsWith('.install-') && !path.basename(String(file)).startsWith('.install-repair-')) throw removalError;
+        return originalRm(file, options);
+      });
+      const releaseError = new Error('injected release failure');
+      const original = daemonOwner.acquireDaemonOwner;
+      const leaseFault = vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementation(async (...args) => {
+        const lease = await original(...args);
+        return mode === 'its removal' ? lease : { release: async () => { await lease.release(); throw releaseError; } };
+      });
+      const error = await installation.recover().catch((caught: unknown) => caught).finally(() => { removal.mockRestore(); leaseFault.mockRestore(); });
+      const [left] = await snapshotNames();
+      expect(left).toMatch(/^\.install-(?!repair-)/u);
+      expect(error).toMatchObject({ code: 'upgrade_pending', message: expect.stringContaining(`remove ${path.join(installRoot, 'snapshots', left!)} before the next install`) });
+      expect(causes(error)).toEqual(mode === 'its removal' ? [removalError] : [removalError, releaseError]);
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+      // The stores are restored: recover() has nothing left, and the next install refuses the leftover until it is removed.
+      await expect(installation.recover()).resolves.toBeUndefined();
+      await verdicts('accepted');
+      await expect(installation.install(candidate)).rejects.toMatchObject({ code: 'install_snapshot_leftover' });
+    });
+
     it('restores the stores only after every installation artifact is removed, and keeps a failed restore for repair', async () => {
       installation = migrating();
       await verdicts('migration-required');
@@ -1592,12 +1623,17 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         await installation.upgrade(await payload('2.0.0'));
         await fs.writeFile(db, 'v2 data');
         const injected = failRename(step);
-        try { await installation.rollback().catch((error: unknown) => { if ((error as { code?: string }).code !== 'EIO') expectPendingEio(error); }); }
+        let outcome: unknown;
+        try { outcome = await installation.rollback().then(() => 'resolved', (error: unknown) => error); }
         finally { injected.restore(); }
         if (!injected.fired()) {
           expect(step).toBeGreaterThan(3);
           break;
         }
+        // Every injected fault rejects. Rename 1 writes the pending receipt: before it nothing changed, so the EIO is
+        // thrown as it is; after it the work is unfinished: upgrade_pending with the EIO in its cause (#2010).
+        if (step === 1) expect(outcome).toMatchObject({ code: 'EIO' });
+        else expectPendingEio(outcome);
         await installation.recover();
         await expectConsistent({ '1.0.0': 'v1 data', '2.0.0': 'v2 data' });
         // Only an EIO before the pending receipt is written leaves 2.0.0; every later one is completed.

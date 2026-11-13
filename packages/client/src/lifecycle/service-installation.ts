@@ -1111,12 +1111,15 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         note = `The stores of an earlier failed install were restored, but its repair snapshot could not be retired; it is retained at ${kept} and is restored again first.`;
         throw joinLater(error, await release());
       }
-      // Restored and retired: the copy is no longer needed, whatever the release does.
-      await fs.rm(done, { recursive: true, force: true }).catch(() => undefined);
-      const released = await release();
-      if (released.length > 0) {
-        note = `The stores of an earlier failed install were restored and its repair snapshot removed, but their gates or leases could not be released.`;
-        throw new FailureList(released, note);
+      // Restored and retired: the copy is no longer needed. A failed removal
+      // leaves an ordinary install snapshot the next install refuses: report it.
+      const failures: unknown[] = [];
+      await fs.rm(done, { recursive: true, force: true }).catch((error: unknown) => { failures.push(error); });
+      const removed = failures.length === 0;
+      failures.push(...await release());
+      if (failures.length > 0) {
+        note = `The stores of an earlier failed install were restored${removed ? '' : `, but the retired snapshot could not be removed; remove ${done} before the next install`}${failures.length > (removed ? 0 : 1) ? ', and their gates or leases could not be released' : ''}.`;
+        throw new FailureList(failures, note);
       }
     } catch (error) {
       const later: unknown[] = [];
