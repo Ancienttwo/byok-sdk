@@ -86,7 +86,12 @@ export interface ServiceInstallationOptions {
    * `precheck_failed`; a store that is, holds or lies in the install root
    * or a daemon store's `service/` directory, after resolving links and
    * without case on darwin and win32, is `store_overlaps_service_state`
-   * (#2011).
+   * (#2011). A store path with a `..` segment (either separator on win32)
+   * is `precheck_failed`: pass normalized absolute paths. Like every
+   * precheck refusal, both leave the stores untouched and take no snapshot:
+   * the staged candidate and its pending receipt give way to a failed
+   * receipt, `current` points at the previous version again and its service
+   * restarts.
    */
   precheck(versionDir: string): ServiceProgram;
   /**
@@ -1082,6 +1087,13 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       throw new ServiceInstallationError('precheck_failed');
     }
     if (!Array.isArray(stores) || !stores.every(isServiceStoreVerdict)) throw new ServiceInstallationError('precheck_failed');
+    // The one boundary where store paths enter (#2011): `..` after a link
+    // resolves differently from how it is compared; `.` cannot (#1350).
+    if (stores.some((store) => store.path.split(platform === 'win32' ? /[\\/]/u : '/').includes('..'))) {
+      const error = new ServiceInstallationError('precheck_failed');
+      error.message += ' A store path must not contain .. segments; pass a normalized absolute path.';
+      throw error;
+    }
     const paths = await Promise.all(stores.map((store) => canonical(store.path)));
     if (overlaps(stores, paths, platform) || stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
     // A store that is, holds or lies in the install root or a daemon store's

@@ -1775,10 +1775,23 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         // A link to service/, a store under the install root, and (where names ignore case) another spelling of service/.
         [undefined, path.join(alias, 'host.db')], ['directory', path.join(installRoot, 'versions')],
         ...(process.platform === 'darwin' || process.platform === 'win32' ? [['directory', path.join(storeDir, 'SERVICE')] as [string, string]] : [])];
+      const listed = async (at: string, kind?: string) => fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([{ store: 'host', path: at, verdict: 'accepted', reason: 'accepted', ...(kind ? { kind } : {}) }]));
       for (const [kind, at] of cases) {
-        await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([{ store: 'host', path: at, verdict: 'accepted', reason: 'accepted', ...(kind ? { kind } : {}) }]));
+        await listed(at, kind);
+        events = [];
         await expect(installation.upgrade(await payload('3.0.0'))).rejects.toMatchObject({ code: 'store_overlaps_service_state' });
-        expect([await pointer('current'), existsSync(path.join(installRoot, 'snapshots', '3.0.0'))]).toEqual(['2.0.0', false]);
+        // A precheck refusal: the stores and snapshots stay as they were, and the previous version is current and started again.
+        expect([await pointer('current'), existsSync(path.join(installRoot, 'snapshots', '3.0.0')), await fs.readFile(db, 'utf8'), events.at(-2)]).toEqual(['2.0.0', false, 'v2 data', 'start']);
+      }
+      // A `..` after a link resolves through the link's target; such a path is refused before it is compared.
+      const hop = path.join(root, 'hop');
+      await fs.symlink(path.join(storeDir, 'nested', 'deeper'), hop, 'dir').catch(() => undefined);
+      await fs.mkdir(path.join(storeDir, 'nested', 'deeper'), { recursive: true });
+      for (const at of [`${hop}${path.sep}..${path.sep}..${path.sep}service${path.sep}new.db`, `${hop}${path.sep}..${path.sep}..${path.sep}..${path.sep}${path.basename(installRoot)}${path.sep}new.db`,
+        `${root}${path.sep}.${path.sep}hop${path.sep}..${path.sep}..${path.sep}service${path.sep}new.db`]) {
+        await listed(at);
+        await expect(installation.upgrade(await payload('3.0.0'))).rejects.toMatchObject({ code: 'precheck_failed', message: expect.stringContaining('normalized') });
+        expect(await fs.readFile(db, 'utf8')).toBe('v2 data');
       }
     });
 
@@ -1989,10 +2002,14 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     }, 120_000);
   });
 
+  // Skipped on win32: a process cannot SIGKILL itself there (signals are
+  // emulated by TerminateProcess), and the child's private gate root is the
+  // POSIX one; the in-process crash harness above covers win32.
   describe.skipIf(process.platform === 'win32')('a real SIGKILL of the upgrading process after any write, then recover() (#2011)', () => {
-    // The child imports this package's source, counts its own file system
-    // writes and SIGKILLs itself after the n-th: no finally, release or exit
-    // handler runs, and its leases and gates die with it.
+    // The child imports this package's source and SIGKILLs itself once its
+    // n-th file system write (including a FileHandle write or sync) has
+    // completed: no finally, release or exit handler runs, and its leases
+    // and gates die with it.
     const CHILD = `
       import { promises as fs, existsSync, writeFileSync, mkdirSync } from 'node:fs';
       import path from 'node:path';
@@ -2002,10 +2019,14 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       mkdirSync(c.gates, { recursive: true, mode: 0o700 });
       (await import(c.gate)).setPosixGateRootForTests(c.gates);
       let writes = 0;
-      for (const name of ['rename', 'rm', 'copyFile', 'cp', 'symlink', 'writeFile', 'mkdir', 'open', 'unlink']) {
-        const original = fs[name].bind(fs);
-        fs[name] = async (...args) => { if (++writes > c.killAt) process.kill(process.pid, 'SIGKILL'); return original(...args); };
-      }
+      const counted = (call) => async (...args) => { const result = await call(...args); if (++writes === c.killAt) process.kill(process.pid, 'SIGKILL'); return result; };
+      for (const name of ['rename', 'rm', 'copyFile', 'cp', 'symlink', 'writeFile', 'mkdir', 'unlink']) fs[name] = counted(fs[name].bind(fs));
+      const open = fs.open.bind(fs);
+      fs.open = async (...args) => {
+        const handle = await open(...args);
+        for (const name of ['write', 'writeFile', 'sync']) handle[name] = counted(handle[name].bind(handle));
+        return handle;
+      };
       const current = path.join(c.installRoot, 'current');
       const noop = async () => undefined;
       const lifecycle = {
@@ -2022,6 +2043,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         program: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'host.js')] }),
         precheck: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'precheck.cjs'), c.verdicts] }),
         healthCheck: async () => { if ((await installation.currentVersion()) === '2.0.0') writeFileSync(c.db, 'v2 data'); },
+        ...(c.migrate ? { migrate: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), c.verdicts, c.db, 'accepted'] }) } : {}),
         healthTimeoutMs: 5000, stopTimeoutMs: 2000,
       }, lifecycle);
       await installation.upgrade(c.payload);
@@ -2029,18 +2051,21 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     const hook = new URL('./fixtures/ts-source-resolve-hook.mjs', import.meta.url).href;
     const source = (relative: string) => new URL(relative, import.meta.url).href;
 
-    it('every kill point leaves stores that belong to the version current names, and nothing started without current', async () => {
+    it.each([false, true])('every kill point (migrating: %s) leaves stores that belong to the version current names, and nothing started without current', async (migrate) => {
       await installation.install(await payload('1.0.0'));
-      const candidate = await payload('2.0.0');
+      const candidate = await payload('2.0.0', { 'migrate.cjs': MIGRATE });
+      const migrateScript = path.join(installRoot, 'versions', '2.0.0', 'migrate.cjs');
       const startedWithoutCurrent = path.join(root, 'started-without-current');
       const template = path.join(root, 'template');
       for (const dir of [installRoot, storeDir]) await fs.cp(dir, path.join(template, path.basename(dir)), { recursive: true, verbatimSymlinks: true });
-      for (let killAt = 0; ; killAt += 1) {
+      for (let killAt = 1; ; killAt += 1) {
         for (const dir of [installRoot, storeDir]) {
           await fs.rm(dir, { recursive: true, force: true });
           await fs.cp(path.join(template, path.basename(dir)), dir, { recursive: true, verbatimSymlinks: true });
         }
+        await verdicts(migrate ? 'migration-required' : 'accepted');
         const config = {
+          migrate,
           installation: source('../lifecycle/service-installation.ts'), unit: source('../lifecycle/service-unit.ts'), gate: source('../util/path-mutation-gate.ts'),
           gates: path.join(root, `gates-${killAt}`), killAt, installRoot, storeDir, db, payload: candidate, startedWithoutCurrent, verdicts: path.join(root, 'verdicts.json'),
         };
@@ -2048,19 +2073,29 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         let stderr = '';
         child.stderr!.on('data', (chunk) => { stderr += String(chunk); });
         const [code, signal] = await new Promise<[number | null, NodeJS.Signals | null]>((resolve) => child.once('exit', (...result) => resolve(result)));
+        // A migrate killed between spawn and its synced record is the Host's to
+        // stop (the documented residue): it ends by itself here, so wait for it
+        // as an operator would before recover().
+        await vi.waitFor(() => expect(spawnSync('pgrep', ['-f', migrateScript]).status).toBe(1), { timeout: 10_000 });
         installation = installationOver(fakeLifecycle());
         const settled = await installation.recover();
         expect([existsSync(startedWithoutCurrent), settled?.state === 'pending']).toEqual([false, false]);
         const current = await pointer('current');
-        // Back on 1.0.0, nothing the candidate wrote survives; on 2.0.0, the switch is settled.
-        if (current === '1.0.0') expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
-        else expect([current, (await installation.receipt())?.state]).toEqual(['2.0.0', 'switched']);
+        const data = await fs.readFile(db, 'utf8');
+        if (current === '1.0.0') {
+          // Back on 1.0.0: nothing the candidate or its migration wrote survives.
+          expect(data).toBe('v1 data');
+        } else {
+          // On 2.0.0: the switch is settled, the stores are the candidate's (migrated, or v1 data it accepted, or what it wrote since), and the snapshot holds v1.
+          expect([current, (await installation.receipt())?.state, await fs.readFile(path.join(installRoot, 'snapshots', '2.0.0', '0'), 'utf8')]).toEqual(['2.0.0', 'switched', 'v1 data']);
+          expect(migrate ? ['migrated data', 'v2 data'] : ['v1 data', 'v2 data']).toContain(data);
+        }
         if (signal !== 'SIGKILL') {
-          expect([code, stderr, killAt > 0, current]).toEqual([0, '', true, '2.0.0']);
+          expect([code, stderr, current]).toEqual([0, '', '2.0.0']);
           break;
         }
       }
-    }, 300_000);
+    }, 600_000);
   });
 
   describe('crash consistency: every rename may fail, and recover() resolves what it leaves', () => {

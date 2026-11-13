@@ -252,9 +252,32 @@ service that had already restarted.
   be, hold or lie in the install root or a daemon store's `service/`
   directory (its leases, launcher and records), compared after resolving
   symbolic links and, on macOS and Windows, without case. Such a store is
-  refused before anything is snapshotted; list the store's own files or directory instead. A snapshot
-  taken before this check is not re-checked on restore (#2102): before
-  rolling back one, compare its `snapshot.json` with your stores.
+  refused before anything is snapshotted; list the store's own files or
+  directory instead. List normalized absolute paths: a store path with a
+  `..` segment (either separator on Windows) is `precheck_failed`, because
+  `..` after a link resolves differently from how it is compared.
+- **What a precheck refusal does:** `store_overlaps_service_state`, the
+  `..` refusal and every other precheck refusal leave the stores
+  untouched and take no snapshot. The staged candidate gets a pending
+  receipt, the service stops, a failed receipt replaces the pending one,
+  `current` points at the previous version again and its service restarts.
+- **Snapshots taken before this check (#2102):** restore does not re-check
+  them, so one taken by 0.42.0 or an earlier build of this train can list
+  `service/` or the install root, and restoring it would replace the live
+  leases, launcher and records. Before the first operation on this version:
+  1. Call no `ServiceInstallation` method yet, `upgrade`, `rollback` and
+     `recover` included: every operation first restores a kept install
+     repair snapshot when `current` is absent.
+  2. List every `<installRoot>/snapshots/*/snapshot.json`, the
+     `.install-repair-*` snapshots included.
+  3. Normalize each `entries[].path` (resolve links, and on macOS and
+     Windows ignore case) and compare it with the install root and with each
+     daemon store's `<storeDir>/service/`. An entry that is, holds or lies in
+     one of them overlaps.
+  4. With no overlap, continue as usual. With one, keep the service stopped,
+     copy what the other entries need from the snapshot's `<index>` or
+     `<index>.d` files by hand, then remove that snapshot directory before
+     calling any installation method.
 - **Snapshot removal (#2062):** a snapshot that cannot be removed after the
   final receipt no longer fails the call; it stays.
 - On systemd, a start runs `systemctl --user reset-failed` first, since the

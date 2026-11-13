@@ -11389,7 +11389,12 @@ export interface ServiceInstallationOptions {
      * `precheck_failed`; a store that is, holds or lies in the install root
      * or a daemon store's `service/` directory, after resolving links and
      * without case on darwin and win32, is `store_overlaps_service_state`
-     * (#2011).
+     * (#2011). A store path with a `..` segment (either separator on win32)
+     * is `precheck_failed`: pass normalized absolute paths. Like every
+     * precheck refusal, both leave the stores untouched and take no snapshot:
+     * the staged candidate and its pending receipt give way to a failed
+     * receipt, `current` points at the previous version again and its service
+     * restarts.
      */
     precheck(versionDir: string): ServiceProgram;
     /**
