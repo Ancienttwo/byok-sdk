@@ -12,7 +12,7 @@ export class ConfiguredPathLinkError extends Error {
   ) {
     super(reason === 'windows_link'
       ? `configured path ${configuredPath} passes through a symbolic link or junction at ${link} (${reason}, ${detail}); point the setting at the physical directory`
-      : `configured path ${configuredPath} has an untrusted symbolic link at ${link} (${reason}, ${detail}); point the setting at the physical directory, or make the link and the directory holding it owned by root or uid ${process.getuid!()} and not writable by others`);
+      : `configured path ${configuredPath} has an untrusted symbolic link at ${link} (${reason}, ${detail}); point the setting at the physical directory, or make the link and the directory holding it owned by root or uid ${process.geteuid!()} and not writable by others`);
     this.name = 'ConfiguredPathLinkError';
   }
 }
@@ -51,7 +51,8 @@ export function foldNameAliases(configured: string): string {
     if (process.platform === 'win32') {
       throw new ConfiguredPathLinkError(configured, ancestor, 'windows_link', `target ${readlinkSync(ancestor)}`);
     }
-    const uid = process.getuid!();
+    // The effective uid owns the links and directories this process creates (#2016).
+    const uid = process.geteuid!();
     if (link.uid !== 0 && link.uid !== uid) {
       throw new ConfiguredPathLinkError(configured, ancestor, 'link_owner', `uid ${link.uid}`);
     }
