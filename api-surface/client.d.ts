@@ -11304,8 +11304,10 @@ import { type ApplyLoginShellEnvironmentOptions, type ServiceEnvironmentStatus }
  *
  * `HOME` is the home the service manager gave the job (the launchd plist pins
  * the lifecycle's home, #2017), so an rc that resets it cannot move the daemon
- * to another home. Only `HOME` and `BYOK_*` are pinned: `PATH`, `XDG_*` and
- * other values an rc derives from a different home stay as the rc set them.
+ * to another home. Only the daemon's `HOME` and `BYOK_*` are pinned: `PATH`,
+ * `XDG_*` and other values an rc derives from a different home stay as the rc
+ * set them, and a default runtime environment gives tasks the snapshot's
+ * `HOME` (#2084) unless its policy passes `HOME`.
  */
 /** The `byok-agent start` flag generated service definitions pass. */
 export declare const SERVICE_FLAG = "--service";
