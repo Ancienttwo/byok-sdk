@@ -11499,11 +11499,12 @@ export interface ServiceInstallation {
      * the install-root gate (#2001), so no other installation changes
      * `current` or the snapshots meanwhile. A
      * failed restore renames it `snapshots/.install-repair-<uuid>` and the
-     * error names it: the next first install restores it, under the store
-     * leases and before its precheck. When it cannot stop the service, take
-     * the leases, restore or retire the repair name, or when more than one
-     * repair snapshot exists, it fails, names the snapshots, starts nothing
-     * and removes a marked unit.
+     * error, `upgrade_pending`, names it: the next operation (recover()
+     * included) restores it first, under the store leases, while no version
+     * is current. When it cannot stop the service, take the leases, restore
+     * or retire the repair name, or when more than one repair snapshot
+     * exists, it fails with `upgrade_pending`, names the snapshots, starts
+     * nothing and removes a marked unit.
      */
     install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
     /**
@@ -11530,26 +11531,21 @@ export interface ServiceInstallation {
      * switched to, under a `pending` receipt written first. Store writes since
      * that switch are discarded.
      *
-     * The top-level code names the Host's next step, which follows where the
-     * receipt stops. On every exit where a store gate or lease failed to
-     * release and the receipt stays `pending` (a refusal whose `failed`
-     * receipt was not written, including one that is not a
-     * `ServiceInstallationError`; a failed pointer write or snapshot restore;
-     * the release after the pointer writes; a rollback after a failed health
-     * check), the error is `store_release_failed`. Its `cause` is one flat
-     * `AggregateError`: the failure that came first (such as
-     * `health_check_failed`, a preparation error or `store_busy`), every
-     * release failure, then a failed receipt write or restart. Call
-     * recover(); a lease that failed to release stays held until its process
-     * exits, so restart the Host process first when recover() reports
-     * `store_busy`. When an upgrade refusal's `failed` receipt cannot be
-     * written, the previous version also stays stopped, since recover()
-     * restores the snapshot over whatever it would write; without a release
-     * failure the refusal keeps its code and the receipt write joins its
-     * `cause`. A refusal whose final receipt was written keeps its code,
-     * and a later release or restart failure joins its `cause` the same way.
-     * A release failure after the final receipt would not reject a committed
-     * result; no path releases there today.
+     * The top-level code follows the outcome (#2010). A call that wrote its
+     * final receipt throws its first failure's own class and code; later
+     * failures (a release, a restart) join its `cause`, one flat
+     * `AggregateError` with the first failure first. A call that leaves its
+     * work unfinished (the receipt stays `pending`: a failed stop, pointer
+     * write, snapshot restore, release or final receipt write; or a repair
+     * snapshot remains) throws `upgrade_pending`, whose `cause` lists every
+     * failure in order; call recover() next. A lease that failed to release
+     * stays held until its process exits, so restart the Host process first
+     * when recover() fails with `store_busy` in its cause. When an upgrade
+     * refusal's `failed` receipt cannot be written, the previous version
+     * stays stopped, since recover() restores the snapshot over whatever it
+     * would write. A preparation error that is neither a
+     * ServiceInstallationError nor a ServiceUnitError is
+     * `store_preparation_failed`, with the original error as its cause.
      */
     rollback(): Promise<ServiceUpgradeReceipt>;
     /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. Release failures follow the same rule as on `rollback()`. */
@@ -11567,9 +11563,9 @@ declare const ERROR_MESSAGES: {
     readonly payload_invalid: 'The payload manifest is missing, malformed, or does not match the payload files.';
     readonly version_current: 'The payload is the version already running.';
     readonly version_conflict: 'A different payload with the same version id is already staged.';
-    readonly upgrade_pending: 'An earlier upgrade or rollback was interrupted. Run recover() (CLI: byok-agent upgrade recover) first.';
+    readonly upgrade_pending: 'An earlier upgrade, rollback or install was interrupted or left its stores unrestored. Run recover() (CLI: byok-agent upgrade recover) first.';
+    readonly store_preparation_failed: 'Store preparation failed with an error of its own (the cause). Nothing was switched; the stores are as before.';
     readonly store_busy: 'A daemon store still has a running owner after the stop. Stop every process that uses it and retry.';
-    readonly store_release_failed: 'The store gates or leases could not be released before the final receipt was written; the receipt stays pending. Run recover() (CLI: byok-agent upgrade recover); if it reports store_busy, restart the Host process first.';
     readonly daemon_stores_invalid: 'daemonStores() threw or listed an invalid store: each storeDir must be absolute and listed once, each productId not empty.';
     readonly owned_process_residue: 'Processes from the previous daemon run survived; resolve them before upgrading.';
     readonly precheck_failed: 'The candidate\'s store precheck did not produce a valid verdict.';
@@ -11584,7 +11580,7 @@ declare const ERROR_MESSAGES: {
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
     readonly install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.';
     readonly install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.';
-    readonly snapshots_symlinked: 'The install root\'s snapshots/ is a symbolic link. Uninstall does not follow it and changed nothing; replace it with a directory or remove the link, then retry.';
+    readonly snapshots_symlinked: 'The install root\'s snapshots/ is a symbolic link. It was not followed and nothing changed; replace it with a directory or remove the link, then retry.';
 };
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
 /** Closed codes; a store refusal carries the precheck verdicts, and `snapshot_failed` the copy error as `cause`. */

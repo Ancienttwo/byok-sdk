@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "5ff0f556b11b924a1a350f5d7beaaf3094cd6c2177346cac3aa58d1916b245f6"
+    "snapshotSha256": "ed018d13008cfafa72ee260c593d2fce99f10b500f60f61ddd35e570f6ac3f31"
   },
   "configFields": {
     "status": "tracked",
@@ -30,7 +30,7 @@
     {
       "id": "service-store-release-failures",
       "impact": "breaking",
-      "summary": "Store lease and gate release failures preserve a refused ServiceInstallationError and its code, with the refusal and all release failures in its AggregateError cause; Hosts that matched the 0.42.0 AggregateError on first install must read cause instead. When a release fails and an upgrade, rollback or recover receipt remains pending, the new store_release_failed code directs the Host to recover; restart the Host process first if the stuck lease causes store_busy. The same type gains install_root_foreign_owner (#2001): every ServiceInstallation operation holds an install-root gate, so a second operation on one install root fails at once with lifecycle_owner_busy, and an install root owned by another user is refused before anything changes.",
+      "summary": "Store lease and gate release failures preserve a refused ServiceInstallationError and its code, with the refusal and all release failures in its AggregateError cause; Hosts that matched the 0.42.0 AggregateError on first install must read cause instead. The code follows the outcome (#2010): a call that leaves its receipt pending or its stores unrestored throws upgrade_pending with every failure in its cause, so the Host runs recover(), first restarting the Host process if a stuck lease makes it fail with store_busy; a preparation error that is not the SDK's own is the new store_preparation_failed with the original error as its cause. The same type gains install_root_foreign_owner (#2001): every ServiceInstallation operation holds an install-root gate, so a second operation on one install root fails at once with lifecycle_owner_busy, and an install root owned by another user is refused before anything changes.",
       "migration": "docs/releases/host-upgrade-next-minor.md#store-release-failures-name-the-next-step",
       "items": [
         "export:@byok-sdk/client#ServiceInstallationErrorCode"

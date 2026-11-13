@@ -99,7 +99,9 @@ restarted.
 no longer keeps the operation pending with the lifecycle owner gate held, and
 a check that succeeds after the deadline fails. A late upgrade check restores
 the previous version (`health_check_failed`), and a late check of the
-restored version is `rollback_unhealthy`, as for any failed check. The clock
+restored version leaves a `failed` receipt with `rollback_unhealthy`, as for
+any failed check; `upgrade()` then throws `health_check_failed` with that
+failure in its `cause` (#2010). The clock
 now starts after start returns, as on install; platform commands still have
 no time bound (#1971). A Host whose check is slower than `healthTimeoutMs`
 raises it. `healthTimeoutMs` must now be an integer from 1 to 2147483647
@@ -153,28 +155,31 @@ becomes that `AggregateError` itself. A first install joins a failure to
 remove its staged version or its marked unit, or to restart that unit, the
 same way. `upgrade()`'s receipt records the refusal's code.
 
-The top-level error code now names the Host's next step, which follows where
-the receipt stops (#1991). On every exit where a store gate or lease fails to
-release and the receipt stays `pending` (an upgrade refusal whose `failed`
-receipt could not be written, a refusal that is not a
-`ServiceInstallationError`, a failed pointer write or snapshot restore, the
-release after the pointer writes in `upgrade()`, `rollback()` or
-`recover()`, an upgrade's rollback after a failed health check), the error is
-the new `ServiceInstallationErrorCode` `store_release_failed`. Its `cause` is
-one flat `AggregateError`: the failure that came first (`health_check_failed`
-after a failed health check, a preparation error, `store_busy`), every
-release failure, then a failed receipt write or restart. Call `recover()`
-next. A lease that failed to release stays held by its process, so
-`recover()` in the same process can report `store_busy`; restart the Host
-process first. An install whose lease is stuck reports `store_busy` from its
-cleanup in the same way; restart the Host process before the next install.
-A refusal whose final receipt was written keeps its code, and a release or
-restart failure after it joins its `cause`. When an upgrade refusal's `failed`
-receipt cannot be written, the receipt stays `pending` and the previous
-version stays stopped until `recover()`, which would otherwise restore the
-snapshot over what the restarted service wrote. A release failure after a final
-receipt would not turn a committed result into a rejection, the rule #1996
-applies to pruning; no path releases there today. When a failed
+The top-level error code follows the outcome (#1991, #2010). A call that
+wrote its final receipt throws its first failure's own class and code; later
+release or restart failures join its `cause`, one flat `AggregateError` with
+the first failure first. A call that leaves its work unfinished throws
+`upgrade_pending`, whose `cause` lists every failure in order: an upgrade,
+rollback or recover whose receipt stays `pending` (a failed stop, pointer
+write, snapshot restore, release or final receipt write, including an
+upgrade refusal whose `failed` receipt could not be written), and an install
+whose stores could not be restored and left a repair snapshot (0.42.0 threw
+an `AggregateError` there). Call `recover()` next. A lease that failed to
+release stays held by its process, so `recover()` in the same process can
+fail with `store_busy` in its cause; restart the Host process first. When an
+upgrade refusal's `failed` receipt cannot be written, the previous version
+stays stopped until `recover()`, which would otherwise restore the snapshot
+over what the restarted service wrote. A preparation error that is not the
+SDK's own (a `precheck` launch that throws, a failed stop) is
+the new `ServiceInstallationErrorCode` `store_preparation_failed` with the
+original error as its cause: an upgrade records it in a `failed` receipt and
+starts the previous version again, where 0.42.0 left the receipt `pending`
+and started the previous version anyway. A repair snapshot
+(`snapshots/.install-repair-<uuid>`) is now restored first by any operation,
+`recover()` included, while no version is current, not only by the next first
+install. With no version current, a symlinked `snapshots/` is refused
+with `snapshots_symlinked` before anything under it is read, by every
+operation; nothing changes. When a failed
 install's cleanup restored the stores but could not release their leases,
 the error lists `store lease release` as remaining and says the stores were
 restored; the install snapshot it names is then an ordinary leftover to
