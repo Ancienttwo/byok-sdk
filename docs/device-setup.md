@@ -714,15 +714,21 @@ await clearDeviceEnrollment({
   clears its own staged first pairing, never another store's, and pairs only
   with a staged attempt it made (#1964, #2033). Under
   the store's owner lease the clear takes a per-user `productId` lock and holds
-  it from its validation through its deletion. A pairing and a running
-  daemon's token renewal take the same lock, after their own owner lease,
-  around each credential write, and first check that the OS entry still holds
-  this store's enrollment or staged attempt. Another store's pairing or
+  it from its validation through its deletion. A running daemon's token
+  renewal takes the same lock around validating and persisting the new token,
+  and never across a network request. A pairing holds it from validation
+  through its request to persisting the enrollment, because the server's
+  device registration has no fencing (#2045 F1). Another store's pairing or
   renewal therefore lands wholly before or wholly after the clear (#2034).
-  Lock order is the store owner lease, then the `productId` lock, and no holder
-  keeps the lock across a network request. Each side waits up to 30 seconds;
-  a clear that times out fails as `clear_failed` and deletes nothing, and a
-  renewal that times out fails as busy, not as revocation, and is retried.
+  Lock order is the store owner lease, then the `productId` lock. Each side
+  waits up to 30 seconds; a clear that times out fails as `clear_failed` and
+  deletes nothing, and a renewal that times out fails as busy, not as
+  revocation, and is retried.
+- A pairing whose request times out releases the lock while the server may
+  still register it. Its outcome is unknown: the staged attempt stays, and
+  pairing again retries with the same key. If another store pairs with
+  `replaceOtherStore` meanwhile, the late registration can still supersede
+  it on the server; only server-side registration fencing closes that gap.
 - A renewal that finds the enrollment gone writes nothing and halts the
   daemon: `store_not_bound` when another store paired over it,
   `re_pair_required` when it was cleared.

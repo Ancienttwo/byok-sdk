@@ -9,6 +9,7 @@ import { DaemonHaltError } from '../daemon/daemon-lifecycle';
 import { DeviceRecordRePairRequiredError, DeviceStore, readDeviceEnrollmentIdentity, readDeviceEnrollmentStatus } from '../daemon/store';
 import { DeviceStoreBindingMismatchError, FirstPairingAttemptRefusedError } from '../daemon/daemon-errors';
 import { acquireEnrollmentGate } from '../daemon/enrollment-gate';
+import { acquirePathMutationGate, type PathMutationGate } from '../util/path-mutation-gate';
 import { createTestDeviceStore, InMemoryDeviceCredentialBackend } from './fixtures/device-credentials';
 import { testDeviceCredentials } from './fixtures/credential-backend';
 import { clearDeviceEnrollment, DeviceEnrollmentClearError } from '../daemon/enrollment-clear';
@@ -19,6 +20,10 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
 vi.mock('../daemon/control-client', () => ({ connectControlClient: vi.fn() }));
+vi.mock('../util/path-mutation-gate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../util/path-mutation-gate')>();
+  return { ...actual, acquirePathMutationGate: vi.fn(actual.acquirePathMutationGate) };
+});
 vi.mock('../daemon/enrollment-gate', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../daemon/enrollment-gate')>();
   return { acquireEnrollmentGate: vi.fn(actual.acquireEnrollmentGate) };
@@ -156,11 +161,24 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
     expect(await readDeviceEnrollmentStatus(first)).toEqual({ state: 'paired', deviceId });
   });
 
-  describe('renewal and pairing hold the enrollment lock around writes only (#2034)', () => {
+  describe('renewal and pairing take the enrollment lock (#2034)', () => {
+    // Strictly under the 10 s test timeout, so each test settles and restores its mocks before the next starts.
+    const settle = { timeout: 5_000 };
+    const within = <T>(promise: Promise<T>): Promise<T> => Promise.race([
+      promise,
+      new Promise<never>((_, reject) => { setTimeout(() => reject(new Error('barrier not reached')), settle.timeout).unref(); }),
+    ]);
+
     async function trackGate() {
       const { acquireEnrollmentGate: acquire } = await vi.importActual<typeof import('../daemon/enrollment-gate')>('../daemon/enrollment-gate');
-      const gate = { held: 0, taken: 0, restore: () => { vi.mocked(acquireEnrollmentGate).mockReset().mockImplementation(acquire); } };
+      const gate = {
+        held: 0,
+        taken: 0,
+        onWait: undefined as (() => void) | undefined,
+        restore: () => { vi.mocked(acquireEnrollmentGate).mockReset().mockImplementation(acquire); },
+      };
       vi.mocked(acquireEnrollmentGate).mockImplementation(async (id, signal) => {
+        gate.onWait?.();
         const acquired = await acquire(id, signal);
         gate.held += 1;
         gate.taken += 1;
@@ -180,7 +198,7 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
 
       server.rotateDeviceToken(firstDeviceId);
 
-      await vi.waitFor(() => expect(firstDaemon.status().lifecycle).toMatchObject({ phase: 'halted', reason: 'store_not_bound' }), { timeout: 10_000 });
+      await vi.waitFor(() => expect(firstDaemon.status().lifecycle).toMatchObject({ phase: 'halted', reason: 'store_not_bound' }), settle);
       expect(await readDeviceEnrollmentStatus(second)).toEqual({ state: 'paired', deviceId });
     });
 
@@ -200,28 +218,28 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
       const write = credentials.replace.bind(credentials);
       vi.spyOn(credentials, 'replace').mockImplementation(async (record) => { renewalArrived(); return write(record); });
       vi.spyOn(credentials, 'clear').mockImplementationOnce(async () => {
-        const waiting = gate.taken;
-        vi.mocked(acquireEnrollmentGate).mockImplementationOnce(async (id, signal) => {
-          renewalArrived();
-          return (await vi.importActual<typeof import('../daemon/enrollment-gate')>('../daemon/enrollment-gate')).acquireEnrollmentGate(id, signal);
-        });
+        const taken = gate.taken;
+        gate.onWait = renewalArrived;
         server.rotateDeviceToken(firstDeviceId);
         // Released once the renewal has either written or is waiting on the gate this clear holds.
-        await arrived;
-        expect(gate.taken).toBe(waiting);
+        await within(arrived);
+        gate.onWait = undefined;
+        expect(gate.taken).toBe(taken);
         return deleteEntry();
       });
 
       try {
         await clearDeviceEnrollment({ productId, storeDir: second.storeDir! }, { deviceCredentials: credentials });
-        await vi.waitFor(() => expect(firstDaemon.status().lifecycle).toMatchObject({ phase: 'halted', reason: 're_pair_required' }), { timeout: 10_000 });
+        await vi.waitFor(() => expect(firstDaemon.status().lifecycle).toMatchObject({ phase: 'halted', reason: 're_pair_required' }), settle);
+        // Completion barrier: the renewal has released the gate.
+        await vi.waitFor(() => expect(gate.held).toBe(0), settle);
       } finally {
         gate.restore();
       }
       expect(await credentials.read()).toBeUndefined();
     });
 
-    it('never holds the lock across a pairing or renewal request', async () => {
+    it('holds the lock across a pairing request (#2045 F1) and never across a renewal request', async () => {
       const config = await storeConfig();
       const daemon = daemonFor(config);
       const gate = await trackGate();
@@ -237,14 +255,42 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
         await daemon.start();
         await waitForDaemonOpen(daemon);
         server.rotateDeviceToken(deviceId);
-        await vi.waitFor(() => expect(requests.some((request) => request.path === '/byok/token')).toBe(true), { timeout: 10_000 });
-        // Two pairing segments and the renewal's write.
-        await vi.waitFor(() => expect(gate.taken).toBeGreaterThanOrEqual(3), { timeout: 10_000 });
+        // Completion barrier: the pairing's and the renewal's gates were both taken and released.
+        await vi.waitFor(() => {
+          expect(requests.some((request) => request.path === '/byok/token')).toBe(true);
+          expect(gate.taken).toBeGreaterThanOrEqual(2);
+          expect(gate.held).toBe(0);
+        }, settle);
       } finally {
         gate.restore();
       }
-      expect(requests.some((request) => request.path === '/byok/pair')).toBe(true);
-      expect(requests.filter((request) => request.held > 0)).toEqual([]);
+      expect(requests.filter((request) => request.path === '/byok/pair').map((request) => request.held)).toEqual([1]);
+      expect(requests.filter((request) => request.path !== '/byok/pair' && request.held > 0)).toEqual([]);
+    });
+
+    it('an aborted caller starts no acquisition', async () => {
+      vi.mocked(acquirePathMutationGate).mockClear();
+
+      await expect(acquireEnrollmentGate(`gate-${randomUUID()}`, AbortSignal.abort())).rejects.toThrow();
+
+      expect(acquirePathMutationGate).not.toHaveBeenCalled();
+    });
+
+    it('a caller aborted while waiting releases the gate its acquisition obtains later', async () => {
+      const id = `gate-${randomUUID()}`;
+      const holder = await acquireEnrollmentGate(id);
+      vi.mocked(acquirePathMutationGate).mockClear();
+      const controller = new AbortController();
+      const waiting = acquireEnrollmentGate(id, controller.signal);
+      controller.abort();
+      await expect(waiting).rejects.toThrow();
+      const abandoned = vi.mocked(acquirePathMutationGate).mock.results[0]!.value as Promise<PathMutationGate>;
+
+      await holder.release();
+      const late = await within(abandoned);
+
+      const next = await acquirePathMutationGate({ scope: late.scope as `device-enrollment:${string}` }, { waitMs: 1_000 });
+      await next.release();
     });
   });
 

@@ -3431,6 +3431,8 @@ export declare class AuthManager {
     /** The OS entry no longer holds this store's enrollment: drop the cached record, stop renewing and report it. Always throws `error`. */
     private loseBinding;
     private underEnrollmentGate;
+    /** Under the enrollment gate: the key and request facts a pairing proves, staging a new first-pairing attempt when this store has none. */
+    private pairingKey;
     /**
      * Under the enrollment gate: this store's bound enrollment, or else its own
      * staged first-pairing attempt (undefined when none, or when

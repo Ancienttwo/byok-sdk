@@ -243,105 +243,74 @@ export class AuthManager {
         // changed after the registration commit.
         const observedDeviceName = this.opts.deviceName ?? os.hostname();
         const observedMachineId = await this.opts.machineId?.();
-        // The enrollment gate covers validation and the attempt write only,
-        // never the request below (#2034).
-        const { keyPair, pairingDeviceName, pairingMachineId } = await this.underEnrollmentGate(signal, async () => {
-          const { existing, attempt } = this.record === undefined
-            ? await this.pairingAuthority(signal, replaceOtherStore)
-            : { existing: this.record, attempt: undefined };
-          if (existing) {
-            return {
-              keyPair: { privateKey: importPrivateKeyPem(existing.devicePrivateKeyPem), publicKeyBase64Url: existing.devicePublicKey },
-              pairingDeviceName: observedDeviceName,
-              pairingMachineId: observedMachineId,
-            };
-          }
-          if (attempt) {
-            return {
-              keyPair: { privateKey: importPrivateKeyPem(attempt.devicePrivateKeyPem), publicKeyBase64Url: attempt.devicePublicKey },
-              pairingDeviceName: attempt.deviceName,
-              pairingMachineId: attempt.machineId,
-            };
-          }
-          const generated = generateDeviceKeyPair();
-          // Persist before the first network request. If the server commits
-          // while its response is lost, the explicit retry uses this exact key.
-          await this.credentials.saveFirstPairingAttempt({
-            kind: 'first-pairing-attempt-v1',
-            deviceName: observedDeviceName,
-            devicePublicKey: generated.publicKeyBase64Url,
-            devicePrivateKeyPem: exportPrivateKeyPem(generated.privateKey),
-            ...(observedMachineId === undefined ? {} : { machineId: observedMachineId }),
-            storeIdentity: this.opts.store.identity,
-          }, signal);
-          return { keyPair: generated, pairingDeviceName: observedDeviceName, pairingMachineId: observedMachineId };
-        });
+        // The pairing holds the enrollment gate across its own request: the
+        // server's registration has no fencing, so a request in flight could
+        // supersede another store's later pairing (#2045 F1). The request
+        // deadline bounds the hold. A request that times out is unknown, not
+        // failed: its staged attempt stays for an exact retry with the same
+        // key (#1767), and the server may still register it after the gate is
+        // released; only registration fencing on the server closes that gap.
+        return this.underEnrollmentGate(signal, async () => {
+          const { keyPair, pairingDeviceName, pairingMachineId } = await this.pairingKey(signal, replaceOtherStore, observedDeviceName, observedMachineId);
 
-        const url = new URL(BYOK_PAIR_PATH, toHttpBase(this.opts.serverUrl));
-        // Best-effort and optional: an unresolvable machine identity omits the
-        // field, which is the documented "no supersession" case — it never
-        // becomes an empty string or any other placeholder the server would
-        // then treat as a real machine shared by every unidentifiable device.
-        const body = await this.runRequest(signal, async (requestSignal) => {
-          const sentAt = Date.now();
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              pairingCode,
-              deviceName: pairingDeviceName,
-              devicePublicKey: keyPair.publicKeyBase64Url,
-              ...(pairingMachineId === undefined ? {} : { machineId: pairingMachineId }),
-            }),
-            signal: requestSignal,
+          const url = new URL(BYOK_PAIR_PATH, toHttpBase(this.opts.serverUrl));
+          // Best-effort and optional: an unresolvable machine identity omits the
+          // field, which is the documented "no supersession" case — it never
+          // becomes an empty string or any other placeholder the server would
+          // then treat as a real machine shared by every unidentifiable device.
+          const body = await this.runRequest(signal, async (requestSignal) => {
+            const sentAt = Date.now();
+            const res = await fetch(url, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                pairingCode,
+                deviceName: pairingDeviceName,
+                devicePublicKey: keyPair.publicKeyBase64Url,
+                ...(pairingMachineId === undefined ? {} : { machineId: pairingMachineId }),
+              }),
+              signal: requestSignal,
+            });
+            const receivedAt = Date.now();
+            if (!res.ok) {
+              throw new Error(`pairing failed: HTTP ${res.status} ${await safeErrorText(res)}`.trimEnd());
+            }
+            // Pairing is the only time an authenticated tenant binding may enter
+            // local state. Parse the required wire contract before building the
+            // one atomic DeviceRecord; no token claim or host configuration is an
+            // alternate tenant authority.
+            const paired = PairResponseSchema.safeParse(await res.json());
+            if (!paired.success) throw new AuthResponseInvalidError('pair', { cause: paired.error });
+            return {
+              ...paired.data,
+              expiresAt: deviceLocalExpiry(receivedAt, paired.data.expiresIn),
+              clockSkew: observeClockSkew(sentAt, receivedAt, res),
+            };
           });
-          const receivedAt = Date.now();
-          if (!res.ok) {
-            throw new Error(`pairing failed: HTTP ${res.status} ${await safeErrorText(res)}`.trimEnd());
-          }
-          // Pairing is the only time an authenticated tenant binding may enter
-          // local state. Parse the required wire contract before building the
-          // one atomic DeviceRecord; no token claim or host configuration is an
-          // alternate tenant authority.
-          const paired = PairResponseSchema.safeParse(await res.json());
-          if (!paired.success) throw new AuthResponseInvalidError('pair', { cause: paired.error });
-          return {
-            ...paired.data,
-            expiresAt: deviceLocalExpiry(receivedAt, paired.data.expiresIn),
-            clockSkew: observeClockSkew(sentAt, receivedAt, res),
-          };
-        });
 
-        const metadata: DeviceMetadata = {
-          deviceId: body.deviceId,
-          tenantId: body.tenantId,
-          devicePublicKey: keyPair.publicKeyBase64Url,
-        };
-        const record: DeviceRecord = {
-          ...metadata,
-          accessToken: body.accessToken,
-          expiresAt: body.expiresAt,
-          devicePrivateKeyPem: exportPrivateKeyPem(keyPair.privateKey),
-        };
-        // device.json is this store's pair-time binding and a non-secret
-        // projection. Write it first, then atomically replace the complete OS
-        // enrollment authority. If the authoritative replace fails, the next
-        // load reports the binding mismatch; no mixed identity/key can load,
-        // and recovery is re-running pair or the doctor repair action.
-        await this.underEnrollmentGate(signal, async () => {
-          // Another store may have paired while the request ran; the key this
-          // request proved must still be this store's enrollment or attempt.
-          const { existing, attempt } = await this.pairingAuthority(signal, replaceOtherStore);
-          if ((existing ?? attempt)?.devicePublicKey !== keyPair.publicKeyBase64Url) {
-            throw new FirstPairingAttemptRefusedError('store_not_bound');
-          }
+          const metadata: DeviceMetadata = {
+            deviceId: body.deviceId,
+            tenantId: body.tenantId,
+            devicePublicKey: keyPair.publicKeyBase64Url,
+          };
+          const record: DeviceRecord = {
+            ...metadata,
+            accessToken: body.accessToken,
+            expiresAt: body.expiresAt,
+            devicePrivateKeyPem: exportPrivateKeyPem(keyPair.privateKey),
+          };
+          // device.json is this store's pair-time binding and a non-secret
+          // projection. Write it first, then atomically replace the complete OS
+          // enrollment authority. If the authoritative replace fails, the next
+          // load reports the binding mismatch; no mixed identity/key can load,
+          // and recovery is re-running pair or the doctor repair action.
           await this.opts.store.save(metadata);
           await this.credentials.replace(record, signal);
+          this.record = record;
+          this.lastClockSkew = body.clockSkew;
+          this.revoked = false;
+          return record;
         });
-        this.record = record;
-        this.lastClockSkew = body.clockSkew;
-        this.revoked = false;
-        return record;
       });
     } finally {
       this.pairing = false;
@@ -527,6 +496,44 @@ export class AuthManager {
     } finally {
       await gate.release();
     }
+  }
+
+  /** Under the enrollment gate: the key and request facts a pairing proves, staging a new first-pairing attempt when this store has none. */
+  private async pairingKey(
+    signal: AbortSignal,
+    replaceOtherStore: boolean,
+    observedDeviceName: string,
+    observedMachineId: string | undefined,
+  ): Promise<{ readonly keyPair: ReturnType<typeof generateDeviceKeyPair>; readonly pairingDeviceName: string; readonly pairingMachineId: string | undefined }> {
+    const { existing, attempt } = this.record === undefined
+      ? await this.pairingAuthority(signal, replaceOtherStore)
+      : { existing: this.record, attempt: undefined };
+    if (existing) {
+      return {
+        keyPair: { privateKey: importPrivateKeyPem(existing.devicePrivateKeyPem), publicKeyBase64Url: existing.devicePublicKey },
+        pairingDeviceName: observedDeviceName,
+        pairingMachineId: observedMachineId,
+      };
+    }
+    if (attempt) {
+      return {
+        keyPair: { privateKey: importPrivateKeyPem(attempt.devicePrivateKeyPem), publicKeyBase64Url: attempt.devicePublicKey },
+        pairingDeviceName: attempt.deviceName,
+        pairingMachineId: attempt.machineId,
+      };
+    }
+    const generated = generateDeviceKeyPair();
+    // Persist before the first network request. If the server commits
+    // while its response is lost, the explicit retry uses this exact key.
+    await this.credentials.saveFirstPairingAttempt({
+      kind: 'first-pairing-attempt-v1',
+      deviceName: observedDeviceName,
+      devicePublicKey: generated.publicKeyBase64Url,
+      devicePrivateKeyPem: exportPrivateKeyPem(generated.privateKey),
+      ...(observedMachineId === undefined ? {} : { machineId: observedMachineId }),
+      storeIdentity: this.opts.store.identity,
+    }, signal);
+    return { keyPair: generated, pairingDeviceName: observedDeviceName, pairingMachineId: observedMachineId };
   }
 
   /**
