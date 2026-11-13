@@ -1,5 +1,7 @@
 import { checkDependencyDirection } from '../architecture/dependency-graph.mjs';
 import { checkRetiredIdentities } from './check-retired-identities.mjs';
+import { specifiers } from '../api-surface/module-scan.mjs';
+import { builtinModules } from 'node:module';
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -190,6 +192,30 @@ for (const [directory, expectedName] of publicPackages) {
   }
   if (readFileSync(path.join(repoRoot, directory, 'LICENSE'), 'utf8') !== readFileSync(path.join(repoRoot, 'LICENSE'), 'utf8')) {
     errors.push(`${directory}/LICENSE: must match the root license byte-for-byte`);
+  }
+}
+
+// Every shipped declaration must resolve its external package from the consumer's
+// install, including declarations reached through non-root entrypoints.
+const builtins = new Set(builtinModules);
+for (const [directory] of publicPackages) {
+  const manifest = readJson(`${directory}/package.json`);
+  const dist = path.join(repoRoot, directory, 'dist');
+  if (!existsSync(dist)) {
+    errors.push(`${directory}/dist: missing; build before checking published declarations`);
+    continue;
+  }
+  for (const entry of readdirSync(dist, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile() || !/\.d\.(?:ts|mts|cts)$/.test(entry.name)) continue;
+    const file = path.join(entry.parentPath, entry.name);
+    for (const specifier of specifiers(readFileSync(file, 'utf8'))) {
+      if (specifier.startsWith('.') || specifier.startsWith('#') || specifier.startsWith('node:') ||
+          specifier.startsWith('cloudflare:') || builtins.has(specifier)) continue;
+      const dependency = specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0];
+      if (dependency !== manifest.name && !manifest.dependencies?.[dependency] && !manifest.peerDependencies?.[dependency]) {
+        errors.push(`${path.relative(repoRoot, file)}: ${dependency} is referenced by a published declaration but missing from dependencies or peerDependencies`);
+      }
+    }
   }
 }
 

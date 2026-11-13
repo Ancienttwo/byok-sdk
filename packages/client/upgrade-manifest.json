@@ -16,6 +16,15 @@
   },
   "entries": [
     {
+      "id": "client-store-compatibility-type",
+      "impact": "additive",
+      "summary": "The client root exports the StoreCompatibility type used by bot-collaboration ledger inspection, so strict package installations can resolve the published declaration.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2076",
+      "items": [
+        "export:@byok-sdk/client#StoreCompatibility"
+      ]
+    },
+    {
       "id": "bot-turn-instruction-host-kit",
       "impact": "additive",
       "summary": "Host adapters can compute the instruction frozen by K8 sync with botTurnInstruction on the host-kit entry, using an options object and InstructionLimits.",
@@ -338,6 +347,11 @@
       "item": "export:@byok-sdk/client#SqliteLocalTaskJournal",
       "change": "changed",
       "entry": "journal-prune-cutoff"
+    },
+    {
+      "item": "export:@byok-sdk/client#StoreCompatibility",
+      "change": "added",
+      "entry": "client-store-compatibility-type"
     },
     {
       "item": "export:@byok-sdk/client#clearDeviceEnrollment",
