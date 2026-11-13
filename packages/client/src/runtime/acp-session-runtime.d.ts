@@ -20,7 +20,7 @@ export declare class UnsupportedOptionError extends Error {
 }
 export interface AcpControl {
   // ControlResult also permits an exit response with a numeric or null code.
-  response: { body: { kind: string; code?: string | number | null; reason?: string } };
+  response: { body: { kind: string; code?: string | number | null; reason?: string; failure?: string } };
 }
 /** Structural SPI: one complete kernel record of an ACP session. */
 export interface AcpRecord {
