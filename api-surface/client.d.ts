@@ -11400,7 +11400,9 @@ export interface ServiceInstallationOptions {
      * process group it leads, on Windows its pid and start time. Until that
      * group (on Windows, the root) has ended, nothing restores or starts on
      * the stores: upgrade() throws `upgrade_pending` and recover() changes
-     * nothing. A pgid reused by another group also reads as running; recover()
+     * nothing. When the record cannot be written, the group gets SIGTERM, then
+     * SIGKILL after a second; only once it is proved gone (ESRCH) is anything
+     * restored, else the call is `upgrade_pending` with `current` absent. A pgid reused by another group also reads as running; recover()
      * then refuses until that group ends or the machine restarts. A process
      * that leaves the group (setsid), what a Windows root starts, and a death
      * between spawn and record stay the Host's responsibility. The Host
@@ -11492,8 +11494,9 @@ export interface ServiceUpgradeReceipt {
  * `store_owned`. A symbolic link anywhere under `snapshots/` (the directory,
  * a snapshot, a snapshot file) is `snapshots_symlinked` before any side
  * effect; a link swapped in after that check is the Host's responsibility.
- * A version 1 receipt (SDK 0.42) is `receipt_upgrade_required` until
- * recover() rewrites it; a pending one must be recovered with SDK 0.42.
+ * A pending version 1 receipt (SDK 0.42) is `receipt_upgrade_required`:
+ * recover it with SDK 0.42 first. A final one reads as version 2, and the
+ * next write stores version 2.
  */
 export interface ServiceInstallation {
     /** The service lifecycle whose program runs `<installRoot>/current`. */
@@ -11508,7 +11511,8 @@ export interface ServiceInstallation {
      * then throws `install_health_check_failed`. A same-id reinstall only
      * repairs the service and checks health, as before; it does not prepare
      * stores or change earlier rollback snapshots; it journals a pending
-     * `repair` receipt with the prior receipt and never replaces `current`.
+     * `repair` receipt with the prior receipt, stops the service before it
+     * rewrites the unit, and never replaces `current`.
      * A failed repair keeps the payload, `current` and the unit, writes the
      * prior receipt back and throws `install_health_check_failed`; an
      * interrupted one leaves recover() to write the prior receipt back and
@@ -11628,7 +11632,7 @@ declare const ERROR_MESSAGES: {
     readonly rollback_unhealthy: 'The previous version was restored but failed its health check too.';
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
     readonly install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.';
-    readonly receipt_upgrade_required: 'The receipt is from SDK 0.42: run recover() once (a pending one with SDK 0.42 first).';
+    readonly receipt_upgrade_required: 'Pending SDK 0.42 receipt: run recover() with SDK 0.42 first.';
     readonly receipt_state_inconsistent: 'The receipt does not match the version pointers. Nothing was changed.';
     readonly switch_unhealthy: 'The new version stays current but is unhealthy. Call rollback(), or keep it.';
     readonly repair_interrupted: 'A same-version reinstall was interrupted. Run install() again.';
@@ -11669,6 +11673,7 @@ export declare function installationHoldsStart(storeDir: string): Promise<boolea
 export declare function readServiceInstallationState(installRoot: string): Promise<{
     current: string | undefined;
     receipt: ServiceUpgradeReceipt | undefined;
+    receiptError?: 'receipt_upgrade_required';
 }>;
 export declare function createServiceInstallation(opts: ServiceInstallationOptions): ServiceInstallation;
 /**
