@@ -550,7 +550,8 @@ keeps the one to restore and removes the others.
 Later upgrades never prune `.install-*` directories, and `uninstall()` keeps
 them: it removes every other snapshot but leaves `snapshots/` in place while
 one exists. Every operation refuses a symbolic link under `snapshots/` (the directory,
-a snapshot it is about to restore, or a file in that snapshot) with
+a snapshot it is about to restore, its `snapshot.json`, or any path segment
+of a file it lists) with
 `ServiceInstallationError` `snapshots_symlinked` before it changes
 anything; a link swapped in after that check is the Host's responsibility. A leftover `.install-<uuid>` (a removal that failed, a rename
 that failed, an installer that was killed) is never restored automatically,
@@ -594,8 +595,9 @@ a start that could restart the service after removal.
 If the service fails to install, activate, start or pass its health check,
 install removes the unit and launcher, `current`, the installation record and
 the staged `versions/<id>` directory, then throws `ServiceInstallationError`
-with code `install_health_check_failed` and the original error as `cause`. This also applies when reinstalling
-the same id: a failed repair leaves no service installed. After a first
+with code `install_health_check_failed` and the original error as `cause`. A failed same-id reinstall
+(repair) is different: it keeps the payload, `current` and the unit, and the
+receipt it replaced, so run `install` again once the cause is fixed. After a first
 install that prepared stores, cleanup restores the prepared snapshot last,
 once the unit, `current`, the record and the staged directory are gone,
 including Host and daemon stores changed by migration or startup. A failed
@@ -648,12 +650,17 @@ program to run from `current`, or fail with `service_program_not_current`
 before anything changes; `install` with the same version id rewrites the
 unit, then retry.
 
-While `migrate` runs, its process group is recorded in the `pending` receipt
-(on POSIX it runs detached in a group of its own). After a process death,
-`recover()` changes nothing while that group still runs and says so; run it
-again once the migration has exited. A migration process that leaves its
-group (`setsid`), or one on Windows, is not tracked: the Host stops it before
-`recover()`.
+While `migrate` runs, it is recorded in the `pending` receipt: on POSIX the
+process group it leads (it runs detached in a group of its own), on Windows
+its pid and start time. Until that group (on Windows, the root) has ended,
+nothing restores or starts on the stores: when the root exits and its group
+still runs, `upgrade apply` fails with `upgrade_pending` and keeps the
+record, and `recover()` changes nothing and says so; run it again once the
+migration has ended. A pgid the system has given to another group since
+also counts as running: when `recover()` keeps refusing and no migration
+process is left, end the group it names or restart the machine. A process
+that leaves the group (`setsid`), and what a Windows migration starts, are
+not tracked: the Host stops them before `recover()`.
 
 `upgrade rollback` writes a `pending` receipt, then restores `previous` and the
 snapshot taken when `current` was switched to; store writes since then are

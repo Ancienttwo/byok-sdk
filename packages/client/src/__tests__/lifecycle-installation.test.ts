@@ -287,7 +287,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(await fs.readFile(path.join(installRoot, 'versions', '2.0.0', 'host.js'), 'utf8')).toBe('// corrected 2.0.0');
   });
 
-  it.each(['first install', 'same-id reinstall', 'activation failure', 'typed activation failure'])('%s removes installation artifacts when startup fails, preserving stores (#1966)', async (mode) => {
+  it.each(['first install', 'activation failure', 'typed activation failure'])('%s removes installation artifacts when startup fails, preserving stores (#1966)', async (mode) => {
     const healthError = mode === 'typed activation failure'
       ? new ServiceUnitError('service_unload_timeout')
       : new Error(mode === 'activation failure' ? 'service activation failed' : 'identity endpoint is unhealthy');
@@ -306,7 +306,6 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     };
     installation = installationOver(createManagedLifecycle(def, unit));
     const candidate = await payload('1.0.0');
-    if (mode === 'same-id reinstall') await installation.install(candidate);
     onHealth = async () => { throw healthError; };
     const hostStore = path.join(root, 'host-store.json');
     await fs.writeFile(hostStore, 'Host data');
@@ -1672,6 +1671,31 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await pointer('current')).toBe('2.0.0');
     });
 
+    it('a failed repair keeps the payload, current, the unit and the receipt it replaced', async () => {
+      const prior = await installation.receipt();
+      unhealthy.add('2.0.0');
+      await expect(installation.install(await payload('2.0.0'))).rejects.toMatchObject({ code: 'install_health_check_failed' });
+      expect([await pointer('current'), await installation.receipt(), events.includes('uninstall')]).toEqual(['2.0.0', prior, false]);
+      expect(existsSync(path.join(installRoot, 'versions', '2.0.0'))).toBe(true);
+    });
+
+    it.skipIf(process.platform === 'win32')('a migrate whose group outlives its root leaves the stores alone until the group ends', async () => {
+      const lingering = `${MIGRATE}\nrequire('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' }).unref();`;
+      installation = installationOver(fakeLifecycle(), { migrate: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] }) });
+      await verdicts('migration-required');
+      const error = await installation.upgrade(await payload('3.0.0', { 'migrate.cjs': lingering })).catch((caught: unknown) => caught);
+      const { migrate } = JSON.parse(await fs.readFile(receiptPath(), 'utf8')) as { migrate: { pgid: number } };
+      try {
+        expect(error).toMatchObject({ code: 'upgrade_pending', message: expect.stringContaining(`process group ${migrate.pgid}`) });
+        expect([await pointer('current'), await fs.readFile(db, 'utf8'), events.includes('start')]).toEqual([undefined, 'migrated data', false]);
+        await expect(installation.recover()).rejects.toMatchObject({ code: 'upgrade_pending' });
+      } finally {
+        process.kill(-migrate.pgid, 'SIGKILL');
+      }
+      await vi.waitFor(async () => expect(await installation.recover()).toMatchObject({ state: 'rolled-back' }));
+      expect([await pointer('current'), await fs.readFile(db, 'utf8')]).toEqual(['2.0.0', 'v2 data']);
+    });
+
     it('a version 1 receipt: a pending one is refused untouched, a final one is rewritten by recover()', async () => {
       const v1 = { ...(await installation.receipt()), version: 1 };
       await fs.writeFile(receiptPath(), JSON.stringify({ ...v1, state: 'pending' }));
@@ -1684,8 +1708,8 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await installation.receipt()).toMatchObject({ version: 2, state: 'switched' });
     });
 
-    it.skipIf(process.platform === 'win32')('a migrate process group that still runs keeps recover() from touching anything', async () => {
-      const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { detached: true, stdio: 'ignore' });
+    it('a migrate process group that still runs keeps recover() from touching anything (win32: its root)', async () => {
+      const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { detached: process.platform !== 'win32', stdio: 'ignore' });
       try {
         await new Promise((resolve) => child.once('spawn', resolve));
         await fs.rm(path.join(installRoot, 'current'));
@@ -1695,7 +1719,8 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         expect(events).toEqual([]);
         expect(await tree(root)).toEqual(before);
       } finally {
-        process.kill(-child.pid!, 'SIGKILL');
+        if (process.platform === 'win32') child.kill('SIGKILL');
+        else process.kill(-child.pid!, 'SIGKILL');
         await new Promise((resolve) => child.once('exit', resolve));
       }
       await expect(installation.recover()).resolves.toMatchObject({ state: 'rolled-back', code: 'upgrade_pending' });
@@ -1714,7 +1739,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(events).toEqual([]);
     });
 
-    it.each(['snapshots', path.join('snapshots', '2.0.0'), path.join('snapshots', '2.0.0', '0')])('rollback() refuses a link at %s before any side effect (#2061)', async (level) => {
+    it.each(['snapshots', path.join('snapshots', '2.0.0'), path.join('snapshots', '2.0.0', 'snapshot.json'), path.join('snapshots', '2.0.0', '0')])('rollback() refuses a link at %s before any side effect (#2061)', async (level) => {
       const linked = path.join(installRoot, level);
       await fs.rename(linked, `${linked}-moved`);
       await fs.symlink(`${linked}-moved`, linked);
@@ -1751,6 +1776,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       'an upgrade whose candidate fails its health check': { unhealthy: ['2.0.0'], run: () => installation.upgrade(path.join(root, 'payloads', '2.0.0')) },
       'a rollback': { unhealthy: [], run: () => installation.rollback() },
       'a migrating upgrade': { unhealthy: [], migrate: true, run: () => installation.upgrade(path.join(root, 'payloads', '2.0.0')) },
+      'a same-version repair': { unhealthy: [], run: () => installation.install(path.join(root, 'payloads', '2.0.0')) },
     } as const;
     it.each(Object.keys(scenarios) as (keyof typeof scenarios)[])('%s', async (name) => {
       const scenario = scenarios[name];
@@ -1761,7 +1787,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       installation = over();
       await installation.install(await payload('1.0.0'));
       await payload('2.0.0', { 'migrate.cjs': MIGRATE });
-      if (name === 'a rollback') {
+      if (name === 'a rollback' || name === 'a same-version repair') {
         await installation.upgrade(path.join(root, 'payloads', '2.0.0'));
         await fs.writeFile(db, 'v2 later');
         onHealth = async () => undefined;
@@ -1783,6 +1809,16 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         await crash.end();
         unhealthy = new Set();
         installation = over();
+        if (name === 'a same-version repair') {
+          // Every write of a repair leaves `current` and the stores alone; recover() clears its journal, and the repair runs again.
+          const prior = JSON.parse(await fs.readFile(path.join(template, path.basename(installRoot), 'upgrade-receipt.json'), 'utf8'));
+          await installation.recover().catch((error: unknown) => expect(error).toMatchObject({ code: 'repair_interrupted' }));
+          expect([await pointer('current'), await fs.readFile(db, 'utf8'), startedWithoutCurrent]).toEqual(['2.0.0', 'v2 later', false]);
+          await installation.install(path.join(root, 'payloads', '2.0.0'));
+          expect(await installation.receipt()).toEqual(prior);
+          if (!died) break;
+          continue;
+        }
         const settled = await installation.recover();
         // Never a start with `current` absent, and the stores always belong to the version `current` names.
         expect(startedWithoutCurrent).toBe(false);

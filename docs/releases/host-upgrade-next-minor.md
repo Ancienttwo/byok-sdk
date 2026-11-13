@@ -219,18 +219,26 @@ service that had already restarted.
   `failed` receipt with `switch_unhealthy`. The Host decides: call
   `rollback()` to discard the candidate's store writes, or keep it.
 - **`repair_interrupted`:** a same-version reinstall journals a `repair`
-  receipt and never removes `current`. After an interruption, `recover()`
+  receipt and never replaces `current`. A failed one now keeps the payload,
+  `current` and the unit and puts the earlier receipt back (0.42.0 removed
+  the installation). After an interruption, `recover()`
   writes the earlier receipt back and throws `repair_interrupted`; call
   `install()` again.
 - **Start gate:** `byok-agent start` and `createDaemon` refuse with
   `store_owned` while a `pending` receipt has `current` absent. A Host
   process that opens the stores without them checks the receipt itself.
-- **Migration:** an upgrade's `migrate` runs detached in its own process
-  group on POSIX, recorded in the `pending` receipt, and `recover()` changes
-  nothing while that group runs. A process that leaves the group (`setsid`)
-  and Windows migrations are not tracked: stop them before `recover()`.
+- **Migration:** an upgrade's `migrate` is recorded in the `pending`
+  receipt: on POSIX the process group it leads (it runs detached), on
+  Windows its pid and start time. Until that group (on Windows, the root)
+  ends, nothing restores or starts: `upgrade()` fails with `upgrade_pending`
+  when the root exits first, and `recover()` changes nothing. A pgid reused
+  by another group also counts as running; when `recover()` keeps refusing
+  with no migration process left, end the group it names or restart the
+  machine. A process that leaves the group (`setsid`), and what a Windows
+  migration starts, are not tracked: stop them before `recover()`.
 - **Links under `snapshots/`:** every operation refuses a symbolic link at
-  `snapshots/`, at a snapshot it is about to restore or at a file in it with
+  `snapshots/`, at a snapshot it is about to restore, at its `snapshot.json`
+  or at any path segment of a file it lists, with
   `snapshots_symlinked`, before its first side effect (#2061). A link swapped
   in after that check is the Host's responsibility.
 - **Snapshot removal (#2062):** a snapshot that cannot be removed after the

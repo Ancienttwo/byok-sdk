@@ -92,11 +92,15 @@ export interface ServiceInstallationOptions {
    * `store_migration_required` and nothing is switched. Any failure after the
    * snapshot (a throw here, an exit other than 0, a failed or non-accepting
    * second precheck) restores the snapshot and is `store_migration_failed`,
-   * with a thrown or precheck error as `cause`. On upgrade its process
-   * group (detached on POSIX) is recorded in the pending receipt before it
-   * is awaited, and recover() changes nothing while that group still runs
-   * (#2011). A process that leaves the group (setsid), a death between
-   * spawn and record, and Windows stay the Host's responsibility. The Host
+   * with a thrown or precheck error as `cause`. On upgrade it is recorded
+   * in the pending receipt before it is awaited (#2011): on POSIX the
+   * process group it leads, on Windows its pid and start time. Until that
+   * group (on Windows, the root) has ended, nothing restores or starts on
+   * the stores: upgrade() throws `upgrade_pending` and recover() changes
+   * nothing. A pgid reused by another group also reads as running; recover()
+   * then refuses until that group ends or the machine restarts. A process
+   * that leaves the group (setsid), what a Windows root starts, and a death
+   * between spawn and record stay the Host's responsibility. The Host
    * must make this program safe to run again after interruption: install
    * has no write-ahead receipt for a process death during migration.
    */
@@ -203,8 +207,10 @@ export interface ServiceInstallation {
    * then throws `install_health_check_failed`. A same-id reinstall only
    * repairs the service and checks health, as before; it does not prepare
    * stores or change earlier rollback snapshots; it journals a pending
-   * `repair` receipt with the prior receipt, never deletes `current`, and
-   * an interrupted one leaves recover() to write the prior receipt back and
+   * `repair` receipt with the prior receipt and never replaces `current`.
+   * A failed repair keeps the payload, `current` and the unit, writes the
+   * prior receipt back and throws `install_health_check_failed`; an
+   * interrupted one leaves recover() to write the prior receipt back and
    * throw `repair_interrupted`, after which install() runs again. An allowed unmarked unit
    * is untouched until preparation succeeds; its live store owner causes
    * `store_busy`. An owned marked unit without a current version is stopped
@@ -434,6 +440,11 @@ function unfinishedFailure(errors: readonly unknown[], note: string): ServiceIns
 
 const RELEASE_NOTE = 'The store gates or leases could not be released.';
 const STOP_NOTE = 'The service could not be stopped and its stores leased.';
+
+/** A migrate group that outlived its root (#2011): nothing is restored or started, and the record stays. */
+class MigrateRunning extends Error {}
+
+const migrateNote = (group: OwnedProcessGroupRecord): string => `The store migration may still run (process group ${group.pgid}); nothing was restored or started. Run recover() once it has ended.`;
 
 /** A preparation exit is typed (#2010): an error that is not ours becomes `store_preparation_failed`. */
 function preparationError(error: unknown): unknown {
@@ -837,6 +848,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       // `current`: stage() only verifies `versions/<id>`, and the unit files are
       // replaced by rename. Its pending receipt keeps the final receipt it replaces,
       // put back when it settles, so the receipt records only upgrades (#2011).
+      // A failed repair keeps all of that: there is no earlier state to restore.
       const prior = installed === undefined ? undefined : await readReceipt();
       if (installed !== undefined) await writePending({ kind: 'repair', from: id, to: id, ...(prior === undefined ? {} : { prior }) });
       // An install snapshot must not replace a same-id reinstall's earlier
@@ -873,7 +885,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       let activationAttempted = false;
       let health: Awaited<ReturnType<typeof startHealthy>>;
       try {
-        await setPointer('current', id);
+        if (installed === undefined) await setPointer('current', id);
         await writeRecord();
         if (prepared !== undefined) {
           // A failed release cannot prove the stores are still all held.
@@ -887,11 +899,15 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       } catch (cause) {
         health = { ok: false, cause };
       }
+      if (installed !== undefined) {
+        await writeBack(prior);
+        if (health.ok) return;
+        throw new ServiceInstallationError('install_health_check_failed', undefined, { cause: health.cause });
+      }
       if (health.ok) {
         // Health commits the installation. Garbage collection cannot turn
         // that success into a rejection with migrated stores still live.
         if (prepared !== undefined) await fs.rm(path.join(snapshotsDir, snapshotId), { recursive: true, force: true }).catch(() => undefined);
-        if (installed !== undefined) await writeBack(prior);
         return;
       }
 
@@ -906,7 +922,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         { name: 'service unit and launcher', remove: async () => {
           // A first install that failed before activation has not touched
           // the allowed foreign unit. Never try to uninstall that unit.
-          if (activationAttempted || installed !== undefined || stopMarked) await held.uninstall();
+          if (activationAttempted || stopMarked) await held.uninstall();
         } },
         { name: 'current pointer', remove: () => setPointer('current', undefined) },
         { name: 'installation record', remove: () => fs.rm(serviceInstallationRecordPath(storeDir), { force: true }) },
@@ -954,7 +970,6 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           throw error;
         }
       }
-      if (installed !== undefined) await writeBack(prior);
       throw new ServiceInstallationError('install_health_check_failed', undefined, { cause: health.cause });
     });
   }
@@ -1102,7 +1117,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     } catch (error) {
       const errors = typedParts(error);
       let unfinished: string | undefined;
-      if (restoreOnFailure) {
+      if (error instanceof MigrateRunning) unfinished = error.message;
+      else if (restoreOnFailure) {
         const failed = installing ? await restoreInstallSnapshot(snapshotId) : await restoreSnapshot(snapshotId).then(() => undefined, (restoreError: unknown) => ({ errors: [restoreError], kept: path.join(snapshotsDir, snapshotId) }));
         if (failed !== undefined) {
           errors.push(...failed.errors);
@@ -1134,7 +1150,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       if (code !== 0) throw new ServiceInstallationError('store_migration_failed', stores);
       migrated = await precheck(to);
     } catch (error) {
-      if (error instanceof ServiceInstallationError && error.code === 'store_migration_failed') throw error;
+      if (error instanceof MigrateRunning || (error instanceof ServiceInstallationError && error.code === 'store_migration_failed')) throw error;
       throw new ServiceInstallationError('store_migration_failed', stores, { cause: error });
     }
     if (!migrated.every((store) => store.verdict === 'accepted' || store.verdict === 'absent')) {
@@ -1145,32 +1161,38 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
 
   /**
    * Runs `migrate` and resolves to its exit code (`null` when it cannot
-   * start). Under an upgrade's journal (#2011, POSIX) it leads a process
-   * group of its own, recorded in the pending receipt (written and synced)
-   * before the wait, so recover() leaves the stores alone while the group
-   * still runs. Not covered, the Host's responsibility: the moment between
-   * spawn and the synced record, a migrate that leaves its group (setsid, a
-   * daemon), and win32, where no group is recorded.
+   * start). Under an upgrade's journal (#2011) it is recorded in the pending
+   * receipt (written and synced) before the wait: on POSIX the process group
+   * it leads, on win32 its pid and start time. When the root exits while its
+   * group still runs, nothing may restore or start on the stores, so this
+   * throws {@link MigrateRunning} and the record stays. Not covered, the
+   * Host's responsibility: the moment between spawn and the synced record, a
+   * process that leaves the group (setsid, a daemon), and on win32 what the
+   * root started.
    */
   async function runMigrate(program: ServiceProgram, journal?: Journal): Promise<number | null> {
-    const tracked = journal !== undefined && platform !== 'win32';
-    const child = spawn(program.command, program.args, { cwd: program.cwd, stdio: 'ignore', detached: tracked, windowsHide: true });
+    const tracked = journal !== undefined;
+    const child = spawn(program.command, program.args, { cwd: program.cwd, stdio: 'ignore', detached: tracked && platform !== 'win32', windowsHide: true });
     const exit = new Promise<number | null>((resolve) => {
       child.once('error', () => resolve(null));
       child.once('exit', (code) => resolve(code));
     });
+    let migrate: OwnedProcessGroupRecord | undefined;
     if (tracked && child.pid !== undefined) {
       try {
-        const migrate = ownedProcessGroupRecord(child, 'migrate');
+        migrate = ownedProcessGroupRecord(child, 'migrate', undefined, platform);
         if (migrate !== undefined) await writePending({ ...journal, migrate });
       } catch (error) {
         // Nothing unrecorded may outlive this call.
-        process.kill(-child.pid, 'SIGKILL');
+        if (platform === 'win32') child.kill('SIGKILL');
+        else process.kill(-child.pid, 'SIGKILL');
         await exit;
         throw error;
       }
     }
-    return exit;
+    const code = await exit;
+    if (migrate !== undefined && ownedProcessGroupRuns(migrate, platform)) throw new MigrateRunning(migrateNote(migrate));
+    return code;
   }
 
   /**
@@ -1270,10 +1292,17 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   /** Checks `snapshots/<name>` and every copy in it a restore reads, before the operation's first side effect. */
   async function refuseLinkedSnapshot(name: string): Promise<void> {
     const dir = path.join(snapshotsDir, name);
+    const index = path.join(dir, 'snapshot.json');
     await refuseLinkedSnapshots(dir);
-    if (!(await exists(path.join(dir, 'snapshot.json')))) return;
-    const { entries } = JSON.parse(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8')) as { entries: SnapshotEntry[] };
-    for (const entry of entries) for (const file of Object.values(entry.files)) await refuseLinkedSnapshots(path.join(dir, file));
+    await refuseLinkedSnapshots(index);
+    if (!(await exists(index))) return;
+    const { entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: SnapshotEntry[] };
+    for (const entry of entries) {
+      for (const file of Object.values(entry.files)) {
+        let at = dir;
+        for (const part of file.split(/[\\/]/u)) await refuseLinkedSnapshots(at = path.join(at, part));
+      }
+    }
   }
 
   async function listInstallSnapshots(): Promise<string[]> {
@@ -1516,8 +1545,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         if (v1) await writeFileAtomic(receiptPath, `${JSON.stringify(last, null, 2)}\n`);
         return last;
       }
-      if (last.migrate !== undefined && ownedProcessGroupRuns(last.migrate)) {
-        throw unfinishedFailure([], `The store migration of this upgrade may still run (process group ${last.migrate.pgid}); nothing was changed.`);
+      if (last.migrate !== undefined && ownedProcessGroupRuns(last.migrate, platform)) {
+        throw unfinishedFailure([], migrateNote(last.migrate));
       }
       const current = await currentVersion();
       const at = current === undefined ? 'absent' : current === last.from ? 'from' : current === last.to ? 'to' : 'other';

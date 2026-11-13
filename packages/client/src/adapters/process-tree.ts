@@ -393,8 +393,13 @@ export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOption
  * unreadable table, or a child missing while running or not leading its own
  * group, throws, and nothing it owns is left unrecorded.
  */
-export function ownedProcessGroupRecord(child: ChildProcess, label: string, read: () => ProcessTable = readProcessTable): OwnedProcessGroupRecord | undefined {
+export function ownedProcessGroupRecord(child: ChildProcess, label: string, read: () => ProcessTable = readProcessTable, platform: NodeJS.Platform = process.platform): OwnedProcessGroupRecord | undefined {
   const pid = child.pid!;
+  if (platform === 'win32') {
+    // win32 has no group: the root alone, named by its pid and start time.
+    const start = win32ProcessStart(pid);
+    return start === undefined ? undefined : { pgid: pid, rootStart: start, bootId: '', writerPid: process.pid, writerStart: '' };
+  }
   const table = read();
   const writer = table.get(process.pid);
   if (writer === undefined) throw new Error(`${label} process group could not be recorded: the process table is unreadable`);
@@ -449,36 +454,32 @@ function startedAtOrAfter(start: string, rootStart: string): boolean {
 }
 
 /**
- * The processes of the run that recorded `group` still in `table`: its root
- * and descendants, or what still carries its pgid once the root is gone.
- * Empty when the pgid's leader is another process (the pid was reused) or
- * the group holds a process older than its root (someone else's group).
+ * Whether a recorded migrate group may still run (#2011); anything that
+ * cannot be read counts as running. POSIX: a group recorded in an earlier
+ * boot has ended; otherwise `kill(-pgid, 0)` decides and only ESRCH means
+ * ended. A pgid the system has handed to a new group since then also counts
+ * as running: recover() refuses until that group ends or the machine
+ * restarts. win32: the root alone, by pid and start time; what it started
+ * is the Host's.
  */
-function groupProcesses(group: OwnedProcessGroupRecord, table: ProcessTable): ProcessEntry[] {
-  const leader = table.get(group.pgid);
-  if (leader !== undefined && leader.start !== group.rootStart) return [];
-  const members = [...table.values()].filter((entry) => entry.pgid === group.pgid);
-  if (leader === undefined && members.some((entry) => !startedAtOrAfter(entry.start, group.rootStart))) return [];
-  const entries = new Map<number, ProcessEntry>(members.map((entry) => [entry.pid, entry]));
-  if (leader !== undefined) {
-    entries.set(leader.pid, leader);
-    for (const descendant of descendantsOf(table, leader.pid)) entries.set(descendant.pid, descendant);
+export function ownedProcessGroupRuns(group: OwnedProcessGroupRecord, platform: NodeJS.Platform, kill: (pid: number, signal: number) => void = process.kill): boolean {
+  try {
+    if (platform === 'win32') return win32ProcessStart(group.pgid) === group.rootStart;
+    if (group.bootId !== currentBootId()) return false;
+    kill(-group.pgid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
   }
-  return [...entries.values()];
 }
 
-/**
- * POSIX: whether a process of the run that recorded `group` may still run,
- * by the same rules {@link reapOwnedProcessGroups} uses to find one. A
- * record from an earlier boot names nothing that runs. win32 records no
- * group, so nothing runs here. An unreadable process table throws: nothing
- * is declared ended on a guess.
- */
-export function ownedProcessGroupRuns(group: OwnedProcessGroupRecord, platform: NodeJS.Platform = process.platform): boolean {
-  if (platform === 'win32') return false;
-  const table = readProcessTable();
-  if (!table.has(process.pid)) throw new Error('the process table could not be read to check a recorded process group');
-  return group.bootId === currentBootId() && groupProcesses(group, table).length > 0;
+/** win32: when process `pid` started (UTC ticks), or `undefined` when no process has that pid. An unreadable answer throws. */
+export function win32ProcessStart(pid: number, run: typeof spawnSync = spawnSyncSystemTool): string | undefined {
+  const result = run('powershell', ['-NoProfile', '-NonInteractive', '-Command', `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p) { $p.StartTime.ToUniversalTime().Ticks } else { 'none' }`], { encoding: 'utf8', windowsHide: true, timeout: 30_000 });
+  const out = String(result.stdout ?? '').trim();
+  if (result.status === 0 && out === 'none') return undefined;
+  if (result.status !== 0 || !/^\d+$/u.test(out)) throw new Error(`the start time of process ${pid} could not be read`);
+  return out;
 }
 
 /**
@@ -540,9 +541,23 @@ export async function reapOwnedProcessGroups(
       liveWriter += 1;
       continue;
     }
-    const entries = groupProcesses(group, table);
-    if (entries.length === 0) ended.push(group);
-    else found.push({ record: group, entries });
+    const leader = table.get(group.pgid);
+    if (leader !== undefined && leader.start !== group.rootStart) {
+      ended.push(group);
+      continue;
+    }
+    const members = [...table.values()].filter((entry) => entry.pgid === group.pgid);
+    if (leader === undefined && members.some((entry) => !startedAtOrAfter(entry.start, group.rootStart))) {
+      ended.push(group);
+      continue;
+    }
+    const entries = new Map<number, ProcessEntry>(members.map((entry) => [entry.pid, entry]));
+    if (leader !== undefined) {
+      entries.set(leader.pid, leader);
+      for (const descendant of descendantsOf(table, leader.pid)) entries.set(descendant.pid, descendant);
+    }
+    if (entries.size === 0) ended.push(group);
+    else found.push({ record: group, entries: [...entries.values()] });
   }
   for (const group of found) killEntries(group.entries, table);
   const held = (group: Found, current: ProcessTable): boolean =>
