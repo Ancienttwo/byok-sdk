@@ -69,6 +69,7 @@
 
 - **Fixed (client; #2008)** — An agent, agent terminal tool or Pi RPC spawn whose environment holds a value containing a NUL byte now fails before the process starts, with an error that names the variable and never its value. Previously Node's rejection quoted the value in escaped form, which credential redaction did not match, so a credential could reach the start failure reason. No Host action is needed.
 
+- **Fixed (client; #2065)** — When an MCP server, agent runtime, agent terminal tool or Pi RPC process fails to start, the error now carries only Node's error code (`spawn failed: ENOENT`) and no longer keeps Node's original error, whose `spawnargs` could carry a credential passed as an argument. MCP start-failure reasons now read `failed to start: spawn failed: <code>` instead of naming the command path, so a Host that matches the old `spawn <path> <code>` text in `task.decline` or `task.fail` reasons must update its matcher; see the next-MINOR Host upgrade guide.
 - **Fixed (client, keys; #2043)** — The NUL-byte spawn check from #2008 now also covers the keys Pi provider launcher's custody spawn, MCP server spawns and ACP terminal arguments, and it checks argument values, env names and inherited env keys. The error names only the argument position or env name. An MCP spawn failure no longer keeps Node's original exception as its `cause`; it carries only the error code. No Host action is needed.
 
 ## 0.42.0 — 2026-11-13 (published)

@@ -42,6 +42,12 @@ Restart requires a product that needs a cloud agent using platform keys with Piâ
 
 No configuration change is needed. Every SDK Pi RPC session now caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings, instead of answering each idle `cache_warming_decision` with `stop`. Pi cancels the warmer at settlement and revalidates pending decisions before dispatch, so a late `"warm"` answer cannot send a refresh after settlement. Under `agentUserContext: 'inherit'` a device setting of `"off"` still turns warming off; under `excluded` the session's settings are in memory and do not read the device file.
 
+## MCP start-failure reasons carry only the error code (#2065)
+
+When an MCP server or helper process cannot start, the reason in `task.decline` and `task.fail` now ends in `failed to start: spawn failed: <code>` instead of Node's `spawn <command path> <code>` message. For example, `MCP toolset server "team" failed to start: spawn /usr/local/bin/team-mcp ENOENT` now reads `MCP toolset server "team" failed to start: spawn failed: ENOENT`. Node's message named the command path, and its error kept the arguments, which can carry a credential, so only the code remains. Agent runtime, agent terminal tool and Pi RPC start failures use the same `spawn failed: <code>` form.
+
+A Host that matches these reasons should key on the code (`ENOENT`, `EACCES` and so on) after `spawn failed: `, not on the command path or the old `spawn <path>` text. A reason without a Node code ends in `spawn failed: unknown`.
+
 ## Provider status reads take the configuration lock (#2012)
 
 `ProviderRegistry.get()`, `list()` and `setDefaultModelProvider()` now read provider status under the same configuration lock that credential writers hold. In one process, a status read waits for a running `configure()`, `replaceSecret()`, `delete()` or sealed provisioning change to finish. With a file-backed `SqliteProviderProfileStore` that another process also writes (for example a separate custody child), a status read waits at most the store's `configurationLockWaitMs` (default `PROVIDER_CONFIGURATION_LOCK_WAIT_MS`, 10 000 ms). If the lock is still held after that wait, the read rejects with a `ByokKeysError` whose `code` is `PROVIDER_CONFIGURATION_BUSY`. Earlier releases never rejected here.

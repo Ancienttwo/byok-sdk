@@ -5,6 +5,7 @@ import { __hostExitBackstopForTests } from '../adapters/process-tree';
 import { createOwnedTerminalSpawn } from '../runtime/owned-terminal-process';
 import { PiRpcClient } from '../adapters/pi/rpc-client';
 import { McpStdioClient } from '../mcp/client';
+import { spawnStartError } from '../util/spawn-input';
 import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/95c6547/runtimes/codex/app-server-client';
 
 // Pass-through spy: every spawn below, including MCP's direct one, is observable.
@@ -88,10 +89,23 @@ describe('BYOK owned line process', () => {
     await expect(new McpStdioClient({ command: '' }, { env: {} }).connect()).rejects.toThrow(/^MCP server failed to spawn: ERR_INVALID_ARG_VALUE$/);
   });
 
-  it('rejects spawn failure and still settles its exit receipt', async () => {
-    const child = checkedSpawn('/nonexistent/byok-s2a-binary', [], { env: {} }); live.push(child);
+  it('falls back to fixed text for a code-less spawn error', () => {
+    const error = spawnStartError(new Error('spawn /bin/fake-key-2065 failed'));
+    expect(error).toMatchObject({ message: 'spawn failed: unknown', code: undefined });
+    expect(carriesSecret(error)).toBe(false);
+  });
+
+  it('rejects spawn failure with only its code on every client spawn and still settles its exit receipt', async () => {
+    const command = '/nonexistent/byok-s2a-binary', args = ['--token=fake-key-2065'];
+    const child = checkedSpawn(command, args, { env: {} }); live.push(child);
     const exited = child.exited.catch(error => error); const onExit = vi.fn(); child.onExit(onExit);
-    await expect(child.spawned).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(await exited).toMatchObject({ code: 'ENOENT' }); expect(onExit).toHaveBeenCalledTimes(1);
+    const pi = new PiRpcClient({ command, args, cwd: '.', env: {} });
+    const errors = [await child.spawned.catch(error => error), await exited, await createOwnedTerminalSpawn()(command, args, { cwd: '.', env: {}, shell: false }).spawned.catch(error => error),
+      await pi.waitClosed().then(() => pi.terminalError), await new McpStdioClient({ command, args }, { env: {} }).connect().catch(error => error)];
+    // Node's own error carries the arguments in `spawnargs`; nothing nested may.
+    expect(errors.filter(error => carriesSecret(error))).toEqual([]);
+    expect(errors.slice(0, 4)).toEqual(Array(4).fill(expect.objectContaining({ message: 'spawn failed: ENOENT', code: 'ENOENT' })));
+    expect(errors[4]).toMatchObject({ message: 'MCP server failed to start: spawn failed: ENOENT' });
+    expect(onExit).toHaveBeenCalledTimes(1);
   });
 });
