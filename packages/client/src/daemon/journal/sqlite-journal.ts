@@ -545,7 +545,10 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
    * learns the bytes are durable and that this call changed nothing, which is
    * exactly what the cursor needed.
    */
-  appendEnvelope(record: ReceivedEnvelopeRecord): Promise<JournalReceipt> {
+  appendEnvelope(input: ReceivedEnvelopeRecord): Promise<JournalReceipt> {
+    // The write runs after the queue drains, so it and the checks below read
+    // one copy the caller cannot change in between.
+    const record: ReceivedEnvelopeRecord = Object.freeze({ ...input, identity: Object.freeze({ ...input.identity }) });
     const bytes = byteLength(record.bytes);
     const bound = Math.max(this.#maxRecordBytes, ENVELOPE_RECORD_FLOOR_BYTES);
     if (bytes > bound) {

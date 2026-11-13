@@ -384,6 +384,30 @@ describe('SqliteLocalTaskJournal', () => {
         .rejects.toBeInstanceOf(TypeError);
       for (const table of ['journal_envelope', 'journal_task', 'journal_idempotency']) expect(countRows(storeDir, table)).toBe(0);
     });
+
+    it('refuses bytes that are not JSON before its transaction begins', async () => {
+      const storeDir = await tmpStore();
+      const steps: JournalFaultStep[] = [];
+      const journal = build(storeDir, { faults: { onStep: (step) => { steps.push(step); } } });
+
+      await expect(journal.appendEnvelope(envelopeRecord({ bytes: 'not json', bytesHash: journalHash('not json') })))
+        .rejects.toBeInstanceOf(TypeError);
+      expect(steps).toEqual([]);
+      for (const table of ['journal_envelope', 'journal_task', 'journal_idempotency']) expect(countRows(storeDir, table)).toBe(0);
+    });
+
+    it('writes the task id it checked when the caller changes the record before the append runs', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      const record = envelopeRecord({ taskId: 'task-1' });
+
+      const appended = journal.appendEnvelope(record);
+      (record as { taskId?: string }).taskId = 'task-B';
+      await appended;
+      for (const table of ['journal_envelope', 'journal_task', 'journal_idempotency']) {
+        expect(readRows(storeDir, `SELECT task_id FROM ${table}`)).toEqual([{ task_id: 'task-1' }]);
+      }
+    });
   });
 
   describe('restart', () => {
