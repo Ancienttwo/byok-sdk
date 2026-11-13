@@ -266,6 +266,35 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
     }
   });
 
+  it('a disposal whose last table read timed out still ends the remembered setsid grandchild on retry (#2105)', async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-process-tree-retry-'));
+    const receiptFile = path.join(workspaceDir, 'process-tree.json');
+    const child = spawn(process.execPath, [DESCENDANT_FIXTURE, receiptFile, '0', '0', '', '1'], withOwnedProcessTree({ stdio: 'ignore', env: {} }));
+    let closed = false;
+    const closeReceipt = new Promise<void>((resolve) => child.once('close', () => { closed = true; resolve(); }));
+    const receipt = await readReceipt(receiptFile, ['descendantPid', 'grandchildPid']);
+    let reads = 0;
+    const options = {
+      child, waitClosed: () => closeReceipt, isClosed: () => closed, label: 'setsid fixture', termGraceMs: 300,
+      // The read before the SIGTERM succeeds; the read before killing what left the group times out once.
+      readProcessTableFn: () => {
+        reads += 1;
+        if (reads === 2) throw new Error('Process table ps: timed out after 2000 ms, exit unconfirmed');
+        return readOwnedProcessTable();
+      },
+    };
+    try {
+      await expect(disposeOwnedProcessTree(options)).rejects.toMatchObject({ name: 'RuntimeDisposalFailure', message: expect.stringContaining('exit unconfirmed') });
+      expect(processExists(receipt.grandchildPid)).toBe(true);
+      await disposeOwnedProcessTree(options);
+      expect(reads).toBe(3);
+      expect(processExists(receipt.grandchildPid)).toBe(false);
+    } finally {
+      reapAll([receipt.descendantPid, receipt.grandchildPid]);
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it.skipIf(process.platform === 'win32')('a hung ps is SIGKILLed at its time limit and the disposal is refused before any group signal (#2105)', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-hung-ps-'));
     const fakePs = path.join(workspaceDir, 'ps');
