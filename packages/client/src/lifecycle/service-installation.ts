@@ -450,13 +450,17 @@ class MigrateRunning extends Error {}
 
 const migrateNote = (pgid: number): string => `Migrate process group ${pgid} may still run; nothing restored or started. Run recover() after it ends.`;
 
-/** POSIX: whether process group `pgid` ends within `timeoutMs`. Only ESRCH proves it; any other answer does not. */
+/**
+ * POSIX: whether process group `pgid` ends within `timeoutMs`. Only ESRCH
+ * proves it; any other answer is asked again (darwin answers EPERM while the
+ * group's last process exits).
+ */
 async function groupGone(pgid: number, timeoutMs = 5000): Promise<boolean> {
   for (const until = Date.now() + timeoutMs; Date.now() < until; await delay(50)) {
     try {
       process.kill(-pgid, 0);
     } catch (error) {
-      return (error as NodeJS.ErrnoException).code === 'ESRCH';
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true;
     }
   }
   return false;
