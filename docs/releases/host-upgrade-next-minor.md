@@ -192,9 +192,13 @@ The service unit and launcher run only `<installRoot>/current`, and
 service that had already restarted.
 
 - **Before upgrading the SDK:** when `upgrade-receipt.json` is `pending`,
-  run `recover()` with SDK 0.42 first. The new SDK refuses a version 1
-  receipt with `receipt_upgrade_required`; `recover()` rewrites a final
-  one as version 2.
+  run `recover()` with SDK 0.42 first. The new SDK refuses a pending
+  version 1 receipt with `receipt_upgrade_required`; a final one reads as
+  version 2, and the next write stores version 2. `byok-agent upgrade
+  status` still exits normally on a pending version 1 receipt: `--json` prints `receipt: null` and the new field
+  `receiptError: { code: 'receipt_upgrade_required', message }`, and the
+  text output prints `receipt: refused code=receipt_upgrade_required`. The
+  file is not read further or changed.
 - **Required on macOS: rewrite the unit before the first upgrade.** After
   updating the SDK, call `install()` once with the payload of the version
   `current` points at (the same version id). It rewrites the unit without

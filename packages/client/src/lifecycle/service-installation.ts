@@ -191,8 +191,9 @@ export interface ServiceUpgradeReceipt {
  * `store_owned`. A symbolic link anywhere under `snapshots/` (the directory,
  * a snapshot, a snapshot file) is `snapshots_symlinked` before any side
  * effect; a link swapped in after that check is the Host's responsibility.
- * A version 1 receipt (SDK 0.42) is `receipt_upgrade_required` until
- * recover() rewrites it; a pending one must be recovered with SDK 0.42.
+ * A pending version 1 receipt (SDK 0.42) is `receipt_upgrade_required`:
+ * recover it with SDK 0.42 first. A final one reads as version 2, and the
+ * next write stores version 2.
  */
 export interface ServiceInstallation {
   /** The service lifecycle whose program runs `<installRoot>/current`. */
@@ -328,7 +329,7 @@ const ERROR_MESSAGES = {
   rollback_unhealthy: 'The previous version was restored but failed its health check too.',
   no_rollback: 'There is no previous version with a store snapshot to roll back to.',
   install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.',
-  receipt_upgrade_required: 'The receipt is from SDK 0.42: run recover() once (a pending one with SDK 0.42 first).',
+  receipt_upgrade_required: 'A pending receipt from SDK 0.42 remains: run recover() with SDK 0.42 first.',
   receipt_state_inconsistent: 'The receipt does not match the version pointers. Nothing was changed.',
   switch_unhealthy: 'The new version stays current but is unhealthy. Call rollback(), or keep it.',
   repair_interrupted: 'A same-version reinstall was interrupted. Run install() again.',
@@ -529,10 +530,11 @@ async function readUpgradeReceipt(installRoot: string): Promise<StoredReceipt | 
 }
 
 /**
- * Reads the receipt. A version 1 receipt is `receipt_upgrade_required`
- * (#2011), except a final one when `v1Final` is set: recover() rewrites it.
+ * Reads the receipt (#2011). A pending version 1 receipt is
+ * `receipt_upgrade_required`; a final one has the same fields and meaning in
+ * version 2 and reads as one, and the next write stores version 2.
  */
-async function readStoredReceipt(installRoot: string, v1Final = false): Promise<{ receipt: StoredReceipt; v1: boolean } | undefined> {
+async function readStoredReceipt(installRoot: string): Promise<{ receipt: StoredReceipt; v1: boolean } | undefined> {
   const receiptPath = path.join(installRoot, 'upgrade-receipt.json');
   let text: string;
   try {
@@ -544,7 +546,7 @@ async function readStoredReceipt(installRoot: string, v1Final = false): Promise<
   const receipt = JSON.parse(text) as Omit<Partial<StoredReceipt>, 'version'> & { version?: unknown };
   if (receipt.format === 'byok-service-upgrade-receipt' && receipt.version === 1) {
     // A v1 pending receipt is restored only by the SDK that wrote it.
-    if (!v1Final || receipt.state === 'pending') throw new ServiceInstallationError('receipt_upgrade_required');
+    if (receipt.state === 'pending') throw new ServiceInstallationError('receipt_upgrade_required');
     return { receipt: { ...receipt, version: 2 } as StoredReceipt, v1: true };
   }
   if (receipt.format !== 'byok-service-upgrade-receipt' || receipt.version !== 2 || (receipt.state === 'pending' && !PENDING_KINDS.has(receipt.kind))) {
@@ -573,9 +575,16 @@ export async function installationHoldsStart(storeDir: string): Promise<boolean>
  * read from disk only: no service definition, unit or service manager is
  * involved, so a status read needs none of their inputs (WinSW paths).
  */
-export async function readServiceInstallationState(installRoot: string): Promise<{ current: string | undefined; receipt: ServiceUpgradeReceipt | undefined }> {
+export async function readServiceInstallationState(installRoot: string): Promise<{ current: string | undefined; receipt: ServiceUpgradeReceipt | undefined; receiptError?: 'receipt_upgrade_required' }> {
   const root = path.resolve(installRoot);
-  return { current: await readInstallPointer(root, 'current'), receipt: await readUpgradeReceipt(root) };
+  const current = await readInstallPointer(root, 'current');
+  try {
+    return { current, receipt: await readUpgradeReceipt(root) };
+  } catch (error) {
+    // A version 1 receipt is reported, never read or rewritten here (#2011).
+    if (error instanceof ServiceInstallationError && error.code === 'receipt_upgrade_required') return { current, receipt: undefined, receiptError: error.code };
+    throw error;
+  }
 }
 
 export function createServiceInstallation(opts: ServiceInstallationOptions): ServiceInstallation {
@@ -1538,7 +1547,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    */
   function recover(): Promise<ServiceUpgradeReceipt | undefined> {
     return rootOwned(async () => {
-      const read = await readStoredReceipt(root, true);
+      const read = await readStoredReceipt(root);
       if (read === undefined) return undefined;
       const { receipt: last, v1 } = read;
       if (last.state !== 'pending') {

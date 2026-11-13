@@ -459,6 +459,12 @@ byok-agent upgrade rollback --config device.json
 byok-agent upgrade status --json --config device.json
 ```
 
+`upgrade status` prints `current` and the receipt. A `pending` receipt
+written by SDK 0.42 is not read: status exits normally with `receipt: null` and
+`receiptError: { "code": "receipt_upgrade_required", "message": ... }` (in
+text, `receipt: refused code=receipt_upgrade_required`), and the file is
+left as it is.
+
 The install root is yours and lies outside the store. The SDK owns
 `versions/<id>`, the `current` and `previous` pointers (symlinks; directory
 junctions on Windows), `snapshots/` and `upgrade-receipt.json` in it, and
@@ -699,9 +705,9 @@ The receipt's `kind` and where `current` points decide what recover does:
 
 A snapshot is removed only after the receipt that ends the operation is
 written; when that removal fails, the receipt stands and the snapshot stays.
-A receipt written by SDK 0.42 (version 1) is refused with
-`receipt_upgrade_required` until `recover()` rewrites it; a `pending` one
-must be recovered with SDK 0.42 before upgrading the SDK.
+A `pending` receipt written by SDK 0.42 (version 1) is refused with
+`receipt_upgrade_required`: recover it with SDK 0.42 before upgrading the
+SDK. A final one reads as version 2, and the next write stores version 2.
 
 The top-level error code follows the outcome. A call that wrote its final
 receipt throws its first failure with that failure's own code; later release

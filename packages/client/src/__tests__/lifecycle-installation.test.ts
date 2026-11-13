@@ -1732,6 +1732,12 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await installation.receipt()).toMatchObject({ version: 2, state: 'switched' });
     });
 
+    it('a final version 1 receipt is no pending one: upgrade() proceeds and writes version 2', async () => {
+      await fs.writeFile(receiptPath(), JSON.stringify({ ...(await installation.receipt()), version: 1 }));
+      await expect(installation.upgrade(await payload('3.0.0'))).resolves.toMatchObject({ version: 2, state: 'switched', from: '2.0.0', to: '3.0.0' });
+      expect(JSON.parse(await fs.readFile(receiptPath(), 'utf8'))).toMatchObject({ version: 2, state: 'switched' });
+    });
+
     it('a migrate process group that still runs keeps recover() from touching anything (win32: its root)', async () => {
       const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { detached: process.platform !== 'win32', stdio: 'ignore' });
       try {

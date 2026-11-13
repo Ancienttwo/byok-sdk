@@ -349,6 +349,16 @@ describe('#1097 slice 2: payload installations through the CLI', () => {
       await runUpgradeStatusCommand(installRoot, { json: false, log: (line) => lines.push(line) });
       expect(JSON.parse(lines[1]!)).toEqual({ current: '2.0.0', receipt });
       expect(lines.slice(2)).toEqual(['current: 2.0.0', 'receipt: switched from=1.0.0 to=2.0.0 at=now']);
+      // A version 1 receipt is reported as its typed refusal, unread and unchanged (#2011).
+      const v1 = JSON.stringify({ ...receipt, version: 1, state: 'pending' });
+      await fs.writeFile(path.join(installRoot, 'upgrade-receipt.json'), v1);
+      lines.length = 0;
+      await runUpgradeStatusCommand(installRoot, { json: true, log: (line) => lines.push(line) });
+      await runUpgradeStatusCommand(installRoot, { json: false, log: (line) => lines.push(line) });
+      const refusal = new ServiceInstallationError('receipt_upgrade_required');
+      expect(JSON.parse(lines[0]!)).toEqual({ current: '2.0.0', receipt: null, receiptError: { code: refusal.code, message: refusal.message } });
+      expect(lines.slice(1)).toEqual(['current: 2.0.0', `receipt: refused code=receipt_upgrade_required ${refusal.message}`]);
+      expect(await fs.readFile(path.join(installRoot, 'upgrade-receipt.json'), 'utf8')).toBe(v1);
     } finally {
       await fs.rm(installRoot, { recursive: true, force: true });
     }
