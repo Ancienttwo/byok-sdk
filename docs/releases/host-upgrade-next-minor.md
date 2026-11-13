@@ -2,6 +2,92 @@
 
 Draft checklist for a Host moving from the current release to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Service install prepares kept stores
+
+A Host that preserves stores on uninstall can now reinstall a candidate
+that needs a store migration without a separate Host migration sequence
+(#1983). `install()` and `upgrade()` share quiescence, staged candidate
+precheck, store snapshot, migration and the second precheck. Install writes
+`current`, the installation record and service unit only after preparation
+succeeds. Preparation runs only without a current version; same-id
+reinstall remains the #1966 repair/health path and does not precheck,
+snapshot or migrate, preserving earlier rollback snapshots.
+
+An SDK-marked unit of the recorded owner with no current version, such as
+a payload-less CLI service, is stopped before preparation takes its store
+leases. On any preparation failure before writing `current`, leases/gates
+are released, staging is removed, then the unit is started again, even if
+it was previously stopped. After a failed store restore it is not started
+and is removed instead, because the stores may be partial and a boot or
+login would otherwise start it; the next install writes it again. Later
+failures use #1966 cleanup.
+
+An absent unit and an unmarked unit allowed by `replaceUnmarked` are not
+stopped during preparation. The store leases establish quiescence. A
+running legacy agent on those stores now makes `install(..., {
+replaceUnmarked: true })` return `store_busy`, leaving its unit untouched.
+Stop the legacy agent before retrying; replacement happens only after
+preparation succeeds.
+
+`precheck` is already required by `ServiceInstallationOptions`; no option
+was added and there is no skip when it is omitted. The CLI supplies the SDK
+store precheck; embedded Hosts must list their own stores too. An empty
+list or already accepted stores need no migration. First-install refusals
+remove the staged version and use the same `store_busy`, `store_rejected`,
+`store_repair_required` and `store_migration_required` errors as upgrade.
+A failed migration or a second precheck with non-accepting verdicts
+restores the snapshot and throws `store_migration_failed`. Existing raw
+launch errors and `precheck_failed` for malformed post-migration output
+remain unchanged in both paths, after restoring the snapshot.
+
+After successful preparation, a failed installation or health check
+removes the unit, `current`, the installation record and the staged
+version, and restores the prepared stores last. When an artifact cannot be
+removed, or the store leases for the restore cannot be taken, the stores
+stay migrated and are not restored; the error names the kept snapshot. OS credentials are
+never cleared. After health succeeds, installation is committed: failure to
+remove its temporary `<installRoot>/snapshots/.install-<uuid>` does not
+reject the install, and after a completed restore it does not replace the
+store error. No existing diagnostic/event hook reports cleanup.
+Rollback/recover never select `.install-*`.
+
+A restore that fails renames the snapshot to
+`<installRoot>/snapshots/.install-repair-<uuid>` and names it in the error.
+The next first install restores it under the store leases, before its
+precheck, then retires it and continues. If it cannot stop the service,
+take the leases, restore or retire the repair name, the install fails,
+changes nothing else and starts nothing. With more than one repair snapshot
+it restores none and lists them all for an operator to choose. Anything written to the stores
+between the two installs is replaced.
+
+Host-visible changes follow. `upgrade()` pruning no longer removes any
+`.install-*` directory, and `uninstall()` keeps them too: it does not
+remove `snapshots/` while one exists, and it refuses a symlinked
+`snapshots/` with the new `ServiceInstallationErrorCode`
+`snapshots_symlinked` before changing anything. A leftover `.install-<uuid>` is never
+restored automatically. The next first install, deciding from the snapshots
+it lists while holding the store leases, refuses with the new
+`ServiceInstallationErrorCode` `install_snapshot_leftover`, lists every
+leftover path and starts nothing; an operator compares its `snapshot.json`
+with the current stores, removes it once it is not needed, and retries.
+This also blocks an install after `uninstall()` when a successful install
+could not remove its own snapshot, until that directory is removed by hand.
+A first install also reads `current` again under the store leases and
+refuses with `installation_exists`, before its precheck, when another
+installation (an owner gate under another `gateRoot`) wrote it in between.
+That refusal keeps every version directory, since the other installation may
+use it; the next successful upgrade's prune or `uninstall()` removes what is
+left. Known issue: other interleavings of installations under different
+`gateRoot`s that share one `installRoot` remain; an install-root lock is
+#2001.
+When a lease release fails after a refused first install, the error is an
+`AggregateError` carrying the refusal (with its code) and the release
+error. Install has no write-ahead receipt
+for process death during migration: the next install prechecks the stores
+as they remain, and the Host must make `migrate` safe to run again. Adding
+an install receipt is outside this change.
+See [Versioned installs](../device-setup.md#versioned-installs).
+
 ## Service install requires a healthy start
 
 `ServiceInstallation.install()` now runs the same health check as `upgrade()`
@@ -21,8 +107,9 @@ is healthy even before pairing.
 If the service fails to install, activate, start or pass its health check,
 install removes the unit, launcher, `current`, installation record and the
 staged version directory, including on a same-id
-reinstall. No service remains after successful cleanup. Host stores, daemon
-stores and OS credentials are preserved. If removal fails, the error carries
+reinstall. No service remains after successful cleanup. Prepared Host and
+daemon stores are restored from the install snapshot; OS credentials are
+never cleared. If removal fails, the error carries
 an `AggregateError` with both the original and removal failures as `cause`
 and names the remaining artifacts in its message. Install enforces the
 health-check deadline even if a custom check ignores abort or succeeds late.

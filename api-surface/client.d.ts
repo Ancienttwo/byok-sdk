@@ -11229,7 +11229,9 @@ export interface ServiceInstallationOptions {
      * the snapshot when the precheck reports a store as `migration-required`;
      * exit 0 is success. The precheck then runs again and must report every
      * store `accepted` or `absent`. Without it, a `migration-required` store is
-     * `store_migration_required` and nothing is switched.
+     * `store_migration_required` and nothing is switched. The Host must make
+     * this program safe to run again after interruption: install has no
+     * write-ahead receipt for a process death during migration.
      */
     migrate?(versionDir: string): ServiceProgram;
     /**
@@ -11247,8 +11249,9 @@ export interface ServiceInstallationOptions {
      */
     healthTimeoutMs?: number;
     /**
-     * Every daemon store the service process owns, read after the service has
-     * stopped, on every upgrade, rollback and recover (#1328). Each `storeDir`
+     * Every daemon store the service process owns, leased on a first install
+     * and read after stopping the service on upgrade, rollback and recover
+     * (#1328, #1983). Each `storeDir`
      * is absolute and listed once; `productId` is not empty; an empty list is
      * valid. An invalid list or a throw is `daemon_stores_invalid`. Default:
      * `[{ storeDir: service.storeDir, productId }]`. Requires `healthCheck`,
@@ -11305,12 +11308,35 @@ export interface ServiceInstallation {
     /** The service lifecycle whose program runs `<installRoot>/current`. */
     readonly lifecycle: ServiceLifecycle;
     /**
-     * Stages the payload as the first version, points `current` at it, installs
-     * and starts the service, then waits for its health check. A write,
-     * activation, start or health-check failure removes
-     * the unit, launcher, `current`, installation record and staged version,
-     * including on a same-id reinstall, and throws `install_health_check_failed`.
-     * Host stores, daemon stores and OS credentials are left intact.
+     * With no current version, stages the payload, leases daemon stores, runs
+     * the candidate precheck, snapshots listed stores and migrates when
+     * required, then points
+     * `current` at it, records, installs, starts and checks health. Preparation
+     * failures remove staging and use upgrade's store errors. A later failure
+     * removes the installation and restores the prepared store snapshot,
+     * then throws `install_health_check_failed`. A same-id reinstall only
+     * repairs the service and checks health, as before; it does not prepare
+     * stores or change earlier rollback snapshots. An allowed unmarked unit
+     * is untouched until preparation succeeds; its live store owner causes
+     * `store_busy`. An owned marked unit without a current version is stopped
+     * before preparation and started again after preparation fails, once
+     * leases/gates are released and staging removed. After a failed store
+     * restore it is removed instead, and the next install writes it again.
+     * OS credentials are never cleared. `precheck` is required.
+     * The temporary snapshot `snapshots/.install-<uuid>` is removed after a
+     * healthy start or a completed restore; a removal failure does not change
+     * the outcome, and a leftover is kept, never restored automatically: the
+     * next first install refuses with `install_snapshot_leftover`, listing it,
+     * and starts nothing until an operator removes it. Every check uses
+     * `current` and the snapshots read under the store leases: when another
+     * installation wrote `current` in between, it refuses with
+     * `installation_exists` and keeps every version directory. A
+     * failed restore renames it `snapshots/.install-repair-<uuid>` and the
+     * error names it: the next first install restores it, under the store
+     * leases and before its precheck. When it cannot stop the service, take
+     * the leases, restore or retire the repair name, or when more than one
+     * repair snapshot exists, it fails without other changes, names the
+     * snapshots and starts nothing.
      */
     install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
     /**
@@ -11332,7 +11358,7 @@ export interface ServiceInstallation {
     rollback(): Promise<ServiceUpgradeReceipt>;
     /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. */
     recover(): Promise<ServiceUpgradeReceipt | undefined>;
-    /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. The store is not touched. */
+    /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
     uninstall(): Promise<void>;
     /** The last receipt, or `undefined`. */
     receipt(): Promise<ServiceUpgradeReceipt | undefined>;
@@ -11359,6 +11385,8 @@ declare const ERROR_MESSAGES: {
     readonly health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.';
     readonly rollback_unhealthy: 'The previous version was restored but failed its health check too.';
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
+    readonly install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.';
+    readonly snapshots_symlinked: 'The install root\'s snapshots/ is a symbolic link. Uninstall does not follow it and changed nothing; replace it with a directory or remove the link, then retry.';
 };
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
 /** Closed codes; a store refusal carries the precheck verdicts, and `snapshot_failed` the copy error as `cause`. */
