@@ -378,6 +378,37 @@ it('preserves a completed turn when interrupted while native disposal is pending
   } finally { gate.resolve(); spy.mockRestore(); }
 });
 
+it.each(['1.18.35', 'opencode v2.0.26'])('does not start fallback after interrupt during %s cleanup', async version => {
+  const box = setup(version);
+  const rateGate = path.join(box.cwd, 'release-rate-limit');
+  box.env.FAKE_ACP_SESSION_STORE = path.join(box.cwd, 'native-session.json');
+  box.env.FAKE_ACP_RATE_GATE = rateGate;
+  const gate = Promise.withResolvers<void>();
+  let disposing = false;
+  const dispose = processTree.disposeOwnedProcessTree;
+  const spy = vi.spyOn(processTree, 'disposeOwnedProcessTree').mockImplementation(async options => {
+    if (options.label === 'opencode acp' && !disposing) { disposing = true; await gate.promise; }
+    return dispose(options);
+  });
+  try {
+    const session = await box.start('opencode-limit');
+    await vi.waitFor(() => expect(box.facts().some(fact => fact.kind === 'prompt')).toBe(true));
+    writeFileSync(rateGate, 'release');
+    await vi.waitFor(() => expect(disposing).toBe(true));
+    const interrupted = session.interrupt();
+    gate.resolve();
+    await expect(interrupted).resolves.toBeUndefined();
+    const events: AgentEvent[] = [];
+    let failure: unknown;
+    try { for await (const event of session.events) events.push(event as AgentEvent); }
+    catch (error) { failure = error; }
+    expect(failure).toMatchObject({ phase: 'run', failure: { class: 'rate_limited' } });
+    expect(events.some(event => event.type === 'error' && event.message.includes('model_switch'))).toBe(false);
+    expect(box.facts().filter(fact => fact.kind === 'prompt')).toHaveLength(1);
+    expect(box.facts().some(fact => fact.kind === 'cancel')).toBe(false);
+  } finally { gate.resolve(); spy.mockRestore(); }
+});
+
 it('settles an opening budget kill before disposing the native session', async () => {
   const box = setup();
   const adapter = new OpenCodeAdapter({ models, maxRetainedBytes: 1, resolveBin: () => ({ command: fake, source: 'env' }) });
