@@ -142,9 +142,13 @@ A Host that decides a task is over by combining `completed`, `failed`, `cancelle
 
 A received offer with no owner also resolves `cancelled` / `not-required` / `none` once its cloud cancellation is journaled (#1944). `DaemonTaskSettlement.delivery` is `accepted` or `rejected` for an outbound terminal, or `not-required` when no local terminal envelope or runtime was required; a Host that exhaustively checks it handles the new member. Late waits and redelivery in the same run keep the cancellation result without starting a runtime. A never-claimed offer alone is not final; revocation and replay expiry carry no per-task cancellation authority, so waits spanning stop or halt need an `AbortSignal`.
 
-Known limit (#1955): after restart, including stop/start of the same Daemon instance, the journal interface cannot expose an already consumed cancellation. The run-local cancellation result expires, and ordinary received-task recovery instead reports `daemon_interrupted`; once that terminal is accepted, the awaitable reads `failed` / `accepted` / `none`.
-
 A wait on a task whose offer the journal refused now rejects with the append's error, `LocalStorageEmergencyError` under local-storage emergency (#1901); retry the wait after the offer is redelivered. An aborted wait keeps nothing on the daemon.
+
+## Stored task cancellation
+
+Custom implementations of `LocalTaskJournal` must implement the required `readTaskCancellation(taskId, identity, afterSeq)` method (#1955). Return `{ identity, bytes, bytesHash }` from the stored inbound `task.cancel` with the lowest mailbox sequence strictly above `afterSeq`, the stored offer's sequence, for that task and exact tenant/product/device enrollment, or `undefined` if no cancellation exists. Fail closed by rejecting on a candidate from another enrollment or with a mismatched hash; verify candidate hashes before filtering by content. Return the original canonical bytes and stored `sha256:` hash; do not reconstruct bytes or return a derived flag. SDK code checks identity, hash, envelope type, task binding and sequence order before using the cancellation. Update journal test doubles too. Hosts using the SDK SQLite journal need no code or storage migration: it reads the envelopes already stored.
+
+A received offer cancelled before admission now keeps `cancelled / not-required / none` after restart, including when the cursor has passed the cancellation. Recovery sends no `daemon_interrupted` failure for it, and redelivery cannot start a runtime.
 
 ## Packaged Hosts resolve SDK hosting from the asset root
 
