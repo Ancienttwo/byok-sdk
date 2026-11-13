@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { InMemoryTruthStore, tenantId } from '@byok-sdk/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PROVIDER_CUSTODY_RECEIPT_LIMIT } from './custody';
@@ -17,6 +18,7 @@ import type { CommandRunner } from './command-runner';
 import { LinuxSecretServiceSecretStore } from './linux-secret-service';
 import { InMemorySecretStore, type ModelProviderSecretName, modelProviderSecretName } from './secret-store';
 import { SqliteProviderProfileStore, providerConfigurationLockPath } from './sqlite-profile-store';
+import { TruthStoreProviderProfileStore } from './truth-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
 
 const OLD_KEY = 'sk-registry-custody-old-0a1f';
@@ -298,14 +300,52 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     await expect(profiles.get('openai')).resolves.toMatchObject({ auth_mode: 'none' });
     await expect(profiles.getPending('openai')).resolves.toBeUndefined();
     await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+    // The leftover key never follows the profile back to authentication.
+    await expect(registry().configure({ ...OPENAI, base_url: 'https://elsewhere.example/v1' })).rejects.toMatchObject({ code: 'PROVIDER_SECRET_MISSING' });
+    await expect(registry().configure(OPENAI)).rejects.toMatchObject({ code: 'PROVIDER_SECRET_MISSING' });
 
     await registry().configure(OPENAI, OLD_KEY);
+    await expect(registry().configure({ ...OPENAI, base_url: 'https://elsewhere.example/v1' })).rejects.toMatchObject({ code: 'PROVIDER_SECRET_MISSING' });
     const acquire = profiles.acquireConfigurationLock.bind(profiles);
     vi.spyOn(profiles, 'acquireConfigurationLock').mockImplementationOnce(async () => {
       const lock = await acquire();
-      return { release: async () => { await lock.release(); throw new Error('release failed'); } };
+      return { release: async () => {
+        await lock.release();
+        throw new ByokKeysError('PROVIDER_PROFILE_INVALID', `release ${NEW_KEY}`, { cause: new Error(NEW_KEY) });
+      } };
     });
-    await expect(registry().replaceSecret('openai', NEW_KEY)).rejects.toMatchObject({ code: 'PROVIDER_CHANGE_COMMITTED' });
+    const released = await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error as Error);
+    expect(released).toMatchObject({ code: 'PROVIDER_CHANGE_COMMITTED', cause: { code: 'PROVIDER_PROFILE_INVALID' } });
+    const chain = (error: unknown): string => (error instanceof Error ? `${error.message} ${error.stack} ${chain(error.cause)}` : String(error));
+    expect(chain(released)).not.toContain(NEW_KEY);
+    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
+
+    // A lock connection that fails to close still frees the process-local lock.
+    vi.spyOn(process.getBuiltinModule('node:sqlite').DatabaseSync.prototype, 'close').mockImplementationOnce(() => { throw new Error('close failed'); });
+    await expect(registry().replaceSecret('openai', OLD_KEY)).rejects.toMatchObject({ code: 'PROVIDER_CHANGE_COMMITTED' });
+    await expect(registry().get('openai')).resolves.toMatchObject({ secret_configured: true });
+
+    // A read inside the store after its commit cannot report the switch as failed.
+    await registry().configure({ ...OPENAI, profile_ref: 'other', enabled: false }, OLD_KEY);
+    const get = profiles.get.bind(profiles);
+    vi.spyOn(profiles, 'get').mockImplementation(async (ref) => {
+      const profile = await get(ref);
+      if (profile?.enabled === true && ref === 'other') throw new Error('read after commit');
+      return profile;
+    });
+    await expect(registry().setDefaultModelProvider('other')).resolves.toMatchObject({ enabled: true });
+    vi.mocked(profiles.get).mockRestore();
+
+    // A TruthStore write that lands but is not confirmed is committed: no rollback, no marker.
+    const truth = new InMemoryTruthStore({ now: () => new Date(clock) });
+    const truthProfiles = new TruthStoreProviderProfileStore({ tenant: tenantId('custody'), truthStore: truth });
+    const truthRegistry = new ProviderRegistry({ now: () => new Date(clock), profileStore: truthProfiles, secretStore: secrets });
+    await truthRegistry.configure(OPENAI, OLD_KEY);
+    const write = truth.writeSnapshot.bind(truth);
+    vi.spyOn(truth, 'writeSnapshot').mockImplementationOnce(async (...args) => ({ ...(await write(...args)), body: { kind: 'inline', body: '{}' } }));
+    await expect(truthRegistry.configure({ ...OPENAI, model: 'gpt-5.2-mini' }, NEW_KEY)).rejects.toMatchObject({ code: 'PROVIDER_CHANGE_COMMITTED' });
+    await expect(truthProfiles.get('openai')).resolves.toMatchObject({ model: 'gpt-5.2-mini' });
+    await expect(truthProfiles.getPending('openai')).resolves.toBeUndefined();
     await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
 
     vi.spyOn(secrets, 'has').mockRejectedValueOnce(new Error('store refused'));

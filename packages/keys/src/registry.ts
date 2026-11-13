@@ -169,6 +169,10 @@ async function secretStoreCall<T>(call: () => Promise<T>): Promise<T> {
  * and the marker its commit cleared) instead of a read after the commit, so a
  * failed read can never report a committed change as failed.
  */
+function isChangeCommitted(error: unknown): boolean {
+  return error instanceof ByokKeysError && error.code === 'PROVIDER_CHANGE_COMMITTED';
+}
+
 function committedStatus(profile: ModelProviderProfile, secretConfigured: boolean): ProviderStatus {
   return providerStatusOf(profile, { secretConfigured, configurationPending: false });
 }
@@ -254,14 +258,19 @@ export class ProviderRegistry {
    * authenticating profile will have a secret, mark pending, write the
    * secret, then commit the profile and clear the marker in one store
    * transaction. An unfinished earlier change (a pending marker) can only be
-   * resolved by a call that supplies a new secret.
+   * resolved by a call that supplies a new secret. Without a secret, the
+   * stored key is reused only when the committed profile already
+   * authenticates against the same `base_url`; otherwise the call rejects with
+   * `PROVIDER_SECRET_MISSING`, so a key never follows a profile to a new
+   * endpoint.
    *
    * The returned status is the state this call committed, built without a
    * read after the commit; once the lock is released another writer may
    * already have changed it. A rejection with `PROVIDER_CHANGE_COMMITTED` means
    * the change is in effect but a later step failed: for an `auth_mode: 'none'`
-   * profile, deleting the previous key, which then stays in the store; or
-   * releasing the lock. Any other rejection means nothing was committed.
+   * profile, deleting the previous key, which then stays in the store;
+   * confirming the write; or releasing the lock. Its `cause` carries only the
+   * failed step's code. Any other rejection means nothing was committed.
    */
   async configure(
     configuration: ProviderConfiguration,
@@ -288,7 +297,15 @@ export class ProviderRegistry {
       const pendingBefore = await this.#profiles.getPending(profileRef);
       if (configuration.auth_mode !== 'none' && secret === undefined) {
         if (pendingBefore !== undefined) throw configurationPendingError();
-        if (!(await secretStoreCall(() => this.#secrets.has(secretName)))) {
+        // A stored key is reused only for the endpoint it was supplied for: a
+        // key left behind by an earlier switch to `auth_mode: 'none'` (whose
+        // delete failed) or a new base_url requires the key again.
+        if (
+          previous === undefined
+          || previous.auth_mode === 'none'
+          || previous.base_url !== profile.base_url
+          || !(await secretStoreCall(() => this.#secrets.has(secretName)))
+        ) {
           throw new ByokKeysError(
             'PROVIDER_SECRET_MISSING',
             'Provider authentication requires a secret in the operating-system credential store',
@@ -450,12 +467,15 @@ export class ProviderRegistry {
     let done = false;
     try {
       return await withConfigurationLock(this.#profiles, () => body(() => { done = true; }));
-    } catch (cause) {
-      if (!done) throw cause;
+    } catch (error) {
+      if (!done && !isChangeCommitted(error)) throw error;
+      // The failed step may be an injected store or lock echoing a key, so
+      // only its known code survives, under a fixed message.
+      const code = error instanceof ByokKeysError && Object.hasOwn(BYOK_KEYS_ERROR_CODES, error.code) ? error.code : undefined;
       throw new ByokKeysError(
         'PROVIDER_CHANGE_COMMITTED',
         'The provider change was committed, but a step after the commit failed; read the provider status again',
-        { cause },
+        code === undefined ? undefined : { cause: new ByokKeysError(code, 'A step after the provider change was committed failed') },
       );
     }
   }
@@ -510,6 +530,8 @@ export class ProviderRegistry {
       if (secret !== undefined) await secretStoreCall(() => this.#secrets.set(secretName, secret));
       await this.#profiles.commitCustody(commit);
     } catch (cause) {
+      // The store reports a commit it made but could not confirm; nothing to roll back.
+      if (isChangeCommitted(cause)) throw cause;
       if (secret !== undefined) {
         try {
           if (!previous.readable) throw cause;

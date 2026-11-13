@@ -370,7 +370,8 @@ export declare class ByokKeysError extends Error {
  * `PROVIDER_SECRET_STORE_FAILED`) and `DEVICE_SEALING_KEY_INVALID` belong to
  * sealed provider provisioning and likewise have no source counterpart.
  * `PROVIDER_CHANGE_COMMITTED` marks a registry write that committed before a
- * later step (a follow-up key delete or the lock release) failed.
+ * later step (a follow-up key delete, a store's confirmation of its write, or
+ * the lock release) failed.
  * `KEYCHAIN_SECRET_CORRUPTED` narrows the decode failure to an entry that
  * carries this store's storage prefix (one the SDK wrote) but whose payload
  * does not decode; `KEYCHAIN_SECRET_DECODE_FAILED` remains the code for a
@@ -1478,7 +1479,11 @@ export interface ProviderProfileStore {
     getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined>;
     /** Stored receipt for a provisioning request id, if still retained. */
     getReceipt(requestId: string): Promise<ProviderCustodyReceipt | undefined>;
-    /** Apply a custody commit atomically (see {@link ProviderCustodyCommit}). */
+    /**
+     * Apply a custody commit atomically (see {@link ProviderCustodyCommit}).
+     * A store whose write landed but cannot be confirmed applies the rest of
+     * the commit and throws `PROVIDER_CHANGE_COMMITTED`, never another code.
+     */
     commitCustody(commit: ProviderCustodyCommit): Promise<void>;
     /**
      * Record a key-check outcome on a receipt, only if that receipt's
@@ -2027,14 +2032,19 @@ export declare class ProviderRegistry {
      * authenticating profile will have a secret, mark pending, write the
      * secret, then commit the profile and clear the marker in one store
      * transaction. An unfinished earlier change (a pending marker) can only be
-     * resolved by a call that supplies a new secret.
+     * resolved by a call that supplies a new secret. Without a secret, the
+     * stored key is reused only when the committed profile already
+     * authenticates against the same `base_url`; otherwise the call rejects with
+     * `PROVIDER_SECRET_MISSING`, so a key never follows a profile to a new
+     * endpoint.
      *
      * The returned status is the state this call committed, built without a
      * read after the commit; once the lock is released another writer may
      * already have changed it. A rejection with `PROVIDER_CHANGE_COMMITTED` means
      * the change is in effect but a later step failed: for an `auth_mode: 'none'`
-     * profile, deleting the previous key, which then stays in the store; or
-     * releasing the lock. Any other rejection means nothing was committed.
+     * profile, deleting the previous key, which then stays in the store;
+     * confirming the write; or releasing the lock. Its `cause` carries only the
+     * failed step's code. Any other rejection means nothing was committed.
      */
     configure(configuration: ProviderConfiguration, secret?: string): Promise<ProviderStatus>;
     /**

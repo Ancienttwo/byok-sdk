@@ -43,7 +43,8 @@ export class ByokKeysError extends Error {
  * `PROVIDER_SECRET_STORE_FAILED`) and `DEVICE_SEALING_KEY_INVALID` belong to
  * sealed provider provisioning and likewise have no source counterpart.
  * `PROVIDER_CHANGE_COMMITTED` marks a registry write that committed before a
- * later step (a follow-up key delete or the lock release) failed.
+ * later step (a follow-up key delete, a store's confirmation of its write, or
+ * the lock release) failed.
  * `KEYCHAIN_SECRET_CORRUPTED` narrows the decode failure to an entry that
  * carries this store's storage prefix (one the SDK wrote) but whose payload
  * does not decode; `KEYCHAIN_SECRET_DECODE_FAILED` remains the code for a
