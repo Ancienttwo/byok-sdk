@@ -180,8 +180,10 @@ export interface ServiceInstallation {
    * healthy start or a completed restore; a removal failure does not change
    * the outcome, and a leftover is kept, never restored automatically: the
    * next first install refuses with `install_snapshot_leftover`, listing it,
-   * and starts nothing until an operator removes it. Every check uses the
-   * snapshots listed under the store leases. A
+   * and starts nothing until an operator removes it. Every check uses
+   * `current` and the snapshots read under the store leases: when another
+   * installation wrote `current` in between, it refuses with
+   * `installation_exists` and keeps every version directory. A
    * failed restore renames it `snapshots/.install-repair-<uuid>` and the
    * error names it: the next first install restores it, under the store
    * leases and before its precheck. When it cannot stop the service, take
@@ -532,11 +534,16 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         } catch (error) {
           // Preparation released its leases. Remove staging before
           // restarting an owned marked unit, as upgrade does on refusal.
+          // After installation_exists every version directory stays: the
+          // other installation may use it. A later prune or uninstall
+          // removes what is left.
           let failure = error;
-          try {
-            await fs.rm(path.join(versionsDir, id), { recursive: true, force: true });
-          } catch (cleanup) {
-            failure = new AggregateError([error, cleanup], `${error instanceof Error ? error.message : 'Store preparation failed.'} The staged version could not be removed: ${path.join(versionsDir, id)}.`);
+          if (!(error instanceof ServiceInstallationError && error.code === 'installation_exists')) {
+            try {
+              await fs.rm(path.join(versionsDir, id), { recursive: true, force: true });
+            } catch (cleanup) {
+              failure = new AggregateError([error, cleanup], `${error instanceof Error ? error.message : 'Store preparation failed.'} The staged version could not be removed: ${path.join(versionsDir, id)}.`);
+            }
           }
           // A failed restore may have left partial stores. The unit stays
           // stopped, and our marked unit is removed, as after a failed health
@@ -771,10 +778,13 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
     let restoreOnFailure = false;
     try {
-      // Every decision uses the inventory taken under the leases: until
-      // then another installation (an owner gate under another gate root)
-      // can still change snapshots/.
-      if (installing) await restoreRepairSnapshots(checkInstallSnapshots(await listInstallSnapshots()));
+      // Every decision uses `current` and the inventory read under the
+      // leases: until then another installation (an owner gate under another
+      // gate root) can still change them.
+      if (installing) {
+        if ((await currentVersion()) !== undefined) throw new ServiceInstallationError('installation_exists');
+        await restoreRepairSnapshots(checkInstallSnapshots(await listInstallSnapshots()));
+      }
       let stores = await precheck(candidate);
       const refused = stores.find(isRefused);
       if (refused !== undefined) {

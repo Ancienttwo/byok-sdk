@@ -11327,8 +11327,10 @@ export interface ServiceInstallation {
      * healthy start or a completed restore; a removal failure does not change
      * the outcome, and a leftover is kept, never restored automatically: the
      * next first install refuses with `install_snapshot_leftover`, listing it,
-     * and starts nothing until an operator removes it. Every check uses the
-     * snapshots listed under the store leases. A
+     * and starts nothing until an operator removes it. Every check uses
+     * `current` and the snapshots read under the store leases: when another
+     * installation wrote `current` in between, it refuses with
+     * `installation_exists` and keeps every version directory. A
      * failed restore renames it `snapshots/.install-repair-<uuid>` and the
      * error names it: the next first install restores it, under the store
      * leases and before its precheck. When it cannot stop the service, take

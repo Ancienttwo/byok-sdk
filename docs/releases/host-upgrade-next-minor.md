@@ -72,6 +72,14 @@ leftover path and starts nothing; an operator compares its `snapshot.json`
 with the current stores, removes it once it is not needed, and retries.
 This also blocks an install after `uninstall()` when a successful install
 could not remove its own snapshot, until that directory is removed by hand.
+A first install also reads `current` again under the store leases and
+refuses with `installation_exists`, before its precheck, when another
+installation (an owner gate under another `gateRoot`) wrote it in between.
+That refusal keeps every version directory, since the other installation may
+use it; the next successful upgrade's prune or `uninstall()` removes what is
+left. Known issue: other interleavings of installations under different
+`gateRoot`s that share one `installRoot` remain; an install-root lock is
+#2001.
 When a lease release fails after a refused first install, the error is an
 `AggregateError` carrying the refusal (with its code) and the release
 error. Install has no write-ahead receipt

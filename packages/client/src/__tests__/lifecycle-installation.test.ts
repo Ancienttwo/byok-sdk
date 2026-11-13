@@ -712,6 +712,25 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await pointer('current')).toBe('3.0.0');
       expect(await snapshotNames()).toEqual([]);
       expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+
+      // B installs after A read `current` and before A holds the lease: A reads it again under the lease, refuses
+      // before its precheck, and keeps every version directory, which B may share (same id) or own.
+      for (const [ours, theirs] of [['5.0.0', '4.0.0'], ['5.0.0', '5.0.0']] as const) {
+        await installation.uninstall();
+        let prechecked = false;
+        installation = installationOver({ ...ungated(fakeLifecycle()), stop: async () => { await b.install(await payload(theirs)); } }, {
+          migrate,
+          precheck: (versionDir) => {
+            prechecked = true;
+            return { command: process.execPath, args: [path.join(versionDir, 'precheck.cjs'), path.join(root, 'verdicts.json')] };
+          },
+        });
+        await expect(installation.install(await payload(ours))).rejects.toMatchObject({ code: 'installation_exists' });
+        expect(prechecked).toBe(false);
+        expect(await pointer('current')).toBe(theirs);
+        expect(await fs.readFile(path.join(installRoot, 'versions', theirs, 'host.js'), 'utf8')).toBe(`// ${theirs}`);
+        expect(await snapshotNames()).toEqual([]);
+      }
     });
 
     it('uninstall refuses a symlinked snapshots/ and changes nothing behind it', async () => {
