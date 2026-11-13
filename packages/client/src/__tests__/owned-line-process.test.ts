@@ -51,14 +51,32 @@ describe('BYOK owned line process', () => {
     await child.spawned; expect(await line).toBe('你好'); expect(await child.exited).toBe(7); expect(exited).toHaveBeenCalledWith(7);
   });
 
-  it('rejects NUL-bearing spawn input by position or env name on every spawn, never echoing it', async () => {
-    const env = Object.create({ BYOK_TEST_KEY: 'fake-key\0tail' }) as Record<string, string>; // Node reads inherited keys too
-    for (const start of [() => createOwnedLineProcessSpawn()(process.execPath, [], { env }),
-      () => createOwnedTerminalSpawn()(process.execPath, [], { cwd: '.', env, shell: false }),
-      () => new PiRpcClient({ command: process.execPath, args: [], cwd: '.', env })]) expect.soft(start).toThrow(/^spawn env variable BYOK_TEST_KEY contains a NUL byte$/);
-    expect.soft(() => createOwnedTerminalSpawn()(process.execPath, ['-e', 'fake-key\0tail'], { cwd: '.', env: {}, shell: false })).toThrow(/^spawn argument 1 contains a NUL byte$/);
-    expect.soft(() => createOwnedLineProcessSpawn()(process.execPath, [], { env: { 'fake-key\0tail': '' } })).toThrow(/^spawn env variable name contains a NUL byte$/);
-    await expect.soft(new McpStdioClient({ command: process.execPath }, { env: { BYOK_TEST_KEY: 'fake-key\0tail' } }).connect()).rejects.toThrow(/failed to spawn: spawn env variable BYOK_TEST_KEY contains a NUL byte$/);
+  it('rejects NUL-bearing spawn input on every client spawn before starting it, naming only the slot', async () => {
+    const secret = 'fake-key\0tail';
+    const cases: Array<{ command: string; args: string[]; env: Record<string, string>; message: string; inherited?: boolean }> = [
+      { command: `/bin/${secret}`, args: [], env: {}, message: 'spawn command contains a NUL byte' },
+      { command: process.execPath, args: ['-e', secret], env: {}, message: 'spawn argument 1 contains a NUL byte' },
+      { command: process.execPath, args: [], env: { [secret]: '' }, message: 'spawn env variable name contains a NUL byte' },
+      // Node reads inherited enumerable keys too; MCP copies own keys only, so it is not handed one.
+      { command: process.execPath, args: [], env: Object.create({ BYOK_TEST_KEY: secret }), message: 'spawn env variable BYOK_TEST_KEY contains a NUL byte', inherited: true },
+    ];
+    for (const { command, args, env, message, inherited } of cases) {
+      const spawnFn = vi.fn((file: string, argv: readonly string[], options: SpawnOptions) => spawn(file, argv, options));
+      const entries: Array<[string, () => unknown]> = [
+        ['line', () => createOwnedLineProcessSpawn({ spawnFn })(command, args, { env })],
+        ['terminal', () => createOwnedTerminalSpawn({ spawnFn })(command, args, { cwd: '.', env, shell: false })],
+        ['pi rpc', () => new PiRpcClient({ command, args, cwd: '.', env, spawnFn: spawnFn as unknown as typeof spawn })],
+        ...(inherited ? [] : [['mcp', () => new McpStdioClient({ command, args }, { env }).connect()] as [string, () => unknown]]),
+      ];
+      for (const [entry, start] of entries) {
+        const error = await (async () => { try { await start(); } catch (caught) { return caught as Error; } })();
+        expect.soft(error?.message, entry).toBe(entry === 'mcp' ? `MCP server failed to spawn: ${message}` : message);
+        expect.soft(`${error?.stack} ${String(error?.cause)}`, entry).not.toMatch(/fake-key|tail/);
+      }
+      expect.soft(spawnFn).not.toHaveBeenCalled();
+    }
+    // A synchronous Node rejection keeps its code, without the raw exception.
+    await expect(new McpStdioClient({ command: '' }, { env: {} }).connect()).rejects.toThrow(/^MCP server failed to spawn: ERR_INVALID_ARG_VALUE$/);
   });
 
   it('rejects spawn failure and still settles its exit receipt', async () => {
