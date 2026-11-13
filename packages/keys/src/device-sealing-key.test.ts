@@ -73,6 +73,13 @@ describe('DeviceSealingKeyStore', () => {
       expect(error!.cause).toBeUndefined();
       expect(`${error!.message} ${error!.stack}`).not.toContain(echo);
     }
+    // The recovery a damaged or foreign entry names is the device key's, never a provider key's.
+    for (const code of ['KEYCHAIN_SECRET_CORRUPTED', 'KEYCHAIN_SECRET_DECODE_FAILED', 'CREDENTIAL_MANAGER_READ_FAILED']) {
+      vi.spyOn(secrets, 'get').mockRejectedValueOnce(new ByokKeysError(code, echo));
+      const error = await store.loadOrCreate(ENROLLMENT).then(() => undefined, (thrown: unknown) => thrown as Error);
+      expect(error).toMatchObject({ code, message: expect.stringContaining('device sealing key') });
+      expect(error!.message).not.toMatch(/provider|supply/u);
+    }
   });
 
   it('rotate replaces the private key and advances the epoch', async () => {
