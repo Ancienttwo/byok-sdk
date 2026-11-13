@@ -28,6 +28,8 @@ const ENROLLMENT_GATE_WAIT_MS = 30_000;
  * under the gate and holds it across its own request, because the server's
  * registration has no fencing (#2045 F1), and through its E2EE member custody
  * (#2030 F2), including the shutdown of a running daemon it re-pairs. A
+ * running daemon's member writes take it around each write and its binding
+ * reread, never across network I/O (#2055). A
  * request that times out releases the gate while the server may still
  * register it, and only server fencing closes that gap. The OS entry is per user, and so is the gate.
  * `signal` abandons the wait; a gate acquired after the abort is released.

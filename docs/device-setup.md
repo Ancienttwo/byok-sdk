@@ -779,6 +779,11 @@ await clearDeviceEnrollment({
   The pairing holds the lock across its request because the server's device
   registration has no fencing (#2045 F1). Another store's pairing or renewal
   therefore lands wholly before or wholly after the clear (#2034, #2030 F2).
+  A running daemon's own writes of the member entries (member resume, KEM
+  rotation, a verified chain head) take the lock around each write, reread
+  that the OS entry still holds the daemon's enrollment, and otherwise write
+  nothing and halt as a renewal does; they never hold it across a network
+  request (#2055).
   Lock order is the store owner lease, then the `productId` lock.
 - The request deadline bounds only the network request, and each OS credential
   command has its own 15 s deadline; nothing bounds the whole time a holder
