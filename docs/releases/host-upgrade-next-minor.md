@@ -2,6 +2,16 @@
 
 Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Undici in the Host dependency tree (#2081)
+
+The client now depends on `undici` 8.12.4. Pi 1.5.2 still declares 8.12.3 exactly, so a Host install can retain a separate vulnerable copy. To use 8.12.4 throughout the npm dependency tree, add the line for your package manager to the root `package.json` and reinstall:
+
+- npm: `"overrides": { "undici": "8.12.4" }`
+- Bun: `"overrides": { "undici": "8.12.4" }`
+- pnpm: `"pnpm": { "overrides": { "undici": "8.12.4" } }`
+
+Merge these entries into any existing overrides. This does not update Node's built-in undici or copies bundled inside other packages; update those runtimes and packages separately.
+
 ## Cancel selected Host intents without a pass (#2003)
 
 `BotCollaboration.cancelHostIntents(keys)` atomically cancels a chosen set of unsubmitted Host intents without draining. It returns settled conclusions on replay and refuses the whole set when any key is unknown, a Bot Turn or in flight. `HostIntentError.rejected` lists every refused key and code; exhaustive switches over `HostIntentError.code` add `inflight`. Existing single cancellation and switch APIs keep their behavior, and the store format is unchanged. A Host may replace freeze → individual cancels → abort with this call; keep the freeze when other work on the device must also be held. Successors start on the next pass, or call `drain()` to start them.
