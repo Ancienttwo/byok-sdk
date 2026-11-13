@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "2a86fbaaf244bfbaae8fd3f7da2966e02c446586df6d4e5bd381af396d6357ee"
+    "snapshotSha256": "afd905a7a46cdd4bff38fb19001ff657f75cc13de0394f33df4c820f392a9ae1"
   },
   "configFields": {
     "status": "tracked",
@@ -87,6 +87,21 @@
         "export:@byok-sdk/client#LocalStateRelocationIntegrityError",
         "export:@byok-sdk/client#ServiceUnitError"
       ]
+    },
+    {
+      "id": "enrollment-clear-store-scope",
+      "impact": "breaking",
+      "summary": "clearDeviceEnrollment and Daemon.unpair() no longer delete another store's credential or staged first pairing under the same productId: they hold a per-user productId lock from validation through deletion, and pairing takes it across its credential writes, each waiting up to 30 seconds. FirstPairingAttempt gains storeIdentity (DeviceStore.identity, the SHA-256 hex of the resolved storeDir); an injected DeviceCredentialBackend keeps every attempt field, or the store's own attempt is refused. A clear refuses another store's attempt as store_not_bound and an attempt that names no store (staged by 0.42.0) with the new DeviceEnrollmentClearErrorCode pairing_attempt_unattributed; clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }) deletes it. Pairing applies the same rule (#2033): it reuses only its own store's staged attempt and otherwise throws the new FirstPairingAttemptRefusedError (store_not_bound, which replaceOtherStore discards, or pairing_attempt_unattributed). A running daemon's token renewal does not take the lock yet (#2034). BlobClient and InstallSkillPacksOptions change only through the types they reference (#1964).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#enrollment-clear-is-scoped-to-its-store-1964",
+      "items": [
+        "export:@byok-sdk/client#BlobClient",
+        "export:@byok-sdk/client#DeviceCredentialBackend",
+        "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
+        "export:@byok-sdk/client#FirstPairingAttemptRefusedError",
+        "export:@byok-sdk/client#InstallSkillPacksOptions",
+        "export:@byok-sdk/client#clearDeviceEnrollment",
+        "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend"
+      ]
     }
   ],
   "changes": [
@@ -126,6 +141,31 @@
       "entry": "bot-turn-instruction-host-kit"
     },
     {
+      "item": "export:@byok-sdk/client#BlobClient",
+      "change": "changed",
+      "entry": "enrollment-clear-store-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceCredentialBackend",
+      "change": "changed",
+      "entry": "enrollment-clear-store-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
+      "change": "changed",
+      "entry": "enrollment-clear-store-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client#FirstPairingAttemptRefusedError",
+      "change": "added",
+      "entry": "enrollment-clear-store-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client#InstallSkillPacksOptions",
+      "change": "changed",
+      "entry": "enrollment-clear-store-scope"
+    },
+    {
       "item": "export:@byok-sdk/client#LocalStateRelocationBusyError",
       "change": "changed",
       "entry": "path-gate-release-failures"
@@ -159,6 +199,16 @@
       "item": "export:@byok-sdk/client#SqliteLocalTaskJournal",
       "change": "changed",
       "entry": "journal-prune-cutoff"
+    },
+    {
+      "item": "export:@byok-sdk/client#clearDeviceEnrollment",
+      "change": "changed",
+      "entry": "enrollment-clear-store-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
+      "change": "changed",
+      "entry": "enrollment-clear-store-scope"
     },
     {
       "item": "export:@byok-sdk/core#LocalStoreId",

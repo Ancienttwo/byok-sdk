@@ -753,7 +753,10 @@ await clearDeviceEnrollment({
   later pairing reads because each pairing mints a new device id.
 - `DeviceEnrollmentClearError.code` is `store_owned` when another process holds
   the owner lease (nothing is read or cleared), `store_not_bound` when the OS
-  entry holds an enrollment another `storeDir` paired (it is left in place), or
+  entry holds an enrollment another `storeDir` paired or a first-pairing
+  attempt another `storeDir` staged (it is left in place),
+  `pairing_attempt_unattributed` when it holds a first-pairing attempt that
+  names no `storeDir` (staged by 0.42.0; it is left in place), or
   `clear_failed` with the provider or filesystem error as `cause`. A
   `device.json` that cannot be parsed is refused as `clear_failed` before
   anything is deleted; that store needs a re-pair. A credential provider
@@ -762,7 +765,21 @@ await clearDeviceEnrollment({
   store with no enrollment clears successfully.
 - It clears the OS credential set of the account it runs as. A Windows
   `LocalSystem` service's enrollment is out of an interactive user's reach.
-- Clearing acts on the productId-wide OS credential entry; with more than one store under one productId, do not clear one store while another is pairing or has an unresolved first pairing (#1964).
+- The OS credential entry is shared by every store of one `productId`. A store
+  clears its own staged first pairing, never another store's, and pairs only
+  with a staged attempt it made (#1964, #2033). Under
+  the store's owner lease the clear takes a per-user `productId` lock and holds
+  it from its validation through its deletion; a pairing takes the same lock,
+  after its own owner lease, across its credential writes, so a pairing of
+  another store runs wholly before or wholly after the clear. Either side waits
+  up to 30 seconds for the other; a clear that times out fails as
+  `clear_failed` and deletes nothing. A running daemon's token renewal does
+  not take the lock yet (#2034): a daemon whose enrollment another store
+  replaced can write its renewed credential back while that store clears, and
+  the clear deletes it.
+- `clearUnattributedAttempt: true` also deletes a first-pairing attempt that
+  names no `storeDir`. Set it only when no other store of this `productId` is
+  pairing.
 - Clear before deleting the data directory. The owner lease recreates
   `storeDir` if it is already gone.
 - `byok-agent unpair --yes --config <file>` runs `Daemon.unpair()`, which also
@@ -868,6 +885,16 @@ size bound. Older clients fail closed while the replacement attempt is pending;
 after promotion, the entry is an ordinary enrollment again. The public credential
 backend API shape is unchanged; injected backends must preserve the same staging
 and renewal semantics.
+
+**Staged first pairing of another store.** A pairing reuses a staged
+first-pairing attempt only when that attempt names this `storeDir` (#2033).
+Otherwise it throws `FirstPairingAttemptRefusedError` and writes nothing:
+`store_not_bound` when another store staged it (that store finishes or clears
+its pairing, or `pair --replace-other-store` discards the attempt and stages a
+fresh key), or `pairing_attempt_unattributed` when it names no store, as one
+staged by 0.42.0 does (when no other store of this `productId` is pairing,
+clear it with `clearDeviceEnrollment({ productId, storeDir,
+clearUnattributedAttempt: true })`, then pair again).
 
 **Provider unreachable on a slow IPv4 network.** Node tries each resolved
 address for 250 ms by default before it moves to the next one. When a device's

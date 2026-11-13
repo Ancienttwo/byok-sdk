@@ -16,7 +16,7 @@ import {
   type DeviceRecord,
 } from './store.js';
 import type { DeviceCredentialBackend } from './device-credential-store.js';
-import { DeviceStoreBindingMismatchError } from './daemon-errors.js';
+import { DeviceStoreBindingMismatchError, FirstPairingAttemptRefusedError } from './daemon-errors.js';
 import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys.js';
 import { toHttpBase } from './url.js';
 import { MAX_TIMER_DELAY_MS } from '../util/timer-delay.js';
@@ -222,7 +222,10 @@ export class AuthManager {
    * refuses with {@link DeviceStoreBindingMismatchError} while the OS entry
    * holds an enrollment this storeDir did not pair, unless
    * `replaceOtherStore` states the operator's intent to replace it; the
-   * replacement never reuses that enrollment's key.
+   * replacement never reuses that enrollment's key. A staged first-pairing
+   * attempt is reused only when it names this store; otherwise it refuses
+   * with {@link FirstPairingAttemptRefusedError}, and `replaceOtherStore`
+   * discards another store's attempt (#2033).
    */
   async pair(pairingCode: string, options?: { readonly replaceOtherStore?: boolean }): Promise<DeviceRecord> {
     this.pairing = true;
@@ -257,7 +260,12 @@ export class AuthManager {
         if (existing) {
           keyPair = { privateKey: importPrivateKeyPem(existing.devicePrivateKeyPem), publicKeyBase64Url: existing.devicePublicKey };
         } else {
-          const firstAttempt = await this.credentials.readFirstPairingAttempt(signal);
+          const staged = await this.credentials.readFirstPairingAttempt(signal);
+          const firstAttempt = staged?.storeIdentity === this.opts.store.identity ? staged : undefined;
+          if (staged !== undefined && firstAttempt === undefined) {
+            if (staged.storeIdentity === undefined) throw new FirstPairingAttemptRefusedError('pairing_attempt_unattributed');
+            if (options?.replaceOtherStore !== true) throw new FirstPairingAttemptRefusedError('store_not_bound');
+          }
           if (firstAttempt) {
             keyPair = {
               privateKey: importPrivateKeyPem(firstAttempt.devicePrivateKeyPem),
@@ -275,6 +283,7 @@ export class AuthManager {
               devicePublicKey: keyPair.publicKeyBase64Url,
               devicePrivateKeyPem: exportPrivateKeyPem(keyPair.privateKey),
               ...(pairingMachineId === undefined ? {} : { machineId: pairingMachineId }),
+              storeIdentity: this.opts.store.identity,
             }, signal);
           }
         }

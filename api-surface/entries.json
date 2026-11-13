@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2753840,
+      "budgetBytes": 2756596,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -286,7 +286,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3205923,
+      "budgetBytes": 3208679,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -460,7 +460,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2423551,
+      "budgetBytes": 2426307,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -577,7 +577,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 549556,
+      "budgetBytes": 549602,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -693,7 +693,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Task/device assertions; core includes protected Zod probes",
-      "budgetBytes": 126023,
+      "budgetBytes": 126120,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -908,7 +908,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 511934,
+      "budgetBytes": 511980,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1048,7 +1048,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 575950,
+      "budgetBytes": 575996,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2589,7 +2589,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2414984,
+      "budgetBytes": 2417394,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
