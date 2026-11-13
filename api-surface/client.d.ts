@@ -11917,7 +11917,7 @@ export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
 /** Closed codes only; the message never carries a path or OS text. */
 export declare class ServiceUnitError extends Error {
     readonly code: ServiceUnitErrorCode;
-    constructor(code: ServiceUnitErrorCode);
+    constructor(code: ServiceUnitErrorCode, options?: ErrorOptions);
 }
 export declare function assertServiceOwner(owner: unknown): asserts owner is string;
 /** `<storeDir>/service`: the SDK-owned directory for the launcher and the lifecycle owner record. */
@@ -12217,13 +12217,13 @@ export declare function generateWinswXml(def: {
 export declare function createWinswLifecycle(def: ServiceDefinition, deps?: WinswDeps, gateRoot?: string): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/local-state-relocation.d.ts ====
 export declare class LocalStateRelocationError extends Error {
-    constructor(message: string);
+    constructor(message: string, options?: ErrorOptions);
 }
 export declare class LocalStateRelocationBusyError extends LocalStateRelocationError {
-    constructor(message: string);
+    constructor(message: string, options?: ErrorOptions);
 }
 export declare class LocalStateRelocationIntegrityError extends LocalStateRelocationError {
-    constructor(message: string);
+    constructor(message: string, options?: ErrorOptions);
 }
 export interface LocalStateRelocationInput {
     readonly productId: string;

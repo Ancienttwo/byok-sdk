@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "57ffe9f806dbaa4cce34d81d18ec801284c6b1f2cc22c2040f59af0924702614"
+    "snapshotSha256": "9125ba9148c3bb584c337cff8658e7bce739cfb9d02390a7d50d03b2ebb5a24b"
   },
   "configFields": {
     "status": "tracked",
@@ -75,6 +75,18 @@
         "export:@byok-sdk/client#LocalTaskJournal",
         "export:@byok-sdk/client#SqliteLocalTaskJournal"
       ]
+    },
+    {
+      "id": "path-gate-release-failures",
+      "impact": "breaking",
+      "summary": "A path mutation gate release that fails while another error is thrown is kept: PathMutationGateBusyError, ServiceUnitError and LocalStateRelocation errors keep their class and code with an AggregateError of the original error and the release failures in cause, and an error of another class from a managed service lifecycle operation becomes that AggregateError. ServiceUnitError and the LocalStateRelocation error classes accept ErrorOptions. Hosts that read the original error of such a failure read it from cause.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#gate-release-failures-join-the-thrown-error",
+      "items": [
+        "export:@byok-sdk/client#LocalStateRelocationBusyError",
+        "export:@byok-sdk/client#LocalStateRelocationError",
+        "export:@byok-sdk/client#LocalStateRelocationIntegrityError",
+        "export:@byok-sdk/client#ServiceUnitError"
+      ]
     }
   ],
   "changes": [
@@ -114,6 +126,21 @@
       "entry": "bot-turn-instruction-host-kit"
     },
     {
+      "item": "export:@byok-sdk/client#LocalStateRelocationBusyError",
+      "change": "changed",
+      "entry": "path-gate-release-failures"
+    },
+    {
+      "item": "export:@byok-sdk/client#LocalStateRelocationError",
+      "change": "changed",
+      "entry": "path-gate-release-failures"
+    },
+    {
+      "item": "export:@byok-sdk/client#LocalStateRelocationIntegrityError",
+      "change": "changed",
+      "entry": "path-gate-release-failures"
+    },
+    {
       "item": "export:@byok-sdk/client#LocalTaskJournal",
       "change": "changed",
       "entry": "journal-prune-cutoff"
@@ -122,6 +149,11 @@
       "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
       "change": "changed",
       "entry": "service-store-release-failures"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUnitError",
+      "change": "changed",
+      "entry": "path-gate-release-failures"
     },
     {
       "item": "export:@byok-sdk/client#SqliteLocalTaskJournal",

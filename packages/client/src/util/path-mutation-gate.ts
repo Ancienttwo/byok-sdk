@@ -52,8 +52,9 @@ export class PathMutationGateBusyError extends Error {
   constructor(
     public readonly scope: PathMutationGateScope,
     public readonly targetPath: string,
+    options?: ErrorOptions,
   ) {
-    super(`${scope} mutation gate is already held for ${targetPath}`);
+    super(`${scope} mutation gate is already held for ${targetPath}`, options);
     this.name = 'PathMutationGateBusyError';
   }
 }
@@ -122,6 +123,22 @@ function resolveGateTarget(input: PathMutationGateInput): Promise<string> {
   return isPathless(input) ? Promise.resolve('*') : resolvePathWithoutCreate(input.targetPath);
 }
 
+/**
+ * The error to throw when releasing gates after `error` failed too (#2002). A
+ * release failure is never dropped: a busy error is rebuilt as a
+ * {@link PathMutationGateBusyError}, so callers that map busy keep doing so,
+ * with an `AggregateError` of `error` and the release failures as its cause;
+ * any other error becomes that `AggregateError`.
+ *
+ * @internal
+ */
+export function withGateReleaseFailures(error: unknown, releaseFailures: readonly unknown[]): unknown {
+  if (releaseFailures.length === 0) return error;
+  // A fixed message: formatting a thrown value can itself throw and drop both errors.
+  const all = new AggregateError([error, ...releaseFailures], 'An operation failed, and releasing a path mutation gate failed too');
+  return error instanceof PathMutationGateBusyError ? new PathMutationGateBusyError(error.scope, error.targetPath, { cause: all }) : all;
+}
+
 /** Takes the OS lock for `identity`; resolves to the function that drops it, or `undefined` when another handle holds it. */
 async function lockIdentity(identity: string, gateRoot: string | undefined): Promise<(() => Promise<void>) | undefined> {
   if (process.platform === 'darwin') {
@@ -174,8 +191,9 @@ async function acquireOne(input: PathMutationGateInput, gateRoot: string | undef
       throw new Error(`path mutation gate target changed during acquisition: ${input.targetPath}`);
     }
   } catch (error) {
-    await unlock();
-    throw error;
+    const failures: unknown[] = [];
+    await unlock().catch((unlockError: unknown) => { failures.push(unlockError); });
+    throw withGateReleaseFailures(error, failures);
   }
 
   let released = false;
@@ -219,8 +237,8 @@ export async function acquirePathMutationGates(
     for (const item of unique) acquired.push(await acquireBefore(item.input, deadline, options.gateRoot));
     return Object.freeze(acquired.slice());
   } catch (error) {
-    await Promise.allSettled(acquired.reverse().map((gate) => gate.release()));
-    throw error;
+    const released = await Promise.allSettled(acquired.reverse().map((gate) => gate.release()));
+    throw withGateReleaseFailures(error, released.flatMap((result) => (result.status === 'rejected' ? [result.reason] : [])));
   }
 }
 
