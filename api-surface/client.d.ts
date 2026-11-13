@@ -12190,7 +12190,8 @@ export declare function checkUpgradeFrom(fromVersion: string, options?: {
     readonly resolveFrom?: string;
 }): UpgradeFromReport;
 // ==== @byok-sdk/client dist/lifecycle/windows-user.d.ts ====
-import { type Runner } from '../util/exec-runner.js';
+import { type SpawnOptions } from 'node:child_process';
+import type { Runner } from '../util/exec-runner.js';
 import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { type ServiceDefinition, type ServiceProgram } from './service-types.js';
 /** DI seams for tests; the real ones start Windows processes. */
@@ -12218,6 +12219,18 @@ export declare function windowsStartupDir(appData: string): string;
  * --headless` drops them).
  */
 export declare function generateWindowsStartupUnit(launcherPath: string): string;
+/**
+ * Runs the unit the way Explorer does; the launcher it starts outlives this
+ * process. After the `launch` bound only the unit's own
+ * `cmd` is terminated, never its tree: the launcher `start` made is that
+ * `cmd`'s child and is the service itself. The rejection then means the
+ * launcher may or may not be running; `start()` and `status()` ask the
+ * launcher query again. A `cmd` whose exit is not confirmed may still start
+ * one (`exitConfirmed: false`). `spawnCmd` is a test seam.
+ *
+ * @internal
+ */
+export declare function launchUnit(unitPath: string, spawnCmd?: (args: string[], options: SpawnOptions) => import("child_process").ChildProcess): Promise<void>;
 /**
  * Windows logon autostart without the SCM or an administrator (#1337,
  * probe: `docs/researches/2026-11-02-windows-user-autostart-probe.md`).
@@ -14854,15 +14867,6 @@ export interface RunResult {
  * verification requirement, without ever shelling out for real in tests.
  */
 export type Runner = (command: string, args: string[]) => Promise<RunResult>;
-/**
- * A platform command outlived its bound and its process tree was stopped.
- * Whether it took effect is UNKNOWN (a job may have been bootstrapped or a
- * service registered before the stop); it never means the change did not
- * happen and is never idempotent absence. The next install or uninstall
- * starts again from the service manager's own state.
- */
-export declare class PlatformCommandTimeoutError extends Error {
-}
 /**
  * Runs `command`/`args` via `run` and throws a clear, labeled error if it
  * exits non-zero — for the subset of calls across launchd/systemd/WinSW
