@@ -153,7 +153,7 @@ export async function archiveAgentTerminalMessages(
       // daemon start does (#393).
       await new OwnedProcessLedger(storeDir).reconcile();
       // Credential-blind metadata; callers supply an authenticated target, never infer it here.
-      const metadata = await new DeviceStore(storeDir, createDeviceCredentialStore({ productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials })).load();
+      const metadata = await new DeviceStore(config.productId, storeDir, createDeviceCredentialStore({ productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials })).load();
       if (!metadata || metadata.deviceId !== input.expectedDeviceId || metadata.tenantId !== input.expectedTenantId) {
         throw new DeviceOperatorError('target-mismatch');
       }

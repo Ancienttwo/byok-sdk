@@ -37,7 +37,7 @@ const OUTBOX_DROPPABLE_TYPES: ReadonlySet<Envelope['type']> = new Set(['task.pro
 export type ConnectionState = 'connecting' | 'open';
 
 /** The remote conditions that end a session for good. */
-export type ConnectionHaltReason = Extract<DaemonHaltReason, 'device_revoked' | 'handshake_rejected' | 'replay_cursor_too_old'>;
+export type ConnectionHaltReason = Extract<DaemonHaltReason, 'device_revoked' | 'handshake_rejected' | 'replay_cursor_too_old' | 'store_not_bound' | 're_pair_required'>;
 
 /**
  * Server work requiring durable handler completion before acknowledgement.
@@ -635,6 +635,11 @@ export class ConnectionManager {
   /** The device was found revoked outside this session's own requests (proactive token renewal). */
   noteDeviceRevoked(): void {
     this.halt('device_revoked');
+  }
+
+  /** A renewal found the OS entry no longer holds this store's enrollment (#2034). */
+  noteBindingLost(reason: 'store_not_bound' | 're_pair_required'): void {
+    this.halt(reason);
   }
 
   /**

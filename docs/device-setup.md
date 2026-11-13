@@ -714,14 +714,18 @@ await clearDeviceEnrollment({
   clears its own staged first pairing, never another store's, and pairs only
   with a staged attempt it made (#1964, #2033). Under
   the store's owner lease the clear takes a per-user `productId` lock and holds
-  it from its validation through its deletion; a pairing takes the same lock,
-  after its own owner lease, across its credential writes, so a pairing of
-  another store runs wholly before or wholly after the clear. Either side waits
-  up to 30 seconds for the other; a clear that times out fails as
-  `clear_failed` and deletes nothing. A running daemon's token renewal does
-  not take the lock yet (#2034): a daemon whose enrollment another store
-  replaced can write its renewed credential back while that store clears, and
-  the clear deletes it.
+  it from its validation through its deletion. A pairing and a running
+  daemon's token renewal take the same lock, after their own owner lease,
+  around each credential write, and first check that the OS entry still holds
+  this store's enrollment or staged attempt. Another store's pairing or
+  renewal therefore lands wholly before or wholly after the clear (#2034).
+  Lock order is the store owner lease, then the `productId` lock, and no holder
+  keeps the lock across a network request. Each side waits up to 30 seconds;
+  a clear that times out fails as `clear_failed` and deletes nothing, and a
+  renewal that times out fails as busy, not as revocation, and is retried.
+- A renewal that finds the enrollment gone writes nothing and halts the
+  daemon: `store_not_bound` when another store paired over it,
+  `re_pair_required` when it was cleared.
 - `clearUnattributedAttempt: true` also deletes a first-pairing attempt that
   names no `storeDir`. Set it only when no other store of this `productId` is
   pairing.

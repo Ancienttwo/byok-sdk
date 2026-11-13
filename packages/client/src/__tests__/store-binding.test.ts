@@ -156,6 +156,98 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
     expect(await readDeviceEnrollmentStatus(first)).toEqual({ state: 'paired', deviceId });
   });
 
+  describe('renewal and pairing hold the enrollment lock around writes only (#2034)', () => {
+    async function trackGate() {
+      const { acquireEnrollmentGate: acquire } = await vi.importActual<typeof import('../daemon/enrollment-gate')>('../daemon/enrollment-gate');
+      const gate = { held: 0, taken: 0, restore: () => { vi.mocked(acquireEnrollmentGate).mockReset().mockImplementation(acquire); } };
+      vi.mocked(acquireEnrollmentGate).mockImplementation(async (id, signal) => {
+        const acquired = await acquire(id, signal);
+        gate.held += 1;
+        gate.taken += 1;
+        return { ...acquired, release: async () => { gate.held -= 1; await acquired.release(); } };
+      });
+      return gate;
+    }
+
+    it('a running daemon whose enrollment another store replaced halts as store_not_bound on renewal and writes nothing', async () => {
+      const first = await storeConfig();
+      const firstDaemon = daemonFor(first);
+      const { deviceId: firstDeviceId } = await firstDaemon.pair('pairing-code');
+      await firstDaemon.start();
+      await waitForDaemonOpen(firstDaemon);
+      const second = await storeConfig();
+      const { deviceId } = await daemonFor(second).pair('pairing-code', { replaceOtherStore: true });
+
+      server.rotateDeviceToken(firstDeviceId);
+
+      await vi.waitFor(() => expect(firstDaemon.status().lifecycle).toMatchObject({ phase: 'halted', reason: 'store_not_bound' }), { timeout: 10_000 });
+      expect(await readDeviceEnrollmentStatus(second)).toEqual({ state: 'paired', deviceId });
+    });
+
+    it('a renewal waiting on another store\'s clear does not restore the cleared credential and halts as re_pair_required', async () => {
+      const first = await storeConfig();
+      const firstDaemon = daemonFor(first);
+      const { deviceId: firstDeviceId } = await firstDaemon.pair('pairing-code');
+      await firstDaemon.start();
+      await waitForDaemonOpen(firstDaemon);
+      const second = await storeConfig();
+      await daemonFor(second).pair('pairing-code', { replaceOtherStore: true });
+      const credentials = testDeviceCredentials(productId);
+      const gate = await trackGate();
+      let renewalArrived!: () => void;
+      const arrived = new Promise<void>((resolve) => { renewalArrived = resolve; });
+      const deleteEntry = credentials.clear.bind(credentials);
+      const write = credentials.replace.bind(credentials);
+      vi.spyOn(credentials, 'replace').mockImplementation(async (record) => { renewalArrived(); return write(record); });
+      vi.spyOn(credentials, 'clear').mockImplementationOnce(async () => {
+        const waiting = gate.taken;
+        vi.mocked(acquireEnrollmentGate).mockImplementationOnce(async (id, signal) => {
+          renewalArrived();
+          return (await vi.importActual<typeof import('../daemon/enrollment-gate')>('../daemon/enrollment-gate')).acquireEnrollmentGate(id, signal);
+        });
+        server.rotateDeviceToken(firstDeviceId);
+        // Released once the renewal has either written or is waiting on the gate this clear holds.
+        await arrived;
+        expect(gate.taken).toBe(waiting);
+        return deleteEntry();
+      });
+
+      try {
+        await clearDeviceEnrollment({ productId, storeDir: second.storeDir! }, { deviceCredentials: credentials });
+        await vi.waitFor(() => expect(firstDaemon.status().lifecycle).toMatchObject({ phase: 'halted', reason: 're_pair_required' }), { timeout: 10_000 });
+      } finally {
+        gate.restore();
+      }
+      expect(await credentials.read()).toBeUndefined();
+    });
+
+    it('never holds the lock across a pairing or renewal request', async () => {
+      const config = await storeConfig();
+      const daemon = daemonFor(config);
+      const gate = await trackGate();
+      const send = globalThis.fetch;
+      const requests: Array<{ readonly path: string; readonly held: number }> = [];
+      vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+        requests.push({ path: new URL(String(input instanceof Request ? input.url : input)).pathname, held: gate.held });
+        return send(input, init);
+      });
+
+      try {
+        const { deviceId } = await daemon.pair('pairing-code');
+        await daemon.start();
+        await waitForDaemonOpen(daemon);
+        server.rotateDeviceToken(deviceId);
+        await vi.waitFor(() => expect(requests.some((request) => request.path === '/byok/token')).toBe(true), { timeout: 10_000 });
+        // Two pairing segments and the renewal's write.
+        await vi.waitFor(() => expect(gate.taken).toBeGreaterThanOrEqual(3), { timeout: 10_000 });
+      } finally {
+        gate.restore();
+      }
+      expect(requests.some((request) => request.path === '/byok/pair')).toBe(true);
+      expect(requests.filter((request) => request.held > 0)).toEqual([]);
+    });
+  });
+
   describe('clearDeviceEnrollment clears a store without a daemon (#1841)', () => {
     const clear = (config: DaemonConfig) =>
       clearDeviceEnrollment({ productId, storeDir: config.storeDir! }, { deviceCredentials: testDeviceCredentials(productId) });
@@ -262,7 +354,7 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
       const staging = await storeConfig();
       await expect(daemonFor(unreachable(staging)).pair('pairing-code')).rejects.toThrow();
       const credentials = testDeviceCredentials(productId);
-      const own = new DeviceStore(DeviceStore.resolveDir(productId, staging.storeDir), credentials).identity;
+      const own = new DeviceStore(productId, DeviceStore.resolveDir(productId, staging.storeDir), credentials).identity;
       expect((await credentials.readFirstPairingAttempt())?.storeIdentity).toMatch(/^[0-9a-f]{64}$/u);
       expect((await credentials.readFirstPairingAttempt())?.storeIdentity).toBe(own);
 

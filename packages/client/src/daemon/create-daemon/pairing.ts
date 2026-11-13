@@ -1,7 +1,6 @@
 import { assertServerUrlAllowed, formatServerUrl } from '../url.js';
 import { type DeviceEnrollment, type DeviceRecord, DeviceRecordRePairRequiredError } from '../store.js';
 import { clearEnrollmentUnderLease } from '../enrollment-clear.js';
-import { acquireEnrollmentGate } from '../enrollment-gate.js';
 import { DeviceStoreBindingMismatchError, EmbeddedPairingError } from '../daemon-errors.js';
 import { checkVerificationSecret, enrollDeviceMember } from '../device-member.js';
 import { acquireDaemonOwner } from '../../util/daemon-owner.js';
@@ -152,16 +151,9 @@ export async function pairUnderLease(
         (error instanceof DeviceStoreBindingMismatchError && replaceOtherStore);
       if (!replaceable) throw error;
     }
-    // The productId gate, taken after the owner lease, keeps another store's
-    // enrollment clear from validating before these writes and deleting after
-    // them (#1964).
-    const gate = await acquireEnrollmentGate(config.productId);
-    let record: DeviceRecord;
-    try {
-      record = await daemonState.auth.pair(pairingCode, { replaceOtherStore });
-    } finally {
-      await gate.release();
-    }
+    // auth.pair() takes the enrollment gate after this owner lease, around its
+    // validation and writes only (#1964, #2034).
+    const record = await daemonState.auth.pair(pairingCode, { replaceOtherStore });
     replacementPersisted = true;
     // No stopped daemon operation may continue using a superseded binding
     // between re-pair and the next start. startUnderLease will construct the
@@ -265,7 +257,7 @@ export async function unpairUnderLease(daemonScope: DaemonScope): Promise<void> 
     // therefore either wholly before this cleanup (and is fully removed) or
     // wholly after it; stale pre-lease identity can never drive cleanup.
     daemonState.carriedFreshness = undefined;
-    const current = await clearEnrollmentUnderLease({ productId: config.productId, store, memberRecords }, () => daemonState.auth.readCurrent(), () => {
+    const current = await clearEnrollmentUnderLease({ store, memberRecords }, () => daemonState.auth.readCurrent(), () => {
       // Once the credential is gone this process must not keep the previous
       // cache, even if the metadata removal below fails.
       daemonState.auth = buildAuthManager();

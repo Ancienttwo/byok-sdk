@@ -72,7 +72,7 @@ export function composeDaemonStores(input: Pick<DaemonInputs & DaemonConfigScope
   });
 
   const teamWorkspaces = new LocalTeamWorkspace(storeDir);
-  const store = new DeviceStore(storeDir, overrides.deviceCredentials === undefined ? createDeviceCredentialStore({
+  const store = new DeviceStore(config.productId, storeDir, overrides.deviceCredentials === undefined ? createDeviceCredentialStore({
     productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials, nativeAssetRoot: config.nativeAssetRoot,
   }) : overrides.deviceCredentials);
   // #654 E2d-1: the member entries live in the same OS custody as the

@@ -202,6 +202,8 @@ export class DeviceStore {
    * CI/dev machine, not just asserted.
    */
   constructor(
+    /** The productId whose OS credential entry this store shares; the one source of the enrollment lock's scope (#2034). */
+    readonly productId: string,
     storeDir: string,
     readonly credentials: DeviceCredentialBackend,
     private readonly secureDirOptions?: EnsureSecureDirOptions,
@@ -390,7 +392,7 @@ export async function readEnrollmentAuthority(
 ): Promise<EnrollmentAuthorityRead> {
   const { productId, storeDir: configuredStoreDir, deviceCredentials, nativeAssetRoot } = readEnrollmentOptions(options);
   const storeDir = DeviceStore.resolveDir(productId, configuredStoreDir);
-  return readStoreEnrollment(new DeviceStore(storeDir, createDeviceCredentialStore({ productId, storeDir, deviceCredentials, nativeAssetRoot })));
+  return readStoreEnrollment(new DeviceStore(productId, storeDir, createDeviceCredentialStore({ productId, storeDir, deviceCredentials, nativeAssetRoot })));
 }
 
 /** {@link readEnrollmentAuthority} over an already composed store. */

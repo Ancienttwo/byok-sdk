@@ -15,7 +15,8 @@ import {
   type DeviceMetadata,
   type DeviceRecord,
 } from './store.js';
-import type { DeviceCredentialBackend } from './device-credential-store.js';
+import type { DeviceCredentialBackend, FirstPairingAttempt } from './device-credential-store.js';
+import { acquireEnrollmentGate } from './enrollment-gate.js';
 import { DeviceStoreBindingMismatchError, FirstPairingAttemptRefusedError } from './daemon-errors.js';
 import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys.js';
 import { toHttpBase } from './url.js';
@@ -132,6 +133,8 @@ export interface AuthManagerOptions {
   authRequestDeadlineMs?: number;
   /** Called once revocation is detected, so a caller (ConnectionManager) can stop retrying and surface the state instead of looping. */
   onRevoked?: () => void;
+  /** Called once a renewal finds the OS entry no longer holds this store's enrollment (#2034); the daemon halts with that reason. */
+  onBindingLost?: (reason: 'store_not_bound' | 're_pair_required') => void;
 }
 
 /**
@@ -233,60 +236,46 @@ export class AuthManager {
     this.proactiveTimer = undefined;
     try {
       return await this.runCredentialMutation(async (signal) => {
-        let existing = this.record;
-        if (!existing) {
-          try {
-            existing = await this.loadRecord(signal);
-          } catch (error) {
-            // Explicit pairing is the one authorized replacement path for a
-            // legacy/tampered enrollment file. It never reads through it: a
-            // fresh keypair and complete authenticated PairResponse replace
-            // the record atomically below. Another store's enrollment is
-            // replaced only on the operator's explicit request.
-            const replaceable = error instanceof DeviceRecordRePairRequiredError ||
-              (error instanceof DeviceStoreBindingMismatchError && options?.replaceOtherStore === true);
-            if (!replaceable) throw error;
-          }
-        }
+        const replaceOtherStore = options?.replaceOtherStore === true;
         // These request facts join the key as one immutable first-pair
         // attempt. A retry after process restart must not silently change its
         // server-side binding because hostname/config or machine observation
         // changed after the registration commit.
         const observedDeviceName = this.opts.deviceName ?? os.hostname();
         const observedMachineId = await this.opts.machineId?.();
-        let keyPair: ReturnType<typeof generateDeviceKeyPair>;
-        let pairingDeviceName = observedDeviceName;
-        let pairingMachineId = observedMachineId;
-        if (existing) {
-          keyPair = { privateKey: importPrivateKeyPem(existing.devicePrivateKeyPem), publicKeyBase64Url: existing.devicePublicKey };
-        } else {
-          const staged = await this.credentials.readFirstPairingAttempt(signal);
-          const firstAttempt = staged?.storeIdentity === this.opts.store.identity ? staged : undefined;
-          if (staged !== undefined && firstAttempt === undefined) {
-            if (staged.storeIdentity === undefined) throw new FirstPairingAttemptRefusedError('pairing_attempt_unattributed');
-            if (options?.replaceOtherStore !== true) throw new FirstPairingAttemptRefusedError('store_not_bound');
-          }
-          if (firstAttempt) {
-            keyPair = {
-              privateKey: importPrivateKeyPem(firstAttempt.devicePrivateKeyPem),
-              publicKeyBase64Url: firstAttempt.devicePublicKey,
+        // The enrollment gate covers validation and the attempt write only,
+        // never the request below (#2034).
+        const { keyPair, pairingDeviceName, pairingMachineId } = await this.underEnrollmentGate(signal, async () => {
+          const { existing, attempt } = this.record === undefined
+            ? await this.pairingAuthority(signal, replaceOtherStore)
+            : { existing: this.record, attempt: undefined };
+          if (existing) {
+            return {
+              keyPair: { privateKey: importPrivateKeyPem(existing.devicePrivateKeyPem), publicKeyBase64Url: existing.devicePublicKey },
+              pairingDeviceName: observedDeviceName,
+              pairingMachineId: observedMachineId,
             };
-            pairingDeviceName = firstAttempt.deviceName;
-            pairingMachineId = firstAttempt.machineId;
-          } else {
-            keyPair = generateDeviceKeyPair();
-            // Persist before the first network request. If the server commits
-            // while its response is lost, the explicit retry uses this exact key.
-            await this.credentials.saveFirstPairingAttempt({
-              kind: 'first-pairing-attempt-v1',
-              deviceName: pairingDeviceName,
-              devicePublicKey: keyPair.publicKeyBase64Url,
-              devicePrivateKeyPem: exportPrivateKeyPem(keyPair.privateKey),
-              ...(pairingMachineId === undefined ? {} : { machineId: pairingMachineId }),
-              storeIdentity: this.opts.store.identity,
-            }, signal);
           }
-        }
+          if (attempt) {
+            return {
+              keyPair: { privateKey: importPrivateKeyPem(attempt.devicePrivateKeyPem), publicKeyBase64Url: attempt.devicePublicKey },
+              pairingDeviceName: attempt.deviceName,
+              pairingMachineId: attempt.machineId,
+            };
+          }
+          const generated = generateDeviceKeyPair();
+          // Persist before the first network request. If the server commits
+          // while its response is lost, the explicit retry uses this exact key.
+          await this.credentials.saveFirstPairingAttempt({
+            kind: 'first-pairing-attempt-v1',
+            deviceName: observedDeviceName,
+            devicePublicKey: generated.publicKeyBase64Url,
+            devicePrivateKeyPem: exportPrivateKeyPem(generated.privateKey),
+            ...(observedMachineId === undefined ? {} : { machineId: observedMachineId }),
+            storeIdentity: this.opts.store.identity,
+          }, signal);
+          return { keyPair: generated, pairingDeviceName: observedDeviceName, pairingMachineId: observedMachineId };
+        });
 
         const url = new URL(BYOK_PAIR_PATH, toHttpBase(this.opts.serverUrl));
         // Best-effort and optional: an unresolvable machine identity omits the
@@ -339,8 +328,16 @@ export class AuthManager {
         // enrollment authority. If the authoritative replace fails, the next
         // load reports the binding mismatch; no mixed identity/key can load,
         // and recovery is re-running pair or the doctor repair action.
-        await this.opts.store.save(metadata);
-        await this.credentials.replace(record, signal);
+        await this.underEnrollmentGate(signal, async () => {
+          // Another store may have paired while the request ran; the key this
+          // request proved must still be this store's enrollment or attempt.
+          const { existing, attempt } = await this.pairingAuthority(signal, replaceOtherStore);
+          if ((existing ?? attempt)?.devicePublicKey !== keyPair.publicKeyBase64Url) {
+            throw new FirstPairingAttemptRefusedError('store_not_bound');
+          }
+          await this.opts.store.save(metadata);
+          await this.credentials.replace(record, signal);
+        });
         this.record = record;
         this.lastClockSkew = body.clockSkew;
         this.revoked = false;
@@ -416,8 +413,23 @@ export class AuthManager {
       expiresAt: body.expiresAt,
     };
     // Renewal atomically replaces the complete enrollment authority; identity
-    // and key cannot drift from the new token/expiry.
-    await this.credentials.replace(updated, signal);
+    // and key cannot drift from the new token/expiry. It writes only while
+    // this store still holds that enrollment, under the enrollment gate
+    // (#2034); otherwise the new token is discarded and the binding is lost.
+    await this.underEnrollmentGate(signal, async () => {
+      let current: DeviceRecord | undefined;
+      try {
+        current = await this.loadRecord(signal);
+      } catch (error) {
+        if (error instanceof DeviceStoreBindingMismatchError || error instanceof DeviceRecordRePairRequiredError) this.loseBinding(error);
+        throw error;
+      }
+      if (current === undefined) this.loseBinding(new DeviceRecordRePairRequiredError());
+      if (current.deviceId !== record.deviceId || current.tenantId !== record.tenantId || current.devicePublicKey !== record.devicePublicKey) {
+        this.loseBinding(new DeviceStoreBindingMismatchError(current, record));
+      }
+      await this.credentials.replace(updated, signal);
+    });
     this.record = updated;
     this.lastClockSkew = body.clockSkew;
     this.lastRenewedAt = performance.now();
@@ -497,6 +509,54 @@ export class AuthManager {
       }, UNTYPED_401_RECHECK_DELAY_MS);
       signal.addEventListener('abort', onStop, { once: true });
     });
+  }
+
+  /** The OS entry no longer holds this store's enrollment: drop the cached record, stop renewing and report it. Always throws `error`. */
+  private loseBinding(error: DeviceStoreBindingMismatchError | DeviceRecordRePairRequiredError): never {
+    this.record = undefined;
+    if (this.proactiveTimer) clearTimeout(this.proactiveTimer);
+    this.proactiveTimer = undefined;
+    this.opts.onBindingLost?.(error instanceof DeviceStoreBindingMismatchError ? 'store_not_bound' : 're_pair_required');
+    throw error;
+  }
+
+  private async underEnrollmentGate<T>(signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
+    const gate = await acquireEnrollmentGate(this.opts.store.productId, signal);
+    try {
+      return await operation();
+    } finally {
+      await gate.release();
+    }
+  }
+
+  /**
+   * Under the enrollment gate: this store's bound enrollment, or else its own
+   * staged first-pairing attempt (undefined when none, or when
+   * `replaceOtherStore` discards another store's). Another store's enrollment
+   * or attempt, or an attempt that names no store, is refused (#2033).
+   */
+  private async pairingAuthority(
+    signal: AbortSignal,
+    replaceOtherStore: boolean,
+  ): Promise<{ readonly existing: DeviceRecord | undefined; readonly attempt: FirstPairingAttempt | undefined }> {
+    try {
+      const existing = await this.loadRecord(signal);
+      if (existing) return { existing, attempt: undefined };
+    } catch (error) {
+      // Explicit pairing is the one authorized replacement path for a
+      // legacy/tampered enrollment file. It never reads through it: a fresh
+      // keypair and complete authenticated PairResponse replace the record
+      // atomically. Another store's enrollment is replaced only on the
+      // operator's explicit request.
+      const replaceable = error instanceof DeviceRecordRePairRequiredError ||
+        (error instanceof DeviceStoreBindingMismatchError && replaceOtherStore);
+      if (!replaceable) throw error;
+    }
+    const staged = await this.credentials.readFirstPairingAttempt(signal);
+    if (staged === undefined || staged.storeIdentity === this.opts.store.identity) return { existing: undefined, attempt: staged };
+    if (staged.storeIdentity === undefined) throw new FirstPairingAttemptRefusedError('pairing_attempt_unattributed');
+    if (!replaceOtherStore) throw new FirstPairingAttemptRefusedError('store_not_bound');
+    return { existing: undefined, attempt: undefined };
   }
 
   /** Always throws — `never` return type lets call sites use `if (x === 401) this.markRevoked();` without an explicit `return`/`throw` of their own. */

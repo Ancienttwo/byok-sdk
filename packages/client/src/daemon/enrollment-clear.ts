@@ -46,7 +46,6 @@ export class DeviceEnrollmentClearError extends Error {
 
 /** One store's enrollment custody: the `device.json` projection, the OS credential and, with the OS provider, the member entries. */
 export interface EnrollmentCustody {
-  readonly productId: string;
   readonly store: DeviceStore;
   readonly memberRecords: { clear(): Promise<void> } | undefined;
 }
@@ -76,7 +75,7 @@ export async function clearEnrollmentUnderLease(
   onCredentialCleared: () => void = () => {},
   clearUnattributedAttempt = false,
 ): Promise<DeviceRecord | undefined> {
-  const gate = await acquireEnrollmentGate(custody.productId);
+  const gate = await acquireEnrollmentGate(custody.store.productId);
   try {
     let current: DeviceRecord | undefined;
     try {
@@ -119,9 +118,8 @@ export async function clearEnrollmentUnderLease(
  * id. It reads the calling process's OS credential set, so it clears the
  * enrollment of the account it runs as. The OS credential entry is shared by
  * every store of one productId: the clear never deletes another store's
- * enrollment or staged first pairing, and it excludes their pairing writes
- * while it runs (#1964). A running daemon's token renewal does not take that
- * lock yet (#2034), so a renewal written back while the clear runs is deleted. `clearUnattributedAttempt: true` also deletes a
+ * enrollment or staged first pairing, and it excludes their pairing and
+ * renewal writes while it runs (#1964, #2034). `clearUnattributedAttempt: true` also deletes a
  * first-pairing attempt that names no store; set it only when no other store
  * of this productId is pairing.
  */
@@ -144,8 +142,7 @@ export async function clearDeviceEnrollment(
   // Composition only reads once the lease is held. An injected backend has
   // no member custody, as in a daemon built with one.
   const custody: EnrollmentCustody = {
-    productId,
-    store: new DeviceStore(storeDir, injected ?? createDeviceCredentialStore(provider)),
+    store: new DeviceStore(productId, storeDir, injected ?? createDeviceCredentialStore(provider)),
     memberRecords: injected === undefined ? new DeviceMemberRecords(createDeviceMemberCustody(provider)) : undefined,
   };
   let lease: DaemonOwnerLease;
