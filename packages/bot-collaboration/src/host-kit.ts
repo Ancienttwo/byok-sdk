@@ -2,18 +2,21 @@
 // migration, retention, dreaming, adapter steps). It does not load the L Host or @byok-sdk/client, so a Worker
 // can bundle it.
 import { botTurnInstruction as buildBotTurnInstruction, type BotHistoryState, type ContextTurn, type InstructionLimits } from './rules/context.js';
-import type { ContextRoutine, ContextState } from './rules/schema.js';
+import { outcomeSchema, promptActions, type CheckedOffer, type ContextRoutine, type ContextState } from './rules/schema.js';
 import type { RoomMessage } from './rules/rooms.js';
 import type { Turn } from './rules/turn.js';
 
 /** Inputs used by sync to freeze a Bot Turn's instruction. */
 export interface BotTurnInstructionOptions<R extends ContextRoutine = ContextRoutine> {
-  state: ContextState & BotHistoryState; turn: Turn; limits: InstructionLimits;
-  routines?: readonly R[]; injected?: readonly ContextTurn[]; room?: readonly RoomMessage[]; actions?: readonly string[];
+  state: ContextState & BotHistoryState; turn: Turn; limits: InstructionLimits; models: readonly string[];
+  routines?: readonly R[]; injected?: readonly ContextTurn[]; room?: readonly RoomMessage[]; offer?: CheckedOffer;
 }
-/** Compute the instruction sync freezes, with the same history, routines and prompt actions. */
-export function botTurnInstruction<R extends ContextRoutine>(options: BotTurnInstructionOptions<R>) {
-  return buildBotTurnInstruction(options.state, options.turn, options.limits, options.routines, options.injected, options.room, options.actions);
+/** Compute the instruction sync freezes, with the same history, routines and offer. */
+export function botTurnInstruction<R extends ContextRoutine>(options: BotTurnInstructionOptions<R>): { instruction: string } {
+  const routines = options.routines ?? [];
+  const schema = outcomeSchema(options.turn.botId, options.state, options.turn, options.models, routines, options.offer);
+  const { instruction } = buildBotTurnInstruction(options.state, options.turn, options.limits, routines, options.injected, options.room, promptActions(schema, options.offer));
+  return { instruction };
 }
 export type { InstructionLimits } from './rules/context.js';
 export { DelegationError, HostIntentError } from './rules/delegation.js';

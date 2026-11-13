@@ -694,7 +694,7 @@ export type HomeServer = Partial<Pick<ByokServer, 'enqueueAgentHomeProjection' |
 export declare function flushHomes(server: HomeServer, ledger: HostLedger, now: () => number): Promise<void>;
 // ==== @byok-sdk/bot-collaboration dist/host-kit.d.ts ====
 import { type BotHistoryState, type ContextTurn, type InstructionLimits } from './rules/context.js';
-import type { ContextRoutine, ContextState } from './rules/schema.js';
+import { type CheckedOffer, type ContextRoutine, type ContextState } from './rules/schema.js';
 import type { RoomMessage } from './rules/rooms.js';
 import type { Turn } from './rules/turn.js';
 /** Inputs used by sync to freeze a Bot Turn's instruction. */
@@ -702,135 +702,14 @@ export interface BotTurnInstructionOptions<R extends ContextRoutine = ContextRou
     state: ContextState & BotHistoryState;
     turn: Turn;
     limits: InstructionLimits;
+    models: readonly string[];
     routines?: readonly R[];
     injected?: readonly ContextTurn[];
     room?: readonly RoomMessage[];
-    actions?: readonly string[];
+    offer?: CheckedOffer;
 }
-/** Compute the instruction sync freezes, with the same history, routines and prompt actions. */
+/** Compute the instruction sync freezes, with the same history, routines and offer. */
 export declare function botTurnInstruction<R extends ContextRoutine>(options: BotTurnInstructionOptions<R>): {
-    context: {
-        historyWindow: import("./rules/history.js").HistoryWindow;
-        room: {
-            id: string;
-            name: string;
-            members: string[];
-            announcement: string;
-            visibility: 'after_join';
-            messages: RoomMessage[];
-        };
-        round: {
-            id: string;
-            limit: number;
-            counts: Record<string, number>;
-        };
-        seat: {
-            id: string;
-            deadline: number | undefined;
-        };
-        teamNotes: {
-            id: string;
-            text: string;
-        }[];
-        roster: {
-            id: string;
-            name: string;
-            role: string;
-            mainBot: boolean;
-        }[];
-        rejectedActions: import("./model.js").Rejection[];
-        rooms: {
-            id: string;
-            name: string;
-            members: string[];
-            admin?: string;
-            mode: 'mention';
-            announcement: string;
-            memberMentions?: import("./rooms.js").MemberMentions;
-            archived?: true;
-        }[];
-        delegation?: {
-            delegationId: string;
-            from: {
-                botId: string;
-                name: string;
-            };
-            hop: number;
-        } | undefined;
-        openDelegations?: {
-            items: {
-                id: string;
-                from: string;
-                to: string;
-                status: "queued" | "reply_held" | "reply_pending" | "resolved" | "running" | "uncertain" | "waiting_device";
-                request: string;
-            }[];
-            omitted: number;
-            notice: string | null;
-        } | undefined;
-    } | ({
-        teamNotes: {
-            id: string;
-            text: string;
-        }[];
-        roster: {
-            id: string;
-            name: string;
-            role: string;
-            mainBot: boolean;
-        }[];
-        rejectedActions: import("./model.js").Rejection[];
-        rooms: {
-            id: string;
-            name: string;
-            members: string[];
-            admin?: string;
-            mode: 'mention';
-            announcement: string;
-            memberMentions?: import("./rooms.js").MemberMentions;
-            archived?: true;
-        }[];
-        delegation?: {
-            delegationId: string;
-            from: {
-                botId: string;
-                name: string;
-            };
-            hop: number;
-        } | undefined;
-        openDelegations?: {
-            items: {
-                id: string;
-                from: string;
-                to: string;
-                status: "queued" | "reply_held" | "reply_pending" | "resolved" | "running" | "uncertain" | "waiting_device";
-                request: string;
-            }[];
-            omitted: number;
-            notice: string | null;
-        } | undefined;
-    } & {
-        historyWindow: {
-            turnLimit: number;
-            maxBytes: number;
-            omittedMessages: number;
-            omittedTurns?: number;
-            currentRequestBytes: number;
-            metadataOverBudget: boolean;
-            notice: string | null;
-            omittedBackground?: number;
-            omittedCards: number;
-            omittedQuestions: number;
-            omittedPendingCards: number;
-            omittedPendingQuestions: number;
-            omittedRejections: number;
-        };
-        rejectedActions: import("./model.js").Rejection[];
-        questions: import("./model.js").Question[];
-        cards: import("./model.js").Card[];
-        routines: R[];
-        history: import("@byok-sdk/protocol").HandoffPack;
-    });
     instruction: string;
 };
 export type { InstructionLimits } from './rules/context.js';
