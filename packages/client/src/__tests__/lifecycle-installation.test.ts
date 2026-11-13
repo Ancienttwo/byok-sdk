@@ -328,6 +328,30 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(await fs.readFile(hostStore, 'utf8')).toBe('Host data');
   });
 
+  it('a unit an earlier SDK wrote (#2017 plist): upgrade() is refused until install() of the current payload rewrites it', async () => {
+    const unitPath = path.join(root, 'service.unit');
+    let content = `${SERVICE_UNIT_MARKER} written by an earlier SDK`;
+    const def = { name: 'svc', storeDir, logDir: path.join(storeDir, 'service-logs'), owner: 'app', program: { command: process.execPath, args: [] } };
+    const unit: PlatformUnit = {
+      serviceName: 'svc', unitPath, launcherPath: unitPath,
+      files: () => [{ path: unitPath, content }],
+      activate: async () => undefined, deactivate: async () => undefined, removeFiles: async () => { await fs.rm(unitPath); },
+      start: async () => undefined, stop: async () => undefined,
+      query: async () => ({ running: true, determinate: true, detail: 'fake' }),
+    };
+    installation = installationOver(createManagedLifecycle(def, unit));
+    const installed = await payload('1.0.0');
+    await installation.install(installed);
+    content = `${SERVICE_UNIT_MARKER} with HOME`;
+    expect(await installation.lifecycle.inspect()).toMatchObject({ state: 'repairable' });
+    const candidate = await payload('2.0.0');
+    await expect(installation.upgrade(candidate)).rejects.toMatchObject({ code: 'service_program_not_current', message: expect.stringContaining('Reinstall the payload installed now') });
+    expect([await pointer('current'), await installation.receipt()]).toEqual(['1.0.0', undefined]);
+    await installation.install(installed);
+    expect(await installation.lifecycle.inspect()).toMatchObject({ state: 'exact' });
+    await expect(installation.upgrade(candidate)).resolves.toMatchObject({ state: 'switched', from: '1.0.0', to: '2.0.0' });
+  });
+
   it('refuses a foreign unit before staging or writing installation artifacts (#1966)', async () => {
     const unitPath = path.join(root, 'foreign.unit');
     const launcherPath = path.join(root, 'foreign.launcher');

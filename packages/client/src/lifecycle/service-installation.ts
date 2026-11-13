@@ -332,7 +332,7 @@ const ERROR_MESSAGES = {
   receipt_state_inconsistent: 'The receipt does not match the version pointers. Nothing was changed.',
   switch_unhealthy: 'The new version stays current but is unhealthy. Call rollback(), or keep it.',
   repair_interrupted: 'A same-version reinstall was interrupted. Run install() again.',
-  service_program_not_current: 'The service unit must be the one this SDK writes, running from <installRoot>/current. Run install() with the same version id to rewrite the unit, then retry.',
+  service_program_not_current: 'The service unit must be the one this SDK writes, running from <installRoot>/current. Reinstall the payload installed now (install() with the current version id) to rewrite the unit, then retry.',
   install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.',
   snapshots_symlinked: 'A path under the install root\'s snapshots/ is a symbolic link. Nothing changed; replace the link, then retry.',
 } as const;
