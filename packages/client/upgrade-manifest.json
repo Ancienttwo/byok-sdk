@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "ed018d13008cfafa72ee260c593d2fce99f10b500f60f61ddd35e570f6ac3f31"
+    "snapshotSha256": "0f00369c0e23208b0ba495bcb62e17e821dd96aa4a60bd6158c1b563bddbaa82"
   },
   "configFields": {
     "status": "tracked",
@@ -48,7 +48,7 @@
     {
       "id": "bot-collaboration-cancel-host-intents",
       "impact": "breaking",
-      "summary": "cancelHostIntents atomically cancels selected unsubmitted Host intents without a pass. HostIntentError.rejected lists all refused keys and code gains inflight; update exhaustive switches. Existing cancelHostIntent, drainForSwitch and abortSwitch behavior and store format are unchanged. Hosts may replace freeze, individual cancels and abort with this call, retaining freeze when other device work must be held. Successors wait for a later pass or an explicit drain().",
+      "summary": "cancelHostIntents atomically cancels selected unsubmitted Host intents without a pass. HostIntentError.rejected lists all refused keys and code gains inflight; update exhaustive switches. Existing cancelHostIntent, drainForSwitch and abortSwitch retain their other behavior, and the store format is unchanged; see committed-cancel-wake-pending for the wake-dispatch change. Hosts may replace freeze, individual cancels and abort with this call, retaining freeze when other device work must be held. Successors wait for a later pass or an explicit drain().",
       "migration": "docs/releases/host-upgrade-next-minor.md#cancel-selected-host-intents-without-a-pass-2003",
       "items": [
         "export:@byok-sdk/bot-collaboration#BotCollaboration",
@@ -132,6 +132,16 @@
         "export:@byok-sdk/client/host-layout#HostLayoutPlatform",
         "export:@byok-sdk/client#resolveHostLayout",
         "export:@byok-sdk/client/host-layout#resolveHostLayout"
+      ]
+    },
+    {
+      "id": "committed-cancel-wake-pending",
+      "impact": "breaking",
+      "summary": "HostExecutionCore.cancel returns an object; BotCollaboration.cancelTurn and abortSwitch may return wakePending: true when wake dispatch fails after commit. The durable outbox records lastError and retries; drain and wake hooks still reject WakeDispatchError, an AggregateError. Update callers expecting cancel to return void.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#committed-cancellation-with-a-pending-wake-2004",
+      "items": [
+        "export:@byok-sdk/server/execution-core#HostExecutionCore",
+        "export:@byok-sdk/server/execution-core#WakeDispatchError"
       ]
     }
   ],
@@ -325,6 +335,16 @@
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
       "change": "changed",
       "entry": "keys-secret-corrupted-code"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",
+      "change": "changed",
+      "entry": "committed-cancel-wake-pending"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#WakeDispatchError",
+      "change": "added",
+      "entry": "committed-cancel-wake-pending"
     },
     {
       "item": "store:bot-collaboration-ledger",

@@ -3,7 +3,7 @@ import { ownReadOnlyToolsets } from './toolset-policy.js';
 import { admitBotToolsets, inactive } from './rules/team.js';
 import { buildHandoffPack, type HandoffPackBudgets, type UpdateRoutineAction } from '@byok-sdk/protocol';
 import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
-import { enqueue, HostExecutionCore, settle, type ExecutionServer, type HostOptions, type Intent, type IntentInput, type OutcomeTransaction,
+import { enqueue, HostExecutionCore, WakeDispatchError, settle, type ExecutionServer, type HostOptions, type Intent, type IntentInput, type OutcomeTransaction,
   type MessageTransaction } from '@byok-sdk/server/execution-core';
 import type { HostJobHandler, Routine } from '@byok-sdk/server/execution-core';
 import { HostLedger, type Conclusion } from '@byok-sdk/server/execution-core';
@@ -935,25 +935,31 @@ export class BotCollaboration {
    * Owner API. Cancels a Turn, an input batch by its id or a member input id, or B's chain Turn through its delegation.
    * Idempotent (#1405): a Turn whose K4 intent already has a cancel gives `cancel_pending`, and an ended Turn
    * `already_settled`; neither writes or calls `core.cancel`.
+   * After commit, a wake-only dispatch failure resolves with `wakePending: true`; the outbox retains failed wakes for retry.
+   * The failure may concern another wake or already be retried before return. Other failures, including a Host job or
+   * outbox capacity failure, can still reject after commit (#2072).
    */
-  cancelTurn(id: string, ...by: PrincipalArg): Promise<TurnCancelResult> {
+  cancelTurn(id: string, ...by: PrincipalArg): Promise<TurnCancelResult & { wakePending?: true }> {
     return this.exclusive(async () => {
       this.ownerOnly(by, 'cancelTurn', id);
       return this.cancelOneTurn(id);
     });
   }
-  private async cancelOneTurn(id: string): Promise<TurnCancelResult> {
+  private async cancelOneTurn(id: string): Promise<TurnCancelResult & { wakePending?: true }> {
     // The read and the commit run in one synchronous step, so no K4 transaction lands between them.
     const snapshot = this.ledger.snapshot(), settled = turnCancelAnswer(stateOf(snapshot.application), intentRows(snapshot), id);
     if (settled) return { turnId: id, ...settled };
     const result = this.commitKeyless({ kind: 'cancel_turn', turnId: id });
     const value = valueOf<{ deliver: boolean } | { target: string; admitted: boolean }>(result);
-    if ('deliver' in value) await this.settleChain(result);
-    else {
-      if (value.admitted) await this.core.cancel(value.target);
-      await this.process();
-    }
-    return { turnId: id, result: 'cancelled' };
+    let wakePending: true | undefined;
+    try {
+      if ('deliver' in value) await this.settleChain(result);
+      else {
+        if (value.admitted) wakePending = (await this.core.cancel(value.target)).wakePending;
+        await this.process();
+      }
+    } catch (error) { if (!(error instanceof WakeDispatchError)) throw error; wakePending = true; }
+    return { turnId: id, result: 'cancelled', ...(wakePending && { wakePending }) };
   }
   /** The L owner record of a device (#957, §4.1). A device with no record is L at revision 0. */
   topology(deviceId: string): DeviceTopology { return deviceTopology(this.snapshot(), deviceId); }
@@ -1048,15 +1054,19 @@ export class BotCollaboration {
    * A failed export or check: clears the freeze on the frozen revision, so L owns the device again and held Turns run. An
    * abort of a device of the export ends the export, and the new owner discards its import. After the commit every device
    * of the export is owned by H, so none aborts.
+   * After commit, a wake-only dispatch failure resolves with `wakePending: true`; the outbox retains failed wakes for retry.
+   * The failure may concern another wake or already be retried before return. Other failures, including a Host job or
+   * outbox capacity failure, can still reject after commit (#2072).
    */
-  abortSwitch(deviceId: string, expectedRevision: number): Promise<DeviceTopology> {
+  abortSwitch(deviceId: string, expectedRevision: number): Promise<DeviceTopology & { wakePending?: true }> {
     return this.exclusive(async () => {
       this.ledger.transaction(s => {
         const state = stateOf(s.application), step = switchStep(s, deviceId, expectedRevision, 'abort');
         if (state.switchExport?.devices.some(device => device.deviceId === deviceId)) delete state.switchExport;
         return step;
       });
-      await this.process();
+      try { await this.process(); }
+      catch (error) { if (error instanceof WakeDispatchError) return { ...this.topology(deviceId), wakePending: true }; throw error; }
       return this.topology(deviceId);
     });
   }
