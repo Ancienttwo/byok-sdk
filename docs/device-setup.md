@@ -480,9 +480,8 @@ With no current version, preparation stops an SDK-marked unit of the
 recorded owner (including a payload-less CLI service) before taking the
 daemon-store leases and gates. On any preparation failure before writing
 `current`, it releases the leases/gates, removes the version directory it
-created (after `installation_exists` every version directory stays, since
-another installation may be using it; the next successful upgrade's prune or
-`uninstall` removes it), then starts that
+created (one it reused stays: it holds the version already staged), then
+starts that
 unit again, even if it was stopped before the call. The one exception is a
 failed store restore: the stores may then be partial, so the unit is not
 started and is removed, leaving only the repair snapshot, as after a failed
@@ -490,6 +489,20 @@ health check; otherwise a boot or login could start it on those stores. The
 next install writes the unit again. When that removal fails, the error names
 both the unit and the snapshot. Failures after preparation succeeds use the
 installation cleanup below.
+
+Every `install`, `upgrade`, `rollback`, `recover` and `uninstall` holds an
+install-root gate for its whole run (#2001). A second operation on the same
+install root, from any process of the same user and under any `gateRoot`,
+fails at once with `lifecycle_owner_busy` and writes nothing. The operation
+creates a missing install root first, so every spelling of the root (a
+symlink, or another letter case on a case-insensitive volume) takes the same
+gate and a refusal leaves at most that empty directory. On macOS and Linux an
+install root owned by another user, including one that user created first,
+is refused with `install_root_foreign_owner` before anything is written in
+it. These guarantees hold only while the install root's parent directory is
+writable by the installing user alone; otherwise another user can rename the
+root or replace it with a symlink after the check (#2028). Windows has no
+owner check, and exclusion between Windows users is not guaranteed.
 
 Preparation does not stop an absent unit or an allowed unmarked unit. It
 leases and gates the daemon stores instead. With `replaceUnmarked`, a

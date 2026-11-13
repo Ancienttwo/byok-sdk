@@ -35,6 +35,30 @@ try {
 
 A Host that already handles `PROVIDER_CONFIGURATION_BUSY` from `configure()` or `resolveDefaultModelProvider()` can reuse that handling. When one profile's credential read fails, `list()` now rejects with that failure only after the other reads have finished. No configuration change is needed.
 
+## One operation at a time per install root
+
+Every `install()`, `upgrade()`, `rollback()`, `recover()` and `uninstall()`
+now holds an install-root gate for its whole run (#2001). The gate does not
+use the lifecycle `gateRoot`, so installations under different gate roots
+that share one install root exclude each other: a second operation fails at
+once with `lifecycle_owner_busy`, which now also means the install root is
+in use, and writes nothing. Retry it after the first one ends. This resolves
+the 0.42.0 known issue about installations under different `gateRoot`s
+sharing one `installRoot`. A first install therefore no longer reads
+`current` again under the store leases or refuses with `installation_exists`
+after staging, and the install snapshots are listed once, after the gate is
+taken. Every operation creates a missing install root before taking the
+gate, so a refused operation can leave an empty install root behind; every
+spelling of the root takes the same gate. On macOS and Linux, an install root
+owned by another user (also one that user created first) is refused with the
+new `ServiceInstallationErrorCode` `install_root_foreign_owner` before
+anything is written in it; run the operation as the owner of the root. The
+gate and the owner check use the effective uid. These guarantees hold only
+while the install root's parent directory is writable by the installing user
+alone: another user who can write it can rename the root or replace it with a
+symlink after the check (#2028). Windows has no owner check, and two Windows
+users operating on one install root are not guaranteed to exclude each other.
+
 ## Gate release failures join the thrown error
 
 A path mutation gate release that fails while another error is thrown is
@@ -114,9 +138,7 @@ need not name the snapshot, and is left to #1992.
 ## Store release failures name the next step
 
 A refused first install now removes only a version directory it created,
-and keeps one it reused, since another installation may be using it; after
-`installation_exists` every version directory stays until the next
-successful upgrade's prune or `uninstall()` removes it (#1991). When the next
+and keeps one it reused, which holds the version already staged (#1991). When the next
 first install cannot stop the service, take the leases, or restore or retire
 a repair snapshot, it starts nothing and removes a marked unit; nothing else
 changes.

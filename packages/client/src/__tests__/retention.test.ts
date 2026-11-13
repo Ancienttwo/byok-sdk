@@ -106,7 +106,7 @@ it.skipIf(process.getuid===undefined)('refuses a different reported UID before c
    return {format:'module',shortCircuit:true,source:transformSync(readFileSync(new URL(url),'utf8'),{loader:'ts',format:'esm',sourcefile:url}).code};
   }});
   const {ScratchRoot}=await import(${JSON.stringify(new URL('../daemon/retention/scratch.ts',import.meta.url).href)});
-  const root=${JSON.stringify(root)},uid=process.getuid();process.getuid=()=>uid+1;
+  const root=${JSON.stringify(root)},uid=process.geteuid();process.geteuid=()=>uid+1;
   const chmod=fs.chmod;let chmodCalls=0;fs.chmod=async(...args)=>{chmodCalls++;return chmod(...args);};
   let error;try{await new ScratchRoot(root).create();}catch(cause){error={name:cause.name,message:cause.message};}
   console.log(JSON.stringify({error,chmodCalls,mode:(await fs.lstat(root)).mode&0o777}));

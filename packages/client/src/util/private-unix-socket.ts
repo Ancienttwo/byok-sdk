@@ -5,8 +5,9 @@ import path from 'node:path';
 export const PRIVATE_SOCKET_FALLBACK_ROOT = '/tmp';
 export const UNIX_SOCKET_PATH_SOFT_LIMIT = 100;
 export const PRIVATE_SOCKET_FALLBACK_PREFIXES = { control: 'byok', storeMutex: 'byok-store-mutex' } as const;
-// The uid keeps users on one host out of each other's fallback directories; only this user's are recognized for reclaim.
-const FALLBACK_UID = String(process.getuid?.() ?? 'unknown');
+// The effective uid keeps users on one host out of each other's fallback directories; only this user's are
+// recognized for reclaim. It is the uid that owns what this process creates, as the ownership checks below compare.
+const FALLBACK_UID = String(process.geteuid?.() ?? 'unknown');
 const FALLBACK_LEAF = new RegExp(`^(${Object.values(PRIVATE_SOCKET_FALLBACK_PREFIXES).join('|')})-${FALLBACK_UID}-[0-9a-f]{16}$`);
 
 export type PrivateDirectoryRefusalCode = 'private_dir_symlink' | 'private_dir_not_directory' | 'private_dir_foreign_owner' | 'private_dir_mode';
@@ -69,14 +70,14 @@ export function privateSocketEndpoint(
 export async function ensureOwnedPrivateDirectory(
   dir: string,
   refuse: (code: PrivateDirectoryRefusalCode, ownerUid?: number, cause?: unknown) => Error =
-    (code, ownerUid, cause) => new PrivateDirectoryRefusedError(code, dir, process.getuid?.(), ownerUid, cause),
+    (code, ownerUid, cause) => new PrivateDirectoryRefusedError(code, dir, process.geteuid?.(), ownerUid, cause),
 ): Promise<void> {
   await fs.mkdir(dir, { recursive: true, mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
     // Inspect existing non-directories below so they receive a typed refusal.
     if (error.code !== 'EEXIST' && error.code !== 'ENOTDIR') throw error;
   });
   const stat = await fs.lstat(dir);
-  const uid = process.getuid?.();
+  const uid = process.geteuid?.();
   if (stat.isSymbolicLink()) throw refuse('private_dir_symlink');
   if (!stat.isDirectory()) throw refuse('private_dir_not_directory');
   if (uid !== undefined && stat.uid !== uid) throw refuse('private_dir_foreign_owner', stat.uid);
@@ -168,7 +169,7 @@ export async function listenPrivateUnixSocket(server: net.Server, endpoint: stri
 }
 
 async function ensureSocketMode(endpoint: string): Promise<void> {
-  if (process.getuid === undefined) return;
+  if (process.geteuid === undefined) return;
   const stat = await fs.lstat(endpoint);
   // chmod follows symlinks, so it must never run on anything but the socket itself.
   if (!stat.isSocket()) throw new PrivateSocketPathError(endpoint);

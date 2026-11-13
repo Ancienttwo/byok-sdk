@@ -156,7 +156,15 @@ afterAll(async () => {
 
 describe.runIf(supported)('path-mutation gate: one OS lock per handle (#1149)', () => {
   it.runIf(process.platform === 'darwin')('the production gate root is /tmp/byok-pm-<uid>', () => {
-    expect(POSIX_GATE_ROOT).toBe(`/tmp/byok-pm-${process.getuid!()}`);
+    expect(POSIX_GATE_ROOT).toBe(`/tmp/byok-pm-${process.geteuid!()}`);
+  });
+
+  it('a process whose real uid differs takes the same gate: it is keyed by the effective uid (#2001)', async () => {
+    const targetPath = await target();
+    await settle(acquirePathMutationGate({ scope: 'store', targetPath }));
+    vi.spyOn(process, 'getuid').mockReturnValue(process.geteuid!() + 1);
+    const gate = await mockedGate();
+    expect(await settle(gate.acquirePathMutationGate({ scope: 'store', targetPath }))).toBeInstanceOf(gate.PathMutationGateBusyError);
   });
 
   it.skipIf(process.platform !== 'darwin')('uses the shared typed refusal for a foreign-owned gate root', async () => {

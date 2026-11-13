@@ -5,7 +5,7 @@ import path from 'node:path';
 import { resolveExistingAncestor } from './existing-ancestor.js';
 import { ensureOwnedPrivateDirectory } from './private-unix-socket.js';
 
-export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'service-lifecycle' | 'pi-session-discovery' | `agy-session:${string}` | `pi-session-admission:${string}` | `pi-session-writer:${string}`;
+export type PathMutationGateScope = 'store' | 'install-root' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'service-lifecycle' | 'pi-session-discovery' | `agy-session:${string}` | `pi-session-admission:${string}` | `pi-session-writer:${string}`;
 
 /**
  * Scopes with one fixed identity and no target path.
@@ -83,7 +83,9 @@ export class PathMutationGateBusyError extends Error {
 export const PATH_MUTATION_GATE_PROTOCOL = 2;
 
 // Fixed and environment-independent; holds the darwin lock files.
-export const POSIX_GATE_ROOT = `/tmp/byok-pm-${process.getuid?.() ?? 'unknown'}`;
+// Keyed by the effective uid, the identity that owns the files a holder writes and that
+// the install-root owner check compares (#2001): a process whose real uid differs locks in the same place.
+export const POSIX_GATE_ROOT = `/tmp/byok-pm-${process.geteuid?.() ?? 'unknown'}`;
 // Read at acquire time. Only the client test setup replaces it, so test runs do
 // not leave one never-unlinked lock per temp path in the real root. Not exported
 // from the package entry.
@@ -158,7 +160,7 @@ async function lockIdentity(identity: string, gateRoot: string | undefined): Pro
     return async () => closeSync(fd);
   }
   let endpoint: string;
-  if (process.platform === 'linux') endpoint = `\0byok-pm-${process.getuid?.() ?? 'unknown'}-${identity}`;
+  if (process.platform === 'linux') endpoint = `\0byok-pm-${process.geteuid?.() ?? 'unknown'}-${identity}`;
   else if (process.platform === 'win32') endpoint = `\\\\.\\pipe\\byok-path-mutation-${identity}`;
   else throw new Error(`path mutation gate is not supported on ${process.platform}`);
   const server: Server = createServer((socket) => socket.destroy());
