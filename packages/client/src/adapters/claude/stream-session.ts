@@ -85,6 +85,11 @@ export class ClaudeStreamSession {
       onLine: handler => owned.onLine(handler), onExit: handler => owned.onExit(handler),
       writeAcknowledged: text => owned.writeAcknowledged(text),
       write: (text: string): void => {
+        // OAR's drain writes a held follow-up as a user line named by its input id; written, it can no longer be withdrawn (#1940).
+        if (this.#held.size > 0) {
+          const line = JSON.parse(text) as { type?: unknown; uuid?: unknown };
+          if (line.type === 'user' && typeof line.uuid === 'string') this.#held.delete(line.uuid);
+        }
         // Keep the owned transport's synchronous writability refusal visible to OAR.
         const written = owned.writeAcknowledged(text);
         this.#inputWrites?.push(written);

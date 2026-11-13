@@ -16,6 +16,7 @@ import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { observationOf } from './fixtures/mcp-observation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
+import type { RawEvent } from '../../vendor/oar/95c6547/contracts/session';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
@@ -646,6 +647,10 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await expect(session.followUp({ instruction: 'next' })).resolves.toBeUndefined();
     expect((await takeTurn(session)).filter(event => event.type === 'progress')).toEqual([{ type: 'progress', text: 'own turn' }]);
     expect((await takeTurn(session)).filter(event => event.type === 'progress')).toEqual([{ type: 'progress', text: 'reply-2:next' }]);
+    // The delivered follow-up is no longer held: a later interrupt has nothing to withdraw (#1940).
+    await session.interrupt();
+    const records = (session as unknown as { stream: { raw: { records(): readonly RawEvent[] } } }).stream.raw.records();
+    expect(records.filter(record => record.kind === 'request' && record.body.kind === 'withdraw')).toEqual([]);
   });
 
   it('interrupt() withdraws a follow-up held during a Claude-own turn: the instruction is never written', async () => {

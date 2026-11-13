@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.103.0",
-    "commit": "6c800f27e24f12458b503e8c871be9d3adf71d0c"
+    "commit": "9598f83f1ab23b62cecf5a72f5ff2f456e8b4d5c"
   },
   "release": {
     "ecosystem": "npm",
@@ -863,7 +863,8 @@
       "path": "shared/stream-json/projection.ts",
       "sourcePath": "packages/oar/src/shared/stream-json/projection.ts",
       "upstreamSha256": "100b9a2e895cb72b0b45a71c8dc9d9ff3d028c2fd6beed8d1cba745fdd50b9f2",
-      "vendoredSha256": "100b9a2e895cb72b0b45a71c8dc9d9ff3d028c2fd6beed8d1cba745fdd50b9f2"
+      "vendoredSha256": "889a8749579df587b335f8de1fe24cafc23e140a0748f425ffafda7578e7e230",
+      "delta": "Attribution bookkeeping: rememberToolUses stores only tool uses made inside an agent. A root tool use adds no state.agents entry and copies no map; attributionOf gives a frame naming it the same path as before, because an empty-path entry and no entry read alike. Entries for tool uses inside an agent stay for the session, since a background agent can report after its tool's result."
     },
     {
       "path": "shared/stream-json/session.ts",
