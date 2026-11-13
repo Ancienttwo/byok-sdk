@@ -817,7 +817,12 @@ export class AgentHomeLeaseManager {
       if (error instanceof PathMutationGateBusyError) {
         throw new AgentHomeBusyError('Agent-home root is reserved for local-state relocation');
       }
-      throw withHomeReleaseFailures(error instanceof AgentHomeError ? error : new AgentHomeError(`could not acquire Agent home lease: ${error instanceof Error ? error.message : String(error)}`), releaseFailures);
+      const primary = error instanceof AgentHomeError ? error : new AgentHomeError(`could not acquire Agent home lease: ${error instanceof Error ? error.message : String(error)}`);
+      if (primary !== error && releaseFailures.length) {
+        primary.cause = new AggregateError([error, ...releaseFailures]);
+        throw primary;
+      }
+      throw withHomeReleaseFailures(primary, releaseFailures);
     }
     const acquiredLockPath = lockPath;
     if (acquiredLockPath === undefined) throw new AgentHomeError('Agent home lease marker path was not established');
