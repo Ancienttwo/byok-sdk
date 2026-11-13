@@ -662,16 +662,19 @@ describe('the prepared runtime entry spawn', () => {
       expect(JSON.stringify(written)).not.toContain(CANARY);
       await launched.cleanup();
       expect(await fs.readdir(projection)).toEqual([]);
-      // Same slots and messages as the client spawn helper's case. Env names here are a fixed allowlist.
+      // Same slots and messages as the client spawn helper's case. LC_* and XDG_* ambient names pass through.
       const secret = 'fake-key\0tail';
       vi.spyOn(store, 'get').mockResolvedValueOnce(secret); // a custom SecretStore; the built-in ones refuse NUL
-      for (const [input, message] of [[{}, 'spawn env variable PI_PROVIDER_API_KEY contains a NUL byte'],
-        [{ piBin: `/bin/${secret}` }, 'spawn command contains a NUL byte'], [{ piFixedArgs: [secret] }, 'spawn argument 1 contains a NUL byte']] as Array<[{ piBin?: string; piFixedArgs?: string[] }, string]>) {
+      const carriesSecret = (value: unknown, depth = 0): boolean => typeof value === 'string' ? value.includes('fake-key')
+        : depth < 5 && typeof value === 'object' && value !== null && Object.getOwnPropertyNames(value).some(key => carriesSecret((value as Record<string, unknown>)[key], depth + 1));
+      for (const [input, ambient, message] of [[{}, {}, 'spawn env variable PI_PROVIDER_API_KEY contains a NUL byte'],
+        [{ piBin: `/bin/${secret}` }, {}, 'spawn command contains a NUL byte'], [{ piFixedArgs: [secret] }, {}, 'spawn argument 1 contains a NUL byte'],
+        [{}, { [`LC_${secret}`]: 'x' }, 'spawn env variable name contains a NUL byte']] as Array<[{ piBin?: string; piFixedArgs?: string[] }, Record<string, string>, string]>) {
         const spawnChild = vi.fn(nodeSpawn);
-        const error = await startPiProvider(provider, { ...options, ...input }, { ambient: {}, createSecretStore: () => store, spawn: spawnChild, profiles: await profilesWith(provider) })
+        const error = await startPiProvider(provider, { ...options, ...input }, { ambient, createSecretStore: () => store, spawn: spawnChild, profiles: await profilesWith(provider) })
           .then(() => undefined, (caught: Error) => caught);
         expect.soft(error?.message).toBe(message);
-        expect.soft(`${error?.stack} ${String(error?.cause)}`).not.toMatch(/fake-key|tail/);
+        expect.soft(carriesSecret(error)).toBe(false);
         expect.soft(spawnChild).not.toHaveBeenCalled();
       }
     } finally { await fs.rm(root, { recursive: true, force: true }); }
