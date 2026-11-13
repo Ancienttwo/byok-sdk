@@ -640,17 +640,22 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
 
   it('followUp() during a turn Claude runs on its own is held and sent when that turn ends', async () => {
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_OWN_TURN: '1' });
+    const gate = path.join(ctx.workspaceDir, 'own-turn-release');
+    ctx.env.FAKE_CLAUDE_OWN_TURN_GATE = gate;
     const session = await startAdapter(fakeClaudeAdapter(), baseTask, ctx);
     openSessions.push(session);
+    const records = () => (session as unknown as { stream: { raw: { records(): readonly RawEvent[] } } }).stream.raw.records();
     await takeTurn(session);
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Claude's own turn has started: its system/init is the second one.
+    await vi.waitFor(() => expect(records().filter(record => record.kind === 'frame' && (record.body.native as { subtype?: unknown } | null)?.subtype === 'init')).toHaveLength(2));
     await expect(session.followUp({ instruction: 'next' })).resolves.toBeUndefined();
+    expect(records().filter(record => record.kind === 'request' && record.body.kind === 'queue')).toHaveLength(1);
+    await fs.writeFile(gate, '');
     expect((await takeTurn(session)).filter(event => event.type === 'progress')).toEqual([{ type: 'progress', text: 'own turn' }]);
     expect((await takeTurn(session)).filter(event => event.type === 'progress')).toEqual([{ type: 'progress', text: 'reply-2:next' }]);
     // The delivered follow-up is no longer held: a later interrupt has nothing to withdraw (#1940).
     await session.interrupt();
-    const records = (session as unknown as { stream: { raw: { records(): readonly RawEvent[] } } }).stream.raw.records();
-    expect(records.filter(record => record.kind === 'request' && record.body.kind === 'withdraw')).toEqual([]);
+    expect(records().filter(record => record.kind === 'request' && record.body.kind === 'withdraw')).toEqual([]);
   });
 
   it('interrupt() withdraws a follow-up held during a Claude-own turn: the instruction is never written', async () => {

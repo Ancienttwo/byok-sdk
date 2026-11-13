@@ -114,7 +114,9 @@
 //                                          interrupt lands in the tool phase.
 //   FAKE_CLAUDE_OWN_TURN=1             -> after turn 1, Claude runs a turn of
 //                                          its own: init at once, result 300ms
-//                                          later.
+//                                          later, or once
+//                                          FAKE_CLAUDE_OWN_TURN_GATE=<path>
+//                                          exists when that is set.
 //   FAKE_CLAUDE_USER_RECEIPT=<path>     -> append each user message's text.
 //   FAKE_CLAUDE_INTERRUPT_ERROR=1       -> answer an interrupt with an error
 //                                          control_response and no result.
@@ -762,10 +764,14 @@ function runProbeOrTurnFlow() {
     if (process.env.FAKE_CLAUDE_OWN_TURN === '1' && turn === 1) {
       // A turn of Claude's own (a background task wake): init at once, its result 300ms later.
       send({ type: 'system', subtype: 'init', session_id: reportedSessionId, model: 'fake-model' });
-      setTimeout(() => {
+      const ownTurnGate = process.env.FAKE_CLAUDE_OWN_TURN_GATE;
+      const finishOwnTurn = () => {
         send({ type: 'assistant', message: { model: 'fake-model', id: 'msg_own', role: 'assistant', content: [{ type: 'text', text: 'own turn' }] }, session_id: reportedSessionId });
         send({ type: 'result', subtype: 'success', is_error: false, num_turns: turn, session_id: reportedSessionId, usage: {}, result: 'own turn' });
-      }, 300);
+      };
+      const waitOwnTurnGate = () => (existsSync(ownTurnGate) ? finishOwnTurn() : setTimeout(waitOwnTurnGate, 10));
+      if (ownTurnGate) waitOwnTurnGate();
+      else setTimeout(finishOwnTurn, 300);
     }
   }
 
