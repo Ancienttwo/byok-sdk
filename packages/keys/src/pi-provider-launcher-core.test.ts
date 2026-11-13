@@ -367,6 +367,21 @@ describe('committed Pi spawn boundary', () => {
     },
   );
 
+  it.each([undefined, 'e-custom', 'ENOENT'])('sanitizes synchronous spawn failures with code %s', async (code) => {
+    const f = await fixture();
+    try {
+      const source = Object.assign(new Error(CANARY), { code, path: CANARY, spawnargs: [CANARY] });
+      const error = await startPiProvider(f.provider, f.options, {
+        ambient: {}, createSecretStore: () => f.store, profiles: f.profiles, spawn: () => { throw source; },
+      }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).toMatchObject({ code, message: `spawn failed: ${code ?? 'unknown'}` });
+      expect(Object.keys(error as Error)).toEqual(['code']);
+      expect(JSON.stringify(Object.getOwnPropertyDescriptors(error as Error))).not.toContain(CANARY);
+      expect(await fs.readdir(f.projection)).toEqual([]);
+    } finally { await fs.rm(f.root, { recursive: true, force: true }); }
+  });
+
   it('rejects a projection path that is not absolute and normalized', async () => {
     for (const candidate of ['projection', '/projection/../projection']) {
       await expect(assertPiProjectionDirectory(candidate)).rejects.toThrow(/absolute normalized/);

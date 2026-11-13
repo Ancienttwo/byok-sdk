@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Fixed (keys; #2100, #2096)** — `runPiProviderLauncher()` now returns a fixed `spawn failed: <code>` error with only the spawn code when Pi cannot start, and routes credential-store reads through the fixed-message secret-store error boundary. Original errors, paths, arguments and causes are no longer exposed; known store codes remain available.
+- **Fixed (keys; #2100, #2096)** — `runPiProviderLauncher()` now returns a fixed `spawn failed: <code>` error with only the spawn code when Pi cannot start, and routes credential-store reads through the fixed-message secret-store error boundary. Original errors, paths, arguments and causes are no longer exposed; known store codes remain available and other store errors become `PROVIDER_SECRET_STORE_FAILED`.
 
 - **Fixed (client; #1944)** — A failed release of an offer-owned scratch (an offer that declines or fails before any runtime starts) no longer sets `disposal: 'failed'` on `whenTaskSettled`. It still emits `runtime-disposal-failed` with `runtimeId: 'scratch'`, but `disposal` stays `none` whether the failure lands before or after the decline or failure settles. The daemon classifies the failure by the owner that reported it, not by the id, so a custom harness whose id is `scratch` still sets `disposal: 'failed'`. This resolves the 0.42.0 known issue.
 

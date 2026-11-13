@@ -623,10 +623,10 @@ function assertNoNulSpawnInput(command: string, args: readonly string[], env: No
   }
 }
 
+// 与 client util/spawn-input 的 spawnStartError 同语义，core 下次加公开面时合成一份 (#2043).
 function sanitizedSpawnError(error: unknown): Error {
-  const rawCode = (error as NodeJS.ErrnoException | null)?.code;
-  const code = typeof rawCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/u.test(rawCode) ? rawCode : 'UNKNOWN';
-  return Object.assign(new Error(`spawn failed: ${code}`), { code });
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return Object.assign(new Error(`spawn failed: ${code ?? 'unknown'}`), { code });
 }
 
 /** Owns the credential-to-spawn sequence; the client retains directory ownership. */
