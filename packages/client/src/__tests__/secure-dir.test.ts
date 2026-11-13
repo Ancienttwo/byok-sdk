@@ -2,9 +2,15 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PlatformCommandTimeoutError } from '../util/command-timeouts';
+import { resolveSystemTool } from '@byok-sdk/core/system-tool';
+import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError } from '../util/command-timeouts';
 import type { Runner } from '../util/exec-runner';
 import { buildIcaclsArgs, ensurePiProjectionDir, ensureSecureDir, ensureSecureStoreRoot, SecureDirHardeningError, SecureDirModeError } from '../util/secure-dir';
+
+vi.mock('@byok-sdk/core/system-tool', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@byok-sdk/core/system-tool')>();
+  return { ...actual, resolveSystemTool: vi.fn(actual.resolveSystemTool) };
+});
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -107,6 +113,27 @@ describe('util/secure-dir: ensureSecureDir (finding F7/R4)', () => {
     expect(stat.isDirectory()).toBe(true);
     expect(run).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledWith('icacls', buildIcaclsArgs(dir, 'winuser'));
+  });
+
+  it.runIf(process.platform !== 'win32')('#1971: the real icacls run is bounded by the platform bound and surfaces its timeout', async () => {
+    const root = await tmpDir('byok-secure-dir-icacls-');
+    // A stand-in icacls that never exits.
+    const icacls = path.join(root, 'icacls');
+    await fs.writeFile(icacls, `#!${process.execPath}\nsetInterval(() => {}, 1000);\n`, { mode: 0o755 });
+    vi.mocked(resolveSystemTool).mockReturnValueOnce(icacls);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    try {
+      let settled = false;
+      const secured = ensureSecureDir(path.join(root, 'store'), { platform: 'win32' }).catch((error: unknown) => error).finally(() => (settled = true));
+      // The bound is armed once the command has started.
+      await vi.waitUntil(() => vi.getTimerCount() > 0);
+      await vi.advanceTimersByTimeAsync(COMMAND_TIMEOUT_MS.platform - 500);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(await secured).toMatchObject({ constructor: PlatformCommandTimeoutError, exitConfirmed: true });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('#1971: an icacls timeout surfaces as PlatformCommandTimeoutError, not a hardening error', async () => {

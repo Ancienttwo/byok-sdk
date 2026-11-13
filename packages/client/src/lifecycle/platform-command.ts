@@ -17,8 +17,9 @@ import { cmdQuote } from './service-unit.js';
  * process table cannot be read, a process outlives SIGKILL) or does not
  * settle in time is unconfirmed, with any cleanup failure as `cause`.
  * Residual: on POSIX the cleanup reads the process table with a synchronous
- * `/bin/ps` call, which has no bound yet and blocks the event loop while it
- * runs (#2105). `platform` and `spawnFn` are the cleanup's test seams.
+ * `/bin/ps` call, which blocks the event loop while it runs; that read's own
+ * bound is tracked in #2105, and until then a hung `ps` can hold this run
+ * past every bound here. `platform` and `spawnFn` are the cleanup's test seams.
  */
 export function runBounded(
   executable: string,
@@ -111,7 +112,9 @@ export function launchUnit(unitPath: string, spawnCmd = (args: string[], options
       timedOut = true;
       void stopRoot(child, unitPath).then(reject);
     }, COMMAND_TIMEOUT_MS.launch);
-    child.once('error', (error) => {
+    child.on('error', (error) => {
+      // After the bound, a kill() failure is stopRoot's unconfirmed exit, not this launch's error.
+      if (timedOut) return;
       clearTimeout(timer);
       reject(error);
     });

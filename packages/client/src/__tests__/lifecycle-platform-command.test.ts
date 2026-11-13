@@ -122,6 +122,16 @@ describe('util/command-timeouts: stopRoot (#1971)', () => {
     expect(child.kill).toHaveBeenCalledWith('SIGKILL');
   });
 
+  it('the Startup launch reports a kill() that fails with a synchronous EPERM error as an unconfirmed timeout', async () => {
+    vi.useFakeTimers();
+    const child = fakeChild(false);
+    // Node's ChildProcess.kill emits `error` synchronously, then returns false.
+    child.kill = vi.fn(() => (child.emit('error', Object.assign(new Error('kill EPERM'), { code: 'EPERM' })), false)) as never;
+    const launched = launchUnit('C:\\Startup\\acme.cmd', () => child).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(COMMAND_TIMEOUT_MS.launch);
+    expect(await launched).toMatchObject({ constructor: PlatformCommandTimeoutError, exitConfirmed: false });
+  });
+
   it('the Startup launch kills only its cmd and reports a failed kill as unconfirmed', async () => {
     vi.useFakeTimers();
     const child = fakeChild(false);
