@@ -79,7 +79,7 @@ import {
 } from './agent-content-read.js';
 import type { DaemonState } from './create-daemon/state.js';
 import { injectedAdapterConfigConflicts } from './create-daemon/support.js';
-import { resolveDaemonConfig } from './create-daemon/config.js';
+import { hostJournal, resolveDaemonConfig } from './create-daemon/config.js';
 import { composeDaemonStores } from './create-daemon/stores.js';
 import { composeDaemonWorkspaces } from './create-daemon/workspaces.js';
 import type { DaemonScope } from './create-daemon/scope.js';
@@ -1036,7 +1036,7 @@ function buildDaemon(
     fleetJitter: undefined,
     agentEgress: initialAgentEgress,
     ownedJournal: undefined,
-    journal: overrides.journal,
+    journal: overrides.journal && hostJournal(overrides.journal),
     hostedStorageInitializationBarrierComplete: true,
     connection: undefined,
     blobLifecycleAbort: undefined,

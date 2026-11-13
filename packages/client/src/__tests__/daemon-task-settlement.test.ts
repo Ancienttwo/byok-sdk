@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, encodeEnvelope, HOST_MCP_TASK_CONTEXT_CAPABILITY } from '@byok-sdk/protocol';
-import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
+import { createDaemonWithAdapters, type Daemon, type DaemonOverrides } from '../daemon/create-daemon';
 import { DaemonTaskUnknownError, TaskSettlementRegistry, type DaemonTaskSettlement } from '../daemon/task-settlement';
 import { LocalStorageEmergencyError } from '../daemon/retention/pressure';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
@@ -30,12 +30,12 @@ describe('Daemon.whenTaskSettled', () => {
     await server.close();
   });
 
-  function build(adapter: StubRuntimeAdapter, storeDir: string): Daemon {
+  function build(adapter: StubRuntimeAdapter, storeDir: string, overrides: DaemonOverrides = {}): Daemon {
     daemon = createDaemonWithAdapters({
       agentHome: testAgentHomeConfig(), agentEgress: FRESH_DAEMON_EGRESS, storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-settlement',
       serverUrl: server.url, storeDir,
-    }, [adapter]);
+    }, [adapter], overrides);
     return daemon;
   }
 
@@ -210,12 +210,54 @@ describe('Daemon.whenTaskSettled', () => {
     const adapter = new StubRuntimeAdapter();
     const { d } = await started(adapter);
     const taskId = 'task-cancel-before-offer';
-    server.send(createEnvelope('task.cancel', { reason: 'cancel before offer' }, { taskId, seq: server.nextSeq() }));
+    // Force the interleaving: the cancel reads the task only after its later offer is journaled.
+    let journaled!: () => void;
+    const offerJournaled = new Promise<void>((resolve) => { journaled = resolve; });
+    const originalAppend = SqliteLocalTaskJournal.prototype.appendEnvelope;
+    const append = vi.spyOn(SqliteLocalTaskJournal.prototype, 'appendEnvelope').mockImplementation(async function (this: SqliteLocalTaskJournal, record) {
+      const receipt = await originalAppend.call(this, record);
+      if (record.taskId === taskId && record.opensTask) journaled();
+      return receipt;
+    });
+    const originalRead = SqliteLocalTaskJournal.prototype.readTask;
+    const read = vi.spyOn(SqliteLocalTaskJournal.prototype, 'readTask').mockImplementation(async function (this: SqliteLocalTaskJournal, id, binding) {
+      if (id === taskId) await offerJournaled;
+      return originalRead.call(this, id, binding);
+    });
+    try {
+      server.send(createEnvelope('task.cancel', { reason: 'cancel before offer' }, { taskId, seq: server.nextSeq() }));
+      await vi.waitFor(() => expect(read).toHaveBeenCalledWith(taskId, expect.anything()));
+      offer(taskId);
+      const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
+      expect(decline.payload).toMatchObject({ reason: expect.stringMatching(/cancelled before claim/i) });
+      await expect(d.whenTaskSettled(taskId)).resolves.toEqual({ terminal: 'declined', delivery: 'accepted', disposal: 'none' });
+      expect(adapter.startCalls).toHaveLength(0);
+    } finally {
+      journaled();
+      append.mockRestore();
+      read.mockRestore();
+    }
+  });
+
+  it('rejects an injected journal row whose sequence is not a safe integer', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-settlement-injected-'));
+    const journal = new SqliteLocalTaskJournal({ storeDir });
+    const readTask = journal.readTask.bind(journal);
+    journal.readTask = vi.fn(async (id: string, binding: Parameters<typeof readTask>[1]) => {
+      const row = await readTask(id, binding);
+      return row && { ...row, seq: null as unknown as number };
+    });
+    const d = build(adapter, storeDir, { journal });
+    await d.pair('pairing-code');
+    await d.start();
+    const taskId = 'task-injected-null-seq';
     offer(taskId);
-    const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
-    expect(decline.payload).toMatchObject({ reason: expect.stringMatching(/cancelled before claim/i) });
-    await expect(d.whenTaskSettled(taskId)).resolves.toEqual({ terminal: 'declined', delivery: 'accepted', disposal: 'none' });
+    await vi.waitFor(() => expect(journal.readTask).toHaveBeenCalledWith(taskId, expect.anything()));
+    await expect(d.whenTaskSettled(taskId, { signal: AbortSignal.timeout(2_000) })).rejects.toThrow(/malformed.*seq/);
     expect(adapter.startCalls).toHaveLength(0);
+    await d.stop();
+    await journal.close();
   });
 
   it('does not settle a received offer when cancellation sequence equals its durable offer sequence', async () => {

@@ -8,6 +8,7 @@ import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory.js';
 import { resolveAgentMemoryMcpBin, resolveAgentMemoryDescribeBin } from '../resolve-agent-memory-mcp-bin.js';
 import { resolveLocalAgentReleaseIdentity } from '../../release-identity.js';
 import { LocalStorageConfigError } from '../retention/config.js';
+import type { JournalIdentity, LocalTaskJournal, RecoverableTask, WithheldOfferTask } from '../journal/journal.js';
 import { McpToolsetRegistry } from '../toolset-registry.js';
 import { resolvePiByokLauncher } from '../../adapters/runtime-adapters.js';
 import { DEFAULT_MAX_TASK_OUTPUT_BYTES, DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME, DEFAULT_MAX_CONCURRENT_TASKS } from '../task-runner.js';
@@ -198,6 +199,29 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
     agentMemoryDescribeBin, agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, piByokLauncher,
     memoryHelper, configWarnings, toolAuthorizationResolver,
   };
+}
+
+/**
+ * The only view the daemon has of a host-supplied journal. A task row whose
+ * seq is not a safe integer is malformed: mailbox ordering never compares it.
+ */
+export function hostJournal(journal: LocalTaskJournal): LocalTaskJournal {
+  const checked = <T extends RecoverableTask | WithheldOfferTask>(row: T): T => {
+    if (!Number.isSafeInteger(row.seq)) throw new Error(`injected journal row for task ${row.taskId} is malformed: seq must be a safe integer`);
+    return row;
+  };
+  return new Proxy(journal, {
+    get(target, key) {
+      if (key === 'readTask') return async (...args: Parameters<LocalTaskJournal['readTask']>) => {
+        const row = await target.readTask(...args);
+        return row && checked(row);
+      };
+      if (key === 'listRecoveryTasks') return async (identity: JournalIdentity) => (await target.listRecoveryTasks(identity)).map(checked);
+      if (key === 'listRecoverable') return async () => (await target.listRecoverable()).map(checked);
+      const value: unknown = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
 }
 
 export type DaemonConfigScope = ReturnType<typeof resolveDaemonConfig>;
