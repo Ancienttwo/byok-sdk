@@ -44,10 +44,10 @@ it('reports no installation before install', () => {
   expect(app('status')).toEqual({ status: 0, output: { current: null, receipt: null } });
 });
 
-it('answers an upgrade without an installation with the typed refusal and changes nothing', async () => {
+it('answers an upgrade without an installation with the typed refusal and leaves only the empty install root', async () => {
   const result = app('upgrade', '--payload', await payload('2.0.0', { 'byok-agent.mjs': 'v2' }));
   expect(result).toEqual({ status: 3, output: { error: 'installation_absent', stores: null, receipt: null } });
-  await expect(readdir(installRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await readdir(installRoot)).toEqual([]);
 });
 
 it('refuses a payload whose bytes do not match its manifest before installing anything', async () => {

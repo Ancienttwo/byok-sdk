@@ -504,13 +504,17 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * `root` (#2001). The gate always uses the default gate root, never the
    * lifecycle's `gateRoot`, so installations under different gate roots that
    * share an install root still exclude each other. A held gate is
-   * `lifecycle_owner_busy`. On POSIX an install root another user owns is
-   * `install_root_foreign_owner`, before anything is written: the gate is
-   * per user, so only its owner can take it.
+   * `lifecycle_owner_busy`. The root is created first, so the gate and the
+   * owner check act on an existing directory: the gate resolves its real
+   * path, one spelling for every alias (a symlink, or another letter case on
+   * a case-insensitive volume), and whoever creates a missing root owns it.
+   * The gate is per OS user, so on POSIX a root another user owns is
+   * `install_root_foreign_owner` before anything is written under it.
    */
   function rootOwned<T>(operation: (held: HeldServiceLifecycle) => Promise<T>): Promise<T> {
     return lifecycle.owned(async (held) => {
       let gate: PathMutationGate;
+      await fs.mkdir(root, { recursive: true });
       try {
         gate = await acquirePathMutationGate({ scope: 'install-root', targetPath: root }, { waitMs: 0 });
       } catch (error) {
@@ -534,15 +538,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   async function assertOwnInstallRoot(): Promise<void> {
     const euid = process.geteuid?.();
     if (euid === undefined) return;
-    let uid: number;
-    try {
-      uid = (await fs.stat(root)).uid;
-    } catch (error) {
-      // The operation creates a missing root itself.
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-      throw error;
-    }
-    if (uid !== euid) {
+    if ((await fs.stat(root)).uid !== euid) {
       const error = new ServiceInstallationError('install_root_foreign_owner');
       error.message = `${error.message} (${root})`;
       throw error;

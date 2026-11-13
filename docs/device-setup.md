@@ -493,9 +493,13 @@ installation cleanup below.
 Every `install`, `upgrade`, `rollback`, `recover` and `uninstall` holds an
 install-root gate for its whole run (#2001). A second operation on the same
 install root, from any process of the same user and under any `gateRoot`,
-fails at once with `lifecycle_owner_busy` and writes nothing. On macOS and
-Linux an install root owned by another user is refused with
-`install_root_foreign_owner` before anything is written.
+fails at once with `lifecycle_owner_busy` and writes nothing. The operation
+creates a missing install root first, so every spelling of the root (a
+symlink, or another letter case on a case-insensitive volume) takes the same
+gate and a refusal leaves at most that empty directory. On macOS and Linux an
+install root owned by another user, including one that user created first,
+is refused with `install_root_foreign_owner` before anything is written in
+it.
 
 Preparation does not stop an absent unit or an allowed unmarked unit. It
 leases and gates the daemon stores instead. With `replaceUnmarked`, a

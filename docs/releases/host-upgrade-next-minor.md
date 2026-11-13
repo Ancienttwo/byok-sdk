@@ -39,9 +39,12 @@ the 0.42.0 known issue about installations under different `gateRoot`s
 sharing one `installRoot`. A first install therefore no longer reads
 `current` again under the store leases or refuses with `installation_exists`
 after staging, and the install snapshots are listed once, after the gate is
-taken. On macOS and Linux, an install root owned by another user is refused
-with the new `ServiceInstallationErrorCode` `install_root_foreign_owner`
-before anything is written; run the operation as the owner of the root.
+taken. Every operation creates a missing install root before taking the
+gate, so a refused operation can leave an empty install root behind; every
+spelling of the root takes the same gate. On macOS and Linux, an install root
+owned by another user (also one that user created first) is refused with the
+new `ServiceInstallationErrorCode` `install_root_foreign_owner` before
+anything is written in it; run the operation as the owner of the root.
 
 ## Gate release failures join the thrown error
 

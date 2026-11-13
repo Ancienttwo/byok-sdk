@@ -267,7 +267,8 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       inspect: async () => ({ state: 'foreign', unitPath, launcherPath }),
     });
     await expect(installation.install(await payload('1.0.0'))).rejects.toMatchObject({ code: 'service_unit_unmarked' });
-    await expect(fs.lstat(installRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+    // Only the empty root exists: it is created before the install-root gate (#2001).
+    expect(await fs.readdir(installRoot)).toEqual([]);
     expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
     expect(await fs.readFile(unitPath, 'utf8')).toBe('operator unit');
     expect(await fs.readFile(launcherPath, 'utf8')).toBe('operator launcher');
@@ -767,33 +768,40 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       // Owner gates under different gate roots do not exclude each other; owned() without the gate models that.
       // The install-root gate does: while A holds it, every operation of B is lifecycle_owner_busy and writes nothing.
       const ungated = (base: ManagedServiceLifecycle): ManagedServiceLifecycle => ({ ...base, owned: (operation) => operation({ install: base.install, uninstall: base.uninstall }) });
-      const b = installationOver(ungated(fakeLifecycle()));
+      // The root does not exist yet. On a case-insensitive volume B also spells it in another case.
+      await fs.rm(installRoot, { recursive: true, force: true });
+      const alias = installRoot.toUpperCase();
+      const b = installationOver(ungated(fakeLifecycle()), existsSync(path.dirname(alias)) ? { installRoot: alias } : {});
       const [three, four] = [await payload('3.0.0'), await payload('4.0.0')];
       let refusals: unknown[] = [];
-      installation = installationOver({ ...ungated(fakeLifecycle()), stop: async () => {
-        const before = await tree(installRoot);
+      // B runs while A holds the gate and before A stages anything.
+      installation = installationOver({ ...ungated(fakeLifecycle()), inspect: async () => {
+        const snap = async () => (existsSync(installRoot) ? tree(installRoot) : {});
+        const before = await snap();
         refusals = await Promise.all([b.install(four), b.upgrade(four), b.rollback(), b.recover(), b.uninstall()].map((operation) => operation.catch((caught: unknown) => caught)));
-        expect(await tree(installRoot)).toEqual(before);
+        expect(await snap()).toEqual(before);
+        return { state: 'exact', unitPath: 'unit', launcherPath: 'launcher' };
       } });
       await installation.install(three);
       expect(refusals).toEqual(Array(5).fill(expect.objectContaining({ code: 'lifecycle_owner_busy' })));
       expect(await pointer('current')).toBe('3.0.0');
 
-      // On POSIX an install root another user owns is refused before anything is written.
+      // On POSIX an install root another user owns is refused before anything is written, also when
+      // it did not exist yet and the other user created it first.
       await installation.uninstall();
+      await fs.rm(installRoot, { recursive: true, force: true });
       if (process.geteuid === undefined) return;
       const realStat = fs.stat.bind(fs);
       const foreign = vi.spyOn(fs, 'stat').mockImplementation((async (file: string, ...rest: []) => {
         const stat = await realStat(file, ...rest);
         return file === installRoot ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 }) : stat;
       }) as typeof fs.stat);
-      const before = await tree(installRoot);
       try {
         await expect(installation.install(three)).rejects.toMatchObject({ code: 'install_root_foreign_owner' });
       } finally {
         foreign.mockRestore();
       }
-      expect(await tree(installRoot)).toEqual(before);
+      expect(await tree(installRoot)).toEqual({});
     });
 
     it('uninstall refuses a symlinked snapshots/ and changes nothing behind it', async () => {
