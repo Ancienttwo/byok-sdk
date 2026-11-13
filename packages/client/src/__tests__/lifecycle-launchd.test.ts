@@ -108,7 +108,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
   });
 
   it('#1971: a timed-out best-effort bootout fails install() before bootstrap', async () => {
-    const timeout = new PlatformCommandTimeoutError('launchctl', 30_000);
+    const timeout = new PlatformCommandTimeoutError('launchctl timed out');
     const run = vi.fn<Runner>().mockImplementation(async (_cmd, args) => {
       if (args[0] === 'bootout') throw timeout;
       return args[0] === 'print' ? ABSENT : ok();

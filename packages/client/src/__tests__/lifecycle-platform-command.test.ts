@@ -2,7 +2,8 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { PlatformCommandTimeoutError, runBounded } from '../util/exec-runner';
+import { runBounded } from '../lifecycle/platform-command';
+import { PlatformCommandTimeoutError } from '../util/exec-runner';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -18,7 +19,7 @@ function alive(pid: number): boolean {
   }
 }
 
-describe('util/exec-runner: runBounded (#1971)', () => {
+describe('lifecycle/platform-command: runBounded (#1971)', () => {
   it('resolves a non-zero exit with its output', async () => {
     await expect(runBounded(process.execPath, ['-e', 'process.stdout.write("out"); process.stderr.write("err"); process.exit(3)'], 10_000))
       .resolves.toEqual({ code: 3, stdout: 'out', stderr: 'err' });

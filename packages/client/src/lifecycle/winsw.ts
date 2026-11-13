@@ -1,7 +1,8 @@
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { COMMAND_TIMEOUT_MS } from '../util/command-timeouts.js';
-import { defaultRunner, runBounded, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner.js';
+import { runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner.js';
+import { defaultRunner, runBounded } from './platform-command.js';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { SERVICE_REDIRECT_LIMITS } from './service-log.js';
 import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types.js';

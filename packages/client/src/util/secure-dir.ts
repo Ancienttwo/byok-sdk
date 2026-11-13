@@ -9,10 +9,11 @@ import type { Runner } from './exec-runner.js';
 
 /**
  * Runs `icacls` within the `platform` bound (#1971); past it the process is
- * killed and waited for, and the run rejects. Not `exec-runner.ts`'s
- * `defaultRunner`: this module is loaded lazily, and a value import of that
- * runner makes the bundler wrap its process-tree graph in lazy initialisers.
- * `icacls` starts no children, so killing it stops the whole command.
+ * killed and waited for, and the run rejects. Not the lifecycle's
+ * `defaultRunner` (`lifecycle/platform-command.ts`): `util` may not depend on
+ * `lifecycle`, and this lazily loaded module would pull that runner's
+ * process-tree graph into lazy initialisers. `icacls` starts no children, so
+ * killing it stops the whole command.
  */
 const runIcacls: Runner = (command, args) =>
   new Promise((resolve, reject) => {
@@ -93,7 +94,7 @@ const OWNER_RIGHTS_SID = '*S-1-3-4';
  * Returns a plain ARGV array with NO manually-embedded quote characters —
  * this is meant for `child_process.execFile`'s array form (this codebase's
  * own established convention for every external command it ever runs; see
- * `util/exec-runner.ts`'s `defaultRunner`), which is never a shell and
+ * `lifecycle/platform-command.ts`'s `defaultRunner`), which is never a shell and
  * so has no shell-quoting hazard for a `dir`/username containing spaces —
  * Node's own Windows argv encoding (used internally by `execFile`/`spawn`
  * when given an array) already quotes/escapes each element correctly

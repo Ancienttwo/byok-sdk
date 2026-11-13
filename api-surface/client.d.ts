@@ -14864,24 +14864,6 @@ export type Runner = (command: string, args: string[]) => Promise<RunResult>;
 export declare class PlatformCommandTimeoutError extends Error {
 }
 /**
- * Runs `executable` directly (never a shell) as the root of an owned process
- * tree and resolves with its exit code and output, whatever the code. It
- * rejects when the executable cannot start, ends on a signal or prints more
- * than 1 MiB, and after `timeoutMs` with {@link PlatformCommandTimeoutError},
- * once `disposeOwnedProcessTree` has stopped the tree (SIGTERM, then SIGKILL;
- * `taskkill /T /F` on Windows) and waited for it within its bounded grace.
- */
-export declare function runBounded(executable: string, args: readonly string[], timeoutMs: number, cwd?: string): Promise<RunResult>;
-/**
- * The real {@link Runner}: {@link runBounded} at the `platform` bound. A bare
- * `command` is a system tool and starts from its trusted location, never
- * from `PATH`; one that has none rejects with `SystemToolUnavailableError`
- * (`@byok-sdk/core/system-tool`, #1304). Every command it runs is a native
- * executable, never a `.cmd`/`.bat` script, which Windows cannot start
- * without a shell.
- */
-export declare const defaultRunner: Runner;
-/**
  * Runs `command`/`args` via `run` and throws a clear, labeled error if it
  * exits non-zero — for the subset of calls across launchd/systemd/WinSW
  * that must actually succeed for `install()`/`start()` to honestly report
@@ -15010,7 +14992,7 @@ import type { Runner } from './exec-runner.js';
  * Returns a plain ARGV array with NO manually-embedded quote characters —
  * this is meant for `child_process.execFile`'s array form (this codebase's
  * own established convention for every external command it ever runs; see
- * `util/exec-runner.ts`'s `defaultRunner`), which is never a shell and
+ * `lifecycle/platform-command.ts`'s `defaultRunner`), which is never a shell and
  * so has no shell-quoting hazard for a `dir`/username containing spaces —
  * Node's own Windows argv encoding (used internally by `execFile`/`spawn`
  * when given an array) already quotes/escapes each element correctly
