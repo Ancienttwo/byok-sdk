@@ -1,11 +1,14 @@
+import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  InMemorySecretStore, LinuxSecretServiceSecretStore, modelProviderSecretName, SqliteProviderProfileStore,
+  InMemorySecretStore, LinuxSecretServiceSecretStore, ProviderRegistry, modelProviderSecretName, SqliteProviderProfileStore,
   type ModelProviderSecretName, type ProviderConfiguration, type SecretStore,
 } from '@byok-sdk/keys';
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
@@ -13,9 +16,10 @@ import { executionCatalog } from '../host/conversation/catalog.ts';
 import { catalogEntryFor, ProviderProfiles } from '../host/keys/catalog.ts';
 import { refusalReceipt, runCustody } from './child.ts';
 import { keysMainHandlers } from './main-handlers.ts';
+import { BridgeError } from '../bridge/protocol.ts';
 import { CustodyError } from './protocol.ts';
+import { CUSTODY_DEADLINE_MS, listFromCustody, submitToCustody, type CustodyChild } from './submit.ts';
 import type { CommandChild } from '../main/host-command.ts';
-import { listFromCustody, submitToCustody } from './submit.ts';
 
 const SECRET = 'sk-custody-test-secret-0123456789';
 const CONFIGURATION: ProviderConfiguration = {
@@ -31,10 +35,10 @@ beforeEach(async () => {
   root = await mkdtemp(path.join(os.tmpdir(), 'byok-custody-'));
   keysDb = path.join(root, 'host', 'keys.db');
 });
-afterEach(async () => { await rm(root, { recursive: true, force: true }); });
+afterEach(async () => { vi.useRealTimers(); await rm(root, { recursive: true, force: true }); });
 
 /** The custody child in process: its stdin, stdout and exit, around `runCustody` with an injected store. */
-function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: string[]): CommandChild {
+function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: string[]): CustodyChild {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const events = new EventEmitter();
@@ -44,7 +48,7 @@ function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: s
     stdout.end(line);
     events.emit('exit', receipt.ok ? 0 : 1);
   });
-  const child: CommandChild = { stdin, stdout, once: (event, listener) => { events.once(event, listener); return child; } };
+  const child: CustodyChild = { stdin, stdout, kill: vi.fn(() => true), once: (event, listener) => { events.once(event, listener); return child; } };
   return child;
 }
 
@@ -142,6 +146,98 @@ describe('custody child', () => {
     expect(reloads).toEqual([]);
   });
 
+  it.each(['submit', 'list'] as const)('bounds a hung Host catalog refresh after %s without repeating a write', async operation => {
+    vi.useFakeTimers();
+    const secrets = new InMemorySecretStore<ModelProviderSecretName>();
+    const write = vi.spyOn(secrets, 'set');
+    let notify!: () => void;
+    const refreshing = new Promise<void>(resolve => { notify = resolve; });
+    const handlers = keysMainHandlers({
+      spawnHostCommand: () => custodyChild(secrets, []),
+      callHost: () => { notify(); return new Promise<null>(() => {}); },
+    });
+    const request = operation === 'submit'
+      ? handlers['keys.submit']({ op: 'configure', configuration: CONFIGURATION, secret: SECRET })
+      : handlers['keys.list'](undefined);
+    const settled = Promise.resolve(request).then(value => ({ value }), (error: unknown) => ({ error }));
+    await Promise.race([refreshing, settled]);
+    await vi.advanceTimersByTimeAsync(CUSTODY_DEADLINE_MS);
+    expect(await settled).toMatchObject({ error: { code: 'catalog_refresh_timeout',
+      message: expect.stringContaining(operation === 'submit' ? 'The key change was saved' : 'Stored providers were read') } });
+    expect(write).toHaveBeenCalledTimes(operation === 'submit' ? 1 : 0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    ['stopped', new BridgeError('unknown_method', 'Unknown bridge method keys.profilesChanged')],
+    ['not running', new BridgeError('host_exited', 'No Host is running')],
+  ])('lists stored providers while the Host is %s', async (_state, refusal) => {
+    const secrets = new InMemorySecretStore<ModelProviderSecretName>();
+    const handlers = keysMainHandlers({ spawnHostCommand: () => custodyChild(secrets, []), callHost: () => Promise.reject(refusal) });
+    await expect(Promise.resolve(handlers['keys.submit']({ op: 'configure', configuration: CONFIGURATION, secret: SECRET }))).rejects.toBe(refusal);
+    const statuses = await handlers['keys.list'](undefined);
+    expect(statuses.map(status => status.profile_ref)).toEqual(['writer']);
+  });
+
+  it('rebuilds the catalog on Reload after a committed change loses its receipt, without writing the key again', async () => {
+    vi.useFakeTimers();
+    const secrets = new InMemorySecretStore<ModelProviderSecretName>();
+    const write = vi.spyOn(secrets, 'set');
+    const profiles = new ProviderProfiles(keysDb);
+    const brand = { instruction: 'reply', models: { pi: { label: 'Pi', runtime: 'pi' as const } } };
+    let catalog = executionCatalog(brand, 'device', await profiles.load());
+    profiles.subscribe(next => { catalog = executionCatalog(brand, 'device', next); });
+    const lost = custodyChild(secrets, []);
+    vi.spyOn(lost.stdout as PassThrough, 'end').mockReturnValue(lost.stdout as PassThrough);
+    const committed = new Promise<void>(resolve => lost.once('exit', () => resolve()));
+    const callHost = vi.fn(async () => { await profiles.changed(); return null; });
+    let spawned = 0;
+    const handlers = keysMainHandlers({ spawnHostCommand: () => (++spawned === 1 ? lost : custodyChild(secrets, [])), callHost });
+    const request = handlers['keys.submit']({ op: 'configure', configuration: CONFIGURATION, secret: SECRET });
+    const refused = expect(request).rejects.toMatchObject({ code: 'custody_timeout' });
+    await committed;
+    await vi.advanceTimersByTimeAsync(CUSTODY_DEADLINE_MS);
+    await refused;
+    expect(callHost).not.toHaveBeenCalled();
+    expect(catalog.choices.map(choice => choice.id)).toEqual(['pi']);
+    const statuses = await handlers['keys.list'](undefined);
+    expect(statuses.map(status => status.profile_ref)).toEqual(['writer']);
+    expect(catalog.choices.map(choice => choice.id)).toEqual(['pi', 'pi:writer']);
+    expect(callHost).toHaveBeenCalledOnce();
+    await expect(handlers['keys.list'](undefined)).resolves.toEqual(statuses);
+    expect(callHost).toHaveBeenCalledTimes(2);
+    expect(write).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['submit', 'list'] as const)('bounds a hung %s before exit and while waiting for stdout', async operation => {
+    vi.useFakeTimers();
+    for (const exited of [false, true]) {
+      const events = new EventEmitter();
+      const child: CustodyChild = { stdin: new PassThrough(), stdout: new PassThrough(), kill: vi.fn(() => true),
+        once: (event, listener) => { events.once(event, listener); return child; } };
+      const request = operation === 'list' ? listFromCustody(child)
+        : submitToCustody(child, { op: 'replace_secret', profileRef: 'writer', secret: SECRET });
+      const refused = expect(request).rejects.toMatchObject({ code: 'custody_timeout',
+        message: expect.stringMatching(operation === 'list' ? /^(?!.*may still be saved).*Nothing was changed/ : /may still be saved.*reload stored providers/) });
+      if (exited) { events.emit('exit', 0); await Promise.resolve(); }
+      await vi.advanceTimersByTimeAsync(CUSTODY_DEADLINE_MS);
+      await refused;
+      // A list holds no configuration lock and is killed; a change keeps running and holding the lock, only the wait ends.
+      if (operation === 'list') expect(child.kill).toHaveBeenCalledExactlyOnceWith('SIGKILL');
+      else expect(child.kill).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  });
+
+  it('cancels the deadline after a successful custody call', async () => {
+    vi.useFakeTimers();
+    const child = custodyChild(new InMemorySecretStore(), []);
+    await expect(listFromCustody(child)).resolves.toEqual([]);
+    await vi.advanceTimersByTimeAsync(CUSTODY_DEADLINE_MS);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('rejects the submission when the custody child died before reading stdin', async () => {
     const events = new EventEmitter();
     const stdin = new PassThrough();
@@ -150,5 +246,47 @@ describe('custody child', () => {
     const submitted = submitToCustody(child, { op: 'replace_secret', profileRef: 'writer', secret: SECRET });
     stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
     await expect(submitted).rejects.toMatchObject({ code: 'custody_exited' });
+  });
+
+  it('holds the configuration lock past a timed-out wait until the OS-store helper has written', { timeout: 30_000 }, async () => {
+    // A real custody process whose OS store writes through a slow helper process, as `security` and `secret-tool` do.
+    const osStore = path.join(root, 'os-store');
+    const helper = `process.stdin.setEncoding('utf8'); let v = ''; process.stdin.on('data', c => { v += c; });
+      process.stdin.on('end', () => setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(osStore)}, v), 1500));`;
+    const script = `import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+      import { runCommand } from '@byok-sdk/keys';
+      import { runCustodyCommand } from ${JSON.stringify(path.resolve('src/custody/child.ts'))};
+      const store = { providerLabel: 'test', available: async () => true, delete: async () => false,
+        get: async () => (existsSync(${JSON.stringify(osStore)}) ? readFileSync(${JSON.stringify(osStore)}, 'utf8') : undefined),
+        has: async () => existsSync(${JSON.stringify(osStore)}), scope() { return store; },
+        set: async (_name, secret) => { writeFileSync(${JSON.stringify(`${osStore}.started`)}, ''); await runCommand(process.execPath, ['-e', ${JSON.stringify(helper)}], secret); } };
+      process.exitCode = await runCustodyCommand(${JSON.stringify(keysDb)}, () => store);`;
+    await new ProviderProfiles(keysDb).load();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let custody!: ChildProcess;
+    const handlers = keysMainHandlers({
+      spawnHostCommand: () => (custody = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['pipe', 'pipe', 'inherit'] })),
+      callHost: async () => null,
+    });
+    const first = Promise.resolve(handlers['keys.submit']({ op: 'configure', configuration: CONFIGURATION, secret: 'sk-first-synthetic' }));
+    const refused = expect(first).rejects.toMatchObject({ code: 'custody_timeout' });
+    while (!existsSync(`${osStore}.started`)) await sleep(20);
+    await vi.advanceTimersByTimeAsync(CUSTODY_DEADLINE_MS);
+    await refused;
+    vi.useRealTimers();
+    const exited = new Promise(resolve => custody.once('exit', resolve));
+    const later = new ProviderRegistry({ profileStore: new SqliteProviderProfileStore({ path: keysDb, configurationLockWaitMs: 0 }), secretStore: {
+      providerLabel: 'test', available: async () => true, delete: async () => false, has: async () => existsSync(osStore), scope() { return this; },
+      get: async () => (existsSync(osStore) ? readFileSync(osStore, 'utf8') : undefined), set: async (_name, secret) => writeFileSync(osStore, secret) } });
+    try {
+      await expect(later.configure(CONFIGURATION, 'sk-later-synthetic')).rejects.toMatchObject({ code: 'PROVIDER_CONFIGURATION_BUSY' });
+      await exited;
+      expect(readFileSync(osStore, 'utf8')).toBe('sk-first-synthetic');
+      await later.configure(CONFIGURATION, 'sk-later-synthetic');
+      await sleep(2000);
+      expect(readFileSync(osStore, 'utf8')).toBe('sk-later-synthetic');
+    } finally {
+      await later.close();
+    }
   });
 });
