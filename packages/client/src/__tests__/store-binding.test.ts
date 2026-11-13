@@ -372,33 +372,20 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
       const secondDaemon = daemonFor(kept === 'credential' ? second : unreachable(second));
       const credentials = testDeviceCredentials(productId);
       const deleteEntry = credentials.clear.bind(credentials);
-      const { acquireEnrollmentGate: acquire } = await vi.importActual<typeof import('../daemon/enrollment-gate')>('../daemon/enrollment-gate');
-      let held = 0;
-      let inWindow = false;
-      let reachedGate!: () => void;
-      const pairingAtGate = new Promise<void>((resolve) => { reachedGate = resolve; });
-      vi.mocked(acquireEnrollmentGate).mockImplementation(async (id) => {
-        if (inWindow) reachedGate();
-        const gate = await acquire(id);
-        held += 1;
-        return { ...gate, release: async () => { held -= 1; await gate.release(); } };
-      });
+      const gate = await trackGate();
       let pairing: Promise<unknown> = Promise.resolve();
       vi.spyOn(credentials, 'clear').mockImplementationOnce(async () => {
-        // The clear holds the productId gate from its validation to here.
-        expect(held).toBe(1);
-        inWindow = true;
         pairing = secondDaemon.pair('pairing-code', { replaceOtherStore: true }).catch((error: unknown) => error);
-        // Released once the pairing has either written in this window or is waiting on the held gate.
-        await Promise.race([pairing, pairingAtGate]);
+        // The clear holds the gate from its validation to here, so the pairing must wait on it.
+        await gate.excludes(pairing);
         return deleteEntry();
       });
 
       try {
         await clear(first);
-        await pairing;
+        await within(pairing);
       } finally {
-        vi.mocked(acquireEnrollmentGate).mockImplementation(acquire);
+        gate.restore();
       }
 
       if (kept === 'credential') expect(await readDeviceEnrollmentStatus(second)).toMatchObject({ state: 'paired' });
