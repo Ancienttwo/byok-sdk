@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-import { familyOwners, knownFamilies, reviewedScripts, selectImpact, vitestTmpRootConsumers, workspaceGraph } from './select-impact.mjs';
+import { familyOwners, knownFamilies, reviewedScripts, scriptChecksForPaths, selectImpact, vitestTmpRootConsumers, workspaceGraph } from './select-impact.mjs';
 import { needsBuild } from './plan-ci.mjs';
 import { isCwdRefusal } from '../qualification/opencode-native-canary.ts';
 const root = new URL('../../', import.meta.url);
@@ -404,6 +404,41 @@ test('archived vendored Hermes paths stay mapped as root CI scripts (#1854)', ()
     const file = `scripts/ci/vendor/hermes/${path}`;
     assert.deepEqual(selectImpact([file]), { dirs: [], files: [file], families: [], reason: 'root-ci-scripts' }, path);
   }
+  // #1959: all archived files remain inputs of the deleting PR.
+  const archived = spawnSync('git', ['ls-tree', '-r', '--name-only', 'v0.42.0', '--', 'packages/cloud-do'], { cwd: fileURLToPath(root), encoding: 'utf8' });
+  assert.equal(archived.status, 0, archived.stderr);
+  const deleted = [...archived.stdout.trim().split('\n'), 'api-surface/cloud-do.d.ts',
+    'scripts/release/cloud-do-consumer-smoke.mjs', 'scripts/release/cloud-do-consumer-worker.mjs'];
+  for (const file of deleted) {
+    const impact = selectImpact([file]);
+    const checks = scriptChecksForPaths([file]);
+    assert.ok(impact.families.includes('npm-release-pack'), file);
+    assert.ok(checks.install, file);
+    assert.ok(checks.tests.includes('scripts/api-surface/check-api-surface.test.mjs'), file);
+    assert.ok(checks.tests.includes('scripts/release/pack-and-smoke.test.mjs'), file);
+  }
+  assert.throws(() => selectImpact(['packages/cloud-do/src/unreviewed.ts']), /reviewed CI mapping required/i);
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-unknown-owner-'));
+  try {
+    mkdirSync(join(cwd, 'api-surface'));
+    const entries = join(cwd, 'api-surface/entries.json');
+    writeFileSync(entries, '{}');
+    const git = (...args) => spawnSync('git', args, { cwd, encoding: 'utf8' });
+    assert.equal(git('init').status, 0);
+    assert.equal(git('add', '.').status, 0);
+    assert.equal(git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'base').status, 0);
+    const base = git('rev-parse', 'HEAD').stdout.trim();
+    writeFileSync(entries, JSON.stringify({ '@byok-sdk/unknown': {} }));
+    assert.throws(() => selectImpact(['api-surface/entries.json'], { cwd, base }), /reviewed CI mapping required/i);
+    for (const key of ['@byok-sdk/cloud-do', '@byok-sdk/cloud-do/package.json']) {
+      writeFileSync(entries, JSON.stringify({ [key]: {} }));
+      assert.throws(() => selectImpact(['api-surface/entries.json'], { cwd, base }), /reviewed CI mapping required/i, key);
+    }
+    const restored = join(cwd, 'packages/cloud-do/package.json');
+    mkdirSync(dirname(restored), { recursive: true });
+    writeFileSync(restored, '{}');
+    assert.throws(() => selectImpact(['packages/cloud-do/package.json'], { cwd, base }), /reviewed CI mapping required/i);
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
 });
 
 test('vendored npm runtime manifests and locks select the runtime contract matrix', () => {
@@ -600,15 +635,13 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
   assert.deepEqual(Object.keys(reviewedScripts).sort(), [
     'scripts/api-surface/check-api-surface.mjs',
     'scripts/api-surface/check-version-authority.mjs', 'scripts/api-surface/check-version-authority.test.mjs',
-    'scripts/api-surface/entry-closure.test.mjs',
+    'scripts/api-surface/entry-closure.mjs', 'scripts/api-surface/entry-closure.test.mjs',
     'scripts/architecture/dependency-baseline.json', 'scripts/architecture/dependency-graph.mjs', 'scripts/architecture/dependency-graph.test.mjs',
     'scripts/ci/with-secret-service.sh',
     'scripts/codemod/relative-js-specifiers.mjs',
     'scripts/docs/device-setup.mjs', 'scripts/docs/device-setup.test.mjs',
     'scripts/release/beta-release.test.mjs', 'scripts/release/check-package-graph.mjs', 'scripts/release/check-retired-identities.mjs',
     'scripts/release/check-upgrade-manifest.mjs', 'scripts/release/check-upgrade-manifest.test.mjs',
-    'scripts/release/cloud-do-consumer-smoke.mjs',
-    'scripts/release/cloud-do-consumer-worker.mjs',
     'scripts/release/execution-submit-smoke.mjs',
     'scripts/release/node-next-consumer-probe.mjs',
     'scripts/release/pack-and-smoke.mjs',
@@ -617,7 +650,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     'scripts/release/pg-migrate-smoke.mjs',
     'scripts/release/pi-launcher-smoke.mjs',
     'scripts/release/pi-runtime-identity.mjs',
-    'scripts/release/publish-recovery.test.mjs', 'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/published-store-paths.mjs', 'scripts/release/registry-readback.mjs',
+    'scripts/release/publish-recovery.test.mjs', 'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/published-store-paths.mjs', 'scripts/release/registry-npm.test.mjs', 'scripts/release/registry-readback.mjs',
     'scripts/release/upgrade-manifest/dts-surface.mjs', 'scripts/release/upgrade-manifest/history.mjs', 'scripts/release/upgrade-manifest/manifest.mjs',
     'scripts/release/upgrade-manifest/snapshot.mjs',
   ]);
@@ -632,6 +665,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
       if (file !== path) assert.ok(readFileSync(new URL(file, root), 'utf8').includes(path.split('/').pop()), `${file} does not run ${path}`);
     }
   }
+  assert.deepEqual(reviewedScripts['scripts/api-surface/entry-closure.mjs'], { tests: ['scripts/api-surface/entry-closure.test.mjs'], install: true });
   assert.deepEqual(reviewedScripts['scripts/api-surface/entry-closure.test.mjs'], { tests: ['scripts/api-surface/entry-closure.test.mjs'], install: true });
   // pack-and-smoke.mjs selects exactly the family jobs that run it.
   assert.equal(scripts['check:release-pack'], 'node scripts/release/pack-and-smoke.mjs');
@@ -643,8 +677,6 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     return /(?:bun run check:release-pack|node scripts\/release\/pack-and-smoke\.mjs)(?:\s|$)/.test(workflow.slice(start, next < 0 ? undefined : start + 1 + next));
   });
   assert.deepEqual(selectImpact(['scripts/release/pack-and-smoke.mjs']).families, sorted(runners));
-  assert.deepEqual(selectImpact(['scripts/release/cloud-do-consumer-smoke.mjs']).families, sorted(runners));
-  assert.deepEqual(selectImpact(['scripts/release/cloud-do-consumer-worker.mjs']).families, sorted(runners));
   assert.deepEqual(selectImpact(['scripts/release/node-next-consumer-probe.mjs']).families, sorted(runners));
   assert.ok(runners.includes('npm-release-pack'));
   // Its store-path guard runs inside those same jobs.
@@ -872,7 +904,7 @@ test('the todo build config selects the client build that runs it', () => {
 });
 
 test('reviewed M package build configs keep owner consumers and packed artifacts, not adjacent unknown configs', () => {
-  for (const owner of ['cloud-dataplane', 'cloud-do', 'cloud', 'protocol', 'server', 'testkit', 'ui-runtime']) {
+  for (const owner of ['cloud-dataplane', 'cloud', 'protocol', 'server', 'testkit', 'ui-runtime']) {
     const path = `packages/${owner}/tsup.config.ts`;
     const plan = selectImpact([path]);
     const ownerScope = selectImpact([`packages/${owner}/tsconfig.json`]);
@@ -881,11 +913,6 @@ test('reviewed M package build configs keep owner consumers and packed artifacts
     assert.throws(() => selectImpact([`packages/${owner}/tsup.unreviewed.config.ts`]), /reviewed CI mapping required/i);
     assert.throws(() => selectImpact([`packages/${owner}/tsup.config.mjs`]), /reviewed CI mapping required/i);
   }
-  // #1387: cloud-do's build runs scripts/check-dist.mjs; a sibling script stays unreviewed.
-  const checkDist = selectImpact(['packages/cloud-do/scripts/check-dist.mjs']);
-  const cloudDo = selectImpact(['packages/cloud-do/tsconfig.json']);
-  assert.deepEqual([checkDist.dirs, checkDist.families], [cloudDo.dirs, sorted(new Set([...cloudDo.families, 'npm-release-pack']))]);
-  assert.throws(() => selectImpact(['packages/cloud-do/scripts/unreviewed.mjs']), /reviewed CI mapping required/i);
   assert.throws(() => selectImpact(['packages/client/tsup.other.config.ts']), /reviewed CI mapping required/i);
   assert.throws(() => selectImpact(['packages/unreviewed/tsup.config.ts']), /reviewed CI mapping required/i);
 });

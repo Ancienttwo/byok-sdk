@@ -29,6 +29,14 @@ const CANCEL_PROBE_MAX_MS = 1000;
 const WAKE_RETRY_LIMIT = 10;
 const WAKE_RETRY_FIRST_MS = 1000;
 const WAKE_RETRY_MAX_MS = 60_000;
+/**
+ * A drain or wake hook failed only on wake dispatch; failed calls remain in the durable outbox for retry.
+ * A drain that also fails on a Host job or outbox capacity throws a plain AggregateError instead.
+ */
+export class WakeDispatchError extends AggregateError {
+  constructor(failures: unknown[]) { super(failures, 'Wake dispatch failed; durable outbox retained'); }
+}
+
 export interface OutcomeTransaction {
   readonly intent: Readonly<Intent>;
   readonly terminal: Terminal;
@@ -240,14 +248,21 @@ export class HostExecutionCore {
     this.ledger.transaction(state => this.routineCommands(state).lifecycle(id, lifecycle));
     await this.drain();
   }
-  async cancel(key: string): Promise<void> {
+  /**
+   * Commits the cancellation, then drains. Returns `wakePending: true` if that drain fails only on wake dispatch;
+   * the outbox retains failed wakes for retry. The failure may concern another wake or already be retried before return.
+   * Other errors can still reject after commit, including a Host job or outbox capacity failure (#2072).
+   */
+  async cancel(key: string): Promise<{ wakePending?: true }> {
     this.assertOpen();
     this.ledger.transaction(state => {
       const intent = state.intents[hash(key)];
       if (!intent) throw new Error('Intent not found');
       if (!intent.conclusion) intent.cancelReason = 'cancelled';
     });
-    await this.drain();
+    try { await this.drain(); }
+    catch (error) { if (error instanceof WakeDispatchError) return { wakePending: true }; throw error; }
+    return {};
   }
   readonly consume = async (wake: DueWake, signal: AbortSignal): Promise<void> => {
     this.assertOpen(); signal.throwIfAborted();
@@ -457,7 +472,10 @@ export class HostExecutionCore {
       failures.unshift(capacityFailure);
     }
     // Reject after scheduling cleanup, so the SDK retains the hook retry.
-    if (failures.length) throw new AggregateError(failures, 'Wake dispatch failed; durable outbox retained');
+    if (failures.length) {
+      if (!capacityFailure && !jobFailures.length) throw new WakeDispatchError(failures);
+      throw new AggregateError(failures, 'Wake dispatch failed; durable outbox retained');
+    }
   }
   private async runHostJobs(): Promise<unknown[]> {
     const failures: unknown[] = [];

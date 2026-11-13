@@ -42,7 +42,7 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | agy | Claude | Codex | dsh | Grok | OpenCode | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.77` | `2.2.6` | `1.5.2` | `1.5.2` |
+| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.5.2` | `1.5.2` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | yes | no |
 | Display-only message draft | `messageDraft` | no | yes | yes | no | yes | no | yes | yes |
@@ -96,16 +96,18 @@ retain upstream's permission model. See [Pi subagents](spec.md#pi-subagents).
 `OpenCodeAdapter` is an opt-in custom harness (`harnessId: 'opencode'`). Its
 descriptor declares `platforms: ['darwin', 'win32']` (#1593); Linux stays
 undeclared. `platforms` is OS-grained, so `darwin` covers both arches. The
-native 2.2.6 canary passed first task, same-session resume, cleanup and the
-free-model canary on macOS x64. The runtime contract (`opencode1` and
-`opencode2` legs, see [Runtime contract suite](runtime-contract.md)) adds the
-lifecycle cases on OpenCode 1.19.5 and 2.2.6 against a loopback
-OpenAI-compatible provider: completion, same-session resume with a different
-workspace refused, a refused permission request, cancellation of a running
-shell tool, and no surviving OpenCode process after close. They passed on macOS
-arm64 and Windows x64, and the Windows legs run in CI (`opencode-real-windows`).
-Evidence and commands are in the [research note](researches/2026-11-09-opencode-platform-qualification.md). The compatibility floors are v1 1.18.35 and v2 2.0.26. The
-default version policy qualifies `2.2.6` and warns on any other accepted
+native 2.3.0 free-model canary passed a first task and same-session resume on
+macOS arm64, with process cleanup; a different workspace was refused. It did
+not observe a permission request. The runtime contract (`opencode1` and
+`opencode2` legs, see [Runtime contract suite](runtime-contract.md)) exercises
+OpenCode 1.19.5 and 2.3.0 against a loopback provider: completion, resume with a
+different workspace refused, permission refusal, cancellation of a running shell
+tool, and no surviving OpenCode process after close. These passed on macOS
+arm64 and Windows x64; the Windows legs run in CI (`opencode-real-windows`).
+See the [2.3.0 evidence](researches/2026-11-13-opencode-2.3.0-qualification.md)
+and [earlier platform evidence](researches/2026-11-09-opencode-platform-qualification.md).
+The compatibility floors are v1 1.18.35 and v2 2.0.26. The
+default version policy qualifies `2.3.0` and warns on any other accepted
 version (`OPENCODE_VERSION_POLICY`, `unqualified: 'warn'`); only a Host may
 declare `block`. Unrecognized, below-floor and prerelease tokens still fail the
 executable compatibility gate.
@@ -150,7 +152,7 @@ persona overlay and cleanup; v2 refuses Agent-memory readers before execution
 because that appended instruction channel is unavailable. Task-scoped Host MCP
 servers are passed through ACP on each open, including resume and model fallback.
 The loopback contract exercised a tool call and task isolation on OpenCode 1.19.5
-and 2.2.6 on macOS arm64 and Windows x64. Native user MCP remains inherited.
+and 2.3.0 on macOS arm64 and Windows x64; see the [qualification evidence](researches/2026-11-13-opencode-2.3.0-qualification.md). Native user MCP remains inherited.
 V2 `execute` calls remain opaque without a proven
 native tool identity; the SDK never derives MCP names from code. Child call IDs
 carry the native child session id to avoid merging their calls with root calls.

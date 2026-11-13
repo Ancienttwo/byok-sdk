@@ -122,7 +122,7 @@ Thumbs.db
 .ai/harness/architecture/archive/
 
 
-# Broader wrangler local state (package-level rules already cover cloud-do/dataplane)
+# Broader wrangler local state (package-level rules already cover dataplane)
 **/.wrangler/
 
 # Local key material (fixtures do not ship .pem today)

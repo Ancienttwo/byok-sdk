@@ -2,13 +2,31 @@
 
 Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Committed cancellation with a pending wake (#2004)
+
+`HostExecutionCore.cancel()` now returns an object instead of `void`. Update callers and test doubles that require `Promise<void>` to accept its result. `BotCollaboration.cancelTurn()` and `abortSwitch()` keep their existing result fields. When only wake dispatch fails after one of these operations commits, it resolves with `wakePending: true` instead of rejecting. The failure can concern any wake in that drain, including one unrelated to the operation, and a concurrent retry may succeed before the result returns. Do not repeat the committed operation solely because the flag is present.
+
+To inspect outstanding work, read `HostLedger.snapshot().outbox` on the ledger used by the core or Bot. Failed rows have `kind: 'schedule'` or `kind: 'cancel-wake'` and `lastError`; the core retries each row on a timer up to 10 times, with backoff capped at 60 seconds. After that, the row waits for another drain to retry it. Track the row's outbox key and wake key: a successful SDK schedule or cancel removes that unchanged row. A row can also be superseded by later work, so its disappearance alone does not prove that the wake fired. For a scheduled wake, `server.wakes.pending()` reports SDK-queued wakes; acceptance into that queue is not completion of the wake hook. An explicit `HostExecutionCore.drain()` or `BotCollaboration.drain()` that resolves confirms its drain did not report a dispatch failure; drains and wake hooks still reject `WakeDispatchError` when their only failures are wake calls.
+
+Other errors can still reject after commit. In particular, a drain that also encounters a Host job failure or `OutboxFullError` may reject after the cancellation or abort was committed; this remaining ambiguity is tracked in [#2072](https://github.com/Ancienttwo/byok-sdk/issues/2072).
+
+## OpenCode qualified version 2.3.0 (#1972)
+
+The OpenCode adapter's default policy qualifies 2.3.0. A device still running 2.2.6 reports the `runtime_version_unqualified` advisory with `qualifiedVersion: '2.3.0'` through detect; hello and presence report `state: 'warn'` with the same qualified version. The default policy remains `warn`, so tasks can still run. Upgrade the device's OpenCode to 2.3.0 to clear the advisory, or keep 2.2.6 and show the advisory while planning the upgrade. A Host that supplies its own OpenCode `versionPolicy` keeps that policy; review it separately before changing versions. See the [qualification evidence](../researches/2026-11-13-opencode-2.3.0-qualification.md).
+
 ## Cancel selected Host intents without a pass (#2003)
 
-`BotCollaboration.cancelHostIntents(keys)` atomically cancels a chosen set of unsubmitted Host intents without draining. It returns settled conclusions on replay and refuses the whole set when any key is unknown, a Bot Turn or in flight. `HostIntentError.rejected` lists every refused key and code; exhaustive switches over `HostIntentError.code` add `inflight`. Existing single cancellation and switch APIs keep their behavior, and the store format is unchanged. A Host may replace freeze → individual cancels → abort with this call; keep the freeze when other work on the device must also be held. Successors start on the next pass, or call `drain()` to start them.
+`BotCollaboration.cancelHostIntents(keys)` atomically cancels a chosen set of unsubmitted Host intents without draining. It returns settled conclusions on replay and refuses the whole set when any key is unknown, a Bot Turn or in flight. `HostIntentError.rejected` lists every refused key and code; exhaustive switches over `HostIntentError.code` add `inflight`. Existing single cancellation and switch APIs retain their other behavior, and the store format is unchanged; see the wake-dispatch change above. A Host may replace freeze → individual cancels → abort with this call; keep the freeze when other work on the device must also be held. Successors start on the next pass, or call `drain()` to start them.
 
 ## Ledger precheck and store ID (#1981)
 
 The local bot-collaboration entry exports `inspectLedger(path, tenant)`, a precheck that reads a private copy of the stopped L ledger. If it reports `migration-required`, run `migrateWouldDo` after taking a snapshot and before serving. A valid exported ledger is accepted; if its switch is aborted, run the precheck again before serving. `LocalStoreId` adds `bot-collaboration-ledger`: update exhaustive switches and `Record<LocalStoreId, ...>` mappings to include the new member.
+
+## cloud-do archived
+
+`@byok-sdk/cloud-do` leaves the release train. Remove the dependency, or pin it to exactly 0.42.0 if the Host still needs it. No later version or fixes will be published, and its npm versions will be deprecated. The upgrade train check no longer inspects this package, even if it remains installed.
+
+Restart requires a product that needs a cloud agent using platform keys with Pi’s durable harness in Cloudflare Durable Objects. Start from `archive/cloud-do` (the last main commit with the package; it differs from the last published version `v0.42.0` only in its README), qualify it again against the Pi version current at the time, and obtain the replay-safe tool list, provider profiles and binding names from the Host. See [ADR-036](../architecture/adr-2026-10-03-cloud-generic-agent.md).
 
 ## Pi cache warming stops at settlement (#1949)
 
@@ -99,7 +117,9 @@ restarted.
 no longer keeps the operation pending with the lifecycle owner gate held, and
 a check that succeeds after the deadline fails. A late upgrade check restores
 the previous version (`health_check_failed`), and a late check of the
-restored version is `rollback_unhealthy`, as for any failed check. The clock
+restored version leaves a `failed` receipt with `rollback_unhealthy`, as for
+any failed check; `upgrade()` then throws `health_check_failed` with that
+failure in its `cause` (#2010). The clock
 now starts after start returns, as on install; platform commands still have
 no time bound (#1971). A Host whose check is slower than `healthTimeoutMs`
 raises it. `healthTimeoutMs` must now be an integer from 1 to 2147483647
@@ -153,28 +173,31 @@ becomes that `AggregateError` itself. A first install joins a failure to
 remove its staged version or its marked unit, or to restart that unit, the
 same way. `upgrade()`'s receipt records the refusal's code.
 
-The top-level error code now names the Host's next step, which follows where
-the receipt stops (#1991). On every exit where a store gate or lease fails to
-release and the receipt stays `pending` (an upgrade refusal whose `failed`
-receipt could not be written, a refusal that is not a
-`ServiceInstallationError`, a failed pointer write or snapshot restore, the
-release after the pointer writes in `upgrade()`, `rollback()` or
-`recover()`, an upgrade's rollback after a failed health check), the error is
-the new `ServiceInstallationErrorCode` `store_release_failed`. Its `cause` is
-one flat `AggregateError`: the failure that came first (`health_check_failed`
-after a failed health check, a preparation error, `store_busy`), every
-release failure, then a failed receipt write or restart. Call `recover()`
-next. A lease that failed to release stays held by its process, so
-`recover()` in the same process can report `store_busy`; restart the Host
-process first. An install whose lease is stuck reports `store_busy` from its
-cleanup in the same way; restart the Host process before the next install.
-A refusal whose final receipt was written keeps its code, and a release or
-restart failure after it joins its `cause`. When an upgrade refusal's `failed`
-receipt cannot be written, the receipt stays `pending` and the previous
-version stays stopped until `recover()`, which would otherwise restore the
-snapshot over what the restarted service wrote. A release failure after a final
-receipt would not turn a committed result into a rejection, the rule #1996
-applies to pruning; no path releases there today. When a failed
+The top-level error code follows the outcome (#1991, #2010). A call that
+wrote its final receipt throws its first failure's own class and code; later
+release or restart failures join its `cause`, one flat `AggregateError` with
+the first failure first. A call that leaves its work unfinished throws
+`upgrade_pending`, whose `cause` lists every failure in order: an upgrade,
+rollback or recover whose receipt stays `pending` (a failed stop, pointer
+write, snapshot restore, release or final receipt write, including an
+upgrade refusal whose `failed` receipt could not be written), and an install
+whose stores could not be restored and left a repair snapshot (0.42.0 threw
+an `AggregateError` there). Call `recover()` next. A lease that failed to
+release stays held by its process, so `recover()` in the same process can
+fail with `store_busy` in its cause; restart the Host process first. When an
+upgrade refusal's `failed` receipt cannot be written, the previous version
+stays stopped until `recover()`, which would otherwise restore the snapshot
+over what the restarted service wrote. A preparation error that is not the
+SDK's own (a `precheck` launch that throws, a failed stop) is
+the new `ServiceInstallationErrorCode` `store_preparation_failed` with the
+original error as its cause: an upgrade records it in a `failed` receipt and
+starts the previous version again, where 0.42.0 left the receipt `pending`
+and started the previous version anyway. A repair snapshot
+(`snapshots/.install-repair-<uuid>`) is now restored first by any operation,
+`recover()` included, while no version is current, not only by the next first
+install. With no version current, a symlinked `snapshots/` is refused
+with `snapshots_symlinked` before anything under it is read, by every
+operation; nothing changes. When a failed
 install's cleanup restored the stores but could not release their leases,
 the error lists `store lease release` as remaining and says the stores were
 restored; the install snapshot it names is then an ordinary leftover to
@@ -196,7 +219,7 @@ A corrupted SDK entry (new code `KEYCHAIN_SECRET_CORRUPTED` on macOS and Linux, 
 
 Known limitation on Windows: Credential Manager reports a damaged entry as `CREDENTIAL_MANAGER_READ_FAILED`, the same code as other read failures. `replaceSecret()` cannot tell the two apart, so it refuses instead of overwriting the entry. To recover, delete the entry in Credential Manager (Windows Credentials, the generic credential `<servicePrefix>.model-<profile_ref>-api-key`, by default `com.byok.keys.model-<profile_ref>-api-key`), then configure the key again.
 
-Credential-store errors from these methods keep their code but carry a fixed SDK message and no cause, because an injected store may put a key in its own error. Match on `error.code`, not on the message text.
+Credential-store errors from every `ProviderRegistry` method (`get()`, `list()`, `configure()`, `replaceSecret()`, `delete()`, `setDefaultModelProvider()` and `resolveDefaultModelProvider()`, #2029) keep a keychain, Credential Manager or secret-shape code with a fixed SDK message and no cause. Any other store error becomes `PROVIDER_SECRET_STORE_FAILED`, because an injected store may put a key in its own error. Match on `error.code`, not on the message text. `configure()`, `replaceSecret()`, `setDefaultModelProvider()` and `delete()` never read the stores after their commit (#2023). The status they return is the state the call committed, which may be stale once the call returns. A call that resolves has committed its change. A call that rejects with the new `PROVIDER_CHANGE_COMMITTED` has also committed it, but a later step failed: either deleting the previous key after `configure()` switched a profile to `auth_mode: 'none'`, in which case that key stays in the credential store until a later `configure()` or `delete()` removes it, a profile store that wrote the change but could not confirm it, or releasing the configuration lock. Its `cause` carries only the failed step's code, never the step's own message. Treat that code as success, read the status again with `get()`, and, for the `auth_mode: 'none'` case, retry the `configure()` to remove the leftover key. A rejection with any other code committed nothing. `configure()` without a secret now reuses the stored key only when the committed profile already authenticates against the same `base_url`; switching a profile from `auth_mode: 'none'` back to authentication, or changing its `base_url`, rejects with `PROVIDER_SECRET_MISSING` until the Host supplies the key again.
 
 ## Stored cancellation pruning cutoff
 
@@ -232,3 +255,16 @@ Apply this import codemod (including type-only imports); split a mixed root impo
 -import { resolveHostLayout, HostLayoutInputError, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform } from '@byok-sdk/client';
 +import { resolveHostLayout, HostLayoutInputError, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform } from '@byok-sdk/client/host-layout';
 ```
+
+## launchd jobs run with the install's HOME (#2017)
+
+The plist an `install()` writes on macOS now sets `EnvironmentVariables.HOME` to the home the lifecycle resolved (`os.homedir()` of the installing process), which is the directory it placed the plist and its paths under. launchd previously started the job with the account's home. The public `generateLaunchdPlist()` writes no `HOME`, as before.
+
+Two HOME values matter, and the SDK pins only the first:
+
+- **Daemon HOME.** Under `--service` the daemon keeps the plist's `HOME` (and its own `BYOK_*`) after applying the login-shell snapshot, even when a shell startup file resets `HOME`. Paths the daemon resolves from its own `HOME` stay under the installed home.
+- **Task HOME.** Runtime children get the environment the runtime environment policy builds. With the default `base: 'login-shell'`, that is the startup snapshot, so a startup file that exports `HOME` (or derives `PATH`, `XDG_*` and other values from the real home) still sets them for tasks. Follow-up: #2084.
+
+A Host that installs under a scratch `HOME` to isolate a test install must also isolate tasks: put `HOME` in the policy's `pass` (`runtimeEnvironment: { pass: ['HOME', ...] }`, or the per-runtime `runtimes.<id>.runtimeEnvironment`) so tasks get the daemon's live `HOME`, or use `base: 'allowlist'` and supply `PATH`, `XDG_*` and other derived values itself. Do not rely on the startup snapshot for isolation.
+
+**Required step on macOS:** a plist written by an earlier SDK no longer matches the generated unit and inspects as `repairable`. Before the first `upgrade()` or `rollback()` on each macOS device, call `install()` again on the same installation (same service name and install root) with the payload that is installed now, to rewrite the unit, then upgrade. The reinstall must use the current payload id: `install()` with any other payload is refused with `installation_exists`. Read the id with `installation.currentVersion()` and keep the payload directory whose `readPayloadManifest(dir).id` equals it until this reinstall has run. No other platform is affected.

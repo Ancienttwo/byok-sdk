@@ -187,10 +187,10 @@ test('a routine plan never contains the complete test suite', () => {
 // #649: the targeted job installs for a reviewed script whose tests need
 // installed packages; the other reviewed scripts run their tests without one.
 test('reviewed release scripts install only when their tests need packages', () => {
-  const install = ['scripts/api-surface/check-api-surface.mjs', 'scripts/api-surface/entry-closure.test.mjs', 'scripts/architecture/dependency-graph.mjs', 'scripts/architecture/dependency-graph.test.mjs', 'scripts/architecture/dependency-baseline.json', 'scripts/release/check-package-graph.mjs', 'scripts/release/check-retired-identities.mjs', 'scripts/release/pack-and-smoke.mjs', 'scripts/release/pack-and-smoke.test.mjs',
+  const install = ['scripts/api-surface/check-api-surface.mjs', 'scripts/api-surface/entry-closure.mjs', 'scripts/api-surface/entry-closure.test.mjs', 'scripts/architecture/dependency-graph.mjs', 'scripts/architecture/dependency-graph.test.mjs', 'scripts/architecture/dependency-baseline.json', 'scripts/release/check-package-graph.mjs', 'scripts/release/check-retired-identities.mjs', 'scripts/release/pack-and-smoke.mjs', 'scripts/release/pack-and-smoke.test.mjs',
     'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/publish-recovery.test.mjs',
-    'scripts/release/beta-release.test.mjs', 'scripts/release/registry-readback.mjs',
-    'scripts/release/execution-submit-smoke.mjs', 'scripts/release/packaging-plugin-smoke.mjs', 'scripts/release/cloud-do-consumer-smoke.mjs', 'scripts/release/cloud-do-consumer-worker.mjs', 'scripts/release/node-next-consumer-probe.mjs',
+    'scripts/release/beta-release.test.mjs', 'scripts/release/registry-npm.test.mjs', 'scripts/release/registry-readback.mjs',
+    'scripts/release/execution-submit-smoke.mjs', 'scripts/release/packaging-plugin-smoke.mjs', 'scripts/release/node-next-consumer-probe.mjs',
     'scripts/release/pi-launcher-smoke.mjs', 'scripts/release/pi-runtime-identity.mjs', 'scripts/release/pg-migrate-smoke.mjs', 'scripts/release/published-store-paths.mjs', 'scripts/release/check-upgrade-manifest.mjs',
     'scripts/release/check-upgrade-manifest.test.mjs'];
   for (const path of Object.keys(reviewedScripts)) {
@@ -202,14 +202,14 @@ test('reviewed release scripts install only when their tests need packages', () 
 
 
 test('M build inputs require build and packed checks without turning unknown configs into a release fallback', () => {
-  const paths = [...['cloud-dataplane', 'cloud-do', 'cloud', 'protocol', 'server', 'testkit', 'ui-runtime'].map(owner => `packages/${owner}/tsup.config.ts`)];
+  const paths = [...['cloud-dataplane', 'cloud', 'protocol', 'server', 'testkit', 'ui-runtime'].map(owner => `packages/${owner}/tsup.config.ts`)];
   const plan = planCi({ event: 'pull_request', sha, paths });
   assert.equal(plan.mode, 'targeted');
   assert.equal(needsBuild(plan), true);
   assert.ok(plan.families.includes('npm-release-pack'));
   assert.ok(plan.families.includes('dataplane'));
   assert.ok(!plan.families.includes('build-test'));
-  for (const owner of ['cloud-dataplane', 'cloud-do', 'cloud', 'protocol', 'server', 'testkit', 'ui-runtime']) assert.ok(plan.dirs.includes(`packages/${owner}`));
+  for (const owner of ['cloud-dataplane', 'cloud', 'protocol', 'server', 'testkit', 'ui-runtime']) assert.ok(plan.dirs.includes(`packages/${owner}`));
   assert.doesNotThrow(() => requireCiPlan(results(plan), plan, 'pull_request', sha));
   assert.throws(() => requireCiPlan({ ...results(plan), 'npm-release-pack': { result: 'skipped' } }, plan, 'pull_request', sha));
   assert.throws(() => planCi({ event: 'pull_request', sha, paths: [...paths, 'packages/client/tsup.unreviewed.config.ts'] }), /reviewed CI mapping required/i);

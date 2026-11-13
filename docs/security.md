@@ -725,7 +725,13 @@ changes `process.env`; `--service` additionally replaces the daemon's
 the user's terminal would. The shell never receives the daemon's `BYOK_*`
 values. Captured `BYOK_*` names are dropped and, under `--service`, the
 daemon's own pre-capture `BYOK_*` values are restored, so rc files cannot set
-SDK control variables; task children still receive no `BYOK_*` at all. Only
+SDK control variables; task children still receive no `BYOK_*` at all. The
+daemon's pre-capture `HOME` is restored the same way (#2017), so an rc cannot
+move the daemon to another home. This pins the daemon's `HOME` only: a
+default (`login-shell` base) runtime environment is built from the snapshot,
+so task children get the `HOME`, `PATH` and `XDG_*` values the rc set
+(#2084). A Host that needs task isolation passes `HOME` with the policy's
+`pass` or builds tasks from `base: 'allowlist'`. Only
 the source, a closed failure code and the shell's basename are recorded
 (`environment-resolved` in `audit.jsonl`, shown by `status`, `doctor` and the
 support bundle) — never variable values or paths. Variable names leave the
@@ -911,12 +917,6 @@ Drafts, egress payloads, truth `memory` records and routing metadata are not sea
 The Host refuses a draft for a sealed task.
 [Sealed tasks](#sealed-tasks) states what a sealed task still shows the Host and what sealing does not protect.
 
-`@byok-sdk/cloud-do` is not on this surface.
-It is a session host in a Durable Object (`packages/cloud-do/README.md:3-5`).
-It runs the model with platform keys (`packages/cloud-do/README.md:104-105`), so it must read plaintext.
-Tenant erasure does not reach its storage.
-A sealed task must not go to `@byok-sdk/cloud-do`, because it would read the sealed content in plaintext.
-
 ### Readers by data category
 
 The categories are the ones that the #654 design uses (§6.1).
@@ -981,7 +981,7 @@ Sealing does not protect against:
 - **The device's own storage.** The daemon's local journal and the runtime's files are plaintext on the device.
 - **Revocation.** Removing a member does not take back plaintext that it already opened.
 - **Backups.** A backup keeps the key packages and the ciphertext. See [Scope shred](#scope-shred).
-- **Other hosts.** `@byok-sdk/server` has no sealed dispatch and refuses `sealing` and `sealed`. `@byok-sdk/cloud-do` reads task content in plaintext, so a sealed task must not go to it.
+- **Other hosts.** `@byok-sdk/server` has no sealed dispatch and refuses `sealing` and `sealed`.
 
 ### Deletion paths
 

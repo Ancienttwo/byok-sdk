@@ -370,7 +370,9 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
   async save(profile: ModelProviderProfile): Promise<ModelProviderProfile> {
     const validated = await this.#validateForSave(profile);
     this.#transaction(() => this.#writeProfile(validated));
-    return (await this.get(validated.profile_ref)) as ModelProviderProfile;
+    // The committed value, not a read-back: a read failing after the commit
+    // would report a change in effect as one that never happened.
+    return validated;
   }
 
   async #validateForSave(profile: ModelProviderProfile): Promise<ModelProviderProfile> {
@@ -478,8 +480,11 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
           held.exec('ROLLBACK');
         } finally {
           HELD_LOCK_CONNECTIONS.delete(held);
-          held.close();
-          await local.release();
+          try {
+            held.close();
+          } finally {
+            await local.release();
+          }
         }
       },
     };

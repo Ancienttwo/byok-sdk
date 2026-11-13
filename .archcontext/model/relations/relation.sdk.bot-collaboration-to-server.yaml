@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.bot-collaboration-to-server",
+  "kind": "depends-on",
+  "source": "module.sdk.bot-collaboration",
+  "target": "module.sdk.server",
+  "synchrony": "synchronous",
+  "intent": "Build collaboration on the Host execution core."
+}

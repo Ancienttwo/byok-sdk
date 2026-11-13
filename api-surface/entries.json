@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2759723,
+      "budgetBytes": 2758185,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -129,12 +129,16 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 modules a Host adapter composes; Worker-loadable, no @byok-sdk/client",
-      "budgetBytes": 607813,
+      "budgetBytes": 608128,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": true,
-        "thirdParty": false
+        "thirdParty": false,
+        "forbidden": [
+          "fs",
+          "path"
+        ]
       }
     },
     "facts": {
@@ -156,8 +160,6 @@
         "@cfworker/json-schema",
         "async_hooks",
         "crypto",
-        "fs",
-        "path",
         "zod"
       ],
       "lazyImports": [],
@@ -170,9 +172,7 @@
       "nodeBuiltins": {
         "workspace": [
           "async_hooks",
-          "crypto",
-          "fs",
-          "path"
+          "crypto"
         ],
         "thirdParty": []
       },
@@ -286,7 +286,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3211806,
+      "budgetBytes": 3210124,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -460,7 +460,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2429434,
+      "budgetBytes": 2427280,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -577,7 +577,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 550594,
+      "budgetBytes": 550872,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -948,7 +948,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 512972,
+      "budgetBytes": 513274,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1018,7 +1018,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private ACP runtime stack (Grok, agy, OpenCode)",
-      "budgetBytes": 125256,
+      "budgetBytes": 125231,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1088,7 +1088,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 575996,
+      "budgetBytes": 576564,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1702,89 +1702,6 @@
       ]
     }
   },
-  "@byok-sdk/cloud-do": {
-    "kind": "exports",
-    "policy": {
-      "purpose": "Durable Object session runtime",
-      "budgetBytes": 140460,
-      "zod": false,
-      "codegen": true,
-      "nodeBuiltins": {
-        "workspace": false,
-        "thirdParty": false
-      }
-    },
-    "facts": {
-      "target": "packages/cloud-do/dist/index.js",
-      "conditions": [
-        "import"
-      ],
-      "types": [
-        "packages/cloud-do/dist/index.d.ts"
-      ],
-      "bareImports": [
-        "@earendil-works/chord/context",
-        "@earendil-works/pi-ai/models",
-        "@earendil-works/pi-ai/utils/event-stream",
-        "@earendil-works/pi-ai/utils/text",
-        "@earendil-works/pi-ai/utils/transcript",
-        "@earendil-works/pi-ai/utils/validation",
-        "@earendil-works/pi-durable",
-        "@earendil-works/pi-durable/storage/sqlite",
-        "cloudflare:workers"
-      ],
-      "lazyImports": [],
-      "thirdParty": [
-        "@earendil-works/chord",
-        "@earendil-works/pi-ai",
-        "@earendil-works/pi-durable",
-        "@earendil-works/pi-schema",
-        "@earendil-works/pi-telemetry",
-        "partial-json"
-      ],
-      "unavailableOptional": [],
-      "opaqueImports": [],
-      "nodeBuiltins": {
-        "workspace": [],
-        "thirdParty": []
-      },
-      "codegen": [
-        {
-          "file": "@earendil-works/pi-ai/dist/auth/context.js",
-          "line": 10,
-          "rule": "opaque import()"
-        }
-      ]
-    }
-  },
-  "@byok-sdk/cloud-do/package.json": {
-    "kind": "exports",
-    "policy": {
-      "purpose": "Package metadata",
-      "budgetBytes": 1630,
-      "zod": false,
-      "codegen": false,
-      "nodeBuiltins": {
-        "workspace": false,
-        "thirdParty": false
-      }
-    },
-    "facts": {
-      "target": "packages/cloud-do/package.json",
-      "conditions": [],
-      "types": [],
-      "bareImports": [],
-      "lazyImports": [],
-      "thirdParty": [],
-      "unavailableOptional": [],
-      "opaqueImports": [],
-      "nodeBuiltins": {
-        "workspace": [],
-        "thirdParty": []
-      },
-      "codegen": []
-    }
-  },
   "@byok-sdk/cloud/package.json": {
     "kind": "exports",
     "policy": {
@@ -1989,7 +1906,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 244231,
+      "budgetBytes": 246145,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2334,7 +2251,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 709866,
+      "budgetBytes": 710023,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2410,7 +2327,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 415277,
+      "budgetBytes": 415592,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2435,8 +2352,6 @@
         "@cfworker/json-schema",
         "async_hooks",
         "crypto",
-        "fs",
-        "path",
         "zod"
       ],
       "lazyImports": [],
@@ -2449,9 +2364,7 @@
       "nodeBuiltins": {
         "workspace": [
           "async_hooks",
-          "crypto",
-          "fs",
-          "path"
+          "crypto"
         ],
         "thirdParty": []
       },
@@ -2629,7 +2542,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2420510,
+      "budgetBytes": 2421741,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2968,7 +2881,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 181948,
+      "budgetBytes": 182432,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

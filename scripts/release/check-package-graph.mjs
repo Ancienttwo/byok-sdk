@@ -14,7 +14,6 @@ const dispatchPackages = [
   ['packages/server', '@byok-sdk/server'],
   ['packages/cloud', '@byok-sdk/cloud'],
   ['packages/cloud-dataplane', '@byok-sdk/cloud-dataplane'],
-  ['packages/cloud-do', '@byok-sdk/cloud-do'],
   ['packages/ui-runtime', '@byok-sdk/ui-runtime'],
   ['packages/bot-collaboration', '@byok-sdk/bot-collaboration'],
 ];

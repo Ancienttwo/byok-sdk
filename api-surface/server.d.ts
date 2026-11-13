@@ -23,6 +23,13 @@ export type ExecutionServer = {
     /** Embedded process-local hints; reads from tasks remain authoritative. */
     events?: ByokServer['events'];
 };
+/**
+ * A drain or wake hook failed only on wake dispatch; failed calls remain in the durable outbox for retry.
+ * A drain that also fails on a Host job or outbox capacity throws a plain AggregateError instead.
+ */
+export declare class WakeDispatchError extends AggregateError {
+    constructor(failures: unknown[]);
+}
 export interface OutcomeTransaction {
     readonly intent: Readonly<Intent>;
     readonly terminal: Terminal;
@@ -135,7 +142,14 @@ export declare class HostExecutionCore {
     /** The one path for routine commands. */
     private routineCommands;
     lifecycle(id: string, lifecycle: Routine['lifecycle']): Promise<void>;
-    cancel(key: string): Promise<void>;
+    /**
+     * Commits the cancellation, then drains. Returns `wakePending: true` if that drain fails only on wake dispatch;
+     * the outbox retains failed wakes for retry. The failure may concern another wake or already be retried before return.
+     * Other errors can still reject after commit, including a Host job or outbox capacity failure (#2072).
+     */
+    cancel(key: string): Promise<{
+        wakePending?: true;
+    }>;
     readonly consume: (wake: DueWake, signal: AbortSignal) => Promise<void>;
     /** The hook shares the occurrence commit: both persist, or neither does. */
     private runOccurrenceHook;
@@ -188,7 +202,7 @@ export declare class HostExecutionCore {
     flushProjections(deliver: (id: string, value: Json) => Promise<void>): Promise<void>;
 }
 // ==== @byok-sdk/server dist/execution-core/index.d.ts ====
-export { HostExecutionCore } from './core.js';
+export { HostExecutionCore, WakeDispatchError } from './core.js';
 export type { ExecutionServer, HostOptions, OutcomeTransaction, OccurrenceHook, OccurrenceTransaction, AgentMessageInput, MessageDecision, MessageTransaction } from './core.js';
 export { CompactVetoError, HostLedger, OutboxFullError, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError } from './ledger.js';
 export type { ApplicationRows, CompactionOptions, CompactionResult, CompactVeto, TombstoneKind, HostLedgerOptions, ProjectionOutboxLimits, ProjectionOutboxUsage, LedgerDump, LedgerDumpMemoryTombstone, LedgerDumpRow, LedgerDumpTombstone } from './ledger.js';
