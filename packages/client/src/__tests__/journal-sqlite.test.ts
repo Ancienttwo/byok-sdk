@@ -942,7 +942,7 @@ describe('SqliteLocalTaskJournal', () => {
       const storeDir = await tmpStore();
       const journal = build(storeDir);
       await journal.appendEnvelope(offer('cancelled', 1));
-      for (const [index, bound] of rows.entries()) {
+      for (const [index, bound] of (rows as readonly { taskId?: string; seq?: number }[]).entries()) {
         const seq = 2 + index;
         // appendEnvelope refuses bytes naming another task (#2054), so that corruption is written to the store directly.
         await journal.appendEnvelope(cancel('cancelled', seq, bound.taskId === undefined ? bound : {}));
