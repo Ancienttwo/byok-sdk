@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { AgentHomeBusyError, AgentHomeLeaseManager } from '../agent-home';
+import { AgentHomeBusyError, AgentHomeCommitCopyError, AgentHomeLeaseCorruptError, AgentHomeLeaseManager, AgentHomeManager } from '../agent-home';
 import { acquireDaemonOwner, DaemonOwnerActiveError, DaemonOwnerReclaimingError } from '../util/daemon-owner';
 import * as gates from '../util/path-mutation-gate';
 import * as pi from '../util/pi-session-retention';
@@ -38,6 +38,51 @@ it('retains the home busy type and both causes when release fails', async () => 
   expect(error).toBeInstanceOf(AgentHomeBusyError);
   expect(error.cause).toBeInstanceOf(AggregateError);
   expect(error.cause.errors).toEqual([primary, failure]);
+});
+
+it('keeps corrupt marker errors non-retryable when the root gate release fails', async () => {
+  const root = testScratchRoot();
+  const home = new AgentHomeManager({ hostStorageRoot: root });
+  const resolution = await home.layout.resolve({ agentId: 'agent', profileRevision: '1' });
+  await fs.mkdir(path.join(resolution.canonicalHome, '.byok'), { recursive: true });
+  await fs.writeFile(path.join(resolution.canonicalHome, '.byok', 'agent-home.lease'), 'invalid');
+  const failure = new Error('release root');
+  vi.spyOn(gates, 'acquirePathMutationGate').mockResolvedValue({ release: async () => { throw failure; } } as never);
+  const error = await home.leaseManager.acquire(resolution).catch(e => e);
+  expect(error).toBeInstanceOf(AgentHomeLeaseCorruptError);
+  expect(error.cause.errors[0]).toBeInstanceOf(AgentHomeLeaseCorruptError);
+  expect(error.cause.errors[1]).toBe(failure);
+});
+
+it('keeps settle and lease release failures together', async () => {
+  const root = testScratchRoot();
+  const manager = new AgentHomeLeaseManager({ settleAgentMemoryCommit: async ({ canonicalHome }) => {
+    await fs.writeFile(path.join(canonicalHome, '.byok', 'agent-home.lease'), 'invalid');
+    throw new Error('settle');
+  } });
+  const home = new AgentHomeManager({ hostStorageRoot: root, leaseManager: manager });
+  const resolution = await home.layout.resolve({ agentId: 'agent', profileRevision: '1' });
+  const error = await manager.acquire(resolution).catch(e => e);
+  expect(error).toBeInstanceOf(AgentHomeCommitCopyError);
+  expect(error.cause.errors[0]).toBeInstanceOf(AgentHomeCommitCopyError);
+  expect(error.cause.errors[1]).toBeInstanceOf(AgentHomeLeaseCorruptError);
+});
+
+it('keeps owner release operation and release gate failures together', async () => {
+  const root = testScratchRoot();
+  const failure = new Error('release gate');
+  const release = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(failure).mockResolvedValue(undefined);
+  vi.spyOn(gates, 'acquirePathMutationGate').mockResolvedValue({ release } as never);
+  const lease = await acquireDaemonOwner(root, 'daemon');
+  const ownerPath = path.join(root, 'daemon-owner.json');
+  const original = await fs.readFile(ownerPath, 'utf8');
+  await fs.writeFile(ownerPath, JSON.stringify({ ...JSON.parse(original), nonce: 'other' }));
+  const error = await lease.release().catch(e => e);
+  expect(error).toBeInstanceOf(AggregateError);
+  expect(error.errors[0].message).toMatch(/identity changed/);
+  expect(error.errors[1]).toBe(failure);
+  await fs.writeFile(ownerPath, original);
+  await lease.release();
 });
 
 it('preserves owner publication failure and gate release failure', async () => {

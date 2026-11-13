@@ -5,6 +5,7 @@ import path from 'node:path';
 import { sameContent } from './file-state.js';
 import { ensureSecureStoreRoot } from './secure-dir.js';
 import { listenPrivateUnixSocket, privateSocketEndpoint, PrivateSocketInUseError, reclaimPrivateSocketFallbackDirectory } from './private-unix-socket.js';
+import { withRelease } from './with-release.js';
 import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
@@ -91,6 +92,14 @@ export class DaemonOwnerReclaimingError extends Error {
     super('store mutation lease is being reclaimed; retry after the current operation finishes', options);
     this.name = 'DaemonOwnerReclaimingError';
   }
+}
+
+function withOwnerReleaseFailures<T>(error: T, failures: readonly unknown[]): T | Error {
+  if (failures.length === 0) return error;
+  const cause = new AggregateError([error, ...failures]);
+  if (error instanceof DaemonOwnerActiveError) return new DaemonOwnerActiveError(error.role, { cause });
+  if (error instanceof DaemonOwnerReclaimingError) return new DaemonOwnerReclaimingError({ cause });
+  return withGateReleaseFailures(error, failures) as Error;
 }
 
 function isOwnerRecord(value: unknown): value is OwnerRecord {
@@ -374,6 +383,7 @@ export async function acquireDaemonOwner(
   }
   let mutex: StoreMutexLock | undefined;
   let liveness: LivenessListener | undefined;
+  const failures: unknown[] = [];
   try {
     // No target path is created until the fixed OS-temp path gate is held.
     // Relocation uses the same gate and therefore cannot pass inspection
@@ -420,7 +430,7 @@ export async function acquireDaemonOwner(
               scope: 'store',
               targetPath: canonicalStoreDir,
             }, { waitMs: 2_000 });
-            try {
+            await withRelease(async () => {
               const current = await readOwner(ownerPath);
               if (current?.nonce !== record.nonce) {
                 throw new Error('store mutation lease identity changed before release');
@@ -429,11 +439,7 @@ export async function acquireDaemonOwner(
               await ownedMutex.close();
               await fs.rm(ownerPath);
               released = true;
-            } catch (error) {
-              try { await releaseGate.release(); } catch (releaseError) { throw withGateReleaseFailures(error, [releaseError]); }
-              throw error;
-            }
-            await releaseGate.release();
+            }, () => releaseGate.release(), withOwnerReleaseFailures);
           },
         };
       }
@@ -453,20 +459,20 @@ export async function acquireDaemonOwner(
         }))) {
           await fs.rm(ownerPath);
         }
-      } finally {
-        const currentReclaim = await readOwner(reclaimPath);
-        if (currentReclaim?.nonce === record.nonce) await fs.rm(reclaimPath, { force: true });
+      } catch (error) {
+        try {
+          const currentReclaim = await readOwner(reclaimPath);
+          if (currentReclaim?.nonce === record.nonce) await fs.rm(reclaimPath, { force: true });
+        } catch (failure) { failures.push(failure); }
+        throw error;
       }
+      const currentReclaim = await readOwner(reclaimPath);
+      if (currentReclaim?.nonce === record.nonce) await fs.rm(reclaimPath, { force: true });
     }
   } catch (err) {
-    await liveness?.close().catch(() => undefined);
-    await mutex?.close().catch(() => undefined);
-    try { await pathGate?.release(); } catch (releaseError) {
-      const cause = new AggregateError([err, releaseError]);
-      if (err instanceof DaemonOwnerActiveError) throw new DaemonOwnerActiveError(err.role, { cause });
-      if (err instanceof DaemonOwnerReclaimingError) throw new DaemonOwnerReclaimingError({ cause });
-      throw withGateReleaseFailures(err, [releaseError]);
-    }
-    throw err;
+    try { await liveness?.close(); } catch (failure) { failures.push(failure); }
+    try { await mutex?.close(); } catch (failure) { failures.push(failure); }
+    try { await pathGate?.release(); } catch (failure) { failures.push(failure); }
+    throw withOwnerReleaseFailures(err, failures);
   }
 }
