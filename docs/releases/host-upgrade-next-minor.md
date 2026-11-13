@@ -2,6 +2,10 @@
 
 Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## OpenCode qualified version 2.3.0 (#1972)
+
+The OpenCode adapter's default policy qualifies 2.3.0. A device still running 2.2.6 reports the `runtime_version_unqualified` advisory with `qualifiedVersion: '2.3.0'` through detect; hello and presence report `state: 'warn'` with the same qualified version. The default policy remains `warn`, so tasks can still run. Upgrade the device's OpenCode to 2.3.0 to clear the advisory, or keep 2.2.6 and show the advisory while planning the upgrade. A Host that supplies its own OpenCode `versionPolicy` keeps that policy; review it separately before changing versions. See the [qualification evidence](../researches/2026-11-13-opencode-2.3.0-qualification.md).
+
 ## Cancel selected Host intents without a pass (#2003)
 
 `BotCollaboration.cancelHostIntents(keys)` atomically cancels a chosen set of unsubmitted Host intents without draining. It returns settled conclusions on replay and refuses the whole set when any key is unknown, a Bot Turn or in flight. `HostIntentError.rejected` lists every refused key and code; exhaustive switches over `HostIntentError.code` add `inflight`. Existing single cancellation and switch APIs keep their behavior, and the store format is unchanged. A Host may replace freeze → individual cancels → abort with this call; keep the freeze when other work on the device must also be held. Successors start on the next pass, or call `drain()` to start them.
