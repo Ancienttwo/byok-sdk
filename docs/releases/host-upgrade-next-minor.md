@@ -10,7 +10,7 @@ The client now depends on `undici` 8.12.4. Pi 1.5.2 still declares 8.12.3 exactl
 - Bun: `"overrides": { "undici": "8.12.4" }`
 - pnpm: `"pnpm": { "overrides": { "undici": "8.12.4" } }`
 
-Merge these entries into any existing overrides. This does not update Node's built-in undici or copies bundled inside other packages; update those runtimes and packages separately.
+Merge these entries into any existing overrides. After reinstalling, inspect the dependency tree with `npm ls undici --all`, `bun pm why undici`, or `pnpm why -r undici`, respectively; every listed undici version should be 8.12.4. Pi's upstream pin is tracked in [#2098](https://github.com/Ancienttwo/byok-sdk/issues/2098). This does not update Node's built-in undici or copies bundled inside other packages; update those runtimes and packages separately.
 
 ## Cancel selected Host intents without a pass (#2003)
 
