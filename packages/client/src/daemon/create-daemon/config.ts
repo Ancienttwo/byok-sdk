@@ -217,6 +217,7 @@ export function hostJournal(journal: LocalTaskJournal): LocalTaskJournal {
     },
     listRecoveryTasks: async (identity) => (await journal.listRecoveryTasks(identity)).map(checked),
     listRecoverable: async () => (await journal.listRecoverable()).map(checked),
+    readTaskCancellation: (taskId, identity, afterSeq) => journal.readTaskCancellation(taskId, identity, afterSeq),
     appendEnvelope: (record) => journal.appendEnvelope(record),
     appendWithheldOffer: (record) => journal.appendWithheldOffer(record),
     recordAdmission: (record) => journal.recordAdmission(record),

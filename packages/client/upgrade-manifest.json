@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "081d877af3889b2eddb4302dbab54755b4843fa1b60251861fb3bda0849d6047"
+    "snapshotSha256": "16434b895729f05c409b350e5dcc70e206bf7e95eae99c37c65dbbf41fc443fe"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,16 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "journal-read-task-cancellation",
+      "impact": "breaking",
+      "summary": "Custom LocalTaskJournal implementations must add the required readTaskCancellation(taskId, identity, afterSeq), returning the original lowest-sequence stored inbound task.cancel above the offer sequence afterSeq (bytes, bytesHash and enrollment identity), or undefined. SDK code validates identity, hash, task binding and sequence order so a received offer remains cancelled / not-required / none after restart without a daemon_interrupted failure. The SDK SQLite journal reads existing envelopes without a store migration; update custom journals and test doubles.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#stored-task-cancellation",
+      "items": [
+        "export:@byok-sdk/client#LocalTaskJournal",
+        "export:@byok-sdk/client#SqliteLocalTaskJournal"
+      ]
+    },
     {
       "id": "service-install-health-check",
       "impact": "breaking",
@@ -2467,6 +2477,11 @@
       "entry": "hermes-runtime-adapter-removed"
     },
     {
+      "item": "export:@byok-sdk/client#LocalTaskJournal",
+      "change": "changed",
+      "entry": "journal-read-task-cancellation"
+    },
+    {
       "item": "export:@byok-sdk/client#OpenCodeAdapter",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
@@ -2550,6 +2565,11 @@
       "item": "export:@byok-sdk/client#ServicePayloadManifest",
       "change": "changed",
       "entry": "service-payload-meta"
+    },
+    {
+      "item": "export:@byok-sdk/client#SqliteLocalTaskJournal",
+      "change": "changed",
+      "entry": "journal-read-task-cancellation"
     },
     {
       "item": "export:@byok-sdk/client#clearDeviceEnrollment",
