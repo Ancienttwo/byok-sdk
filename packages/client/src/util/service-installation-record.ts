@@ -1,7 +1,7 @@
 // The installation reads a daemon needs before it starts (#2011), below both
 // daemon/ and lifecycle/ so the start check does not import the installer.
 import { promises as fs } from 'node:fs';
-import path from 'node:path';
+import { basename, isAbsolute, join } from 'node:path';
 import { VERSION_ID } from '../service-payload-manifest.js';
 
 export type InstallPointer = 'current' | 'previous';
@@ -14,7 +14,7 @@ export interface ServiceInstallationRecord {
 }
 
 export function serviceInstallationRecordPath(storeDir: string): string {
-  return path.join(storeDir, 'service', 'installation.json');
+  return join(storeDir, 'service', 'installation.json');
 }
 
 /** The installation record of a store, or `undefined` when the service is not installed from payloads. */
@@ -27,7 +27,7 @@ export async function readServiceInstallationRecord(storeDir: string): Promise<S
     throw error;
   }
   const record = JSON.parse(text) as Partial<ServiceInstallationRecord>;
-  if (record.format !== 'byok-service-installation' || record.version !== 1 || typeof record.installRoot !== 'string' || !path.isAbsolute(record.installRoot)) {
+  if (record.format !== 'byok-service-installation' || record.version !== 1 || typeof record.installRoot !== 'string' || !isAbsolute(record.installRoot)) {
     throw new Error(`service installation record ${serviceInstallationRecordPath(storeDir)} is not a version 1 record`);
   }
   return record as ServiceInstallationRecord;
@@ -35,7 +35,7 @@ export async function readServiceInstallationRecord(storeDir: string): Promise<S
 
 /** The version `<installRoot>/<name>` points at, or `undefined` when the pointer is absent. */
 export async function readInstallPointer(installRoot: string, name: InstallPointer): Promise<string | undefined> {
-  const link = path.join(installRoot, name);
+  const link = join(installRoot, name);
   let target: string;
   try {
     target = await fs.readlink(link);
@@ -43,8 +43,8 @@ export async function readInstallPointer(installRoot: string, name: InstallPoint
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
-  const id = path.basename(target.replace(/[\\/]+$/u, ''));
-  if (!VERSION_ID.test(id)) throw new Error(`${link} does not point into ${path.join(installRoot, 'versions')}`);
+  const id = basename(target.replace(/[\\/]+$/u, ''));
+  if (!VERSION_ID.test(id)) throw new Error(`${link} does not point into ${join(installRoot, 'versions')}`);
   return id;
 }
 
@@ -59,6 +59,6 @@ export async function readInstallPointer(installRoot: string, name: InstallPoint
 export async function installationHoldsStart(storeDir: string): Promise<boolean> {
   const record = await readServiceInstallationRecord(storeDir);
   if (record === undefined || (await readInstallPointer(record.installRoot, 'current')) !== undefined) return false;
-  const text = await fs.readFile(path.join(record.installRoot, 'upgrade-receipt.json'), 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+  const text = await fs.readFile(join(record.installRoot, 'upgrade-receipt.json'), 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
   return text !== undefined && (JSON.parse(text) as { state?: unknown }).state === 'pending';
 }
