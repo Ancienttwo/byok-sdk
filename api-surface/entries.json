@@ -134,7 +134,11 @@
       "codegen": true,
       "nodeBuiltins": {
         "workspace": true,
-        "thirdParty": false
+        "thirdParty": false,
+        "forbidden": [
+          "fs",
+          "path"
+        ]
       }
     },
     "facts": {
@@ -156,8 +160,6 @@
         "@cfworker/json-schema",
         "async_hooks",
         "crypto",
-        "fs",
-        "path",
         "zod"
       ],
       "lazyImports": [],
@@ -170,9 +172,7 @@
       "nodeBuiltins": {
         "workspace": [
           "async_hooks",
-          "crypto",
-          "fs",
-          "path"
+          "crypto"
         ],
         "thirdParty": []
       },
@@ -286,7 +286,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3212635,
+      "budgetBytes": 3212764,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2334,7 +2334,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 709866,
+      "budgetBytes": 710023,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2435,8 +2435,6 @@
         "@cfworker/json-schema",
         "async_hooks",
         "crypto",
-        "fs",
-        "path",
         "zod"
       ],
       "lazyImports": [],
@@ -2449,9 +2447,7 @@
       "nodeBuiltins": {
         "workspace": [
           "async_hooks",
-          "crypto",
-          "fs",
-          "path"
+          "crypto"
         ],
         "thirdParty": []
       },
