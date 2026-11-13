@@ -48,6 +48,14 @@ describe('BYOK owned line process', () => {
     await child.spawned; expect(await line).toBe('你好'); expect(await child.exited).toBe(7); expect(exited).toHaveBeenCalledWith(7);
   });
 
+  it('rejects a NUL-bearing env value by name without echoing the value', () => {
+    const spawnFn = vi.fn((command: string, args: readonly string[], options: SpawnOptions) => spawn(command, args, options));
+    const start = () => createOwnedLineProcessSpawn({ spawnFn })(process.execPath, ['-e', ''], { env: { BYOK_TEST_KEY: 'fake-key\0tail' } });
+    expect(start).toThrow('env variable BYOK_TEST_KEY contains a NUL byte');
+    expect(start).not.toThrow(/fake-key|tail/);
+    expect(spawnFn).not.toHaveBeenCalled();
+  });
+
   it('rejects spawn failure and still settles its exit receipt', async () => {
     const child = checkedSpawn('/nonexistent/byok-s2a-binary', [], { env: {} }); live.push(child);
     const exited = child.exited.catch(error => error); const onExit = vi.fn(); child.onExit(onExit);
