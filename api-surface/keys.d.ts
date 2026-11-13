@@ -2260,6 +2260,13 @@ import { type ProviderProfileRef } from './provider-profile.js';
  *    has no installed base, so this package removes the implicit substitution:
  *    every store scopes itself, and {@link EnvelopeScopedSecretStore} is a
  *    decorator a caller applies on purpose.
+ *
+ * A `get` may throw `KEYCHAIN_SECRET_CORRUPTED` only for an entry stored in
+ * the SDK's storage-prefix format whose payload does not decode.
+ * `ProviderRegistry.replaceSecret` and `configure` overwrite such an entry, so
+ * a store a Host injects must report any other decode problem, including a
+ * value without the prefix, under another code (such as
+ * `KEYCHAIN_SECRET_DECODE_FAILED`); the registry never overwrites those.
  */
 export interface SecretStore<TName extends string = string> {
     /** Human-readable backend name, safe to show a user. Never contains a secret. */
