@@ -12,8 +12,8 @@ import { acquireEnrollmentGate } from '../daemon/enrollment-gate';
 import { acquirePathMutationGate, type PathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { createTestDeviceStore, InMemoryDeviceCredentialBackend } from './fixtures/device-credentials';
 import { AuthManager } from '../daemon/auth-manager';
-import { DeviceMemberRecords } from '../daemon/device-member-custody';
-import { testDeviceCredentials } from './fixtures/credential-backend';
+import { DeviceMemberKeyStore, DeviceMemberRecords } from '../daemon/device-member-custody';
+import { testDeviceCredentials, testDeviceMemberCustody } from './fixtures/credential-backend';
 import { clearDeviceEnrollment, DeviceEnrollmentClearError } from '../daemon/enrollment-clear';
 import { repairDeviceEnrollmentMetadata } from '../diagnostics/device-doctor';
 import { connectControlClient } from '../daemon/control-client';
@@ -217,6 +217,44 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
 
       await vi.waitFor(() => expect(firstDaemon.status().lifecycle).toMatchObject({ phase: 'halted', reason: 'store_not_bound' }), settle);
       expect(await readDeviceEnrollmentStatus(second)).toEqual({ state: 'paired', deviceId });
+    });
+
+    it('a running daemon\'s member resume writes no member entry of another store\'s enrollment and halts as store_not_bound (#2055)', async () => {
+      const first = await storeConfig();
+      const firstDaemon = daemonFor(first);
+      await firstDaemon.pair('pairing-code');
+      const { tenantId, deviceId } = await readDeviceEnrollmentIdentity(first) as { tenantId: string; deviceId: string };
+      const second = await storeConfig();
+      const custody = testDeviceMemberCustody(productId);
+      const jwk = { x: 'x', y: 'y' };
+      vi.spyOn(DeviceMemberKeyStore.prototype, 'load').mockResolvedValue({ signing: { publicJwk: jwk }, kem: { publicJwk: jwk } } as never);
+      const point = { seq: 1, hash: `sha256:${'0'.repeat(64)}` };
+      let resumed!: () => void;
+      const reading = new Promise<void>((resolve) => { resumed = resolve; });
+      let replaced!: () => void;
+      const paired = new Promise<void>((resolve) => { replaced = resolve; });
+      vi.spyOn(DeviceMemberRecords.prototype, 'readState').mockImplementationOnce(async () => {
+        resumed();
+        await paired;
+        return { tenantId, deviceId, member: { signingPublicJwk: jwk, kemPublicJwk: jwk }, anchor: { approverSigningPublicJwk: jwk, entry: point }, head: point } as never;
+      });
+      await firstDaemon.start();
+      await within(reading);
+
+      // The resume read its state; another store pairs over the enrollment and stages its member entry before the first write.
+      await daemonFor(second).pair('pairing-code', { replaceOtherStore: true });
+      custody.entries.set('pairing-verification', 'second store');
+      const gate = await trackGate();
+      try {
+        replaced();
+        await vi.waitFor(() => expect(firstDaemon.status().lifecycle).toMatchObject({ phase: 'halted', reason: 'store_not_bound' }), settle);
+        // The binding was reread under the gate.
+        await vi.waitFor(() => expect({ taken: gate.taken, held: gate.held }).toEqual({ taken: 1, held: 0 }), settle);
+      } finally {
+        gate.restore();
+      }
+      expect(custody.entries.get('pairing-verification')).toBe('second store');
+      expect(await readDeviceEnrollmentStatus(second)).toMatchObject({ state: 'paired' });
     });
 
     it('a renewal waiting on another store\'s clear does not restore the cleared credential and halts as re_pair_required', async () => {

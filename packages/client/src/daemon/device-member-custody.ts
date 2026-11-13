@@ -107,7 +107,7 @@ function sameBinding(left: MemberKeyBinding, right: MemberKeyBinding): boolean {
  * still one snapshot of every key.
  */
 export class DeviceMemberKeyStore implements MemberKeyStore {
-  constructor(private readonly custody: DeviceMemberCustodyBackend) {}
+  constructor(private readonly custody: DeviceMemberCustodyBackend, private readonly guard: MemberWriteGuard = (write) => write()) {}
 
   async load(binding: MemberKeyBinding, signal?: AbortSignal): Promise<MemberKeys | undefined> {
     const text = await this.custody.read('member-keys', signal);
@@ -120,6 +120,10 @@ export class DeviceMemberKeyStore implements MemberKeyStore {
   }
 
   async loadOrCreate(binding: MemberKeyBinding): Promise<MemberKeys> {
+    return this.guard(() => this.#loadOrCreate(binding));
+  }
+
+  async #loadOrCreate(binding: MemberKeyBinding): Promise<MemberKeys> {
     const stored = await this.load(binding);
     if (stored !== undefined) return stored;
     await this.custody.replace('member-keys', await generateMemberKeyRecord(binding));
@@ -143,16 +147,18 @@ export class DeviceMemberKeyStore implements MemberKeyStore {
     return this.#rewrite(binding, async (text) => finishMemberKemRotation(text, epoch), `finish a KEM rotation to epoch ${epoch}`);
   }
 
-  async #rewrite(binding: MemberKeyBinding, change: (text: string) => Promise<string | undefined>, what: string): Promise<MemberKeys> {
-    if ((await this.load(binding)) === undefined) throw new DeviceMemberCustodyError(`no device member keys of this enrollment to ${what}`);
-    const text = (await this.custody.read('member-keys'))!;
-    const next = await change(text);
-    if (next === undefined) throw new DeviceMemberCustodyError(`the device member keys cannot ${what}`);
-    if (next !== text) await this.custody.replace('member-keys', next);
-    // Read back: the stored keys, not the ones computed here, are the member.
-    const stored = await this.load(binding);
-    if (stored === undefined) throw new DeviceMemberCustodyError('the device member keys were not stored');
-    return stored;
+  #rewrite(binding: MemberKeyBinding, change: (text: string) => Promise<string | undefined>, what: string): Promise<MemberKeys> {
+    return this.guard(async () => {
+      if ((await this.load(binding)) === undefined) throw new DeviceMemberCustodyError(`no device member keys of this enrollment to ${what}`);
+      const text = (await this.custody.read('member-keys'))!;
+      const next = await change(text);
+      if (next === undefined) throw new DeviceMemberCustodyError(`the device member keys cannot ${what}`);
+      if (next !== text) await this.custody.replace('member-keys', next);
+      // Read back: the stored keys, not the ones computed here, are the member.
+      const stored = await this.load(binding);
+      if (stored === undefined) throw new DeviceMemberCustodyError('the device member keys were not stored');
+      return stored;
+    });
   }
 }
 
@@ -250,12 +256,24 @@ function parsePending(text: string): PendingPairingVerification | undefined {
   return { tenantId, deviceId, pv, deadline: deadline as number };
 }
 
+/**
+ * Runs one whole write of the member entries, read-back included. The
+ * entries are shared per productId, so a running daemon's writes run under
+ * the enrollment gate while its enrollment still holds (#2055).
+ */
+export type MemberWriteGuard = <T>(write: () => Promise<T>) => Promise<T>;
+
 /** The member state and pending pv entries, with their shape checks. */
 export class DeviceMemberRecords {
   readonly keys: DeviceMemberKeyStore;
 
-  constructor(private readonly custody: DeviceMemberCustodyBackend) {
-    this.keys = new DeviceMemberKeyStore(custody);
+  constructor(private readonly custody: DeviceMemberCustodyBackend, private readonly guard: MemberWriteGuard = (write) => write()) {
+    this.keys = new DeviceMemberKeyStore(custody, guard);
+  }
+
+  /** The same entries, every write run by `guard`. Pairing and the enrollment clear hold the gate already and use the unguarded records. */
+  guardedBy(guard: MemberWriteGuard): DeviceMemberRecords {
+    return new DeviceMemberRecords(this.custody, guard);
   }
 
   async readState(signal?: AbortSignal): Promise<DeviceMemberState | undefined> {
@@ -267,13 +285,13 @@ export class DeviceMemberRecords {
   }
 
   async saveState(state: DeviceMemberState): Promise<void> {
-    await this.custody.replace('member-state', JSON.stringify({
+    await this.guard(() => this.custody.replace('member-state', JSON.stringify({
       v: 1,
       tenantId: state.tenantId,
       deviceId: state.deviceId,
       member: state.member,
       ...(state.anchor === undefined ? {} : { anchor: state.anchor, head: state.head }),
-    }));
+    })));
   }
 
   async readPending(signal?: AbortSignal): Promise<PendingPairingVerification | undefined> {
@@ -285,20 +303,22 @@ export class DeviceMemberRecords {
   }
 
   async savePending(pending: PendingPairingVerification): Promise<void> {
-    await this.custody.replace('pairing-verification', JSON.stringify({
+    await this.guard(() => this.custody.replace('pairing-verification', JSON.stringify({
       v: 1, tenantId: pending.tenantId, deviceId: pending.deviceId, pv: pending.pv, deadline: pending.deadline,
-    }));
+    })));
   }
 
   async deletePending(signal?: AbortSignal): Promise<void> {
-    await this.#delete('pairing-verification', signal);
+    await this.guard(() => this.#delete('pairing-verification', signal));
   }
 
   /** Forget the member: a new enrollment or an unpair. */
   async clear(): Promise<void> {
-    await this.#delete('pairing-verification');
-    await this.#delete('member-state');
-    await this.#delete('member-keys');
+    await this.guard(async () => {
+      await this.#delete('pairing-verification');
+      await this.#delete('member-state');
+      await this.#delete('member-keys');
+    });
   }
 
   /** Delete and read back, as the enrollment clear does: a provider that reports a deletion it did not make throws. */

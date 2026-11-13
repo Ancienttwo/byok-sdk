@@ -401,17 +401,7 @@ export class AuthManager {
     // this store still holds that enrollment, under the enrollment gate
     // (#2034); otherwise the new token is discarded and the binding is lost.
     await this.underEnrollmentGate(signal, async () => {
-      let current: DeviceRecord | undefined;
-      try {
-        current = await this.loadRecord(signal);
-      } catch (error) {
-        if (error instanceof DeviceStoreBindingMismatchError || error instanceof DeviceRecordRePairRequiredError) this.loseBinding(error);
-        throw error;
-      }
-      if (current === undefined) this.loseBinding(new DeviceRecordRePairRequiredError());
-      if (current.deviceId !== record.deviceId || current.tenantId !== record.tenantId || current.devicePublicKey !== record.devicePublicKey) {
-        this.loseBinding(new DeviceStoreBindingMismatchError(current, record));
-      }
+      await this.checkBinding(record, signal);
       await this.credentials.replace(updated, signal);
     });
     this.record = updated;
@@ -493,6 +483,38 @@ export class AuthManager {
       }, UNTYPED_401_RECHECK_DELAY_MS);
       signal.addEventListener('abort', onStop, { once: true });
     });
+  }
+
+  /**
+   * Internal daemon seam (#2055): runs `write` of the shared E2EE member
+   * entries under the enrollment gate, after rereading that the OS entry and
+   * `device.json` still hold this run's enrollment. Otherwise it writes
+   * nothing and loses the binding as a renewal does. Never hold it across
+   * network I/O.
+   */
+  async underBinding<T>(write: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.runCredentialMutation((mutationSignal) => {
+      const both = signal === undefined ? mutationSignal : AbortSignal.any([mutationSignal, signal]);
+      return this.underEnrollmentGate(both, async () => {
+        await this.checkBinding(this.record, both);
+        return write();
+      });
+    });
+  }
+
+  /** Under the enrollment gate: the OS entry still holds `record`, or the binding is lost. */
+  private async checkBinding(record: DeviceRecord | undefined, signal: AbortSignal): Promise<void> {
+    let current: DeviceRecord | undefined;
+    try {
+      current = await this.loadRecord(signal);
+    } catch (error) {
+      if (error instanceof DeviceStoreBindingMismatchError || error instanceof DeviceRecordRePairRequiredError) this.loseBinding(error);
+      throw error;
+    }
+    if (current === undefined || record === undefined) this.loseBinding(new DeviceRecordRePairRequiredError());
+    if (current.deviceId !== record.deviceId || current.tenantId !== record.tenantId || current.devicePublicKey !== record.devicePublicKey) {
+      this.loseBinding(new DeviceStoreBindingMismatchError(current, record));
+    }
   }
 
   /** The OS entry no longer holds this store's enrollment: drop the cached record, stop renewing and report it. Always throws `error`. */
