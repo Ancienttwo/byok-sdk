@@ -33,6 +33,7 @@ import {
   type SecretStore,
   modelProviderSecretName,
 } from './secret-store.js';
+import { isSecretStoreErrorCode, sanitizeSecretStoreError, secretStoreCall } from './secret-store-call.js';
 import { isPortableSecretValue } from './secret-value.js';
 import { normalizeProviderUrl } from './url.js';
 
@@ -222,18 +223,6 @@ const SAFE_PASSTHROUGH_CODES = new Set([
   'PROVIDER_PROFILE_INVALID',
 ]);
 
-/**
- * Credential-store calls are wrapped so no OS error text, exit code, or cause
- * can reach a status, receipt, log, or thrown message.
- */
-async function credentialStoreCall<T>(call: () => Promise<T>): Promise<T> {
-  try {
-    return await call();
-  } catch {
-    throw new ByokKeysError('PROVIDER_SECRET_STORE_FAILED', 'Provider credential store operation failed');
-  }
-}
-
 type Decision =
   | { readonly kind: 'reject'; readonly code: ProviderProvisioningRejection }
   | {
@@ -387,9 +376,9 @@ export async function applySealedProviderProvisioning(
       try {
         if (decision.credential.kind === 'set') {
           const value = decision.credential.secret;
-          await credentialStoreCall(() => secrets.set(secretName, value));
+          await secretStoreCall(() => secrets.set(secretName, value));
         } else if (decision.credential.kind === 'delete') {
-          await credentialStoreCall(() => secrets.delete(secretName));
+          await secretStoreCall(() => secrets.delete(secretName));
         }
       } catch {
         // The OS write may or may not have happened: the marker stays, and
@@ -401,7 +390,7 @@ export async function applySealedProviderProvisioning(
         ? true
         : decision.credential.kind === 'delete'
           ? false
-          : await credentialStoreCall(() => secrets.has(secretName));
+          : await secretStoreCall(() => secrets.has(secretName));
       const applied: ProviderProvisioningResult = {
         ...facts,
         outcome: 'applied',
@@ -421,8 +410,11 @@ export async function applySealedProviderProvisioning(
       return applied;
     });
   } catch (error) {
-    if (error instanceof ByokKeysError && (SAFE_PASSTHROUGH_CODES.has(error.code) || error.code === 'PROVIDER_SECRET_STORE_FAILED')) {
-      throw error;
+    if (error instanceof ByokKeysError && SAFE_PASSTHROUGH_CODES.has(error.code)) throw error;
+    // A credential-store failure keeps the code the shared boundary gave it,
+    // rebuilt so only that boundary's fixed text can leave.
+    if (error instanceof ByokKeysError && isSecretStoreErrorCode(error.code)) {
+      throw sanitizeSecretStoreError(error);
     }
     throw new ByokKeysError('PROVIDER_CUSTODY_STATE_INVALID', 'Provider provisioning could not complete its local commit');
   } finally {
@@ -583,7 +575,7 @@ async function runKeyCheck(
     if (profile === undefined) return undefined;
     const current = bindingOf(profile);
     if (current.profileRevision !== binding.profileRevision || current.profileHash !== binding.profileHash) return undefined;
-    const key = await credentialStoreCall(() => options.secretStore.get(secretName));
+    const key = await secretStoreCall(() => options.secretStore.get(secretName));
     return key === undefined ? undefined : { profile, key };
   });
   if (snapshot === undefined) return result;
