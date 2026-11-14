@@ -36,9 +36,9 @@ const cleanups: (()=>Promise<void>)[]=[];
 afterEach(async()=>{for(const cleanup of cleanups.splice(0).reverse())await cleanup();vi.restoreAllMocks();});
 const DAY=86_400_000;
 const identity:JournalIdentity={productId:'retention',tenantId:'tenant',deviceId:'device'};
-async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:AgentHomeManager;store?:string;budget?:StorageBudgetInput;freeBytes?:number;usageScanLimit?:number;piSessionDir?:string;agySessionStore?:string;ttlMs?:Partial<Record<ExpiringClassId,number>>}={}) {
+async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:AgentHomeManager;store?:string;budget?:StorageBudgetInput;freeBytes?:number;usageScanLimit?:number;piSessionDir?:string;agySessionStore?:string;ttlMs?:Partial<Record<ExpiringClassId,number>>;maxPassDurationMs?:number}={}) {
  const store=input.store??testScratchRoot();let time=Date.parse('2026-10-14T00:00:00.000Z');const clock=()=>new Date(time);
- const config=resolveStorageConfig(store,{scratchRoot:testScratchRoot(),retention:{maxDeletionsPerPass:input.max??256,ttlMs:input.ttlMs},...(input.budget?{budget:input.budget}:{})});
+ const config=resolveStorageConfig(store,{scratchRoot:testScratchRoot(),retention:{maxDeletionsPerPass:input.max??256,ttlMs:input.ttlMs,maxPassDurationMs:input.maxPassDurationMs},...(input.budget?{budget:input.budget}:{})});
  const scratch=new ScratchRoot(config.scratchRoot,clock);await scratch.open(store);
  const registry=createRetentionRegistry({storeDir:store,scratch,config,clock,journal:()=>input.journal,identity:()=>identity,preparation:()=>undefined,
   ...(input.home?{home:input.home,handoffs:new AgentSessionHandoffStore()}:{}),...(input.usageScanLimit===undefined?{}:{usageScanLimit:input.usageScanLimit}),...(input.piSessionDir===undefined?{}:{piSessionDir:input.piSessionDir}),...(input.agySessionStore===undefined?{}:{agySessionStore:input.agySessionStore})});
@@ -335,10 +335,11 @@ it('a daemon store with a long path claims and uses its short default scratch ro
  await new ScratchRoot(resolveStorageConfig(store).scratchRoot).open(store);
 });
 
-// Cleanup removes one entry per budgeted inspection across 16k+ entries: 2.8 s measured on CI, against the default 10 s limit, so this test keeps its own headroom.
-it('reclaims a released runtime larger than the measurement limit across periodic passes', async () => {
- const f=await fixture(),large=await f.scratch.create(),small=await f.scratch.create();
- for(let start=0;start<16_384;start+=128) await Promise.all(Array.from({length:128},(_,offset)=>fs.writeFile(path.join(large.runtimeDir,`empty-${start+offset}`),'')));
+// Inspections, not wall-clock time, must bound these passes: under load the 10 s
+// default pass limit ends a pass before the runtime share is spent (#2082).
+it('reclaims a released runtime larger than the runtime pass share across periodic passes', async () => {
+ const LARGE=PASS_INSPECTIONS/2+2_048,f=await fixture({maxPassDurationMs:DAY}),large=await f.scratch.create(),small=await f.scratch.create();
+ for(let start=0;start<LARGE;start+=128) await Promise.all(Array.from({length:128},(_,offset)=>fs.writeFile(path.join(large.runtimeDir,`empty-${start+offset}`),'')));
  await fs.writeFile(path.join(small.runtimeDir,'small'),'small');
  await large.release();await small.release();f.advance(DAY+1);
  const observations=[];
@@ -346,9 +347,9 @@ it('reclaims a released runtime larger than the measurement limit across periodi
   await f.sweeper.runPass('periodic');
   observations.push({pass,largeExists:await exists(large.runtimeDir),largeFiles:await fs.readdir(large.runtimeDir).then(x=>x.length,()=>0),smallExists:await exists(small.runtimeDir),errors:f.failures.filter(x=>x==='exec-runtime:sweep_failed').length});
  }
- expect(observations.some(item=>item.largeFiles<16_384)).toBe(true);
+ expect(observations.some(item=>item.largeFiles<LARGE)).toBe(true);
  // The first pass makes progress but spends at most the runtime share of the pass budget.
- expect(observations[0]!.largeFiles).toBeLessThan(16_384);expect(observations[0]!.largeFiles).toBeGreaterThanOrEqual(16_384-PASS_INSPECTIONS/2);
+ expect(observations[0]!.largeFiles).toBeLessThan(LARGE);expect(observations[0]!.largeFiles).toBeGreaterThanOrEqual(LARGE-PASS_INSPECTIONS/2);
  expect(f.failures).not.toContain('exec-runtime:sweep_failed');
  expect(await exists(small.runtimeDir)).toBe(false);
  expect(await exists(large.runtimeDir)).toBe(false);
@@ -433,7 +434,7 @@ it('keeps bytes already removed when a later unlink fails mid-pass, then complet
  await s.release();f.advance(DAY);
  const target=path.dirname(s.runtimeDir),marker=path.join(target,'released'),released=await fs.readFile(marker,'utf8');
  const realUnlink=fs.unlink.bind(fs);let calls=0;
- const unlink=vi.spyOn(fs,'unlink').mockImplementation(async file=>{if(++calls===2)throw Object.assign(new Error('busy'),{code:'EBUSY'});return realUnlink(file);});
+ const unlink=vi.spyOn(fs,'unlink').mockImplementation(async file=>{if(String(file).startsWith(s.runtimeDir)&&++calls===2)throw Object.assign(new Error('busy'),{code:'EBUSY'});return realUnlink(file);});
  const tally={deleted:0,bytes:0},first=runtimeBudget(f,tally);
  await expect(f.registry.sweep('exec-runtime',first)).rejects.toThrow('busy');
  expect(runtimeReclaimedBytes.get(first)).toBe(5);expect(tally.deleted).toBe(0);
@@ -443,17 +444,19 @@ it('keeps bytes already removed when a later unlink fails mid-pass, then complet
  expect(tally.deleted).toBe(1);expect(5+retried+tally.bytes).toBe(15+Buffer.byteLength(released));
  expect(await exists(target)).toBe(false);
 });
+// 9216 files plus one 4096-inspection pass: up to 15 s measured on mac-pro x64 with four
+// concurrent copies of this file (#2082), so this test keeps the same headroom as the one above.
 it('a large expired runtime backlog leaves pass budget for agent-result in the same pass',async()=>{
  const {home,binding,results}=await idleHome();await fs.mkdir(results,{recursive:true});
  const record=path.join(results,resultName(0));await fs.writeFile(record,'{}');await old(record);await binding.lease.release();
- const f=await fixture({home}),s=await f.scratch.create();
+ const f=await fixture({home,maxPassDurationMs:DAY}),s=await f.scratch.create();
  for(let start=0;start<9_216;start+=128) await Promise.all(Array.from({length:128},(_,offset)=>fs.writeFile(path.join(s.runtimeDir,`empty-${start+offset}`),'')));
  await s.release();f.advance(DAY);
  const report=await f.sweeper.runPass('periodic');
  expect(report.truncated).toBe(true);expect(await exists(record)).toBe(false);
  expect((await fs.readdir(s.runtimeDir)).length).toBeGreaterThan(0);
  expect(f.failures).toEqual([]);
-});
+}, 30_000);
 const ledgerHex=(c:string)=>c.repeat(64);
 async function sessionLedgers(directory:string,files:Record<string,string>){
  const root=path.join(directory,'.byok','runtime-sessions');await fs.mkdir(root,{recursive:true});
