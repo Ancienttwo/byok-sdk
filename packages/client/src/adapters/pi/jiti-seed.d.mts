@@ -17,4 +17,9 @@ export interface PiJitiSeed {
   /** Throws `pi_jiti_seed_unavailable` before writing anything when an input does not verify. */
   materialize(group: PiJitiSeedGroup, root: string): { readonly written: number; readonly kept: number };
 }
-export function openPiJitiSeed(seedRoot: string, loaderUrl: string | undefined): PiJitiSeed;
+export function openPiJitiSeed(seedRoot: string, loaderUrls: readonly string[]): PiJitiSeed;
+export interface PiJitiSeedUse {
+  /** Writes the group's private cache files, or turns the process cold. */
+  materialize(group: PiJitiSeedGroup, root: string): void;
+}
+export function usePiJitiSeed(seedRoot: string, loaderUrls: readonly string[], report: (reason: string) => void): PiJitiSeedUse;

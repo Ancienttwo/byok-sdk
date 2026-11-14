@@ -9,11 +9,14 @@
 //     installed client carries exactly the seed regenerated from the installed
 //     pi-subagents and jiti, bound to bun.lock and the official Pi
 //     closureDigest; copyPiRuntimeAssets copies it unchanged; and a fresh
-//     execution that materializes it leaves jiti zero transforms.
-//   node build-pi-jiti-seed.mjs --gate <piAssetRoot>
+//     execution in which the installed dist's own materializer seeds it
+//     leaves jiti zero transforms.
+//   node build-pi-jiti-seed.mjs --gate <piAssetRoot> [<materializerModule>]
 //     The zero-transform gate alone, for any Pi asset root: in a fresh
-//     execution (--zero-transform), materialize every group, then count the
-//     transforms jiti's own cache lookup still requests. Fails unless zero.
+//     execution (--zero-transform), materialize every group with the module's
+//     usePiJitiSeed (this source tree's by default), then count the transforms
+//     a jiti loader created beside that module, with jiti's default cache
+//     choice, still requests. Fails unless zero.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -24,7 +27,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   PI_JITI_SEED_CANONICAL_ROOT, PI_JITI_SEED_DIR, PI_JITI_SEED_FORMAT, PI_JITI_SEED_VERSION,
-  canonicalSeedFile, fileUrlLiteral, openPiJitiSeed, piSubagentHostPeersSource, sha256,
+  canonicalSeedFile, fileUrlLiteral, piSubagentHostPeersSource, sha256,
 } from '../src/adapters/pi/jiti-seed.mjs';
 import { OFFICIAL_PI_PROVENANCE } from '../src/adapters/pi/official-pi-installation.mjs';
 import { parseBunLock } from '../../../scripts/release/pi-runtime-identity.mjs';
@@ -33,6 +36,7 @@ const client = fileURLToPath(new URL('../', import.meta.url));
 const repo = path.resolve(client, '../..');
 /** The entry of each pi-subagents graph: the parent extension, and the Bun background runner. */
 const GRAPHS = Object.freeze({ parent: 'bundle/index.js', runner: 'src/runs/background/binary-bootstrap.js' });
+const SOURCE_MATERIALIZER = fileURLToPath(new URL('../src/adapters/pi/jiti-seed.mjs', import.meta.url));
 
 /** The installed package `name` that Node resolution finds from `fromDir`. */
 function installed(fromDir, name) {
@@ -139,7 +143,8 @@ async function verifyInstalled(installRoot) {
     const { copyPiRuntimeAssets } = await import(pathToFileURL(path.join(clientPkg.dir, 'dist/index.js')).href);
     const assetRoot = path.join(scratch, 'pi');
     await copyPiRuntimeAssets({ outDir: assetRoot, form: 'compiled-executable' });
-    const result = zeroTransformRun(assetRoot, path.join(scratch, 'execution'));
+    // The materializer the packed client ships: its Bun runner seam, where the tarball's bundle put it.
+    const result = zeroTransformRun(assetRoot, path.join(scratch, 'execution'), path.join(clientPkg.dir, 'dist/bin/pi-runtime-host.js'));
     assert.deepEqual(readSeed(assetRoot), shipped, 'copyPiRuntimeAssets changed the seed');
     // The seed is the one these installed inputs derive, under their locked integrities.
     const subagents = installed(clientPkg.dir, 'pi-subagents');
@@ -164,11 +169,11 @@ async function verifyInstalled(installRoot) {
 }
 
 /** One fresh execution: its own TMPDIR and cwd, no inherited jiti options. */
-function zeroTransformRun(assetRoot, executionDir) {
+function zeroTransformRun(assetRoot, executionDir, materializer) {
   const tmp = path.join(executionDir, 'runtime'), cwd = path.join(executionDir, 'workspace');
   for (const dir of [tmp, cwd]) mkdirSync(dir, { recursive: true });
   const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('JITI_')));
-  const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--zero-transform', assetRoot],
+  const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--zero-transform', assetRoot, materializer],
     { cwd, env: { ...env, TMPDIR: tmp, TEMP: tmp, TMP: tmp }, encoding: 'utf8' });
   if (child.status !== 0) throw new Error(`Pi jiti seed zero-transform gate could not run:\n${child.stderr}`);
   const result = JSON.parse(child.stdout);
@@ -178,18 +183,16 @@ function zeroTransformRun(assetRoot, executionDir) {
   return result;
 }
 
-async function zeroTransform(assetRoot) {
+async function zeroTransform(assetRoot, materializer) {
+  const { usePiJitiSeed } = await import(pathToFileURL(materializer).href);
   const pkg = path.join(assetRoot, 'pi-subagents');
   const { HOST_PEER_ALIASES } = await import(pathToFileURL(path.join(pkg, 'src/runs/background/runner-aliases.js')).href);
   const peers = mkdtempSync(path.join(os.tmpdir(), 'peers-'));
   writeFileSync(path.join(peers, 'host-peers.ts'), piSubagentHostPeersSource(HOST_PEER_ALIASES.filter(alias => !alias.optional).map(alias => alias.specifier)));
   let unavailable;
-  try {
-    const seed = openPiJitiSeed(assetRoot, undefined);
-    seed.materialize('parent', pkg); seed.materialize('runner', pkg); seed.materialize('host-peers', peers);
-  } catch (error) {
-    unavailable = error instanceof Error ? error.message : String(error);
-  }
+  // The loader below is created beside the materializer, as Pi's is beside its bundle.
+  const seed = usePiJitiSeed(assetRoot, [pathToFileURL(materializer).href], reason => { unavailable = `pi_jiti_seed_unavailable: ${reason}`; });
+  seed.materialize('parent', pkg); seed.materialize('runner', pkg); seed.materialize('host-peers', peers);
   // The supported graphs, derived from the copied package rather than the
   // seed, looked up as Pi's loader looks them up: jiti's own cache check, where
   // a request for the transform is a Babel run.
@@ -199,8 +202,9 @@ async function zeroTransform(assetRoot) {
   ];
   let transforms = 0;
   const jitiDir = path.join(pkg, 'node_modules', 'jiti');
-  const jiti = createRequire(path.join(jitiDir, 'package.json'))(path.join(jitiDir, 'lib', 'jiti.cjs')).createJiti(path.join(os.tmpdir(), 'gate.cjs'), {
-    fsCache: path.join(os.tmpdir(), 'jiti'), moduleCache: false, transform: () => { transforms++; return { code: '' }; },
+  // jiti's own cache choice, after the seed decided JITI_FS_CACHE: a cold seed leaves no cache to hit.
+  const jiti = createRequire(path.join(jitiDir, 'package.json'))(path.join(jitiDir, 'lib', 'jiti.cjs')).createJiti(materializer, {
+    moduleCache: false, transform: () => { transforms++; return { code: '' }; },
   });
   for (const { file, ts } of lookups) {
     const real = realpathSync(file);
@@ -214,6 +218,7 @@ if (mode === undefined) await build();
 else if (mode === '--verify-installed' && target) await verifyInstalled(target);
 else if (mode === '--gate' && target) {
   const scratch = mkdtempSync(path.join(os.tmpdir(), 'byok-pi-seed-gate-'));
-  try { console.log(JSON.stringify(zeroTransformRun(path.resolve(target), scratch))); } finally { rmSync(scratch, { recursive: true, force: true }); }
-} else if (mode === '--zero-transform' && target) await zeroTransform(target);
-else throw new Error('usage: build-pi-jiti-seed.mjs [--verify-installed <installRoot> | --gate <piAssetRoot>]');
+  const materializer = process.argv[4] === undefined ? SOURCE_MATERIALIZER : path.resolve(process.argv[4]);
+  try { console.log(JSON.stringify(zeroTransformRun(path.resolve(target), scratch, materializer))); } finally { rmSync(scratch, { recursive: true, force: true }); }
+} else if (mode === '--zero-transform' && target && process.argv[4]) await zeroTransform(target, process.argv[4]);
+else throw new Error('usage: build-pi-jiti-seed.mjs [--verify-installed <installRoot> | --gate <piAssetRoot> [<materializerModule>]]');

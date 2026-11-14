@@ -54,23 +54,40 @@ export function canonicalSeedFile(group, relative) {
 }
 
 /**
- * Refusal reasons name files and versions only; they reach the Host through a
- * diagnostic frame and must carry no other local information.
+ * A refusal the seed constructs itself. Its reason names files and versions
+ * only; it is the one text that reaches the Host diagnostic.
  */
-const refuse = reason => { throw new Error(`pi_jiti_seed_unavailable: ${reason}`); };
+class PiJitiSeedRefusal extends Error {
+  constructor(reason) {
+    super(`pi_jiti_seed_unavailable: ${reason}`);
+    this.reason = reason.replace(/[\r\n]+/gu, ' ');
+  }
+}
+const refuse = reason => { throw new PiJitiSeedRefusal(reason); };
 
 /**
- * The cache directory the Pi loader's jiti will use, chosen as jiti 2.7.0
+ * The diagnostic reason of a seed failure. Any other exception (JSON, I/O, a
+ * module that throws) may quote bytes it read, so only its class is kept.
+ */
+function refusalReason(error) {
+  if (error instanceof PiJitiSeedRefusal) return error.reason;
+  return `the seed could not be read (${error instanceof Error ? error.constructor.name : typeof error})`;
+}
+
+/**
+ * The cache directory every listed jiti loader will use, chosen as jiti 2.7.0
  * chooses its default, or a refusal when that directory is not this
  * execution's own: an adjacent `node_modules/.cache/jiti` would be shared,
  * and environment overrides change the cache contract.
  */
-function executionCacheDir(loaderUrl) {
+function executionCacheDir(loaderUrls) {
   for (const name of ['JITI_FS_CACHE', 'JITI_REBUILD_FS_CACHE', 'JITI_SOURCE_MAPS', 'JITI_CACHE', 'JITI_JSX']) {
     if (process.env[name] !== undefined) refuse(`${name} changes the jiti cache contract`);
   }
-  const loader = typeof loaderUrl === 'string' && loaderUrl.startsWith('file:') ? fileURLToPath(loaderUrl) : loaderUrl;
-  if (typeof loader === 'string' && existsSync(path.resolve(loader, '../node_modules'))) refuse('the Pi loader would use an adjacent shared cache');
+  for (const loaderUrl of loaderUrls) {
+    const loader = loaderUrl.startsWith('file:') ? fileURLToPath(loaderUrl) : loaderUrl;
+    if (existsSync(path.resolve(loader, '../node_modules'))) refuse('the Pi loader would use an adjacent shared cache');
+  }
   const tmp = os.tmpdir();
   if (process.env.TMPDIR && tmp === process.cwd() && !process.env.JITI_RESPECT_TMPDIR_ENV) refuse('TMPDIR is the working directory');
   return path.join(tmp, 'jiti');
@@ -78,11 +95,12 @@ function executionCacheDir(loaderUrl) {
 
 /**
  * Open the one seed below `seedRoot` and bind it to this execution's cache.
- * `loaderUrl` is the `import.meta.url` Pi's extension loader runs under in
- * this bundle. Throws `pi_jiti_seed_unavailable` when the seed cannot be
- * used; the caller reports that and continues cold.
+ * `loaderUrls` are the filenames every jiti loader of this process's seeded
+ * graphs is created with (Pi's extension loader runs under this bundle's
+ * `import.meta.url`). Throws `pi_jiti_seed_unavailable` when the seed cannot
+ * be used.
  */
-export function openPiJitiSeed(seedRoot, loaderUrl) {
+export function openPiJitiSeed(seedRoot, loaderUrls) {
   const dir = path.join(seedRoot, PI_JITI_SEED_DIR);
   const digests = existsSync(dir) ? readdirSync(dir) : [];
   if (digests.length !== 1) refuse(`expected one seed in ${dir}, found ${digests.length}`);
@@ -97,7 +115,7 @@ export function openPiJitiSeed(seedRoot, loaderUrl) {
   const jitiDir = path.join(pkg, 'node_modules', 'jiti');
   const jitiVersion = JSON.parse(readFileSync(path.join(jitiDir, 'package.json'), 'utf8')).version;
   if (jitiVersion !== manifest.jiti) refuse(`seed is for jiti ${manifest.jiti}, not ${jitiVersion}`);
-  const cacheDir = executionCacheDir(loaderUrl);
+  const cacheDir = executionCacheDir(loaderUrls);
   try {
     mkdirSync(cacheDir, { recursive: true });
     accessSync(cacheDir, constants.W_OK);
@@ -143,6 +161,31 @@ export function openPiJitiSeed(seedRoot, loaderUrl) {
         body = undefined;
       }
       return { written, kept: prepared.length - written };
+    },
+  };
+}
+
+/**
+ * The seed of one Pi process. jiti's fs cache stays on only while the seed
+ * opened, which proves the cache directory is this execution's own, and every
+ * materialization verified. Any failure, whatever its cause, sets
+ * `JITI_FS_CACHE=false` for this process and the processes it starts, so
+ * every later jiti loader transforms in memory; `report` receives the reason
+ * once. Call this, and `materialize` each group, before the first jiti loader
+ * of the process is created.
+ */
+export function usePiJitiSeed(seedRoot, loaderUrls, report) {
+  let seed;
+  const cold = error => {
+    seed = undefined;
+    process.env.JITI_FS_CACHE = 'false';
+    report(refusalReason(error));
+  };
+  try { seed = openPiJitiSeed(seedRoot, loaderUrls); } catch (error) { cold(error); }
+  return {
+    materialize(group, root) {
+      if (seed === undefined) return;
+      try { seed.materialize(group, root); } catch (error) { cold(error); }
     },
   };
 }

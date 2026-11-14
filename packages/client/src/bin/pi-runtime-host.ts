@@ -9,4 +9,4 @@ export { runSdkReservedHelperCommand } from '../lifecycle/sdk-reserved-helper-co
 
 export { runPiDurableHost } from './pi-durable-host.js';
 // #1927: a Bun background runner re-entry seeds its graph through this seam, so the root entry does not carry the materializer.
-export { openPiJitiSeed } from '../adapters/pi/jiti-seed.mjs';
+export { usePiJitiSeed } from '../adapters/pi/jiti-seed.mjs';

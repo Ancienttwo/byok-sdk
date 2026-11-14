@@ -157,12 +157,12 @@ export async function runBundledSubagentCommand(argv: readonly string[]): Promis
     (globalThis as { PI_BUNDLED_NODE?: boolean }).PI_BUNDLED_NODE = true;
     Reflect.get(globalThis, 'Headers');
     const { DefaultResourceLoader, getAgentDir } = await import('@earendil-works/pi-coding-agent');
-    // #1927: this runner's own graph; a seed that does not verify is reported
-    // once on the runner's stderr and the runner transforms cold.
-    const { openPiJitiSeed } = await import('#byok-pi-runtime-host');
-    try { openPiJitiSeed(trusted.root, import.meta.url).materialize('runner', pkg); } catch (error) {
-      process.stderr.write(`byok-pi-runner: ${error instanceof Error ? error.message : String(error)}\n`);
-    }
+    // #1927: this runner's own graph, loaded by Pi's loader and by the
+    // bootstrap's second jiti; a seed failure is reported once on the runner's
+    // stderr and both transform cold with the fs cache off.
+    const { usePiJitiSeed } = await import('#byok-pi-runtime-host');
+    usePiJitiSeed(trusted.root, [import.meta.url, pathToFileURL(path.join(pkg, BINARY_BOOTSTRAP)).href],
+      (reason: string) => process.stderr.write(`byok-pi-runner: pi_jiti_seed_unavailable: ${reason}\n`)).materialize('runner', pkg);
     const loader = new DefaultResourceLoader({ cwd: process.cwd(), agentDir: getAgentDir(), noExtensions: true,
       noSkills: true, noPromptTemplates: true, additionalExtensionPaths: [path.join(pkg, BINARY_BOOTSTRAP)] });
     trusted.verify();
