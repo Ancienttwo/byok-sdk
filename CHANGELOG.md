@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Breaking (keys; #2132)** — `applySealedProviderProvisioning()` returns `secret_store_unavailable` for a credential store whose `available()` is `false` without recording it or consuming the request's `operationGeneration`, so the same request, or a new one at the same generation, applies once the store is available. Before, the rejection was recorded and the same request stayed rejected after the store recovered. A `secret_store_unavailable` from a failed credential write is still recorded and keeps the operation pending. No type or code changes. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#sealed-provisioning-retries-an-unavailable-credential-store-2132).
+
 - **Fixed (keys; #2031)** — Pi projection directory ownership is checked against the effective uid, which owns files created by the process. When real and effective uids differ, an effective-uid-owned directory is accepted and a directory owned only by the real uid is refused.
 
 - **Security (client, cloud, server, bot-collaboration; #2118)** — Raise the declared dependency floors to `hono` `^4.13.16` and `@hono/node-server` `^2.1.6`, and update the lockfile to 4.13.18 and 2.1.8 respectively, fixing the seven Hono advisories reported by the security nightly. This includes bot-collaboration's optional node-server peer for its testing entry and the client and bot-collaboration development dependencies. Hosts that pin an older copy must update it; existing Host lockfiles and bundled distributions need to be refreshed and rebuilt.

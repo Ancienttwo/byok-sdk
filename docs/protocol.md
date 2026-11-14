@@ -1304,7 +1304,14 @@ value. The set (`PROVIDER_PROVISIONING_REJECTION_CODES`) is `request_invalid`,
 `provider_kind_unsupported`, `pi_model_invalid`, `capabilities_invalid`,
 `seal_open_failed`, `secret_invalid`, `local_commit_interrupted` (also any
 request that finds an operation still pending locally) and
-`secret_store_unavailable`. Re-sending an identical completion yields `idempotent` with the stored
+`secret_store_unavailable`. Every rejection after the profile's generation
+watermark check is recorded as the device's durable result and consumes the
+generation, except `secret_store_unavailable` when the device's credential
+store reports itself unavailable before any write: that rejection is not
+recorded and does not consume the generation, so the same request, or a new one
+at the same generation, applies once the store is available. A
+`secret_store_unavailable` from a failed credential write is recorded and
+leaves the operation pending, as before. Re-sending an identical completion yields `idempotent` with the stored
 result and no rewrite; a different digest or result yields `conflict` with the
 stored result unchanged. `host_terminal` is valid only for a rejected
 completion the Host recorded on its own authority (`request_expired`,
