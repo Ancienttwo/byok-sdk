@@ -11379,7 +11379,13 @@ import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, Servic
 export interface ServiceStoreVerdict {
     /** An SDK `LocalStoreId` or a Host store id: 1-64 of `a-z 0-9 -`, starting with a letter or digit. */
     readonly store: string;
-    /** Absolute. No two stores share a path, and no store lies inside a `directory` store. */
+    /**
+     * Absolute. No two stores share a path or lie inside each other, compared
+     * both as written and with links resolved (#2106): a store under another,
+     * also only through a link, is `precheck_failed`, and so is a snapshot
+     * entry an earlier version recorded that way, before a restore changes
+     * any store.
+     */
     readonly path: string;
     /**
      * `file` (the default): the file plus its `-wal` and `-journal`, each a
