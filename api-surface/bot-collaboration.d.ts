@@ -907,7 +907,10 @@ export type HostIntentHandler = (document: unknown, transaction: OutcomeTransact
 /** Synchronous. A throw rolls the message transaction back, and a thenable or another result throws. */
 export type HostIntentMessageHandler = (input: AgentMessageInput, transaction: MessageTransaction) => MessageDisposition;
 /** The cancel answer of a Host intent (K8 `IntentCancelResult`). */
-export type HostIntentCancelResult = IntentCancelResult<Conclusion>;
+export type HostIntentCancelResult = IntentCancelResult<Conclusion> & {
+    wakePending?: true;
+    drainError?: unknown;
+};
 /** Reply readback port (§3.3). The Host acceptance record stays the body authority. */
 export type MessageServer = {
     tasks: Partial<Pick<ByokServer['tasks'], 'agentMessage'>>;
@@ -1017,11 +1020,11 @@ export declare class BotCollaboration {
      * `task.complete` that arrived before the cancel still runs the handler once. A `handler_failed` intent stays stuck,
      * because K4 applies its terminal again: `failStuckIntent` settles it. Refuses a Bot Turn key and an unknown key.
      *
-     * The call can still reject after `core.cancel` has committed: it rethrows a `drainError`, and a later `process()` failure
-     * also rejects. The cancel may already be in effect then, so do not treat a rejection as "not cancelled". Calling again is
-     * safe: an intent that already concluded returns `already_settled`, a committed cancel returns `cancel_pending`, a replay whose
-     * drain settles it returns `cancelled`, and the same failure (for example a still-full outbox) rejects again. This differs from `cancelTurn`,
-     * which handles `drainError` differently; aligning the two is tracked in #2144.
+     * After commit, a wake-only failure returns `wakePending: true`. Other failures return `drainError`, the unchanged
+     * first drain or process rejection (the whole AggregateError for mixed failures), even if a later pass succeeds.
+     * Check `'drainError' in result`, report it and retry pending work with `drain()` or recovery. The cancellation
+     * committed; reconciliation may be unfinished. Job/outbox retry state is unchanged; explicit drains and wake hooks
+     * still reject. Pre-commit failures still reject.
      */
     cancelHostIntent(key: string, ...by: PrincipalArg): Promise<HostIntentCancelResult>;
     /**
