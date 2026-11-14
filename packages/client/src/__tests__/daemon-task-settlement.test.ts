@@ -678,6 +678,38 @@ describe('Daemon.whenTaskSettled', () => {
       await expect(r.wait('task-unreadable')).rejects.toBe(failure);
     });
 
+    it('reads again instead of reporting unknown when the offer is journaled during the read', async () => {
+      let row: { localState: string; seq: number } | undefined;
+      let release = (): void => {};
+      const r = new TaskSettlementRegistry();
+      r.bindJournal({
+        readTask: async () => {
+          const snapshot = row;
+          if (snapshot === undefined) await new Promise<void>((resolve) => { release = resolve; });
+          return snapshot;
+        },
+        hasTaskCancellation: async () => false,
+        unconfirmedTerminal: async () => undefined,
+      });
+      const waiting = r.wait('task-late');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      r.offerSeen('task-late');
+      row = { localState: 'terminal:complete', seq: 1 };
+      r.offerJournaled('task-late');
+      release();
+      await expect(waiting).resolves.toEqual({ terminal: 'complete', delivery: 'accepted', disposal: 'none' });
+    });
+
+    it('rejects with the abort reason while the journal read is still pending', async () => {
+      const r = new TaskSettlementRegistry();
+      r.bindJournal({ readTask: () => new Promise(() => {}), hasTaskCancellation: async () => false, unconfirmedTerminal: async () => undefined });
+      const controller = new AbortController();
+      const waiting = r.wait('task-hung', controller.signal);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      controller.abort('stop');
+      await expect(waiting).rejects.toBe('stop');
+    });
+
     it('reads an offer as unknown once it is journaled without a row, not as seen', async () => {
       const { registry: r } = registry();
       r.offerSeen('task-gone');

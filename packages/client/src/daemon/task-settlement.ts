@@ -44,11 +44,10 @@ export interface DaemonTaskSettlement {
  * `whenTaskSettled` rejects with this when an earlier journal read returned
  * no row for the task and, once that read finished, this Daemon instance had
  * no in-memory record of the task (no held runtime, nothing settled or
- * awaited for it in this run) and no offer for it marked as seen. The read
- * and those checks are not atomic: an offer appended while the read was
- * pending ends the mark, so the wait can report unknown although the row now
- * exists (#2097). The mark also ends when the offer's append is refused, so a
- * refused offer with no row reads as unknown too. A task whose rows retention
+ * awaited for it in this run) and no offer for it marked as seen. A read
+ * that overlapped the offer's journal append is repeated instead. The mark
+ * also ends when the offer's append is refused, so a refused offer with no
+ * row reads as unknown too. A task whose rows retention
  * pruned, a task never journaled on this device and an offer still on its way
  * look the same. Unknown does not prove the task is over or will never start:
  * an offer may still arrive, and whether one is on its way is for the Host's
@@ -104,11 +103,13 @@ const TERMINALS: ReadonlySet<string> = new Set<DaemonTaskTerminal>(['complete', 
 // settlement, each runtime owner's first disposal outcome and, for a task this
 // daemon has not seen, the journal; never by public events. An offer seen
 // before its journal append keeps a wait in between from reading as unknown;
-// `offerJournaled` or `offerRefused` ends that window. A wait-only entry
+// `offerJournaled` or `offerRefused` ends that window; a read in flight when
+// `offerJournaled` runs may predate the row, so the wait reads again. A wait-only entry
 // (see `isWaitOnly`) is dropped when its last waiter leaves.
 export class TaskSettlementRegistry implements TaskRuntimeOwnership {
   readonly #entries = new Map<string, Entry>();
   readonly #offersSeen = new Set<string>();
+  readonly #reads = new Map<string, Set<{ journaled: boolean }>>();
   #journal: TaskSettlementJournal | undefined;
 
   bindJournal(journal: TaskSettlementJournal): void {
@@ -125,7 +126,10 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
   }
 
   /** The offer's row is durable: later waits read the journal. */
-  offerJournaled(taskId: string): void { this.#offersSeen.delete(taskId); }
+  offerJournaled(taskId: string): void {
+    this.#offersSeen.delete(taskId);
+    for (const read of this.#reads.get(taskId) ?? []) read.journaled = true;
+  }
 
   /** The journal refused the offer's append; its waiters fail closed. A redelivery starts a new window. */
   offerRefused(taskId: string, reason: unknown): void {
@@ -179,7 +183,7 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
     if (journal === undefined) throw new Error('daemon is not started; call start() first');
     let entry = this.#entries.get(taskId);
     if (entry === undefined) {
-      const durable = await durableSettlement(journal, taskId);
+      const durable = await this.#readDurable(journal, taskId, signal);
       signal?.throwIfAborted();
       entry = this.#entries.get(taskId);
       if (entry === undefined) {
@@ -208,6 +212,26 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
     });
   }
 
+  async #readDurable(journal: TaskSettlementJournal, taskId: string, signal: AbortSignal | undefined): Promise<DaemonTaskSettlement | 'pending' | 'unknown'> {
+    for (;;) {
+      signal?.throwIfAborted();
+      const read = { journaled: false };
+      let reads = this.#reads.get(taskId);
+      if (reads === undefined) {
+        reads = new Set();
+        this.#reads.set(taskId, reads);
+      }
+      reads.add(read);
+      try {
+        const durable = await abortable(durableSettlement(journal, taskId), signal);
+        if (durable !== 'unknown' || !read.journaled) return durable;
+      } finally {
+        reads.delete(read);
+        if (reads.size === 0) this.#reads.delete(taskId);
+      }
+    }
+  }
+
   #entry(taskId: string): Entry {
     let entry = this.#entries.get(taskId);
     if (entry === undefined) {
@@ -223,6 +247,16 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
     for (const waiter of entry.waiters) waiter.resolve(entry.result);
     entry.waiters.clear();
   }
+}
+
+// The journal read keeps running after an abort; only the wait stops.
+function abortable<T>(read: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return read;
+  return new Promise<T>((resolve, reject) => {
+    const abort = (): void => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    void read.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
 }
 
 async function durableSettlement(journal: TaskSettlementJournal, taskId: string): Promise<DaemonTaskSettlement | 'pending' | 'unknown'> {
