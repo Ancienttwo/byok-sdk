@@ -526,3 +526,27 @@ Every other rejection has its own source, and none of them is `DaemonTaskUnknown
 - **Offer append refused:** the waiters of an offer whose journal append failed reject with that append's error (for example `LocalStorageEmergencyError`). A redelivery starts a new wait.
 
 The last three are faults.
+
+## Spawn input and start errors (#2151)
+
+`@byok-sdk/core/system-tool` provides `assertNoNulSpawnInput` and
+`spawnStartError` (#2111). A Host that starts its own child processes can now
+pass the same cwd it gives to spawn as the optional fourth argument:
+`assertNoNulSpawnInput(command, args, env, cwd)`. The three-argument call
+checks command, args and env only. A NUL-bearing cwd is refused before spawn
+with `spawn cwd contains a NUL byte`; the directory itself is not included.
+SDK client transports and the Pi custody launcher already pass their cwd.
+
+Synchronous failures from the owned line, owned terminal and Pi RPC spawns
+now have the same `spawn failed: <code>` message and optional `code` as their
+asynchronous spawn failures, without the original message, path, arguments
+or cause. MCP keeps its `MCP server failed to spawn: <code>` wrapper for
+synchronous failures. A Host that inspected raw Node spawn errors should
+use `error.code` for the owned transports and Pi RPC; MCP still reports a
+transport error. Correct invalid cwd input before retrying a NUL rejection.
+
+`spawnStartError` accepts only string codes; absent or non-string values
+produce `spawn failed: unknown` and `code: undefined`. Host test doubles
+that represent OS errors should use string codes. The helper is intended
+for ordinary Node spawn errors: it copies string codes verbatim and does
+not sanitize arbitrary objects or protect against throwing code getters.

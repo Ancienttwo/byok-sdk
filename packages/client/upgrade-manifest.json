@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "59729f712f2348da58e2ce95ea1d1668e3e04b376614320624cab6029d5d66d7"
+    "snapshotSha256": "ba4db8a698f74d8d60cfe2695c7c7f8b82e142112d8a93f8da7ba325aa89caa8"
   },
   "configFields": {
     "status": "tracked",
@@ -231,8 +231,8 @@
     {
       "id": "core-spawn-input-rules",
       "impact": "additive",
-      "summary": "@byok-sdk/core/system-tool exports assertNoNulSpawnInput, which refuses a spawn command, argument or env entry holding a NUL byte and names only its slot, and spawnStartError, which reduces a spawn failure to `spawn failed: <code>` with only `code`. The client and the keys Pi launcher now share these rules; their behavior is unchanged.",
-      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2111",
+      "summary": "@byok-sdk/core/system-tool exports assertNoNulSpawnInput(command, args, env, cwd?), which refuses a NUL byte in command, args, env or the optional cwd and names only its slot, and spawnStartError, which retains only a string code as `spawn failed: <code>` (unknown for absent or non-string codes). Client process transports and the keys Pi launcher share these rules, including cwd preflight and synchronous spawn failures (#2111, #2151).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#spawn-input-and-start-errors-2151",
       "items": [
         "export:@byok-sdk/core/system-tool#assertNoNulSpawnInput",
         "export:@byok-sdk/core/system-tool#spawnStartError"
