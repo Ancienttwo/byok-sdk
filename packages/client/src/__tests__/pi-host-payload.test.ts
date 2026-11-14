@@ -48,7 +48,7 @@ async function tempRoot(prefix: string): Promise<string> {
 }
 
 describe('copyPiRuntimeAssets', () => {
-  // A full asset-root copy writes the 330 jiti seed files too; on Windows each is a scanned file write.
+  // A full asset-root copy writes every jiti seed template too; on Windows each is a scanned file write.
   it.each(['interpreter+bundle', 'compiled-executable'] as const)('writes the %s asset root that the Pi host verifies', { timeout: 60_000 }, async (form) => {
     const sdk = await loadClient();
     const outDir = path.join(await tempRoot('byok-pi-assets-'), 'pi');
@@ -137,6 +137,42 @@ async function cacheFiles(dir: string): Promise<Map<string, string>> {
 }
 
 describe('Pi jiti seed (#1927)', () => {
+  it('derives split-export seed keys from the files and async modes jiti actually transforms (#2209)', async () => {
+    const root = await tempRoot('byok-pi-seed-resolve-');
+    await fs.mkdir(path.join(root, 'node_modules/split-edge'), { recursive: true });
+    const sources = {
+      'package.json': '{"type":"module"}',
+      'entry.js': 'import value from "split-edge"; export const result = [value, require("split-edge")];',
+      'node_modules/split-edge/package.json': '{"type":"module","exports":{"import":"./import.js","require":"./require.js"}}',
+      // Extensionless import makes native ESM fail, exercising jiti's fallback on Node 24 too.
+      'node_modules/split-edge/import.js': 'import "./leaf"; export default "import";',
+      'node_modules/split-edge/leaf.js': 'export const leaf = true;',
+      'node_modules/split-edge/require.js': 'module.exports = "require";',
+    };
+    await Promise.all(Object.entries(sources).map(([file, source]) => fs.writeFile(path.join(root, file), source)));
+    const subagents = path.dirname(require.resolve('pi-subagents'));
+    type TransformInput = { filename: string; async: boolean };
+    const { createJiti } = createRequire(path.join(subagents, 'package.json'))('jiti') as {
+      createJiti(file: string, options: Record<string, unknown>): {
+        options: { transform(input: TransformInput): { code: string } }; import(id: string): Promise<unknown>;
+      };
+    };
+    const { diskGraph } = await import(pathToFileURL(SEED_GATE).href) as {
+      diskGraph(pkg: string, entry: string, peers: Set<string>, factory: typeof createJiti): { file: string; async: boolean }[];
+    };
+    const options = { fsCache: false, moduleCache: false };
+    const base = createJiti(path.join(root, 'entry.js'), options), runtimeKeys: string[] = [];
+    const key = (file: string, async: boolean): string => `${path.relative(root, file).split(path.sep).join('/')}:${async}`;
+    const splitEntry = (file: string): boolean => /[\\/](import|require)\.js$/u.test(file);
+    const jiti = createJiti(path.join(root, 'entry.js'), { ...options, transform(input: TransformInput) {
+      if (splitEntry(input.filename)) runtimeKeys.push(key(input.filename, input.async));
+      return base.options.transform(input);
+    } });
+    await jiti.import('./entry.js');
+    expect(diskGraph(root, 'entry.js', new Set(), createJiti).filter(input => splitEntry(input.file))
+      .map(input => key(input.file, input.async)).sort()).toEqual(runtimeKeys.sort());
+  });
+
   it('materializes, under a path with spaces and non-ASCII characters, exactly the cache files cold jiti writes there', { timeout: 300_000 }, async () => {
     const sdk = await loadClient();
     const root = path.join(await tempRoot('byok-pi-seed-'), 'install dir 安装');
