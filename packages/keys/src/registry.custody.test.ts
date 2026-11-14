@@ -21,6 +21,9 @@ import { SqliteProviderProfileStore, providerConfigurationLockPath } from './sql
 import { TruthStoreProviderProfileStore } from './truth-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
 
+/** An object whose primitive form is a known code, carrying a fake key in its own fields. */
+const primitiveCode = () => ({ secret: 'sk-fake', [Symbol.toPrimitive]: () => 'KEYCHAIN_WRITE_FAILED' });
+
 const OLD_KEY = 'sk-registry-custody-old-0a1f';
 const NEW_KEY = 'sk-registry-custody-new-9b2e';
 
@@ -124,9 +127,10 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
 
   it('passes on store errors only as a fixed message for a known code (#1946)', async () => {
     await registry().configure(OPENAI, OLD_KEY);
-    const echo = (code: string, value: unknown) => new ByokKeysError(code, `echo ${String(value)} ${OLD_KEY}`);
+    const echo = (code: unknown, value: unknown) => new ByokKeysError(code as string, `echo ${String(value)} ${OLD_KEY}`);
     const set = secrets.set.bind(secrets);
-    const failures = ['KEYCHAIN_WRITE_FAILED', 'STORE_DEFINED_CODE', `SECRET_${NEW_KEY}`];
+    // A non-string code whose primitive form is a known code must not pass either.
+    const failures: unknown[] = ['KEYCHAIN_WRITE_FAILED', 'STORE_DEFINED_CODE', `SECRET_${NEW_KEY}`, primitiveCode()];
     vi.spyOn(secrets, 'set').mockImplementation(async (name, value) => {
       if (value === NEW_KEY && failures.length > 0) throw echo(failures.shift()!, value);
       return set(name, value);
@@ -135,11 +139,13 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error),
       await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error),
       await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error),
+      await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error),
     ];
     vi.spyOn(secrets, 'has').mockRejectedValueOnce(echo('KEYCHAIN_UNAVAILABLE', NEW_KEY));
     errors.push(await registry().configure({ ...OPENAI, model: 'gpt-5.2-mini' }).catch((error: unknown) => error));
-    expect(errors.map((error) => (error as ByokKeysError).code)).toEqual(['KEYCHAIN_WRITE_FAILED', 'PROVIDER_SECRET_STORE_FAILED', 'PROVIDER_SECRET_STORE_FAILED', 'KEYCHAIN_UNAVAILABLE']);
-    expect((errors[3] as Error).message).toContain('install secret-tool');
+    expect(errors.map((error) => (error as ByokKeysError).code)).toEqual(['KEYCHAIN_WRITE_FAILED', 'PROVIDER_SECRET_STORE_FAILED', 'PROVIDER_SECRET_STORE_FAILED', 'PROVIDER_SECRET_STORE_FAILED', 'KEYCHAIN_UNAVAILABLE']);
+    expect(JSON.stringify(errors)).not.toContain('sk-fake');
+    expect((errors[4] as Error).message).toContain('install secret-tool');
     expect(JSON.stringify(errors.map((error) => [(error as Error).message, (error as Error).stack, String((error as Error).cause)]))).not.toMatch(new RegExp(`${OLD_KEY}|${NEW_KEY}`, 'u'));
   });
 
@@ -319,6 +325,18 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     expect(released).toMatchObject({ code: 'PROVIDER_CHANGE_COMMITTED', cause: { code: 'PROVIDER_PROFILE_INVALID' } });
     const chain = (error: unknown): string => (error instanceof Error ? `${error.message} ${error.stack} ${chain(error.cause)}` : String(error));
     expect(chain(released)).not.toContain(NEW_KEY);
+    // A non-string code whose primitive form is a known code is dropped, not carried in `cause`.
+    vi.spyOn(profiles, 'acquireConfigurationLock').mockImplementationOnce(async () => {
+      const lock = await acquire();
+      return { release: async () => {
+        await lock.release();
+        throw new ByokKeysError(primitiveCode() as unknown as string, 'release failed');
+      } };
+    });
+    const unchecked = await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error as Error);
+    expect(unchecked).toMatchObject({ code: 'PROVIDER_CHANGE_COMMITTED' });
+    expect((unchecked as Error).cause).toBeUndefined();
+    expect(JSON.stringify([unchecked, (unchecked as Error).cause])).not.toContain('sk-fake');
     await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
 
     // A lock connection that fails to close still frees the process-local lock.
@@ -406,6 +424,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       .toThrow(expect.objectContaining({ code: 'PROVIDER_STORE_SCHEMA_STALE' }));
   });
 });
+
 
 describe('launcher custody snapshot (A4)', () => {
   async function setup() {

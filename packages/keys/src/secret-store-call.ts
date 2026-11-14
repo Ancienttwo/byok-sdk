@@ -87,9 +87,13 @@ const STORE_FAMILY_CODES = {
   SECRET_VALUE_INVALID: 1,
 } as const satisfies Record<StoreFamilyCode, 1>;
 
-/** Whether `code` is one the boundary can produce. */
-export function isSecretStoreErrorCode(code: string): boolean {
-  return code === 'PROVIDER_SECRET_STORE_FAILED' || Object.hasOwn(STORE_FAMILY_CODES, code);
+/**
+ * Whether `code` is one the boundary can produce. `code` comes from a store's
+ * error and is not checked by `ByokKeysError`: an object whose primitive form
+ * is a known code would pass `Object.hasOwn`, so only a string qualifies.
+ */
+export function isSecretStoreErrorCode(code: unknown): code is string {
+  return typeof code === 'string' && (code === 'PROVIDER_SECRET_STORE_FAILED' || Object.hasOwn(STORE_FAMILY_CODES, code));
 }
 
 /**
