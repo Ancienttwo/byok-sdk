@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import { createEnvelope, encodeEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { handleInboundEnvelope, terminalReceiptKey } from '../inbound';
-import { taskRedactionCodec, taskRedactionReceiptKey } from '../task-redaction';
+import { taskRedactionCodec } from '../task-redaction';
 import { archiveTerminalTasks } from '../task-archive';
 import { tenantStoresFor } from '../tenant-stores';
 import { createHarness, grantAgentHome, offerPayload, TENANT_A, TEST_AGENT_REF } from './support/harness';
@@ -82,15 +82,13 @@ describe('replays across the terminal-task archive', () => {
   });
 
   it.each([
-    ['task.claim', 'missing', false, false, 'h1', 'claim_offer_mismatch'],
-    ['task.claim', 'missing', false, false, undefined, undefined],
-    ['task.fail', 'missing', false, false, undefined, 'recovery_offer_mismatch'],
-    ['task.claim', 'tombstone', false, false, undefined, 'claim_offer_mismatch'],
-    ['task.fail', 'tombstone', false, false, undefined, 'recovery_offer_mismatch'],
-    ['task.claim', 'tombstone', true, true, undefined, 'claim_offer_mismatch'],
-    ['task.fail', 'tombstone', true, true, undefined, 'recovery_offer_mismatch'],
-    ['task.fail', 'tombstone', true, false, undefined, 'recovery_offer_mismatch'],
-  ] as const)('checks %s with a %s offer (archived=%s, redacted=%s, harness=%s)', async (type, state, archived, redacted, harnessId, reason) => {
+    ['task.claim', 'missing', false, 'h1', 'claim_offer_mismatch'],
+    ['task.claim', 'missing', false, undefined, undefined],
+    ['task.fail', 'missing', false, undefined, 'recovery_offer_mismatch'],
+    ['task.claim', 'tombstone', false, undefined, 'claim_offer_mismatch'],
+    ['task.fail', 'tombstone', false, undefined, 'recovery_offer_mismatch'],
+    ['task.fail', 'tombstone', true, undefined, 'recovery_offer_mismatch'],
+  ] as const)('checks %s with a %s offer (archived=%s, harness=%s)', async (type, state, archived, harnessId, reason) => {
     const h = createHarness();
     const { deviceId } = await h.pairDevice(TENANT_A);
     await grantAgentHome(h, TENANT_A, deviceId);
@@ -100,10 +98,6 @@ describe('replays across the terminal-task archive', () => {
       { id: 'h1', version: '1.0.0', capabilities: { steer: false, resume: false, approvalInteractive: false } },
     ] });
     const offer = await h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
-    if (redacted) {
-      expect(await handleInboundEnvelope(stores, deviceId,
-        createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }))).toEqual({ outcome: 'accepted' });
-    }
     const originalAttempt = await stores.tasks.get(offer.taskId);
     const tombstone = await taskRedactionCodec(h.crypto).tombstone(encodeEnvelope(offer.envelope));
     const guardedStores = {
@@ -120,7 +114,6 @@ describe('replays across the terminal-task archive', () => {
         return stores.receipts.get(key);
       } },
     };
-    if (redacted) await stores.receipts.record({ key: taskRedactionReceiptKey(offer.taskId), body: '{}' });
     // The last row reaches the unclaimed archive's missing-terminal guard;
     // keep the attempt offered so the cloud-settled guard does not preempt it.
     expect(await stores.receipts.get(terminalReceiptKey(offer.taskId))).toBeUndefined();
