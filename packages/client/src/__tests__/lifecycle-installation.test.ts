@@ -1226,7 +1226,7 @@ for name, operation in [('rename', lambda: os.rename(entry, moved)),
     except OSError as error:
         result[name] = errno.errorcode[error.errno]
 print(json.dumps(result))
-`, shared, entry, moved, target], { encoding: 'utf8', timeout: 10_000 });
+`, shared, entry, moved, target], { cwd: scratch, encoding: 'utf8', timeout: 10_000 });
           expect(attack.error).toBeUndefined();
           expect(attack.status, attack.stderr).toBe(0);
           const result = JSON.parse(attack.stdout) as { uid: number; rename: string | null; symlink: string | null };
