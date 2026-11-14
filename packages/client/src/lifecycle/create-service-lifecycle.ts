@@ -20,7 +20,7 @@ export interface CreateServiceLifecycleOptions {
    * WinSW binaries obviously aren't present on the "wrong" OS).
    */
   platform?: NodeJS.Platform;
-  /** Platform-specific DI seams (mocked exec, mocked fs, mocked homedir/getuid) — only the fields matching the resolved platform are ever read. */
+  /** Platform-specific DI seams (mocked exec, mocked fs, mocked homedir/uid) — only the fields matching the resolved platform are ever read. */
   deps?: LaunchdDeps & SystemdDeps & WinswDeps & WindowsUserDeps;
   /**
    * An isolated root for the `service-lifecycle` gate that install, repair,

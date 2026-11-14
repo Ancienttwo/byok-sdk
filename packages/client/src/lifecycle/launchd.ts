@@ -54,7 +54,12 @@ export interface LaunchdDeps {
   run?: Runner;
   fs?: ManagedLifecycleFs;
   homedir?: () => string;
-  /** Defaults to `process.getuid` — macOS/Linux only; this module is never constructed on `win32` (see `create-service-lifecycle.ts`). */
+  /**
+   * The uid of the `gui/<uid>` domain. Defaults to `process.geteuid`, the
+   * uid that owns the plist, launcher and store this process writes, so the
+   * job launchd runs as can read them (#2031). macOS/Linux only; this module
+   * is never constructed on `win32` (see `create-service-lifecycle.ts`).
+   */
   getuid?: () => number;
   /** Clock and wait for the unload deadline; tests drive them. */
   now?: () => number;
@@ -165,10 +170,10 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
   const getuid =
     deps.getuid ??
     (() => {
-      if (typeof process.getuid !== 'function') {
-        throw new Error('launchd lifecycle requires a POSIX uid (process.getuid unavailable) — this module only runs on macOS');
+      if (typeof process.geteuid !== 'function') {
+        throw new Error('launchd lifecycle requires a POSIX uid (process.geteuid unavailable) — this module only runs on macOS');
       }
-      return process.getuid();
+      return process.geteuid();
     });
 
   const now = deps.now ?? Date.now;
