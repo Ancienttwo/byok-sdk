@@ -377,6 +377,24 @@ describe('committed Pi spawn boundary', () => {
     },
   );
 
+  it.skipIf(process.platform === 'win32').each(['effective', 'real'] as const)(
+    'checks the %s uid owner when real and effective uids differ', async (owner) => {
+      const f = await fixture();
+      try {
+        const { uid } = await fs.lstat(f.projection);
+        vi.spyOn(process, 'geteuid').mockReturnValue(owner === 'effective' ? uid : uid + 1);
+        vi.spyOn(process, 'getuid').mockReturnValue(owner === 'real' ? uid : uid + 1);
+        if (owner === 'effective') {
+          await expect(assertPiProjectionDirectory(f.projection)).resolves.toBeUndefined();
+        } else {
+          await expect(assertPiProjectionDirectory(f.projection)).rejects.toThrow(
+            'pi_projection_owner_mismatch: Pi projection directory must be owned by the effective uid',
+          );
+        }
+      } finally { vi.restoreAllMocks(); await fs.rm(f.root, { recursive: true, force: true }); }
+    },
+  );
+
   it.each([undefined, 'e-custom', 'ENOENT'])('sanitizes synchronous spawn failures with code %s', async (code) => {
     const f = await fixture();
     try {
