@@ -85,9 +85,20 @@ it('retains a failed callback outbox and re-notifies on recovery, then closes id
   let notified!: () => void;
   const recovered = new Promise<void>(resolve => { notified = resolve; });
   host = await openHost({ onOutbox: () => { if (failing) throw new Error('offline Host'); notified(); } });
+  let failed!: () => void;
+  const failureCommitted = new Promise<void>(resolve => { failed = resolve; });
+  const ledger = host.ledger, transaction = ledger.transaction.bind(ledger);
+  // Observe the actual error commit; callback entry alone precedes durable retry state.
+  const writes = vi.spyOn(ledger, 'transaction').mockImplementation(apply => {
+    const result = transaction(apply);
+    if (Object.values(ledger.snapshot().outbox).some(row => row.kind === 'projection' && row.lastError === 'offline Host')) failed();
+    return result;
+  });
   await host.core.enqueue(host.intent('callback'));
   (await running('callback')).finish({ text: 'callback' });
-  await vi.waitFor(() => expect(Object.values(host!.ledger.snapshot().outbox).find(row => row.kind === 'projection')?.lastError).toBe('offline Host'));
+  await failureCommitted;
+  writes.mockRestore();
+  expect(Object.values(host.ledger.snapshot().outbox).find(row => row.kind === 'projection')?.lastError).toBe('offline Host');
   failing = false;
   await host.restartCore();
   await recovered;
