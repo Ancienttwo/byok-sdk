@@ -30,7 +30,7 @@ Start with the [Worker example](../../examples/hosted-bot-collaboration-worker/R
 | 2.3-2.6 | device seat: the published stable tag t3 supplies (at least v0.42.0) plus the two-file window SHA overlay; build/typecheck with the commands below | Exactly two overlay files, compilation exits 0; no unpublished SDK code | #794 5.2/chain, #654 5.11/5.15 |
 | 2.8 | device seat: `bun ci && bun run build` in a separate window SHA checkout. During the window the owner installs browsers: `PLAYWRIGHT_BROWSERS_PATH="$HOME/byok-p9/ms-playwright" bun node_modules/playwright/cli.js install chromium firefox webkit` | W3 uses the main checkout; do not install browser dependencies into the SDK tag checkout. Record an affected engine OPEN/FAIL on failure | #654(e) 5.13 |
 
-Pin versions (operator / t3; all later steps reuse these variables, without taking a new main SHA mid-window). The block uses `set -e`, so run it in the shell that keeps the variables for the window, not one you mind losing: a failed check ends that shell.
+Pin versions (operator / t3; all later steps reuse these variables, without taking a new main SHA mid-window). The block uses `set -e`: if a check fails, that shell exits and the pinned variables go with it. Fix the cause and rerun the whole block in a new shell.
 
 ```sh
 set -e
