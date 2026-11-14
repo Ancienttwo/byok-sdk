@@ -87,11 +87,18 @@ spelling of the root takes the same gate. On macOS and Linux, an install root
 owned by another user (also one that user created first) is refused with the
 new `ServiceInstallationErrorCode` `install_root_foreign_owner` before
 anything is written in it; run the operation as the owner of the root. The
-gate and the owner check use the effective uid. These guarantees hold only
-while the install root's parent directory is writable by the installing user
-alone: another user who can write it can rename the root or replace it with a
-symlink after the check (#2028). Windows has no owner check, and two Windows
-users operating on one install root are not guaranteed to exclude each other.
+gate and the owner check use the effective uid. An install root another
+user could rename or replace with a symlink after the check is refused with
+the new code `install_root_ancestor_unsafe`, naming the directory (#2028):
+every directory from the root up to `/`, along the path as given and its real
+path, must belong to the installing user or root and must not be writable by
+everyone unless it has the sticky bit. Move such an install root under a
+directory only the installing user or root can change. Group-writable
+directories are accepted and their group trusted (macOS `/Applications` is
+root:admin 775). Windows has neither check, since rename rights there follow
+ACLs the SDK does not read: keep the install root under a directory only the
+installing user can change, such as `%LOCALAPPDATA%`. Two Windows users
+operating on one install root are not guaranteed to exclude each other.
 
 ## Gate release failures join the thrown error
 

@@ -1009,6 +1009,22 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await tree(installRoot)).toEqual({});
     });
 
+    it.skipIf(process.platform === 'win32')('an install root another user could rename or replace is install_root_ancestor_unsafe before anything is written (#2028)', async () => {
+      const shared = path.join(root, 'shared');
+      const app = path.join(shared, 'app');
+      await fs.mkdir(app, { recursive: true });
+      const over = installationOver(fakeLifecycle(), { installRoot: app });
+      // A parent anyone can write without the sticky bit, then the root itself; a sticky parent like /tmp is accepted.
+      for (const [dir, mode] of [[shared, 0o777], [app, 0o777]] as const) {
+        await fs.chmod(dir, mode);
+        await expect(over.recover()).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`(${dir})`) });
+        expect(await tree(app)).toEqual({});
+        await fs.chmod(dir, 0o755);
+      }
+      await fs.chmod(shared, 0o1777);
+      await expect(over.recover()).resolves.toBeUndefined();
+    });
+
     it('uninstall refuses a symlinked snapshots/ and changes nothing behind it', async () => {
       await installation.install(await payload('1.0.0'));
       const outside = path.join(root, 'outside');

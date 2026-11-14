@@ -412,6 +412,7 @@ const ERROR_MESSAGES = {
   repair_interrupted: 'A same-version reinstall was interrupted. Run install() again.',
   service_program_not_current: 'The service unit must be the one this SDK writes, running from <installRoot>/current. Reinstall the payload installed now (install() with the current version id) to rewrite the unit, then retry.',
   install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.',
+  install_root_ancestor_unsafe: 'Another user could rename or replace the install root: a directory its lookup passes through belongs to another user or is writable by everyone without the sticky bit. Nothing was changed; choose an install root whose every directory up to / belongs to this user or root.',
   snapshots_symlinked: 'A path under the install root\'s snapshots/ is a symbolic link. Nothing changed; replace the link, then retry.',
   store_overlaps_service_state: 'A store overlaps the install root or a daemon store\'s service/ directory.',
 } as const;
@@ -712,15 +713,26 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * path, one spelling for every alias (a symlink, or another letter case on
    * a case-insensitive volume), and whoever creates a missing root owns it.
    * The gate is per effective uid, so on POSIX a root another user owns is
-   * `install_root_foreign_owner` before anything is written under it. This
-   * holds only while the root's parent directory is writable by this user
-   * alone: otherwise the root can be renamed or replaced by a symlink after
-   * the check (#2028). Windows has no owner check.
+   * `install_root_foreign_owner` before anything is written under it. A
+   * root another user could rename or replace with a link after the check
+   * is `install_root_ancestor_unsafe` (#2028): every directory from the
+   * root up to `/`, along the path as given and along its real path, must
+   * belong to this user or to root and must not be writable by everyone
+   * unless it has the sticky bit. A
+   * group-writable directory is accepted: its group is trusted (macOS
+   * `/Applications` is root:admin 775). Windows has neither check: who can
+   * rename an entry there follows ACLs (FILE_DELETE_CHILD on the parent,
+   * DELETE on the entry, inheritance), which have no sticky-bit equivalent
+   * and are not read; keep the root in a directory only this user can
+   * change, such as one under %LOCALAPPDATA%.
    */
   function rootOwned<T>(operation: (held: HeldServiceLifecycle) => Promise<T>): Promise<T> {
     return lifecycle.owned(async (held) => {
       let gate: PathMutationGate;
-      await fs.mkdir(root, { recursive: true });
+      // Created without `recursive` so an existing root is never taken for
+      // one this call made; either way the checks below decide (#2028).
+      await fs.mkdir(path.dirname(root), { recursive: true });
+      await fs.mkdir(root).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
       try {
         gate = await acquirePathMutationGate({ scope: 'install-root', targetPath: root }, { waitMs: 0 });
       } catch (error) {
@@ -747,10 +759,16 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   async function assertOwnInstallRoot(): Promise<void> {
     const euid = process.geteuid?.();
     if (euid === undefined) return;
-    if ((await fs.stat(root)).uid !== euid) {
-      const error = new ServiceInstallationError('install_root_foreign_owner');
-      error.message = `${error.message} (${root})`;
+    const refuse = (at: string, code: ServiceInstallationErrorCode = 'install_root_ancestor_unsafe'): never => {
+      const error = new ServiceInstallationError(code);
+      error.message = `${error.message} (${at})`;
       throw error;
+    };
+    if ((await fs.stat(root)).uid !== euid) refuse(root, 'install_root_foreign_owner');
+    const chain = (at: string): string[] => path.dirname(at) === at ? [at] : [at, ...chain(path.dirname(at))];
+    for (const dir of new Set([...chain(path.resolve(root)), ...chain(await fs.realpath(root))])) {
+      const { uid, mode } = await fs.stat(dir);
+      if ((uid !== euid && uid !== 0) || ((mode & 0o002) !== 0 && (mode & 0o1000) === 0)) refuse(dir);
     }
   }
 
