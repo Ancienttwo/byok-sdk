@@ -296,6 +296,11 @@ test('the desktop keys browser script selects its owner and unknown siblings rem
   assert.throws(() => selectImpact(['examples/desktop-bot-app/scripts/other.browser.mjs']), /Reviewed CI mapping required/);
 });
 
+test('the two-user install-root test selects its macOS/Linux service matrix (#2153)', () => {
+  const impact = selectImpact(['packages/client/src/__tests__/lifecycle-installation.test.ts']);
+  assert.deepEqual(impact.families, ['dataplane', 'service-upgrade-smoke']);
+});
+
 test('a platform family is selected only by a path it owns', () => {
   const owned = {
     'agent-memory-export-linux': 'packages/client/src/daemon/agent-memory-export.ts',
