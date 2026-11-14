@@ -357,7 +357,8 @@ export interface ServiceInstallation {
    * `store_overlaps_service_state`, each naming the path. An earlier
    * version could record either. The call then throws `upgrade_pending`
    * with that refusal in its cause, and the receipt, `current`, the
-   * snapshot and every store stay as they were. Returns the receipt, or `undefined` when there is none. Release
+   * snapshot and every store stay as they were. Returns the receipt, or
+   * `undefined` when there is none. Release
    * failures follow the same rule as on `rollback()`.
    */
   recover(): Promise<ServiceUpgradeReceipt | undefined>;
