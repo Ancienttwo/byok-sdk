@@ -498,7 +498,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     let attempt = 0;
     await vi.waitFor(
       () => {
-        if (linesLive.some((l) => /started taskId=t-live-\d+/.test(l))) return;
+        if (linesLive.some((l) => /started taskId="t-live-\d+"/.test(l))) return;
         attempt += 1;
         server.send(
           createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: `t-live-${attempt}`, seq: server.nextSeq() }),

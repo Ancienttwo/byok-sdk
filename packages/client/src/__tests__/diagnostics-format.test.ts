@@ -50,29 +50,29 @@ describe('diagnostics/format: formatDaemonEventLine', () => {
   it('F6 renders suppressed built-in risk codes on local decision and reminder lines', () => {
     expect(formatDaemonEventLine({ kind: 'tool-authorization', ts: 'T', taskId: 't', toolName: 'bash',
       decision: 'allow', authorization: { source: 'rule', ruleIds: ['push-origin'] }, reasons: [], suppressedReasons: ['destructive-git'] }))
-      .toBe('[T] tool-authorization taskId=t tool="bash" decision=allow source=rule ruleIds=["push-origin"] reasons= suppressedReasons=destructive-git');
+      .toBe('[T] tool-authorization taskId="t" tool="bash" decision=allow source=rule ruleIds=["push-origin"] reasons= suppressedReasons=destructive-git');
     expect(formatDaemonEventLine({ kind: 'tool-reminder', ts: 'T', taskId: 't', toolName: 'bash',
       authorization: { source: 'rule', ruleIds: ['ask-push'] }, reasons: ['custom-rule'], suppressedReasons: ['destructive-git'], summary: 'review' }))
-      .toBe('[T] tool-reminder taskId=t tool="bash" source=rule ruleIds=["ask-push"] reasons=custom-rule suppressedReasons=destructive-git summary="review"');
+      .toBe('[T] tool-reminder taskId="t" tool="bash" source=rule ruleIds=["ask-push"] reasons=custom-rule suppressedReasons=destructive-git summary="review"');
   });
 
   it('renders file-scope deny and adoption audit without paths', () => {
     expect(formatDaemonEventLine({ kind: 'file-scope', ts: 'T', taskId: 't1', decision: 'deny', lane: 'rpc',
       homeAccess: 'writer', scope: { source: 'host', mode: 'workspaces', digest: 'd1' }, rootId: 'repo',
       access: 'write', code: 'file_scope_unavailable', reason: 'symlink' }))
-      .toBe('[T] file-scope taskId=t1 decision=deny lane=rpc homeAccess=writer mode=workspaces digest=d1 rootId="repo" access=write code=file_scope_unavailable reason=symlink');
+      .toBe('[T] file-scope taskId="t1" decision=deny lane=rpc homeAccess=writer mode=workspaces digest=d1 rootId="repo" access=write code=file_scope_unavailable reason=symlink');
     expect(formatDaemonEventLine({ kind: 'file-scope', ts: 'T', taskId: 't2', decision: 'policy-adoption', lane: 'rpc',
       homeAccess: 'writer', scope: { source: 'host', mode: 'home', digest: 'd2' }, rootIds: ['home'] }))
-      .toBe('[T] file-scope taskId=t2 decision=policy-adoption lane=rpc homeAccess=writer mode=home digest=d2 rootIds=["home"]');
+      .toBe('[T] file-scope taskId="t2" decision=policy-adoption lane=rpc homeAccess=writer mode=home digest=d2 rootIds=["home"]');
   });
 
   it('renders local rule decisions and reminder provenance without additional input content', () => {
     expect(formatDaemonEventLine({ kind: 'tool-authorization', ts: 'T', taskId: 't1', toolName: 'bash', toolCallId: 'c1',
       decision: 'allow', authorization: { source: 'rule', ruleIds: ['push-origin'] }, reasons: [] }))
-      .toBe('[T] tool-authorization taskId=t1 tool="bash" decision=allow source=rule ruleIds=["push-origin"] reasons=');
+      .toBe('[T] tool-authorization taskId="t1" tool="bash" decision=allow source=rule ruleIds=["push-origin"] reasons=');
     expect(formatDaemonEventLine({ kind: 'tool-reminder', ts: 'T', taskId: 't1', toolName: 'read',
       authorization: { source: 'floor', ruleIds: [] }, reasons: ['sensitive-path'], summary: 'protected path' }))
-      .toBe('[T] tool-reminder taskId=t1 tool="read" source=floor ruleIds=[] reasons=sensitive-path summary="protected path"');
+      .toBe('[T] tool-reminder taskId="t1" tool="read" source=floor ruleIds=[] reasons=sensitive-path summary="protected path"');
   });
   it('renders each DaemonEvent kind on one plain line prefixed with its timestamp', () => {
     const cases: DaemonEvent[] = [
@@ -99,19 +99,19 @@ describe('diagnostics/format: formatDaemonEventLine', () => {
     ];
 
     expect(cases.map((event) => formatDaemonEventLine(event))).toEqual([
-      '[T] offered taskId=t1 runtime=pi',
-      '[T] claimed taskId=t1',
-      '[T] claimed taskId=t1 claimedRuntime=pi',
-      '[T] started taskId=t1',
-      '[T] progress taskId=t1 turn_end',
-      '[T] artifact taskId=t1 name=out.txt contentType=text/plain',
-      '[T] awaiting-approval taskId=t1 summary="needs a human"',
-      '[T] awaiting-approval taskId=t1 approvalId=appr-1 summary="needs a human"',
-      '[T] completed taskId=t1 sessionRef=sess-1 summary="done"',
-      '[T] failed taskId=t1 retryable=false reason="boom"',
-      '[T] failed taskId=t1 retryable=false preClaim=true reason="declined"',
-      '[T] cancelled taskId=t1 reason="user cancelled"',
-      '[T] cancelled taskId=t1',
+      '[T] offered taskId="t1" runtime=pi',
+      '[T] claimed taskId="t1"',
+      '[T] claimed taskId="t1" claimedRuntime=pi',
+      '[T] started taskId="t1"',
+      '[T] progress taskId="t1" turn_end',
+      '[T] artifact taskId="t1" name=out.txt contentType=text/plain',
+      '[T] awaiting-approval taskId="t1" summary="needs a human"',
+      '[T] awaiting-approval taskId="t1" approvalId=appr-1 summary="needs a human"',
+      '[T] completed taskId="t1" sessionRef=sess-1 summary="done"',
+      '[T] failed taskId="t1" retryable=false reason="boom"',
+      '[T] failed taskId="t1" retryable=false preClaim=true reason="declined"',
+      '[T] cancelled taskId="t1" reason="user cancelled"',
+      '[T] cancelled taskId="t1"',
       '[T] lifecycle phase=running connection=open',
       '[T] paired deviceId=dev-1',
       '[T] unpaired',
@@ -146,17 +146,17 @@ describe('diagnostics/format: formatTaskLine / formatTaskListLines', () => {
       declined: true,
       updatedAt: 'T',
     };
-    expect(formatTaskLine(task)).toBe('t1 Complete runtime=pi claimedRuntime=claude updatedAt=T sessionRef=sess-1 declined=true summary="all done"');
+    expect(formatTaskLine(task)).toBe('"t1" Complete runtime=pi claimedRuntime=claude updatedAt=T sessionRef=sess-1 declined=true summary="all done"');
   });
 
   it('renders a minimal task with no optional fields', () => {
     const task: DaemonTaskInfo = { taskId: 't2', state: 'Offered', updatedAt: 'T' };
-    expect(formatTaskLine(task)).toBe('t2 Offered updatedAt=T');
+    expect(formatTaskLine(task)).toBe('"t2" Offered updatedAt=T');
   });
 
   it('renders a recorded task (from the audit log) with its summary size, never text', () => {
     expect(formatTaskLine({ taskId: 't1', state: 'Complete', updatedAt: 'T', sessionRef: 's', summaryBytes: 42 })).toBe(
-      't1 Complete updatedAt=T sessionRef=s summaryBytes=42',
+      '"t1" Complete updatedAt=T sessionRef=s summaryBytes=42',
     );
   });
 
@@ -169,7 +169,7 @@ describe('diagnostics/format: formatTaskLine / formatTaskListLines', () => {
       { taskId: 't1', state: 'Running', updatedAt: 'T' },
       { taskId: 't2', state: 'Complete', updatedAt: 'T' },
     ];
-    expect(formatTaskListLines(tasks)).toEqual(['t1 Running updatedAt=T', 't2 Complete updatedAt=T']);
+    expect(formatTaskListLines(tasks)).toEqual(['"t1" Running updatedAt=T', '"t2" Complete updatedAt=T']);
   });
 
 });
@@ -424,7 +424,7 @@ describe('diagnostics/format: formatLiveStatusLines', () => {
   it('shows a placeholder for no active tasks, and one line per active task otherwise', () => {
     expect(formatLiveStatusLines(baseLive())).toContain('live-active-tasks: (none)');
     const lines = formatLiveStatusLines(baseLive({ activeTasks: [{ taskId: 't1', state: 'Running' }] }));
-    expect(lines).toContain('live-active-task: t1 Running');
+    expect(lines).toContain('live-active-task: "t1" Running');
     expect(lines).not.toContain('live-active-tasks: (none)');
   });
 
@@ -445,7 +445,7 @@ describe('diagnostics/format: formatLiveStatusLines', () => {
         approvalsPending: 1,
       }),
     );
-    expect(lines).toContain('live-approval: appr-1 taskId=t1 summary="Bash: rm -rf /tmp/x"');
+    expect(lines).toContain('live-approval: appr-1 taskId="t1" summary="Bash: rm -rf /tmp/x"');
     expect(lines).not.toContain('live-approvals: (none)');
   });
 
@@ -463,7 +463,7 @@ describe('diagnostics/format: formatLiveStatusLines', () => {
     const lines = formatLiveStatusLines(
       baseLive({ approvals: [{ approvalId: 'appr-3', taskId: 't3', kind: 'task-terminal', createdAt: '2026-01-01T00:00:00.000Z' }] }),
     );
-    expect(lines).toContain('live-approval: appr-3 taskId=t3 summary="(no summary)"');
+    expect(lines).toContain('live-approval: appr-3 taskId="t3" summary="(no summary)"');
   });
 
   it('shows a placeholder for no queue watermarks, and one line per task otherwise (M4 Phase 4, part B.3)', () => {
@@ -477,8 +477,8 @@ describe('diagnostics/format: formatLiveStatusLines', () => {
         ],
       }),
     );
-    expect(lines).toContain('live-queue-watermark: t1 progressBatcherPending=4 pendingApprovals=2');
-    expect(lines).toContain('live-queue-watermark: t2 progressBatcherPending=0 pendingApprovals=0');
+    expect(lines).toContain('live-queue-watermark: "t1" progressBatcherPending=4 pendingApprovals=2');
+    expect(lines).toContain('live-queue-watermark: "t2" progressBatcherPending=0 pendingApprovals=0');
     expect(lines).not.toContain('live-queue-watermarks: (none)');
   });
 
@@ -525,7 +525,7 @@ describe('diagnostics/format: formatApprovalsListLines (finding F4)', () => {
   it('renders approvalId, taskId, age, and a quoted summary excerpt — one line per pending approval', () => {
     const nowMs = Date.parse('2026-01-01T00:01:30.000Z'); // 90s after createdAt
     const lines = formatApprovalsListLines([approval()], nowMs);
-    expect(lines).toEqual(['appr-1 taskId=t1 age=1m summary="Bash: rm -rf /tmp/x"']);
+    expect(lines).toEqual(['appr-1 taskId="t1" age=1m summary="Bash: rm -rf /tmp/x"']);
   });
 
   it('renders one line per entry, preserving order', () => {
@@ -535,8 +535,8 @@ describe('diagnostics/format: formatApprovalsListLines (finding F4)', () => {
       nowMs,
     );
     expect(lines).toEqual([
-      'appr-1 taskId=t1 age=10s summary="Bash: rm -rf /tmp/x"',
-      'appr-2 taskId=t2 age=10s summary="Bash: rm -rf /tmp/x"',
+      'appr-1 taskId="t1" age=10s summary="Bash: rm -rf /tmp/x"',
+      'appr-2 taskId="t2" age=10s summary="Bash: rm -rf /tmp/x"',
     ]);
   });
 
@@ -569,10 +569,10 @@ describe('diagnostics/format: formatApprovalsListLines (finding F4)', () => {
 describe('diagnostics/format: live view and environment', () => {
   it('tasks --follow (the authenticated live view) renders full fidelity', () => {
     expect(formatDaemonEventLine({ kind: 'progress', ts: 'T', taskId: 't1', event: { type: 'progress', text: 'doing the thing' } })).toBe(
-      '[T] progress taskId=t1 progress: "doing the thing"',
+      '[T] progress taskId="t1" progress: "doing the thing"',
     );
     expect(formatDaemonEventLine({ kind: 'completed', ts: 'T', taskId: 't1', summary: 'done', sessionRef: 's' })).toBe(
-      '[T] completed taskId=t1 sessionRef=s summary="done"',
+      '[T] completed taskId="t1" sessionRef=s summary="done"',
     );
   });
 

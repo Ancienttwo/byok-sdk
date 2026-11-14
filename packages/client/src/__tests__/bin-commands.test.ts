@@ -212,7 +212,7 @@ describe('bin/commands/tasks: runTasksListCommand', () => {
     // The audit log never holds the summary text, only its size (#395); the
     // text is available live over the control socket (`tasks --follow`).
     expect(lines).toEqual([
-      't1 Complete runtime=pi updatedAt=2026-01-01T00:00:03.000Z sessionRef=s1 summaryBytes=4',
+      '"t1" Complete runtime=pi updatedAt=2026-01-01T00:00:03.000Z sessionRef=s1 summaryBytes=4',
     ]);
   });
 });
@@ -376,8 +376,8 @@ describe('bin/commands/approvals: runApprovalsCommand (finding F4)', () => {
 
     expect(handleRequest).toHaveBeenCalledWith('approvals.list', undefined);
     expect(lines).toEqual([
-      'appr-1 taskId=t1 age=1m summary="Bash: rm -rf /tmp/x"',
-      'appr-2 taskId=t2 age=30s summary="(no summary)"',
+      'appr-1 taskId="t1" age=1m summary="Bash: rm -rf /tmp/x"',
+      'appr-2 taskId="t2" age=30s summary="(no summary)"',
     ]);
     expect(close).toHaveBeenCalledTimes(1);
   });
