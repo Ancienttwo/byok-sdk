@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { MessageDraftDelta } from '../types';
 import { CodexProjection } from '../adapters/codex/projection';
-import { createSessionKernel } from '../../vendor/oar/95c6547/shared/session-kernel';
+import { createSessionKernel } from '../../vendor/oar/2f81b34/shared/session-kernel';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 function setup() {
   const kernel = createSessionKernel('root');

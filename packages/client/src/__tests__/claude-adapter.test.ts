@@ -16,7 +16,7 @@ import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { observationOf } from './fixtures/mcp-observation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
-import type { RawEvent } from '../../vendor/oar/95c6547/contracts/session';
+import type { RawEvent } from '../../vendor/oar/2f81b34/contracts/session';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 

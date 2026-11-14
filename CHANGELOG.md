@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Changed (client; #2179)** — The vendored OAR moves from 0.103.0 to 0.105.0 (upstream release commit `2f81b349`, `packages/client/vendor/oar/2f81b34/`, fork branch `byok/0.105.0`). With OpenCode 2.3 or later, the qualified line, the session now declares OpenCode's child-session-updates capability at `initialize`, so a `task` subagent's updates arrive on `opencode/session/child_update` and are recorded under the child's session id. The SDK events of a task stay the same: a subagent's tool calls still come as `tool_use`/`tool_result` with session-prefixed ids, its text is still not `progress`, and the task still ends at the root turn's end. OpenCode `steer` stays unsupported in the SDK; the capability matrix does not change.
+
 - **Fixed (keys; #2031)** — Pi projection directory ownership is checked against the effective uid, which owns files created by the process. When real and effective uids differ, an effective-uid-owned directory is accepted and a directory owned only by the real uid is refused.
 
 - **Security (client, cloud, server, bot-collaboration; #2118)** — Raise the declared dependency floors to `hono` `^4.13.16` and `@hono/node-server` `^2.1.6`, and update the lockfile to 4.13.18 and 2.1.8 respectively, fixing the seven Hono advisories reported by the security nightly. This includes bot-collaboration's optional node-server peer for its testing entry and the client and bot-collaboration development dependencies. Hosts that pin an older copy must update it; existing Host lockfiles and bundled distributions need to be refreshed and rebuilt.
