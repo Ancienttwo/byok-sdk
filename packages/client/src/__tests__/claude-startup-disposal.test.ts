@@ -2,6 +2,7 @@ import { inertScratch } from './fixtures/inert-scratch';
 import { EventEmitter } from 'node:events';
 import { promises as fs } from 'node:fs';
 import { PassThrough } from 'node:stream';
+import { inspect } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeAdapter, type SpawnFn } from '../adapters/claude/claude-adapter';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
@@ -145,14 +146,24 @@ describe('Claude failed-start resource ownership', () => {
     expect(fs.rm).toHaveBeenCalledWith(configDir, { recursive: true, force: true });
   });
 
-  it('retains a pre-spawn cleanup failure and original spawn error for an idempotent retry', async () => {
-    const original = new Error('spawn refused');
+  it.each(['ENOENT', 'EACCES', undefined])('retains a pre-spawn cleanup failure and sanitized spawn error (code %s) for an idempotent retry', async (code) => {
+    const canary = 'private-spawn-input';
+    const original = Object.assign(new Error(`spawn refused: ${canary}`), {
+      code, path: `/inert/${canary}`, spawnargs: [canary], env: { TOKEN: canary }, cwd: `/inert/${canary}`, cause: new Error(canary),
+    });
+    expect(inspect(original, { depth: null })).toContain(canary);
     const cleanupError = new Error('config removal refused');
     const spawnFn = (() => { throw original; }) as SpawnFn;
     vi.mocked(fs.rm).mockRejectedValueOnce(cleanupError);
     const failure = await start(spawnFn).catch(error => error);
     expect(failure).toBeInstanceOf(RuntimeStartupDisposalFailure);
-    expect(containsCause(failure, original)).toBe(true);
+    expect(failure.cause).toBeInstanceOf(AggregateError);
+    const startupError = (failure.cause as AggregateError).errors[0];
+    expect(startupError).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(startupError.cause).toMatchObject({ message: `spawn failed: ${code ?? 'unknown'}`, code });
+    for (const field of ['path', 'spawnargs', 'env', 'cwd', 'cause']) expect(startupError.cause).not.toHaveProperty(field);
+    expect(containsCause(failure, original)).toBe(false);
+    expect(inspect(failure, { depth: null })).not.toContain(canary);
     expect(containsCause(failure, cleanupError)).toBe(true);
     await failure.retryDisposal(); await failure.retryDisposal();
     expect(fs.rm).toHaveBeenCalledTimes(2);
