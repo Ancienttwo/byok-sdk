@@ -81,6 +81,19 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     expect(run).toHaveBeenCalledWith('launchctl', ['enable', 'gui/501/Acme-Agent-']);
   });
 
+  it('#2031: the gui domain defaults to the effective uid that owns the files it writes', async () => {
+    const run = vi.fn<Runner>().mockImplementation(async (_cmd, args) => (args[0] === 'print' ? ABSENT : ok()));
+    const getuid = vi.spyOn(process, 'getuid').mockReturnValue(501);
+    const geteuid = vi.spyOn(process, 'geteuid').mockReturnValue(502);
+    try {
+      await createLaunchdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h' }).install();
+      expect(run).toHaveBeenCalledWith('launchctl', ['bootstrap', 'gui/502', PLIST]);
+    } finally {
+      getuid.mockRestore();
+      geteuid.mockRestore();
+    }
+  });
+
   it('#2017: the job runs with the HOME the lifecycle installed under, not the account home', async () => {
     const run = vi.fn<Runner>().mockImplementation(async (_cmd, args) => (args[0] === 'print' ? ABSENT : ok()));
     const fs = fakeFs();
