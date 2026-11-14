@@ -15,7 +15,7 @@ import todoLayout from '../adapters/pi/todo-locale-layout.json';
 import { REQUIRE_BUN_ENV, resolveBunBin } from './support/test-bun-bin';
 import { writeKoffiAssetRoot } from '../../../../scripts/testing/sdk-koffi-asset-root.mjs';
 import { startLoopbackProvider } from './runtime-contract/loopback';
-import { openPiJitiSeed, piJitiFilename, piSubagentHostPeersSource, PI_JITI_SEED_DIR, sha256, usePiJitiSeed, type PiJitiSeedGroup } from '../adapters/pi/jiti-seed.mjs';
+import { openPiJitiSeed, piJitiFilename, piJitiSeedFile, piSubagentHostPeersSource, piSubagentHostSdkSource, PI_JITI_SEED_DIR, sha256, usePiJitiSeed, type PiJitiSeedGroup, type PiJitiSeedRoot } from '../adapters/pi/jiti-seed.mjs';
 
 const execFileAsync = promisify(execFile);
 const BUN_BIN = resolveBunBin();
@@ -98,7 +98,7 @@ describe('copyPiRuntimeAssets', () => {
   });
 });
 
-interface SeedManifest { readonly entries: { group: PiJitiSeedGroup; path: string; ts: boolean; async: boolean }[] }
+interface SeedManifest { readonly entries: { group: PiJitiSeedGroup; root: PiJitiSeedRoot; path: string; ts: boolean; async: boolean }[] }
 const SEED_GATE = fileURLToPath(new URL('../../scripts/build-pi-jiti-seed.mjs', import.meta.url));
 
 async function readSeedManifest(assets: string): Promise<{ dir: string; manifest: SeedManifest }> {
@@ -113,6 +113,13 @@ async function writeHostPeers(assets: string, dir: string): Promise<void> {
     { HOST_PEER_ALIASES: { specifier: string; optional?: boolean }[] };
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, 'host-peers.ts'), piSubagentHostPeersSource(HOST_PEER_ALIASES.filter(alias => !alias.optional).map(alias => alias.specifier)));
+}
+
+/** Prepare the generated foreground-child bridge before materializing parent. */
+async function writeHostSdk(dir: string): Promise<void> {
+  const pi = await import('@earendil-works/pi-coding-agent');
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, 'index.js'), piSubagentHostSdkSource(pi));
 }
 
 /** Run `body` as an execution whose temporary directory is `tmp`. */
@@ -137,12 +144,13 @@ describe('Pi jiti seed (#1927)', () => {
     await sdk.copyPiRuntimeAssets({ outDir: assets, form: 'compiled-executable' });
     const peers = path.join(root, 'peer probe 探针');
     await writeHostPeers(assets, peers);
+    const hostSdk = path.join(root, 'host SDK'); await writeHostSdk(hostSdk);
     const groupRoot = (group: PiJitiSeedGroup): string => group === 'host-peers' ? peers : path.join(assets, 'pi-subagents');
     const seeded = path.join(root, 'seeded'), cold = path.join(root, 'cold');
     await fs.mkdir(seeded); await fs.mkdir(cold);
     inExecution(seeded, () => {
       const seed = openPiJitiSeed(assets, []);
-      for (const group of ['parent', 'runner', 'host-peers'] as const) seed.materialize(group, groupRoot(group));
+      for (const group of ['parent', 'runner', 'host-peers'] as const) seed.materialize(group, groupRoot(group), hostSdk);
     });
     // The pinned jiti with its own Babel transform, asked for the same files at their installed paths.
     const jitiDir = path.join(assets, 'pi-subagents/node_modules/jiti');
@@ -151,7 +159,7 @@ describe('Pi jiti seed (#1927)', () => {
     const jiti = createJiti(path.join(cold, 'cold.cjs'), { fsCache: path.join(cold, 'jiti'), moduleCache: false });
     const { manifest } = await readSeedManifest(assets);
     for (const entry of manifest.entries) {
-      const file = piJitiFilename(jiti, path.join(groupRoot(entry.group), entry.path));
+      const file = piJitiFilename(jiti, piJitiSeedFile(entry, groupRoot(entry.group), hostSdk));
       jiti.transform({ filename: file, source: await fs.readFile(file, 'utf8'), ts: entry.ts, async: entry.async, jsx: false });
     }
     const expected = await cacheFiles(path.join(cold, 'jiti'));
@@ -165,9 +173,10 @@ describe('Pi jiti seed (#1927)', () => {
     const assets = path.join(root, 'pi');
     await sdk.copyPiRuntimeAssets({ outDir: assets, form: 'interpreter+bundle' });
     const pkg = path.join(assets, 'pi-subagents');
+    const hostSdk = path.join(root, 'host-sdk'); await writeHostSdk(hostSdk);
     const run = (name: string): string => {
       const tmp = path.join(root, name);
-      inExecution(tmp, () => openPiJitiSeed(assets, []).materialize('parent', pkg));
+      inExecution(tmp, () => openPiJitiSeed(assets, []).materialize('parent', pkg, hostSdk));
       return path.join(tmp, 'jiti');
     };
     const { dir } = await readSeedManifest(assets);
@@ -240,6 +249,21 @@ process.stdout.write(JSON.stringify({ seed, jiti }));`;
       expect(reasons).toEqual(['the seed could not be read (SyntaxError)']);
       expect(process.env.JITI_FS_CACHE).toBe('false');
     } finally { delete process.env.JITI_FS_CACHE; }
+  });
+
+  it('refuses a v1 manifest before writing any cache files', { timeout: 120_000 }, async () => {
+    const sdk = await loadClient();
+    const root = await tempRoot('byok-pi-seed-version-'), assets = path.join(root, 'pi'), tmp = path.join(root, 'tmp');
+    await sdk.copyPiRuntimeAssets({ outDir: assets, form: 'interpreter+bundle' });
+    const { dir } = await readSeedManifest(assets);
+    const manifest = JSON.parse(await fs.readFile(path.join(dir, 'manifest.json'), 'utf8')) as { version: number };
+    manifest.version = 1;
+    const bytes = JSON.stringify(manifest);
+    await fs.rm(dir, { recursive: true });
+    const old = path.join(assets, PI_JITI_SEED_DIR, sha256(bytes));
+    await fs.mkdir(old); await fs.writeFile(path.join(old, 'manifest.json'), bytes); await fs.mkdir(tmp);
+    expect(() => inExecution(tmp, () => openPiJitiSeed(assets, []))).toThrow('pi_jiti_seed_unavailable: unsupported manifest');
+    expect(await fs.readdir(tmp)).toEqual([]);
   });
 
   it('release gate: zero transforms with the copied seed, a transform for every lookup when it is changed or missing', { timeout: 300_000 }, async () => {

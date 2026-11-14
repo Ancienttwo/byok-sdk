@@ -15,7 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
  */
 export const PI_JITI_SEED_DIR = 'sdk-derived/pi-jiti-seed';
 export const PI_JITI_SEED_FORMAT = 'byok.pi.jiti-seed';
-export const PI_JITI_SEED_VERSION = 1;
+export const PI_JITI_SEED_VERSION = 2;
 /** Templates are generated against this root; only their own file URL literal names it. */
 export const PI_JITI_SEED_CANONICAL_ROOT = '/__byok_pi_jiti_seed__';
 /**
@@ -44,6 +44,28 @@ export function piSubagentHostPeersSource(specifiers) {
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
+/** The generated foreground-child bridge, shared by the build seed and the Host. */
+export function piSubagentHostSdkSource(pi) {
+  const names = Object.keys(pi).filter(name => name !== 'default' && /^[A-Za-z_$][\w$]*$/u.test(name)).sort();
+  return [
+    `const pi = globalThis[Symbol.for(${JSON.stringify(PI_SUBAGENTS_HOST_KEY)})];`,
+    "if (pi === undefined) throw new Error('pi_subagents_host_sdk_unavailable: this package is the Pi of one byok-sdk bundled host and loads only inside it');",
+    ...names.map((name, index) => `const value${index} = pi[${JSON.stringify(name)}]; export { value${index} as ${name} };`),
+    ...('default' in pi ? ['export default pi.default;'] : []),
+  ].join('\n') + '\n';
+}
+
+/** Resolve one v2 manifest input at the same roots the Host prepared. */
+export function piJitiSeedFile(entry, root, hostSdkRoot) {
+  if (entry.root === 'host-sdk') {
+    if (hostSdkRoot === undefined) refuse('the host SDK root was not prepared');
+    return path.join(hostSdkRoot, entry.path);
+  }
+  if (entry.root === 'pi-subagent-extensions') return path.join(root, '..', entry.root, entry.path);
+  if (entry.root === 'pi-subagents' || entry.root === 'host-peers') return path.join(root, entry.path);
+  refuse(`unsupported source root: ${entry.root}`);
+}
+
 /**
  * The filename `jiti` keys its cache file by for `file`: its own resolver's
  * spelling of the real path (forward slashes on Windows). The seed writes and
@@ -58,8 +80,8 @@ export function fileUrlLiteral(file) {
   return JSON.stringify(pathToFileURL(file).href);
 }
 
-export function canonicalSeedFile(group, relative) {
-  return path.posix.join(PI_JITI_SEED_CANONICAL_ROOT, group === 'host-peers' ? 'host-peers' : 'pi-subagents', relative);
+export function canonicalSeedFile(root, relative) {
+  return path.posix.join(PI_JITI_SEED_CANONICAL_ROOT, root, relative);
 }
 
 /**
@@ -157,9 +179,9 @@ export function openPiJitiSeed(seedRoot, loaderUrls) {
      * before anything is written. An entry jiti already finds in this
      * execution's cache, written earlier by the same execution, is kept.
      */
-    materialize(group, root) {
+    materialize(group, root, hostSdkRoot) {
       const prepared = manifest.entries.filter(entry => entry.group === group).map(entry => {
-        const file = piJitiFilename(jiti, path.join(root, entry.path));
+        const file = piJitiFilename(jiti, piJitiSeedFile(entry, root, hostSdkRoot));
         const source = readFileSync(file, 'utf8');
         if (sha256(source) !== entry.sourceSha256) refuse(`source changed: ${file}`);
         let code = readFileSync(path.join(templates, entry.template), 'utf8');
@@ -207,9 +229,9 @@ export function usePiJitiSeed(seedRoot, loaderUrls, report) {
     else seed = openPiJitiSeed(seedRoot, loaderUrls);
   } catch (error) { cold(error); }
   return {
-    materialize(group, root) {
+    materialize(group, root, hostSdkRoot) {
       if (seed === undefined) return;
-      try { seed.materialize(group, root); } catch (error) { cold(error); }
+      try { seed.materialize(group, root, hostSdkRoot); } catch (error) { cold(error); }
     },
   };
 }

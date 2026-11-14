@@ -4,6 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { CreateAgentSessionResult, ExtensionFactory, InlineExtension } from '@earendil-works/pi-coding-agent';
 import { dependencies as clientDependencies } from '../../../package.json';
+import { piSubagentHostSdkSource } from './jiti-seed.mjs';
 import type { ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc.js';
 
 // pi-subagents reads its own package files (manifest, agents, prompts, runner
@@ -150,7 +151,6 @@ export function isNodeSea(): boolean {
 }
 
 const HOST_SDK_GLOBAL_KEY = 'byok-sdk.pi-subagents.host-sdk';
-const EXPORT_NAME = /^[A-Za-z_$][\w$]*$/u;
 
 /**
  * pi-subagents loads the Pi SDK of its foreground children, and decides
@@ -169,16 +169,10 @@ export async function writePiSubagentsHostSdk(dir: string, assetRoot: string): P
   const pi = await import('@earendil-works/pi-coding-agent') as Record<string, unknown>;
   (globalThis as Record<symbol, unknown>)[Symbol.for(HOST_SDK_GLOBAL_KEY)] = pi;
   const manifest = JSON.parse(readFileSync(path.join(assetRoot, 'package.json'), 'utf8')) as { name: string; version: string; piConfig?: unknown };
-  const names = Object.keys(pi).filter(name => name !== 'default' && EXPORT_NAME.test(name));
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: manifest.name, version: manifest.version, type: 'module',
     ...(manifest.piConfig === undefined ? {} : { piConfig: manifest.piConfig }), exports: { '.': './index.js' } }), { flag: 'wx' });
-  writeFileSync(path.join(dir, 'index.js'), [
-    `const pi = globalThis[Symbol.for(${JSON.stringify(HOST_SDK_GLOBAL_KEY)})];`,
-    "if (pi === undefined) throw new Error('pi_subagents_host_sdk_unavailable: this package is the Pi of one byok-sdk bundled host and loads only inside it');",
-    ...names.map((name, index) => `const value${index} = pi[${JSON.stringify(name)}]; export { value${index} as ${name} };`),
-    ...('default' in pi ? ['export default pi.default;'] : []),
-  ].join('\n') + '\n', { flag: 'wx' });
+  writeFileSync(path.join(dir, 'index.js'), piSubagentHostSdkSource(pi), { flag: 'wx' });
   return dir;
 }
 

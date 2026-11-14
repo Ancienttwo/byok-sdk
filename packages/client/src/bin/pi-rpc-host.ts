@@ -319,7 +319,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
         extensionFactories.push(refuseBundledBackground);
       }
       const asset = await loadPiSubagentsAsset(subagentAssets, config.toolAuthorization, fileScoped);
-      seed.materialize('parent', join(subagentAssets, PI_SUBAGENTS_ASSET_DIR));
+      seed.materialize('parent', join(subagentAssets, PI_SUBAGENTS_ASSET_DIR), process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT);
       subagentExtensionPaths.push(asset.extensionPath);
       extensionFactories.push(...asset.factories);
     }
