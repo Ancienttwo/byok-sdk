@@ -1,4 +1,4 @@
-import { afterEach, expect, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { hash, taskId } from '@byok-sdk/server/execution-core';
 import { template } from './k4-fixtures.test-support';
@@ -56,7 +56,12 @@ async function ledgerSubject(): Promise<RoutineSubject> {
         new AbortController().signal);
     },
     sync: () => host.drain(),
-    cancelTurn: async turnId => { await host.cancelTurn(turnId); },
+    cancelTurn: async turnId => {
+      const result = await host.cancelTurn(turnId);
+      if ('drainError' in result) {
+        console.error('Cancellation committed; drain failed. Failed jobs remain pending for retry on the next drain.', result.drainError);
+      }
+    },
     update: action => host.updateRoutine(action),
     lifecycle: (id, value) => host.setRoutineLifecycle(id, value),
     end: id => host.endRoutine(id),
@@ -75,4 +80,14 @@ async function ledgerSubject(): Promise<RoutineSubject> {
     state: () => host.snapshot(),
   };
 }
+it.each([new Error('Host job failed'), undefined])('reports a committed routine cancellation drain error (%s)', async drainError => {
+  const subject = await ledgerSubject(), host = opened.at(-1)!.bot;
+  const cancel = vi.spyOn(host, 'cancelTurn').mockResolvedValueOnce({ turnId: 'cancelled-turn', result: 'cancelled', drainError });
+  const report = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    await expect(subject.cancelTurn('cancelled-turn')).resolves.toBeUndefined();
+    expect(report).toHaveBeenCalledWith('Cancellation committed; drain failed. Failed jobs remain pending for retry on the next drain.', drainError);
+  } finally { cancel.mockRestore(); report.mockRestore(); }
+});
+
 routineVectors('L BotCollaboration', ledgerSubject);

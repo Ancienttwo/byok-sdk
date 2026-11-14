@@ -129,6 +129,9 @@ export class ConversationService {
 
   async cancel(params: unknown): Promise<TurnCancelResult> {
     const result = await this.#conversation.bot.cancelTurn(text(record(params, 'k8.cancel').turnId, 'turnId'));
+    if ('drainError' in result) {
+      console.error('Cancellation committed; drain failed. Failed jobs remain pending for retry on the next drain.', result.drainError);
+    }
     this.changed();
     return result;
   }

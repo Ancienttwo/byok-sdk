@@ -181,6 +181,20 @@ it('shows a failed Turn with the server\'s task reason, and marks a Pi backgroun
   service.close();
 }, 30_000);
 
+it.each([new Error('Host job failed'), undefined])('reports a committed cancellation drain error without rejecting (%s)', async drainError => {
+  const fx = await open(), changed = vi.fn();
+  const result = { turnId: 'cancelled-turn', result: 'cancelled' as const, drainError };
+  const cancel = vi.spyOn(fx.conversation.bot, 'cancelTurn').mockResolvedValueOnce(result);
+  const report = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const service = new ConversationService({ conversation: fx.conversation, store: fx.store, server: fx.server,
+    brand: { roles: [] }, models: () => [], changed });
+  try {
+    await expect(service.cancel({ turnId: result.turnId })).resolves.toBe(result);
+    expect(report).toHaveBeenCalledWith('Cancellation committed; drain failed. Failed jobs remain pending for retry on the next drain.', drainError);
+    expect(changed).toHaveBeenCalledOnce();
+  } finally { service.close(); cancel.mockRestore(); report.mockRestore(); }
+});
+
 it('places drafts, questions, outcome-less and cancelled Turns, folds above the clear, and derives each rail state', () => {
   const turn = (id: string, fields: Record<string, unknown> = {}) => ({ id, root: id, botId: 'b', source: 'user', request: '', hop: 0, status: 'processing', ...fields }) as never;
   const ended = (id: string, seq: number, conclusion: string, reply?: string) => ({ turnId: id, botId: 'b', root: id, seq,
