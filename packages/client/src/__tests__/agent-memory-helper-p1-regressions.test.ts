@@ -35,7 +35,7 @@ const helperHarness = vi.hoisted(() => {
     }
   }
 
-  let lastChild: { exitCode: number | null } | undefined;
+  let lastChild: (Emitter & { exitCode: number | null }) | undefined;
   const requests: Array<Record<string, unknown>> = [];
   const spawn = vi.fn(() => {
     const stdout = new Emitter();
@@ -171,6 +171,7 @@ describe('Agent memory helper P1 regressions', () => {
         const child = helperHarness.lastChild();
         if (child === undefined) throw new Error('helper spawn was not observed');
         child.exitCode = 0;
+        child.emit('exit', 0, null);
         await filesystem.close();
       });
     } finally {

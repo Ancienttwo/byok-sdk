@@ -77,6 +77,7 @@ import { CursorStore } from '../daemon/cursor-store';
 import { TestServer } from './fixtures/test-server';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper';
+import * as helperInternal from '../daemon/agent-memory-fs-helper-internal';
 import { resolveAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
 import { createAgentMemoryIntentProcessor, helperAgentMemoryIntentBackend } from '../daemon/agent-memory-intent';
 
@@ -187,13 +188,23 @@ describe.skipIf(process.platform !== 'darwin' || !hasAgentMemoryHelperBuild())('
       agentMemoryIntents: { fetch: request => w.transport.fetch(request), complete: completion => w.transport.complete(completion) },
     }, [], { longPoll: { retryDelayMs: 20, idleDelayMs: 20 } });
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let releaseProbe!: () => void;
+    const probeGate = new Promise<void>(resolve => { releaseProbe = resolve; });
+    const realOpen = helperInternal.openAgentMemoryFilesystemHelperWithBudget;
+    const open = vi.spyOn(helperInternal, 'openAgentMemoryFilesystemHelperWithBudget').mockImplementation(async (input, options) => {
+      if (options?.timeout !== undefined) await probeGate;
+      return realOpen(input, options);
+    });
     try {
       server.setPairingTenantId('pairing-code', 'tenant');
       const record = await daemon.pair('pairing-code');
       w = await world('replace', 'notes/topic.md', { root: hostStorageRoot, deviceId: record.deviceId });
       await daemon.start();
       const hello = await server.waitFor(event => event.type === 'conn.hello');
-      expect(hello.type === 'conn.hello' && hello.payload.capabilities).toContain('agent-memory-intent.v1');
+      expect(hello.type === 'conn.hello' && hello.payload.capabilities).not.toContain('agent-memory-intent.v1');
+      releaseProbe();
+      const ready = await server.waitFor(event => event.type === 'conn.hello' && event.payload.capabilities?.includes('agent-memory-intent.v1') === true);
+      expect(ready.type === 'conn.hello' && ready.payload.capabilities).toContain('agent-memory-intent.v1');
       control.mode = 'acked';
       const envelope = createEnvelope('agent.memory.intent.available', w.notice, { seq: server.nextSeq() });
       server.pushLongPollEvent(envelope);
@@ -210,7 +221,9 @@ describe.skipIf(process.platform !== 'darwin' || !hasAgentMemoryHelperBuild())('
       expect((await w.ledger()).ackedAt).toEqual(expect.any(String));
       expect(w.completions).toHaveLength(2);
       expect(w.completions[1]).toEqual(w.completions[0]);
-    } finally { await daemon.stop(); await server.close(); errors.mockRestore(); }
+    } finally {
+      await daemon.stop(); releaseProbe(); await server.close(); open.mockRestore(); errors.mockRestore();
+    }
   });
 
   it('holds the writer lease through timeout until the real stopped helper exits', async () => {

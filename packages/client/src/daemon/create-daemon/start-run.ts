@@ -17,6 +17,7 @@ import { assertJournalEnvelopeProtocol } from '../daemon-errors.js';
 import { resultReplyFailureFromState } from '../result-reply-failure.js';
 import { loginShellSnapshot, serviceEnvironmentStatus } from '../../login-shell-environment.js';
 import { detectRuntimes } from './support.js';
+import { agentMemoryBackendProof, initializeAgentMemoryBackend } from './services.js';
 import { recordRuntimeVersionChanges } from '../runtime-versions-store.js';
 import { BlobClient } from '../blob-client.js';
 import type { DaemonScope } from './scope.js';
@@ -33,7 +34,7 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
     ownedProcessLedger, scratchRoot, storeDir, daemonState, initializeInputPreparation, config,
     retentionSweeper, replaceControlServer, setLifecycle, initializeOwnedHostedStorage,
     storagePressure, egressPolicy, agentHomeManager, cursorStore, terminalCommits, operationalHealth,
-    observer, adapters, provenAgentMemoryBackend, taskSettlement,
+    observer, adapters, taskSettlement,
   } = daemonScope;
   // #384 item 3 / #393: on POSIX a SIGKILLed or OOM-killed daemon leaves its
   // owned runtime groups running, and a tool process in one could still be
@@ -234,6 +235,8 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
   observer.noteEnvironmentResolved({ ...daemonState.resolvedEnvironment }, daemonState.environmentResolvedAt);
 
   daemonState.blobLifecycleAbort = new AbortController();
+  // Configuration errors stay synchronous to start; only the volume barrier is background work.
+  await initializeAgentMemoryBackend(daemonScope);
   const [{ runtimes, harnesses, observations, runtimeUnavailable }, blobClient] = await Promise.all([
     detectRuntimes(adapters),
     Promise.resolve(new BlobClient(config.serverUrl, daemonState.auth, { signal: daemonState.blobLifecycleAbort.signal })),
@@ -256,7 +259,8 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
   observer.noteRuntimesDetected(daemonState.runtimeObservations.map(observation => ({ ...observation })));
   daemonState.detectedRuntimeFacts = runtimes;
   daemonState.detectedRuntimeUnavailable = runtimeUnavailable;
-  const agentMemoryBackend = await provenAgentMemoryBackend();
+  // Startup reads readiness; only the run-owned background scheduler may probe.
+  const agentMemoryBackend = agentMemoryBackendProof(daemonScope).backend;
   const agentMemoryIntentBackend = config.agentMemoryIntents === undefined ? undefined : agentMemoryBackend;
   return {
     record, activeJournal, activePressureEngine, journalIdentity, resultReplyRecoveryTasks,
