@@ -980,7 +980,7 @@ function buildDaemon(
       observer.noteRetentionSweep(report);
       void (report.failures === 0 ? operationalHealth.recordSuccess('maintenance') : operationalHealth.recordFailure('maintenance')).catch(() => undefined);
     },
-    onFailure: (trigger, classId, code) => observer.noteRetentionFailure(trigger, classId, code),
+    onFailure: (trigger, classId, code, taskId) => observer.noteRetentionFailure(trigger, classId, code, taskId),
   });
 
   /**

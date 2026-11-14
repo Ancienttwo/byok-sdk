@@ -7206,6 +7206,16 @@ export declare class JournalUnknownTaskError extends Error {
     readonly taskId: string;
     constructor(taskId: string, operation: string);
 }
+/**
+ * A stored task row failed an integrity check, so the journal refused to read or prune it.
+ * Not a package export: retention reads `taskId` to name the task in its `retention-failure`
+ * event, and the message names it too. The message is fixed text: the failed check's own
+ * error, whose text can quote stored bytes (a parser error does), stays in `cause` alone.
+ */
+export declare class JournalIntegrityError extends Error {
+    readonly taskId: string;
+    constructor(taskId: string, cause: unknown);
+}
 /** Thrown when the journal is used after {@link LocalTaskJournal.close}. */
 export declare class JournalClosedError extends Error {
     constructor(operation: string);
@@ -7444,13 +7454,16 @@ export type DaemonEvent = ({
 })) | ({
     kind: 'retention-sweep';
     ts: string;
-} & SweepReport) | {
+} & SweepReport)
+/** `taskId`: the confirmed-journal task whose stored rows failed an integrity check; absent for every other failure. */
+ | {
     kind: 'retention-failure';
     ts: string;
     trigger: RetentionTrigger;
     classId: RetentionClassId;
     count: number;
     code: string;
+    taskId?: string;
 } | {
     kind: 'offered';
     ts: string;
@@ -7949,7 +7962,7 @@ export declare class DaemonObserver {
      * cursor advancement or the next envelope being processed.
      */
     noteRetentionSweep(report: SweepReport): void;
-    noteRetentionFailure(trigger: RetentionTrigger, classId: RetentionClassId, code: string): void;
+    noteRetentionFailure(trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string): void;
     private emit;
 }
 // ==== @byok-sdk/client dist/daemon/operational-health.d.ts ====
@@ -8460,7 +8473,8 @@ export interface RetentionSweeperOptions {
     readonly timers?: RetentionTimers;
     readonly jitter: (sequence: number, baseMs: number) => number;
     readonly onSweep?: (report: SweepReport) => void;
-    readonly onFailure?: (trigger: RetentionTrigger, classId: RetentionClassId, code: string) => void;
+    /** `taskId` is set only for a journal task that failed its integrity check; one call per such task. */
+    readonly onFailure?: (trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string) => void;
 }
 /** All maintenance has this one lifecycle owner, including daemons without a journal. */
 export declare class RetentionSweeper {

@@ -626,7 +626,7 @@ describe('Daemon.whenTaskSettled', () => {
       }
       const terminal = vi.spyOn(SqliteLocalTaskJournal.prototype, 'recordTerminal');
       try {
-        await expect(build(new StubRuntimeAdapter(), first.storeDir).start()).rejects.toThrow('durable cancellation candidate bytes/hash mismatch');
+        await expect(build(new StubRuntimeAdapter(), first.storeDir).start()).rejects.toMatchObject({ cause: expect.objectContaining({ message: 'durable cancellation candidate bytes/hash mismatch' }) });
         expect(terminal).not.toHaveBeenCalled();
         expect(server.received.filter((e) => e.task_id === taskId)).toEqual([]);
       } finally {

@@ -18,7 +18,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { AgentHomeManager } from '../agent-home';
 import { AgentSessionHandoffStore, sessionFileName } from '../daemon/agent-session-handoff-store';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
-import { journalHash, type JournalIdentity } from '../daemon/journal/journal';
+import { JournalIntegrityError, journalHash, type JournalIdentity } from '../daemon/journal/journal';
 import { acquireReplicaLock } from '../adapters/pi-durable/replica';
 import { defaultScratchRoot, ScratchRoot, ScratchRootPathError, validateScratchRoot } from '../daemon/retention/scratch';
 import { createRetentionRegistry } from '../daemon/retention/producers';
@@ -43,7 +43,7 @@ async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:
  const registry=createRetentionRegistry({storeDir:store,scratch,config,clock,journal:()=>input.journal,identity:()=>identity,preparation:()=>undefined,
   ...(input.home?{home:input.home,handoffs:new AgentSessionHandoffStore()}:{}),...(input.usageScanLimit===undefined?{}:{usageScanLimit:input.usageScanLimit}),...(input.piSessionDir===undefined?{}:{piSessionDir:input.piSessionDir}),...(input.agySessionStore===undefined?{}:{agySessionStore:input.agySessionStore})});
  const pressure=new StoragePressure(config.budget),failures:string[]=[];
- const sweeper=new RetentionSweeper({registry,config,clock,pressure,freeBytes:async()=>input.freeBytes??1_000_000_000,jitter:(_s,ms)=>ms,onFailure:(_t,id,code)=>{failures.push(`${id}:${code}`);}});
+ const sweeper=new RetentionSweeper({registry,config,clock,pressure,freeBytes:async()=>input.freeBytes??1_000_000_000,jitter:(_s,ms)=>ms,onFailure:(_t,id,code,taskId)=>{failures.push([id,code,...(taskId===undefined?[]:[taskId])].join(':'));}});
  cleanups.push(()=>sweeper.stop());return {store,scratch,sweeper,registry,pressure,failures,config,clock,advance:(ms:number)=>{time+=ms;}};
 }
 const fakeAuthority=(id:RetentionClassId):ClassAuthority=>({roots:[],owner:'sdk',scope:'store',bound:PROTECTED_CLASS_IDS.includes(id as ProtectedClassId)?PROTECTED_CLASS_BOUNDS[id as ProtectedClassId]:{kind:'ttl',ttlMs:DAY}});
@@ -140,12 +140,21 @@ it('confirmed tasks that cannot be pruned are paged past with one cursor query p
  const store=testScratchRoot(),journal=new SqliteLocalTaskJournal({storeDir:store});cleanups.push(()=>journal.close());
  for(const id of ['broken-0','broken-1','broken-2'])await terminal(journal,id,'confirmed','2026-08-01T00:00:00.000Z');await terminal(journal,'expired','confirmed');
  const prune=journal.pruneConfirmedJournalTask.bind(journal);
- vi.spyOn(journal,'pruneConfirmedJournalTask').mockImplementation(async(taskId,cutoff)=>{if(taskId.startsWith('broken'))throw new Error('integrity');return prune(taskId,cutoff);});
+ vi.spyOn(journal,'pruneConfirmedJournalTask').mockImplementation(async(taskId,cutoff)=>{if(taskId.startsWith('broken'))throw new JournalIntegrityError(taskId,new Error('integrity'));return prune(taskId,cutoff);});
  const list=vi.spyOn(journal,'listPrunableConfirmedTasks');
  const f=await fixture({store,journal,max:1});await f.sweeper.runPass('periodic');
- expect(f.failures).toEqual(['confirmed-journal:sweep_failed']);
+ expect(f.failures).toEqual(['broken-0','broken-1','broken-2'].map(id=>`confirmed-journal:sweep_failed:${id}`));
  expect(list.mock.calls.map(([,limit,after])=>[limit,after])).toEqual([[1,undefined],[1,'broken-0'],[1,'broken-1'],[1,'broken-2']]);
  expect(await journal.readTask('expired',identity)).toBeUndefined();expect(await journal.readTask('broken-0',identity)).toBeDefined();
+});
+it('a failed page query is reported after the task integrity failures already collected',async()=>{
+ const store=testScratchRoot(),journal=new SqliteLocalTaskJournal({storeDir:store});cleanups.push(()=>journal.close());
+ for(const id of ['broken-0','expired'])await terminal(journal,id,'confirmed','2026-08-01T00:00:00.000Z');
+ vi.spyOn(journal,'pruneConfirmedJournalTask').mockImplementation(async taskId=>{throw new JournalIntegrityError(taskId,new Error('integrity'));});
+ const list=journal.listPrunableConfirmedTasks.bind(journal);
+ vi.spyOn(journal,'listPrunableConfirmedTasks').mockImplementation(async(cutoff,limit,after)=>{if(after!==undefined)throw new Error('page');return list(cutoff,limit,after);});
+ const f=await fixture({store,journal,max:1});await f.sweeper.runPass('periodic');
+ expect(f.failures).toEqual(['confirmed-journal:sweep_failed:broken-0','confirmed-journal:sweep_failed']);
 });
 it('a journal that ignores the after cursor fails the confirmed-journal sweep with a contract error',async()=>{
  const store=testScratchRoot(),journal=new SqliteLocalTaskJournal({storeDir:store});cleanups.push(()=>journal.close());

@@ -2,6 +2,7 @@ import { PASS_INSPECTIONS, runtimeReclaimedBytes } from './runtime-accounting.js
 import type { ResolvedStorageConfig } from './config.js';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, type ClassUsage, type RetentionClassId, type RetentionTrigger, type SweepBudget, type SweepReport, RetentionRegistry } from './registry.js';
 import { StoragePressure } from './pressure.js';
+import { JournalIntegrityError } from '../journal/journal.js';
 
 export interface RetentionTimers {
   setTimeout(handler: () => void, ms: number): unknown;
@@ -28,7 +29,15 @@ export interface RetentionSweeperOptions {
   readonly timers?: RetentionTimers;
   readonly jitter: (sequence: number, baseMs: number) => number;
   readonly onSweep?: (report: SweepReport) => void;
-  readonly onFailure?: (trigger: RetentionTrigger, classId: RetentionClassId, code: string) => void;
+  /** `taskId` is set only for a journal task that failed its integrity check; one call per such task. */
+  readonly onFailure?: (trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string) => void;
+}
+
+/** One report per integrity-failed task, plus one untagged report for any other failure. */
+function failureTaskIds(error: unknown): (string | undefined)[] {
+  const errors = error instanceof AggregateError ? error.errors : [error];
+  const ids = errors.flatMap(cause => cause instanceof JournalIntegrityError ? [cause.taskId] : []);
+  return ids.length > 0 && ids.length === errors.length ? ids : [...ids, undefined];
 }
 
 const nextClass = new WeakMap<RetentionSweeper, number>();
@@ -111,7 +120,7 @@ export class RetentionSweeper {
       try { await registry.sweep(id, budget); }
       catch (error) {
         failures++;
-        this.options.onFailure?.(trigger, id, 'sweep_failed');
+        for (const taskId of failureTaskIds(error)) this.options.onFailure?.(trigger, id, 'sweep_failed', taskId);
         if (trigger === 'startup' && id === 'exec-sdk') { startupFailure = error; break; }
       }
     }

@@ -228,7 +228,10 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     pages: for (;;) {
       const limit = budget.remaining();
       if (limit <= 0) break;
-      const tasks = await journal.listPrunableConfirmedTasks(cutoff, limit, after);
+      // A failed page query is reported after the task failures already collected, never instead of them.
+      let tasks: string[];
+      try { tasks = await journal.listPrunableConfirmedTasks(cutoff, limit, after); }
+      catch (error) { failures.push(error); break; }
       if (tasks.some(taskId => kept.has(taskId))) throw new LocalStorageConfigError('config', 'journal listPrunableConfirmedTasks ignored its after cursor');
       for (const taskId of tasks) {
         if (!budget.available()) break pages;
