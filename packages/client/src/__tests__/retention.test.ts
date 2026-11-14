@@ -317,7 +317,7 @@ it('a daemon store with a long path claims and uses its short default scratch ro
 
 // Inspections, not wall-clock time, must bound these passes: under load the 10 s
 // default pass limit ends a pass before the runtime share is spent (#2082).
-it('reclaims a released runtime larger than the measurement limit across periodic passes', async () => {
+it('reclaims a released runtime larger than the runtime pass share across periodic passes', async () => {
  const LARGE=PASS_INSPECTIONS/2+2_048,f=await fixture({maxPassDurationMs:DAY}),large=await f.scratch.create(),small=await f.scratch.create();
  for(let start=0;start<LARGE;start+=128) await Promise.all(Array.from({length:128},(_,offset)=>fs.writeFile(path.join(large.runtimeDir,`empty-${start+offset}`),'')));
  await fs.writeFile(path.join(small.runtimeDir,'small'),'small');
