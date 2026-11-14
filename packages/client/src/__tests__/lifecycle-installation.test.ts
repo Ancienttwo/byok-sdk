@@ -16,7 +16,7 @@ import {
   type ServiceInstallationOptions,
 } from '../lifecycle/service-installation';
 import { installationHoldsStart, readServiceInstallationRecord } from '../util/service-installation-record';
-import { SERVICE_PAYLOAD_MANIFEST, sha256File, writeServicePayloadManifest, type ServicePayloadManifest } from '../service-payload-manifest';
+import { collisionKey, SERVICE_PAYLOAD_MANIFEST, sha256File, writeServicePayloadManifest, type ServicePayloadManifest } from '../service-payload-manifest';
 import { createManagedLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
 import { createLaunchdLifecycle } from '../lifecycle/launchd';
 import type { Runner } from '../util/exec-runner';
@@ -721,7 +721,11 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     ['Unicode normalization', '\u00e9.js', 'e\u0301.js', '\u00e9.js and e\u0301.js'],
     ['sharp s', '\u00df.js', 'ss.js', '\u00df.js and ss.js'],
     ['capital sharp s', '\u1e9e.js', 'ss.js', '\u1e9e.js and ss.js'],
-    ['an uppercase that decomposes', '\u0390.js', '\u03aa\u0301.js', '\u0390.js and \u03aa\u0301.js'],
+    // The code points one pass of upper then lower missed: an uppercase that decomposes, against its NFC spelling.
+    ...['\u0390', '\u03b0', '\u1fd2', '\u1fd3', '\u1fd7', '\u1fe2', '\u1fe3', '\u1fe7'].map((point) => {
+      const upper = point.toUpperCase().normalize('NFC');
+      return [`U+${point.codePointAt(0)!.toString(16).toUpperCase()} and its uppercase`, `${point}.js`, `${upper}.js`, `${point}.js and ${upper}.js`];
+    }),
     ['the manifest\'s own name', 'x.js', 'BYOK-PAYLOAD.JSON', 'byok-payload.json and BYOK-PAYLOAD.JSON'],
     ['the manifest\'s own name as a directory', 'x.js', 'Byok-Payload.json/y.js', 'byok-payload.json and Byok-Payload.json'],
   ])('a manifest naming two paths that differ only in %s is payload_name_collision before anything is staged (#1962)', async (_label, first, second, named) => {
@@ -731,6 +735,22 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await fs.writeFile(manifestPath, JSON.stringify({ ...manifest, files: { ...manifest.files, [second]: manifest.files[first] } }));
     await expect(installation.install(dir)).rejects.toMatchObject({ code: 'payload_name_collision', message: expect.stringContaining(named) });
     expect(existsSync(path.join(installRoot, 'versions'))).toBe(false);
+  });
+
+  it('the payload collision key is idempotent and unchanged by uppercasing, lowercasing or decomposing any code point (#1962)', () => {
+    // Run on every Node version: a Unicode table change that breaks the key fails here.
+    const broken: string[] = [];
+    for (let point = 0; point <= 0x10ffff; point += 1) {
+      if (point >= 0xd800 && point <= 0xdfff) continue;
+      const character = String.fromCodePoint(point);
+      // No case and no decomposition: every step leaves it as it is, so there is nothing to check.
+      if (character.toUpperCase() === character && character.toLowerCase() === character && character.normalize('NFD') === character && character.normalize('NFC') === character) continue;
+      const key = collisionKey(character);
+      for (const variant of [key, character.toUpperCase(), character.toLowerCase(), character.normalize('NFD')]) {
+        if (collisionKey(variant) !== key) broken.push(`U+${point.toString(16).toUpperCase()} ${variant}`);
+      }
+    }
+    expect(broken).toEqual([]);
   });
 
   it('a verifier that removes the staged copy or renames a file in it is payload_invalid, naming the copy (#1962)', async () => {

@@ -72,9 +72,14 @@ export function collidingPayloadPaths(relatives: readonly string[]): readonly [s
  * lowercased, twice, then NFC again. Per code point, so JavaScript's
  * final-sigma rule does not apply (`σ`, `ς` and `Σ` all become `σ`). Twice,
  * because one pass takes `ẞ` only to `ß`; the last NFC recomposes what
- * uppercasing decomposed (`ΐ`).
+ * uppercasing decomposed (`ΐ`). The result depends on the runtime's Unicode
+ * tables (Node 24: Unicode 17); the every-code-point check in the
+ * installation tests runs on each Node version and fails if an upgrade
+ * breaks the property {@link collidingPayloadPaths} relies on.
+ *
+ * @internal Exported for that check.
  */
-function collisionKey(name: string): string {
+export function collisionKey(name: string): string {
   const each = (text: string, map: (point: string) => string): string => Array.from(text, map).join('');
   const once = (text: string): string => each(each(text, (point) => point.toUpperCase()), (point) => point.toLowerCase());
   return once(once(name.normalize('NFC'))).normalize('NFC');
