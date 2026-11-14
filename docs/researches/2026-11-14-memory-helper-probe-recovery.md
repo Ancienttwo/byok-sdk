@@ -60,7 +60,9 @@ cd packages/client
 
 Result: **5 files passed, 227 tests passed, 26 skipped**. Real helper/filesystem tests ran locally only. A verified SDK helper copied to a test-owned directory and stripped of executable permission makes configured-intent startup fail with `EACCES` before any hello. Capability assertions wait for the newly proven background declaration and continue to reject authoritative failures. MCP reload selects the exact toolset snapshot because an independent memory readiness refresh may interleave another hello; its exact toolset/path-disclosure assertions remain intact.
 
-Recovery uses existing `setHelloCapability` and `connection.refreshHello()`, refreshing the existing `conn.hello` array. No message, protocol field, reason code, configuration option or public declaration was added. Refusal diagnostics contain a bounded code, class or numeric exit code; external signal diagnostics contain the signal name, without original messages/paths.
+Recovery uses existing `setHelloCapability` and `connection.refreshHello()`, refreshing the existing `conn.hello` array. The complete helper CI collection plus the controlled file was also run locally: **15 files passed, 293 tests passed, 34 skipped**. Two older integration cases had assumed the first hello already carried memory readiness. Their revised fixtures gate the real volume opener, assert the first hello omits the intent capability, release the gate, and assert a later refreshed hello includes it before continuing real copied-asset I/O and cursor/no-repeat-CAS checks. The gate never supplies a fake result or capability. The copied-asset observer follows the explicit internal opener so it still sees the daemon volume proof as well as consumer opens.
+
+No message, protocol field, reason code, configuration option or public declaration was added. Refusal diagnostics contain a bounded code, class or numeric exit code; external signal diagnostics contain the signal name, without original messages/paths.
 
 ## Public surface and dependency graph
 

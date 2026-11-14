@@ -11,7 +11,7 @@ import { expect, it, vi } from 'vitest';
 import { AgentHomeLayout } from '../agent-home';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { copyAgentMemoryHelperAssets, resolveAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
-import * as helperClient from '../daemon/agent-memory-fs-helper';
+import * as helperClient from '../daemon/agent-memory-fs-helper-internal';
 import { hasAgentMemoryHelperBuild } from './fixtures/agent-memory-helper-build';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -31,7 +31,13 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
   const assetRoot = path.join(root, 'assets');
   const server = await TestServer.start();
   const client = new Client({ name: 'relocated-memory-test', version: '1' }, { capabilities: {} });
-  const open = vi.spyOn(helperClient, 'openAgentMemoryFilesystemHelper'); // observe real calls; never replace the backend
+  let releaseProbe!: () => void;
+  const probeGate = new Promise<void>(resolve => { releaseProbe = resolve; });
+  const realOpen = helperClient.openAgentMemoryFilesystemHelperWithBudget;
+  const open = vi.spyOn(helperClient, 'openAgentMemoryFilesystemHelperWithBudget').mockImplementation(async (input, options) => {
+    if (options?.timeout !== undefined) await probeGate;
+    return realOpen(input, options); // real verification and helper I/O after the readiness gate
+  });
   let daemon: ReturnType<typeof createDaemonWithAdapters> | undefined;
   let restoreRootInput: (() => void) | undefined;
   try {
@@ -68,8 +74,11 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
     await daemon.start();
     const hello = await server.waitFor(event => event.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
+    expect(hello.payload.capabilities).not.toContain('agent-memory-intent.v1');
     if (intents) {
-      expect(hello.payload.capabilities).toContain('agent-memory-intent.v1');
+      releaseProbe();
+      const ready = await server.waitFor(event => event.type === 'conn.hello' && event.payload.capabilities?.includes('agent-memory-intent.v1') === true);
+      expect(ready.type === 'conn.hello' && ready.payload.capabilities).toContain('agent-memory-intent.v1');
       expect(open.mock.calls.some(([input]) => input.canonicalHome === path.join(root, 'homes'))).toBe(true);
       const notice = createEnvelope('agent.memory.intent.available', { intentId: intent.intentId, agentRef }, { seq: server.nextSeq() });
       server.pushLongPollEvent(notice);
@@ -108,6 +117,7 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
     restoreRootInput?.();
     await client.close();
     await daemon?.stop();
+    releaseProbe();
     await server.close();
     open.mockRestore();
     await fs.rm(root, { recursive: true, force: true });
