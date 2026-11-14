@@ -1883,6 +1883,22 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect([await tree(root), await installation.receipt(), events]).toEqual([before, receipt, []]);
     });
 
+    it('a snapshot record that is not format 2 is snapshot_upgrade_required where a restore reads it, and the restore writes nothing', async () => {
+      // A failed health check restores the upgrade's own snapshot without the rollback()/recover() link check first.
+      const index = path.join(installRoot, 'snapshots', '3.0.0', 'snapshot.json');
+      unhealthy.add('3.0.0');
+      onHealth = async (version) => {
+        if (version !== '3.0.0') return;
+        await fs.writeFile(db, 'v3 data');
+        const { entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+        await fs.writeFile(index, JSON.stringify({ entries }));
+      };
+      const error = await installation.upgrade(await payload('3.0.0')).catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'upgrade_pending' });
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'snapshot_upgrade_required', message: expect.stringContaining(path.dirname(index)) }));
+      expect([await fs.readFile(db, 'utf8'), (await installation.receipt())?.state]).toEqual(['v3 data', 'pending']);
+    });
+
     it('a snapshot entry with a .. segment after a link is refused by recover() before any store changes, every time (#2102)', async () => {
       const marker = path.join(storeDir, 'service', 'marker');
       await fs.writeFile(marker, 'live');

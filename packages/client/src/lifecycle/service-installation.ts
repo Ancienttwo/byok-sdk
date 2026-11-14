@@ -12,7 +12,7 @@ import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-pr
 import { ownedProcessGroupRecord, ownedProcessGroupRuns, type OwnedProcessGroupRecord } from '../adapters/process-tree.js';
 import { acquirePathMutationGate, acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate.js';
 import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle.js';
-import { canonical, checkRestoreTargets, checkStorePaths, directoryStorePath, mkdirReal, SNAPSHOT_FORMAT, within, type StorePathRefusal } from './store-path-identity.js';
+import { canonical, checkRestoreTargets, checkStorePaths, directoryStorePath, mkdirReal, parseSnapshotRecord, SNAPSHOT_FORMAT, within, type SnapshotEntry, type SnapshotRecord, type StorePathRefusal } from './store-path-identity.js';
 import type { HeldServiceLifecycle, ManagedServiceLifecycle } from './managed-lifecycle.js';
 import {
   isJsonObject, isPayloadPath, listPayloadFiles, SERVICE_PAYLOAD_MANIFEST, sha256File, SHA256_HEX, VERSION_ID, type ServicePayloadManifest,
@@ -1305,7 +1305,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    */
   async function restoreSnapshot(to: string): Promise<void> {
     const dir = path.join(snapshotsDir, to);
-    const { entries } = JSON.parse(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8')) as { entries: SnapshotEntry[] };
+    const { entries } = await readSnapshot(to);
     const refusal = await checkRestoreTargets(entries, [root, ...serviceDirs], platform);
     if (refusal !== undefined) throw storePathError(refusal);
     for (const entry of entries) {
@@ -1360,24 +1360,29 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   /**
-   * Checks `snapshots/<name>` and every copy in it a restore reads, before
-   * the operation's first side effect. A snapshot SDK 0.42 took (no
-   * `format`) is `snapshot_upgrade_required`, as a version 1 pending
-   * receipt is `receipt_upgrade_required`: it records no canonical paths,
-   * so this version cannot restore it safely.
+   * The one reader of `snapshots/<name>/snapshot.json`. A record that is not
+   * format 2 with a canonical path on every entry, such as one SDK 0.42
+   * wrote, is `snapshot_upgrade_required` naming the snapshot, as a
+   * version 1 pending receipt is `receipt_upgrade_required`: this version
+   * cannot restore it safely.
    */
+  async function readSnapshot(name: string): Promise<SnapshotRecord> {
+    const dir = path.join(snapshotsDir, name);
+    const record = parseSnapshotRecord(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8'));
+    if (record !== undefined) return record;
+    const error = new ServiceInstallationError('snapshot_upgrade_required');
+    error.message = `${error.message} (${dir})`;
+    throw error;
+  }
+
+  /** Checks `snapshots/<name>` and every copy in it a restore reads, and reads its record, before the operation's first side effect. */
   async function refuseLinkedSnapshot(name: string): Promise<void> {
     const dir = path.join(snapshotsDir, name);
     const index = path.join(dir, 'snapshot.json');
     await refuseLinkedSnapshots(dir);
     await refuseLinkedSnapshots(index);
     if (!(await exists(index))) return;
-    const { format, entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { format?: unknown; entries: SnapshotEntry[] };
-    if (format !== SNAPSHOT_FORMAT) {
-      const error = new ServiceInstallationError('snapshot_upgrade_required');
-      error.message = `${error.message} (${dir})`;
-      throw error;
-    }
+    const { entries } = await readSnapshot(name);
     for (const entry of entries) {
       for (const file of Object.values(entry.files)) {
         let at = dir;
@@ -1690,16 +1695,6 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   return { lifecycle, install, upgrade, rollback, recover, uninstall, receipt: readReceipt, currentVersion };
 }
 
-interface SnapshotEntry {
-  store: string;
-  path: string;
-  /** Absent in a snapshot 0.34 wrote, and for every file store. */
-  kind?: 'directory';
-  /** `path` with its links resolved when the snapshot was taken (#2106). */
-  canonical: string;
-  /** Saved files by suffix (`''`, `-wal`, `-journal`; a directory's tree under `''`); empty when the store was absent. */
-  files: Record<string, string>;
-}
 
 /**
  * The suffixes of a store that exist now: a file store's regular files, or a

@@ -16,6 +16,39 @@ import { resolveExistingAncestor } from '../util/existing-ancestor.js';
 /** `snapshot.json` format: 2 records each entry's canonical path, and a restore writes there. SDK 0.42 wrote none. */
 export const SNAPSHOT_FORMAT = 2;
 
+/** One store in `snapshot.json`. */
+export interface SnapshotEntry {
+  readonly store: string;
+  readonly path: string;
+  /** Absent for a file store. */
+  readonly kind?: 'directory';
+  /** `path` with its links resolved when the snapshot was taken. */
+  readonly canonical: string;
+  /** Saved files by suffix (`''`, `-wal`, `-journal`; a directory's tree under `''`); empty when the store was absent. */
+  readonly files: Readonly<Record<string, string>>;
+}
+
+export interface SnapshotRecord {
+  readonly format: typeof SNAPSHOT_FORMAT;
+  readonly entries: readonly SnapshotEntry[];
+}
+
+/** `snapshot.json` parsed and checked once, or `undefined` for anything else, such as a record SDK 0.42 wrote without `format` and `canonical`. */
+export function parseSnapshotRecord(text: string): SnapshotRecord | undefined {
+  let record: unknown;
+  try {
+    record = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  const { format, entries } = (record ?? {}) as { format?: unknown; entries?: unknown };
+  const string = (value: unknown): value is string => typeof value === 'string';
+  const isEntry = (entry: Partial<Record<keyof SnapshotEntry, unknown>> | null): boolean => entry !== null && typeof entry === 'object'
+    && string(entry.store) && string(entry.path) && string(entry.canonical) && (entry.kind === undefined || entry.kind === 'directory')
+    && typeof entry.files === 'object' && entry.files !== null && Object.values(entry.files).every(string);
+  return format === SNAPSHOT_FORMAT && Array.isArray(entries) && entries.every(isEntry) ? record as SnapshotRecord : undefined;
+}
+
 /** A refused store path: the installation error code and the text its message ends with, naming the path. */
 export interface StorePathRefusal {
   readonly code: 'precheck_failed' | 'store_overlaps_service_state';
