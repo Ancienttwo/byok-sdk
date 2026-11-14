@@ -11109,7 +11109,15 @@ export interface CreateServiceLifecycleOptions {
      * WinSW binaries obviously aren't present on the "wrong" OS).
      */
     platform?: NodeJS.Platform;
-    /** Platform-specific DI seams (mocked exec, mocked fs, mocked homedir/getuid) — only the fields matching the resolved platform are ever read. */
+    /**
+     * Platform-specific DI seams (mocked exec, mocked fs, mocked homedir/uid) —
+     * only the fields matching the resolved platform are ever read. On macOS
+     * `deps.getuid` picks the `gui/<uid>` domain and defaults to the real uid,
+     * the session user; the gate and file ownership checks use the effective
+     * uid, which owns what this process creates (#2031). Under `sudo` both are
+     * 0, so the default domain is `gui/0`; a root Host managing a user's session
+     * service passes `deps: { getuid: () => <user uid> }`.
+     */
     deps?: LaunchdDeps & SystemdDeps & WinswDeps & WindowsUserDeps;
     /**
      * An isolated root for the `service-lifecycle` gate that install, repair,
@@ -11234,7 +11242,18 @@ export interface LaunchdDeps {
     run?: Runner;
     fs?: ManagedLifecycleFs;
     homedir?: () => string;
-    /** Defaults to `process.getuid` — macOS/Linux only; this module is never constructed on `win32` (see `create-service-lifecycle.ts`). */
+    /**
+     * The uid of the `gui/<uid>` domain. Defaults to `process.getuid`, the real
+     * uid: the domain belongs to the logged-in session user, and a setuid Host
+     * (ruid 501, euid 0) still targets that user's `gui/501`; root has no GUI
+     * session. Ownership checks on files this process creates use
+     * `process.geteuid` instead, since the effective uid is who owns them
+     * (#2031). Under `sudo` both uids are 0 and the default is `gui/0`; a Host
+     * that manages a user's session service from a root process passes that
+     * user's uid here (`createServiceLifecycle(def, { deps: { getuid: () => 501 } })`).
+     * macOS/Linux only; this module is never constructed on `win32` (see
+     * `create-service-lifecycle.ts`).
+     */
     getuid?: () => number;
     /** Clock and wait for the unload deadline; tests drive them. */
     now?: () => number;

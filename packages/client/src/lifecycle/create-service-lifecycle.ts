@@ -20,7 +20,15 @@ export interface CreateServiceLifecycleOptions {
    * WinSW binaries obviously aren't present on the "wrong" OS).
    */
   platform?: NodeJS.Platform;
-  /** Platform-specific DI seams (mocked exec, mocked fs, mocked homedir/getuid) — only the fields matching the resolved platform are ever read. */
+  /**
+   * Platform-specific DI seams (mocked exec, mocked fs, mocked homedir/uid) —
+   * only the fields matching the resolved platform are ever read. On macOS
+   * `deps.getuid` picks the `gui/<uid>` domain and defaults to the real uid,
+   * the session user; the gate and file ownership checks use the effective
+   * uid, which owns what this process creates (#2031). Under `sudo` both are
+   * 0, so the default domain is `gui/0`; a root Host managing a user's session
+   * service passes `deps: { getuid: () => <user uid> }`.
+   */
   deps?: LaunchdDeps & SystemdDeps & WinswDeps & WindowsUserDeps;
   /**
    * An isolated root for the `service-lifecycle` gate that install, repair,
