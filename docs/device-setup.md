@@ -802,10 +802,12 @@ Windows): such a store is refused with
 `store_overlaps_service_state` before anything is snapshotted. List
 normalized absolute paths: a path with a `..` segment is
 `precheck_failed`. On an upgrade's first precheck either refusal leaves the
-stores untouched and starts the previous version again. A snapshot taken before this check is not re-checked
-on restore (#2102); check old snapshots as
-[the upgrade notes](releases/host-upgrade-next-minor.md) describe before
-calling any installation method.
+stores untouched and starts the previous version again. A restore checks
+every snapshot entry the same way before it changes any store (#2102), so a
+snapshot an older version took is refused, naming the path, with
+`upgrade_pending` and the refusal in its cause; see
+[the upgrade notes](releases/host-upgrade-next-minor.md) for how to resolve
+it.
 [`examples/service-upgrade`](../examples/service-upgrade/) is such an App.
 
 ### Other installs

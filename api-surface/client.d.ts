@@ -11727,7 +11727,14 @@ export interface ServiceInstallation {
      * `receipt_state_inconsistent` and nothing changes. It does not check the
      * unit: a pending receipt is only written after upgrade() or rollback()
      * checked it. A final version 1 receipt is rewritten as version 2.
-     * Returns the receipt, or `undefined` when there is none. Release
+     * Before a restore changes any store, every snapshot entry is checked as
+     * the precheck checks a store (#2102): one with a `..` segment is
+     * `precheck_failed`, one in the install root or a `service/` is
+     * `store_overlaps_service_state`, each naming the path. An earlier
+     * version could record either. The call then throws `upgrade_pending`
+     * with that refusal in its cause, and the receipt, `current`, the
+     * snapshot and every store stay as they were. Returns the receipt, or
+     * `undefined` when there is none. Release
      * failures follow the same rule as on `rollback()`.
      */
     recover(): Promise<ServiceUpgradeReceipt | undefined>;

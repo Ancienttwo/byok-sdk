@@ -351,7 +351,14 @@ export interface ServiceInstallation {
    * `receipt_state_inconsistent` and nothing changes. It does not check the
    * unit: a pending receipt is only written after upgrade() or rollback()
    * checked it. A final version 1 receipt is rewritten as version 2.
-   * Returns the receipt, or `undefined` when there is none. Release
+   * Before a restore changes any store, every snapshot entry is checked as
+   * the precheck checks a store (#2102): one with a `..` segment is
+   * `precheck_failed`, one in the install root or a `service/` is
+   * `store_overlaps_service_state`, each naming the path. An earlier
+   * version could record either. The call then throws `upgrade_pending`
+   * with that refusal in its cause, and the receipt, `current`, the
+   * snapshot and every store stay as they were. Returns the receipt, or
+   * `undefined` when there is none. Release
    * failures follow the same rule as on `rollback()`.
    */
   recover(): Promise<ServiceUpgradeReceipt | undefined>;
@@ -1130,22 +1137,36 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       throw new ServiceInstallationError('precheck_failed');
     }
     if (!Array.isArray(stores) || !stores.every(isServiceStoreVerdict)) throw new ServiceInstallationError('precheck_failed');
-    // The one boundary where store paths enter (#2011): `..` after a link
-    // resolves differently from how it is compared; `.` cannot (#1350).
-    if (stores.some((store) => store.path.split(platform === 'win32' ? /[\\/]/u : '/').includes('..'))) {
-      const error = new ServiceInstallationError('precheck_failed');
-      error.message += ' A store path must not contain .. segments; pass a normalized absolute path.';
-      throw error;
-    }
-    const paths = await Promise.all(stores.map((store) => canonical(store.path)));
+    const paths = await refuseServiceOverlap(stores.map((store) => store.path));
     if (overlaps(stores, paths, platform) || stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
-    // A store that is, holds or lies in the install root or a daemon store's
-    // service/ would have the versions, receipt, live leases or launcher
-    // replaced by a restore (#2011). Each is guarded both as its target and
-    // as the entry naming it, since a restore removes a link, not its target.
-    const guarded = (await Promise.all([root, ...serviceDirs].map(async (at) => [await canonical(at), path.join(await canonical(path.dirname(at)), path.basename(at))]))).flat();
-    if (paths.some((a) => guarded.some((b) => within(a, b, platform) || within(b, a, platform)))) throw new ServiceInstallationError('store_overlaps_service_state');
     return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path) } : store);
+  }
+
+  /**
+   * A store that is, holds or lies in the install root or a daemon store's
+   * service/ would have the versions, receipt, live leases or launcher
+   * replaced by a restore (#2011). Each is guarded both as its target and
+   * as the entry naming it, since a restore removes a link, not its target.
+   * A path with a `..` segment is `precheck_failed` first: `..` after a link
+   * resolves through the link's target, while `canonical` folds it away
+   * (`.` cannot do that, #1350). Takes the paths as written and returns
+   * them canonical. Both refusals name the path. Run at the precheck and,
+   * for a snapshot an earlier version took without these checks, before a
+   * restore changes any store (#2102).
+   */
+  async function refuseServiceOverlap(written: readonly string[]): Promise<string[]> {
+    const refuse = (code: ServiceInstallationErrorCode, at: string, note = ''): never => {
+      const error = new ServiceInstallationError(code);
+      error.message += `${note} (${at})`;
+      throw error;
+    };
+    const dotted = written.find((at) => at.split(platform === 'win32' ? /[\\/]/u : '/').includes('..'));
+    if (dotted !== undefined) refuse('precheck_failed', dotted, ' A store path must not contain .. segments; pass a normalized absolute path.');
+    const paths = await Promise.all(written.map(canonical));
+    const guarded = (await Promise.all([root, ...serviceDirs].map(async (at) => [await canonical(at), path.join(await canonical(path.dirname(at)), path.basename(at))]))).flat();
+    const overlapping = paths.findIndex((a) => guarded.some((b) => within(a, b, platform) || within(b, a, platform)));
+    if (overlapping !== -1) refuse('store_overlaps_service_state', written[overlapping]!);
+    return paths;
   }
 
   /** One candidate store preparation sequence for install and upgrade, retaining the quiescent leases until the caller switches. */
@@ -1308,6 +1329,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     // Older snapshots retain the Host's spelling. Check every directory root
     // before changing any store, including links hidden by a trailing / or /.
     const entries = snapshot.entries.map((entry) => entry.kind === 'directory' ? { ...entry, path: directoryStorePath(entry.path) } : entry);
+    await refuseServiceOverlap(entries.map((entry) => entry.path));
     await Promise.all(entries.filter((entry) => entry.kind === 'directory').map(async (entry) => {
       try {
         if ((await fs.lstat(entry.path)).isSymbolicLink()) throw new ServiceInstallationError('precheck_failed');

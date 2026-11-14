@@ -409,36 +409,41 @@ service that had already restarted.
   - The precheck after a migration: the snapshot is already taken. The
     refusal becomes the cause of `store_migration_failed`, the snapshot is
     restored, and an upgrade then returns to the previous version as above.
-- **Snapshots taken before this check (#2102):** restore does not re-check
-  them, so one taken by 0.42.0 or an earlier build of this train can list
-  `service/` or the install root, and restoring it would replace the live
-  leases, launcher and records. Before the first operation on this version:
-  1. Call no `ServiceInstallation` method yet, `upgrade`, `rollback` and
-     `recover` included: every operation first restores a kept install
-     repair snapshot when `current` is absent.
-  2. List every `<installRoot>/snapshots/*/snapshot.json`, the
-     `.install-repair-*` snapshots included.
-  3. Normalize each `entries[].path` (resolve links, and on macOS and
-     Windows ignore case) and compare it with the install root and with each
-     daemon store's `<storeDir>/service/`, each taken both resolved and as
-     the link entry that names it. An entry that is, holds or lies in one
-     of them overlaps.
-  4. With no overlap, continue as usual.
-  5. With one, keep the service stopped and back up the snapshot directory.
-     Then restore every entry by hand, in the order listed, as a restore
-     would:
-     - a directory entry (`"kind": "directory"`): remove the path, then copy
-       `files[""]` (`<index>.d`) back to it. With no `files[""]` the store
-       did not exist, so it stays removed. For the overlapping entry, skip
-       only what lies in the install root or a `service/` directory, and
-       restore the rest of its data;
-     - a file entry: remove the path and its `-wal`, `-journal` and `-shm`
-       files, then copy each `files` item back as `<path><suffix>` (an
-       SQLite file with the `-wal` and `-journal` the snapshot holds). A
-       suffix the snapshot lacks stays removed.
-  6. Only after every entry is restored, remove that snapshot directory,
-     then call `recover()`. When you cannot tell what an entry held, keep
-     the service stopped and the snapshot in place.
+- **Snapshots taken before this check (#2102):** 0.42.0 and earlier
+  builds of this train recorded store paths without these checks. Before a
+  restore (`rollback()`, a `recover()` restore, an install repair) changes
+  any store, every entry of the snapshot is now checked as the precheck
+  checks a store:
+  - an entry with a `..` segment is `precheck_failed`, because the file
+    system follows a link before `..` and the check would not;
+  - an entry that is, holds or lies in the install root or a `service/`
+    directory is `store_overlaps_service_state`.
+
+  The call throws `upgrade_pending` with that refusal in its `cause`; its
+  message names the entry's path. Nothing is restored: the receipt stays
+  `pending`, and `current`, the snapshot and every store stay as they were.
+  `recover()` refuses again until the snapshot is fixed. Keep the service
+  stopped, back up `<installRoot>/snapshots/<version>/` and then:
+  - **`..` entry:** in `snapshot.json`, replace that entry's `path` with
+    the path the file system reaches: resolve the part before the `..`
+    with its links (`realpath`), then apply the `..`. If the result is
+    in the install root or a `service/` directory, handle it as below;
+    otherwise call `recover()`.
+  - **Overlapping entry:** restore every entry by hand, in the order
+    listed, as a restore would:
+    - a directory entry (`"kind": "directory"`): remove the path, then copy
+      `files[""]` (`<index>.d`) back to it. With no `files[""]` the store
+      did not exist, so it stays removed. For the overlapping entry, skip
+      only what lies in the install root or a `service/` directory, and
+      restore the rest of its data;
+    - a file entry: remove the path and its `-wal`, `-journal` and `-shm`
+      files, then copy each `files` item back as `<path><suffix>` (an
+      SQLite file with the `-wal` and `-journal` the snapshot holds). A
+      suffix the snapshot lacks stays removed.
+
+    Only after every entry is restored, remove that snapshot directory,
+    then call `recover()`. When you cannot tell what an entry held, keep
+    the service stopped and the snapshot in place.
 - **Snapshot removal (#2062):** a snapshot that cannot be removed after the
   final receipt no longer fails the call; it stays.
 - On systemd, a start runs `systemctl --user reset-failed` first, since the
