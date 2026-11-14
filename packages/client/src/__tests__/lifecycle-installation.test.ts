@@ -631,11 +631,45 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     });
     await installation.install(await payload('1.0.0'));
     await expect(installation.upgrade(await payload('1.0.0'))).rejects.toMatchObject({ code: 'version_current' });
-    expect(staged).toEqual(['.staging', '1.0.0']);
+    // A matched existing version is verified on a fresh copy too, never on versions/1.0.0 itself (#1962).
+    expect(staged).toEqual(['.staging', '.staging']);
     refuse = true;
     const error = await installation.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught);
     expect(error).toMatchObject({ code: 'payload_invalid', cause: { message: 'node too old' } });
     expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual(['1.0.0']);
+  });
+
+  it('a verifier that changes the staged copy cannot change an installed version, and its change is payload_invalid (#1962)', async () => {
+    let fail = false;
+    const tampering = installationOver(fakeLifecycle(), {
+      verifyPayload: async (dir) => {
+        await fs.writeFile(path.join(dir, 'host.js'), 'tampered');
+        if (fail) throw new Error('refused');
+      },
+    });
+    await expect(tampering.install(await payload('1.0.0'))).rejects.toMatchObject({ code: 'payload_invalid' });
+    expect(existsSync(path.join(installRoot, 'versions', '1.0.0'))).toBe(false);
+    await installation.install(await payload('1.0.0'));
+    for (const throws of [true, false]) {
+      fail = throws;
+      await expect(tampering.install(await payload('1.0.0'))).rejects.toMatchObject({ code: 'payload_invalid' });
+      expect(await fs.readFile(path.join(installRoot, 'versions', '1.0.0', 'host.js'), 'utf8')).toBe('// 1.0.0');
+    }
+  });
+
+  it('a copy that overwrites an earlier one, as two names on a case-insensitive volume do, is payload_invalid (#1962)', async () => {
+    const dir = await payload('1.0.0', { 'A.js': 'first', 'b.js': 'second' });
+    const copyFile = fs.copyFile.bind(fs);
+    // b.js lands on A.js, as a.js would on a case-insensitive install volume.
+    const collide = vi.spyOn(fs, 'copyFile').mockImplementation((async (source: string, destination: string, mode?: number) => {
+      if (path.basename(String(destination)) !== 'b.js') return copyFile(source, destination, mode);
+      const first = path.join(path.dirname(String(destination)), 'A.js');
+      await copyFile(source, first, mode);
+      await fs.link(first, destination);
+    }) as typeof fs.copyFile);
+    const error = await installation.install(dir).catch((caught: unknown) => caught).finally(() => collide.mockRestore());
+    expect(error).toMatchObject({ code: 'payload_invalid' });
+    expect(existsSync(path.join(installRoot, 'versions', '1.0.0'))).toBe(false);
   });
 
   it('upgrade stops, prechecks, snapshots, switches and confirms health', async () => {

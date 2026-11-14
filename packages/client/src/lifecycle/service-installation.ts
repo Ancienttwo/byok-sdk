@@ -162,11 +162,13 @@ export interface ServiceInstallationOptions {
   stopTimeoutMs?: number;
   /**
    * The Host's own payload policy (#1842), such as a Node floor, file-size
-   * ceilings or file modes. Runs on the staged copy after every digest
-   * passed and before it becomes `versions/<id>`, and on an existing
-   * `versions/<id>` whose manifest matched, so it checks the exact bytes
-   * that will run. `manifest` is a frozen copy. A throw is `payload_invalid` with the error as `cause`;
-   * nothing new appears under `versions/`.
+   * ceilings or file modes. Runs on a fresh staged copy after every digest
+   * passed, also when `versions/<id>` already exists with a matching
+   * manifest, so it checks the exact bytes that will run and never sees the
+   * installed version (#1962). `manifest` is a frozen copy. A throw is
+   * `payload_invalid` with the error as `cause`, and so is a staged copy that
+   * no longer matches the manifest afterwards; nothing under `versions/`
+   * changes.
    */
   verifyPayload?(stagedDir: string, manifest: ServicePayloadManifest): void | Promise<void>;
   /** Test seams for the underlying lifecycle. */
@@ -866,11 +868,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   async function stage(payloadDir: string, { manifest, bytes }: Awaited<ReturnType<typeof readPayload>>): Promise<{ id: string; created: boolean }> {
     const id = manifest.id;
     const target = path.join(versionsDir, id);
-    if (await exists(target)) {
-      if (!(await matchesManifest(target, manifest, bytes))) throw new ServiceInstallationError('version_conflict');
-      await verifyStaged(target, manifest);
-      return { id, created: false };
-    }
+    const installed = await exists(target);
+    if (installed && !(await matchesManifest(target, manifest, bytes))) throw new ServiceInstallationError('version_conflict');
     const staging = path.join(versionsDir, `.staging-${randomUUID()}`);
     await fs.mkdir(staging, { recursive: true });
     try {
@@ -885,12 +884,17 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       // The parsed bytes, not a second read: a manifest swapped after the check never lands in `versions/`.
       await fs.writeFile(path.join(staging, SERVICE_PAYLOAD_MANIFEST), bytes);
       await verifyStaged(staging, manifest);
-      await fs.rename(staging, target);
+      // Checked again after the hook, which may have changed the copy, and
+      // after every copy: two names that one case-insensitive volume stores
+      // as one file leave fewer files than the manifest lists (#1962).
+      if (!(await matchesManifest(staging, manifest, bytes))) throw new ServiceInstallationError('payload_invalid');
+      if (!installed) await fs.rename(staging, target);
     } catch (error) {
       await fs.rm(staging, { recursive: true, force: true });
       throw error;
     }
-    return { id, created: true };
+    if (installed) await fs.rm(staging, { recursive: true, force: true });
+    return { id, created: !installed };
   }
 
   async function verifyStaged(dir: string, manifest: ServicePayloadManifest): Promise<void> {
