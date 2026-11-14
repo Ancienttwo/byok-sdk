@@ -1194,6 +1194,9 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     it.skipIf(process.env.BYOK_TWO_USER_TEST !== '1').each([0o777, 0o1777])(
       'real two-user ancestor replacement, mode %i (#2153; requires CI BYOK_TWO_USER_TEST=1 and BYOK_TWO_USER_NAME)',
       async (mode) => {
+        const started = Date.now();
+        const mark = (stage: string) => console.log('two-user timing', mode, stage, Date.now() - started);
+        mark('start');
         expect(process.env.GITHUB_ACTIONS).toBe('true');
         expect(['darwin', 'linux']).toContain(process.platform);
         const user = process.env.BYOK_TWO_USER_NAME;
@@ -1211,6 +1214,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
           await fs.mkdir(target);
           await fs.chmod(shared, mode);
           const beforeEntry = await fs.lstat(entry);
+          mark('before attacker');
           const attack = spawnSync('sudo', ['-n', '-u', user!, '--', '/usr/bin/python3', '-c', `
 import errno, json, os, sys
 shared, entry, moved, target = sys.argv[1:]
@@ -1226,7 +1230,8 @@ for name, operation in [('rename', lambda: os.rename(entry, moved)),
     except OSError as error:
         result[name] = errno.errorcode[error.errno]
 print(json.dumps(result))
-`, shared, entry, moved, target], { cwd: scratch, encoding: 'utf8', timeout: 10_000 });
+`, shared, entry, moved, target], { cwd: scratch, encoding: 'utf8', timeout: 30_000 });
+          mark(`after attacker status=${attack.status} error=${attack.error?.message}`);
           expect(attack.error).toBeUndefined();
           expect(attack.status, attack.stderr).toBe(0);
           const result = JSON.parse(attack.stdout) as { uid: number; rename: string | null; symlink: string | null };
@@ -1239,7 +1244,9 @@ print(json.dumps(result))
             expect((await fs.lstat(moved)).ino).toBe(beforeEntry.ino);
             expect((await fs.lstat(entry)).uid).toBe(result.uid);
             expect(await fs.readlink(entry)).toBe(target);
+            mark('before snapshots');
             const before = [await tree(scratch), await tree(root)];
+            mark('before SDK');
             // Observe real fs calls without replacing their implementations: even
             // a transient create-and-remove before the refusal is a failure.
             const writes = (['mkdir', 'open', 'writeFile', 'appendFile', 'rename', 'rm', 'unlink', 'copyFile', 'cp', 'symlink', 'chmod', 'chown'] as const)
@@ -1249,6 +1256,7 @@ print(json.dumps(result))
                 code: 'install_root_ancestor_unsafe', message: expect.stringContaining(shared),
               });
               for (const write of writes) expect(write).not.toHaveBeenCalled();
+              mark('after SDK');
             } finally {
               for (const write of writes) write.mockRestore();
             }
@@ -1267,9 +1275,12 @@ print(json.dumps(result))
             expect(await tree(target)).toEqual({});
           }
         } finally {
+          mark('before cleanup');
           await fs.rm(scratch, { recursive: true, force: true });
+          mark('after cleanup');
         }
       },
+      60_000,
     );
 
     it.skipIf(process.platform === 'win32')('every directory and link a lookup of the install root reads is checked, through every hop (#2028)', async () => {
