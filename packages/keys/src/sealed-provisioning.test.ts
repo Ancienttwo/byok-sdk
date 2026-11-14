@@ -396,11 +396,13 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       expect(`${(error as Error).message} ${(error as Error).stack}`).not.toContain(KEY_A);
     });
 
-    it('rejects before marking when the credential store is unavailable', async () => {
+    it('rejects an unavailable credential store without a receipt, so the same request applies later (#2132)', async () => {
       vi.spyOn(secrets, 'available').mockResolvedValueOnce(false);
-      const result = await apply(await configureRequest(sealingKey, KEY_A, { requestId: 'req-1', generation: 1 }));
-      expect(result).toMatchObject({ code: 'secret_store_unavailable' });
+      const request = await configureRequest(sealingKey, KEY_A, { requestId: 'req-1', generation: 1 });
+      expect(await apply(request)).toMatchObject({ code: 'secret_store_unavailable' });
       await expect(profiles.getPending(PROFILE_REF)).resolves.toBeUndefined();
+      await expect(profiles.getOperationWatermark(PROFILE_REF)).resolves.toBeUndefined();
+      expect(await apply(request)).toMatchObject({ outcome: 'applied', operationGeneration: 1 });
     });
   });
 

@@ -3,7 +3,7 @@ import { ownedProcessGroupRecord } from '../adapters/process-tree';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { existsSync, promises as fs } from 'node:fs';
+import { existsSync, promises as fs, type Stats } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -996,18 +996,94 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await installation.uninstall();
       await fs.rm(installRoot, { recursive: true, force: true });
       if (process.geteuid === undefined) return;
-      const realStat = fs.stat.bind(fs);
-      const foreign = vi.spyOn(fs, 'stat').mockImplementation((async (file: string, ...rest: []) => {
-        const stat = await realStat(file, ...rest);
-        return file === installRoot ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 }) : stat;
-      }) as typeof fs.stat);
+      const spellings = [installRoot, path.join(await fs.realpath(path.dirname(installRoot)), path.basename(installRoot))];
+      const owned = <F extends (at: string, ...rest: []) => Promise<Stats>>(real: F) => (async (at: string, ...rest: []) => {
+        const stat = await real(at, ...rest);
+        return spellings.includes(at) ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 }) : stat;
+      }) as F;
+      const [lstat, stat, mkdir] = [fs.lstat.bind(fs), fs.stat.bind(fs), fs.mkdir.bind(fs)];
+      const foreign: Array<{ mockRestore(): void }> = [vi.spyOn(fs, 'lstat').mockImplementation(owned(lstat)), vi.spyOn(fs, 'stat').mockImplementation(owned(stat))];
       try {
-        await expect(installation.install(three)).rejects.toMatchObject({ code: 'install_root_foreign_owner' });
+        for (const created of ['before', 'in the race'] as const) {
+          if (created === 'before') await fs.mkdir(installRoot);
+          else {
+            await fs.rm(installRoot, { recursive: true });
+            foreign.push(vi.spyOn(fs, 'mkdir').mockImplementation((async (at: string, ...rest: []) => {
+              const made = await mkdir(at, ...rest);
+              if (spellings.includes(at)) throw Object.assign(new Error('EEXIST'), { code: 'EEXIST' });
+              return made;
+            }) as typeof fs.mkdir));
+          }
+          await expect(installation.install(three)).rejects.toMatchObject({ code: 'install_root_foreign_owner' });
+          expect(await tree(installRoot)).toEqual({});
+        }
       } finally {
-        foreign.mockRestore();
+        for (const spy of foreign) spy.mockRestore();
       }
-      expect(await tree(installRoot)).toEqual({});
     });
+
+    it.skipIf(process.platform === 'win32')('an install root another user could rename or replace is install_root_ancestor_unsafe before anything is written (#2028)', async () => {
+      // Refusals name the directory as resolved: root's own links (macOS /tmp, /var) pass and are followed.
+      const real = await fs.realpath(root);
+      const shared = path.join(real, 'shared');
+      const app = path.join(shared, 'app');
+      await fs.mkdir(app, { recursive: true });
+      const over = installationOver(fakeLifecycle(), { installRoot: path.join(root, 'shared', 'app') });
+      // A parent anyone can write without the sticky bit, then the root itself; a sticky parent like /tmp is accepted.
+      for (const [dir, mode] of [[shared, 0o777], [app, 0o777]] as const) {
+        await fs.chmod(dir, mode);
+        await expect(over.recover()).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${dir} (writable by everyone, no sticky bit)`) });
+        expect(await tree(app)).toEqual({});
+        await fs.chmod(dir, 0o755);
+      }
+      // A missing root is not created under an unchecked parent.
+      await fs.rm(app, { recursive: true });
+      await fs.chmod(shared, 0o777);
+      await expect(over.recover()).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe' });
+      expect(existsSync(app)).toBe(false);
+      await fs.chmod(shared, 0o1777);
+      await expect(over.recover()).resolves.toBeUndefined();
+    });
+
+    it.skipIf(process.platform === 'win32')('every directory and link a lookup of the install root reads is checked, through every hop (#2028)', async () => {
+      const real = await fs.realpath(root);
+      const [safe, shared, sticky] = [path.join(real, 'safe'), path.join(real, 'shared'), path.join(real, 'sticky')];
+      await fs.mkdir(path.join(safe, 'real', 'app'), { recursive: true });
+      await fs.mkdir(shared);
+      await fs.mkdir(sticky);
+      await fs.chmod(shared, 0o777);
+      await fs.chmod(sticky, 0o1777);
+      const refused = (installRoot: string) => installationOver(fakeLifecycle(), { installRoot }).recover();
+      // safe/entry -> shared/hop -> safe/real: the middle directory is writable by everyone.
+      await fs.symlink(path.join(shared, 'hop'), path.join(safe, 'entry'));
+      await fs.symlink('../safe/real', path.join(shared, 'hop'));
+      await expect(refused(path.join(safe, 'entry', 'app'))).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${shared} (writable`) });
+      // A link another user owns in a sticky directory: its owner could repoint it.
+      const link = path.join(sticky, 'link');
+      await fs.symlink(path.join(safe, 'real'), link);
+      const lstat = fs.lstat.bind(fs);
+      const foreign = vi.spyOn(fs, 'lstat').mockImplementation((async (at: string, ...rest: []) => {
+        const stat = await lstat(at, ...rest);
+        return at === link ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 }) : stat;
+      }) as typeof fs.lstat);
+      await expect(refused(path.join(link, 'app')).finally(() => foreign.mockRestore())).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${link} (owner uid`) });
+      await expect(refused(path.join(link, 'app'))).resolves.toBeUndefined();
+      // More than 40 links is refused, not an ELOOP.
+      for (let n = 0; n < 41; n += 1) await fs.symlink(n === 40 ? path.join(safe, 'real') : `l${n + 1}`, path.join(safe, `l${n}`));
+      await expect(refused(path.join(safe, 'l0', 'app'))).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining('more than 40 links') });
+      // A .. in the install root, or after a missing directory in a link target, is refused before anything is created.
+      await expect(refused(`${safe}/real/../real/app`)).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining('a .. segment') });
+      await fs.symlink('new/../../shared', path.join(safe, 'via'));
+      await expect(refused(path.join(safe, 'via', 'app'))).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${path.join(safe, 'new')} (missing`) });
+      expect(existsSync(path.join(safe, 'new'))).toBe(false);
+      // A directory this user cannot read (root reads every directory).
+      if (process.geteuid?.() === 0) return;
+      const locked = path.join(safe, 'locked');
+      await fs.mkdir(locked, { mode: 0o600 });
+      await expect(refused(path.join(locked, 'app'))).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${locked} (not readable)`) });
+      expect(await fs.readdir(locked)).toEqual([]);
+    });
+
 
     it('uninstall refuses a symlinked snapshots/ and changes nothing behind it', async () => {
       await installation.install(await payload('1.0.0'));
@@ -1814,7 +1890,9 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       try {
         expect(error).toMatchObject({ code: 'upgrade_pending', message: expect.stringContaining(`process group ${migrate.pgid}`) });
         expect([await pointer('current'), await fs.readFile(db, 'utf8'), events.includes('start')]).toEqual([undefined, 'migrated data', false]);
+        // recover() leaves the stores alone while the recorded migration still runs (#2106).
         await expect(installation.recover()).rejects.toMatchObject({ code: 'upgrade_pending' });
+        expect([await pointer('current'), await fs.readFile(db, 'utf8'), events.includes('start')]).toEqual([undefined, 'migrated data', false]);
       } finally {
         process.kill(-migrate.pgid, 'SIGKILL');
       }
@@ -1856,6 +1934,227 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await listed(holder, 'directory');
       await expect(installation.upgrade(await payload('3.0.0'))).rejects.toMatchObject({ code: 'store_overlaps_service_state' });
       expect([await pointer('current'), await fs.readlink(path.join(holder, 'app'))]).toEqual(['2.0.0', installRoot]);
+    });
+
+    it('a snapshot entry that overlaps service/ is refused before a restore changes any store (#2102)', async () => {
+      const marker = path.join(storeDir, 'service', 'marker');
+      await fs.writeFile(marker, 'live');
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+      const service = path.join(storeDir, 'service');
+      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'old', path: service, canonical: service, kind: 'directory', files: {} }] }));
+      const error = await installation.rollback().catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'upgrade_pending' });
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'store_overlaps_service_state', message: expect.stringContaining(path.join(storeDir, 'service')) }));
+      expect([await fs.readFile(marker, 'utf8'), await fs.readFile(db, 'utf8'), existsSync(index)]).toEqual(['live', 'v2 data', true]);
+    });
+
+    it('a snapshot SDK 0.42 took is snapshot_upgrade_required before rollback() changes anything', async () => {
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const { entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: Array<Record<string, unknown>> };
+      await fs.writeFile(index, JSON.stringify({ entries: entries.map(({ canonical: _canonical, ...entry }) => entry) }));
+      const before = await tree(root);
+      const receipt = await installation.receipt();
+      await expect(installation.rollback()).rejects.toMatchObject({ code: 'snapshot_upgrade_required', message: expect.stringContaining(path.dirname(index)) });
+      expect([await tree(root), await installation.receipt(), events]).toEqual([before, receipt, []]);
+    });
+
+    it('a snapshot record that is not format 2 is snapshot_upgrade_required where a restore reads it, and the restore writes nothing', async () => {
+      // A failed health check restores the upgrade's own snapshot without the rollback()/recover() link check first.
+      const index = path.join(installRoot, 'snapshots', '3.0.0', 'snapshot.json');
+      unhealthy.add('3.0.0');
+      onHealth = async (version) => {
+        if (version !== '3.0.0') return;
+        await fs.writeFile(db, 'v3 data');
+        const { entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+        await fs.writeFile(index, JSON.stringify({ entries }));
+      };
+      const error = await installation.upgrade(await payload('3.0.0')).catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'upgrade_pending' });
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'snapshot_upgrade_required', message: expect.stringContaining(path.dirname(index)) }));
+      expect([await fs.readFile(db, 'utf8'), (await installation.receipt())?.state]).toEqual(['v3 data', 'pending']);
+    });
+
+    it.each(['', '/', '/.'])('a directory store root swapped for a link while its realpath still matches, listed as tree%s, is refused before any store is restored', async (spelling) => {
+      const real = await fs.realpath(root);
+      const [a, b, alias] = [path.join(real, 'aa'), path.join(real, 'bb'), path.join(real, 'alias')];
+      await fs.mkdir(path.join(a, 'tree'), { recursive: true });
+      await fs.writeFile(path.join(a, 'tree', 'marker'), 'kept');
+      await fs.mkdir(b);
+      await fs.symlink(a, alias, 'dir');
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'tree', path: `${path.join(alias, 'tree')}${spelling}`, canonical: path.join(a, 'tree'), kind: 'directory', files: {} }] }));
+      // The migration repoints alias and links bb/tree back to aa/tree: alias/tree still resolves to aa/tree, but is a link.
+      await fs.rm(alias);
+      await fs.symlink(b, alias, 'dir');
+      await fs.symlink(path.join(a, 'tree'), path.join(b, 'tree'), 'dir');
+      const error = await installation.rollback().catch((caught: unknown) => caught);
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining('must not be a link') }));
+      expect([await fs.readFile(db, 'utf8'), await fs.readFile(path.join(a, 'tree', 'marker'), 'utf8')]).toEqual(['v2 data', 'kept']);
+    });
+
+    it.each(['', '/', '/.'])('a directory store root that became a dangling link, recorded as tree%s, is refused before any store is restored', async (spelling) => {
+      const tree = path.join(await fs.realpath(root), 'tree');
+      await fs.symlink(path.join(root, 'gone'), tree, 'dir');
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'tree', path: `${tree}${spelling}`, canonical: tree, kind: 'directory', files: {} }] }));
+      const error = await installation.rollback().catch((caught: unknown) => caught);
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining('must not be a link') }));
+      expect([await fs.readFile(db, 'utf8'), (await fs.lstat(tree)).isSymbolicLink()]).toEqual(['v2 data', true]);
+    });
+
+    it.each([['file', 'a file'], ['directory', 'a file'], ['file', 'a link to itself'], ['directory', 'a link to itself']] as const)('a %s store whose parent directory became %s is precheck_failed before any store is restored', async (kind, became) => {
+      const parent = path.join(await fs.realpath(root), 'parent');
+      if (became === 'a file') await fs.writeFile(parent, 'a file now');
+      else await fs.symlink(parent, parent);
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'nested', path: path.join(parent, 'db'), canonical: path.join(parent, 'db'), ...(kind === 'directory' ? { kind } : {}), files: {} }] }));
+      const error = await installation.rollback().catch((caught: unknown) => caught);
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ name: 'ServiceInstallationError', code: 'precheck_failed' }));
+      expect([await fs.readFile(db, 'utf8'), became === 'a file' ? await fs.readFile(parent, 'utf8') : await fs.readlink(parent)]).toEqual(['v2 data', became === 'a file' ? 'a file now' : parent]);
+    });
+
+    it.each([['an array', []], ['an array of names', ['0']], ['an unknown suffix', { '-shm': '0' }], ['another name', { '': '9' }], ['naming a removed copy', undefined]])('snapshot files as %s are snapshot_upgrade_required before rollback() changes anything', async (_label, files) => {
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: Array<{ files: Record<string, string> }> };
+      if (files === undefined) await fs.rm(path.join(path.dirname(index), Object.values(snapshot.entries[0]!.files)[0]!), { recursive: true });
+      else await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: snapshot.entries.map((entry, at) => at === 0 ? { ...entry, files } : entry) }));
+      const before = await tree(root);
+      await expect(installation.rollback()).rejects.toMatchObject({ code: 'snapshot_upgrade_required' });
+      expect(await tree(root)).toEqual(before);
+    });
+
+    it('a snapshot entry with a .. segment after a link is refused by recover() before any store changes, every time (#2102)', async () => {
+      const marker = path.join(storeDir, 'service', 'marker');
+      await fs.writeFile(marker, 'live');
+      await fs.mkdir(path.join(storeDir, 'nested'));
+      await fs.mkdir(path.join(root, 'outside'));
+      await fs.symlink(path.join(storeDir, 'nested'), path.join(root, 'outside', 'hop'), 'dir');
+      // canonical() folds the .., the file system follows hop first.
+      const dotted = path.join(root, 'outside', 'hop') + `${path.sep}..${path.sep}service${path.sep}marker`;
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'old', path: dotted, canonical: dotted, files: {} }] }));
+      await fs.rm(path.join(installRoot, 'current'));
+      await journal({ kind: 'upgrade', from: '1.0.0', to: '2.0.0' });
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const error = await installation.recover().catch((caught: unknown) => caught);
+        expect(error).toMatchObject({ code: 'upgrade_pending' });
+        expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining(dotted) }));
+        expect([await fs.readFile(marker, 'utf8'), await fs.readFile(db, 'utf8'), existsSync(index), await pointer('current'), (await installation.receipt())?.state]).toEqual(['live', 'v2 data', true, undefined, 'pending']);
+      }
+    });
+
+    it('a store path whose link changed since the snapshot is refused before a restore changes any store (#2106)', async () => {
+      const [a, b, link] = [path.join(root, 'a'), path.join(root, 'b'), path.join(root, 'link')];
+      for (const dir of [a, b]) await fs.mkdir(path.join(dir, 'data'), { recursive: true });
+      await fs.symlink(a, link, 'dir');
+      await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([{ store: 'host', path: path.join(link, 'data'), verdict: 'accepted', reason: 'accepted', kind: 'directory' }]));
+      await installation.upgrade(await payload('3.0.0'));
+      await fs.writeFile(path.join(b, 'data', 'kept'), 'b');
+      await fs.rm(link);
+      await fs.symlink(b, link, 'dir');
+      const error = await installation.rollback().catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'upgrade_pending' });
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining('no longer resolves') }));
+      expect([await fs.readFile(path.join(b, 'data', 'kept'), 'utf8'), existsSync(path.join(installRoot, 'snapshots', '3.0.0', 'snapshot.json'))]).toEqual(['b', true]);
+    });
+
+    it('a link repointed to another spelling of its target is refused on a case-sensitive volume, even where names usually ignore case (#2106)', async () => {
+      // Two directories that differ only in case, as on a case-sensitive APFS volume: realpath returns the spelling it found.
+      const [lower, upper, link] = [path.join(root, 'a'), path.join(root, 'A'), path.join(root, 'link')];
+      await fs.mkdir(path.join(lower, 'data'), { recursive: true });
+      await fs.symlink(lower, link, 'dir');
+      await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([{ store: 'host', path: path.join(link, 'data'), verdict: 'accepted', reason: 'accepted', kind: 'directory' }]));
+      installation = installationOver(fakeLifecycle(), { lifecycle: { platform: 'darwin' } });
+      await installation.upgrade(await payload('3.0.0'));
+      await fs.writeFile(path.join(lower, 'data', 'kept'), 'other store');
+      const realpath = fs.realpath.bind(fs);
+      const respelled = vi.spyOn(fs, 'realpath').mockImplementation((async (file: string) => {
+        const found = await realpath(file);
+        return found.startsWith(lower) ? upper + found.slice(lower.length) : found;
+      }) as typeof fs.realpath);
+      const error = await installation.rollback().catch((caught: unknown) => caught).finally(() => respelled.mockRestore());
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining('no longer resolves') }));
+      expect([await fs.readFile(path.join(lower, 'data', 'kept'), 'utf8'), existsSync(path.join(installRoot, 'snapshots', '3.0.0', 'snapshot.json'))]).toEqual(['other store', true]);
+    });
+
+    it('a store listed through another store\'s link is restored at its canonical path, not through that link again (#2106)', async () => {
+      const [d, a, u, v, alias] = [path.join(root, 'dd'), path.join(root, 'aa'), path.join(root, 'uu'), path.join(root, 'vv'), path.join(root, 'alias')];
+      const service = path.join(storeDir, 'service');
+      for (const at of [d, a, u, v]) await fs.mkdir(at);
+      await fs.symlink(d, alias, 'dir');
+      await fs.symlink(u, path.join(v, 'y'), 'dir');
+      await fs.symlink(a, path.join(d, 'x'), 'dir');
+      await fs.symlink(u, path.join(a, 'y'), 'dir');
+      await fs.writeFile(path.join(u, 'marker'), 'snapshot');
+      await fs.writeFile(path.join(service, 'marker'), 'live');
+      await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([[d, 'directory'], [path.join(alias, 'x', 'y', 'marker')], [a, 'directory']]
+        .map(([at, kind], index) => ({ store: `s${index}`, path: at, verdict: 'accepted', reason: 'accepted', ...(kind ? { kind } : {}) }))));
+      await installation.upgrade(await payload('3.0.0'));
+      // The candidate's migration repoints the links inside both directory stores: alias/x/y/marker still resolves to uu/marker.
+      await fs.rm(path.join(d, 'x'));
+      await fs.symlink(v, path.join(d, 'x'), 'dir');
+      await fs.rm(path.join(a, 'y'));
+      await fs.symlink(service, path.join(a, 'y'), 'dir');
+      await fs.writeFile(path.join(u, 'marker'), 'candidate');
+      await expect(installation.rollback()).resolves.toMatchObject({ state: 'rolled-back' });
+      expect([await fs.readFile(path.join(service, 'marker'), 'utf8'), await fs.readFile(path.join(u, 'marker'), 'utf8'), await fs.readlink(path.join(d, 'x')), await fs.readlink(path.join(a, 'y'))]).toEqual(['live', 'snapshot', a, u]);
+    });
+
+    it('a store listed in another case than on disk and removed since the snapshot is restored where names ignore case (#2106)', async () => {
+      const dir = path.join(root, 'r');
+      await fs.mkdir(dir);
+      await fs.writeFile(path.join(dir, 'Store.DB'), 'snapshot');
+      // A case-sensitive volume has no such alias; the next case covers it.
+      if (!existsSync(path.join(dir, 'store.db'))) return;
+      await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([{ store: 'host', path: path.join(dir, 'store.db'), verdict: 'accepted', reason: 'accepted' }]));
+      await installation.upgrade(await payload('3.0.0'));
+      await fs.rm(path.join(dir, 'Store.DB'));
+      await expect(installation.rollback()).resolves.toMatchObject({ state: 'rolled-back' });
+      expect([await fs.readdir(dir), await fs.readFile(path.join(dir, 'Store.DB'), 'utf8')]).toEqual([['Store.DB'], 'snapshot']);
+    });
+
+    it('a missing listed store whose recorded spelling exists, another file on a case-sensitive volume, is refused (#2106)', async () => {
+      const [listed, recorded] = [path.join(root, 'r', 'store.db'), path.join(root, 'r', 'Store.DB')];
+      await fs.mkdir(path.dirname(listed));
+      await fs.writeFile(listed, 'snapshot');
+      await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([{ store: 'host', path: listed, verdict: 'accepted', reason: 'accepted' }]));
+      // The snapshot records the spelling a case-insensitive lookup returned; then the two names are two files.
+      const realpath = fs.realpath.bind(fs);
+      const lookup = vi.spyOn(fs, 'realpath').mockImplementation((async (file: string) => {
+        const found = await realpath(file);
+        return found === listed ? recorded : found;
+      }) as typeof fs.realpath);
+      await installation.upgrade(await payload('3.0.0')).finally(() => lookup.mockRestore());
+      await fs.rm(listed);
+      await fs.writeFile(recorded, 'other');
+      const missing = vi.spyOn(fs, 'realpath').mockImplementation((async (file: string) => {
+        if (file === listed) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        return realpath(file);
+      }) as typeof fs.realpath);
+      const error = await installation.rollback().catch((caught: unknown) => caught).finally(() => missing.mockRestore());
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining('no longer resolves') }));
+      expect(await fs.readFile(recorded, 'utf8')).toBe('other');
+    });
+
+    it('snapshot entries that lie inside each other only through a link are refused before a restore changes any store (#2106)', async () => {
+      const [outer, inner] = [path.join(root, 'outer'), path.join(root, 'inner')];
+      await fs.mkdir(outer);
+      await fs.mkdir(inner);
+      await fs.writeFile(path.join(inner, 'marker'), 'live');
+      await fs.symlink(inner, path.join(outer, 'x'), 'dir');
+      const nested = path.join(outer, 'x', 'marker');
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'outer', path: outer, canonical: outer, kind: 'directory', files: {} }, { store: 'nested', path: nested, canonical: nested, files: {} }] }));
+      const error = await installation.rollback().catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'upgrade_pending' });
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining(`(${outer}, ${nested})`) }));
+      expect([await fs.readFile(db, 'utf8'), await fs.readFile(path.join(inner, 'marker'), 'utf8'), existsSync(path.join(outer, 'x')), existsSync(index)]).toEqual(['v2 data', 'live', true, true]);
     });
 
     it('a linked snapshots/<version> is refused before it is probed or removed (#2061)', async () => {
@@ -2509,6 +2808,17 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     it.each([
       ['a relative storeDir', async () => [{ storeDir: 'store', productId: 'svc' }]],
       ['a store listed twice', async () => [{ storeDir, productId: 'svc' }, { storeDir: `${storeDir}${path.sep}`, productId: 'other' }]],
+      // Two spellings of one store would lease it twice, the second waiting on the first until store_busy (#2161).
+      ['a store listed twice through a link', async () => {
+        await fs.symlink(storeDir, path.join(root, 'store-alias'), 'dir');
+        return [{ storeDir, productId: 'svc' }, { storeDir: path.join(root, 'store-alias'), productId: 'other' }];
+      }],
+      ['a store listed twice in another case where names ignore case', async () => {
+        // On a case-sensitive volume another case is another directory: the link spelling stands in.
+        const upper = path.join(path.dirname(storeDir), path.basename(storeDir).toUpperCase());
+        if (!existsSync(upper)) await fs.symlink(storeDir, upper, 'dir');
+        return [{ storeDir, productId: 'svc' }, { storeDir: upper, productId: 'other' }];
+      }],
       ['an empty productId', async () => [{ storeDir, productId: '' }]],
       ['a throw', async () => { throw new Error('no session'); }],
     ])('%s is daemon_stores_invalid and nothing is switched', async (_label, daemonStores) => {
@@ -2619,6 +2929,18 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         { store: 'research-index', path: index, kind: 'directory', verdict: 'accepted', reason: 'ok' },
         { store: 'shard', path: path.join(index, 'shards', 'a'), verdict: 'accepted', reason: 'ok' },
       )],
+      ['a store inside a directory store only through a link (#2106)', async () => {
+        await fs.mkdir(path.join(root, 'elsewhere'));
+        await fs.symlink(path.join(root, 'elsewhere'), path.join(index, 'x'), 'dir');
+        await verdictsWith(
+          { store: 'research-index', path: index, kind: 'directory', verdict: 'accepted', reason: 'ok' },
+          { store: 'shard', path: path.join(index, 'x', 'shard.db'), verdict: 'accepted', reason: 'ok' },
+        );
+      }],
+      ['a store path through a link loop', async () => {
+        await fs.symlink(path.join(root, 'loop'), path.join(root, 'loop'));
+        await verdictsWith({ store: 'host', path: path.join(root, 'loop', 'host.db'), verdict: 'accepted', reason: 'ok' });
+      }],
       ['a file store that is a directory', () => verdictsWith({ store: 'research-index', path: index, verdict: 'accepted', reason: 'ok' })],
       ['a directory store that is a symlink', async () => {
         await fs.symlink(index, path.join(root, 'index-link'));
@@ -2634,6 +2956,15 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'precheck_failed' });
       expect(await pointer('current')).toBe('1.0.0');
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'precheck_failed' });
+    });
+
+    it.skipIf(process.platform === 'win32' || process.geteuid?.() === 0)('a store path through a directory this user cannot read is precheck_failed and nothing is switched', async () => {
+      await installation.install(await payload('1.0.0'));
+      const locked = path.join(root, 'locked');
+      await fs.mkdir(locked, { mode: 0o600 });
+      await verdictsWith({ store: 'host', path: path.join(locked, 'host.db'), verdict: 'accepted', reason: 'ok' });
+      await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'precheck_failed', message: expect.stringContaining('cannot read') });
+      expect([await pointer('current'), await fs.readdir(locked)]).toEqual(['1.0.0', []]);
     });
 
     it('a failed cleanup of the partial snapshot does not replace snapshot_failed', async () => {

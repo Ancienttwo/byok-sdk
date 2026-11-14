@@ -3509,17 +3509,18 @@ export declare function resolveSystemTool(tool: string, host?: SystemToolHost): 
  */
 export declare function systemExecutable(command: string): string;
 /**
- * Refuse a spawn input that holds a NUL byte, naming only its slot. Node's own
- * rejection quotes the input escaped, which literal credential redaction
- * misses (#2008). Env is walked with `for...in` because Node reads inherited
- * enumerable keys too. The client and the keys launcher both use this rule
- * (#2111).
+ * Refuse a NUL byte in command, args, env or the optional cwd, naming only
+ * its slot. Node's own rejection quotes the input escaped, which literal
+ * credential redaction misses (#2008). Env is walked with `for...in` because
+ * Node reads inherited enumerable keys too. Pass the same cwd as spawn;
+ * omitting cwd checks only command, args and env (#2111, #2151).
  */
-export declare function assertNoNulSpawnInput(command: string, args: readonly string[], env: Readonly<Record<string, string | undefined>> | undefined): void;
+export declare function assertNoNulSpawnInput(command: string, args: readonly string[], env: Readonly<Record<string, string | undefined>> | undefined, cwd?: string): void;
 /**
- * The credential-free form of a failed spawn: Node's spawn error carries
- * `spawnargs` and `path`, so an argument credential would ride any log or
- * serialization of it; only the code crosses (#2065, #2111).
+ * Reduce an ordinary Node spawn error to its string code, or `unknown` when
+ * code is absent or not a string. The result retains no original message,
+ * path, spawnargs or cause (#2065, #2111, #2151). String codes are trusted and
+ * copied verbatim; this does not sanitize arbitrary objects or code getters.
  */
 export declare function spawnStartError(error: unknown): Error & {
     code?: string;

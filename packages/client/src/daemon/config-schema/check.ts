@@ -4,7 +4,7 @@ import type { RuntimeAdapter } from '../../types.js';
 import { AgentEgressPolicyError, resolveAgentEgressPolicy } from '../agent-egress-policy.js';
 import { resolveDaemonConfig } from '../create-daemon/config.js';
 import { resolveDaemonOperationalConfig } from '../create-daemon/operational-config.js';
-import { assertAgySessionStoreTtl, injectedAdapterConfigConflicts } from '../create-daemon/support.js';
+import { assertAgySessionStoreTtl, duplicateAdapterIdIssues, injectedAdapterConfigConflicts } from '../create-daemon/support.js';
 import { buildRuntimeAdapters, runtimeEnvironmentPolicyIssues } from '../../adapters/runtime-adapters.js';
 import type { DaemonConfig } from '../create-daemon.js';
 import { resolveStorageConfig } from '../retention/config.js';
@@ -51,6 +51,8 @@ export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOpti
     if (conflicts.length > 0) {
       return { ok: false, issues: [...issues, ...conflicts.map(({ key, message }): DaemonConfigIssue => ({ severity: 'error', code: 'invalid_value', path: key, message }))] };
     }
+    const duplicateIssues = duplicateAdapterIdIssues(options.adapters);
+    if (duplicateIssues.length > 0) return { ok: false, issues: [...issues, ...duplicateIssues] };
   }
   const policyIssues = versionPolicyConfigIssues(input);
   if (policyIssues.length > 0) return { ok: false, issues: [...issues, ...policyIssues] };

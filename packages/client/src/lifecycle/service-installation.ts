@@ -11,8 +11,8 @@ import { acquireDaemonOwner, DaemonOwnerActiveError, DaemonOwnerReclaimingError,
 import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger.js';
 import { ownedProcessGroupRecord, ownedProcessGroupRuns, type OwnedProcessGroupRecord } from '../adapters/process-tree.js';
 import { acquirePathMutationGate, acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate.js';
-import { resolveExistingAncestor } from '../util/existing-ancestor.js';
 import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle.js';
+import { canonical, checkRestoreTargets, checkStorePaths, directoryStorePath, mkdirReal, parseSnapshotRecord, resolveTrusted, SNAPSHOT_FORMAT, within, type SnapshotEntry, type SnapshotRecord, type StorePathRefusal } from './store-path-identity.js';
 import type { HeldServiceLifecycle, ManagedServiceLifecycle } from './managed-lifecycle.js';
 import {
   isJsonObject, isPayloadPath, listPayloadFiles, SERVICE_PAYLOAD_MANIFEST, sha256File, SHA256_HEX, VERSION_ID, type ServicePayloadManifest,
@@ -29,7 +29,13 @@ import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, Servic
 export interface ServiceStoreVerdict {
   /** An SDK `LocalStoreId` or a Host store id: 1-64 of `a-z 0-9 -`, starting with a letter or digit. */
   readonly store: string;
-  /** Absolute. No two stores share a path, and no store lies inside a `directory` store. */
+  /**
+   * Absolute. No two stores share a path or lie inside each other, compared
+   * both as written and with links resolved (#2106): a store under another,
+   * also only through a link, is `precheck_failed`, and so is a snapshot
+   * entry an earlier version recorded that way, before a restore changes
+   * any store.
+   */
   readonly path: string;
   /**
    * `file` (the default): the file plus its `-wal` and `-journal`, each a
@@ -143,8 +149,11 @@ export interface ServiceInstallationOptions {
    * Every daemon store the service process owns, leased on a first install
    * and read after stopping the service on upgrade, rollback and recover
    * (#1328, #1983). Each `storeDir`
-   * is absolute and listed once; `productId` is not empty; an empty list is
-   * valid. An invalid list or a throw is `daemon_stores_invalid`. Default:
+   * is absolute and listed once, compared with its links resolved (#2161):
+   * a second spelling of one store would take a second lease on it and wait
+   * for its own first one until `store_busy`. `productId` is not empty; an
+   * empty list is valid. An invalid list or a throw is
+   * `daemon_stores_invalid`. Default:
    * `[{ storeDir: service.storeDir, productId }]`. Requires `healthCheck`,
    * since the default one reaches only `productId`'s daemon.
    */
@@ -319,7 +328,8 @@ export interface ServiceInstallation {
    * switched to, under a `pending` receipt written first. Store writes since
    * that switch are discarded. It also resolves a `switch_unhealthy`
    * receipt. The unit must be the exact one this SDK writes, as on
-   * upgrade().
+   * upgrade(). A snapshot SDK 0.42 took is `snapshot_upgrade_required`
+   * before anything changes; roll it back with SDK 0.42, or keep `current`.
    *
    * The top-level code follows the outcome (#2010). A call that wrote its
    * final receipt throws its first failure's own class and code; later
@@ -351,7 +361,17 @@ export interface ServiceInstallation {
    * `receipt_state_inconsistent` and nothing changes. It does not check the
    * unit: a pending receipt is only written after upgrade() or rollback()
    * checked it. A final version 1 receipt is rewritten as version 2.
-   * Returns the receipt, or `undefined` when there is none. Release
+   * A snapshot SDK 0.42 took is `snapshot_upgrade_required` before
+   * anything changes: finish or abandon that upgrade with SDK 0.42 first.
+   * Before a restore changes any store, every snapshot entry is checked
+   * (#2102, #2106): a `..` segment, two stores inside each other, or a path
+   * that no longer resolves as it did at the snapshot is
+   * `precheck_failed`; a store in the install root or a `service/` is
+   * `store_overlaps_service_state`; each names the path. The call then
+   * throws `upgrade_pending` with that refusal in its cause, and the
+   * receipt, `current`, the snapshot and every store stay as they were.
+   * Returns the receipt, or
+   * `undefined` when there is none. Release
    * failures follow the same rule as on `rollback()`.
    */
   recover(): Promise<ServiceUpgradeReceipt | undefined>;
@@ -386,11 +406,13 @@ const ERROR_MESSAGES = {
   no_rollback: 'There is no previous version with a store snapshot to roll back to.',
   install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.',
   receipt_upgrade_required: 'Pending SDK 0.42 receipt: run recover() with SDK 0.42 first.',
+  snapshot_upgrade_required: 'A snapshot SDK 0.42 took would be restored. Nothing was changed; with SDK 0.42, finish or abandon that upgrade (recover() or rollback()), then upgrade with this version.',
   receipt_state_inconsistent: 'The receipt does not match the version pointers. Nothing was changed.',
   switch_unhealthy: 'The new version stays current but is unhealthy. Call rollback(), or keep it.',
   repair_interrupted: 'A same-version reinstall was interrupted. Run install() again.',
   service_program_not_current: 'The service unit must be the one this SDK writes, running from <installRoot>/current. Reinstall the payload installed now (install() with the current version id) to rewrite the unit, then retry.',
   install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.',
+  install_root_ancestor_unsafe: 'Another user could replace the install root. Nothing was changed; move it, or fix the owner or mode of',
   snapshots_symlinked: 'A path under the install root\'s snapshots/ is a symbolic link. Nothing changed; replace the link, then retry.',
   store_overlaps_service_state: 'A store overlaps the install root or a daemon store\'s service/ directory.',
 } as const;
@@ -465,6 +487,13 @@ function joinLater(error: unknown, later: readonly unknown[]): unknown {
 function unfinishedFailure(errors: readonly unknown[], note: string): ServiceInstallationError {
   const error = new ServiceInstallationError('upgrade_pending', undefined, { cause: new FailureList(errors.flatMap(failureParts), note) });
   error.message = `${note} Run recover() (CLI: byok-agent upgrade recover); if it reports store_busy, restart the Host process first.`;
+  return error;
+}
+
+/** The installation error for a refused store path, its message naming the path. */
+function storePathError(refusal: StorePathRefusal): ServiceInstallationError {
+  const error = new ServiceInstallationError(refusal.code);
+  error.message += refusal.detail;
   return error;
 }
 
@@ -610,23 +639,6 @@ export function createServiceInstallation(opts: ServiceInstallationOptions): Ser
 }
 
 /**
- * Whether `child` is `parent` or lies under it, compared by path segment
- * (`current-old/x` is not under `current`) and, on darwin and win32, without
- * case (#2011). The one path containment rule of this module.
- */
-function within(child: string, parent: string, platform: NodeJS.Platform): boolean {
-  const fold = (value: string): string => platform === 'darwin' || platform === 'win32' ? value.toLowerCase() : value;
-  const relative = path.relative(fold(parent), fold(child));
-  return relative === '' || (relative.split(path.sep)[0] !== '..' && !path.isAbsolute(relative));
-}
-
-/** `at` with the symbolic links of its deepest existing ancestor resolved and the missing rest appended, so an alias compares as its target (#2011). */
-async function canonical(at: string): Promise<string> {
-  const found = await resolveExistingAncestor(at);
-  return found === undefined ? path.resolve(at) : path.join(found.canonical, ...found.tail);
-}
-
-/**
  * Whether the command or an argument lies under `current` (#2011). A
  * plausibility check only, without resolving links: the factory is
  * synchronous, and a program that names the path but runs something else
@@ -696,20 +708,26 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * `root` (#2001). The gate always uses the default gate root, never the
    * lifecycle's `gateRoot`, so installations under different gate roots that
    * share an install root still exclude each other. A held gate is
-   * `lifecycle_owner_busy`. The root is created first, so the gate and the
-   * owner check act on an existing directory: the gate resolves its real
-   * path, one spelling for every alias (a symlink, or another letter case on
-   * a case-insensitive volume), and whoever creates a missing root owns it.
-   * The gate is per effective uid, so on POSIX a root another user owns is
-   * `install_root_foreign_owner` before anything is written under it. This
-   * holds only while the root's parent directory is writable by this user
-   * alone: otherwise the root can be renamed or replaced by a symlink after
-   * the check (#2028). Windows has no owner check.
+   * `lifecycle_owner_busy`. On POSIX the root's lookup is checked first
+   * (#2028): an install root another user could rename or replace, through
+   * any directory or link {@link resolveTrusted} reads, is
+   * `install_root_ancestor_unsafe` before anything is created. Then the root
+   * is created, so the gate and the owner check act on an existing
+   * directory: the gate resolves its real path, one spelling for every alias
+   * (a symlink, or another letter case on a case-insensitive volume), and
+   * whoever creates a missing root owns it. The gate is per effective uid,
+   * so a root another user owns is `install_root_foreign_owner` before
+   * anything is written under it. A group-writable directory is accepted: its group is trusted (macOS
+   * `/Applications` is root:admin 775). Windows has neither check: who can
+   * rename an entry there follows ACLs (FILE_DELETE_CHILD on the parent,
+   * DELETE on the entry, inheritance), which have no sticky-bit equivalent
+   * and are not read; keep the root in a directory only this user can
+   * change, such as one under %LOCALAPPDATA%.
    */
   function rootOwned<T>(operation: (held: HeldServiceLifecycle) => Promise<T>): Promise<T> {
     return lifecycle.owned(async (held) => {
       let gate: PathMutationGate;
-      await fs.mkdir(root, { recursive: true });
+      await prepareInstallRoot();
       try {
         gate = await acquirePathMutationGate({ scope: 'install-root', targetPath: root }, { waitMs: 0 });
       } catch (error) {
@@ -733,14 +751,48 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     });
   }
 
+  /**
+   * Checks the install root's whole lookup with {@link resolveTrusted}
+   * before anything is created (#2028), then creates each missing directory
+   * alone, never recursively, and checks again, so an existing one (EEXIST
+   * included) is never taken for one this call made. A `..` in the install
+   * root, or one after a missing directory, is refused before anything is
+   * created. The root itself owned by another user is
+   * `install_root_foreign_owner`; any other refused entry is
+   * `install_root_ancestor_unsafe`. Windows has no such check (see
+   * {@link rootOwned}).
+   */
+  async function prepareInstallRoot(): Promise<void> {
+    const euid = process.geteuid?.();
+    if (euid === undefined) {
+      await fs.mkdir(root, { recursive: true });
+      return;
+    }
+    for (;;) {
+      const walked = await resolveTrusted(opts.installRoot, euid);
+      if ('untrusted' in walked) {
+        // The root itself under another owner keeps its own code: run as that user.
+        if (walked.final && walked.cause === 'owner') throw foreignOwnerError();
+        const error = new ServiceInstallationError('install_root_ancestor_unsafe');
+        error.message = `${error.message} ${walked.untrusted} (${walked.reason}).`;
+        throw error;
+      }
+      if (walked.missing === undefined) return;
+      // 0o755 at most: a directory this call made must pass the next walk under any umask.
+      await fs.mkdir(walked.missing, { mode: 0o755 }).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
+    }
+  }
+
   async function assertOwnInstallRoot(): Promise<void> {
     const euid = process.geteuid?.();
     if (euid === undefined) return;
-    if ((await fs.stat(root)).uid !== euid) {
-      const error = new ServiceInstallationError('install_root_foreign_owner');
-      error.message = `${error.message} (${root})`;
-      throw error;
-    }
+    if ((await fs.stat(root)).uid !== euid) throw foreignOwnerError();
+  }
+
+  function foreignOwnerError(): ServiceInstallationError {
+    const error = new ServiceInstallationError('install_root_foreign_owner');
+    error.message = `${error.message} (${root})`;
+    return error;
   }
 
   async function currentVersion(): Promise<string | undefined> {
@@ -1026,15 +1078,18 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
     if (!Array.isArray(listed)) throw new ServiceInstallationError('daemon_stores_invalid');
     const seen = new Set<string>();
-    return listed.map((store: Partial<ServiceDaemonStore>) => {
+    const stores: ServiceDaemonStore[] = [];
+    for (const store of listed as Partial<ServiceDaemonStore>[]) {
       if (typeof store?.storeDir !== 'string' || !path.isAbsolute(store.storeDir) || typeof store.productId !== 'string' || store.productId === '') {
         throw new ServiceInstallationError('daemon_stores_invalid');
       }
-      const resolved = path.resolve(store.storeDir);
-      if (seen.has(resolved)) throw new ServiceInstallationError('daemon_stores_invalid');
-      seen.add(resolved);
-      return { storeDir: resolved, productId: store.productId };
-    });
+      // One store is one canonical path, the identity a snapshot restore uses too.
+      const identity = await canonical(store.storeDir);
+      if (typeof identity !== 'string' || seen.has(identity)) throw new ServiceInstallationError('daemon_stores_invalid');
+      seen.add(identity);
+      stores.push({ storeDir: path.resolve(store.storeDir), productId: store.productId });
+    }
+    return stores;
   }
 
   /**
@@ -1130,22 +1185,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       throw new ServiceInstallationError('precheck_failed');
     }
     if (!Array.isArray(stores) || !stores.every(isServiceStoreVerdict)) throw new ServiceInstallationError('precheck_failed');
-    // The one boundary where store paths enter (#2011): `..` after a link
-    // resolves differently from how it is compared; `.` cannot (#1350).
-    if (stores.some((store) => store.path.split(platform === 'win32' ? /[\\/]/u : '/').includes('..'))) {
-      const error = new ServiceInstallationError('precheck_failed');
-      error.message += ' A store path must not contain .. segments; pass a normalized absolute path.';
-      throw error;
-    }
-    const paths = await Promise.all(stores.map((store) => canonical(store.path)));
-    if (overlaps(stores, paths, platform) || stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
-    // A store that is, holds or lies in the install root or a daemon store's
-    // service/ would have the versions, receipt, live leases or launcher
-    // replaced by a restore (#2011). Each is guarded both as its target and
-    // as the entry naming it, since a restore removes a link, not its target.
-    const guarded = (await Promise.all([root, ...serviceDirs].map(async (at) => [await canonical(at), path.join(await canonical(path.dirname(at)), path.basename(at))]))).flat();
-    if (paths.some((a) => guarded.some((b) => within(a, b, platform) || within(b, a, platform)))) throw new ServiceInstallationError('store_overlaps_service_state');
-    return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path) } : store);
+    const checked = await checkStorePaths(stores.map((store) => store.path), [root, ...serviceDirs], platform);
+    if ('refusal' in checked) throw storePathError(checked.refusal);
+    if (stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
+    return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path, platform) } : store);
   }
 
   /** One candidate store preparation sequence for install and upgrade, retaining the quiescent leases until the caller switches. */
@@ -1272,10 +1315,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * `<index><suffix>`, a directory store's tree as `<index>.d`. Every store
    * is checked with `lstat` first, so nothing is followed through a symlink.
    * `snapshot.json` is written last and marks a complete snapshot; a copy
-   * that fails removes the partial snapshot. Entries keep the listed paths,
-   * which a restore follows again. The migration is the Host's (trust model
-   * A): it must not change the link structure inside a store, and a restore
-   * after it did is the Host's responsibility (#2106).
+   * that fails removes the partial snapshot. Each entry keeps the listed
+   * path and its canonical form (#2106), in `snapshot.json` format 2: a
+   * restore refuses a listed path that no longer resolves to that place,
+   * and writes to the canonical path.
    */
   async function snapshot(to: string, stores: readonly ServiceStoreVerdict[]): Promise<void> {
     const sources = await Promise.all(stores.map(storeSources));
@@ -1292,9 +1335,11 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           else await fs.copyFile(`${store.path}${suffix}`, path.join(dir, name));
           files[suffix] = name;
         }
-        entries.push({ store: store.store, path: store.path, ...(store.kind === 'directory' ? { kind: 'directory' as const } : {}), files });
+        const recorded = await canonical(store.path);
+        if (typeof recorded !== 'string') throw storePathError(recorded);
+        entries.push({ store: store.store, path: store.path, canonical: recorded, ...(store.kind === 'directory' ? { kind: 'directory' as const } : {}), files });
       }
-      await writeFileAtomic(path.join(dir, 'snapshot.json'), `${JSON.stringify({ entries }, null, 2)}\n`);
+      await writeFileAtomic(path.join(dir, 'snapshot.json'), `${JSON.stringify({ format: SNAPSHOT_FORMAT, entries }, null, 2)}\n`);
     } catch (error) {
       // The cleanup is best effort: the receipt must say snapshot_failed, with the copy error as its cause.
       await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
@@ -1302,27 +1347,27 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
   }
 
+  /**
+   * Checks every entry ({@link checkRestoreTargets}) before any store
+   * changes, then restores each at the canonical path it recorded (#2106),
+   * creating a missing parent as real directories.
+   */
   async function restoreSnapshot(to: string): Promise<void> {
     const dir = path.join(snapshotsDir, to);
-    const snapshot = JSON.parse(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8')) as { entries: SnapshotEntry[] };
-    // Older snapshots retain the Host's spelling. Check every directory root
-    // before changing any store, including links hidden by a trailing / or /.
-    const entries = snapshot.entries.map((entry) => entry.kind === 'directory' ? { ...entry, path: directoryStorePath(entry.path) } : entry);
-    await Promise.all(entries.filter((entry) => entry.kind === 'directory').map(async (entry) => {
-      try {
-        if ((await fs.lstat(entry.path)).isSymbolicLink()) throw new ServiceInstallationError('precheck_failed');
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-    }));
+    const { entries } = await readSnapshot(to);
+    const refusal = await checkRestoreTargets(entries, [root, ...serviceDirs], platform);
+    if (refusal !== undefined) throw storePathError(refusal);
     for (const entry of entries) {
+      const target = entry.canonical;
+      const refused = await mkdirReal(path.dirname(target));
+      if (refused !== undefined) throw storePathError(refused);
       if (entry.kind === 'directory') {
-        await fs.rm(entry.path, { recursive: true, force: true });
-        if (entry.files[''] !== undefined) await fs.cp(path.join(dir, entry.files['']), entry.path, TREE_COPY);
+        await fs.rm(target, { recursive: true, force: true });
+        if (entry.files[''] !== undefined) await fs.cp(path.join(dir, entry.files['']), target, TREE_COPY);
         continue;
       }
-      for (const suffix of [...STORE_FILE_SUFFIXES, '-shm']) await fs.rm(`${entry.path}${suffix}`, { force: true });
-      for (const [suffix, name] of Object.entries(entry.files)) await fs.copyFile(path.join(dir, name), `${entry.path}${suffix}`);
+      for (const suffix of [...STORE_FILE_SUFFIXES, '-shm']) await fs.rm(`${target}${suffix}`, { force: true });
+      for (const [suffix, name] of Object.entries(entry.files)) await fs.copyFile(path.join(dir, name), `${target}${suffix}`);
     }
   }
 
@@ -1364,14 +1409,31 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
   }
 
-  /** Checks `snapshots/<name>` and every copy in it a restore reads, before the operation's first side effect. */
+  /**
+   * The one reader of `snapshots/<name>/snapshot.json`. A record
+   * {@link parseSnapshotRecord} refuses, such as one SDK 0.42 wrote, or one
+   * naming a copy that is not in the snapshot, is `snapshot_upgrade_required` naming the snapshot, as a
+   * version 1 pending receipt is `receipt_upgrade_required`: this version
+   * cannot restore it safely.
+   */
+  async function readSnapshot(name: string): Promise<SnapshotRecord> {
+    const dir = path.join(snapshotsDir, name);
+    const record = parseSnapshotRecord(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8'));
+    const copies = record === undefined ? [] : record.entries.flatMap((entry) => Object.values(entry.files));
+    if (record !== undefined && (await Promise.all(copies.map((name) => exists(path.join(dir, name))))).every(Boolean)) return record;
+    const error = new ServiceInstallationError('snapshot_upgrade_required');
+    error.message = `${error.message} (${dir})`;
+    throw error;
+  }
+
+  /** Checks `snapshots/<name>` and every copy in it a restore reads, and reads its record, before the operation's first side effect. */
   async function refuseLinkedSnapshot(name: string): Promise<void> {
     const dir = path.join(snapshotsDir, name);
     const index = path.join(dir, 'snapshot.json');
     await refuseLinkedSnapshots(dir);
     await refuseLinkedSnapshots(index);
     if (!(await exists(index))) return;
-    const { entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: SnapshotEntry[] };
+    const { entries } = await readSnapshot(name);
     for (const entry of entries) {
       for (const file of Object.values(entry.files)) {
         let at = dir;
@@ -1684,14 +1746,6 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   return { lifecycle, install, upgrade, rollback, recover, uninstall, receipt: readReceipt, currentVersion };
 }
 
-interface SnapshotEntry {
-  store: string;
-  path: string;
-  /** Absent in a snapshot 0.34 wrote, and for every file store. */
-  kind?: 'directory';
-  /** Saved files by suffix (`''`, `-wal`, `-journal`; a directory's tree under `''`); empty when the store was absent. */
-  files: Record<string, string>;
-}
 
 /**
  * The suffixes of a store that exist now: a file store's regular files, or a
@@ -1714,21 +1768,6 @@ async function storeSources(store: ServiceStoreVerdict): Promise<string[]> {
     present.push(suffix);
   }
   return present;
-}
-
-/** Strip only terminal separators and dot components, exposing the root to lstat.
- * Do not resolve symlinks or collapse interior `..`: those can change the target. */
-function directoryStorePath(input: string): string {
-  const root = path.parse(input).root;
-  const separators = process.platform === 'win32' ? /[\\/]+$/u : /\/+$/u;
-  let value = input;
-  while (value.length > root.length) {
-    const trimmed = value.replace(separators, '');
-    if (trimmed.length < root.length) return root;
-    if (path.basename(trimmed) !== '.') return trimmed;
-    value = path.dirname(trimmed);
-  }
-  return value;
 }
 
 export async function readPayloadManifest(payloadDir: string): Promise<ServicePayloadManifest> {
@@ -1790,10 +1829,6 @@ function isRefused(store: ServiceStoreVerdict): boolean {
 }
 
 /** Whether two stores (at their canonical `paths`) share a path or one lies inside a directory store. */
-function overlaps(stores: readonly ServiceStoreVerdict[], paths: readonly string[], platform: NodeJS.Platform): boolean {
-  return stores.some((store, index) => paths.some((other, at) => at !== index
-    && within(other, paths[index]!, platform) && (store.kind === 'directory' || within(paths[index]!, other, platform))));
-}
 
 /**
  * Takes an `installer` lease on a stopped daemon's store, retrying while its

@@ -712,7 +712,8 @@ describe('the prepared runtime entry spawn', () => {
         : depth < 5 && typeof value === 'object' && value !== null && Object.getOwnPropertyNames(value).some(key => carriesSecret((value as Record<string, unknown>)[key], depth + 1));
       for (const [input, ambient, message] of [[{}, {}, 'spawn env variable PI_PROVIDER_API_KEY contains a NUL byte'],
         [{ piBin: `/bin/${secret}` }, {}, 'spawn command contains a NUL byte'], [{ piFixedArgs: [secret] }, {}, 'spawn argument 1 contains a NUL byte'],
-        [{}, { [`LC_${secret}`]: 'x' }, 'spawn env variable name contains a NUL byte']] as Array<[{ piBin?: string; piFixedArgs?: string[] }, Record<string, string>, string]>) {
+        [{ piCwd: `/sealed/${secret}` }, {}, 'spawn cwd contains a NUL byte'],
+        [{}, { [`LC_${secret}`]: 'x' }, 'spawn env variable name contains a NUL byte']] as Array<[{ piBin?: string; piFixedArgs?: string[]; piCwd?: string }, Record<string, string>, string]>) {
         const spawnChild = vi.fn(nodeSpawn);
         const error = await startPiProvider(provider, { ...options, ...input }, { ambient, createSecretStore: () => store, spawn: spawnChild, profiles: await profilesWith(provider) })
           .then(() => undefined, (caught: Error) => caught);

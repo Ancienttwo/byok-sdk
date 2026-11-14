@@ -1304,7 +1304,33 @@ value. The set (`PROVIDER_PROVISIONING_REJECTION_CODES`) is `request_invalid`,
 `provider_kind_unsupported`, `pi_model_invalid`, `capabilities_invalid`,
 `seal_open_failed`, `secret_invalid`, `local_commit_interrupted` (also any
 request that finds an operation still pending locally) and
-`secret_store_unavailable`. Re-sending an identical completion yields `idempotent` with the stored
+`secret_store_unavailable`. Every rejection after the profile's generation
+watermark check is recorded as the device's durable result and consumes the
+generation, except `secret_store_unavailable` when the device's credential
+store reports itself unavailable before any write: that rejection is not
+recorded and does not consume the generation, so the same request, or a new one
+at the same generation, applies once the store is available. A
+`secret_store_unavailable` from a failed credential write is recorded and
+leaves the operation pending, as before. The two return the same code, so the
+device's notice handler tells them apart with the local readback for
+`requestId` + `requestDigest` (`readSealedProvisioningResult`): `absent` means
+unrecorded, and the handler must not submit a completion and must throw, so the
+notice stays unacknowledged and the Host keeps the request and its ciphertext
+for a replay once the store is available (still bound by the time window,
+identity, expected profile and watermark); `completed` means the device has a
+recorded result, and the handler completes the readback's `result` (the
+recorded rejection, or `applied` when another local call applied the same
+request in the meantime), not the rejection it first received; `conflict`
+(another local request holds the id with a different digest) or `interrupted`
+(a local call reserved the request and has not recorded a result) means the
+handler applies the same request again and completes that result, which
+settles the id before any credential-store check: `request_conflict`, the
+other call's recorded result once it finishes under the configuration lock, or
+a recorded `local_commit_interrupted` when it never will; if that call throws,
+the handler throws and the notice stays unacknowledged. A Host that has
+already stored an unrecorded `secret_store_unavailable` as terminal cannot
+replace it by replaying the same request (a different result is `conflict`);
+it submits a new request instead. Re-sending an identical completion yields `idempotent` with the stored
 result and no rewrite; a different digest or result yields `conflict` with the
 stored result unchanged. `host_terminal` is valid only for a rejected
 completion the Host recorded on its own authority (`request_expired`,

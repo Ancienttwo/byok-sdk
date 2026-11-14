@@ -2,6 +2,26 @@
 
 Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Unique injected adapter IDs (#2135)
+
+`createDaemonWithAdapters(config, adapters)` now throws `DaemonConfigInvalidError`
+synchronously when two injected adapters have the same `descriptor.id`. The
+error has `code: 'daemon_config_invalid'` and names the duplicate ID in its
+message. Previously the array was accepted and lookup by ID silently selected
+the first matching adapter.
+
+`checkDaemonConfig(config, { source: 'embedded', adapters })` now returns
+`ok: false` for the same duplicate IDs. Its `issues` match the construction
+error's `issues`: `code: 'invalid_value'`, the path
+`adapters[i].descriptor.id` of the first repeated ID, and a message naming
+that ID. Preflight does not return an effective configuration for this input.
+
+Before constructing the daemon, remove duplicate registrations and choose one
+implementation for each ID. If two custom runtimes are distinct, give them
+distinct IDs and update the Host's runtime routing to match. Handle this error
+at construction as a configuration defect: correct the adapter list before
+retrying; calling `daemon.start()` cannot resolve it.
+
 ## Committed cancellation with a pending wake (#2004)
 
 `HostExecutionCore.cancel()` now returns an object instead of `void`. Update callers and test doubles that require `Promise<void>` to accept its result. `BotCollaboration.cancelTurn()` and `abortSwitch()` keep their existing result fields. When only wake dispatch fails after one of these operations commits, it resolves with `wakePending: true` instead of rejecting. The failure can concern any wake in that drain, including one unrelated to the operation, and a concurrent retry may succeed before the result returns. Do not repeat the committed operation solely because the flag is present.
@@ -93,11 +113,25 @@ spelling of the root takes the same gate. On macOS and Linux, an install root
 owned by another user (also one that user created first) is refused with the
 new `ServiceInstallationErrorCode` `install_root_foreign_owner` before
 anything is written in it; run the operation as the owner of the root. The
-gate and the owner check use the effective uid. These guarantees hold only
-while the install root's parent directory is writable by the installing user
-alone: another user who can write it can rename the root or replace it with a
-symlink after the check (#2028). Windows has no owner check, and two Windows
-users operating on one install root are not guaranteed to exclude each other.
+gate and the owner check use the effective uid. An install root another
+user could rename or replace with a symlink after the check is refused with
+the new code `install_root_ancestor_unsafe`, naming the directory or link
+and why, before anything is created (#2028): the root's path is resolved one
+component at a time, every directory read on the way must belong to the
+installing user or root and must not be writable by everyone unless it has
+the sticky bit, and every symbolic link on the way must belong to the
+installing user or root (at most 40 links). Root's own links such as macOS
+`/tmp` pass. An install root written with a `..` segment, one under a directory the
+installing user cannot read, or one whose links lead through `..` after a missing directory, is refused the same way; a missing
+install root is created one directory at a time only after its whole path
+passes, and the install root itself owned by another user stays
+`install_root_foreign_owner`. Move such an install root under a
+directory only the installing user or root can change. Group-writable
+directories are accepted and their group trusted (macOS `/Applications` is
+root:admin 775). Windows has neither check, since rename rights there follow
+ACLs the SDK does not read: keep the install root under a directory only the
+installing user can change, such as `%LOCALAPPDATA%`. Two Windows users
+operating on one install root are not guaranteed to exclude each other.
 
 ## Gate release failures join the thrown error
 
@@ -409,36 +443,49 @@ service that had already restarted.
   - The precheck after a migration: the snapshot is already taken. The
     refusal becomes the cause of `store_migration_failed`, the snapshot is
     restored, and an upgrade then returns to the previous version as above.
-- **Snapshots taken before this check (#2102):** restore does not re-check
-  them, so one taken by 0.42.0 or an earlier build of this train can list
-  `service/` or the install root, and restoring it would replace the live
-  leases, launcher and records. Before the first operation on this version:
-  1. Call no `ServiceInstallation` method yet, `upgrade`, `rollback` and
-     `recover` included: every operation first restores a kept install
-     repair snapshot when `current` is absent.
-  2. List every `<installRoot>/snapshots/*/snapshot.json`, the
-     `.install-repair-*` snapshots included.
-  3. Normalize each `entries[].path` (resolve links, and on macOS and
-     Windows ignore case) and compare it with the install root and with each
-     daemon store's `<storeDir>/service/`, each taken both resolved and as
-     the link entry that names it. An entry that is, holds or lies in one
-     of them overlaps.
-  4. With no overlap, continue as usual.
-  5. With one, keep the service stopped and back up the snapshot directory.
-     Then restore every entry by hand, in the order listed, as a restore
-     would:
-     - a directory entry (`"kind": "directory"`): remove the path, then copy
-       `files[""]` (`<index>.d`) back to it. With no `files[""]` the store
-       did not exist, so it stays removed. For the overlapping entry, skip
-       only what lies in the install root or a `service/` directory, and
-       restore the rest of its data;
-     - a file entry: remove the path and its `-wal`, `-journal` and `-shm`
-       files, then copy each `files` item back as `<path><suffix>` (an
-       SQLite file with the `-wal` and `-journal` the snapshot holds). A
-       suffix the snapshot lacks stays removed.
-  6. Only after every entry is restored, remove that snapshot directory,
-     then call `recover()`. When you cannot tell what an entry held, keep
-     the service stopped and the snapshot in place.
+- **Snapshots SDK 0.42 took are refused (#2106):** a snapshot now records
+  each store's resolved path (`snapshot.json` format 2). A snapshot 0.42.0
+  took has no such record, so `rollback()`, a `recover()` restore and an
+  install repair refuse it with the new code `snapshot_upgrade_required`,
+  naming the snapshot directory, before anything changes: the receipt,
+  `current`, the snapshot and every store stay as they were. This is the
+  same rule as a version 1 pending receipt (`receipt_upgrade_required`).
+  With SDK 0.42, finish or abandon that upgrade (`recover()`, or
+  `rollback()`), then upgrade with this version. A switched 0.42.0 upgrade
+  keeps its snapshot only for a 0.42 `rollback()`; the next upgrade with
+  this version replaces it.
+- **Restore checks (#2102, #2106):** before a restore changes any store,
+  every entry of the snapshot is checked:
+  - an entry with a `..` segment is `precheck_failed`, because the file
+    system follows a link before `..` and the check would not;
+  - an entry that is, holds or lies in the install root or a `service/`
+    directory is `store_overlaps_service_state`;
+  - two entries that are or lie inside each other, as written or with
+    links resolved (a file store under a directory store through a link
+    inside it, for example), are `precheck_failed`, naming both paths.
+    The precheck refuses such stores too: list the directory store alone,
+    or move the inner store out of it;
+  - a store path that no longer resolves to the recorded path, for example
+    after the candidate's migration repointed a link, is
+    `precheck_failed`.
+
+  The restore then writes to the recorded paths, never through the listed
+  paths' links again. A refusal throws `upgrade_pending` with it in its
+  `cause`; its message names the path. Nothing is restored: from where the
+  restore starts, the receipt, `current`, the snapshot and every store stay
+  as they were (`rollback()` has already written its pending receipt and
+  removed `current`), and `recover()` refuses again. Keep the service
+  stopped, restore the links the migration changed, or restore the stores
+  by hand from `<installRoot>/snapshots/<version>/` (a directory entry's
+  tree is `<index>.d`, a file entry's files are `<index><suffix>`) and
+  remove that snapshot directory, then call `recover()`.
+- **Daemon stores are listed once by identity (#2161):** `daemonStores()`
+  must not list one store under two spellings. A second spelling of a
+  `storeDir`, through a symbolic link or in another letter case on a
+  case-insensitive volume, is now `daemon_stores_invalid` before any lease is
+  taken; before, it waited for its own first lease and failed with
+  `store_busy` after `stopTimeoutMs`. De-duplicate the list by each
+  `storeDir`'s real path (`fs.realpath`) before returning it.
 - **Snapshot removal (#2062):** a snapshot that cannot be removed after the
   final receipt no longer fails the call; it stays.
 - On systemd, a start runs `systemctl --user reset-failed` first, since the
@@ -462,6 +509,18 @@ Known limitation on Windows: Credential Manager reports a damaged entry as `CRED
 
 Credential-store errors from every `ProviderRegistry` method (`get()`, `list()`, `configure()`, `replaceSecret()`, `delete()`, `setDefaultModelProvider()` and `resolveDefaultModelProvider()`, #2029) keep a keychain, Credential Manager or secret-shape code with a fixed SDK message and no cause. Any other store error becomes `PROVIDER_SECRET_STORE_FAILED`, because an injected store may put a key in its own error. Match on `error.code`, not on the message text. `applySealedProviderProvisioning()`, `DeviceSealingKeyStore` and `runPiProviderLauncher()` use the same boundary (#2051, #2096): sealed provisioning, which used to report every store error as `PROVIDER_SECRET_STORE_FAILED`, now keeps those codes too, so handle them wherever you handle `PROVIDER_SECRET_STORE_FAILED`. The launcher now maps other injected-store errors to `PROVIDER_SECRET_STORE_FAILED`. `EnvelopeScopedSecretStore` applies the same boundary to every call on the store it wraps, including `available()`, as do the `available()` checks in sealed provisioning and the launcher (#2096): a Host that calls the decorator directly now gets the fixed message and no cause, and a code outside those families becomes `PROVIDER_SECRET_STORE_FAILED`; before, the wrapped store's error passed through unchanged. A launcher spawn failure now has the fixed message `spawn failed: <code>` (or `spawn failed: unknown` if the code is absent) and retains only `code`, rather than Node's path, spawn arguments and other error properties. `configure()`, `replaceSecret()`, `setDefaultModelProvider()` and `delete()` never read the stores after their commit (#2023). The status they return is the state the call committed, which may be stale once the call returns. A call that resolves has committed its change. A call that rejects with the new `PROVIDER_CHANGE_COMMITTED` has also committed it, but a later step failed: either deleting the previous key after `configure()` switched a profile to `auth_mode: 'none'`, in which case that key stays in the credential store until a later `configure()` or `delete()` removes it, a profile store that wrote the change but could not confirm it, or releasing the configuration lock. Its `cause` carries only the failed step's code, never the step's own message. Treat that code as success, read the status again with `get()`, and, for the `auth_mode: 'none'` case, retry the `configure()` to remove the leftover key. A rejection with any other code committed nothing. `configure()` without a secret now reuses the stored key only when the committed profile already authenticates against the same `base_url`; switching a profile from `auth_mode: 'none'` back to authentication, or changing its `base_url`, rejects with `PROVIDER_SECRET_MISSING` until the Host supplies the key again.
 
+
+## Sealed provisioning retries an unavailable credential store (#2132)
+
+**Breaking (behavior only).** `applySealedProviderProvisioning()` no longer records a rejection when the device's credential store reports `available()` as `false` before any write. The result is still `rejected` with `secret_store_unavailable`, but the device keeps no receipt for it and does not consume its `operationGeneration`. Before, the rejection was recorded and the generation consumed, so the same request stayed rejected after the store recovered (for example after a keyring was unlocked) and a new request needed a higher generation.
+
+What a Host does:
+
+- Change the device's `providerProvisioning` notice handler before it completes a result. Both cases return `rejected` with `secret_store_unavailable`, so on that code call `readSealedProvisioningResult({ profileStore, requestId, requestDigest })`:
+  - `absent`: nothing was recorded. Do not complete to the Host and throw from the handler. The notice stays unacknowledged, the Host keeps the request and its ciphertext, and the redelivered notice applies the same request once the operator fixes the credential store. The retry still passes the time window, identity, expected profile and generation watermark checks; once the window closes it returns `request_expired`, which completes as usual.
+  - `completed`: the device has a recorded result for this request. Complete `readback.result` to the Host, not the rejection the call returned. It is the recorded `secret_store_unavailable` when the failure came from a credential write (the operation stays pending, only a new key submission resolves it, and sending that request again returns the same rejection), or `applied` when another local call applied the same request after this one saw the store unavailable.
+  - `conflict` or `interrupted`: another local request holds this `requestId` with a different digest, or a local call reserved this request after this one and has not recorded a result. Call `applySealedProviderProvisioning()` again with the same request and complete what it returns: `request_conflict` for a conflict; for a reservation it takes the configuration lock (which a store may refuse while the other call holds it) and returns the other call's recorded result, or records `local_commit_interrupted` if that call never finished. If it throws, throw from the handler; the notice stays unacknowledged and is redelivered.
+- A handler that keeps completing every result makes the Host store the unrecorded rejection as terminal and acknowledge the notice. Replaying that request later applies on the device but the Host reports `conflict` and keeps the rejection; submit a new request at the same generation instead. The [keys README handler order](../../packages/keys/README.md#sealed-remote-provisioning) shows the updated steps. No type, code or API changes.
 
 ## Stored cancellation pruning cutoff
 
@@ -526,3 +585,27 @@ Every other rejection has its own source, and none of them is `DaemonTaskUnknown
 - **Offer append refused:** the waiters of an offer whose journal append failed reject with that append's error (for example `LocalStorageEmergencyError`). A redelivery starts a new wait.
 
 The last three are faults.
+
+## Spawn input and start errors (#2151)
+
+`@byok-sdk/core/system-tool` provides `assertNoNulSpawnInput` and
+`spawnStartError` (#2111). A Host that starts its own child processes can now
+pass the same cwd it gives to spawn as the optional fourth argument:
+`assertNoNulSpawnInput(command, args, env, cwd)`. The three-argument call
+checks command, args and env only. A NUL-bearing cwd is refused before spawn
+with `spawn cwd contains a NUL byte`; the directory itself is not included.
+SDK client transports and the Pi custody launcher already pass their cwd.
+
+Synchronous failures from the owned line, owned terminal and Pi RPC spawns
+now have the same `spawn failed: <code>` message and optional `code` as their
+asynchronous spawn failures, without the original message, path, arguments
+or cause. MCP keeps its `MCP server failed to spawn: <code>` wrapper for
+synchronous failures. A Host that inspected raw Node spawn errors should
+use `error.code` for the owned transports and Pi RPC; MCP still reports a
+transport error. Correct invalid cwd input before retrying a NUL rejection.
+
+`spawnStartError` accepts only string codes; absent or non-string values
+produce `spawn failed: unknown` and `code: undefined`. Host test doubles
+that represent OS errors should use string codes. The helper is intended
+for ordinary Node spawn errors: it copies string codes verbatim and does
+not sanitize arbitrary objects or protect against throwing code getters.
