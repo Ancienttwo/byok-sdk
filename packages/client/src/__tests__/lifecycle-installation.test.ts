@@ -1927,6 +1927,65 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect([await fs.readFile(path.join(lower, 'data', 'kept'), 'utf8'), existsSync(path.join(installRoot, 'snapshots', '3.0.0', 'snapshot.json'))]).toEqual(['other store', true]);
     });
 
+    it('a store listed through another store\'s link is restored at its canonical path, not through that link again (#2106)', async () => {
+      const [d, a, u, v, alias] = [path.join(root, 'dd'), path.join(root, 'aa'), path.join(root, 'uu'), path.join(root, 'vv'), path.join(root, 'alias')];
+      const service = path.join(storeDir, 'service');
+      for (const at of [d, a, u, v]) await fs.mkdir(at);
+      await fs.symlink(d, alias, 'dir');
+      await fs.symlink(u, path.join(v, 'y'), 'dir');
+      await fs.symlink(a, path.join(d, 'x'), 'dir');
+      await fs.symlink(u, path.join(a, 'y'), 'dir');
+      await fs.writeFile(path.join(u, 'marker'), 'snapshot');
+      await fs.writeFile(path.join(service, 'marker'), 'live');
+      await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([[d, 'directory'], [path.join(alias, 'x', 'y', 'marker')], [a, 'directory']]
+        .map(([at, kind], index) => ({ store: `s${index}`, path: at, verdict: 'accepted', reason: 'accepted', ...(kind ? { kind } : {}) }))));
+      await installation.upgrade(await payload('3.0.0'));
+      // The candidate's migration repoints the links inside both directory stores: alias/x/y/marker still resolves to uu/marker.
+      await fs.rm(path.join(d, 'x'));
+      await fs.symlink(v, path.join(d, 'x'), 'dir');
+      await fs.rm(path.join(a, 'y'));
+      await fs.symlink(service, path.join(a, 'y'), 'dir');
+      await fs.writeFile(path.join(u, 'marker'), 'candidate');
+      await expect(installation.rollback()).resolves.toMatchObject({ state: 'rolled-back' });
+      expect([await fs.readFile(path.join(service, 'marker'), 'utf8'), await fs.readFile(path.join(u, 'marker'), 'utf8'), await fs.readlink(path.join(d, 'x')), await fs.readlink(path.join(a, 'y'))]).toEqual(['live', 'snapshot', a, u]);
+    });
+
+    it('a store listed in another case than on disk and removed since the snapshot is restored where names ignore case (#2106)', async () => {
+      const dir = path.join(root, 'r');
+      await fs.mkdir(dir);
+      await fs.writeFile(path.join(dir, 'Store.DB'), 'snapshot');
+      // A case-sensitive volume has no such alias; the next case covers it.
+      if (!existsSync(path.join(dir, 'store.db'))) return;
+      await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([{ store: 'host', path: path.join(dir, 'store.db'), verdict: 'accepted', reason: 'accepted' }]));
+      await installation.upgrade(await payload('3.0.0'));
+      await fs.rm(path.join(dir, 'Store.DB'));
+      await expect(installation.rollback()).resolves.toMatchObject({ state: 'rolled-back' });
+      expect([await fs.readdir(dir), await fs.readFile(path.join(dir, 'Store.DB'), 'utf8')]).toEqual([['Store.DB'], 'snapshot']);
+    });
+
+    it('a missing listed store whose recorded spelling exists, another file on a case-sensitive volume, is refused (#2106)', async () => {
+      const [listed, recorded] = [path.join(root, 'r', 'store.db'), path.join(root, 'r', 'Store.DB')];
+      await fs.mkdir(path.dirname(listed));
+      await fs.writeFile(listed, 'snapshot');
+      await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([{ store: 'host', path: listed, verdict: 'accepted', reason: 'accepted' }]));
+      // The snapshot records the spelling a case-insensitive lookup returned; then the two names are two files.
+      const realpath = fs.realpath.bind(fs);
+      const lookup = vi.spyOn(fs, 'realpath').mockImplementation((async (file: string) => {
+        const found = await realpath(file);
+        return found === listed ? recorded : found;
+      }) as typeof fs.realpath);
+      await installation.upgrade(await payload('3.0.0')).finally(() => lookup.mockRestore());
+      await fs.rm(listed);
+      await fs.writeFile(recorded, 'other');
+      const missing = vi.spyOn(fs, 'realpath').mockImplementation((async (file: string) => {
+        if (file === listed) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        return realpath(file);
+      }) as typeof fs.realpath);
+      const error = await installation.rollback().catch((caught: unknown) => caught).finally(() => missing.mockRestore());
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining('no longer resolves') }));
+      expect(await fs.readFile(recorded, 'utf8')).toBe('other');
+    });
+
     it('snapshot entries that lie inside each other only through a link are refused before a restore changes any store (#2106)', async () => {
       const [outer, inner] = [path.join(root, 'outer'), path.join(root, 'inner')];
       await fs.mkdir(outer);

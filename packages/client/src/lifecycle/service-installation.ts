@@ -423,6 +423,8 @@ const STORE_FILE_SUFFIXES = ['', '-wal', '-journal'] as const;
 const STORE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 const STORE_KINDS: ReadonlySet<unknown> = new Set([undefined, 'file', 'directory']);
 /** A directory store's tree is copied as it is: links stay links, nothing is overwritten, a clone where the file system has one. */
+/** `snapshot.json` format: 2 records each entry's canonical path, and a restore writes there (#2106). 0.42.0 wrote no format. */
+const SNAPSHOT_FORMAT = 2;
 const TREE_COPY = { recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false, preserveTimestamps: true, mode: fsConstants.COPYFILE_FICLONE } as const;
 /** How long a stale-token probe waits for the control endpoint to accept or refuse. */
 const CONTROL_PROBE_TIMEOUT_MS = 1_000;
@@ -1309,8 +1311,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * is checked with `lstat` first, so nothing is followed through a symlink.
    * `snapshot.json` is written last and marks a complete snapshot; a copy
    * that fails removes the partial snapshot. Each entry keeps the listed
-   * path and its canonical form (#2106): a restore follows the path again
-   * and refuses it when it no longer resolves to the same place.
+   * path and its canonical form (#2106), in `snapshot.json` format 2: a
+   * restore refuses a listed path that no longer resolves to that place,
+   * and writes to the canonical path.
    */
   async function snapshot(to: string, stores: readonly ServiceStoreVerdict[]): Promise<void> {
     const sources = await Promise.all(stores.map(storeSources));
@@ -1329,7 +1332,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         }
         entries.push({ store: store.store, path: store.path, canonical: await canonical(store.path), ...(store.kind === 'directory' ? { kind: 'directory' as const } : {}), files });
       }
-      await writeFileAtomic(path.join(dir, 'snapshot.json'), `${JSON.stringify({ entries }, null, 2)}\n`);
+      await writeFileAtomic(path.join(dir, 'snapshot.json'), `${JSON.stringify({ format: SNAPSHOT_FORMAT, entries }, null, 2)}\n`);
     } catch (error) {
       // The cleanup is best effort: the receipt must say snapshot_failed, with the copy error as its cause.
       await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
@@ -1337,13 +1340,30 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
   }
 
+  /**
+   * Checks every entry before any store changes, then restores each. A
+   * format 2 snapshot is written to the canonical paths it recorded, never
+   * through the listed path's links again (#2106). The start check proves
+   * both are safe: (a) the listed path resolves exactly to the recorded
+   * canonical path, which is a realpath, so no directory on that chain is a
+   * link now; (b) no two canonical paths contain each other, so the tree
+   * another entry's restore replaces holds neither this target nor an
+   * ancestor of it. A missing parent is created as real directories.
+   */
   async function restoreSnapshot(to: string): Promise<void> {
     const dir = path.join(snapshotsDir, to);
-    const snapshot = JSON.parse(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8')) as { entries: SnapshotEntry[] };
+    const snapshot = JSON.parse(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8')) as { format?: unknown; entries: SnapshotEntry[] };
+    // 0.42.0 wrote no format and no canonical paths: its entries are
+    // restored at the listed paths, without the identity check (#2155
+    // removes this branch).
+    const legacy = snapshot.format === undefined;
+    if (!legacy && (snapshot.format !== SNAPSHOT_FORMAT || snapshot.entries.some((entry) => typeof entry.canonical !== 'string'))) {
+      throw new ServiceInstallationError('precheck_failed');
+    }
     // Older snapshots retain the Host's spelling. Check every directory root
     // before changing any store, including links hidden by a trailing / or /.
     const entries = snapshot.entries.map((entry) => entry.kind === 'directory' ? { ...entry, path: directoryStorePath(entry.path) } : entry);
-    const resolved = await refuseServiceOverlap(entries.map((entry) => entry.path));
+    await refuseServiceOverlap(entries.map((entry) => entry.path));
     await Promise.all(entries.filter((entry) => entry.kind === 'directory').map(async (entry) => {
       try {
         if ((await fs.lstat(entry.path)).isSymbolicLink()) throw new ServiceInstallationError('precheck_failed');
@@ -1351,25 +1371,24 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
     }));
-    // A link that changed since the snapshot, for example in the candidate's
-    // migration, would send the restore elsewhere (#2106); the snapshot stays.
-    // Identity is the realpath as returned: folding case, which only makes
-    // the containment refusals stricter, would allow a/ for A/ on a
-    // case-sensitive volume.
-    const moved = entries.find((entry, index) => entry.canonical !== undefined && resolved[index] !== entry.canonical);
-    if (moved !== undefined) {
-      const error = new ServiceInstallationError('precheck_failed');
-      error.message += ` A store path no longer resolves as it did at the snapshot. (${moved.path})`;
-      throw error;
+    if (!legacy) {
+      for (const entry of entries) {
+        if (await resolvesTo(entry.path, entry.canonical!)) continue;
+        const error = new ServiceInstallationError('precheck_failed');
+        error.message += ` A store path no longer resolves as it did at the snapshot. (${entry.path})`;
+        throw error;
+      }
     }
     for (const entry of entries) {
+      const target = legacy ? entry.path : entry.canonical!;
+      if (!legacy) await mkdirReal(path.dirname(target));
       if (entry.kind === 'directory') {
-        await fs.rm(entry.path, { recursive: true, force: true });
-        if (entry.files[''] !== undefined) await fs.cp(path.join(dir, entry.files['']), entry.path, TREE_COPY);
+        await fs.rm(target, { recursive: true, force: true });
+        if (entry.files[''] !== undefined) await fs.cp(path.join(dir, entry.files['']), target, TREE_COPY);
         continue;
       }
-      for (const suffix of [...STORE_FILE_SUFFIXES, '-shm']) await fs.rm(`${entry.path}${suffix}`, { force: true });
-      for (const [suffix, name] of Object.entries(entry.files)) await fs.copyFile(path.join(dir, name), `${entry.path}${suffix}`);
+      for (const suffix of [...STORE_FILE_SUFFIXES, '-shm']) await fs.rm(`${target}${suffix}`, { force: true });
+      for (const [suffix, name] of Object.entries(entry.files)) await fs.copyFile(path.join(dir, name), `${target}${suffix}`);
     }
   }
 
@@ -1890,6 +1909,41 @@ function runProgram(program: ServiceProgram): Promise<{ code: number | null; std
       resolve({ code, stdout });
     });
   });
+}
+
+/**
+ * Whether `listed` resolves now to `recorded`, the canonical path a snapshot
+ * took of it (#2106). The existing part must match exactly: folding case
+ * would accept a/ for A/ on a case-sensitive volume. A missing segment keeps
+ * the listed spelling, so it may differ from the recorded one in case only
+ * while the recorded spelling is missing too, as on a case-insensitive
+ * volume after the store was removed.
+ */
+async function resolvesTo(listed: string, recorded: string): Promise<boolean> {
+  const found = await resolveExistingAncestor(listed);
+  if (found === undefined) return false;
+  if (found.tail.length === 0) return found.canonical === recorded;
+  const prefix = found.canonical.endsWith(path.sep) ? found.canonical : `${found.canonical}${path.sep}`;
+  if (!recorded.startsWith(prefix)) return false;
+  const rest = recorded.slice(prefix.length).split(path.sep);
+  if (rest.length !== found.tail.length) return false;
+  for (const [index, part] of found.tail.entries()) {
+    if (rest[index] === part) continue;
+    if (rest[index]!.toLowerCase() !== part.toLowerCase() || await exists(path.join(found.canonical, ...rest.slice(0, index + 1)))) return false;
+  }
+  return true;
+}
+
+/** Creates `dir` and its missing ancestors as real directories; an existing one that is not a directory, a link included, is `precheck_failed`. */
+async function mkdirReal(dir: string): Promise<void> {
+  const parent = path.dirname(dir);
+  const stat = await fs.lstat(dir).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+  if (stat !== undefined) {
+    if (!stat.isDirectory()) throw new ServiceInstallationError('precheck_failed');
+    return;
+  }
+  if (parent !== dir) await mkdirReal(parent);
+  await fs.mkdir(dir);
 }
 
 async function exists(file: string): Promise<boolean> {

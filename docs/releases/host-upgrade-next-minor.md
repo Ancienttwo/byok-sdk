@@ -391,6 +391,15 @@ service that had already restarted.
     resolves through. The precheck refuses such stores too: list the
     directory store alone, or move the inner store out of it.
 
+  A snapshot this version takes records each store's resolved path
+  (`snapshot.json` format 2, #2106). Its restore refuses a store path that no
+  longer resolves there (`precheck_failed`, naming the path), for example
+  after the candidate's migration repointed a link, and writes to the
+  recorded path, never through the listed path's links again. A 0.42.0
+  snapshot has no such record: it is restored at the listed paths, so a
+  link changed since it was taken can still redirect that restore. Take a
+  new snapshot (one upgrade on this version) before relying on it.
+
   The call throws `upgrade_pending` with that refusal in its `cause`; its
   message names the entry's path. Nothing is restored: the receipt stays
   `pending`, and `current`, the snapshot and every store stay as they were.
