@@ -604,7 +604,8 @@ export class BotCollaboration {
       const snapshot = this.ledger.snapshot(), state = stateOf(snapshot.application), intent = snapshot.intents[hash(key)];
       const settled = hostIntentCancelAnswer(key, Object.hasOwn(state.turns, key), hostIntent(state, key) && intent);
       if (settled) return { key, ...settled };
-      await this.core.cancel(key);
+      const result = await this.core.cancel(key);
+      if ('drainError' in result) throw result.drainError;
       await this.process();
       if (intent!.phase === 'inflight') return { key, result: 'cancel_pending' };
       return { key, result: 'cancelled', conclusion: this.core.intent(key)!.conclusion! };
@@ -766,7 +767,8 @@ export class BotCollaboration {
   private async deliverCancels(): Promise<void> {
     for (const d of Object.values(this.snapshot().delegations)) {
       if (!d.cancel || d.cancel.delivered) continue;
-      await this.core.cancel(d.cancel.targetTurnId);
+      const result = await this.core.cancel(d.cancel.targetTurnId);
+      if ('drainError' in result) throw result.drainError;
       this.write(s => { stateOf(s.application).delegations[d.id]!.cancel!.delivered = true; });
     }
   }
@@ -935,31 +937,33 @@ export class BotCollaboration {
    * Owner API. Cancels a Turn, an input batch by its id or a member input id, or B's chain Turn through its delegation.
    * Idempotent (#1405): a Turn whose K4 intent already has a cancel gives `cancel_pending`, and an ended Turn
    * `already_settled`; neither writes or calls `core.cancel`.
-   * After commit, a wake-only dispatch failure resolves with `wakePending: true`; the outbox retains failed wakes for retry.
-   * The failure may concern another wake or already be retried before return. Other failures, including a Host job or
-   * outbox capacity failure, can still reject after commit (#2072).
+   * After commit, a wake-only failure returns `wakePending: true`. Other failures return `drainError`, the unchanged
+   * first drain rejection (the whole AggregateError for mixed failures), even if a later pass retries it successfully.
+   * Its presence means cancellation committed, not that reconciliation finished. Inspect/report it and retry pending
+   * work with `drain()` or recovery, rather than repeating the cancellation. Job/outbox retry state is unchanged;
+   * explicit drains and wake hooks still reject. Pre-commit failures still reject.
    */
-  cancelTurn(id: string, ...by: PrincipalArg): Promise<TurnCancelResult & { wakePending?: true }> {
+  cancelTurn(id: string, ...by: PrincipalArg): Promise<TurnCancelResult & { wakePending?: true; drainError?: unknown }> {
     return this.exclusive(async () => {
       this.ownerOnly(by, 'cancelTurn', id);
       return this.cancelOneTurn(id);
     });
   }
-  private async cancelOneTurn(id: string): Promise<TurnCancelResult & { wakePending?: true }> {
+  private async cancelOneTurn(id: string): Promise<TurnCancelResult & { wakePending?: true; drainError?: unknown }> {
     // The read and the commit run in one synchronous step, so no K4 transaction lands between them.
     const snapshot = this.ledger.snapshot(), settled = turnCancelAnswer(stateOf(snapshot.application), intentRows(snapshot), id);
     if (settled) return { turnId: id, ...settled };
     const result = this.commitKeyless({ kind: 'cancel_turn', turnId: id });
     const value = valueOf<{ deliver: boolean } | { target: string; admitted: boolean }>(result);
-    let wakePending: true | undefined;
+    const dispatch = 'target' in value && value.admitted ? await this.core.cancel(value.target) : {};
     try {
       if ('deliver' in value) await this.settleChain(result);
-      else {
-        if (value.admitted) wakePending = (await this.core.cancel(value.target)).wakePending;
-        await this.process();
-      }
-    } catch (error) { if (!(error instanceof WakeDispatchError)) throw error; wakePending = true; }
-    return { turnId: id, result: 'cancelled', ...(wakePending && { wakePending }) };
+      else await this.process();
+    } catch (error) {
+      if (error instanceof WakeDispatchError) dispatch.wakePending = true;
+      else if (!('drainError' in dispatch)) dispatch.drainError = error;
+    }
+    return { turnId: id, result: 'cancelled', ...dispatch };
   }
   /** The L owner record of a device (#957, §4.1). A device with no record is L at revision 0. */
   topology(deviceId: string): DeviceTopology { return deviceTopology(this.snapshot(), deviceId); }
@@ -1054,11 +1058,13 @@ export class BotCollaboration {
    * A failed export or check: clears the freeze on the frozen revision, so L owns the device again and held Turns run. An
    * abort of a device of the export ends the export, and the new owner discards its import. After the commit every device
    * of the export is owned by H, so none aborts.
-   * After commit, a wake-only dispatch failure resolves with `wakePending: true`; the outbox retains failed wakes for retry.
-   * The failure may concern another wake or already be retried before return. Other failures, including a Host job or
-   * outbox capacity failure, can still reject after commit (#2072).
+   * After commit, a wake-only failure returns `wakePending: true`. Other failures return `drainError`, the unchanged
+   * process rejection (the whole AggregateError for mixed failures). Its presence means the abort committed, not that
+   * reconciliation finished. Inspect/report it and retry pending work with `drain()` or recovery, rather than repeating
+   * the abort with its now-stale revision. Job/outbox retry state is unchanged; explicit drains and wake hooks still
+   * reject. A failure may concern other work or already be retried before return. Pre-commit failures still reject.
    */
-  abortSwitch(deviceId: string, expectedRevision: number): Promise<DeviceTopology & { wakePending?: true }> {
+  abortSwitch(deviceId: string, expectedRevision: number): Promise<DeviceTopology & { wakePending?: true; drainError?: unknown }> {
     return this.exclusive(async () => {
       this.ledger.transaction(s => {
         const state = stateOf(s.application), step = switchStep(s, deviceId, expectedRevision, 'abort');
@@ -1066,7 +1072,7 @@ export class BotCollaboration {
         return step;
       });
       try { await this.process(); }
-      catch (error) { if (error instanceof WakeDispatchError) return { ...this.topology(deviceId), wakePending: true }; throw error; }
+      catch (error) { return { ...this.topology(deviceId), ...(error instanceof WakeDispatchError ? { wakePending: true as const } : { drainError: error }) }; }
       return this.topology(deviceId);
     });
   }

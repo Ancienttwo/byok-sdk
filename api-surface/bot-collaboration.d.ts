@@ -1127,12 +1127,15 @@ export declare class BotCollaboration {
      * Owner API. Cancels a Turn, an input batch by its id or a member input id, or B's chain Turn through its delegation.
      * Idempotent (#1405): a Turn whose K4 intent already has a cancel gives `cancel_pending`, and an ended Turn
      * `already_settled`; neither writes or calls `core.cancel`.
-     * After commit, a wake-only dispatch failure resolves with `wakePending: true`; the outbox retains failed wakes for retry.
-     * The failure may concern another wake or already be retried before return. Other failures, including a Host job or
-     * outbox capacity failure, can still reject after commit (#2072).
+     * After commit, a wake-only failure returns `wakePending: true`. Other failures return `drainError`, the unchanged
+     * first drain rejection (the whole AggregateError for mixed failures), even if a later pass retries it successfully.
+     * Its presence means cancellation committed, not that reconciliation finished. Inspect/report it and retry pending
+     * work with `drain()` or recovery, rather than repeating the cancellation. Job/outbox retry state is unchanged;
+     * explicit drains and wake hooks still reject. Pre-commit failures still reject.
      */
     cancelTurn(id: string, ...by: PrincipalArg): Promise<TurnCancelResult & {
         wakePending?: true;
+        drainError?: unknown;
     }>;
     private cancelOneTurn;
     /** The L owner record of a device (#957, §4.1). A device with no record is L at revision 0. */
@@ -1173,12 +1176,15 @@ export declare class BotCollaboration {
      * A failed export or check: clears the freeze on the frozen revision, so L owns the device again and held Turns run. An
      * abort of a device of the export ends the export, and the new owner discards its import. After the commit every device
      * of the export is owned by H, so none aborts.
-     * After commit, a wake-only dispatch failure resolves with `wakePending: true`; the outbox retains failed wakes for retry.
-     * The failure may concern another wake or already be retried before return. Other failures, including a Host job or
-     * outbox capacity failure, can still reject after commit (#2072).
+     * After commit, a wake-only failure returns `wakePending: true`. Other failures return `drainError`, the unchanged
+     * process rejection (the whole AggregateError for mixed failures). Its presence means the abort committed, not that
+     * reconciliation finished. Inspect/report it and retry pending work with `drain()` or recovery, rather than repeating
+     * the abort with its now-stale revision. Job/outbox retry state is unchanged; explicit drains and wake hooks still
+     * reject. A failure may concern other work or already be retried before return. Pre-commit failures still reject.
      */
     abortSwitch(deviceId: string, expectedRevision: number): Promise<DeviceTopology & {
         wakePending?: true;
+        drainError?: unknown;
     }>;
     /**
      * Explicit retention (#798). Moves every row of each acknowledged settled root out of the state, and retires its ids.
