@@ -104,57 +104,72 @@ by its hash.
 
 ## Running a device
 
-`device-runner` is a private example CLI. For device acceptance, start with a clean checkout of tag `v0.41.0`
-(`2895560b37a5741d777241dcefc5c7fb1663fcb6`), then copy only the two runner files from the merge commit providing
-this sealed runner extension. Set `W2_MERGE_SHA` / `$W2MergeSha` below to that actual merge SHA before running the commands. The runner is an example
-overlay; the SDK packages are built from the tag. Record that SDK source commit and state in the evidence that the npm
-packages for this tag were published from the same commit. Record the runner's merge SHA separately.
+`device-runner` is a private example CLI. For device acceptance, use the published stable release tag selected by t3 for the
+window, **at least `v0.42.0`**. Build the SDK packages from that tag, then overlay only `device-runner.ts` and
+`device-session.ts` from the agreed **window SHA** on `main`. The runner calls `daemon.whenTaskSettled` (#1838), which
+requires this minimum SDK version. Record the release tag, its SDK source commit and the window SHA separately;
+confirm that the npm packages for the tag were published from that source commit. The
+[Workers acceptance runbook](../../deploy/runbooks/workers-acceptance.md) defines window selection, gates and teardown.
 
 Use Node satisfying the tagged client's `engines` requirement. Run one runner per dedicated OS user on each device.
 The Host must already have a provisioned scope and supply a fresh pairing code from `POST /host/pairing-code`; the
 device needs only the Host URL and that code, never the operator bearer.
 
-macOS, from the repository root (replace the merge SHA, Host and pairing-code placeholders locally):
+macOS, from a fresh device checkout (use the same window SHA and SDK tag supplied by t3; replace Host and
+pairing-code placeholders privately). On mac-pro, create and verify the dedicated keychain as in runbook row 2.7 first:
 
 ```sh
-git fetch origin --tags
-git checkout v0.41.0
-W2_MERGE_SHA='REPLACE_WITH_RUNNER_MERGE_SHA'
-git checkout "$W2_MERGE_SHA" -- \
+set -e
+git fetch origin main --tags
+WINDOW_SHA='<t3-supplied>'
+SDK_TAG='<t3-supplied>'
+# Confirm SDK_TAG is a published stable release >= v0.42.0 before continuing.
+git checkout --detach "$SDK_TAG"
+git checkout "$WINDOW_SHA" -- \
   examples/hosted-bot-collaboration-worker/src/device-runner.ts \
   examples/hosted-bot-collaboration-worker/src/device-session.ts
 bun install --frozen-lockfile
 bun run build
+bun run --filter @byok-sdk/example-hosted-bot-collaboration-worker typecheck
 cd examples/hosted-bot-collaboration-worker
 node --import tsx src/device-runner.ts \
   --server-url 'https://HOST.workers.dev' \
   --pairing-code 'PAIRING_CODE' \
-  --root "$HOME/byok-worker-device" \
-  --runtime stub
+  --root "$HOME/byok-p9/device-root" \
+  --runtime stub \
+  --macos-keychain-path "$HOME/Library/Keychains/byok-p9.keychain-db"
 ```
 
 Windows PowerShell, from the repository root:
 
 ```powershell
-git fetch origin --tags
-git checkout v0.41.0
-$W2MergeSha = 'REPLACE_WITH_RUNNER_MERGE_SHA'
-git checkout $W2MergeSha -- `
+git fetch origin main --tags
+$WINDOW_SHA = '<t3-supplied>'
+$SDK_TAG = '<t3-supplied>'
+# Use the same WINDOW_SHA and SDK_TAG supplied by t3; stable release >= v0.42.0.
+git checkout --detach $SDK_TAG
+git checkout $WINDOW_SHA -- `
   examples/hosted-bot-collaboration-worker/src/device-runner.ts `
   examples/hosted-bot-collaboration-worker/src/device-session.ts
 bun install --frozen-lockfile
 bun run build
+bun run --filter @byok-sdk/example-hosted-bot-collaboration-worker typecheck
 Set-Location examples/hosted-bot-collaboration-worker
 node --import tsx src/device-runner.ts `
   --server-url 'https://HOST.workers.dev' `
   --pairing-code 'PAIRING_CODE' `
-  --root "$env:USERPROFILE\byok-worker-device" `
+  --root "$env:USERPROFILE\byok-p9\device-root" `
   --runtime stub
 ```
 
 Use the same root for that device's enrollment and Agent homes. The runner uses the SDK's best-effort OS machine
 identity probe and OS credential custody: the user's macOS Keychain or Windows Credential Manager. It supplies no
-synthetic identity or in-memory credential backend. The unpackaged Windows runner requires the client's `koffi`
+synthetic identity or in-memory credential backend. `--macos-keychain-path` passes an absolute path to the public
+`deviceCredentials.macosKeychainPath` configuration; the SDK validates it and uses that keychain for all device records.
+On mac-pro this dedicated keychain is the default for acceptance, following the write failure (exit 36) in the login
+keychain on 2026-11-11, including from a GUI terminal. Verify a `security` write/read/delete round trip first and delete
+the dedicated keychain during teardown. Omit this macOS-only option on Windows.
+The unpackaged Windows runner requires the client's `koffi`
 optional dependency; install optional dependencies and verify it loads on the acceptance machine. If `koffi` is missing
 or cannot load, custody fails closed. A locked or unavailable credential store also fails the run.
 
@@ -203,11 +218,12 @@ while startup is still waiting for the connection. Scope-key readiness is establ
 For the deployed sealed canary, keep the W1 driver, member keys, Postgres/R2 credentials, bearer and tail capture on
 mini-cf, following [the deployed canary setup](src/fixtures/sealed-canary/README.md). Prepare the device with the tagged
 SDK and two-file overlay above. In mini-cf's private operator environment, optionally set `BYOK_CANARY_DEVICE` to a JSON
-object with `machine` (the configured hc machine name), `cwd` (the absolute prepared checkout path on that machine), and
-`root` (that dedicated user's absolute enrollment root). For example, using placeholder paths:
+object with `machine` (the configured hc machine name), `cwd` (the absolute prepared checkout path on that machine),
+`root` (that dedicated user's absolute enrollment root), and optional `macosKeychainPath` (required for mac-pro's dedicated
+acceptance keychain). W1 forwards it as the same `--macos-keychain-path` runner argument. For example, using placeholder paths:
 
 ```sh
-export BYOK_CANARY_DEVICE='{"machine":"mac-pro","cwd":"/path/to/byok-sdk","root":"/path/to/device-root"}'
+export BYOK_CANARY_DEVICE='{"machine":"mac-pro","cwd":"/path/to/byok-sdk","root":"/path/to/device-root","macosKeychainPath":"/path/to/byok-p9.keychain-db"}'
 bun run --filter @byok-sdk/example-hosted-bot-collaboration-worker test \
   src/sealed-zero-hit.test.ts -t 'owner-configured HTTPS canary'
 ```
@@ -218,7 +234,7 @@ the driver sends its public bundle, verifies the runner's code against the MAC-a
 sends `approve` (a mismatch sends `reject` and fails). Only the Host URL, pairing code, verification secret, public member
 bundle and synthetic canary content reach the device. It approves the registered member and installs scope keys from
 mini-cf, runs the sealed task and plaintext twin, then stops and removes its own hc terminal. Run each physical device
-separately and record its SDK source commit, overlay merge commit, OS identity and result independently.
+separately and record its SDK source commit, overlay window SHA, OS identity and result independently.
 
 After `started`, the driver sends this single canary trigger on stdin:
 
@@ -364,7 +380,7 @@ Each row's result is recorded in its PR, with the commit and the CI run.
 | Row | Evidence here | What it still needs |
 | --- | --- | --- |
 | Node H (D2) | `examples/hosted-bot-collaboration` on Node and Postgres (D2's suites) | none from this lane |
-| Worker H, local workerd | `worker.test.ts`, `faults.test.ts`, `clock.test.ts`, `sealed.test.ts` on wrangler 4.123.0 (workerd 1.20260811.1), Postgres 17, the compose S3 endpoint | a deployment: real Hyperdrive (transaction pooling, the connection limit per invocation), R2 over its S3 endpoint, Durable Object alarms on Cloudflare (at-least-once delivery, retries, placement), cron on Cloudflare (the clock's start and recovery path), isolate eviction by Cloudflare, and a sealed routine run on a device with the hosted E2EE member setup |
+| Worker H, local workerd | `worker.test.ts`, `faults.test.ts`, `clock.test.ts`, `sealed.test.ts` on local workerd; deployed acceptance targets PlanetScale Postgres 18. The local compose evidence uses Postgres 17 and the compose S3 endpoint | a deployment: real Hyperdrive (transaction pooling, the connection limit per invocation), R2 over its S3 endpoint, Durable Object alarms on Cloudflare (at-least-once delivery, retries, placement), cron on Cloudflare (the clock's start and recovery path), isolate eviction by Cloudflare, and a sealed routine run on a device with the hosted E2EE member setup |
 | Two device processes, one Host | `two-devices.test.ts`, synthetic runtime, one computer | two physical computers (macOS and Windows), each with its own OS user and network path |
 | Real runtime delegation and reply | none: no paid runtime call is approved | one A -> B -> A chain with real runtimes, each call approved by the maintainer, recorded apart from the synthetic results |
 

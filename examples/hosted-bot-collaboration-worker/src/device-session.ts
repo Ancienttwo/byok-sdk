@@ -27,13 +27,14 @@ export type DeviceCommand = { type: 'finish'; taskId: string; document: unknown 
   | { type: 'canary'; taskId: string; text: string; sealed: boolean } | { type: 'stop' };
 export type RuntimeMode = 'stub' | 'real';
 
-export function deviceConfig(serverUrl: string, root: string): DaemonConfig {
+export function deviceConfig(serverUrl: string, root: string, macosKeychainPath?: string): DaemonConfig {
   return { productId: 'hosted-collaboration-worker', productName: 'Hosted collaboration Worker',
     localAgentRelease: { version: '0.0.0-example' }, serverUrl, storeDir: path.join(root, 'sdk'),
     agentHome: { hostStorageRoot: path.join(root, 'homes'), projection: createAgentHomeProjectionConsumer(async ({ projection, writeHomeFile }) => {
       await writeHomeFile('AGENTS.md', String((projection as { persona?: unknown }).persona ?? ''));
     }) },
     agentEgress: { policy },
+    ...(macosKeychainPath === undefined ? {} : { deviceCredentials: { macosKeychainPath } }),
   };
 }
 

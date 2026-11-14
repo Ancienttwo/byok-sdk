@@ -6,7 +6,7 @@ import type { CanaryCloud } from '../../hosted-bot-collaboration/src/canary-clou
 import { HostedMember } from '../../hosted-bot-collaboration/src/e2ee-member.test-support';
 import { sealedCore, type DeviceCommand, type DeviceEvent } from './device-session.js';
 
-export interface RemoteDeviceConfig { machine: string; cwd: string; root: string }
+export interface RemoteDeviceConfig { machine: string; cwd: string; root: string; macosKeychainPath?: string }
 const exec = promisify(execFile);
 export async function canaryHc(args: string[]): Promise<string> {
   try { return (await exec('hc', args, { timeout: 70_000, maxBuffer: 1_000_000 })).stdout; }
@@ -25,7 +25,8 @@ export async function openRemoteCanaryDevice(cloud: CanaryCloud, tenant: TenantI
     '--cwd', `${config.cwd}/examples/hosted-bot-collaboration-worker`,
     'node', '--import', 'tsx', 'src/device-runner.ts',
     '--server-url', base, '--pairing-code', code, '--verification-secret', member.verificationSecret,
-    '--root', config.root, '--runtime', 'stub', '--canary-controls']);
+    '--root', config.root, '--runtime', 'stub', '--canary-controls',
+    ...(config.macosKeychainPath === undefined ? [] : ['--macos-keychain-path', config.macosKeychainPath])]);
   const send = (command: DeviceCommand) => hc(['send', address, JSON.stringify(command)]);
   async function event(type: DeviceEvent['type'], taskId?: string): Promise<DeviceEvent> {
     for (const deadline = Date.now() + 60_000; Date.now() < deadline;) {
