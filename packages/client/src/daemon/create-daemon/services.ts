@@ -91,7 +91,6 @@ type MemoryProof = {
   backend: AgentMemoryIntentBackend | undefined;
   candidate?: AgentMemoryIntentBackend;
   helper?: Readonly<{ bin: string; root: string }>;
-  failure?: string;
   active?: AbortSignal;
 };
 const memoryProofs = new WeakMap<DaemonScope, MemoryProof>();
@@ -106,7 +105,7 @@ export function agentMemoryBackendProof(scope: DaemonScope): MemoryProof {
   return proof;
 }
 
-/** Cheap configuration validation retains main's fail-closed intent startup behavior. */
+/** Validate configuration and prove native backends before the first hello; only helper volume proof is deferred. */
 export async function initializeAgentMemoryBackend(scope: DaemonScope): Promise<void> {
   const proof: MemoryProof = { status: undefined, backend: undefined };
   memoryProofs.set(scope, proof);
@@ -125,7 +124,14 @@ export async function initializeAgentMemoryBackend(scope: DaemonScope): Promise<
     if (candidate.strictLedgerBarrier) proof.candidate = candidate;
   } catch (error) {
     if (config.agentMemoryIntents !== undefined) throw error;
-    proof.failure = proofFailureKind(error);
+    proof.status = 'refused';
+    console.error(`[byok/client] agent memory backend refused: ${proofFailureKind(error)}`);
+    return;
+  }
+  if (proof.helper === undefined) {
+    const backend = proof.candidate;
+    if (backend !== undefined && (backend.openFilesystem !== undefined || await probeAgentMemoryStrictDirectorySync(config.agentHome.hostStorageRoot))) proof.backend = backend;
+    proof.status = proof.backend === undefined ? 'refused' : 'proven';
   }
 }
 
@@ -148,6 +154,7 @@ export function recoverAgentMemoryBackend(scope: DaemonScope, signal: AbortSigna
     if (memoryProofs.get(scope) === proof) memoryProofs.delete(scope);
   };
   signal.addEventListener('abort', cancel, { once: true });
+  if (proof.helper === undefined || proof.candidate === undefined) return;
   const schedule = () => {
     if (signal.aborted || proof.status !== 'unproven') return;
     timer = setTimeout(() => { void run(); }, Math.min(backoffCeilingMs(attempt++, 1_000), 30_000));
@@ -157,7 +164,7 @@ export function recoverAgentMemoryBackend(scope: DaemonScope, signal: AbortSigna
     if (signal.aborted || memoryProofs.get(scope) !== proof) return;
     let backend: AgentMemoryIntentBackend | undefined;
     let status: 'proven' | 'unproven' | 'refused';
-    let failure = proof.failure;
+    let failure: string | undefined;
     try {
       backend = await probeAgentMemoryBackend(scope, proof, signal);
       status = backend === undefined ? 'refused' : 'proven';
@@ -169,7 +176,7 @@ export function recoverAgentMemoryBackend(scope: DaemonScope, signal: AbortSigna
         : exit.code === null ? `signal=${exit.signal}` : `exit_code=${exit.code}`;
     }
     if (signal.aborted) return;
-    if (proof.status !== status) {
+    if (proof.status !== status && (status !== 'proven' || proof.status === 'unproven')) {
       const transition = status === 'proven' && proof.status === 'unproven' ? 'recovered' : status;
       console.error(`[byok/client] agent memory backend ${transition}${failure === undefined ? '' : `: ${failure}`}`);
     }
@@ -195,7 +202,6 @@ async function probeAgentMemoryBackend(daemonScope: DaemonScope, proof: MemoryPr
     const probe = await openAgentMemoryFilesystemHelperWithBudget({ helperBin, assetRoot: config.agentMemoryHelperAssetRoot, ancestorRoot: canonicalHome, canonicalHome, homeIdentity: { dev: stat.dev, ino: stat.ino } }, { timeout: HELPER_PROBE_TIMEOUT_MS, signal });
     await probe.close();
   }
-  if (backend.openFilesystem === undefined && !(await probeAgentMemoryStrictDirectorySync(config.agentHome!.hostStorageRoot))) return undefined;
   return backend;
 }
 

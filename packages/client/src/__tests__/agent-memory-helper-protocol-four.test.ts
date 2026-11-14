@@ -318,7 +318,24 @@ describe('recoverable daemon memory proof (#2200)', () => {
     abort.abort();
     expect(vi.getTimerCount()).toBe(0);
   });
-  it('logs proven once and never re-probes a proven or authoritatively refused volume', async () => {
+  it('leaves a helper without strict ledger proof quiet and unscheduled', async () => {
+    const { selected, abort } = await scope();
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    Object.defineProperty(process, 'arch', { ...arch, value: 'x64' });
+    await initializeAgentMemoryBackend(selected);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const changed = vi.fn();
+    vi.useFakeTimers();
+    recoverAgentMemoryBackend(selected, abort.signal, changed);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(agentMemoryBackendProof(selected).backend).toBeUndefined();
+    expect(wire.commands).toEqual([]);
+    expect(changed).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    abort.abort();
+  });
+  it('keeps initial success quiet and never re-probes a proven or authoritatively refused volume', async () => {
     const { selected, abort } = await scope();
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     recoverAgentMemoryBackend(selected, abort.signal, vi.fn());
@@ -326,7 +343,7 @@ describe('recoverable daemon memory proof (#2200)', () => {
     const count = wire.commands.length;
     recoverAgentMemoryBackend(selected, abort.signal, vi.fn());
     expect(wire.commands).toHaveLength(count);
-    expect(log.mock.calls).toEqual([['[byok/client] agent memory backend proven']]);
+    expect(log.mock.calls).toEqual([]);
     const { selected: refused, abort: refusedAbort } = await scope();
     wire.barrierError = new Error('unsupported');
     wire.barrierStderr = 'root_barrier_unsupported';
@@ -338,7 +355,7 @@ describe('recoverable daemon memory proof (#2200)', () => {
     expect(wire.commands).toHaveLength(commands);
     expect(vi.getTimerCount()).toBe(0);
     expect(log.mock.calls.at(-1)).toEqual(['[byok/client] agent memory backend refused: AgentMemoryIoError']);
-    expect(log).toHaveBeenCalledTimes(2);
+    expect(log).toHaveBeenCalledTimes(1);
     abort.abort(); refusedAbort.abort();
   });
   it('caps retry backoff and stop cancels an in-flight probe without a diagnostic or another timer', async () => {
