@@ -1,0 +1,146 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { resolveExistingAncestor } from '../util/existing-ancestor.js';
+
+/**
+ * The store path rules of a service installation (#2011, #2102, #2106), in
+ * one place: the precheck and a snapshot restore apply the same checks.
+ *
+ * - Containment ({@link within}) folds case on darwin and win32. It is used
+ *   only to refuse, where folding makes a check stricter.
+ * - Identity ({@link resolvesTo}) compares realpaths exactly. It allows a
+ *   restore, so folding there would accept `a/` for `A/` on a
+ *   case-sensitive volume.
+ */
+
+/** `snapshot.json` format: 2 records each entry's canonical path, and a restore writes there. SDK 0.42 wrote none. */
+export const SNAPSHOT_FORMAT = 2;
+
+/** A refused store path: the installation error code and the text its message ends with, naming the path. */
+export interface StorePathRefusal {
+  readonly code: 'precheck_failed' | 'store_overlaps_service_state';
+  readonly detail: string;
+}
+
+/**
+ * Whether `child` is `parent` or lies under it, compared by path segment
+ * (`current-old/x` is not under `current`) and, on darwin and win32, without
+ * case. For refusals and plausibility checks only.
+ */
+export function within(child: string, parent: string, platform: NodeJS.Platform): boolean {
+  const fold = (value: string): string => platform === 'darwin' || platform === 'win32' ? value.toLowerCase() : value;
+  const relative = path.relative(fold(parent), fold(child));
+  return relative === '' || (relative.split(path.sep)[0] !== '..' && !path.isAbsolute(relative));
+}
+
+/** `at` with the symbolic links of its deepest existing ancestor resolved and the missing rest appended, so an alias compares as its target. */
+export async function canonical(at: string): Promise<string> {
+  const found = await resolveExistingAncestor(at);
+  return found === undefined ? path.resolve(at) : path.join(found.canonical, ...found.tail);
+}
+
+/**
+ * A directory store path without terminal separators and `.` components,
+ * exposing its root to lstat. Links and interior `..` stay: resolving them
+ * could change the target.
+ */
+export function directoryStorePath(input: string, platform: NodeJS.Platform): string {
+  const root = path.parse(input).root;
+  const separators = platform === 'win32' ? /[\\/]+$/u : /\/+$/u;
+  let value = input;
+  while (value.length > root.length) {
+    const trimmed = value.replace(separators, '');
+    if (trimmed.length < root.length) return root;
+    if (path.basename(trimmed) !== '.') return trimmed;
+    value = path.dirname(trimmed);
+  }
+  return value;
+}
+
+/**
+ * Checks store paths as written and returns them canonical, or the first
+ * refusal:
+ * - a `..` segment (either separator on win32): after a link, `..` resolves
+ *   through the link's target, while {@link canonical} folds it away (`.`
+ *   cannot do that, #1350);
+ * - two stores that are or contain each other, as written or resolved: one
+ *   store's restore would change the other's tree, or the links it
+ *   resolves through;
+ * - a store that is, holds or lies in a `guarded` directory (the install
+ *   root, a daemon store's `service/`), each taken both as its target and as
+ *   the entry naming it, since a restore removes a link, not its target.
+ */
+export async function checkStorePaths(written: readonly string[], guarded: readonly string[], platform: NodeJS.Platform): Promise<{ canonical: string[] } | { refusal: StorePathRefusal }> {
+  const dotted = written.find((at) => at.split(platform === 'win32' ? /[\\/]/u : '/').includes('..'));
+  if (dotted !== undefined) return { refusal: { code: 'precheck_failed', detail: ` A store path must not contain .. segments; pass a normalized absolute path. (${dotted})` } };
+  const paths = await Promise.all(written.map(canonical));
+  for (const spelled of [written.map((at) => path.resolve(at)), paths]) {
+    for (const [i, a] of spelled.entries()) {
+      const j = spelled.findIndex((b, at) => at !== i && within(b, a, platform));
+      if (j !== -1) return { refusal: { code: 'precheck_failed', detail: ` Two stores must not be or contain each other. (${written[i]}, ${written[j]})` } };
+    }
+  }
+  const guards = (await Promise.all(guarded.map(async (at) => [await canonical(at), path.join(await canonical(path.dirname(at)), path.basename(at))]))).flat();
+  const overlapping = paths.findIndex((a) => guards.some((b) => within(a, b, platform) || within(b, a, platform)));
+  if (overlapping !== -1) return { refusal: { code: 'store_overlaps_service_state', detail: ` (${written[overlapping]})` } };
+  return { canonical: paths };
+}
+
+/**
+ * Checks a snapshot's entries before a restore changes any store:
+ * {@link checkStorePaths}, then that each listed path still resolves to the
+ * canonical path recorded for it. A restore then writes to the recorded
+ * paths, which is safe: (a) the listed path resolves exactly to a realpath,
+ * so no directory on that chain is a link now; (b) no two recorded paths
+ * contain each other, so the tree another entry's restore replaces holds
+ * neither this target nor an ancestor of it.
+ */
+export async function checkRestoreTargets(entries: ReadonlyArray<{ path: string; canonical: string }>, guarded: readonly string[], platform: NodeJS.Platform): Promise<StorePathRefusal | undefined> {
+  const checked = await checkStorePaths(entries.map((entry) => entry.path), guarded, platform);
+  if ('refusal' in checked) return checked.refusal;
+  for (const entry of entries) {
+    if (!(await resolvesTo(entry.path, entry.canonical))) return { code: 'precheck_failed', detail: ` A store path no longer resolves as it did at the snapshot. (${entry.path})` };
+  }
+  return undefined;
+}
+
+/**
+ * Whether `listed` resolves now to `recorded`. The existing part must match
+ * exactly. A missing segment keeps the listed spelling, so it may differ
+ * from the recorded one in case only while the recorded spelling is missing
+ * too, as on a case-insensitive volume after the store was removed.
+ */
+async function resolvesTo(listed: string, recorded: string): Promise<boolean> {
+  const found = await resolveExistingAncestor(listed);
+  if (found === undefined) return false;
+  if (found.tail.length === 0) return found.canonical === recorded;
+  const prefix = found.canonical.endsWith(path.sep) ? found.canonical : `${found.canonical}${path.sep}`;
+  if (!recorded.startsWith(prefix)) return false;
+  const rest = recorded.slice(prefix.length).split(path.sep);
+  if (rest.length !== found.tail.length) return false;
+  for (const [index, part] of found.tail.entries()) {
+    if (rest[index] === part) continue;
+    if (rest[index]!.toLowerCase() !== part.toLowerCase() || await lstatOrUndefined(path.join(found.canonical, ...rest.slice(0, index + 1))) !== undefined) return false;
+  }
+  return true;
+}
+
+/** Creates `dir` and its missing ancestors as real directories, never following a link; an existing entry that is not a directory is ENOTDIR. */
+export async function mkdirReal(dir: string): Promise<void> {
+  const stat = await lstatOrUndefined(dir);
+  if (stat !== undefined) {
+    if (!stat.isDirectory()) throw Object.assign(new Error(`${dir} is not a directory`), { code: 'ENOTDIR' });
+    return;
+  }
+  if (path.dirname(dir) !== dir) await mkdirReal(path.dirname(dir));
+  await fs.mkdir(dir);
+}
+
+async function lstatOrUndefined(at: string): Promise<import('node:fs').Stats | undefined> {
+  try {
+    return await fs.lstat(at);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
