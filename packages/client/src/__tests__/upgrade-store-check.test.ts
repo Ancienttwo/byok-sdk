@@ -353,7 +353,11 @@ describe('upgrade check --from (#1316)', () => {
   });
 
   it.each(['current', 'history'])('delivers task-home-live and its behavior summary from the %s manifest to an upgrading Host (#2117)', (location) => {
-    const authored = JSON.parse(readFileSync(join(REPO, 'packages/client/upgrade-manifest.json'), 'utf8'));
+    const clientSource = join(REPO, 'packages/client');
+    const candidates = ['upgrade-manifest.json', ...readdirSync(join(clientSource, 'upgrade-history')).map((name) => `upgrade-history/${name}`)];
+    const authored = candidates.map((file) => JSON.parse(readFileSync(join(clientSource, file), 'utf8')))
+      .find((candidate) => candidate.entries.some((entry: { id: string }) => entry.id === 'task-home-live'));
+    expect(authored, 'task-home-live stays shipped after rebaseline archives it').toBeDefined();
     const behavior = authored.entries.find((entry: { id: string }) => entry.id === 'task-home-live');
     expect(behavior).toMatchObject({ impact: 'breaking', items: ['behavior:task-home-live'], summary: expect.stringContaining('HOME') });
     const from = authored.from.version;
