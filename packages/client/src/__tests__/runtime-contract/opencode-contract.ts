@@ -2,6 +2,8 @@ import { execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'node:
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { expect } from 'vitest';
+// Sharing the canary predicate also includes the observer in the client typecheck.
+import { isCwdRefusal } from '../../../../../scripts/qualification/opencode-native-canary';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 import { OpenCodeAdapter } from '../../adapters/opencode/opencode-adapter';
 import { QUALIFIED_OPENCODE_VERSION } from '../../adapters/opencode/opencode-version';
@@ -315,7 +317,7 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
         expect(resumedRef).toBe(sessionRef);
         expect(events.at(-1)).toBe('turn_end');
         expect(history).toBe(true);
-        expect(refusal, 'resume from another workspace must fail').toMatchObject({ phase: 'start', retry: 'non-retryable', message: expect.stringContaining('resumes it only there') });
+        expect(isCwdRefusal(refusal), 'resume from another workspace must fail').toBe(true);
       }, 240_000)],
       'opencode.permission': ['a permission request is refused: the shell command does not run and the turn still ends', check(async () => {
         const { events, written, issued, requests, replies } = await refused();

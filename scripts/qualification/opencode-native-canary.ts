@@ -23,7 +23,7 @@ const report: any = { date: new Date().toISOString(), os: process.platform, arch
   gates: {}, fallback: 'not provoked; replay required', calls: [], modelReadbacks: [], permissions: [] };
 const children: any[] = [];
 const pending = new Map<any, any>();
-let session: any;
+let session: Awaited<ReturnType<typeof start>> | undefined;
 let activeGate = 'detect';
 function processes() {
   if (process.platform === 'win32') {
@@ -89,8 +89,8 @@ async function start(instruction: string, cwd: string, sessionRef?: string) {
   try { return await prepared.operation.start({ kind: 'instruction', instruction, manifest, scratch, env, mcpEnv: {} }); }
   catch (error) { await scratch.release(); throw error; }
 }
-async function collect(current: any) {
-  const events: any[] = []; for await (const event of current.events) events.push(event);
+async function collect(current: Awaited<ReturnType<typeof start>>) {
+  const events = []; for await (const event of current.events) events.push(event);
   return events;
 }
 async function gate(name: string, run: () => Promise<void>) {

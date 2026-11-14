@@ -2261,6 +2261,12 @@ export declare function scopeSecretStore<TName extends string>(store: SecretStor
  * value to `undefined`, which made a foreign value look like an absent secret
  * and let the next `set()` overwrite it. Here a stored value that is not a
  * well-formed envelope raises `SECRET_ENVELOPE_INVALID`.
+ *
+ * The underlying store's errors leave only through the shared secret-store
+ * boundary: a known keychain, Credential Manager or secret-shape code keeps its
+ * code with a fixed message and no cause, and anything else becomes
+ * `PROVIDER_SECRET_STORE_FAILED`, so a backend that echoes a key in its error
+ * cannot pass it on through this decorator.
  */
 export declare class EnvelopeScopedSecretStore<TName extends string = string> implements SecretStore<TName> {
     #private;

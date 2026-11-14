@@ -292,7 +292,7 @@ export async function resolvePiProviderSecret(
   if (profile.auth_mode === 'none') return undefined;
 
   const secrets = createStore();
-  if (!(await secrets.available())) {
+  if (!(await secretStoreCall(() => secrets.available()))) {
     throw new ByokKeysError(
       'KEYCHAIN_UNAVAILABLE',
       `${secrets.providerLabel} is unavailable`,

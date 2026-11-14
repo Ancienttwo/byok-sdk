@@ -387,6 +387,15 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       }
     });
 
+    it('passes an availability check error on only through the shared boundary (#2096)', async () => {
+      vi.spyOn(secrets, 'available').mockRejectedValueOnce(new ByokKeysError('PROVIDER_STORE_UNAVAILABLE', KEY_A, { cause: new Error(KEY_A) }));
+      const error = await apply(await configureRequest(sealingKey, KEY_B, { requestId: 'req-1', generation: 1 }))
+        .catch((thrown: unknown) => thrown as Error);
+      expect(error).toMatchObject({ code: 'PROVIDER_SECRET_STORE_FAILED' });
+      expect((error as Error).cause).toBeUndefined();
+      expect(`${(error as Error).message} ${(error as Error).stack}`).not.toContain(KEY_A);
+    });
+
     it('rejects before marking when the credential store is unavailable', async () => {
       vi.spyOn(secrets, 'available').mockResolvedValueOnce(false);
       const result = await apply(await configureRequest(sealingKey, KEY_A, { requestId: 'req-1', generation: 1 }));

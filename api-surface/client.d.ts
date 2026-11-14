@@ -8865,11 +8865,10 @@ export interface DaemonTaskSettlement {
  * `whenTaskSettled` rejects with this when an earlier journal read returned
  * no row for the task and, once that read finished, this Daemon instance had
  * no in-memory record of the task (no held runtime, nothing settled or
- * awaited for it in this run) and no offer for it marked as seen. The read
- * and those checks are not atomic: an offer appended while the read was
- * pending ends the mark, so the wait can report unknown although the row now
- * exists (#2097). The mark also ends when the offer's append is refused, so a
- * refused offer with no row reads as unknown too. A task whose rows retention
+ * awaited for it in this run) and no offer for it marked as seen. A read
+ * that overlapped the offer's journal append is repeated instead. The mark
+ * also ends when the offer's append is refused, so a refused offer with no
+ * row reads as unknown too. A task whose rows retention
  * pruned, a task never journaled on this device and an offer still on its way
  * look the same. Unknown does not prove the task is over or will never start:
  * an offer may still arrive, and whether one is on its way is for the Host's
