@@ -20,7 +20,7 @@ const releasePackSource = readFileSync(
   'utf8',
 );
 
-test('NodeNext probe accepts real declarations and rejects an any-typed consumer', t => {
+test('NodeNext probe accepts real declarations and rejects an any-typed consumer', async t => {
   for (const declaration of ['export declare function createDaemonWithAdapters(): void;', 'export declare const createDaemonWithAdapters: any;']) {
     const root = mkdtempSync(path.join(os.tmpdir(), 'byok-node-next-probe-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -29,8 +29,8 @@ test('NodeNext probe accepts real declarations and rejects an any-typed consumer
     writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: '@byok-sdk/client', type: 'module', exports: { '.': { types: './index.d.ts' } } }));
     writeFileSync(path.join(pkg, 'index.d.ts'), declaration);
     const probe = () => nodeNextConsumerProbe(root, ['@byok-sdk/client']);
-    if (declaration.includes(': any')) assert.throws(probe, /expected exactly the deliberate TS2322/);
-    else assert.doesNotThrow(probe);
+    if (declaration.includes(': any')) await assert.rejects(probe, /expected exactly the deliberate TS2322/);
+    else await assert.doesNotReject(probe);
     const options = JSON.parse(readFileSync(path.join(root, 'node-next-consumer-node/tsconfig.json'), 'utf8')).compilerOptions;
     assert.equal(options.skipLibCheck, false);
     assert.deepEqual(options.types, ['node']);

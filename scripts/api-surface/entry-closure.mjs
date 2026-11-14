@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { isBuiltin } from 'node:module';
+import { builtinModules, isBuiltin } from 'node:module';
+import { build } from 'esbuild';
 import path from 'node:path';
 import { scanModule } from './module-scan.mjs';
 
@@ -60,25 +61,110 @@ export function manifestEntries(root) {
 
 // Project validated facts into the Node release-smoke consumer.
 // A platform-specific entry needs a reviewed smoke before it can be released.
-export function runtimeSmokeImports(root) {
+export async function runtimeSmokeImports(root) {
+  root = realpathSync(root);
   const contract = readJson(path.join(root, 'api-surface', 'entries.json'));
-  const imports = new Set();
-  for (const entry of manifestEntries(root)) {
-    if (entry.kind !== 'exports') continue;
+  const imports = new Set(), entries = manifestEntries(root), exports = [];
+  for (const entry of entries) {
+    if (entry.kind === 'bin') continue;
     if (entry.conditions.some(condition => !['node', 'import', 'require', 'default'].includes(condition))) {
-      throw new Error(`${entry.id}: non-Node export conditions require a reviewed runtime smoke`);
+      throw new Error(`${entry.id}: non-Node ${entry.kind === 'exports' ? 'export' : 'imports'} conditions require a reviewed runtime smoke`);
     }
-    if (path.extname(entry.target) === '.json') continue;
+    if (entry.kind !== 'exports' || path.extname(entry.target) === '.json') continue;
     const facts = contract[entry.id]?.facts;
     if (facts?.target !== posix(path.relative(root, entry.target))
       || ['bareImports', 'lazyImports'].some(field => !Array.isArray(facts[field])
         || facts[field].some(specifier => typeof specifier !== 'string'))) throw new Error(`${entry.id}: validated entry facts are required for runtime smoke`);
-    if ([...facts.bareImports, ...facts.lazyImports].some(specifier => specifier.startsWith('cloudflare:'))) {
-      throw new Error(`${entry.id}: Cloudflare entry requires a reviewed runtime smoke`);
-    }
+    exports.push(entry);
     imports.add(entry.pkg.manifest.name + (entry.specifier === '.' ? '' : entry.specifier.slice(1)));
   }
-  return { node: sorted(imports) };
+  const boundaries = new Map();
+  const boundaryKey = (importer, specifier) => JSON.stringify([importer, specifier]);
+  let metafile;
+  for (;;) {
+    try {
+      ({ metafile } = await build({
+        absWorkingDir: root, entryPoints: sorted(exports.map(entry => entry.target)),
+        bundle: true, write: false, outdir: '.workerd-probe', metafile: true,
+        platform: 'neutral', conditions: ['workerd'], mainFields: ['module', 'main'],
+        format: 'esm', treeShaking: false, logLevel: 'silent',
+        external: [...builtinModules, 'node:*', 'cloudflare:*'],
+        plugins: [{ name: 'workerd-boundaries', setup(builder) {
+          builder.onResolve({ filter: /.*/ }, args => {
+            const importer = posix(path.relative(root, args.importer));
+            if (boundaries.has(boundaryKey(importer, args.path))) return { path: args.path, external: true };
+          });
+        } }],
+      }));
+      break;
+    } catch (error) {
+      // The full build diagnostics retain condition provenance; build.resolve
+      // drops these notes. Retry only newly classified importer/specifier edges.
+      const classified = (error.errors ?? []).map(diagnostic => {
+        const conditions = diagnostic.notes.find(note => note.text.startsWith('None of the conditions in the package definition'));
+        const specifier = diagnostic.text.match(/^Could not resolve (".*")$/)?.[1];
+        const location = diagnostic.location;
+        if (!location) return null;
+        if (diagnostic.text.startsWith('No loader is configured for ".node" files:')) {
+          const literal = location.lineText.slice(location.column, location.column + location.length);
+          return { importer: location.file, specifier: scanModule(`import ${literal}`).imports[0].specifier, kind: 'native boundary' };
+        }
+        if (!conditions || !specifier) return null;
+        return { importer: location.file, specifier: JSON.parse(specifier),
+          kind: /package definition \("(?:types", ")?node"\)/.test(conditions.text)
+            ? 'node-only boundary' : 'non-workerd condition boundary' };
+      });
+      if (!classified.length || classified.some(boundary => !boundary
+        || boundaries.has(boundaryKey(boundary.importer, boundary.specifier)))) throw error;
+      for (const boundary of classified) boundaries.set(boundaryKey(boundary.importer, boundary.specifier), boundary);
+    }
+  }
+  // esbuild leaves unresolved guarded require() edges external. These are
+  // optional package loads; a missing relative file is still a broken graph.
+  for (const [importer, input] of Object.entries(metafile.inputs)) {
+    for (const edge of input.imports) {
+      if (!edge.external || isBuiltin(edge.path) || edge.path.startsWith('cloudflare:')
+        || boundaries.has(boundaryKey(importer, edge.path))) continue;
+      if (edge.path.startsWith('.') || path.isAbsolute(edge.path)) throw new Error(`${importer}: missing module ${edge.path}`);
+      let directory = path.dirname(path.resolve(root, importer));
+      for (;;) {
+        if (existsSync(path.join(directory, 'node_modules', packageName(edge.path)))) {
+          throw new Error(`${importer}: installed package has an unresolved target ${edge.path}`);
+        }
+        const parent = path.dirname(directory);
+        if (parent === directory) break;
+        directory = parent;
+      }
+      const boundary = { importer, specifier: edge.path, kind: 'optional package boundary' };
+      boundaries.set(boundaryKey(importer, edge.path), boundary);
+    }
+  }
+  const workspace = publicPackages(root).map(pkg => realpathSync(pkg.directory));
+  const thirdPartyCloudflare = new Map();
+  for (const entry of exports) {
+    const seen = new Set();
+    function visit(file, trail = [entry.id]) {
+      if (seen.has(file)) return;
+      seen.add(file);
+      for (const edge of metafile.inputs[file]?.imports ?? []) {
+        if (edge.path.startsWith('cloudflare:')) {
+          const location = realpathSync(path.resolve(root, file));
+          const owned = workspace.some(directory => inside(directory, location)
+            && !path.relative(directory, location).split(path.sep).includes('node_modules'));
+          const via = [...trail, file, edge.path];
+          if (owned) throw new Error(`${entry.id}: Cloudflare entry requires a reviewed runtime smoke; ${via.join(' -> ')}`);
+          thirdPartyCloudflare.set(boundaryKey(file, edge.path), { importer: file, specifier: edge.path, via });
+        }
+        if (!edge.external) visit(edge.path, [...trail, file]);
+      }
+    }
+    visit(posix(path.relative(root, entry.target)));
+  }
+  const workerdBoundaries = [...boundaries.values()].sort((a, b) => a.importer.localeCompare(b.importer) || a.specifier.localeCompare(b.specifier));
+  for (const boundary of workerdBoundaries) console.log(`[runtime-smoke] ${boundary.kind}: ${boundary.importer} -> ${boundary.specifier}`);
+  const thirdPartyCloudflareImports = [...thirdPartyCloudflare.values()];
+  for (const reference of thirdPartyCloudflareImports) console.log(`[runtime-smoke] third-party Cloudflare reference: ${reference.via.join(' -> ')}`);
+  return { node: sorted(imports), workerdBoundaries, thirdPartyCloudflareImports };
 }
 
 function selectTarget(value, conditions) {

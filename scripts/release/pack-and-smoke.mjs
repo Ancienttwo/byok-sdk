@@ -336,7 +336,7 @@ try {
   run(bunBin, ['run', 'build:release']);
   run(nodeBin, ['scripts/release/check-package-graph.mjs']);
   run(nodeBin, ['scripts/api-surface/check-api-surface.mjs']);
-  const smokeImports = runtimeSmokeImports(repoRoot);
+  const smokeImports = await runtimeSmokeImports(repoRoot);
 
   const tarballs = [];
   let migrationFiles;
@@ -507,7 +507,7 @@ try {
         `console.log('[release-pack] isolated imports OK');\n`,
     );
     run(nodeBin, ['smoke.mjs'], smokeDir);
-    nodeNextConsumerProbe(smokeDir);
+    await nodeNextConsumerProbe(smokeDir);
     copyFileSync(path.join(repoRoot, 'scripts/release/execution-submit-smoke.mjs'), path.join(smokeDir, 'execution-submit-smoke.mjs'));
     run(nodeBin, ['execution-submit-smoke.mjs'], smokeDir);
     // #1104: the packaging plugin builds and runs single-file bundles from the installed tarballs.

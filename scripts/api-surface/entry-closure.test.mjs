@@ -38,7 +38,7 @@ function fixture(t) {
   return { root, write, json, policies, loadZod, read: file => readFileSync(path.join(root, file), 'utf8') };
 }
 
-test('runtime smoke includes Node exports and refuses eager and lazy Cloudflare imports', t => {
+test('runtime smoke includes Node exports and refuses eager and lazy Cloudflare imports', async t => {
   const f = fixture(t);
   f.policies();
   for (const target of ['index.js', 'entry']) {
@@ -47,28 +47,97 @@ test('runtime smoke includes Node exports and refuses eager and lazy Cloudflare 
     f.write(`packages/client/dist/${target}`, "export const data = 'cloudflare:workers'; export const load = () => import('./lazy.js');\n");
     f.write('packages/client/dist/lazy.js', 'export const value = 1;');
     assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
-    assert.deepEqual(runtimeSmokeImports(f.root).node, ['@byok-sdk/client', '@byok-sdk/core', '@byok-sdk/protocol']);
+    assert.deepEqual((await runtimeSmokeImports(f.root)).node, ['@byok-sdk/client', '@byok-sdk/core', '@byok-sdk/protocol']);
     for (const source of ["import 'cloudflare:workers';", "export const load = () => import('cloudflare:workers');", "const worker = require('cloudflare:workers');"]) {
       f.write(`packages/client/dist/${target}`, source);
       assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
-      assert.throws(() => runtimeSmokeImports(f.root), /@byok-sdk\/client: Cloudflare entry requires a reviewed runtime smoke/);
+      await assert.rejects(() => runtimeSmokeImports(f.root), /@byok-sdk\/client: Cloudflare entry requires a reviewed runtime smoke/);
     }
   }
 });
 
-test('runtime smoke refuses non-Node export conditions even without Cloudflare imports', t => {
+test('runtime smoke refuses non-Node export conditions even without Cloudflare imports', async t => {
   const f = fixture(t);
   for (const condition of ['node', 'import', 'require', 'default', 'workerd', 'worker', 'edge-light', 'browser', 'custom']) {
     f.json('packages/client/package.json', { name: '@byok-sdk/client', type: 'module',
       exports: { '.': { types: './dist/index.d.ts', [condition]: './dist/index.js' } } });
     f.policies();
     assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
-    if (['node', 'import', 'require', 'default'].includes(condition)) assert.ok(runtimeSmokeImports(f.root).node.includes('@byok-sdk/client'));
-    else assert.throws(() => runtimeSmokeImports(f.root), /non-Node export conditions require a reviewed runtime smoke/, condition);
+    if (['node', 'import', 'require', 'default'].includes(condition)) assert.ok((await runtimeSmokeImports(f.root)).node.includes('@byok-sdk/client'));
+    else await assert.rejects(() => runtimeSmokeImports(f.root), /non-Node export conditions require a reviewed runtime smoke/, condition);
   }
 });
 
-test('runtime smoke requires valid static and lazy import facts', t => {
+test('runtime smoke follows lazy relative graphs before accepting a Node entry', async t => {
+  const f = fixture(t);
+  f.write('packages/client/dist/index.js', "export const load = () => import('./lazy.js');");
+  f.write('packages/client/dist/lazy.js', "export { worker } from './nested.js';");
+  for (const source of ["export const worker = 'cloudflare:workers';", "import { WorkerEntrypoint } from 'cloudflare:workers'; export const worker = WorkerEntrypoint;"]) {
+    f.write('packages/client/dist/nested.js', source);
+    f.policies();
+    assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
+    if (source.startsWith('export')) assert.ok((await runtimeSmokeImports(f.root)).node.includes('@byok-sdk/client'));
+    else await assert.rejects(() => runtimeSmokeImports(f.root), /Cloudflare entry requires a reviewed runtime smoke/);
+  }
+});
+
+test('runtime smoke checks package imports conditions as well as exports', async t => {
+  const f = fixture(t);
+  for (const condition of ['node', 'workerd']) {
+    f.json('packages/client/package.json', { name: '@byok-sdk/client', type: 'module',
+      exports: './dist/index.js', imports: { '#rt': { [condition]: './dist/runtime.js', default: './dist/index.js' } } });
+    f.write('packages/client/dist/runtime.js', 'export const value = 1;');
+    f.policies();
+    assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
+    if (condition === 'node') assert.ok((await runtimeSmokeImports(f.root)).node.includes('@byok-sdk/client'));
+    else await assert.rejects(() => runtimeSmokeImports(f.root), /non-Node .* conditions require a reviewed runtime smoke/);
+  }
+});
+
+test('workerd graph selects dependency exports and imports without the node condition', async t => {
+  const f = fixture(t);
+  f.write('packages/client/dist/index.js', "export const load = () => import('./lazy.js');");
+  f.write('packages/client/dist/lazy.js', "import 'dep';");
+  for (const field of ['exports', 'imports']) {
+    f.json('node_modules/dep/package.json', { name: 'dep', type: 'module',
+      exports: field === 'exports' ? { node: './node.js', workerd: './worker.js' } : './index.js',
+      imports: { '#rt': { node: './node.js', workerd: './worker.js' } } });
+    f.write('node_modules/dep/index.js', "import '#rt';");
+    f.write('node_modules/dep/node.js', 'export const value = 1;');
+    for (const source of ['export const value = 1;', "import 'cloudflare:workers';"]) {
+      f.write('node_modules/dep/worker.js', source);
+      f.policies();
+      assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
+      const result = await runtimeSmokeImports(f.root);
+      assert.ok(result.node.includes('@byok-sdk/client'));
+      assert.equal(result.thirdPartyCloudflareImports.length, source.startsWith('export') ? 0 : 1);
+    }
+  }
+});
+
+test('workerd graph reports condition, optional and native boundaries but rejects missing files', async t => {
+  const f = fixture(t);
+  f.write('packages/client/dist/index.js', "export const load = () => import('./lazy.js');");
+  f.write('node_modules/dep/index.node', 'native fixture');
+  for (const [exports, source, kind] of [
+    [{ node: './index.js' }, "import 'dep';", 'node-only boundary'],
+    [{ browser: './index.js' }, "import 'dep';", 'non-workerd condition boundary'],
+    ['./index.node', "import 'dep';", 'native boundary'],
+    ['./index.js', "try { require('absent') } catch {}", 'optional package boundary'],
+    ['./missing.js', "import 'dep';", null],
+    ['./missing.js', "try { require('dep') } catch {}", null],
+    ['./index.js', "try { require('./missing.js') } catch {}", null],
+  ]) {
+    f.json('node_modules/dep/package.json', { name: 'dep', type: 'module', exports });
+    f.write('packages/client/dist/lazy.js', source);
+    f.policies();
+    assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
+    if (kind) assert.equal((await runtimeSmokeImports(f.root)).workerdBoundaries[0].kind, kind);
+    else await assert.rejects(() => runtimeSmokeImports(f.root), /Could not resolve|missing module|unresolved target/);
+  }
+});
+
+test('runtime smoke requires valid static and lazy import facts', async t => {
   const f = fixture(t);
   f.policies();
   assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
@@ -78,12 +147,12 @@ test('runtime smoke requires valid static and lazy import facts', t => {
       const edited = structuredClone(contract);
       edited['@byok-sdk/client'].facts[field] = value;
       f.json('api-surface/entries.json', edited);
-      assert.throws(() => runtimeSmokeImports(f.root), /validated entry facts are required/);
+      await assert.rejects(() => runtimeSmokeImports(f.root), /validated entry facts are required/);
     }
   }
 });
 
-test('NodeNext includes typed conditional Node exports and excludes untyped exports and JSON', t => {
+test('NodeNext includes typed conditional Node exports and excludes untyped exports and JSON', async t => {
   const f = fixture(t);
   f.json('packages/client/package.json', { name: '@byok-sdk/client', type: 'module', exports: {
     '.': { types: './dist/index.d.ts', node: { import: './dist/index.js', require: './dist/index.js' } },
@@ -92,8 +161,8 @@ test('NodeNext includes typed conditional Node exports and excludes untyped expo
   f.json('packages/core/package.json', { name: '@byok-sdk/core', type: 'module', exports: './dist/index.js' });
   f.policies();
   assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
-  assert.deepEqual(runtimeSmokeImports(f.root).node, ['@byok-sdk/client', '@byok-sdk/core', '@byok-sdk/protocol']);
-  assert.deepEqual(typesBearingEntries(f.root), ['@byok-sdk/client', '@byok-sdk/protocol']);
+  assert.deepEqual((await runtimeSmokeImports(f.root)).node, ['@byok-sdk/client', '@byok-sdk/core', '@byok-sdk/protocol']);
+  assert.deepEqual(await typesBearingEntries(f.root), ['@byok-sdk/client', '@byok-sdk/protocol']);
 });
 
 test('host-kit closure excludes filesystem and path builtins', () => {
