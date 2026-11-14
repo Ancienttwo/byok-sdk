@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.43.0 — 2026-11-15 (candidate)
+## 0.43.0 — 2026-11-14 (published)
 
 - **Fixed (client; #2200)** — A slow macOS memory-helper volume probe now runs in the background so daemon startup does not wait for it. A missed deadline leaves the backend unproven and retries with capped backoff instead of disabling Agent memory for the daemon's lifetime. The full-sync probe has a separate 60-second budget; ordinary helper requests keep 10 seconds. Recovery re-advertises intent and commit-on-success capabilities. Linux native and other non-helper backends still finish proof before the first hello, without an extra capability refresh. Initial success is quiet; diagnostics report only unproven, refused and recovered transitions. Unproven intents fail `filesystem_unavailable` without fetch or ACK and can be retried later. Cheap helper configuration checks still fail startup when intents are configured; each start revalidates proof. Both helper subprocesses distinguish explicit nonzero exits from unproven signal/timeout outcomes, and a close reply requires a normal child exit within the same deadline. Authoritative refusals disable the backend for the current run. See the [Host upgrade note](docs/releases/host-upgrade-0.43.0.md#recoverable-memory-helper-volume-probes-2200).
 

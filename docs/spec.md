@@ -346,9 +346,9 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-A version bump does not authorize publish. The current aligned release is `0.43.0` (prepared candidate); publication requires separate
+A version bump does not authorize publish. The current aligned release is `0.43.0`, published on 2026-11-14 (UTC); later publication requires separate
 release authorization and registry readback. The packed and published keys
-`@byok-sdk/core` edge must be the exact current candidate, `0.43.0`, proven from
+`@byok-sdk/core` edge must be the exact current release, `0.43.0`, proven from
 an isolated standard npm install rather than the workspace graph.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
@@ -359,17 +359,19 @@ in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
 
-0.43.0 is the owner-approved MINOR candidate after 0.42.0. Its nine public
+0.43.0 is the published, owner-approved MINOR after 0.42.0. Its nine public
 packages exclude archived `@byok-sdk/cloud-do` (#1959). Wire stays v6. The
-upgrade manifest has 21 breaking and 4 additive entries, including the
+archived upgrade manifest has 21 breaking and 4 additive entries, including the
 `task-home-live` behavior change (#2084). Service receipts advance to version 2; Hosts must recover
 pending v1 receipts with SDK 0.42.0 and repair macOS units using the same
 current payload before their first upgrade. This cut adds no Postgres
 migration or embedded-server SQLite schema version. See the
-[0.43.0 candidate notes](releases/v0.43.0.md) and
-[Host upgrade checklist](releases/host-upgrade-0.43.0.md). Preparation is not
-publication authorization. Main remains frozen after prep merges until the
-publication-record PR merges; cut manifest entries are immutable.
+[0.43.0 release notes](releases/v0.43.0.md) and
+[Host upgrade checklist](releases/host-upgrade-0.43.0.md). All nine packages were
+published on 2026-11-14 (UTC); registry readback reports `latest` 0.43.0 for all nine.
+The publication record archives the cut manifest unchanged and starts the current
+manifest empty from the release snapshot. Main remains frozen until that PR merges.
+Publication does not establish Host acceptance or production rollout.
 
 0.42.0 is a MINOR release under this policy. It keeps wire v6,
 removes the Hermes runtime adapter (#1876), introduces other breaking public
@@ -494,8 +496,9 @@ included additive public APIs and new public behavior. See the
 its additive APIs and persistence changes. See the
 [0.28.1 release notes](releases/v0.28.1.md).
 
-The registry read of 2026-11-13 (UTC) reports `latest` 0.42.0 for all ten
-packages. The earlier published versions are 0.41.0, 0.40.0, 0.39.0, 0.38.0, 0.37.0, 0.36.0, 0.35.0, 0.34.0, 0.33.0, 0.32.0, 0.31.0, 0.30.2, 0.30.1,
+The registry read of 2026-11-14 (UTC) reports `latest` 0.43.0 for all nine
+packages in the release train; cloud-do remains archived at 0.42.0. The earlier
+published versions include 0.42.0 (2026-11-13, UTC), 0.41.0, 0.40.0, 0.39.0, 0.38.0, 0.37.0, 0.36.0, 0.35.0, 0.34.0, 0.33.0, 0.32.0, 0.31.0, 0.30.2, 0.30.1,
 0.30.0, 0.29.0, 0.28.3, 0.28.2, 0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0. The registry publication times are 2026-10-20 (UTC) for
 0.28.0 / keys 0.13.0, 2026-10-21 (UTC) for 0.28.1 / keys 0.13.1, 2026-10-22
 (UTC) for 0.28.2 and 0.28.3, 2026-10-23 (UTC) for 0.29.0, 2026-10-24 (UTC)

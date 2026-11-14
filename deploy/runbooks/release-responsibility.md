@@ -77,11 +77,12 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
-The prepared candidate is 0.43.0 for all nine public packages, keys included;
-archived cloud-do is excluded. See the [candidate release notes](../../docs/releases/v0.43.0.md)
+The current published release is 0.43.0 for all nine public packages, keys included,
+published on 2026-11-14 (UTC). cloud-do left the release train at 0.43.0 (#1959);
+its existing npm versions are deprecated and receive no further releases or fixes.
+See the [release notes](../../docs/releases/v0.43.0.md)
 and [Host upgrade order](../../docs/releases/v0.43.0.md#host-upgrade-order).
-The current published release remains [0.42.0](../../docs/releases/v0.42.0.md).
-The registry read of 2026-11-13 (UTC) reports `latest` 0.42.0 for all ten packages.
+The registry read of 2026-11-14 (UTC) reports `latest` 0.43.0 for all nine packages.
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
 Historical 0.27.0 preparation named train 0.27.0 and
@@ -96,12 +97,14 @@ dependencies consistent.
 A release set contains eight aligned packages plus keys: nine packages. From 0.28.2 all
 of them carry one version; `check:release-graph` fails when keys
 differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
-the dist-tag `latest`, observed at 0.42.0 for all ten packages on 2026-11-13 (UTC).
+the dist-tag `latest`, observed at 0.43.0 for all nine packages on 2026-11-14 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records prior `latest` 0.42.0 and `priorPublication: existing` for all nine
-packages in the 0.43.0 candidate, including `@byok-sdk/bot-collaboration`.
-There is no first publication in this train. Recheck registry state at publication.
+still records the 0.43.0 release baseline: prior `latest` 0.42.0 and
+`priorPublication: existing` for all nine packages, including
+`@byok-sdk/bot-collaboration`. There was no first publication in this train.
+Keep that historical baseline until the next release preparation updates it;
+recheck registry state at each publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
 package-document absence before a declared first publication, then exact-version
 readback and the declared absent `latest` after an RC. Missing tags/versions or
@@ -143,9 +146,9 @@ separate evidence and authorization; see the
 
 ## Release checklist
 
-At the 0.43.0 release, the owner deprecates published `@byok-sdk/cloud-do` versions on npm (#1959). Preparation does not perform that registry action.
+At the 0.43.0 release, the owner deprecated published `@byok-sdk/cloud-do` versions on npm (#1959). Registry readback on 2026-11-14 (UTC) confirms the archived-package message on `0.0.0-stage`, `0.25.0-rc.1` and `0.42.0`; see the [Host guidance](../../docs/releases/host-upgrade-0.43.0.md#cloud-do-archived).
 
-**0.43.0 freeze:** the owner approved preparation on 2026-11-14 (#1933), with main frozen from prep merge until the publication-record PR merges. This overrides the usual immediate reopening below for this release only. Cut manifest entries must not change; the publication record archives and rebaselines them. Candidate validation and publication still need their separate approvals.
+**0.43.0 freeze:** the owner approved preparation on 2026-11-14 and publication of `d2c2b0ee24e8b01d99f924be6bd91b69c8b7f107` in t4 on 2026-11-15 (#1933, owner-local date). npm publication, tag push and the GitHub Release are complete (2026-11-14 UTC). Main stays frozen from prep merge until the publication-record PR merges, overriding the usual immediate reopening below for this release only. That PR archives the cut manifest unchanged and rebaselines to the release snapshot; later work belongs to the next release. Publication does not establish Host acceptance or production rollout.
 
 1. Pin exact source commit and dependency lockfile; run repository typecheck/test/build, conformance, tenant-isolation I1-I9, credential audit and packageability/service smokes.
 2. Build separately for each supported OS/architecture. Sign/notarize with host-controlled keys and retain signer/audit evidence.

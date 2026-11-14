@@ -12,9 +12,10 @@ publication authorization. Follow the
 
 ## Upgrade manifest
 
-For the 0.43.0 cut, main stays frozen from prep merge until the publication-record
-PR merges. Do not amend the cut's manifest entries afterward. The publication
-record archives and rebaselines them; subsequent changes belong to the
+0.43.0 is published. Its 0.42.0 → 0.43.0 manifest is archived unchanged in
+`packages/client/upgrade-history/0.42.0-0.43.0.json`; the current manifest starts
+empty from the 0.43.0 release snapshot. Main stays frozen from prep merge until
+the publication-record PR merges; subsequent changes belong to the
 [next-MINOR checklist](host-upgrade-next-minor.md).
 
 A release ships `packages/client/upgrade-manifest.json` with one entry per Host-visible change since the previous release; breaking entries need a MINOR, never a PATCH (Q8). See [the upgrade manifest](../upgrade-manifest.md#release-steps).
@@ -30,8 +31,8 @@ the last v5 release, and `golden/v6.releases.json` registers the published 0.41.
 release ([release notes](v0.41.0.md)), the first v6 release, and has no floor. The
 published 0.41.0 decoder is the cross-release baseline. The published 0.42.0
 release is registered with its corpus prefixes ([release notes](v0.42.0.md)).
-The prepared 0.43.0 candidate registers the same 378 envelope and 31 HTTP
-lines ([candidate notes](v0.43.0.md)); wire remains v6.
+The published 0.43.0 release registers the same 378 envelope and 31 HTTP
+lines ([release notes](v0.43.0.md)); wire remains v6.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
 and the v2 registry `golden/releases.json` (floor 0.25.0; 0.25.0, 0.26.0 and

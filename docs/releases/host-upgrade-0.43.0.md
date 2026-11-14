@@ -1,6 +1,6 @@
 # Host upgrade to 0.43.0
 
-Candidate checklist for a Host moving from 0.42.0 to the 0.43.0 MINOR, prepared from main `bbe8b7185`. Earlier Hosts must first apply the preceding Host upgrade checklists. See the [0.43.0 release notes](v0.43.0.md) for the combined migration order and release status.
+Checklist for a Host moving from 0.42.0 to the 0.43.0 MINOR, published on 2026-11-14 (UTC) from `d2c2b0ee24e8b01d99f924be6bd91b69c8b7f107`. Earlier Hosts must first apply the preceding Host upgrade checklists. See the [0.43.0 release notes](v0.43.0.md) for the combined migration order and release status.
 
 ## Recoverable memory-helper volume probes (#2200)
 
@@ -92,7 +92,7 @@ The local bot-collaboration entry exports `inspectLedger(path, tenant)`, a prech
 
 ## cloud-do archived
 
-`@byok-sdk/cloud-do` leaves the release train. Remove the dependency, or pin it to exactly 0.42.0 if the Host still needs it. No later version or fixes will be published. At the 0.43.0 release, the owner deprecates its published npm versions (#1959). The upgrade train check no longer inspects this package, even if it remains installed.
+`@byok-sdk/cloud-do` left the release train at 0.43.0. Remove the dependency, or pin it to exactly 0.42.0 if the Host still needs it. No later version or fixes will be published. The owner deprecated its published npm versions (#1959). Registry readback on 2026-11-14 (UTC) confirms the same archived-package message for `0.0.0-stage`, `0.25.0-rc.1` and `0.42.0`: remove it or pin exactly 0.42.0, with no further releases or fixes, and never send it sealed tasks. The upgrade train check no longer inspects this package, even if it remains installed.
 
 A Host retaining the 0.42.0 pin must not dispatch sealed tasks to cloud-do: it reads task content in plaintext and executes with platform keys. Route sealed tasks only to a device that supports the [sealed payload contract](../spec.md#hosted-sealed-payload-654).
 
