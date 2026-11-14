@@ -127,7 +127,7 @@ describe('TRANSITIONS table contract (#1099 S1)', () => {
       if (fixture === undefined) continue;
       const result = reduce(fixture.snapshot, fixture.event);
       expect(result.disposition).toBe('dropped');
-      expect(result.effects.map(effect => effect.effect.kind)).toEqual(['audit']);
+      expect(result.effects.map(effect => effect.effect.kind)).toEqual([]);
       expect(result.runner).toBe(fixture.snapshot.runner);
       expect(result.task).toBe(fixture.snapshot.task);
     }

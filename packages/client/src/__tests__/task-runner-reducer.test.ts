@@ -164,7 +164,7 @@ describe('task-runner reducer core (#1099 S1)', () => {
     expect(lateJournal.rowId).toBe('F-CLAIM');
     expect(lateJournal.disposition).toBe('dropped');
     expect(lateJournal.task?.claim.journaled).toBe(false);
-    expect(kinds(lateJournal.effects)).toEqual(['audit']);
+    expect(kinds(lateJournal.effects)).toEqual([]);
     expect(lateJournal.task?.revision).toBe(snapshot.task?.revision);
   });
 
@@ -241,7 +241,7 @@ describe('task-runner reducer core (#1099 S1)', () => {
     expect(first.task?.phase).toBe('awaiting_approval');
     expect(first.task?.approval.pending?.requestId).toBe('r1');
     expect(kinds(first.effects)).toEqual([
-      'audit', 'flush.batcher', 'send.approval_request', 'register.approval', 'arm.approval_timeout',
+      'flush.batcher', 'send.approval_request', 'register.approval', 'arm.approval_timeout',
     ]);
     snapshot = snapshotOf(first);
 
@@ -295,7 +295,7 @@ describe('task-runner reducer core (#1099 S1)', () => {
     expect(second.rowId).toBe('T5');
     expect(second.disposition).toBe('dropped');
     expect(second.task?.terminal).toEqual(failed.task?.terminal);
-    expect(kinds(second.effects)).toEqual(['audit']);
+    expect(kinds(second.effects)).toEqual([]);
 
     const evidence = apply(snapshot, makeEvent('terminal.evidence', { token, ok: false }));
     expect(evidence.rowId).toBe('T6');

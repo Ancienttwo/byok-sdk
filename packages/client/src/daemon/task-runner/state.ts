@@ -222,9 +222,7 @@ export type EffectKind =
   | 'steer.session'
   | 'await.offerSettlements'
   | 'shutdown.fail_active_tasks'
-  | 'report.disposalFailure'
-  | 'log'
-  | 'audit';
+  | 'report.disposalFailure';
 
 /** Pure effect description; never a handle or a closure. */
 export interface Effect {
@@ -881,7 +879,6 @@ function dispatchApprovalEffects(pending: {
   readonly requestId: string;
 }): readonly EffectSpec[] {
   return [
-    atom('audit', { detail: { step: 'approval.dispatch' } }),
     atom('flush.batcher'),
     atom('send.approval_request', pending),
     atom('register.approval', pending),
@@ -1074,7 +1071,7 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
       };
     },
     rejection:
-      'First decline wins; later declines audit only. A recorded cancel is retained for redelivery; shutdown can select daemon is shutting down (true).',
+      'First decline wins; later declines are dropped. A recorded cancel is retained for redelivery; shutdown can select daemon is shutting down (true).',
   },
   {
     id: 'C1',
@@ -1594,7 +1591,7 @@ const APPROVAL_ROWS: readonly TransitionRow[] = [
       };
     },
     rejection:
-      'Mismatched approvalId -> audit only (A11). The registry already resolved; this row only updates state and queues the next request.',
+      'Mismatched approvalId -> dropped (A11). The registry already resolved; this row only updates state and queues the next request.',
   },
   {
     id: 'A6',
@@ -1765,10 +1762,10 @@ const APPROVAL_ROWS: readonly TransitionRow[] = [
     apply: (snapshot) => ({
       runner: snapshot.runner,
       task: snapshot.task,
-      effects: [atom('audit', { detail: { stale: 'approval' } })],
+      effects: [],
       disposition: 'dropped',
     }),
-    rejection: 'Stale or mistargeted decisions only audit; never revive or re-send.',
+    rejection: 'Stale or mistargeted decisions are dropped; never revive or re-send.',
   },
 ];
 
@@ -1828,7 +1825,7 @@ const TERMINAL_ROWS: readonly TransitionRow[] = [
         effects: terminalCompleteEffects(terminal.token, false),
       };
     },
-    rejection: 'A turn_end after cancel only audits (T5); the first terminal wins.',
+    rejection: 'A turn_end after cancel is dropped (T5); the first terminal wins.',
   },
   {
     id: 'T2',
@@ -1890,7 +1887,7 @@ const TERMINAL_ROWS: readonly TransitionRow[] = [
       };
     },
     rejection:
-      'Complete vs failed/cancelled: the first event wins; the loser audits. A cancel reason may be empty (task.cancelled schema).',
+      'Complete vs failed/cancelled: the first event wins; the loser is dropped. A cancel reason may be empty (task.cancelled schema).',
   },
   {
     id: 'T4',
@@ -1933,7 +1930,7 @@ const TERMINAL_ROWS: readonly TransitionRow[] = [
     apply: (snapshot) => ({
       runner: snapshot.runner,
       task: snapshot.task,
-      effects: [atom('audit', { detail: { stale: 'terminal' } })],
+      effects: [],
       disposition: 'dropped',
     }),
     rejection:
@@ -2003,7 +2000,7 @@ const TERMINAL_ROWS: readonly TransitionRow[] = [
     apply: (snapshot) => ({
       runner: snapshot.runner,
       task: snapshot.task,
-      effects: [atom('log', { detail: { stage: 'envelope' } })],
+      effects: [],
       threw: true,
     }),
     rejection:
@@ -2079,7 +2076,6 @@ const TERMINAL_ROWS: readonly TransitionRow[] = [
         }),
         effects: [
           atom('report.disposalFailure', { stage: 'close' }),
-          atom('audit', { detail: { close: 'failed' } }),
         ],
       };
     },
@@ -2139,7 +2135,6 @@ const TERMINAL_ROWS: readonly TransitionRow[] = [
         }),
         effects: [
           atom('report.disposalFailure', { stage: 'commit' }),
-          atom('audit', { detail: { commit: 'failed' } }),
         ],
       };
     },
@@ -2254,7 +2249,7 @@ const TERMINAL_ROWS: readonly TransitionRow[] = [
         runner: runnerWith(snapshot.runner, {
           finished: addUniqueBounded(snapshot.runner.finished, task.taskId),
         }),
-        effects: [atom('audit', { detail: { finish: 'completed' } })],
+        effects: [],
       };
     },
     rejection:
@@ -2390,7 +2385,7 @@ const LIFECYCLE_ROWS: readonly TransitionRow[] = [
             atMs: event.atMs,
           },
         }),
-        effects: [atom('audit', { detail: { claim: 'journaled' } })],
+        effects: [],
       };
     },
     rejection:
@@ -2545,7 +2540,6 @@ const LIFECYCLE_ROWS: readonly TransitionRow[] = [
         }),
         effects: [
           atom('revoke.host_contexts', {}, { requires: CLEANUP }),
-          atom('audit', { detail: { terminal: 'in-flight' } }),
         ],
       };
     },
@@ -2564,7 +2558,7 @@ const LIFECYCLE_ROWS: readonly TransitionRow[] = [
         }),
       }) : snapshot.runner,
       task: snapshot.task,
-      effects: [atom('audit', { detail: { terminal: 'settled' } })],
+      effects: [],
       ...(snapshot.task?.phase === 'declined' ? {} : { disposition: 'dropped' as const }),
     }),
     rejection: 'A declined task records a pending cancel for redelivery; a finished task stays settled.',
@@ -2613,10 +2607,10 @@ const LIFECYCLE_ROWS: readonly TransitionRow[] = [
     apply: (snapshot) => ({
       runner: snapshot.runner,
       task: snapshot.task,
-      effects: [atom('log', { detail: { stage: 'steer' } })],
+      effects: [],
     }),
     rejection:
-      'SteerUnsupported: drop + log. Any other error is rethrown by the host to keep the cursor stalled.',
+      'SteerUnsupported: drop. Any other error is rethrown by the host to keep the cursor stalled.',
   },
   {
     id: 'SH1',
@@ -2639,7 +2633,7 @@ const LIFECYCLE_ROWS: readonly TransitionRow[] = [
       ],
     }),
     rejection:
-      'Idempotent (SH2 audits). Already-claimed tasks keep running; new offers are declined at the limits stage.',
+      'Idempotent (SH2 drops repeats). Already-claimed tasks keep running; new offers are declined at the limits stage.',
   },
   {
     id: 'SH2',
@@ -2648,10 +2642,10 @@ const LIFECYCLE_ROWS: readonly TransitionRow[] = [
     when: (snapshot) => !snapshot.runner.acceptingOffers,
     apply: (snapshot) => ({
       runner: snapshot.runner,
-      effects: [atom('audit', { detail: { shutdown: 'already-stopping' } })],
+      effects: [],
       disposition: 'dropped',
     }),
-    rejection: 'Repeated stop_accepting only audits.',
+    rejection: 'Repeated stop_accepting is dropped.',
   },
   {
     id: 'SH3',
@@ -2725,9 +2719,9 @@ const LIFECYCLE_ROWS: readonly TransitionRow[] = [
           phase: 'complete',
         },
       }),
-      effects: [atom('audit', { detail: { shutdown: 'complete' } })],
+      effects: [],
     }),
-    rejection: 'After completion, new events only audit; no wire messages are sent.',
+    rejection: 'After completion, new events are dropped; no wire messages are sent.',
   },
   {
     id: 'M0',
@@ -2777,7 +2771,7 @@ const LIFECYCLE_ROWS: readonly TransitionRow[] = [
       };
     },
     rejection:
-      'Accepted first selects complete; if cancel already selected a terminal this row is stale and audits.',
+      'Accepted first selects complete; if cancel already selected a terminal this row is stale and drops the event.',
   },
   {
     id: 'M2',
@@ -2832,11 +2826,11 @@ const LIFECYCLE_ROWS: readonly TransitionRow[] = [
     apply: (snapshot) => ({
       runner: snapshot.runner,
       task: snapshot.task,
-      effects: [atom('audit', { detail: { stale: 'message' } })],
+      effects: [],
       disposition: 'dropped',
     }),
     rejection:
-      'Terminalizing/retiring/finished/declined (or no task) only audits; no revival.',
+      'Terminalizing/retiring/finished/declined (or no task) drops the event; no revival.',
   },
 ];
 
@@ -2849,10 +2843,10 @@ function fallbackRow(id: string, events: readonly ReducerEventType[]): Transitio
     apply: snapshot => ({
       runner: snapshot.runner,
       ...(snapshot.task === undefined ? {} : { task: snapshot.task }),
-      effects: [atom('audit', { detail: { drop: 'stale' } })],
+      effects: [],
       disposition: 'dropped',
     }),
-    rejection: 'Explicit drop/audit: no state change, no wire effect.',
+    rejection: 'Explicit drop: no state change, no wire effect.',
   };
 }
 
@@ -2899,18 +2893,11 @@ function phaseMatches(phase: TransitionRow['phase'], snapshot: ReducerSnapshot):
   return snapshot.task !== undefined && phase.includes(snapshot.task.phase);
 }
 
-function auditResult(snapshot: ReducerSnapshot, rowId: string, detail: string): ReduceResult {
-  const asOfRevision = snapshot.task?.revision ?? snapshot.runner.revision;
-  const envelope: EffectEnvelope = {
-    id: rowId + '#0',
-    effect: { kind: 'audit', detail: { drop: detail } },
-    asOfRevision,
-    mode: 'atomic',
-  };
+function dropResult(snapshot: ReducerSnapshot, rowId: string, detail: string): ReduceResult {
   return {
     runner: snapshot.runner,
     ...(snapshot.task === undefined ? {} : { task: snapshot.task }),
-    effects: [envelope],
+    effects: [],
     disposition: 'dropped',
     rowId,
     reason: detail,
@@ -2926,15 +2913,15 @@ function auditResult(snapshot: ReducerSnapshot, rowId: string, detail: string): 
 export function reduce(snapshot: ReducerSnapshot, event: ReducerEvent): ReduceResult {
   if (event.taskId !== undefined && snapshot.task !== undefined
     && event.taskId !== snapshot.task.taskId) {
-    return auditResult(snapshot, 'WRONG-TASK', 'drop:wrong-task');
+    return dropResult(snapshot, 'WRONG-TASK', 'drop:wrong-task');
   }
   if (event.taskId !== undefined && snapshot.task === undefined
     && snapshot.runner.finished.includes(event.taskId)) {
-    return auditResult(snapshot, 'FINISHED-TASK', 'drop:finished');
+    return dropResult(snapshot, 'FINISHED-TASK', 'drop:finished');
   }
   if (snapshot.task !== undefined && event.taskId === snapshot.task.taskId
     && event.generation !== undefined && event.generation !== snapshot.task.generation) {
-    return auditResult(snapshot, 'STALE-GENERATION', 'drop:stale-generation');
+    return dropResult(snapshot, 'STALE-GENERATION', 'drop:stale-generation');
   }
 
   const row = transitionTable().find(candidate =>
