@@ -1,6 +1,6 @@
 # Pi jiti seed: task-level validation, first slice
 
-Date: 2026-11-14. Refs #1927. Status: first slice of the [dual-signed implementation scope](https://github.com/Ancienttwo/byok-sdk/issues/1927#issuecomment-6870115839). It measures whether a packaging-time jiti seed shortens a packaged Pi auth-store task enough to pass the [hold decision's gate](https://github.com/Ancienttwo/byok-sdk/issues/1927#issuecomment-6821297717): a median improvement above 300 ms, or above 1 s in the slowest run. The second slice (release-pack binding, the zero-Babel gate, layout tests, CI selection) is not part of this note.
+Date: 2026-11-14. Refs #1927. Status: first and second slices of the [dual-signed implementation scope](https://github.com/Ancienttwo/byok-sdk/issues/1927#issuecomment-6870115839). It measures whether a packaging-time jiti seed shortens a packaged Pi auth-store task enough to pass the [hold decision's gate](https://github.com/Ancienttwo/byok-sdk/issues/1927#issuecomment-6821297717): a median improvement above 300 ms, or above 1 s in the slowest run. The second slice, recorded below the first slice's raw data, adds the Bun runner graph, the release-pack binding and zero-transform gate, the layout tests, the Host diagnostic and CI selection.
 
 ## What was measured
 
@@ -120,3 +120,64 @@ Driver, Host entry and per-run JSON lines were kept in the ignored `_ops/1927/`.
 | 9 | after | 11539.7 | 10223.7 | 138.8 | 143.8 | 44 |
 | 10 | after | 6583.3 | 5977.0 | 209.6 | 94.9 | 44 |
 | 10 | before | 12719.7 | 12467.1 | 1135.7 | 999.7 | 26 |
+
+## Second slice
+
+### Runtime graph
+
+The first slice seeded only what the parent Pi process transforms. With the packaged-host test's foreground child, background runs and workflows, a Bun-compiled product's runner processes transformed 129 more modules at run time, all async, all under `pi-subagents/src/`, inside the same execution's `runtime/jiti`. The relative import closure of `src/runs/background/binary-bootstrap.js` covers every one of them (286 modules, 285 JavaScript). The interpreter-bundle and configured-asset forms transform nothing beyond the parent graph and the user's own extension.
+
+The seed now has three groups: `parent` (43, materialized by every bundled Pi host), `runner` (285, materialized only on a Bun runner re-entry, which loads the materializer through the private `#byok-pi-runtime-host` seam, so the root entry does not carry it) and `host-peers` (1). Each entry records the canonical URL literal the build platform wrote, so a seed built on one OS relocates on another. The manifest also records the locked `pi-subagents` and `jiti` integrities and the official Pi `closureDigest`.
+
+### Zero-transform gate
+
+`build-pi-jiti-seed.mjs --gate <piAssetRoot>` runs one fresh execution (own TMPDIR and cwd, no `JITI_*` variables). It materializes every group, then derives the supported graphs from the copied package, not from the seed, and asks the asset root's own jiti for each module through `transform()` with a counting callback. That is jiti's cache lookup as Pi's loader performs it: the callback runs only when jiti would transform, which in Pi is a Babel run. The gate fails unless the count is zero.
+
+`check:release-pack` runs `--verify-installed` on the isolated install. It checks that the installed client carries exactly one seed, builds a `compiled-executable` asset root with the installed `copyPiRuntimeAssets`, and runs the gate on it. It then checks that the copy is unchanged, that the packed seed equals the seed regenerated from the installed `pi-subagents` and `jiti`, that its `closureDigest` is the official Pi closure's, and that npm's recorded integrities for both packages equal the seed's locked ones.
+
+| Run | Commit | Command | Result | Load average |
+| --- | --- | --- | --- | --- |
+| Green | `b431d9e9` | `NODE_OPTIONS=--no-network-family-autoselection bun run check:release-pack` | exit 0; `[release-pack] Pi jiti seed 658b4c61a58d: 329 lookups after materializing, 0 transforms; packed seed equals the installed pi-subagents/jiti derivation, bound to bun.lock and Pi closure 5b49e4883173, copied unchanged` | 22-28 |
+| Red | `8d48f883` (local only: `b431d9e9` plus one line that appends to the installed client's `templates/000.js` before the gate; branch deleted, not pushed) | same | exit 1; `Pi jiti seed zero-transform gate failed: 329 of 329 lookups transformed (pi_jiti_seed_unavailable: template changed: <copied asset root>/sdk-derived/pi-jiti-seed/658b4c61…/templates/000.js)` | 23-28 |
+
+The client suite repeats the red/green on a copied asset root: zero transforms with the seed, every lookup transformed when a template changes or the seed directory is removed.
+
+### Layout tests
+
+In `pi-host-payload.test.ts`:
+
+- Each packaged host form (Bun and Node interpreter bundles, Bun compiled with and without assets beside it, Node SEA) completes its task. Its private cache holds exactly the manifest entries of the groups that form runs, plus the user's own extension, so no supported module was transformed at run time. Its stderr has no `pi_jiti_seed_unavailable`.
+- A product without its seed, and one whose bundle has a `node_modules` beside it (where jiti would use a cache shared by every task), each complete the task cold. The Host prints exactly one `[byok/client] pi_jiti_seed_unavailable: <reason>` line.
+- With the asset root under `install dir 安装` and the probe under `peer probe 探针`, materializing produces byte-identical cache files, names included, to what the pinned jiti writes with Babel for the same installed paths.
+- Two executions get independent regular files (distinct inodes, link count 1). Poisoning one leaves the other, the seed and a third execution unchanged.
+- An adjacent `node_modules`, `TMPDIR` equal to the working directory, and a `JITI_FS_CACHE` override each refuse the seed before anything is written.
+
+Locally, the Bun forms and both cold layouts passed. The Node interpreter-bundle and SEA forms skip on this machine's Homebrew Node and run in CI.
+
+### Diagnostic
+
+An unusable seed does not change behavior: Pi transforms at run time as without a seed. The Pi host writes one local frame per process on its RPC stdout, `{"type":"byok_host_diagnostic","code":"pi_jiti_seed_unavailable","message":"<reason>"}`. Reasons name files and versions only. The adapter warns once per Host process, as `runtime-versions-store` does. The frame is not an AgentEvent; a public event would be a separate decision. A runner re-entry reports on its own stderr (`runner.stderr.log`) once.
+
+### Bytes
+
+Measured as in the first slice, after a plain `bun run build` (a `build:release` also writes `dist/native/agent-memory-fs/*`, 11,420,046 B unrelated to the seed, so it is excluded here), main `7416804b4` against `b431d9e9`:
+
+| Measure | main | branch | Difference |
+| --- | ---: | ---: | ---: |
+| npm tarball | 8,116,223 B | 10,025,169 B | +1,908,946 B |
+| Unpacked | 33,260,673 B | 41,729,696 B | +8,469,023 B |
+| Files | 529 | 859 | +330 |
+| Seed subtree (329 templates and the manifest) | — | 8,419,031 B | +8,419,031 B |
+
+| Entry | main | branch | Difference |
+| --- | ---: | ---: | ---: |
+| `dist/index.js` | 2,126,947 B | 2,128,444 B | +1,497 B |
+| `dist/bin/byok-agent.js` | 2,121,254 B | 2,122,323 B | +1,069 B |
+| `dist/bin/pi-runtime-host.js` | 417,459 B | 422,383 B | +4,924 B |
+| `dist/adapters/packaging.js` | 33,069 B | 33,233 B | +164 B |
+| `dist/adapters/index.js` | 544,697 B | 545,766 B | +1,069 B |
+| `dist/testing/index.js` | 506,963 B | 508,032 B | +1,069 B |
+
+The root, `byok-agent`, `adapters` and `testing` entries carry the diagnostic frame parser and its one-time warning (about 1 KB) and the seed directory name; none carries the materializer, which only `pi-runtime-host.js` holds. No new `__esm` wrapper appears in `dist/index.js`. A `compiled-executable` asset root grows by the same 330 files.
+
+Runtime figures were measured in the first slice, before the runner group existed; a parent-only task materializes the same 43 entries as then. No Windows/Defender numbers were collected.
