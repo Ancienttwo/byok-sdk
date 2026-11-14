@@ -15,7 +15,7 @@ import todoLayout from '../adapters/pi/todo-locale-layout.json';
 import { REQUIRE_BUN_ENV, resolveBunBin } from './support/test-bun-bin';
 import { writeKoffiAssetRoot } from '../../../../scripts/testing/sdk-koffi-asset-root.mjs';
 import { startLoopbackProvider } from './runtime-contract/loopback';
-import { openPiJitiSeed, piSubagentHostPeersSource, PI_JITI_SEED_DIR, sha256, usePiJitiSeed, type PiJitiSeedGroup } from '../adapters/pi/jiti-seed.mjs';
+import { openPiJitiSeed, piJitiFilename, piSubagentHostPeersSource, PI_JITI_SEED_DIR, sha256, usePiJitiSeed, type PiJitiSeedGroup } from '../adapters/pi/jiti-seed.mjs';
 
 const execFileAsync = promisify(execFile);
 const BUN_BIN = resolveBunBin();
@@ -146,11 +146,11 @@ describe('Pi jiti seed (#1927)', () => {
     // The pinned jiti with its own Babel transform, asked for the same files at their installed paths.
     const jitiDir = path.join(assets, 'pi-subagents/node_modules/jiti');
     const { createJiti } = createRequire(path.join(jitiDir, 'package.json'))(path.join(jitiDir, 'lib/jiti.cjs')) as
-      { createJiti(file: string, options: Record<string, unknown>): { transform(options: Record<string, unknown>): string } };
+      { createJiti(file: string, options: Record<string, unknown>): { resolve(id: string): string; transform(options: Record<string, unknown>): string } };
     const jiti = createJiti(path.join(cold, 'cold.cjs'), { fsCache: path.join(cold, 'jiti'), moduleCache: false });
     const { manifest } = await readSeedManifest(assets);
     for (const entry of manifest.entries) {
-      const file = await fs.realpath(path.join(groupRoot(entry.group), entry.path));
+      const file = piJitiFilename(jiti, path.join(groupRoot(entry.group), entry.path));
       jiti.transform({ filename: file, source: await fs.readFile(file, 'utf8'), ts: entry.ts, async: entry.async, jsx: false });
     }
     const expected = await cacheFiles(path.join(cold, 'jiti'));
@@ -202,12 +202,29 @@ describe('Pi jiti seed (#1927)', () => {
     try {
       expect(() => inExecution(tmp, () => openPiJitiSeed(assets, []))).toThrow('pi_jiti_seed_unavailable: JITI_FS_CACHE changes the jiti cache contract');
     } finally { delete process.env.JITI_FS_CACHE; }
-    // jiti ignores TMPDIR when it is the working directory; a worker cannot chdir, so a child process checks it.
-    const probe = `import { openPiJitiSeed } from ${JSON.stringify(pathToFileURL(fileURLToPath(new URL('../adapters/pi/jiti-seed.mjs', import.meta.url))).href)};
-try { openPiJitiSeed(${JSON.stringify(assets)}, []); } catch (error) { process.stdout.write(error.message); }`;
-    const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '-e', probe], { cwd: tmp, env: { ...process.env, TMPDIR: tmp } });
-    expect(stdout).toBe('pi_jiti_seed_unavailable: TMPDIR is the working directory');
-    expect(await fs.readdir(tmp)).toEqual([]);
+    // The seed binds to the directory jiti 2.7.0 itself computes. jiti drops TMPDIR
+    // when os.tmpdir() is the working directory; a worker cannot chdir, so a child
+    // process reports both the seed's directory and jiti's own choice.
+    const probe = `import { createRequire } from 'node:module';
+import { openPiJitiSeed } from ${JSON.stringify(pathToFileURL(fileURLToPath(new URL('../adapters/pi/jiti-seed.mjs', import.meta.url))).href)};
+let seed; try { seed = openPiJitiSeed(${JSON.stringify(assets)}, []).cacheDir; } catch (error) { seed = error.message; }
+const jiti = createRequire(import.meta.url)(${JSON.stringify(path.join(assets, 'pi-subagents/node_modules/jiti/lib/jiti.cjs'))})
+  .createJiti(process.cwd() + '/probe.cjs', { fsCache: true }).options.fsCache;
+process.stdout.write(JSON.stringify({ seed, jiti }));`;
+    const choose = async (cwd: string, env: Record<string, string>): Promise<{ seed: string; jiti: string }> => JSON.parse(
+      (await execFileAsync(process.execPath, ['--input-type=module', '-e', probe], { cwd, env: { ...process.env, ...env } })).stdout) as { seed: string; jiti: string };
+    // POSIX: jiti falls through to TMP, TEMP or /tmp, which other executions share.
+    // Windows' os.tmpdir() reads TEMP and TMP only, so TMPDIR alone moves nothing there.
+    if (process.platform !== 'win32') {
+      const shared = await choose(tmp, { TMPDIR: tmp });
+      expect(shared.seed).toMatch(/^pi_jiti_seed_unavailable: the Pi loader would leave the working directory for /u);
+      expect(path.resolve(shared.jiti)).not.toBe(path.join(tmp, 'jiti'));
+      expect(await fs.readdir(tmp)).toEqual([]);
+    }
+    // Every temporary directory variable naming the working directory: jiti stays, and so does the seed.
+    const own = path.join(root, 'own'); await fs.mkdir(own);
+    const kept = await choose(own, { TMPDIR: own, TEMP: own, TMP: own });
+    expect([kept.seed, path.resolve(kept.jiti)]).toEqual([path.join(own, 'jiti'), path.join(own, 'jiti')]);
     // A manifest whose digest matches but which is not JSON: the diagnostic
     // keeps the exception class, never the bytes JSON.parse quotes, and the
     // process loses its fs cache.

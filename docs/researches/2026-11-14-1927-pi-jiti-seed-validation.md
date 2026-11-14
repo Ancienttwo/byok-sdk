@@ -150,7 +150,8 @@ In `pi-host-payload.test.ts`:
 - A product without its seed, and one whose bundle has a `node_modules` beside it (where jiti would use a cache shared by every task), each complete the task cold. The Host prints exactly one `[byok/client] pi_jiti_seed_unavailable: <reason>` line.
 - With the asset root under `install dir 安装` and the probe under `peer probe 探针`, materializing produces byte-identical cache files, names included, to what the pinned jiti writes with Babel for the same installed paths.
 - Two executions get independent regular files (distinct inodes, link count 1). Poisoning one leaves the other, the seed and a third execution unchanged.
-- An adjacent `node_modules`, `TMPDIR` equal to the working directory, and a `JITI_FS_CACHE` override each refuse the seed before anything is written.
+- An adjacent `node_modules` and a `JITI_FS_CACHE` override each refuse the seed before anything is written.
+- The seed binds to the directory jiti 2.7.0 computes itself, checked against `createJiti(…, { fsCache: true }).options.fsCache` in the same child process. When `TMPDIR` is set and `os.tmpdir()` is the working directory, jiti recomputes `os.tmpdir()` without `TMPDIR`. On POSIX with only `TMPDIR` naming the working directory, that lands in the shared `TMP`, `TEMP` or `/tmp`, and the seed refuses before writing. On Windows `os.tmpdir()` reads `TEMP` and `TMP`, never `TMPDIR`, so the recomputation moves nothing. With `TMPDIR`, `TEMP` and `TMP` all naming the working directory, jiti stays there on every platform and so does the seed.
 
 Locally, the Bun forms and both cold layouts passed. The Node interpreter-bundle and SEA forms skip on this machine's Homebrew Node and run in CI.
 

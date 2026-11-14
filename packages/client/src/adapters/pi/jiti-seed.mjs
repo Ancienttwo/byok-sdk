@@ -44,6 +44,15 @@ export function piSubagentHostPeersSource(specifiers) {
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
+/**
+ * The filename `jiti` keys its cache file by for `file`: its own resolver's
+ * spelling of the real path (forward slashes on Windows). The seed writes and
+ * the release gate looks up through this one function.
+ */
+export function piJitiFilename(jiti, file) {
+  return jiti.resolve(realpathSync(file));
+}
+
 /** The JavaScript literal jiti's transform writes for `import.meta.url` of `file`. */
 export function fileUrlLiteral(file) {
   return JSON.stringify(pathToFileURL(file).href);
@@ -88,8 +97,18 @@ function executionCacheDir(loaderUrls) {
     const loader = loaderUrl.startsWith('file:') ? fileURLToPath(loaderUrl) : loaderUrl;
     if (existsSync(path.resolve(loader, '../node_modules'))) refuse('the Pi loader would use an adjacent shared cache');
   }
+  // jiti recomputes os.tmpdir() without TMPDIR when TMPDIR is set and the
+  // temporary directory is the working directory. Only a recomputation that
+  // lands elsewhere leaves this execution's directory: on POSIX it falls
+  // through to TMP, TEMP or /tmp, while on Windows os.tmpdir() never read TMPDIR.
   const tmp = os.tmpdir();
-  if (process.env.TMPDIR && tmp === process.cwd() && !process.env.JITI_RESPECT_TMPDIR_ENV) refuse('TMPDIR is the working directory');
+  let dir = tmp;
+  if (process.env.TMPDIR && tmp === process.cwd() && !process.env.JITI_RESPECT_TMPDIR_ENV) {
+    const value = process.env.TMPDIR;
+    delete process.env.TMPDIR;
+    try { dir = os.tmpdir(); } finally { process.env.TMPDIR = value; }
+  }
+  if (dir !== tmp) refuse(`the Pi loader would leave the working directory for ${dir}`);
   return path.join(tmp, 'jiti');
 }
 
@@ -139,7 +158,7 @@ export function openPiJitiSeed(seedRoot, loaderUrls) {
      */
     materialize(group, root) {
       const prepared = manifest.entries.filter(entry => entry.group === group).map(entry => {
-        const file = realpathSync(path.join(root, entry.path));
+        const file = piJitiFilename(jiti, path.join(root, entry.path));
         const source = readFileSync(file, 'utf8');
         if (sha256(source) !== entry.sourceSha256) refuse(`source changed: ${file}`);
         let code = readFileSync(path.join(templates, entry.template), 'utf8');

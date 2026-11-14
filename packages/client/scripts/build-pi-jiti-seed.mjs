@@ -27,7 +27,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   PI_JITI_SEED_CANONICAL_ROOT, PI_JITI_SEED_DIR, PI_JITI_SEED_FORMAT, PI_JITI_SEED_VERSION,
-  canonicalSeedFile, fileUrlLiteral, piSubagentHostPeersSource, sha256,
+  canonicalSeedFile, fileUrlLiteral, piJitiFilename, piSubagentHostPeersSource, sha256,
 } from '../src/adapters/pi/jiti-seed.mjs';
 import { OFFICIAL_PI_PROVENANCE } from '../src/adapters/pi/official-pi-installation.mjs';
 import { parseBunLock } from '../../../scripts/release/pi-runtime-identity.mjs';
@@ -207,8 +207,8 @@ async function zeroTransform(assetRoot, materializer) {
     moduleCache: false, transform: () => { transforms++; return { code: '' }; },
   });
   for (const { file, ts } of lookups) {
-    const real = realpathSync(file);
-    jiti.transform({ filename: real, source: readFileSync(real, 'utf8'), ts, async: true, jsx: false });
+    const filename = piJitiFilename(jiti, file);
+    jiti.transform({ filename, source: readFileSync(filename, 'utf8'), ts, async: true, jsx: false });
   }
   process.stdout.write(JSON.stringify({ entries: lookups.length, transforms, ...(unavailable === undefined ? {} : { unavailable }) }));
 }

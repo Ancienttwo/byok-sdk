@@ -9,6 +9,7 @@ export const PI_SUBAGENTS_HOST_KEY: string;
 export function piSubagentHostPeersSource(specifiers: readonly string[]): string;
 export function sha256(bytes: string | Uint8Array): string;
 export function fileUrlLiteral(file: string): string;
+export function piJitiFilename(jiti: { resolve(id: string): string }, file: string): string;
 export function canonicalSeedFile(group: PiJitiSeedGroup, relative: string): string;
 
 export interface PiJitiSeed {
