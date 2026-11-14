@@ -492,6 +492,13 @@ function unfinishedFailure(errors: readonly unknown[], note: string): ServiceIns
   return error;
 }
 
+/** A payload file that is not a regular file when it is read (#1962). */
+function payloadFileError(file: string): ServiceInstallationError {
+  const error = new ServiceInstallationError('payload_invalid');
+  error.message += ` (${file})`;
+  return error;
+}
+
 /** The installation error for a refused store path, its message naming the path. */
 function storePathError(refusal: StorePathRefusal): ServiceInstallationError {
   const error = new ServiceInstallationError(refusal.code);
@@ -877,7 +884,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         const destination = path.join(staging, ...relative.split('/'));
         await fs.mkdir(path.dirname(destination), { recursive: true });
         await fs.copyFile(path.join(payloadDir, ...relative.split('/')), destination);
-        if ((await sha256File(destination)) !== digest) throw new ServiceInstallationError('payload_invalid');
+        if ((await sha256File(destination, payloadFileError)) !== digest) throw new ServiceInstallationError('payload_invalid');
         const mode = (await fs.stat(path.join(payloadDir, ...relative.split('/')))).mode & 0o777;
         await fs.chmod(destination, mode);
       }
@@ -1810,7 +1817,7 @@ async function matchesManifest(dir: string, manifest: ServicePayloadManifest, by
   if (!(await exists(staged)) || !Buffer.from(bytes).equals(await fs.readFile(staged))) return false;
   for (const [relative, digest] of Object.entries(manifest.files)) {
     const file = path.join(dir, ...relative.split('/'));
-    if (!(await exists(file)) || (await sha256File(file)) !== digest) return false;
+    if (!(await exists(file)) || (await sha256File(file, payloadFileError)) !== digest) return false;
   }
   return true;
 }

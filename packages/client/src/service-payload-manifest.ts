@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { JsonObject } from '@byok-sdk/core';
 
@@ -45,8 +45,27 @@ export async function listPayloadFiles(dir: string, refuse: (relative: string) =
   return result;
 }
 
-export async function sha256File(file: string): Promise<string> {
-  return createHash('sha256').update(await fs.readFile(file)).digest('hex');
+/**
+ * The SHA-256 of the regular file at `file`, or `refuse(file)` for anything
+ * else (#1962). One rule on every platform: `lstat` must show a regular
+ * file, the descriptor opened (no-follow and non-blocking where the platform
+ * defines those flags) must be a regular file with the same device and
+ * inode. A last segment swapped for a link or a FIFO is refused and never
+ * read or waited on. An ancestor swapped after the listing is not caught:
+ * see {@link writeServicePayloadManifest}'s input contract.
+ */
+export async function sha256File(file: string, refuse: (file: string) => Error): Promise<string> {
+  const listed = await fs.lstat(file).catch(() => undefined);
+  if (!listed?.isFile()) throw refuse(file);
+  const handle = await fs.open(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0)).catch(() => undefined);
+  if (handle === undefined) throw refuse(file);
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.dev !== listed.dev || opened.ino !== listed.ino) throw refuse(file);
+    return createHash('sha256').update(await handle.readFile()).digest('hex');
+  } finally {
+    await handle.close();
+  }
 }
 
 /**
@@ -54,6 +73,11 @@ export async function sha256File(file: string): Promise<string> {
  * and returns the bytes written. Every regular file is listed; a symlink or
  * other entry type, an existing manifest, an empty directory, an invalid id
  * and a `meta` that is not a JSON object throw.
+ *
+ * Input contract (#1962): `dir` is the Host's trusted build output and
+ * nothing changes it while this runs. A file swapped for a link or a FIFO is
+ * refused, but a directory above a listed file that is swapped for a link
+ * after the listing can still lead a read outside `dir`.
  */
 export async function writeServicePayloadManifest(dir: string, options: { id: string; meta?: JsonObject }): Promise<Uint8Array> {
   if (!VERSION_ID.test(options.id)) throw new TypeError(`Invalid payload id ${JSON.stringify(options.id)}: 1-64 of A-Z a-z 0-9 . _ -, starting with a letter or digit`);
@@ -65,7 +89,7 @@ export async function writeServicePayloadManifest(dir: string, options: { id: st
   // Default sort compares UTF-16 code units, so the output does not depend on the file system's order or locale.
   for (const relative of relatives.sort()) {
     if (!isPayloadPath(relative)) throw new Error(`Payload path ${relative} cannot be listed in a manifest`);
-    files.push(`    ${JSON.stringify(relative)}: "${await sha256File(path.join(dir, ...relative.split('/')))}"`);
+    files.push(`    ${JSON.stringify(relative)}: "${await sha256File(path.join(dir, ...relative.split('/')), (file) => new Error(`Payload entry ${file} is not a regular file`))}"`);
   }
   // Written as text, not from an object: object key order puts integer-like paths ("9", "10") first.
   const fields = ['"format": "byok-service-payload"', '"version": 1', `"id": ${JSON.stringify(options.id)}`, `"files": {\n${files.join(',\n')}\n  }`];

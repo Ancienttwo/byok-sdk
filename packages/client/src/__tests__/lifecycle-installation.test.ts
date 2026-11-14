@@ -16,7 +16,7 @@ import {
   type ServiceInstallationOptions,
 } from '../lifecycle/service-installation';
 import { installationHoldsStart, readServiceInstallationRecord } from '../util/service-installation-record';
-import { SERVICE_PAYLOAD_MANIFEST, writeServicePayloadManifest, type ServicePayloadManifest } from '../service-payload-manifest';
+import { SERVICE_PAYLOAD_MANIFEST, sha256File, writeServicePayloadManifest, type ServicePayloadManifest } from '../service-payload-manifest';
 import { createManagedLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
 import { createLaunchdLifecycle } from '../lifecycle/launchd';
 import type { Runner } from '../util/exec-runner';
@@ -583,6 +583,22 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await expect(installation.install(bom)).rejects.toMatchObject({ code: 'payload_invalid' });
     expect(await pointer('current')).toBeUndefined();
   });
+
+  it.each(['a link', 'a FIFO', 'another file once opened'])('sha256File refuses a payload file that is %s, without reading or waiting on it (#1962)', async (swap) => {
+    if (swap === 'a FIFO' && process.platform === 'win32') return;
+    const dir = path.join(root, 'hash');
+    await fs.mkdir(dir);
+    const [file, outside] = [path.join(dir, 'host.js'), path.join(root, 'outside.js')];
+    await fs.writeFile(outside, 'outside');
+    if (swap === 'a link') await fs.symlink(outside, file);
+    else if (swap === 'a FIFO') expect(spawnSync('mkfifo', [file]).status).toBe(0);
+    else await fs.writeFile(file, 'payload');
+    const open = fs.open.bind(fs);
+    // Swapped between the lstat and the open: the descriptor is another file.
+    const swapped = vi.spyOn(fs, 'open').mockImplementation((async (at: string, ...rest: []) => open(swap === 'another file once opened' && at === file ? outside : at, ...rest)) as typeof fs.open);
+    const refused = new Error('refused');
+    await expect(sha256File(file, () => refused).finally(() => swapped.mockRestore())).rejects.toBe(refused);
+  }, 5_000);
 
   it('writeServicePayloadManifest writes a manifest stage accepts, with meta, and refuses what it cannot list (#1842)', async () => {
     const dir = path.join(root, 'built');
