@@ -59,7 +59,7 @@
     "@byok-sdk/server": "workspace:*"
   },
   "peerDependencies": {
-    "@hono/node-server": "^2.1.3",
+    "@hono/node-server": "^2.1.6",
     "vitest": "^5.1.0"
   },
   "peerDependenciesMeta": {
@@ -74,7 +74,7 @@
     "@byok-sdk/cloud": "workspace:*",
     "@byok-sdk/core": "workspace:*",
     "@byok-sdk/example-host-execution-core": "workspace:*",
-    "@hono/node-server": "^2.1.3",
+    "@hono/node-server": "^2.1.6",
     "@types/node": "^24",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
