@@ -450,10 +450,14 @@ checks every file against `files`, refuses a file the manifest does not list
 or a listed file that is missing, and stages the manifest bytes it parsed.
 The same `id` with different manifest bytes is `version_conflict`. Host
 policy such as a Node floor, file-size ceilings or file modes goes in
-`verifyPayload(stagedDir, manifest)`: it runs on the staged copy after every
-digest passed and before it becomes `versions/<id>` (and on an existing
-`versions/<id>` that matched), and a throw is `payload_invalid` with nothing
-new under `versions/`. A `byok-agent` payload ships the single-file bundle
+`verifyPayload(stagedDir, manifest)`: it runs on a fresh staged copy after
+every digest passed, before that copy becomes `versions/<id>`. An existing
+`versions/<id>` with a matching manifest is never passed to it: it is
+verified on a fresh copy too, which is then discarded. A throw is
+`payload_invalid` with nothing new under `versions/`, and so is a copy that
+afterwards no longer holds exactly the manifest's file names, manifest bytes
+and digests. Two listed paths that differ only in letter case or Unicode
+normalization are `payload_name_collision` on every volume. A `byok-agent` payload ships the single-file bundle
 `byok-agent.mjs` (built with `@byok-sdk/client/packaging`).
 
 ```sh

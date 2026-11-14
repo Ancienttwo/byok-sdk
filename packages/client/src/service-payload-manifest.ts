@@ -33,6 +33,28 @@ export function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Two payload paths, or two of their directories, that differ only in letter
+ * case or Unicode normalization (NFC), or `undefined` (#1962). One volume
+ * that ignores case or normalization (macOS by default, Windows) stores
+ * them as one entry, so such a payload cannot install as listed anywhere:
+ * the manifest writer and the installer both refuse it.
+ */
+export function collidingPayloadPaths(relatives: readonly string[]): readonly [string, string] | undefined {
+  const seen = new Map<string, string>();
+  for (const relative of relatives) {
+    const parts = relative.split('/');
+    for (let end = 1; end <= parts.length; end += 1) {
+      const spelled = parts.slice(0, end).join('/');
+      const key = spelled.normalize('NFC').toLowerCase();
+      const first = seen.get(key);
+      if (first === undefined) seen.set(key, spelled);
+      else if (first !== spelled) return [first, spelled];
+    }
+  }
+  return undefined;
+}
+
 /** Every regular file under `dir`, `/`-separated and relative. Any other entry type throws `refuse(relative)`. */
 export async function listPayloadFiles(dir: string, refuse: (relative: string) => Error, prefix = ''): Promise<string[]> {
   const result: string[] = [];
@@ -46,33 +68,41 @@ export async function listPayloadFiles(dir: string, refuse: (relative: string) =
 }
 
 /**
- * The SHA-256 of the regular file at `file`, or `refuse(file)` for anything
- * else (#1962). One rule on every platform: `lstat` must show a regular
- * file, the descriptor opened (no-follow and non-blocking where the platform
- * defines those flags) must be a regular file with the same device and
- * inode. A last segment swapped for a link or a FIFO is refused and never
- * read or waited on. An ancestor swapped after the listing is not caught:
- * see {@link writeServicePayloadManifest}'s input contract.
+ * The SHA-256 of the regular file at `file`, or `refuse(file, cause)` (#1962)
+ * for anything else and for any failure to read it. `lstat` must show a
+ * regular file, and the descriptor opened (no-follow and non-blocking where
+ * the platform defines those flags) must be a regular file with the same
+ * device and inode, compared as `bigint`. So the bytes hashed are those of
+ * the file `lstat` saw, and a FIFO is never waited on. Where `open` cannot
+ * refuse a link (Windows), that file renamed and a link to it put in its
+ * place is still read; on POSIX the link is refused. A directory above
+ * `file` swapped after the listing is not caught: see
+ * {@link writeServicePayloadManifest}'s input contract.
  */
-export async function sha256File(file: string, refuse: (file: string) => Error): Promise<string> {
-  const listed = await fs.lstat(file).catch(() => undefined);
-  if (!listed?.isFile()) throw refuse(file);
-  const handle = await fs.open(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0)).catch(() => undefined);
-  if (handle === undefined) throw refuse(file);
+export async function sha256File(file: string, refuse: (file: string, cause?: unknown) => Error): Promise<string> {
+  const listed = await fs.lstat(file, { bigint: true }).catch((error: unknown) => { throw refuse(file, error); });
+  if (!listed.isFile()) throw refuse(file);
+  const handle = await fs.open(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0)).catch((error: unknown) => { throw refuse(file, error); });
+  let digest: string | undefined;
+  let failure: unknown;
   try {
-    const opened = await handle.stat();
-    if (!opened.isFile() || opened.dev !== listed.dev || opened.ino !== listed.ino) throw refuse(file);
-    return createHash('sha256').update(await handle.readFile()).digest('hex');
-  } finally {
-    await handle.close();
+    const opened = await handle.stat({ bigint: true });
+    if (opened.isFile() && opened.dev === listed.dev && opened.ino === listed.ino) digest = createHash('sha256').update(await handle.readFile()).digest('hex');
+  } catch (error) {
+    failure = error;
   }
+  // Closed before refusing, and a close failure never replaces the first one.
+  await handle.close().catch((error: unknown) => { failure ??= error; digest = undefined; });
+  if (digest === undefined) throw refuse(file, failure);
+  return digest;
 }
 
 /**
  * Writes `byok-payload.json` for the payload in `dir` at build time (#1842)
  * and returns the bytes written. Every regular file is listed; a symlink or
  * other entry type, an existing manifest, an empty directory, an invalid id
- * and a `meta` that is not a JSON object throw.
+ * a `meta` that is not a JSON object and two paths that differ only in
+ * letter case or Unicode normalization throw.
  *
  * Input contract (#1962): `dir` is the Host's trusted build output and
  * nothing changes it while this runs. A file swapped for a link or a FIFO is
@@ -85,6 +115,8 @@ export async function writeServicePayloadManifest(dir: string, options: { id: st
   const relatives = await listPayloadFiles(dir, (relative) => new Error(`Payload entry ${relative} is not a regular file or directory`));
   if (relatives.includes(SERVICE_PAYLOAD_MANIFEST)) throw new Error(`${path.join(dir, SERVICE_PAYLOAD_MANIFEST)} already exists`);
   if (relatives.length === 0) throw new Error(`Payload directory ${dir} has no files`);
+  const colliding = collidingPayloadPaths(relatives);
+  if (colliding !== undefined) throw new Error(`Payload paths ${colliding[0]} and ${colliding[1]} differ only in letter case or Unicode normalization`);
   const files: string[] = [];
   // Default sort compares UTF-16 code units, so the output does not depend on the file system's order or locale.
   for (const relative of relatives.sort()) {

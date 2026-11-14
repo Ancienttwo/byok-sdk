@@ -3,7 +3,7 @@ import { ownedProcessGroupRecord } from '../adapters/process-tree';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { existsSync, promises as fs, type Stats } from 'node:fs';
+import { existsSync, promises as fs, type BigIntStats, type Stats } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -600,6 +600,25 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await expect(sha256File(file, () => refused).finally(() => swapped.mockRestore())).rejects.toBe(refused);
   }, 5_000);
 
+  it('sha256File compares device and inode as bigint, and a failed read is its typed refusal with the cause (#1962)', async () => {
+    const file = path.join(root, 'hash.js');
+    await fs.writeFile(file, 'payload');
+    const probe = await fs.open(file);
+    const handles = Object.getPrototypeOf(probe) as { stat: typeof probe.stat; readFile: typeof probe.readFile };
+    await probe.close();
+    const refuse = (_file: string, cause?: unknown) => Object.assign(new Error('refused'), { cause });
+    // Two inode numbers above 2^53 that one Number cannot tell apart.
+    const [lstat, stat] = [fs.lstat.bind(fs), handles.stat];
+    const high = (value: Stats | BigIntStats | undefined, ino: bigint) => Object.assign(Object.create(Object.getPrototypeOf(value)), value, { ino: typeof value!.ino === 'bigint' ? ino : Number(ino) });
+    const spies: Array<{ mockRestore(): void }> = [
+      vi.spyOn(fs, 'lstat').mockImplementation((async (at: string, options?: object) => high(await lstat(at, options), 2n ** 54n + 1n)) as typeof fs.lstat),
+      vi.spyOn(handles, 'stat').mockImplementation(async function (this: typeof probe, options?: object) { return high(await stat.call(this, options as never), 2n ** 54n); } as typeof probe.stat),
+    ];
+    await expect(sha256File(file, refuse).finally(() => { for (const spy of spies) spy.mockRestore(); })).rejects.toThrow('refused');
+    const failing = vi.spyOn(handles, 'readFile').mockRejectedValueOnce(Object.assign(new Error('EIO'), { code: 'EIO' }));
+    await expect(sha256File(file, refuse).finally(() => failing.mockRestore())).rejects.toMatchObject({ message: 'refused', cause: { code: 'EIO' } });
+  });
+
   it('writeServicePayloadManifest writes a manifest stage accepts, with meta, and refuses what it cannot list (#1842)', async () => {
     const dir = path.join(root, 'built');
     await fs.mkdir(path.join(dir, 'lib'), { recursive: true });
@@ -633,6 +652,18 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await expect(writeServicePayloadManifest(empty, { id: '1.0.0' })).rejects.toThrow('has no files');
     await fs.symlink(path.join(dir, 'host.js'), path.join(empty, 'link.js'));
     await expect(writeServicePayloadManifest(empty, { id: '1.0.0' })).rejects.toThrow('link.js is not a regular file');
+
+    // Names one volume would merge, as a case-sensitive build volume can hold them (#1962).
+    await fs.rm(empty, { recursive: true });
+    await fs.mkdir(empty);
+    await fs.writeFile(path.join(empty, 'host.js'), 'x');
+    const readdir = fs.readdir.bind(fs);
+    const merged = vi.spyOn(fs, 'readdir').mockImplementation((async (at: string, options: object) => {
+      const entries = await readdir(at, options as never) as unknown as Array<{ name: string }>;
+      return at === empty ? [...entries, Object.assign(Object.create(Object.getPrototypeOf(entries[0])), entries[0], { name: 'HOST.js' })] : entries;
+    }) as typeof fs.readdir);
+    await expect(writeServicePayloadManifest(empty, { id: '1.0.0' }).finally(() => merged.mockRestore())).rejects.toThrow('host.js and HOST.js differ only in letter case');
+    expect(existsSync(path.join(empty, SERVICE_PAYLOAD_MANIFEST))).toBe(false);
   });
 
   it('verifyPayload runs on the staged copy and on a matched existing version; a throw is payload_invalid (#1842)', async () => {
@@ -671,6 +702,29 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await expect(tampering.install(await payload('1.0.0'))).rejects.toMatchObject({ code: 'payload_invalid' });
       expect(await fs.readFile(path.join(installRoot, 'versions', '1.0.0', 'host.js'), 'utf8')).toBe('// 1.0.0');
     }
+  });
+
+  it.each([['letter case', 'A.js', 'a.js', 'A.js and a.js'], ['Unicode normalization', '\u00e9.js', 'e\u0301.js', '\u00e9.js and e\u0301.js'], ['a directory\'s letter case', 'Lib/x.js', 'lib/y.js', 'Lib and lib']])('a manifest naming two paths that differ only in %s is payload_name_collision before anything is staged (#1962)', async (_label, first, second, named) => {
+    const dir = await payload('1.0.0', { [first]: 'same' });
+    const manifestPath = path.join(dir, SERVICE_PAYLOAD_MANIFEST);
+    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as ServicePayloadManifest;
+    await fs.writeFile(manifestPath, JSON.stringify({ ...manifest, files: { ...manifest.files, [second]: manifest.files[first] } }));
+    await expect(installation.install(dir)).rejects.toMatchObject({ code: 'payload_name_collision', message: expect.stringContaining(named) });
+    expect(existsSync(path.join(installRoot, 'versions'))).toBe(false);
+  });
+
+  it('a verifier that removes the staged copy or renames a file in it is payload_invalid, naming the copy (#1962)', async () => {
+    const removing = installationOver(fakeLifecycle(), { verifyPayload: (dir) => fs.rm(dir, { recursive: true, force: true }) });
+    await expect(removing.install(await payload('1.0.0'))).rejects.toMatchObject({ code: 'payload_invalid', message: expect.stringContaining('.staging-'), cause: { code: 'ENOENT' } });
+    // Another spelling of a listed name: on a case-insensitive volume the listed name still opens it.
+    const renaming = installationOver(fakeLifecycle(), {
+      verifyPayload: async (dir) => {
+        await fs.rename(path.join(dir, 'host.js'), path.join(dir, 'tmp.js'));
+        await fs.rename(path.join(dir, 'tmp.js'), path.join(dir, 'HOST.js'));
+      },
+    });
+    await expect(renaming.install(await payload('1.0.0'))).rejects.toMatchObject({ code: 'payload_invalid' });
+    expect(existsSync(path.join(installRoot, 'versions', '1.0.0'))).toBe(false);
   });
 
   it('a copy that overwrites an earlier one, as two names on a case-insensitive volume do, is payload_invalid (#1962)', async () => {
