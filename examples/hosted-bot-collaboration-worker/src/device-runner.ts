@@ -10,7 +10,7 @@ export function runnerOptions(args: string[]) {
   const { values } = parseArgs({ args, options: {
     'server-url': { type: 'string' }, 'pairing-code': { type: 'string' }, 'verification-secret': { type: 'string' },
     root: { type: 'string' }, runtime: { type: 'string' }, 'stub-canary': { type: 'boolean', default: false },
-    'canary-controls': { type: 'boolean', default: false },
+    'canary-controls': { type: 'boolean', default: false }, 'macos-keychain-path': { type: 'string' },
   }, strict: true, allowPositionals: false });
   if (!values['server-url'] || !values['pairing-code'] || !values.root || !['stub', 'real'].includes(values.runtime ?? '')) {
     throw new Error('required: --server-url --pairing-code --root --runtime stub|real');
@@ -24,7 +24,7 @@ export function runnerOptions(args: string[]) {
   if ((values['stub-canary'] || values['canary-controls']) && values.runtime !== 'stub') throw new Error('canary modes require --runtime stub');
   if (values['stub-canary'] && values['canary-controls']) throw new Error('select one canary mode');
   if (values['verification-secret'] === '') throw new Error('verification secret must not be empty');
-  return { config: deviceConfig(url.href, path.resolve(values.root)), code: values['pairing-code'],
+  return { config: deviceConfig(url.href, path.resolve(values.root), values['macos-keychain-path']), code: values['pairing-code'],
     verificationSecret: values['verification-secret'], runtime: values.runtime as RuntimeMode,
     stubCanary: values['stub-canary'], canaryControls: values['canary-controls'] };
 }
