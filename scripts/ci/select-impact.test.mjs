@@ -669,7 +669,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
   const tracked = new Set(spawnSync('git', ['ls-files'], { cwd: fileURLToPath(root), encoding: 'utf8' }).stdout.split('\n').filter(Boolean));
   const scripts = JSON.parse(readFileSync(new URL('package.json', root), 'utf8')).scripts;
   assert.deepEqual(Object.keys(reviewedScripts).sort(), [
-    'scripts/api-surface/check-api-surface.mjs',
+    'scripts/api-surface/check-api-surface.mjs', 'scripts/api-surface/check-api-surface.test.mjs',
     'scripts/api-surface/check-version-authority.mjs', 'scripts/api-surface/check-version-authority.test.mjs',
     'scripts/api-surface/entry-closure.mjs', 'scripts/api-surface/entry-closure.test.mjs', 'scripts/api-surface/module-scan.mjs',
     'scripts/architecture/dependency-baseline.json', 'scripts/architecture/dependency-graph.mjs', 'scripts/architecture/dependency-graph.test.mjs',

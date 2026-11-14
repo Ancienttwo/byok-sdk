@@ -469,6 +469,7 @@ export const reviewedScripts = Object.freeze({
   // #1387: the test imports acorn (module-scan.mjs), and install also selects the
   // build job that runs check:api-surface.
   'scripts/api-surface/check-api-surface.mjs': { tests: ['scripts/api-surface/check-api-surface.test.mjs'], install: true },
+  'scripts/api-surface/check-api-surface.test.mjs': { tests: ['scripts/api-surface/check-api-surface.test.mjs'], install: true },
   'scripts/api-surface/entry-closure.mjs': { tests: ['scripts/api-surface/entry-closure.test.mjs'], install: true, families: ['npm-release-pack'] },
   'scripts/api-surface/module-scan.mjs': { tests: ['scripts/api-surface/check-api-surface.test.mjs', 'scripts/api-surface/entry-closure.test.mjs'], install: true, families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'] },
   'scripts/api-surface/entry-closure.test.mjs': { tests: ['scripts/api-surface/entry-closure.test.mjs'], install: true },
