@@ -1921,10 +1921,11 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect([await fs.readFile(db, 'utf8'), await fs.readFile(parent, 'utf8')]).toEqual(['v2 data', 'a file now']);
     });
 
-    it.each([['an array', []], ['an array of names', ['0']], ['an unknown suffix', { '-shm': '0' }], ['another name', { '': '9' }], ['a missing copy', { '-wal': '0-wal' }]])('snapshot files as %s are snapshot_upgrade_required before rollback() changes anything', async (_label, files) => {
+    it.each([['an array', []], ['an array of names', ['0']], ['an unknown suffix', { '-shm': '0' }], ['another name', { '': '9' }], ['naming a removed copy', undefined]])('snapshot files as %s are snapshot_upgrade_required before rollback() changes anything', async (_label, files) => {
       const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
-      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: Array<Record<string, unknown>> };
-      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: snapshot.entries.map((entry, at) => at === 0 ? { ...entry, files } : entry) }));
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: Array<{ files: Record<string, string> }> };
+      if (files === undefined) await fs.rm(path.join(path.dirname(index), Object.values(snapshot.entries[0]!.files)[0]!), { recursive: true });
+      else await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: snapshot.entries.map((entry, at) => at === 0 ? { ...entry, files } : entry) }));
       const before = await tree(root);
       await expect(installation.rollback()).rejects.toMatchObject({ code: 'snapshot_upgrade_required' });
       expect(await tree(root)).toEqual(before);

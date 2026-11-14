@@ -11497,8 +11497,11 @@ export interface ServiceInstallationOptions {
      * Every daemon store the service process owns, leased on a first install
      * and read after stopping the service on upgrade, rollback and recover
      * (#1328, #1983). Each `storeDir`
-     * is absolute and listed once; `productId` is not empty; an empty list is
-     * valid. An invalid list or a throw is `daemon_stores_invalid`. Default:
+     * is absolute and listed once, compared with its links resolved (#2161):
+     * a second spelling of one store would take a second lease on it and wait
+     * for its own first one until `store_busy`. `productId` is not empty; an
+     * empty list is valid. An invalid list or a throw is
+     * `daemon_stores_invalid`. Default:
      * `[{ storeDir: service.storeDir, productId }]`. Requires `healthCheck`,
      * since the default one reaches only `productId`'s daemon.
      */
