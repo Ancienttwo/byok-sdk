@@ -1,6 +1,6 @@
-# Host upgrade to the next MINOR
+# Host upgrade to 0.43.0
 
-Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
+Candidate checklist for a Host moving from 0.42.0 to the 0.43.0 MINOR, prepared from main `bd193cf82`. Earlier Hosts must first apply the preceding Host upgrade checklists. See the [0.43.0 release notes](v0.43.0.md) for the combined migration order and release status.
 
 ## Command startup failures and real process outcomes (#2184)
 
@@ -80,7 +80,7 @@ The local bot-collaboration entry exports `inspectLedger(path, tenant)`, a prech
 
 ## cloud-do archived
 
-`@byok-sdk/cloud-do` leaves the release train. Remove the dependency, or pin it to exactly 0.42.0 if the Host still needs it. No later version or fixes will be published. At the next MINOR release, the owner deprecates its published npm versions (#1959). The upgrade train check no longer inspects this package, even if it remains installed.
+`@byok-sdk/cloud-do` leaves the release train. Remove the dependency, or pin it to exactly 0.42.0 if the Host still needs it. No later version or fixes will be published. At the 0.43.0 release, the owner deprecates its published npm versions (#1959). The upgrade train check no longer inspects this package, even if it remains installed.
 
 A Host retaining the 0.42.0 pin must not dispatch sealed tasks to cloud-do: it reads task content in plaintext and executes with platform keys. Route sealed tasks only to a device that supports the [sealed payload contract](../spec.md#hosted-sealed-payload-654).
 

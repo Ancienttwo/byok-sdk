@@ -4,12 +4,17 @@
 
 ## 0.43.0 — 2026-11-14 (candidate)
 
+- **Breaking (client; #2106, #2152)** — SDK 0.42 snapshots are refused with `snapshot_upgrade_required`; finish or abandon the operation using SDK 0.42 before upgrading. Nested stores are `precheck_failed`, and restore refuses a changed canonical store path before changing any store. See the [Host upgrade note](docs/releases/host-upgrade-0.43.0.md#upgrades-commit-through-current-2011).
+- **Changed (client; #1927, #2147)** — Bundled Pi and Bun background runners materialize a verified jiti seed in a private cache; copy matching runtime assets with the Host. An unusable seed disables filesystem caching and reports `pi_jiti_seed_unavailable`. The Windows fix uses jiti's resolved forward-slash cache keys. Measured client growth was +8.47 MB unpacked and +1.91 MB tarball; installed and keys-profile paths do not use the seed (#2163). See the [release notes](docs/releases/v0.43.0.md#changes-since-0420).
+- **Security (client, cloud-dataplane; #2081, #2095)** — Update undici from 8.12.3 to 8.12.4. Upstream Pi still pins 8.12.3, so Hosts must add their own 8.12.4 override, reinstall, inspect the dependency tree and rebuild. See the [Host upgrade note](docs/releases/host-upgrade-0.43.0.md#undici-in-the-host-dependency-tree-2081) and #2098.
+
+- **Changed (cloud-do; #2047)** — Hosts retaining `@byok-sdk/cloud-do` 0.42.0 must not route sealed tasks to it: it reads task content in plaintext and uses platform keys. Route sealed tasks to a device that supports them. Its published versions are to be deprecated at the 0.43.0 release. See the [Host upgrade note](docs/releases/host-upgrade-0.43.0.md#cloud-do-archived).
 - **Fixed (server; #2071, #2026)** — SQLite filesystem builtins load only when SQLite file operations need them, so importing bot-collaboration host-kit no longer eagerly requires `fs` and `path`.
 - **Fixed (client; #2077, #2018)** — Gate and lease cleanup preserves operation errors and reports release failures in occurrence order; all held Pi gates are attempted.
 - **Changed (Pi; #2079, #2052)** — Upgrade `pi-subagents` to 0.88.1, including background runner liveness reconciliation before reporting an unverifiable exit.
 - **Fixed (OpenCode; #2088, #2036)** — A refused interrupt reaches the caller; disposal and rate-limit cleanup no longer start an unintended second turn.
 - **Fixed (Claude; #2090, #2037)** — A refused or unwritten interrupt leaves the turn unchanged instead of incorrectly marking it aborted or arming a kill fallback.
-- **Fixed (client; #2113)** — Synchronous `ps` and `sysctl` calls have a time limit and are killed on timeout, reported as exit unconfirmed.
+- **Fixed (client; #2113, #2105)** — Synchronous `ps` and `sysctl` calls have a time limit and are killed on timeout, reported as exit unconfirmed.
 - **Fixed (client; #2126)** — Maintenance release drops its base lease even if root gate release fails; cleanup removal failures remain visible alongside the original failure.
 
 - **Changed (client; #1962)** — `ServiceInstallation` stages every payload on a fresh copy, also when `versions/<id>` already exists with a matching manifest, so `verifyPayload(stagedDir, manifest)` always receives that staged copy and never the installed `versions/<id>`; a matched existing version is left untouched and the copy is discarded. After the hook returns, the copy must hold exactly the manifest's file names, the same manifest bytes and every digest, or the operation is `payload_invalid` naming the copy, also when the hook removed it. A manifest listing two paths, or two of their directories, that a volume ignoring letter case or Unicode normalization could store as one, `byok-payload.json` itself included, is refused on every volume with the new `ServiceInstallationErrorCode` `payload_name_collision`, naming both, and `writeServicePayloadManifest` refuses to write one; rename one of the two. The comparison is at least as coarse as APFS and NTFS folding and refuses more where they differ: `ß` and `ss`, `σ` and `ς`, and NFC and NFD spellings count as one name. A payload file is hashed only when `lstat` and the opened descriptor show the same regular file (device and inode compared as `bigint`), and a failure to read it is `payload_invalid` naming the file. Keep the payload directory a stable build output while it is installed: on Windows, a file renamed and replaced by a link to it is still read. See the [Host upgrade note](docs/releases/host-upgrade-0.43.0.md#payload-staging-and-name-collisions-1962).
@@ -26,11 +31,11 @@
 
 - **Fixed (core, client, keys; #2151)** — Spawn preflight now rejects a NUL byte in cwd with a slot-only message. `assertNoNulSpawnInput(command, args, env, cwd?)` accepts the spawn directory as an optional fourth argument; the client process transports and Pi custody launcher pass it. Synchronous client spawn failures now pass through `spawnStartError`, which retains only string codes and treats other code values as unknown. See the [Host upgrade note](docs/releases/host-upgrade-0.43.0.md#spawn-input-and-start-errors-2151).
 
-- **Fixed (client; #2135)** — `createDaemonWithAdapters` now rejects duplicate injected `descriptor.id` values synchronously with `DaemonConfigInvalidError`, naming the duplicate ID. `checkDaemonConfig(config, { source: 'embedded', adapters })` also rejects them with `ok: false` and the same `invalid_value` issue at `adapters[i].descriptor.id`. This is a breaking change from silently accepting the array and selecting its first matching adapter. Hosts must register one adapter per ID; see the [Host upgrade note](docs/releases/host-upgrade-0.43.0.md#unique-injected-adapter-ids-2135).
+- **Breaking (client; #2135)** — `createDaemonWithAdapters` now rejects duplicate injected `descriptor.id` values synchronously with `DaemonConfigInvalidError`, naming the duplicate ID. `checkDaemonConfig(config, { source: 'embedded', adapters })` also rejects them with `ok: false` and the same `invalid_value` issue at `adapters[i].descriptor.id`. This is a breaking change from silently accepting the array and selecting its first matching adapter. Hosts must register one adapter per ID; see the [Host upgrade note](docs/releases/host-upgrade-0.43.0.md#unique-injected-adapter-ids-2135).
 
 - **Fixed (examples; #2142)** — The desktop conversation service and the local routine vector adapter log `drainError` after committed cancellation, including an undefined rejection value, and explain that failed jobs remain pending for retry on the next drain. The desktop bridge returns a fixed summary while keeping the original error and its details in local logs.
 
-- **Fixed (client; #2117)** — The upgrade manifest can now record behavior-only breaking changes with a `behavior:<entry-id>` item, a public-entrypoint description and a migration link. The task HOME change (#2084) is recorded as `task-home-live`; `checkUpgradeFrom()` and its CLI JSON report include every breaking entry's authored `summary`, so Hosts see the behavior and migration action. See the [Host upgrade note](docs/releases/host-upgrade-0.43.0.md#behavior-only-upgrade-notices-2117).
+- **Breaking (client; #2117)** — The upgrade manifest can now record behavior-only breaking changes with a `behavior:<entry-id>` item, a public-entrypoint description and a migration link. The task HOME change (#2084) is recorded as `task-home-live`; `checkUpgradeFrom()` and its CLI JSON report include every breaking entry's authored `summary`, so Hosts see the behavior and migration action. `UpgradeFromBreakingEntry.summary` is required; Hosts constructing this type, including test doubles, must supply it. See the [Host upgrade note](docs/releases/host-upgrade-0.43.0.md#behavior-only-upgrade-notices-2117).
 
 - **Fixed (client; #2163)** — Installed, keys-profile, and team-operator Pi hosts disable jiti's filesystem cache before loading extensions unless its location is proven private to the execution, preventing cache writes to a shared adjacent `node_modules` directory.
 
@@ -140,7 +145,7 @@
 
 - **Fixed (client; #2008)** — An agent, agent terminal tool or Pi RPC spawn whose environment holds a value containing a NUL byte now fails before the process starts, with an error that names the variable and never its value. Previously Node's rejection quoted the value in escaped form, which credential redaction did not match, so a credential could reach the start failure reason. No Host action is needed.
 
-- **Fixed (client; #2065)** — When an MCP server, agent runtime, agent terminal tool or Pi RPC process fails to start, the error now carries only Node's error code (`spawn failed: ENOENT`) and no longer keeps Node's original error, whose `spawnargs` could carry a credential passed as an argument. MCP start-failure reasons now read `failed to start: spawn failed: <code>` instead of naming the command path, so a Host that matches the old `spawn <path> <code>` text in `task.decline` or `task.fail` reasons must update its matcher; see the next-MINOR Host upgrade guide.
+- **Fixed (client; #2065)** — When an MCP server, agent runtime, agent terminal tool or Pi RPC process fails to start, the error now carries only Node's error code (`spawn failed: ENOENT`) and no longer keeps Node's original error, whose `spawnargs` could carry a credential passed as an argument. MCP start-failure reasons now read `failed to start: spawn failed: <code>` instead of naming the command path, so a Host that matches the old `spawn <path> <code>` text in `task.decline` or `task.fail` reasons must update its matcher; see the [0.43.0 Host upgrade guide](docs/releases/host-upgrade-0.43.0.md#mcp-start-failure-reasons-carry-only-the-error-code-2065).
 - **Fixed (client, keys; #2043)** — The NUL-byte spawn check from #2008 now also covers the keys Pi provider launcher's custody spawn, MCP server spawns and ACP terminal arguments, and it checks argument values, env names and inherited env keys. The error names only the argument position or env name. An MCP spawn failure no longer keeps Node's original exception as its `cause`; it carries only the error code. No Host action is needed.
 - **Added (client; #2145)** — When confirmed-journal retention refuses to prune a task because its stored rows fail an integrity check (envelope enrollment, hash, withheld-row or task binding), the `retention-failure` event and audit record for that task carry the new optional `taskId`, one event per such task. The error's message is the fixed `journal integrity check failed (task "<id>")`, with the failed check's original error only in `cause`. Neither carries stored bytes. Only the SDK's `SqliteLocalTaskJournal` sets it; a Host-supplied `LocalTaskJournal`'s failures carry no `taskId`. The same integrity errors from `readTaskCancellation` (and so `whenTaskSettled`) now use that fixed message; the original reason moves to `cause`. In `byok-agent` diagnostics text (`tasks`, `tasks --follow`, `status`, `approvals`), every task id is now printed as a quoted, escaped string (`taskId="t1"`, and `"t1" Running ...` at the start of a task line), because the protocol does not constrain task id characters and a newline or control character could break the one-line output. `class` and `code` are unchanged (`confirmed-journal`, `sweep_failed`), other failures carry no `taskId`, and `DaemonObserver.noteRetentionFailure` takes the optional `taskId`. See the [Host upgrade note](docs/releases/host-upgrade-0.43.0.md#retention-failures-name-the-journal-task-2145).
 
@@ -610,7 +615,7 @@ release does not say that 0.39.0, or a Host on it, is ready for production.
   does not make memory files read-only, so a Host narrows the toolset or file
   scope if a Bot must not write `MEMORY.md` from a room. A Host that vendored
   K8 copies `src/rules/sync.ts`
-  ([migration](examples/bot-collaboration/README.md#group-chat-and-main-bot)).
+  ([migration](packages/bot-collaboration/README.md#group-chat-and-main-bot)).
 
 - **Breaking (examples; #1446)** — K8 carries the Bot history of a ContextPack
   in `history`, a `buildHandoffPack` result, in place of `turns` and
@@ -630,7 +635,7 @@ release does not say that 0.39.0, or a Host on it, is ready for production.
   `history.earlier` and `history.omittedTurns`, and a Host that vendored K8
   copies `src/rules/context.ts`, `src/rules/history.ts`, `src/retention.ts`,
   `src/host.ts`, `src/schema.ts` and `src/index.ts`
-  ([migration](examples/bot-collaboration/README.md#group-chat-and-main-bot)).
+  ([migration](packages/bot-collaboration/README.md#group-chat-and-main-bot)).
 
 - **Breaking (examples; #1475)** — K8 Bots dream by default. `BotCollaboration`
   gives each unarchived Bot with a usable template a daily `bot-dream` routine
@@ -647,7 +652,7 @@ release does not say that 0.39.0, or a Host on it, is ready for production.
   constructor throws on an invalid time zone and on an `instructionMaxBytes` that
   leaves a dream under 1 KiB of history. H concludes `bot-dream` occurrences with
   no task
-  ([migration](examples/bot-collaboration/README.md#dreaming-1475)).
+  ([migration](packages/bot-collaboration/README.md#dreaming-1475)).
 
 - **Added (client; #1469)** — `AgyAdapter` runs the Antigravity CLI (`agy`) as a
   custom harness on darwin, linux and win32. `createRuntimeAdapters` and
@@ -722,7 +727,7 @@ release does not say that 0.39.0, or a Host on it, is ready for production.
   it from the seat id. Seats opened before the upgrade are not backfilled. A
   Host that validates the value with a closed schema allows the field first;
   a Host that vendored K8 copies `src/rules/rooms.ts`
-  ([room seat projections](examples/bot-collaboration/README.md#room-seat-projections)).
+  ([room seat projections](packages/bot-collaboration/README.md#room-seat-projections)).
 
 - **Added (protocol; #1441)** — `buildHandoffPack(turns, budgets)` builds a
   bounded conversation handoff from turns that a Host holds. It is a pure
@@ -886,7 +891,7 @@ release does not say that 0.38.0, or a Host on it, is ready for production.
   `settleCode: 'outcome_failed'`, so a reader no longer matches the audit row;
   an older K8 ignores the optional field, so a rollback keeps working. A Host
   that vendored K8 copies `src/host.ts`, `src/index.ts`, `src/delegation.ts`,
-  `src/rules/delegation.ts` and `src/rules/turn.ts` ([migration](examples/bot-collaboration/README.md#idempotent-owner-cancels-1405)).
+  `src/rules/delegation.ts` and `src/rules/turn.ts` ([migration](packages/bot-collaboration/README.md#idempotent-owner-cancels-1405)).
 
 - **Added (examples)** — K8 `inputRoot(key, botId)` (#1407) is a read-only
   query for whether an `input` committed. It returns the Turn id that `input`
@@ -894,7 +899,7 @@ release does not say that 0.38.0, or a Host on it, is ready for production.
   no input with that key committed. It runs no `process()` pass, writes nothing
   and leaves the K8 revision unchanged, so it answers the same after a restart
   and after an `input` that rejected on its drain. A Host that vendored K8
-  copies `src/host.ts` ([input root](examples/bot-collaboration/README.md#input-root-1407)).
+  copies `src/host.ts` ([input root](packages/bot-collaboration/README.md#input-root-1407)).
 
 - **Added (protocol, client, cloud)** — An Agent-home projection may carry an
   optional `hostRevision`, a non-negative safe integer owned by the Host
@@ -1056,7 +1061,7 @@ release does not say that 0.37.0, or a Host on it, is ready for production.
   `src/retention.ts`, `src/rules/rooms.ts` and
   `src/retention-vectors.test-support.ts`, and adds `archived(namespace, id)`
   to its `RetentionSubject`
-  ([K8 retention](examples/bot-collaboration/README.md#retention)).
+  ([K8 retention](packages/bot-collaboration/README.md#retention)).
 
 - **Breaking (client, keys; Windows)** — The keys launcher no longer starts
   Windows PowerShell to check the Pi projection directory, and no longer reads
@@ -1446,7 +1451,7 @@ on it, is ready for production.
   covers it in `historyDigest` (#1318). K8 gains the owner call
   `cancelHostIntent(key)` (#1320). A Host that vendored K8 copies the new
   `rules/context.ts`; see
-  [external history authority](examples/bot-collaboration/README.md#external-history-authority).
+  [external history authority](packages/bot-collaboration/README.md#external-history-authority).
 
 - **Added (keys)** — `WindowsCredentialManagerSecretStoreOptions.systemRoot`: the
   absolute Windows system directory PowerShell is started from. Omitted, the

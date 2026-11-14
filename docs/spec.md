@@ -361,9 +361,8 @@ on keys.
 
 0.43.0 is the owner-approved MINOR candidate after 0.42.0. Its nine public
 packages exclude archived `@byok-sdk/cloud-do` (#1959). Wire stays v6. The
-upgrade manifest has 15 breaking and 3 additive entries; task HOME pinning
-(#2084) is an additional behavior-only breaking change, pending manifest
-support (#2117). Service receipts advance to version 2; Hosts must recover
+upgrade manifest has 21 breaking and 4 additive entries, including the
+`task-home-live` behavior change (#2084). Service receipts advance to version 2; Hosts must recover
 pending v1 receipts with SDK 0.42.0 and repair macOS units using the same
 current payload before their first upgrade. This cut adds no Postgres
 migration or embedded-server SQLite schema version. See the
