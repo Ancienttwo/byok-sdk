@@ -335,7 +335,10 @@ function resolveCancel(state: DelegationState, d: Delegation, taskId: string | u
   resolveDelegation(state, d, 'cancelled', now, emit, d.cancel!.reason ?? 'user_cancelled', reply);
 }
 const CANCELLABLE = new Set<Delegation['status']>(['queued', 'waiting_device', 'running', 'reply_pending']);
-/** The result of an owner cancel (#1405). `cancel_pending` and `already_settled` write nothing and send no cancel. */
+/**
+ * The result of an owner cancel (#1405). `cancelled` confirms the cancel committed, not necessarily its settlement.
+ * Turn/delegation replays that return `cancel_pending` or `already_settled` write nothing and send no cancel.
+ */
 export type CancelOutcome = 'cancelled' | 'cancel_pending' | 'already_settled';
 export interface TurnCancelResult { turnId: string; result: CancelOutcome; conclusion?: string }
 export interface DelegationCancelResult { delegationId: string; result: CancelOutcome; verdict?: Verdict }
@@ -363,8 +366,10 @@ export class HostIntentError extends Error {
   }
 }
 /**
- * `cancelled`: the intent was not submitted and settled as `cancelled`. `cancel_pending`: the SDK cancel went out, and K4
- * settles the intent at its terminal. `already_settled`: no cancel was sent; `conclusion` is the earlier one.
+ * `cancelled`: the intent was not submitted and its cancel committed. `conclusion` is optional: a `drainError` or
+ * `wakePending` result can precede settlement, which waits for a later successful drain. Replay then returns
+ * `already_settled` with the conclusion. `cancel_pending`: the SDK cancel was requested and K4 awaits its terminal;
+ * `conclusion` is absent until settlement. `already_settled`: no cancel was sent; `conclusion` is the earlier one.
  */
 export interface IntentCancelResult<C extends string> { key: string; result: CancelOutcome; conclusion?: C }
 /**
