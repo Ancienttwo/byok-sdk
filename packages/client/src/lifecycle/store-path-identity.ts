@@ -97,7 +97,7 @@ const MAX_LINKS = 40;
 export interface UntrustedLookup {
   readonly untrusted: string;
   readonly reason: string;
-  /** `owner`: another user owns the entry; `mode`: everyone may write it, without the sticky bit; `lookup`: anything else (a `..` segment, a missing or non-directory component with more after it, too many links). */
+  /** `owner`: another user owns the entry; `mode`: everyone may write it, without the sticky bit; `lookup`: anything else (a `..` segment, a missing or non-directory component with more after it, too many links, a directory this user cannot read). */
   readonly cause: 'owner' | 'mode' | 'lookup';
   /** The entry is the directory `at` resolves to, not a directory or link on the way. */
   readonly final: boolean;
@@ -140,7 +140,12 @@ export async function resolveTrusted(at: string, euid: number): Promise<{ resolv
       continue;
     }
     const next = path.join(current, name);
-    const stat = await fs.lstat(next).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+    const stat = await fs.lstat(next).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined;
+      if (error.code === 'EACCES') return null;
+      throw error;
+    });
+    if (stat === null) return lookup(current, 'not readable');
     if (stat === undefined) {
       // The kernel fails here too: nothing below a missing entry can be checked.
       if (pending.includes('..')) return lookup(next, 'missing, with .. after it');
@@ -150,7 +155,8 @@ export async function resolveTrusted(at: string, euid: number): Promise<{ resolv
     if (refused !== undefined) return refused;
     if (stat.isSymbolicLink()) {
       if (++links > MAX_LINKS) return lookup(absolute, `more than ${MAX_LINKS} links`);
-      const target = await fs.readlink(next);
+      const target = await fs.readlink(next).catch((error: NodeJS.ErrnoException) => { if (error.code === 'EACCES') return undefined; throw error; });
+      if (target === undefined) return lookup(next, 'not readable');
       if (path.isAbsolute(target)) current = path.parse(target).root;
       pending.unshift(...target.split(path.sep).filter((part) => part !== '' && part !== '.'));
       continue;
@@ -303,9 +309,9 @@ async function lstatOrUndefined(at: string): Promise<import('node:fs').Stats | u
   return fs.lstat(at).catch((error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT' ? undefined : refuseLookup(error, at));
 }
 
-/** The one mapping of lookup errors, from `realpath` and `lstat` alike: a component that is not a directory (ENOTDIR) or a link loop (ELOOP) is a refused path. */
+/** The one mapping of lookup errors, from `realpath` and `lstat` alike: a component that is not a directory (ENOTDIR), a link loop (ELOOP) or a directory this user cannot read (EACCES) is a refused path. */
 function refuseLookup(error: unknown, at: string): never {
   const code = (error as NodeJS.ErrnoException).code;
-  if (code === 'ENOTDIR' || code === 'ELOOP') throw new Refused({ code: 'precheck_failed', detail: ` A store path runs through a file or a link loop. (${at})` });
+  if (code === 'ENOTDIR' || code === 'ELOOP' || code === 'EACCES') throw new Refused({ code: 'precheck_failed', detail: ` A store path runs through a file, a link loop or a directory this user cannot read. (${at})` });
   throw error;
 }

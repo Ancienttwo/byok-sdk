@@ -1076,6 +1076,12 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await fs.symlink('new/../../shared', path.join(safe, 'via'));
       await expect(refused(path.join(safe, 'via', 'app'))).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${path.join(safe, 'new')} (missing`) });
       expect(existsSync(path.join(safe, 'new'))).toBe(false);
+      // A directory this user cannot read (root reads every directory).
+      if (process.geteuid?.() === 0) return;
+      const locked = path.join(safe, 'locked');
+      await fs.mkdir(locked, { mode: 0o600 });
+      await expect(refused(path.join(locked, 'app'))).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${locked} (not readable)`) });
+      expect(await fs.readdir(locked)).toEqual([]);
     });
 
 
@@ -2950,6 +2956,15 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'precheck_failed' });
       expect(await pointer('current')).toBe('1.0.0');
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'precheck_failed' });
+    });
+
+    it.skipIf(process.platform === 'win32' || process.geteuid?.() === 0)('a store path through a directory this user cannot read is precheck_failed and nothing is switched', async () => {
+      await installation.install(await payload('1.0.0'));
+      const locked = path.join(root, 'locked');
+      await fs.mkdir(locked, { mode: 0o600 });
+      await verdictsWith({ store: 'host', path: path.join(locked, 'host.db'), verdict: 'accepted', reason: 'ok' });
+      await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'precheck_failed', message: expect.stringContaining('cannot read') });
+      expect([await pointer('current'), await fs.readdir(locked)]).toEqual(['1.0.0', []]);
     });
 
     it('a failed cleanup of the partial snapshot does not replace snapshot_failed', async () => {
