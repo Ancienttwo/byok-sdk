@@ -965,6 +965,55 @@ describe('SqliteLocalTaskJournal', () => {
       expect(countRows(storeDir, 'journal_task')).toBe(1);
     });
 
+    describe.each(['confirmed', 'cancelled'] as const)('%s task envelope integrity', (state) => {
+      it.each([
+        ['cancel task id', 'cancel-cancelled-3', { task_id: 'other' }, '', 'invalid durable cancellation binding'],
+        ['cancel sequence', 'cancel-cancelled-3', { seq: 4 }, '', 'invalid durable cancellation binding'],
+        ['non-cancel task id', 'offer-cancelled', { task_id: 'other' }, '', 'invalid durable envelope task binding'],
+        ['hash', 'cancel-cancelled-3', undefined, "bytes_hash = 'wrong'", 'bytes/hash mismatch'],
+        ['enrollment', 'cancel-cancelled-3', undefined, "device_id = 'other'", 'enrollment identity mismatch'],
+        ['withheld bytes', 'cancel-cancelled-3', undefined, 'withheld_bytes = length(bytes)', 'withheld offer row carries bytes'],
+        ['withheld enrollment', 'cancel-cancelled-3', undefined, "withheld_bytes = length(bytes), bytes = '', tenant_id = 'other'", 'enrollment identity mismatch'],
+      ] as const)('preserves all evidence for invalid %s', async (_kind, envelopeId, binding, mutation, error) => {
+        const storeDir = await tmpStore();
+        const journal = build(storeDir, { clock: at('2026-08-01T00:00:00.000Z') });
+        await journal.appendEnvelope(offer('cancelled', 1));
+        await journal.appendEnvelope(cancel('cancelled', 2));
+        // A valid first cancellation must not hide any later corrupt row.
+        await journal.appendEnvelope(cancel('cancelled', 3));
+        if (state === 'confirmed') {
+          await journal.recordTerminal({ taskId: 'cancelled', terminalType: 'complete', bytes: 'terminal', payloadHash: journalHash('terminal'),
+            truthState: 'confirmed', attempt: 1, recordedAt: '2026-08-01T00:00:00.000Z' });
+        }
+        await journal.recordTransition({ taskId: 'cancelled', transitionId: 'retained', to: 'received', occurredAt: '2026-08-01T00:00:00.000Z' });
+        if (binding) {
+          const [row] = readRows(storeDir, `SELECT bytes FROM journal_envelope WHERE envelope_id = '${envelopeId}'`);
+          const bytes = JSON.stringify({ ...JSON.parse(row!.bytes as string), ...binding });
+          readRows(storeDir, `UPDATE journal_envelope SET bytes = '${bytes}', bytes_hash = '${journalHash(bytes)}' WHERE envelope_id = '${envelopeId}'`);
+        } else {
+          readRows(storeDir, `UPDATE journal_envelope SET ${mutation} WHERE envelope_id = '${envelopeId}'`);
+        }
+        const tables = ['journal_envelope', 'journal_task', 'journal_terminal', 'journal_transition', 'journal_idempotency'];
+        const snapshot = () => tables.map((table) => readRows(storeDir, `SELECT * FROM ${table} ORDER BY rowid`));
+        const before = snapshot();
+        await expect(journal.pruneConfirmedJournalTask('cancelled', new Date('2026-08-15T00:00:00.000Z'))).rejects.toThrow(error);
+        expect(snapshot()).toEqual(before);
+      });
+    });
+
+    it('prunes a valid confirmed withheld offer without hashing its absent bytes', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir, { clock: at('2026-08-01T00:00:00.000Z') });
+      const decline = { bytes: 'declined', payloadHash: journalHash('declined') };
+      await journal.appendWithheldOffer({ identity: IDENTITY, envelopeId: 'withheld', taskId: 'withheld', seq: 1,
+        bytesHash: journalHash('original withheld bytes'), byteLength: 24, receivedAt: '2026-08-01T00:00:00.000Z', decline });
+      await journal.confirmTerminal('withheld', decline.payloadHash);
+      await expect(journal.pruneConfirmedJournalTask('withheld', new Date('2026-08-15T00:00:00.000Z'))).resolves.toBe(true);
+      for (const table of ['journal_envelope', 'journal_task', 'journal_terminal', 'journal_idempotency']) {
+        expect(countRows(storeDir, table)).toBe(0);
+      }
+    });
+
     it('refuses to prune when a stored envelope of the cancelled task no longer matches its hash', async () => {
       const storeDir = await tmpStore();
       const journal = build(storeDir);
