@@ -19,7 +19,8 @@
 //     choice, still requests. Fails unless zero.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createRequire } from 'node:module';
+import { builtinModules, createRequire } from 'node:module';
+import { parse } from 'acorn';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -27,7 +28,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   PI_JITI_SEED_CANONICAL_ROOT, PI_JITI_SEED_DIR, PI_JITI_SEED_FORMAT, PI_JITI_SEED_VERSION,
-  canonicalSeedFile, fileUrlLiteral, piJitiFilename, piSubagentHostPeersSource, sha256,
+  canonicalSeedFile, fileUrlLiteral, piJitiFilename, piJitiSeedFile, piSubagentHostPeersSource, piSubagentHostSdkSource, sha256,
 } from '../src/adapters/pi/jiti-seed.mjs';
 import { OFFICIAL_PI_PROVENANCE } from '../src/adapters/pi/official-pi-installation.mjs';
 import { parseBunLock } from '../../../scripts/release/pi-runtime-identity.mjs';
@@ -47,18 +48,77 @@ function installed(fromDir, name) {
   throw new Error(`build-pi-jiti-seed: ${name} is not installed beside ${fromDir}`);
 }
 
-/** Every JavaScript module reachable from `entry` by relative static or dynamic import. */
-function relativeGraph(pkg, entry) {
-  const seen = new Set(), pending = [entry];
-  for (let file = pending.pop(); file !== undefined; file = pending.pop()) {
-    if (seen.has(file) || !file.endsWith('.js')) continue;
-    seen.add(file);
-    const source = readFileSync(path.join(pkg, file), 'utf8');
-    for (const match of source.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["'](\.\.?\/[^"']+)["']/gu)) {
-      pending.push(path.posix.join(path.posix.dirname(file), match[1]));
+/** Literal import/require edges, including lazy imports, without matching comments. */
+function moduleEdges(source) {
+  const edges = [];
+  const visit = node => {
+    if (node === null || typeof node !== 'object') return;
+    if (['ImportDeclaration', 'ExportNamedDeclaration', 'ExportAllDeclaration', 'ImportExpression'].includes(node.type)
+      && typeof node.source?.value === 'string') edges.push({ id: node.source.value, async: true });
+    if (node.type === 'CallExpression' && node.callee.type === 'Identifier' && node.callee.name === 'require'
+      && typeof node.arguments[0]?.value === 'string') edges.push({ id: node.arguments[0].value, async: false });
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach(visit);
+      else if (value !== null && typeof value === 'object') visit(value);
+    }
+  };
+  visit(parse(source, { ecmaVersion: 'latest', sourceType: 'module', allowReturnOutsideFunction: true }));
+  return edges;
+}
+
+/**
+ * The disk graph jiti can reach when SEA's native import only accepts builtins.
+ * Virtual Pi peers stay in the host. Package imports and their require closure
+ * are included even when Node can normally load them without a transform.
+ * Both async and CJS evaluations get their own cache entry, as jiti keys them.
+ */
+function diskGraph(pkg, entry, peers) {
+  const seen = new Set(), pending = [{ path: entry, file: path.join(pkg, entry), async: true }], inputs = [];
+  for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
+    const key = `${item.path}:${item.async}`;
+    if (seen.has(key) || !/\.[cm]?js$/u.test(item.file)) continue;
+    seen.add(key);
+    const source = readFileSync(item.file, 'utf8');
+    inputs.push({ ...item, source, ts: false, root: 'pi-subagents' });
+    for (const edge of moduleEdges(source)) {
+      if (edge.id.startsWith('node:') || builtinModules.includes(edge.id) || peers.has(edge.id)) continue;
+      // jiti 2.7.0 always loads its own loader and TypeScript natively.
+      if (/^(?:jiti|typescript)(?:\/|$)/u.test(edge.id)) continue;
+      const resolver = createRequire(item.file);
+      const resolved = resolver.resolve(edge.id);
+      let relative;
+      if (edge.id.startsWith('.')) relative = path.posix.join(path.posix.dirname(item.path), path.relative(path.dirname(item.file), resolved).split(path.sep).join('/'));
+      else {
+        const parts = edge.id.split('/'), name = parts.slice(0, edge.id.startsWith('@') ? 2 : 1).join('/');
+        const dependency = installed(path.dirname(item.file), name);
+        relative = path.posix.join('node_modules', name, path.relative(dependency.dir, resolved).split(path.sep).join('/'));
+      }
+      pending.push({ path: relative, file: resolved, async: edge.async });
     }
   }
-  return [...seen].sort();
+  return inputs.sort((a, b) => a.path.localeCompare(b.path, 'en') || Number(a.async) - Number(b.async));
+}
+
+/** All supported source roots, derived from package edges and SDK build outputs. */
+async function seedInputs(subagentsDir, extensionsDir, hostSdkSource) {
+  const { HOST_PEER_ALIASES } = await import(pathToFileURL(path.join(subagentsDir, 'src/runs/background/runner-aliases.js')).href);
+  const peers = new Set(HOST_PEER_ALIASES.map(alias => alias.specifier));
+  const inputs = [
+    ...Object.entries(GRAPHS).flatMap(([group, entry]) => diskGraph(subagentsDir, entry, peers).map(input => ({ ...input, group }))),
+    ...readdirSync(extensionsDir).filter(file => /^pi-subagent-.*\.js$/u.test(file)).sort().map(file => ({
+      group: 'parent', root: 'pi-subagent-extensions', path: file, async: true, ts: false, source: readFileSync(path.join(extensionsDir, file), 'utf8'),
+    })),
+    { group: 'parent', root: 'host-sdk', path: 'index.js', async: true, ts: false, source: hostSdkSource },
+    { group: 'host-peers', root: 'host-peers', path: 'host-peers.ts', async: true, ts: true,
+      source: piSubagentHostPeersSource(HOST_PEER_ALIASES.filter(alias => !alias.optional).map(alias => alias.specifier)) },
+  ];
+  const seen = new Set();
+  return inputs.filter(input => {
+    const key = `${input.root}/${input.path}:${input.async}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function lockedIntegrity(lock, name, version) {
@@ -68,23 +128,19 @@ function lockedIntegrity(lock, name, version) {
 }
 
 /** The deterministic seed of `subagentsDir` with the jiti in `jitiDir`. */
-async function generate(subagentsDir, jitiDir) {
+async function generate(subagentsDir, jitiDir, sdkBin) {
   const subagents = JSON.parse(readFileSync(path.join(subagentsDir, 'package.json'), 'utf8'));
   const jitiVersion = JSON.parse(readFileSync(path.join(jitiDir, 'package.json'), 'utf8')).version;
   const lock = parseBunLock(readFileSync(path.join(repo, 'bun.lock'), 'utf8'));
   const { createJiti } = createRequire(path.join(jitiDir, 'package.json'))(path.join(jitiDir, 'lib', 'jiti.cjs'));
   const jiti = createJiti(path.join(client, 'package.json'), { fsCache: false, moduleCache: false });
-  const { HOST_PEER_ALIASES } = await import(pathToFileURL(path.join(subagentsDir, 'src/runs/background/runner-aliases.js')).href);
-  const inputs = [
-    ...Object.entries(GRAPHS).flatMap(([group, entry]) => relativeGraph(subagentsDir, entry).map(file =>
-      ({ group, path: file, ts: false, source: readFileSync(path.join(subagentsDir, file), 'utf8') }))),
-    { group: 'host-peers', path: 'host-peers.ts', ts: true,
-      source: piSubagentHostPeersSource(HOST_PEER_ALIASES.filter(alias => !alias.optional).map(alias => alias.specifier)) },
-  ];
+  const officialPi = installed(sdkBin, '@earendil-works/pi-coding-agent');
+  const pi = await import(pathToFileURL(path.join(officialPi.dir, officialPi.manifest.exports['.'].import)).href);
+  const inputs = await seedInputs(subagentsDir, sdkBin, piSubagentHostSdkSource(pi));
   const templates = new Map();
   const entries = inputs.map((input, index) => {
-    const canonical = canonicalSeedFile(input.group, input.path);
-    const code = jiti.transform({ filename: canonical, source: input.source, ts: input.ts, async: true, jsx: false });
+    const canonical = canonicalSeedFile(input.root, input.path);
+    const code = jiti.transform({ filename: canonical, source: input.source, ts: input.ts, async: input.async, jsx: false });
     const siteLiteral = fileUrlLiteral(canonical);
     const sites = [];
     for (let at = code.indexOf(siteLiteral); at !== -1; at = code.indexOf(siteLiteral, at + siteLiteral.length)) sites.push(at);
@@ -92,7 +148,7 @@ async function generate(subagentsDir, jitiDir) {
     assert.equal(code.split(PI_JITI_SEED_CANONICAL_ROOT.slice(1)).length - 1, sites.length, `unrelocatable canonical path in ${input.group}/${input.path}`);
     const template = `templates/${String(index).padStart(3, '0')}.js`;
     templates.set(template, code);
-    return { group: input.group, path: input.path, ts: input.ts, async: true, sourceSha256: sha256(input.source),
+    return { group: input.group, root: input.root, path: input.path, ts: input.ts, async: input.async, sourceSha256: sha256(input.source),
       template, templateSha256: sha256(code), siteLiteral, sites };
   });
   const manifest = Buffer.from(JSON.stringify({
@@ -122,7 +178,7 @@ async function build() {
   const jiti = installed(subagents.dir, 'jiti');
   // Pi's embedded loader and the seed must agree on jiti's cache format.
   assert.equal(installed(installed(client, '@earendil-works/pi-coding-agent').dir, 'jiti').manifest.version, jiti.manifest.version);
-  const seed = await generate(subagents.dir, jiti.dir);
+  const seed = await generate(subagents.dir, jiti.dir, path.join(client, 'dist/bin'));
   const seedDir = path.join(client, 'dist/assets', PI_JITI_SEED_DIR);
   await rm(seedDir, { recursive: true, force: true });
   await mkdir(path.join(seedDir, seed.digest, 'templates'), { recursive: true });
@@ -149,7 +205,7 @@ async function verifyInstalled(installRoot) {
     // The seed is the one these installed inputs derive, under their locked integrities.
     const subagents = installed(clientPkg.dir, 'pi-subagents');
     const jiti = installed(subagents.dir, 'jiti');
-    const expected = await generate(subagents.dir, jiti.dir);
+    const expected = await generate(subagents.dir, jiti.dir, path.join(clientPkg.dir, 'dist/bin'));
     assert.equal(shipped.digest, expected.digest, 'the packed seed is not the seed of the installed pi-subagents and jiti');
     const expectedFiles = new Map([['manifest.json', sha256(expected.manifest)], ...[...expected.templates].map(([file, code]) => [file, sha256(code)])]);
     assert.deepEqual(shipped.files, expectedFiles, 'packed seed files differ from their manifest');
@@ -192,23 +248,23 @@ async function zeroTransform(assetRoot, materializer) {
   let unavailable;
   // The loader below is created beside the materializer, as Pi's is beside its bundle.
   const seed = usePiJitiSeed(assetRoot, [pathToFileURL(materializer).href], reason => { unavailable = `pi_jiti_seed_unavailable: ${reason}`; });
-  seed.materialize('parent', pkg); seed.materialize('runner', pkg); seed.materialize('host-peers', peers);
-  // The supported graphs, derived from the copied package rather than the
-  // seed, looked up as Pi's loader looks them up: jiti's own cache check, where
-  // a request for the transform is a Babel run.
-  const lookups = [
-    ...Object.values(GRAPHS).flatMap(entry => relativeGraph(pkg, entry).map(file => ({ file: path.join(pkg, file), ts: false }))),
-    { file: path.join(peers, 'host-peers.ts'), ts: true },
-  ];
+  // This gate's oracle generates the bridge from its pinned Pi, independently
+  // of the materializer (which the negative control deliberately replaces).
+  const pi = await import('@earendil-works/pi-coding-agent');
+  const hostSdk = mkdtempSync(path.join(os.tmpdir(), 'host-sdk-'));
+  writeFileSync(path.join(hostSdk, 'index.js'), piSubagentHostSdkSource(pi));
+  seed.materialize('parent', pkg, hostSdk); seed.materialize('runner', pkg); seed.materialize('host-peers', peers);
+  // Derive the lookups from copied sources, independently of the manifest.
+  const lookups = await seedInputs(pkg, path.join(assetRoot, 'pi-subagent-extensions'), readFileSync(path.join(hostSdk, 'index.js'), 'utf8'));
   let transforms = 0;
   const jitiDir = path.join(pkg, 'node_modules', 'jiti');
   // jiti's own cache choice, after the seed decided JITI_FS_CACHE: a cold seed leaves no cache to hit.
   const jiti = createRequire(path.join(jitiDir, 'package.json'))(path.join(jitiDir, 'lib', 'jiti.cjs')).createJiti(materializer, {
     moduleCache: false, transform: () => { transforms++; return { code: '' }; },
   });
-  for (const { file, ts } of lookups) {
-    const filename = piJitiFilename(jiti, file);
-    jiti.transform({ filename, source: readFileSync(filename, 'utf8'), ts, async: true, jsx: false });
+  for (const entry of lookups) {
+    const filename = piJitiFilename(jiti, piJitiSeedFile(entry, entry.group === 'host-peers' ? peers : pkg, hostSdk));
+    jiti.transform({ filename, source: readFileSync(filename, 'utf8'), ts: entry.ts, async: entry.async, jsx: false });
   }
   process.stdout.write(JSON.stringify({ entries: lookups.length, transforms, ...(unavailable === undefined ? {} : { unavailable }) }));
 }
