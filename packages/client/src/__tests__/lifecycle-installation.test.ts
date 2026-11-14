@@ -1925,7 +1925,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
       await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'tree', path: `${tree}${spelling}`, canonical: tree, kind: 'directory', files: {} }] }));
       const error = await installation.rollback().catch((caught: unknown) => caught);
-      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining('no longer resolves') }));
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining('must not be a link') }));
       expect([await fs.readFile(db, 'utf8'), (await fs.lstat(tree)).isSymbolicLink()]).toEqual(['v2 data', true]);
     });
 
