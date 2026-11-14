@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { loginShellSnapshot, type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
+import { loginShellSnapshot, pinLiveHome, type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
 import { PI_PROVIDER_ENV_KEY_NAMES } from '../adapters/pi/pi-provider-env.generated.js';
 
 /**
@@ -14,7 +14,13 @@ import { PI_PROVIDER_ENV_KEY_NAMES } from '../adapters/pi/pi-provider-env.genera
  * - `login-shell` (default): the user's login-shell snapshot
  *   (`../login-shell-environment.ts`), never the daemon's live
  *   environment, so a variable an embedding Host puts into `process.env` does
- *   not reach the runtime. A failed capture fails closed with
+ *   not reach the runtime. One exception: `HOME` is the daemon's own live
+ *   `HOME` (#2084), the rule the daemon applies to itself under `--service`
+ *   (#2017), so an rc that exports another `HOME` cannot move tasks out of a
+ *   scratch home the daemon runs under. `PATH`, `XDG_*` and other values the
+ *   rc derived from its `HOME` stay as the rc set them and may point at
+ *   another home than `HOME`; a Host that needs them consistent passes them
+ *   too (`pass: ['HOME', 'XDG_*', ...]`) or uses `allowlist`. A failed capture fails closed with
  *   {@link RuntimeEnvironmentUnavailableError}. On win32, which has no login
  *   shell, the base is {@link WINDOWS_SESSION_NAMES}: `PATH` and `PATHEXT`
  *   as logon builds them from the registry (see {@link WindowsLogonRegistry}),
@@ -224,7 +230,11 @@ function admitNames(
  * Which environment a runtime adapter gives its children (see this module's
  * doc comment). `pass` names variables taken from the live `process.env` at
  * every build, for a Host that sets them after it starts. Names never match
- * `CLAUDECODE` or `BYOK_*`.
+ * `CLAUDECODE` or `BYOK_*`. A `login-shell` base takes `HOME` from the live
+ * `process.env`, not the snapshot (#2084); `PATH`, `XDG_*` and other values
+ * the user's rc derived from its own `HOME` stay as the snapshot has them, so
+ * a Host that needs them to agree with `HOME` passes them as well or uses
+ * `allowlist`.
  */
 export type RuntimeEnvironmentPolicy =
   | { readonly base?: 'login-shell'; readonly pass?: readonly string[] }
@@ -240,8 +250,9 @@ export type RuntimeEnvironmentConflictRule = (passed: ReadonlySet<string>) => re
 /**
  * Where a runtime environment name came from: the base (`login-shell`,
  * `windows-session` or `allowlist`), the policy's `pass`, or `sdk` for the
- * `NO_PROXY`/`no_proxy` this module writes and the `PI_PACKAGE_DIR` the Pi
- * adapter writes from `packageDir`.
+ * `NO_PROXY`/`no_proxy` this module writes, the live `HOME` it pins over a
+ * `login-shell` snapshot (#2084) and the `PI_PACKAGE_DIR` the Pi adapter
+ * writes from `packageDir`.
  */
 export type RuntimeEnvironmentSource = 'login-shell' | 'windows-session' | 'allowlist' | 'pass' | 'sdk';
 
@@ -615,6 +626,7 @@ export function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput)
   const denied = new Set<string>();
   let base: Record<string, string>;
   let baseSource: RuntimeEnvironmentSource;
+  let pinned: readonly string[] = [];
   if (policy.base === 'allowlist') {
     const patterns = allowlistPatterns(platform, policy.allow ?? []);
     base = admitNames(live, (name) => matchesAny(name, patterns, caseInsensitive), platform, denied);
@@ -633,6 +645,7 @@ export function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput)
     if (status?.source === 'unavailable') throw new RuntimeEnvironmentUnavailableError(status.code);
     if (status?.source !== 'login-shell' || input.snapshot?.env === undefined) throw new TypeError('a login-shell runtime environment requires a captured snapshot');
     base = admitNames(input.snapshot.env, () => true, platform, denied);
+    pinned = pinLiveHome(base, live);
     baseSource = 'login-shell';
   }
   const passPatterns = policy.pass ?? [];
@@ -650,7 +663,7 @@ export function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput)
   Object.assign(env, passed);
   const written = withLoopbackNoProxy(env, caseInsensitive);
   const sources = new Map<string, RuntimeEnvironmentSource>();
-  for (const name of Object.keys(env)) sources.set(name, written.includes(name) ? 'sdk' : Object.hasOwn(passed, name) ? 'pass' : baseSource);
+  for (const name of Object.keys(env)) sources.set(name, written.includes(name) ? 'sdk' : Object.hasOwn(passed, name) ? 'pass' : pinned.includes(name) ? 'sdk' : baseSource);
   const removals = new Map<string, RuntimeEnvironmentRemovalRule>();
   for (const name of conflicted) removals.set(name, 'conflict');
   for (const name of denied) removals.set(name, 'deny');

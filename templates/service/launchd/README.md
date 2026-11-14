@@ -82,10 +82,10 @@ A plist along these lines (see `packages/client/src/lifecycle/launchd.ts`'s
 - **`EnvironmentVariables.HOME`** (#2017) is the home the install resolved,
   the same directory the plist and its paths were placed under; launchd would
   otherwise start the job with the account's home. `--service` keeps this
-  `HOME` for the daemon even if your shell rc resets it. Tasks are built from
-  the login-shell snapshot by default, so they get the `HOME`, `PATH` and
-  `XDG_*` your rc sets (#2084); to isolate them, pass `HOME` in the runtime
-  environment policy's `pass` or use `base: 'allowlist'`.
+  `HOME` for the daemon even if your shell rc resets it, and tasks get the
+  same `HOME` (#2084). They still get the `PATH` and `XDG_*` your rc sets,
+  which may point at another home; to keep them consistent, pass them in the
+  runtime environment policy's `pass` or use `base: 'allowlist'`.
 - **`KeepAlive.SuccessfulExit: false`** is the exit-code contract: launchd
   restarts the job after any exit but 0. This is delegated entirely to launchd
   — the SDK never runs its own in-process supervisor.
