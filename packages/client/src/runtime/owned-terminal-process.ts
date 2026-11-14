@@ -2,7 +2,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import {
   adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree,
 } from '../adapters/process-tree.js';
-import { assertNoNulSpawnInput, spawnStartError } from '../util/spawn-input.js';
+import { assertNoNulSpawnInput, spawnStartError } from '@byok-sdk/core/system-tool';
 
 const LABEL = 'acp terminal';
 
