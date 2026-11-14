@@ -45,7 +45,10 @@ export function remoteCanaryConfig(): CanaryConfig | undefined {
     for (const key of ['bucket', 'accessKeyId', 'secretAccessKey', 'region'] as const) assert.ok(typeof storage[key] === 'string' && storage[key].length > 0);
     const tailFile = required('BYOK_CANARY_TAIL_FILE');
     const device = process.env.BYOK_CANARY_DEVICE === undefined ? undefined : JSON.parse(process.env.BYOK_CANARY_DEVICE) as RemoteDeviceConfig;
-    if (device !== undefined) for (const key of ['machine', 'cwd', 'root'] as const) assert.ok(typeof device[key] === 'string' && device[key].length > 0);
+    if (device !== undefined) {
+      for (const key of ['machine', 'cwd', 'root'] as const) assert.ok(typeof device[key] === 'string' && device[key].length > 0);
+      if (device.macosKeychainPath !== undefined) assert.ok(typeof device.macosKeychainPath === 'string' && device.macosKeychainPath.length > 0);
+    }
     return { base: url.origin, postgresUrl, storage, device, adminToken: required('HOST_ADMIN_TOKEN'), logs: () => readFile(tailFile, 'utf8') };
   } catch {
     throw new Error('Invalid deployed canary configuration; check the required operator environment variables');

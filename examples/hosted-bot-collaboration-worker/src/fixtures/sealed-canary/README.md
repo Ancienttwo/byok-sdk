@@ -49,7 +49,9 @@ not part of this patch.
 
 Owner-run deployment day
 
-The following steps are for the owner to run during the approved staging window.
+The following steps are for the owner to run during the approved staging window;
+use the [Workers acceptance runbook](../../../../../deploy/runbooks/workers-acceptance.md)
+for phase gates, PlanetScale Postgres 18 prerequisites and same-day teardown.
 This change provides the entry and driver; it records no deployed acceptance.
 Run the W1 driver, its in-process daemon and Node member only on the operator
 machine mini-cf, with all configuration loaded from mode-600 ignored
@@ -58,10 +60,12 @@ It uses a scripted runtime and OS credential custody; it is not physical-device
 evidence. Keep the DSN, S3 keys, `HOST_ADMIN_TOKEN` and raw tail only on mini-cf.
 The physical devices mac-pro and win-ci run only the W2 `device-runner`, receiving
 the public server URL and a pairing code, never the operator environment or tail.
-Physical-device sealed execution for #654 (d) needs a W2 extension for E2EE
-pairing with `verificationSecret` and the driver's steer, progress, approval and
-artifact controls. t3 tracks that work separately; this driver does not use the
-current W2 runner for sealed execution.
+For physical-device sealed execution, set `BYOK_CANARY_DEVICE` as documented in
+[Running a device](../../../README.md#running-a-device). The driver uses W2b's
+E2EE pairing, comparison, steer, progress, approval and artifact controls. On
+mac-pro, supply `macosKeychainPath` for the dedicated acceptance keychain; W1
+forwards it to the runner's `--macos-keychain-path` argument. Keep the operator
+credentials on mini-cf and record each physical device independently.
 
 1. Build the workspace with `bun run build`. Prepare a disposable Postgres schema,
    a role whose database-scoped `search_path` selects that schema, and an existing
@@ -157,8 +161,9 @@ compares the measured locations with the `hosted-sealed-inventory` block in
 canary. Missing or unexpected locations fail with the diff; success requires
 `{ "missing": [], "unexpected": [] }`. Observer logs retain only metadata and
 digests, so no raw observer payload is needed for this store/object inventory.
-Physical-device sealed execution and browser evidence remain separate acceptance
-work under #654; the W1 result is **operator-machine daemon (mini-cf)**.
+With `BYOK_CANARY_DEVICE` unset the result is **operator-machine daemon (mini-cf)**;
+with it set, label the configured physical device separately. Browser evidence
+remains a separate acceptance row under #654.
 
 Browser member page (W4)
 

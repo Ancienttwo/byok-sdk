@@ -80,6 +80,16 @@ describe('device runner boundaries', () => {
     expect(options.config).not.toHaveProperty('machineId');
     expect(options.config).not.toHaveProperty('deviceCredentials');
   });
+  it('passes the selected macOS keychain into the daemon configuration', async () => {
+    const keychain = '/tmp/p9-device.keychain-db';
+    const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockReturnValue({ subscribe: () => () => {}, stop: vi.fn() } as unknown as client.Daemon);
+    try {
+      const options = runnerOptions([...runnerArgs, '--macos-keychain-path', keychain]);
+      const device = createDeviceSession(options.config, options.runtime, vi.fn());
+      expect(compose.mock.calls[0]![0].deviceCredentials).toEqual({ macosKeychainPath: keychain });
+      await device.stop();
+    } finally { compose.mockRestore(); }
+  });
   it.each([
     [], [...runnerArgs, '--verification-secret', ''], [...runnerArgs.slice(0, -1), 'real', '--stub-canary'],
     [...runnerArgs.slice(0, -1), 'real', '--canary-controls'], [...runnerArgs, '--stub-canary', '--canary-controls'],
@@ -261,7 +271,7 @@ describe('device runner boundaries', () => {
     } finally { compose.mockRestore(); }
   });
 
-  it.each(['success', 'exited', 'error', 'bad-json', 'identity', 'mismatch', 'bad-mac'])('drives a remote hc device and cleans up on %s', async mode => {
+  it.each(['success', 'keychain', 'exited', 'error', 'bad-json', 'identity', 'mismatch', 'bad-mac'])('drives a remote hc device and cleans up on %s', async mode => {
     const core = await sealedCore();
     const cloud = { createPairingCode: vi.fn(async () => ({ code: 'pair-secret' })), appendMemberChainEntries: vi.fn() } as unknown as CanaryCloud;
     const member = await HostedMember.create(cloud, 'tenant' as never);
@@ -292,8 +302,9 @@ describe('device runner boundaries', () => {
       return '{}';
     });
     try {
-      const opened = openRemoteCanaryDevice(cloud, 'tenant' as never, 'https://host.invalid', { machine: 'device', cwd: '/sdk', root: '/root/device' }, hc);
-      if (mode === 'success') {
+      const opened = openRemoteCanaryDevice(cloud, 'tenant' as never, 'https://host.invalid', { machine: 'device', cwd: '/sdk', root: '/root/device',
+        ...(mode === 'keychain' ? { macosKeychainPath: '/tmp/p9-device.keychain-db' } : {}) }, hc);
+      if (mode === 'success' || mode === 'keychain') {
         const device = await opened;
         await device.begin('task', 'private', true); await device.finish('task'); await device.close();
         expect(member.approve).toHaveBeenCalledWith('physical');
@@ -302,7 +313,8 @@ describe('device runner boundaries', () => {
         expect(sent.map(command => command.type)).toEqual(['member-bundle', 'approve', 'canary', 'stop']);
         expect(hc.mock.calls[0]![0]).toEqual(['run', '--bg', '--json', '--no-notify', '--on', 'device', '--cwd', '/sdk/examples/hosted-bot-collaboration-worker',
           'node', '--import', 'tsx', 'src/device-runner.ts', '--server-url', 'https://host.invalid',
-          '--pairing-code', 'pair-secret', '--verification-secret', member.verificationSecret, '--root', '/root/device', '--runtime', 'stub', '--canary-controls']);
+          '--pairing-code', 'pair-secret', '--verification-secret', member.verificationSecret, '--root', '/root/device', '--runtime', 'stub', '--canary-controls',
+          ...(mode === 'keychain' ? ['--macos-keychain-path', '/tmp/p9-device.keychain-db'] : [])]);
       } else {
         await expect(opened).rejects.toThrow(/remote canary|canary device transport|remote device/);
         if (mode === 'mismatch') expect(hc).toHaveBeenCalledWith(['send', 'device/t1', '{"type":"reject"}']);
