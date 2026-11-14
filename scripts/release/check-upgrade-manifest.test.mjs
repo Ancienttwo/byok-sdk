@@ -147,7 +147,7 @@ test('behavior entries enforce their declaration contract (#2117)', () => {
     [{ items: ['behavior:'] }, /behavior.*must match/],
     [{ id: 'Bad', items: ['behavior:Bad'] }, /id must be a lowercase slug/],
     [{ items: ['behavior:task-home-live', 'export:@byok-sdk/client#Daemon'] }, /behavior.*only item/],
-    [{ acceptance: 'accept' }, /acceptance applies only/],
+    [{ acceptance: 'accept' }, /behavior.*cannot carry acceptance/],
     [{ summary: '' }, /summary.*required/],
     [{ items: [null] }, /items must be an array of strings/],
     [{ items: {} }, /items must be an array of strings/],
@@ -156,6 +156,15 @@ test('behavior entries enforce their declaration contract (#2117)', () => {
     const manifestText = JSON.stringify({ entries: [{ ...entry, ...patch }] });
     const result = checkManifest({ root: repo, baseline, current: baseline, manifestText });
     assert.match(result.errors.join('\n'), error, JSON.stringify(patch));
+  }
+  const store = 'store:client-journal';
+  const before = { ...baseline, items: { [store]: 'before' } };
+  const current = { ...baseline, items: { [store]: 'after' } };
+  for (const items of [[...entry.items, store], [store, ...entry.items]]) {
+    const manifestText = JSON.stringify({ entries: [{ ...entry, items, acceptance: 'accept' }] });
+    const { errors } = checkManifest({ root: repo, baseline: before, current, manifestText });
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /entry task-home-live:.*behavior.*only item/);
   }
 });
 

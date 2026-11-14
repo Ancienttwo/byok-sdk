@@ -2542,7 +2542,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2448688,
+      "budgetBytes": 2448712,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

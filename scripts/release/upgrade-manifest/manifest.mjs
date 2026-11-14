@@ -189,7 +189,9 @@ export function checkManifest({ root, baseline, current, manifestText }) {
       if (change === 'removed' && entry.impact !== 'breaking') errors.push(`${label}: ${item} is removed, so the entry must be breaking`);
     }
     const stores = items.filter((item) => category(item) === 'store' && changeOf.get(item) !== 'added');
-    if (stores.length > 0 && !behavior) {
+    if (behavior) {
+      if (items.length === 1 && entry.acceptance !== undefined) errors.push(`${label}: a behavior entry cannot carry acceptance`);
+    } else if (stores.length > 0) {
       if (!ACCEPTANCE.includes(entry.acceptance)) {
         errors.push(`${label}: a changed store needs acceptance (${ACCEPTANCE.join(' | ')}) for files the previous release wrote`);
       } else if (entry.acceptance !== 'accept' && entry.impact !== 'breaking') {

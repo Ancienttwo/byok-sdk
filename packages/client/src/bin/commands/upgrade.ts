@@ -57,7 +57,7 @@ export function runUpgradeFromCheckCommand(options: {
   } else {
     log(`byok-agent upgrade check ${report.from} -> ${report.to ?? '(unresolved)'}: ${report.verdict}`);
     if (report.refusal !== undefined) log(`${report.refusal.code} — ${report.refusal.message}`);
-    for (const entry of report.breaking) log(`breaking ${entry.release} ${entry.id} — ${entry.migration}`);
+    for (const entry of report.breaking) log(`breaking ${entry.release} ${entry.id} — ${entry.summary} — ${entry.migration}`);
     log(`additive entries: ${report.additiveCount}`);
     for (const pkg of report.train.packages) log(`${pkg.version === 'absent' || pkg.version === report.train.version ? 'train' : 'train-mismatch'} ${pkg.name} ${pkg.version}`);
   }

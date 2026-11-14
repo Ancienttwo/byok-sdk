@@ -340,13 +340,21 @@ describe('upgrade check --from (#1316)', () => {
   }
 
   it('lists the breaking entries released after --from and exits 2', () => {
-    const { code, report } = command('0.33.0', host());
+    const root = host();
+    const { code, report } = command('0.33.0', root);
     expect(code).toBe(UPGRADE_CHECK_REFUSED_EXIT_CODE);
     expect(report.breaking).toEqual([
       { id: 'wire-v5-durable-lane', release: '0.34.0', summary: expect.any(String), migration: 'docs/migrations/wire-v5-durable-lane.md#drain-and-upgrade' },
       { id: 'runtime-generic-names', release: '0.34.0', summary: expect.any(String), migration: 'docs/migrations/wire-v5-durable-lane.md#runtime-names' },
     ]);
     expect(report.additiveCount).toBe(2);
+    const lines: string[] = [];
+    expect(runUpgradeFromCheckCommand({ fromVersion: '0.33.0', json: false, resolveFrom: root, log: (line) => lines.push(line) })).toBe(code);
+    for (const entry of report.breaking) {
+      const line = lines.find((line) => line.startsWith(`breaking ${entry.release} ${entry.id} `));
+      expect(line).toContain(entry.summary);
+      expect(line).toContain(entry.migration);
+    }
     expect(command('0.31.0', host()).report.breaking.map((entry) => entry.release)).toEqual([
       ...Array<string>(28).fill('0.32.0'), ...Array<string>(7).fill('0.33.0'), '0.34.0', '0.34.0',
     ]);
@@ -372,6 +380,11 @@ describe('upgrade check --from (#1316)', () => {
     expect(code).toBe(UPGRADE_CHECK_REFUSED_EXIT_CODE);
     expect(report.verdict).toBe('refused');
     expect(report.breaking).toContainEqual({ id: 'task-home-live', release: candidate, summary: behavior.summary, migration: behavior.migration });
+    const lines: string[] = [];
+    expect(runUpgradeFromCheckCommand({ fromVersion: from, json: false, resolveFrom: root, log: (line) => lines.push(line) })).toBe(code);
+    const line = lines.find((line) => line.startsWith(`breaking ${candidate} task-home-live `));
+    expect(line).toContain(behavior.summary);
+    expect(line).toContain(behavior.migration);
   });
 
   it('passes from the current version with a consistent train', () => {
