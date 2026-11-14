@@ -1908,6 +1908,41 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect([await fs.readFile(path.join(b, 'data', 'kept'), 'utf8'), existsSync(path.join(installRoot, 'snapshots', '3.0.0', 'snapshot.json'))]).toEqual(['b', true]);
     });
 
+    it('a link repointed to another spelling of its target is refused on a case-sensitive volume, even where names usually ignore case (#2106)', async () => {
+      // Two directories that differ only in case, as on a case-sensitive APFS volume: realpath returns the spelling it found.
+      const [lower, upper, link] = [path.join(root, 'a'), path.join(root, 'A'), path.join(root, 'link')];
+      await fs.mkdir(path.join(lower, 'data'), { recursive: true });
+      await fs.symlink(lower, link, 'dir');
+      await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([{ store: 'host', path: path.join(link, 'data'), verdict: 'accepted', reason: 'accepted', kind: 'directory' }]));
+      installation = installationOver(fakeLifecycle(), { lifecycle: { platform: 'darwin' } });
+      await installation.upgrade(await payload('3.0.0'));
+      await fs.writeFile(path.join(lower, 'data', 'kept'), 'other store');
+      const realpath = fs.realpath.bind(fs);
+      const respelled = vi.spyOn(fs, 'realpath').mockImplementation((async (file: string) => {
+        const found = await realpath(file);
+        return found.startsWith(lower) ? upper + found.slice(lower.length) : found;
+      }) as typeof fs.realpath);
+      const error = await installation.rollback().catch((caught: unknown) => caught).finally(() => respelled.mockRestore());
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining('no longer resolves') }));
+      expect([await fs.readFile(path.join(lower, 'data', 'kept'), 'utf8'), existsSync(path.join(installRoot, 'snapshots', '3.0.0', 'snapshot.json'))]).toEqual(['other store', true]);
+    });
+
+    it('snapshot entries that lie inside each other only through a link are refused before a restore changes any store (#2106)', async () => {
+      const [outer, inner] = [path.join(root, 'outer'), path.join(root, 'inner')];
+      await fs.mkdir(outer);
+      await fs.mkdir(inner);
+      await fs.writeFile(path.join(inner, 'marker'), 'live');
+      await fs.symlink(inner, path.join(outer, 'x'), 'dir');
+      const nested = path.join(outer, 'x', 'marker');
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const { entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+      await fs.writeFile(index, JSON.stringify({ entries: [...entries, { store: 'outer', path: outer, kind: 'directory', files: {} }, { store: 'nested', path: nested, files: {} }] }));
+      const error = await installation.rollback().catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'upgrade_pending' });
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining(`(${outer}, ${nested})`) }));
+      expect([await fs.readFile(db, 'utf8'), await fs.readFile(path.join(inner, 'marker'), 'utf8'), existsSync(path.join(outer, 'x')), existsSync(index)]).toEqual(['v2 data', 'live', true, true]);
+    });
+
     it('a linked snapshots/<version> is refused before it is probed or removed (#2061)', async () => {
       const elsewhere = path.join(root, 'elsewhere');
       await fs.mkdir(elsewhere);
@@ -2669,6 +2704,14 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         { store: 'research-index', path: index, kind: 'directory', verdict: 'accepted', reason: 'ok' },
         { store: 'shard', path: path.join(index, 'shards', 'a'), verdict: 'accepted', reason: 'ok' },
       )],
+      ['a store inside a directory store only through a link (#2106)', async () => {
+        await fs.mkdir(path.join(root, 'elsewhere'));
+        await fs.symlink(path.join(root, 'elsewhere'), path.join(index, 'x'), 'dir');
+        await verdictsWith(
+          { store: 'research-index', path: index, kind: 'directory', verdict: 'accepted', reason: 'ok' },
+          { store: 'shard', path: path.join(index, 'x', 'shard.db'), verdict: 'accepted', reason: 'ok' },
+        );
+      }],
       ['a file store that is a directory', () => verdictsWith({ store: 'research-index', path: index, verdict: 'accepted', reason: 'ok' })],
       ['a directory store that is a symlink', async () => {
         await fs.symlink(index, path.join(root, 'index-link'));

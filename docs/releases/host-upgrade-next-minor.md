@@ -383,7 +383,13 @@ service that had already restarted.
   - an entry with a `..` segment is `precheck_failed`, because the file
     system follows a link before `..` and the check would not;
   - an entry that is, holds or lies in the install root or a `service/`
-    directory is `store_overlaps_service_state`.
+    directory is `store_overlaps_service_state`;
+  - two entries that are or lie inside each other, as written or with
+    links resolved (a file store under a directory store through a link
+    inside it, for example), are `precheck_failed`, naming both paths
+    (#2106). Restoring one would change the other's tree or the links it
+    resolves through. The precheck refuses such stores too: list the
+    directory store alone, or move the inner store out of it.
 
   The call throws `upgrade_pending` with that refusal in its `cause`; its
   message names the entry's path. Nothing is restored: the receipt stays
@@ -395,6 +401,9 @@ service that had already restarted.
     with its links (`realpath`), then apply the `..`. If the result is
     in the install root or a `service/` directory, handle it as below;
     otherwise call `recover()`.
+  - **Nested entries:** split them by hand: restore the outer directory
+    entry as below, then each inner entry, and remove the snapshot
+    directory before `recover()`.
   - **Overlapping entry:** restore every entry by hand, in the order
     listed, as a restore would:
     - a directory entry (`"kind": "directory"`): remove the path, then copy

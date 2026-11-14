@@ -29,7 +29,13 @@ import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, Servic
 export interface ServiceStoreVerdict {
   /** An SDK `LocalStoreId` or a Host store id: 1-64 of `a-z 0-9 -`, starting with a letter or digit. */
   readonly store: string;
-  /** Absolute. No two stores share a path, and no store lies inside a `directory` store. */
+  /**
+   * Absolute. No two stores share a path or lie inside each other, compared
+   * both as written and with links resolved (#2106): a store under another,
+   * also only through a link, is `precheck_failed`, and so is a snapshot
+   * entry an earlier version recorded that way, before a restore changes
+   * any store.
+   */
   readonly path: string;
   /**
    * `file` (the default): the file plus its `-wal` and `-journal`, each a
@@ -1138,7 +1144,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
     if (!Array.isArray(stores) || !stores.every(isServiceStoreVerdict)) throw new ServiceInstallationError('precheck_failed');
     const paths = await refuseServiceOverlap(stores.map((store) => store.path));
-    if (overlaps(stores, paths, platform) || stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
+    if (stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
     return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path) } : store);
   }
 
@@ -1163,6 +1169,15 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     const dotted = written.find((at) => at.split(platform === 'win32' ? /[\\/]/u : '/').includes('..'));
     if (dotted !== undefined) refuse('precheck_failed', dotted, ' A store path must not contain .. segments; pass a normalized absolute path.');
     const paths = await Promise.all(written.map(canonical));
+    // Stores that are or contain each other, as written or resolved, would
+    // make one store's restore change another's tree, or the links it
+    // resolves through, before that one is restored.
+    for (const spelled of [written.map((at) => path.resolve(at)), paths]) {
+      for (const [i, a] of spelled.entries()) {
+        const j = spelled.findIndex((b, at) => at !== i && within(b, a, platform));
+        if (j !== -1) refuse('precheck_failed', `${written[i]}, ${written[j]}`, ' Two stores must not be or contain each other.');
+      }
+    }
     const guarded = (await Promise.all([root, ...serviceDirs].map(async (at) => [await canonical(at), path.join(await canonical(path.dirname(at)), path.basename(at))]))).flat();
     const overlapping = paths.findIndex((a) => guarded.some((b) => within(a, b, platform) || within(b, a, platform)));
     if (overlapping !== -1) refuse('store_overlaps_service_state', written[overlapping]!);
@@ -1338,7 +1353,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }));
     // A link that changed since the snapshot, for example in the candidate's
     // migration, would send the restore elsewhere (#2106); the snapshot stays.
-    const moved = entries.find((entry, index) => entry.canonical !== undefined && !(within(resolved[index]!, entry.canonical, platform) && within(entry.canonical, resolved[index]!, platform)));
+    // Identity is the realpath as returned: folding case, which only makes
+    // the containment refusals stricter, would allow a/ for A/ on a
+    // case-sensitive volume.
+    const moved = entries.find((entry, index) => entry.canonical !== undefined && resolved[index] !== entry.canonical);
     if (moved !== undefined) {
       const error = new ServiceInstallationError('precheck_failed');
       error.message += ` A store path no longer resolves as it did at the snapshot. (${moved.path})`;
@@ -1821,10 +1839,6 @@ function isRefused(store: ServiceStoreVerdict): boolean {
 }
 
 /** Whether two stores (at their canonical `paths`) share a path or one lies inside a directory store. */
-function overlaps(stores: readonly ServiceStoreVerdict[], paths: readonly string[], platform: NodeJS.Platform): boolean {
-  return stores.some((store, index) => paths.some((other, at) => at !== index
-    && within(other, paths[index]!, platform) && (store.kind === 'directory' || within(paths[index]!, other, platform))));
-}
 
 /**
  * Takes an `installer` lease on a stopped daemon's store, retrying while its
