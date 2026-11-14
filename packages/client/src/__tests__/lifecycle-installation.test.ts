@@ -1866,8 +1866,29 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await fs.writeFile(index, JSON.stringify({ entries: [...entries, { store: 'old', path: path.join(storeDir, 'service'), kind: 'directory', files: {} }] }));
       const error = await installation.rollback().catch((caught: unknown) => caught);
       expect(error).toMatchObject({ code: 'upgrade_pending' });
-      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'store_overlaps_service_state' }));
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'store_overlaps_service_state', message: expect.stringContaining(path.join(storeDir, 'service')) }));
       expect([await fs.readFile(marker, 'utf8'), await fs.readFile(db, 'utf8'), existsSync(index)]).toEqual(['live', 'v2 data', true]);
+    });
+
+    it('a snapshot entry with a .. segment after a link is refused by recover() before any store changes, every time (#2102)', async () => {
+      const marker = path.join(storeDir, 'service', 'marker');
+      await fs.writeFile(marker, 'live');
+      await fs.mkdir(path.join(storeDir, 'nested'));
+      await fs.mkdir(path.join(root, 'outside'));
+      await fs.symlink(path.join(storeDir, 'nested'), path.join(root, 'outside', 'hop'), 'dir');
+      // As 0.42.0 recorded it: canonical() folds the .., the file system follows hop first.
+      const dotted = path.join(root, 'outside', 'hop') + `${path.sep}..${path.sep}service${path.sep}marker`;
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const { entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+      await fs.writeFile(index, JSON.stringify({ entries: [...entries, { store: 'old', path: dotted, files: {} }] }));
+      await fs.rm(path.join(installRoot, 'current'));
+      await journal({ kind: 'upgrade', from: '1.0.0', to: '2.0.0' });
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const error = await installation.recover().catch((caught: unknown) => caught);
+        expect(error).toMatchObject({ code: 'upgrade_pending' });
+        expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining(dotted) }));
+        expect([await fs.readFile(marker, 'utf8'), await fs.readFile(db, 'utf8'), existsSync(index), await pointer('current'), (await installation.receipt())?.state]).toEqual(['live', 'v2 data', true, undefined, 'pending']);
+      }
     });
 
     it('a linked snapshots/<version> is refused before it is probed or removed (#2061)', async () => {
