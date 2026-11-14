@@ -41,7 +41,7 @@ test('runtime smoke includes Node exports and refuses unreviewed Cloudflare entr
   const f = fixture(t);
   f.policies();
   assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
-  assert.deepEqual(runtimeSmokeImports(f.root), { node: ['@byok-sdk/client', '@byok-sdk/core', '@byok-sdk/protocol'] });
+  assert.deepEqual(runtimeSmokeImports(f.root).node, ['@byok-sdk/client', '@byok-sdk/core', '@byok-sdk/protocol']);
   f.write('packages/client/dist/index.js', "import 'cloudflare:workers';\n");
   assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
   assert.throws(() => runtimeSmokeImports(f.root), /@byok-sdk\/client: Cloudflare entry requires a reviewed runtime smoke/);
