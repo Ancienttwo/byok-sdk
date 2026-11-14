@@ -93,11 +93,25 @@ spelling of the root takes the same gate. On macOS and Linux, an install root
 owned by another user (also one that user created first) is refused with the
 new `ServiceInstallationErrorCode` `install_root_foreign_owner` before
 anything is written in it; run the operation as the owner of the root. The
-gate and the owner check use the effective uid. These guarantees hold only
-while the install root's parent directory is writable by the installing user
-alone: another user who can write it can rename the root or replace it with a
-symlink after the check (#2028). Windows has no owner check, and two Windows
-users operating on one install root are not guaranteed to exclude each other.
+gate and the owner check use the effective uid. An install root another
+user could rename or replace with a symlink after the check is refused with
+the new code `install_root_ancestor_unsafe`, naming the directory or link
+and why, before anything is created (#2028): the root's path is resolved one
+component at a time, every directory read on the way must belong to the
+installing user or root and must not be writable by everyone unless it has
+the sticky bit, and every symbolic link on the way must belong to the
+installing user or root (at most 40 links). Root's own links such as macOS
+`/tmp` pass. An install root written with a `..` segment, one under a directory the
+installing user cannot read, or one whose links lead through `..` after a missing directory, is refused the same way; a missing
+install root is created one directory at a time only after its whole path
+passes, and the install root itself owned by another user stays
+`install_root_foreign_owner`. Move such an install root under a
+directory only the installing user or root can change. Group-writable
+directories are accepted and their group trusted (macOS `/Applications` is
+root:admin 775). Windows has neither check, since rename rights there follow
+ACLs the SDK does not read: keep the install root under a directory only the
+installing user can change, such as `%LOCALAPPDATA%`. Two Windows users
+operating on one install root are not guaranteed to exclude each other.
 
 ## Gate release failures join the thrown error
 

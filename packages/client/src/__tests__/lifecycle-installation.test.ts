@@ -3,7 +3,7 @@ import { ownedProcessGroupRecord } from '../adapters/process-tree';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { existsSync, promises as fs } from 'node:fs';
+import { existsSync, promises as fs, type Stats } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -996,18 +996,94 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await installation.uninstall();
       await fs.rm(installRoot, { recursive: true, force: true });
       if (process.geteuid === undefined) return;
-      const realStat = fs.stat.bind(fs);
-      const foreign = vi.spyOn(fs, 'stat').mockImplementation((async (file: string, ...rest: []) => {
-        const stat = await realStat(file, ...rest);
-        return file === installRoot ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 }) : stat;
-      }) as typeof fs.stat);
+      const spellings = [installRoot, path.join(await fs.realpath(path.dirname(installRoot)), path.basename(installRoot))];
+      const owned = <F extends (at: string, ...rest: []) => Promise<Stats>>(real: F) => (async (at: string, ...rest: []) => {
+        const stat = await real(at, ...rest);
+        return spellings.includes(at) ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 }) : stat;
+      }) as F;
+      const [lstat, stat, mkdir] = [fs.lstat.bind(fs), fs.stat.bind(fs), fs.mkdir.bind(fs)];
+      const foreign: Array<{ mockRestore(): void }> = [vi.spyOn(fs, 'lstat').mockImplementation(owned(lstat)), vi.spyOn(fs, 'stat').mockImplementation(owned(stat))];
       try {
-        await expect(installation.install(three)).rejects.toMatchObject({ code: 'install_root_foreign_owner' });
+        for (const created of ['before', 'in the race'] as const) {
+          if (created === 'before') await fs.mkdir(installRoot);
+          else {
+            await fs.rm(installRoot, { recursive: true });
+            foreign.push(vi.spyOn(fs, 'mkdir').mockImplementation((async (at: string, ...rest: []) => {
+              const made = await mkdir(at, ...rest);
+              if (spellings.includes(at)) throw Object.assign(new Error('EEXIST'), { code: 'EEXIST' });
+              return made;
+            }) as typeof fs.mkdir));
+          }
+          await expect(installation.install(three)).rejects.toMatchObject({ code: 'install_root_foreign_owner' });
+          expect(await tree(installRoot)).toEqual({});
+        }
       } finally {
-        foreign.mockRestore();
+        for (const spy of foreign) spy.mockRestore();
       }
-      expect(await tree(installRoot)).toEqual({});
     });
+
+    it.skipIf(process.platform === 'win32')('an install root another user could rename or replace is install_root_ancestor_unsafe before anything is written (#2028)', async () => {
+      // Refusals name the directory as resolved: root's own links (macOS /tmp, /var) pass and are followed.
+      const real = await fs.realpath(root);
+      const shared = path.join(real, 'shared');
+      const app = path.join(shared, 'app');
+      await fs.mkdir(app, { recursive: true });
+      const over = installationOver(fakeLifecycle(), { installRoot: path.join(root, 'shared', 'app') });
+      // A parent anyone can write without the sticky bit, then the root itself; a sticky parent like /tmp is accepted.
+      for (const [dir, mode] of [[shared, 0o777], [app, 0o777]] as const) {
+        await fs.chmod(dir, mode);
+        await expect(over.recover()).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${dir} (writable by everyone, no sticky bit)`) });
+        expect(await tree(app)).toEqual({});
+        await fs.chmod(dir, 0o755);
+      }
+      // A missing root is not created under an unchecked parent.
+      await fs.rm(app, { recursive: true });
+      await fs.chmod(shared, 0o777);
+      await expect(over.recover()).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe' });
+      expect(existsSync(app)).toBe(false);
+      await fs.chmod(shared, 0o1777);
+      await expect(over.recover()).resolves.toBeUndefined();
+    });
+
+    it.skipIf(process.platform === 'win32')('every directory and link a lookup of the install root reads is checked, through every hop (#2028)', async () => {
+      const real = await fs.realpath(root);
+      const [safe, shared, sticky] = [path.join(real, 'safe'), path.join(real, 'shared'), path.join(real, 'sticky')];
+      await fs.mkdir(path.join(safe, 'real', 'app'), { recursive: true });
+      await fs.mkdir(shared);
+      await fs.mkdir(sticky);
+      await fs.chmod(shared, 0o777);
+      await fs.chmod(sticky, 0o1777);
+      const refused = (installRoot: string) => installationOver(fakeLifecycle(), { installRoot }).recover();
+      // safe/entry -> shared/hop -> safe/real: the middle directory is writable by everyone.
+      await fs.symlink(path.join(shared, 'hop'), path.join(safe, 'entry'));
+      await fs.symlink('../safe/real', path.join(shared, 'hop'));
+      await expect(refused(path.join(safe, 'entry', 'app'))).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${shared} (writable`) });
+      // A link another user owns in a sticky directory: its owner could repoint it.
+      const link = path.join(sticky, 'link');
+      await fs.symlink(path.join(safe, 'real'), link);
+      const lstat = fs.lstat.bind(fs);
+      const foreign = vi.spyOn(fs, 'lstat').mockImplementation((async (at: string, ...rest: []) => {
+        const stat = await lstat(at, ...rest);
+        return at === link ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 }) : stat;
+      }) as typeof fs.lstat);
+      await expect(refused(path.join(link, 'app')).finally(() => foreign.mockRestore())).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${link} (owner uid`) });
+      await expect(refused(path.join(link, 'app'))).resolves.toBeUndefined();
+      // More than 40 links is refused, not an ELOOP.
+      for (let n = 0; n < 41; n += 1) await fs.symlink(n === 40 ? path.join(safe, 'real') : `l${n + 1}`, path.join(safe, `l${n}`));
+      await expect(refused(path.join(safe, 'l0', 'app'))).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining('more than 40 links') });
+      // A .. in the install root, or after a missing directory in a link target, is refused before anything is created.
+      await expect(refused(`${safe}/real/../real/app`)).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining('a .. segment') });
+      await fs.symlink('new/../../shared', path.join(safe, 'via'));
+      await expect(refused(path.join(safe, 'via', 'app'))).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${path.join(safe, 'new')} (missing`) });
+      expect(existsSync(path.join(safe, 'new'))).toBe(false);
+      // A directory this user cannot read (root reads every directory).
+      if (process.geteuid?.() === 0) return;
+      const locked = path.join(safe, 'locked');
+      await fs.mkdir(locked, { mode: 0o600 });
+      await expect(refused(path.join(locked, 'app'))).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${locked} (not readable)`) });
+      expect(await fs.readdir(locked)).toEqual([]);
+    });
+
 
     it('uninstall refuses a symlinked snapshots/ and changes nothing behind it', async () => {
       await installation.install(await payload('1.0.0'));
@@ -1929,15 +2005,16 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect([await fs.readFile(db, 'utf8'), (await fs.lstat(tree)).isSymbolicLink()]).toEqual(['v2 data', true]);
     });
 
-    it('a store whose parent directory became a file is precheck_failed before any store is restored', async () => {
+    it.each([['file', 'a file'], ['directory', 'a file'], ['file', 'a link to itself'], ['directory', 'a link to itself']] as const)('a %s store whose parent directory became %s is precheck_failed before any store is restored', async (kind, became) => {
       const parent = path.join(await fs.realpath(root), 'parent');
-      await fs.writeFile(parent, 'a file now');
+      if (became === 'a file') await fs.writeFile(parent, 'a file now');
+      else await fs.symlink(parent, parent);
       const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
       const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
-      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'nested', path: path.join(parent, 'db'), canonical: path.join(parent, 'db'), files: {} }] }));
+      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'nested', path: path.join(parent, 'db'), canonical: path.join(parent, 'db'), ...(kind === 'directory' ? { kind } : {}), files: {} }] }));
       const error = await installation.rollback().catch((caught: unknown) => caught);
       expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ name: 'ServiceInstallationError', code: 'precheck_failed' }));
-      expect([await fs.readFile(db, 'utf8'), await fs.readFile(parent, 'utf8')]).toEqual(['v2 data', 'a file now']);
+      expect([await fs.readFile(db, 'utf8'), became === 'a file' ? await fs.readFile(parent, 'utf8') : await fs.readlink(parent)]).toEqual(['v2 data', became === 'a file' ? 'a file now' : parent]);
     });
 
     it.each([['an array', []], ['an array of names', ['0']], ['an unknown suffix', { '-shm': '0' }], ['another name', { '': '9' }], ['naming a removed copy', undefined]])('snapshot files as %s are snapshot_upgrade_required before rollback() changes anything', async (_label, files) => {
@@ -2860,6 +2937,10 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
           { store: 'shard', path: path.join(index, 'x', 'shard.db'), verdict: 'accepted', reason: 'ok' },
         );
       }],
+      ['a store path through a link loop', async () => {
+        await fs.symlink(path.join(root, 'loop'), path.join(root, 'loop'));
+        await verdictsWith({ store: 'host', path: path.join(root, 'loop', 'host.db'), verdict: 'accepted', reason: 'ok' });
+      }],
       ['a file store that is a directory', () => verdictsWith({ store: 'research-index', path: index, verdict: 'accepted', reason: 'ok' })],
       ['a directory store that is a symlink', async () => {
         await fs.symlink(index, path.join(root, 'index-link'));
@@ -2875,6 +2956,15 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'precheck_failed' });
       expect(await pointer('current')).toBe('1.0.0');
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'precheck_failed' });
+    });
+
+    it.skipIf(process.platform === 'win32' || process.geteuid?.() === 0)('a store path through a directory this user cannot read is precheck_failed and nothing is switched', async () => {
+      await installation.install(await payload('1.0.0'));
+      const locked = path.join(root, 'locked');
+      await fs.mkdir(locked, { mode: 0o600 });
+      await verdictsWith({ store: 'host', path: path.join(locked, 'host.db'), verdict: 'accepted', reason: 'ok' });
+      await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'precheck_failed', message: expect.stringContaining('cannot read') });
+      expect([await pointer('current'), await fs.readdir(locked)]).toEqual(['1.0.0', []]);
     });
 
     it('a failed cleanup of the partial snapshot does not replace snapshot_failed', async () => {

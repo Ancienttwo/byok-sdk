@@ -11787,6 +11787,7 @@ declare const ERROR_MESSAGES: {
     readonly repair_interrupted: 'A same-version reinstall was interrupted. Run install() again.';
     readonly service_program_not_current: 'The service unit must be the one this SDK writes, running from <installRoot>/current. Reinstall the payload installed now (install() with the current version id) to rewrite the unit, then retry.';
     readonly install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.';
+    readonly install_root_ancestor_unsafe: 'Another user could replace the install root. Nothing was changed; move it, or fix the owner or mode of';
     readonly snapshots_symlinked: 'A path under the install root\'s snapshots/ is a symbolic link. Nothing changed; replace the link, then retry.';
     readonly store_overlaps_service_state: 'A store overlaps the install root or a daemon store\'s service/ directory.';
 };

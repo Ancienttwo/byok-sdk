@@ -509,10 +509,25 @@ symlink, or another letter case on a case-insensitive volume) takes the same
 gate and a refusal leaves at most that empty directory. On macOS and Linux an
 install root owned by another user, including one that user created first,
 is refused with `install_root_foreign_owner` before anything is written in
-it. These guarantees hold only while the install root's parent directory is
-writable by the installing user alone; otherwise another user can rename the
-root or replace it with a symlink after the check (#2028). Windows has no
-owner check, and exclusion between Windows users is not guaranteed.
+it. An install root another user could rename or replace with a symlink
+after that check is refused with `install_root_ancestor_unsafe`, naming the
+directory or link (#2028): the root's path is resolved one component at a
+time, every directory read on the way must belong to the installing user or
+root and must not be writable by everyone unless it has the sticky bit (as
+`/tmp` has), and every symbolic link on the way must belong to the
+installing user or root (at most 40 links). An install root written with a `..` segment, one under a directory the
+installing user cannot read, or one whose links lead through `..` after a missing directory, is refused the same way; a missing
+install root is created one directory at a time only after its whole path
+passes, and the install root itself owned by another user stays
+`install_root_foreign_owner`. A
+group-writable directory is accepted, so its group members are trusted; for
+example macOS `/Applications` is root:admin 775, so any admin user could
+rename an install root placed directly in it. Windows has neither check: who
+can rename an entry there follows ACLs (FILE_DELETE_CHILD on the parent,
+DELETE on the entry, inheritance), which the SDK does not read. Keep a
+Windows install root in a directory only the installing user can change,
+such as one under `%LOCALAPPDATA%`; exclusion between Windows users is not
+guaranteed.
 
 Preparation does not stop an absent unit or an allowed unmarked unit. It
 leases and gates the daemon stores instead. With `replaceUnmarked`, a
