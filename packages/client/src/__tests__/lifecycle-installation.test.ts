@@ -2711,6 +2711,17 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     it.each([
       ['a relative storeDir', async () => [{ storeDir: 'store', productId: 'svc' }]],
       ['a store listed twice', async () => [{ storeDir, productId: 'svc' }, { storeDir: `${storeDir}${path.sep}`, productId: 'other' }]],
+      // Two spellings of one store would lease it twice, the second waiting on the first until store_busy (#2161).
+      ['a store listed twice through a link', async () => {
+        await fs.symlink(storeDir, path.join(root, 'store-alias'), 'dir');
+        return [{ storeDir, productId: 'svc' }, { storeDir: path.join(root, 'store-alias'), productId: 'other' }];
+      }],
+      ['a store listed twice in another case where names ignore case', async () => {
+        // On a case-sensitive volume another case is another directory: the link spelling stands in.
+        const upper = path.join(path.dirname(storeDir), path.basename(storeDir).toUpperCase());
+        if (!existsSync(upper)) await fs.symlink(storeDir, upper, 'dir');
+        return [{ storeDir, productId: 'svc' }, { storeDir: upper, productId: 'other' }];
+      }],
       ['an empty productId', async () => [{ storeDir, productId: '' }]],
       ['a throw', async () => { throw new Error('no session'); }],
     ])('%s is daemon_stores_invalid and nothing is switched', async (_label, daemonStores) => {

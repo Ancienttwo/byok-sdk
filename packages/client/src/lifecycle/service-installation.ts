@@ -149,8 +149,10 @@ export interface ServiceInstallationOptions {
    * Every daemon store the service process owns, leased on a first install
    * and read after stopping the service on upgrade, rollback and recover
    * (#1328, #1983). Each `storeDir`
-   * is absolute and listed once; `productId` is not empty; an empty list is
-   * valid. An invalid list or a throw is `daemon_stores_invalid`. Default:
+   * is absolute and listed once, compared with its links resolved (#2161):
+   * a second spelling of one store would take a second lease on it and wait
+   * for its own first one until `store_busy`. `productId` is not empty; an
+   * empty list is valid. An invalid list or a throw is `daemon_stores_invalid`. Default:
    * `[{ storeDir: service.storeDir, productId }]`. Requires `healthCheck`,
    * since the default one reaches only `productId`'s daemon.
    */
@@ -1034,15 +1036,18 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
     if (!Array.isArray(listed)) throw new ServiceInstallationError('daemon_stores_invalid');
     const seen = new Set<string>();
-    return listed.map((store: Partial<ServiceDaemonStore>) => {
+    const stores: ServiceDaemonStore[] = [];
+    for (const store of listed as Partial<ServiceDaemonStore>[]) {
       if (typeof store?.storeDir !== 'string' || !path.isAbsolute(store.storeDir) || typeof store.productId !== 'string' || store.productId === '') {
         throw new ServiceInstallationError('daemon_stores_invalid');
       }
-      const resolved = path.resolve(store.storeDir);
-      if (seen.has(resolved)) throw new ServiceInstallationError('daemon_stores_invalid');
-      seen.add(resolved);
-      return { storeDir: resolved, productId: store.productId };
-    });
+      // One store is one canonical path, the identity a snapshot restore uses too.
+      const identity = await canonical(store.storeDir);
+      if (seen.has(identity)) throw new ServiceInstallationError('daemon_stores_invalid');
+      seen.add(identity);
+      stores.push({ storeDir: path.resolve(store.storeDir), productId: store.productId });
+    }
+    return stores;
   }
 
   /**
