@@ -122,8 +122,9 @@ async function prompt(message) {
     const child = { rootSessionId: SESSION, childSessionId: 'ses_bg_child', parentSessionId: SESSION, depth: 1, title: 'background' };
     const meta = { _meta: { 'opencode/child-session': { id: 'ses_bg_child', parentID: SESSION, depth: 1 } } };
     const childUpdate = (value) => ({ jsonrpc: '2.0', method: 'opencode/session/child_update', params: { ...child, type: 'update', update: { ...value, ...meta } } });
-    const call = (id) => [{ sessionUpdate: 'tool_call', toolCallId: id, title: 'read', kind: 'read', status: 'in_progress', rawInput: { filePath: `${id}.md` } },
-      { sessionUpdate: 'tool_call_update', toolCallId: id, status: 'completed', content: [{ type: 'content', content: { type: 'text', text: `${id} read` } }] }];
+    // Native 2.3.0 IDs already carry the child session prefix on either channel.
+    const call = (id) => [{ sessionUpdate: 'tool_call', toolCallId: `${child.childSessionId}:${id}`, title: 'read', kind: 'read', status: 'in_progress', rawInput: { filePath: `${id}.md` } },
+      { sessionUpdate: 'tool_call_update', toolCallId: `${child.childSessionId}:${id}`, status: 'completed', content: [{ type: 'content', content: { type: 'text', text: `${id} read` } }] }];
     if (childUpdates) {
       send({ method: 'opencode/session/child_update', params: { ...child, type: 'status', status: 'created' } });
       for (const value of call('in-call')) send(childUpdate(value));
