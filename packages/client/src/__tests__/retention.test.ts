@@ -136,12 +136,12 @@ it('default journal retention discovers old confirmed rows and protects unconfir
  expect(await journal.readTask('expired',identity)).toBeUndefined();for(const id of ['pending','marked','recent'])expect(await journal.readTask(id,identity)).toBeDefined();
  expect(await journal.pruneConfirmedJournalTask('marked',new Date())).toBe(false);
 });
-it('an oldest confirmed task that cannot be pruned is reported without blocking later confirmed tasks',async()=>{
+it('an oldest confirmed task that cannot be pruned is reported without taking the only deletion slot from a later one',async()=>{
  const store=testScratchRoot(),journal=new SqliteLocalTaskJournal({storeDir:store});cleanups.push(()=>journal.close());
  await terminal(journal,'broken','confirmed','2026-08-01T00:00:00.000Z');await terminal(journal,'expired','confirmed');
  const prune=journal.pruneConfirmedJournalTask.bind(journal);
  vi.spyOn(journal,'pruneConfirmedJournalTask').mockImplementation(async(taskId,cutoff)=>{if(taskId==='broken')throw new Error('integrity');return prune(taskId,cutoff);});
- const f=await fixture({store,journal});await f.sweeper.runPass('periodic');
+ const f=await fixture({store,journal,max:1});await f.sweeper.runPass('periodic');
  expect(f.failures).toEqual(['confirmed-journal:sweep_failed']);
  expect(await journal.readTask('expired',identity)).toBeUndefined();expect(await journal.readTask('broken',identity)).toBeDefined();
 });

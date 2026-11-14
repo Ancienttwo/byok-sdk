@@ -219,14 +219,21 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     const journal = options.journal();
     if (journal === undefined) return;
     const cutoff = new Date(budget.now.getTime() - config.ttlMs['confirmed-journal']);
-    const tasks = await journal.listPrunableConfirmedTasks(cutoff, budget.remaining());
-    // Tasks are listed oldest first: one that cannot be pruned is reported
-    // after the pass instead of blocking every later confirmed task.
-    const failures: unknown[] = [];
-    for (const taskId of tasks) {
-      if (!budget.available()) break;
-      try { if (await journal.pruneConfirmedJournalTask(taskId, cutoff)) budget.removed(0); }
-      catch (error) { failures.push(error); }
+    // Tasks are listed oldest first. A task that stays listed after its
+    // attempt (a failed or refused prune) must not hold a deletion slot: each
+    // page widens the limit by the tasks already tried and skips them, so later
+    // tasks are reached in the same pass. Failures are reported after it.
+    const tried = new Set<string>(), failures: unknown[] = [];
+    pages: for (;;) {
+      const tasks = await journal.listPrunableConfirmedTasks(cutoff, budget.remaining() + tried.size);
+      const fresh = tasks.filter(taskId => !tried.has(taskId));
+      if (fresh.length === 0) break;
+      for (const taskId of fresh) {
+        if (budget.remaining() <= 0 || !budget.available()) break pages;
+        tried.add(taskId);
+        try { if (await journal.pruneConfirmedJournalTask(taskId, cutoff)) budget.removed(0); }
+        catch (error) { failures.push(error); }
+      }
     }
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1) throw new AggregateError(failures, 'confirmed journal tasks could not be pruned');
