@@ -3,19 +3,19 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { acpSession, type AcpSessionHooks } from '../../vendor/oar/95c6547/shared/acp/session';
-import type { AcpSessionProfile } from '../../vendor/oar/95c6547/shared/acp/profile';
-import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/95c6547/contracts/session';
-import { grokFailureOutcome } from '../../vendor/oar/95c6547/runtimes/grok/failure';
+import { acpSession, type AcpSessionHooks } from '../../vendor/oar/2f81b34/shared/acp/session';
+import type { AcpSessionProfile } from '../../vendor/oar/2f81b34/shared/acp/profile';
+import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/2f81b34/contracts/session';
+import { grokFailureOutcome } from '../../vendor/oar/2f81b34/runtimes/grok/failure';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { __hostExitBackstopForTests } from '../adapters/process-tree';
-import { createAcpTurns } from '../../vendor/oar/95c6547/shared/acp/turns';
-import { createUsageUpdateGate } from '../../vendor/oar/95c6547/shared/acp/profile';
-import type { AcpProcess } from '../../vendor/oar/95c6547/shared/acp/process';
-import { createSessionKernel } from '../../vendor/oar/95c6547/shared/session-kernel';
-import { recordRetention } from '../../vendor/oar/95c6547/shared/record-retention';
-import { antigravityAcpProfile } from '../../vendor/oar/95c6547/runtimes/antigravity/session';
+import { createAcpTurns } from '../../vendor/oar/2f81b34/shared/acp/turns';
+import { createUsageUpdateGate } from '../../vendor/oar/2f81b34/shared/acp/profile';
+import type { AcpProcess } from '../../vendor/oar/2f81b34/shared/acp/process';
+import { createSessionKernel } from '../../vendor/oar/2f81b34/shared/session-kernel';
+import { recordRetention } from '../../vendor/oar/2f81b34/shared/record-retention';
+import { antigravityAcpProfile } from '../../vendor/oar/2f81b34/runtimes/antigravity/session';
 
 const FAKE = path.join(import.meta.dirname, 'fixtures/fake-acp-agent.mjs');
 // A runtime-neutral profile: the shared stack under test, not a vendor's.
@@ -280,6 +280,20 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
   it('elides consecutive large replies after the last frame and keeps that frame (#1932)', () => {
     const frame = { kind: 'frame', seq: 0, body: { type: 'x', native: {}, events: [] } } as unknown as RawEvent;
     expect(retain([frame, reply(1), reply(2), reply(3)])).toEqual([false, true, true, false]);
+  });
+  it('bounds retained text and reasoning on their own limit and keeps native and tool payloads whole (#2056)', () => {
+    const frame = (seq: number, events: unknown[], native: unknown = {}) => ({ kind: 'frame', seq, body: { type: 'x', native, events } }) as unknown as RawEvent;
+    const tool = frame(0, [{ kind: 'tool_call_started', callId: 'c', tool: 'bash', input: 'ls' }], { id: 'tool' });
+    const text = (seq: number) => frame(seq, [{ kind: 'reasoning', content: { kind: 'text', text: 'r'.repeat(50) } }, { kind: 'text_delta', text: 't'.repeat(100) }]);
+    const last = frame(11, [{ kind: 'tool_call_ended', callId: 'c', content: 'out' }, { kind: 'text_delta', text: 't'.repeat(100) }], { id: 'last' });
+    const log = [tool, ...Array.from({ length: 10 }, (_, index) => text(index + 1)), last];
+    recordRetention(1024, 300)(log, log.length);
+    const kept = log.flatMap(record => record.kind === 'frame' ? record.body.events : [])
+      .reduce((bytes, event) => bytes + (event.kind === 'text_delta' ? event.text.length : event.kind === 'reasoning' && event.content.kind === 'text' ? event.content.text.length : 0), 0);
+    expect(kept).toBeLessThanOrEqual(300);
+    expect(log[0]).toBe(tool);
+    expect(log[11]).toBe(last);
+    expect(log[1]!.body).toEqual({ type: 'x', native: {}, elided: true, events: [{ kind: 'reasoning', content: { kind: 'text', text: '' } }, { kind: 'text_delta', text: '' }] });
   });
   it('reaps a hosted terminal tree when the session is disposed mid-turn', async () => {
     const { dir, log } = workspace();

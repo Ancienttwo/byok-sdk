@@ -157,7 +157,17 @@ V2 `execute` calls remain opaque without a proven
 native tool identity; the SDK never derives MCP names from code. Child call IDs
 carry the native child session id to avoid merging their calls with root calls.
 Child-session text is excluded from root answer progress. The SDK's flat event
-schema has no parent-graph field; no spawning-tool edge is invented. Usage fields
+schema has no parent-graph field; no spawning-tool edge is invented. On 2.3 and
+later, OAR declares OpenCode's child-session-updates capability, so a `task`
+subagent's updates arrive on `opencode/session/child_update`; the adapter reads
+them under the child's session id as above. A child update read after the root
+prompt's answer delivers no event on either channel: the standard channel stops
+sending the child then, and OAR records a `child_update` read then as
+`opencode/session/child_update/after_answer` with no events, which the adapter
+reports with a `console.warn` diagnostic (#2188). The turn stops reading at the
+root `turn_ended`, and the process tree is disposed. No SDK live run has started
+a subagent on this channel (#2182). OAR exposes a
+v2 `steer` through `_session/steering`; the adapter does not call it. Usage fields
 are emitted only when OAR supplies native counters.
 
 Install the chosen line as an operator action. OpenCode v1 uses `opencode-ai`
@@ -553,7 +563,7 @@ task's and the SDK's MCP servers. It changes MCP servers only; the user's
 `AGENTS.md` still loads unless `agentUserContext` is also `excluded`. A run without an `agentRef`, and the default
 `'inherit'`, are unchanged. The adapter works on the session's own
 app server, through two caller-owned steps of the
-[vendored session](../packages/client/vendor/oar/95c6547/PROVENANCE.md):
+[vendored session](../packages/client/vendor/oar/2f81b34/PROVENANCE.md):
 
 - Before the thread opens, `config/read` for the task cwd lists the servers of
   the user and project `config.toml` layers. Each one that is not a task
@@ -609,7 +619,7 @@ ACP `terminal: false` does not hide Grok 1.0.52's native terminal tool. The SDK
 does not provide a hidden-terminal mode; see the [qualified observation and
 limits](researches/2026-10-28-grok-terminal-capability-boundary.md).
 
-The [vendored launch profile](../packages/client/vendor/oar/95c6547/runtimes/grok/session.ts)
+The [vendored launch profile](../packages/client/vendor/oar/2f81b34/runtimes/grok/session.ts)
 uses `agent --always-approve --no-leader stdio`; the adapter forwards the task
 environment. `grok agent` 1.0.52 has no flag for rule loading or folder trust.
 Grok's [Project rules guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/12-project-rules.md)
@@ -867,7 +877,7 @@ What the upstream runtimes offer that the SDK does not use:
 
 - Codex: the 0.164.0 app-server schema has `ephemeral` on `thread/start` (a
   thread that "should not be materialized on disk"), and `codex exec --help`
-  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/95c6547/runtimes/codex/open.ts)
+  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/2f81b34/runtimes/codex/open.ts)
   does not send it. Inferred: 0.160.0 has the field, and an ephemeral thread
   leaves the other `CODEX_HOME` files alone.
 - Grok: `grok` 1.0.62 has no persistence flag, and the `session/new` `_meta`
@@ -974,7 +984,7 @@ and adding persona text alone does not establish isolation.
 
 `GrokAdapter` runs Grok Build over ACP: `grok agent --always-approve
 --no-leader stdio`, through the vendored OAR Grok profile
-(`packages/client/vendor/oar/95c6547`). The ACP stack is a private entry that
+(`packages/client/vendor/oar/2f81b34`). The ACP stack is a private entry that
 loads at session start, so `@byok-sdk/client/adapters` carries no ACP
 dependency.
 
@@ -1289,14 +1299,13 @@ live events, the closing reply and usage are unchanged, and the newest frame
 keeps its payload. The task keeps running; exceeding the limit is not a
 failure.
 
-The limit bounds only native and tool payloads. Text and reasoning, envelopes
-and event kinds are kept whole, because the folds read them, so
-`maxRetainedBytes` is not a bound on total retained bytes (#2056). A task's
-text grows with the provider's per-turn output limit times the number of turns;
-a Host that needs a hard bound sets `maxDurationMs` (the offer's
-`limits.maxDurationMs`, or `DaemonConfig.defaultMaxDurationMs`). For Claude
-this is the behavior since #1892. Codex, Grok, agy, OpenCode and dsh used to
-count their text toward the limit and fail the task past it.
+Text and reasoning have their own 16 MiB limit, with no option (#2056).
+Past it, the oldest frames have their `text_delta` text and readable reasoning
+text emptied and carry `elided: true`; the newest frame stays whole. The text
+limit is a separate budget, so a task with much text does not elide native or
+tool payloads earlier. Envelopes, `seq` and event kinds are kept. Before #1932,
+Codex, Grok, agy, OpenCode and dsh counted their text toward
+`maxRetainedBytes` and failed the task past it.
 
 Limit: Grok classifies a failed prompt from the turn's retained frames. If more
 than `maxRetainedBytes` of frame payload arrives between a failed

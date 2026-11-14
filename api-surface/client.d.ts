@@ -67,7 +67,7 @@ export interface ClaudeAdapterOptions {
     spawnFn?: SpawnFn;
     /** Deadline for native interrupt ACK before owned-process termination fallback. */
     interruptTimeoutMs?: number;
-    /** Native payload bytes the session retains; past it the oldest are elided and the task continues. Default 16 MiB. */
+    /** Native and tool payload bytes the session retains; past it the oldest are elided and the task continues. Default 16 MiB. Text and reasoning have their own 16 MiB limit. */
     maxRetainedBytes?: number;
     /** Local Host callbacks for native stdio requests; never enables remote boolean approvals. */
     nativeInteractions?: NativeInteractionHostOptions;
@@ -11564,11 +11564,13 @@ export interface ServiceInstallationOptions {
     stopTimeoutMs?: number;
     /**
      * The Host's own payload policy (#1842), such as a Node floor, file-size
-     * ceilings or file modes. Runs on the staged copy after every digest
-     * passed and before it becomes `versions/<id>`, and on an existing
-     * `versions/<id>` whose manifest matched, so it checks the exact bytes
-     * that will run. `manifest` is a frozen copy. A throw is `payload_invalid` with the error as `cause`;
-     * nothing new appears under `versions/`.
+     * ceilings or file modes. Runs on a fresh staged copy after every digest
+     * passed, also when `versions/<id>` already exists with a matching
+     * manifest, so it checks the exact bytes that will run and never sees the
+     * installed version (#1962). `manifest` is a frozen copy. A throw is
+     * `payload_invalid` with the error as `cause`, and so is a staged copy that
+     * no longer matches the manifest afterwards; nothing under `versions/`
+     * changes.
      */
     verifyPayload?(stagedDir: string, manifest: ServicePayloadManifest): void | Promise<void>;
     /** Test seams for the underlying lifecycle. */
@@ -11786,6 +11788,7 @@ declare const ERROR_MESSAGES: {
     readonly installation_absent: 'No version is installed under this install root. Install a payload first.';
     readonly installation_exists: 'A version is already installed under this install root. Upgrade it instead.';
     readonly payload_invalid: 'The payload manifest is missing, malformed, or does not match the payload files.';
+    readonly payload_name_collision: 'Two payload paths differ only in letter case or Unicode normalization, so a volume that ignores either stores them as one. Nothing was changed; rename one of';
     readonly version_current: 'The payload is the version already running.';
     readonly version_conflict: 'A different payload with the same version id is already staged.';
     readonly upgrade_pending: 'An earlier upgrade, rollback or install was interrupted or left its stores unrestored. Run recover() (CLI: byok-agent upgrade recover) first.';
@@ -14076,14 +14079,67 @@ export declare const VERSION_ID: RegExp;
 export declare const SHA256_HEX: RegExp;
 export declare function isPayloadPath(relative: string): boolean;
 export declare function isJsonObject(value: unknown): value is JsonObject;
+/**
+ * Two payload paths, or two of their directories, that a volume ignoring
+ * letter case or Unicode normalization could store as one entry, or
+ * `undefined` (#1962). `byok-payload.json` takes part as a path, so a payload
+ * file or directory spelled like it collides too. Such a payload cannot
+ * install as listed on macOS (APFS by default) or Windows (NTFS), so the
+ * manifest writer and the installer refuse it on every volume.
+ *
+ * Two names collide when their {@link collisionKey}s are equal. The key is
+ * meant to be at least as coarse as APFS case folding with normalization and
+ * NTFS's per-character uppercase table: it is unchanged by uppercasing,
+ * lowercasing or normalizing any single code point (checked for every code
+ * point against the runtime's Unicode tables), and both volumes' folds are
+ * made of those steps. It is coarser in places, and those names are refused
+ * too: `ß` and `ss`, `σ` and `ς`, and an NFC and an NFD spelling are one name,
+ * though NTFS keeps each pair apart. Where the runtime's Unicode version and a
+ * volume's table differ, the key errs the same way: a case pair either one
+ * knows is refused.
+ */
+export declare function collidingPayloadPaths(relatives: readonly string[]): readonly [string, string] | undefined;
+/**
+ * NFC, then each code point uppercased and each resulting code point
+ * lowercased, twice, then NFC again. Per code point, so JavaScript's
+ * final-sigma rule does not apply (`σ`, `ς` and `Σ` all become `σ`). Twice,
+ * because one pass takes `ẞ` only to `ß`; the last NFC recomposes what
+ * uppercasing decomposed (`ΐ`). The result depends on the runtime's Unicode
+ * tables (Node 24: Unicode 17); the every-code-point check in the
+ * installation tests runs on each Node version and fails if an upgrade
+ * breaks the property {@link collidingPayloadPaths} relies on.
+ *
+ * @internal Exported for that check.
+ */
+export declare function collisionKey(name: string): string;
 /** Every regular file under `dir`, `/`-separated and relative. Any other entry type throws `refuse(relative)`. */
 export declare function listPayloadFiles(dir: string, refuse: (relative: string) => Error, prefix?: string): Promise<string[]>;
-export declare function sha256File(file: string): Promise<string>;
+/**
+ * The SHA-256 of the regular file at `file`, or `refuse(file, cause)` (#1962)
+ * for anything else and for any failure to read it. `lstat` must show a
+ * regular file, and the descriptor opened (no-follow and non-blocking where
+ * the platform defines those flags) must be a regular file with the same
+ * device and inode, compared as `bigint`. So the bytes hashed are those of
+ * the file `lstat` saw, and a FIFO is never waited on. Where `open` cannot
+ * refuse a link (Windows), that file renamed and a link to it put in its
+ * place is still read; on POSIX the link is refused. A directory above
+ * `file` swapped after the listing is not caught: see
+ * {@link writeServicePayloadManifest}'s input contract.
+ */
+export declare function sha256File(file: string, refuse: (file: string, cause?: unknown) => Error): Promise<string>;
 /**
  * Writes `byok-payload.json` for the payload in `dir` at build time (#1842)
  * and returns the bytes written. Every regular file is listed; a symlink or
  * other entry type, an existing manifest, an empty directory, an invalid id
- * and a `meta` that is not a JSON object throw.
+ * a `meta` that is not a JSON object and paths that collide under
+ * {@link collidingPayloadPaths} (including with `byok-payload.json` itself)
+ * throw.
+ *
+ * Input contract (#1962): `dir` is the Host's trusted build output and
+ * nothing changes it while this runs. Each file is hashed under
+ * {@link sha256File}'s contract, with its platform limits; a directory above
+ * a listed file that is swapped for a link after the listing can still lead
+ * a read outside `dir`.
  */
 export declare function writeServicePayloadManifest(dir: string, options: {
     id: string;

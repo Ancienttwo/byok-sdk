@@ -10,7 +10,7 @@ import { CodexProjection } from '../adapters/codex/projection';
 import { GrokProjection } from '../adapters/grok/projection';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { DaemonObserver, type DaemonEvent } from '../daemon/observer';
-import { createSessionKernel } from '../../vendor/oar/95c6547/shared/session-kernel';
+import { createSessionKernel } from '../../vendor/oar/2f81b34/shared/session-kernel';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { describe, expect, it, vi } from 'vitest';

@@ -20,7 +20,7 @@ import { createRuntimeAdapters } from '../adapters/runtime-adapters';
 import { resolveRuntimeInvocation } from '../adapters/runtime-invocation';
 import { npmNodeShim } from './fixtures/npm-node-shim';
 import { check, defineRuntimeCases } from './runtime-contract/contract';
-import { opencodeSession, opencodeV2RefusedSessionOptions } from '../../vendor/oar/95c6547/runtimes/opencode/session';
+import { opencodeSession, opencodeV2RefusedSessionOptions } from '../../vendor/oar/2f81b34/runtimes/opencode/session';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { startPreparedOperation } from './fixtures/prepared-operation';
@@ -136,6 +136,27 @@ it('keeps v2 child calls distinct and execute opaque, and emits only native usag
   ]);
   expect(events).toContainEqual({ type: 'usage', contextTokens: 321, contextWindow: 1000 });
   expect(events.filter(event => event.type === 'progress')).toEqual([{ type: 'progress', text: 'done' }]);
+});
+
+// #2188: 2.2.7 is the standard channel (no child-session-updates, as OAR 0.103 opened 2.3.0); 2.3.0 is child_update with OAR's fence.
+it('delivers the same background child events on both OpenCode child channels and none after the root answer', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    const runs: AgentEvent[][] = [];
+    for (const version of ['opencode v2.2.7', 'opencode v2.3.0']) {
+      const box = setup(version);
+      runs.push(await collect(await box.start('opencode-background-child')));
+      expect(box.facts().find(fact => fact.kind === 'initialize')?.params.clientCapabilities._meta?.['opencode/child-session-updates']).toBe(version.endsWith('2.3.0') ? true : undefined);
+    }
+    expect(runs[1]).toEqual(runs[0]);
+    expect(runs[0]).toEqual([
+      { type: 'tool_use', tool: 'read', toolCallId: 'ses_bg_child:in-call', input: { filePath: 'in-call.md' } },
+      { type: 'tool_result', tool: 'read', toolCallId: 'ses_bg_child:in-call', output: [{ type: 'text', text: 'in-call read' }] },
+      { type: 'progress', text: 'done' },
+      { type: 'turn_end' },
+    ]);
+    expect(warn.mock.calls.filter(([line]) => String(line).includes('opencode child ses_bg_child update after the root prompt answer'))).toHaveLength(2);
+  } finally { warn.mockRestore(); }
 });
 
 it.each(['appendSystemPrompt', 'systemPrompt'] as const)('refuses v2 %s before launch', async option => {

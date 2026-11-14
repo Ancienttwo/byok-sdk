@@ -15,7 +15,7 @@ import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } fro
 import { canonical, checkRestoreTargets, checkStorePaths, directoryStorePath, mkdirReal, parseSnapshotRecord, resolveTrusted, SNAPSHOT_FORMAT, within, type SnapshotEntry, type SnapshotRecord, type StorePathRefusal } from './store-path-identity.js';
 import type { HeldServiceLifecycle, ManagedServiceLifecycle } from './managed-lifecycle.js';
 import {
-  isJsonObject, isPayloadPath, listPayloadFiles, SERVICE_PAYLOAD_MANIFEST, sha256File, SHA256_HEX, VERSION_ID, type ServicePayloadManifest,
+  collidingPayloadPaths, isJsonObject, isPayloadPath, listPayloadFiles, SERVICE_PAYLOAD_MANIFEST, sha256File, SHA256_HEX, VERSION_ID, type ServicePayloadManifest,
 } from '../service-payload-manifest.js';
 import { ServiceUnitError, throwPublicCommandTimeout } from './service-unit.js';
 import { readInstallPointer, readServiceInstallationRecord, serviceInstallationRecordPath, type InstallPointer, type ServiceInstallationRecord } from '../util/service-installation-record.js';
@@ -162,11 +162,13 @@ export interface ServiceInstallationOptions {
   stopTimeoutMs?: number;
   /**
    * The Host's own payload policy (#1842), such as a Node floor, file-size
-   * ceilings or file modes. Runs on the staged copy after every digest
-   * passed and before it becomes `versions/<id>`, and on an existing
-   * `versions/<id>` whose manifest matched, so it checks the exact bytes
-   * that will run. `manifest` is a frozen copy. A throw is `payload_invalid` with the error as `cause`;
-   * nothing new appears under `versions/`.
+   * ceilings or file modes. Runs on a fresh staged copy after every digest
+   * passed, also when `versions/<id>` already exists with a matching
+   * manifest, so it checks the exact bytes that will run and never sees the
+   * installed version (#1962). `manifest` is a frozen copy. A throw is
+   * `payload_invalid` with the error as `cause`, and so is a staged copy that
+   * no longer matches the manifest afterwards; nothing under `versions/`
+   * changes.
    */
   verifyPayload?(stagedDir: string, manifest: ServicePayloadManifest): void | Promise<void>;
   /** Test seams for the underlying lifecycle. */
@@ -387,6 +389,7 @@ const ERROR_MESSAGES = {
   installation_absent: 'No version is installed under this install root. Install a payload first.',
   installation_exists: 'A version is already installed under this install root. Upgrade it instead.',
   payload_invalid: 'The payload manifest is missing, malformed, or does not match the payload files.',
+  payload_name_collision: 'Two payload paths differ only in letter case or Unicode normalization, so a volume that ignores either stores them as one. Nothing was changed; rename one of',
   version_current: 'The payload is the version already running.',
   version_conflict: 'A different payload with the same version id is already staged.',
   upgrade_pending: 'An earlier upgrade, rollback or install was interrupted or left its stores unrestored. Run recover() (CLI: byok-agent upgrade recover) first.',
@@ -487,6 +490,13 @@ function joinLater(error: unknown, later: readonly unknown[]): unknown {
 function unfinishedFailure(errors: readonly unknown[], note: string): ServiceInstallationError {
   const error = new ServiceInstallationError('upgrade_pending', undefined, { cause: new FailureList(errors.flatMap(failureParts), note) });
   error.message = `${note} Run recover() (CLI: byok-agent upgrade recover); if it reports store_busy, restart the Host process first.`;
+  return error;
+}
+
+/** A payload path that cannot be read as the manifest lists it (#1962), the failure as its cause. */
+function payloadFileError(file: string, cause?: unknown): ServiceInstallationError {
+  const error = new ServiceInstallationError('payload_invalid', undefined, cause === undefined ? undefined : { cause });
+  error.message += ` (${file})`;
   return error;
 }
 
@@ -866,11 +876,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   async function stage(payloadDir: string, { manifest, bytes }: Awaited<ReturnType<typeof readPayload>>): Promise<{ id: string; created: boolean }> {
     const id = manifest.id;
     const target = path.join(versionsDir, id);
-    if (await exists(target)) {
-      if (!(await matchesManifest(target, manifest, bytes))) throw new ServiceInstallationError('version_conflict');
-      await verifyStaged(target, manifest);
-      return { id, created: false };
-    }
+    const installed = await exists(target);
+    if (installed && !(await matchesManifest(target, manifest, bytes))) throw new ServiceInstallationError('version_conflict');
     const staging = path.join(versionsDir, `.staging-${randomUUID()}`);
     await fs.mkdir(staging, { recursive: true });
     try {
@@ -878,19 +885,23 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         const destination = path.join(staging, ...relative.split('/'));
         await fs.mkdir(path.dirname(destination), { recursive: true });
         await fs.copyFile(path.join(payloadDir, ...relative.split('/')), destination);
-        if ((await sha256File(destination)) !== digest) throw new ServiceInstallationError('payload_invalid');
+        if ((await sha256File(destination, payloadFileError)) !== digest) throw new ServiceInstallationError('payload_invalid');
         const mode = (await fs.stat(path.join(payloadDir, ...relative.split('/')))).mode & 0o777;
         await fs.chmod(destination, mode);
       }
       // The parsed bytes, not a second read: a manifest swapped after the check never lands in `versions/`.
       await fs.writeFile(path.join(staging, SERVICE_PAYLOAD_MANIFEST), bytes);
       await verifyStaged(staging, manifest);
-      await fs.rename(staging, target);
+      // Checked again after the hook, which may have changed or removed the copy (#1962).
+      const matched = await matchesManifest(staging, manifest, bytes).catch((error: unknown) => { throw error instanceof ServiceInstallationError ? error : payloadFileError(staging, error); });
+      if (!matched) throw payloadFileError(staging);
+      if (!installed) await fs.rename(staging, target);
     } catch (error) {
       await fs.rm(staging, { recursive: true, force: true });
       throw error;
     }
-    return { id, created: true };
+    if (installed) await fs.rm(staging, { recursive: true, force: true });
+    return { id, created: !installed };
   }
 
   async function verifyStaged(dir: string, manifest: ServicePayloadManifest): Promise<void> {
@@ -1792,23 +1803,35 @@ async function readPayload(payloadDir: string): Promise<{ manifest: ServicePaylo
     && Object.entries(files).every(([relative, digest]) => isPayloadPath(relative) && typeof digest === 'string' && SHA256_HEX.test(digest))
     && (manifest.meta === undefined || isJsonObject(manifest.meta));
   if (!valid) throw new ServiceInstallationError('payload_invalid');
+  const colliding = collidingPayloadPaths(Object.keys(files!));
+  if (colliding !== undefined) {
+    const error = new ServiceInstallationError('payload_name_collision');
+    error.message = `${error.message} ${colliding[0]} and ${colliding[1]}.`;
+    throw error;
+  }
   const present = (await listFiles(payloadDir)).filter((relative) => relative !== SERVICE_PAYLOAD_MANIFEST);
-  const listed = new Set(Object.keys(files!));
-  if (present.length !== listed.size || !present.every((relative) => listed.has(relative))) throw new ServiceInstallationError('payload_invalid');
+  if (!sameNames(present, Object.keys(files!))) throw new ServiceInstallationError('payload_invalid');
   return { manifest: manifest as ServicePayloadManifest, bytes };
 }
 
-/** Whether `dir` holds exactly the manifest's files and the same manifest bytes. */
+/**
+ * Whether `dir` holds exactly the manifest's files, by the names its listing
+ * returns, and the same manifest bytes. Comparing names, not a count, means
+ * no extra file can stand in for one a volume merged or renamed (#1962).
+ */
 async function matchesManifest(dir: string, manifest: ServicePayloadManifest, bytes: Uint8Array): Promise<boolean> {
-  const files = await listFiles(dir);
-  if (files.length !== Object.keys(manifest.files).length + 1) return false;
-  const staged = path.join(dir, SERVICE_PAYLOAD_MANIFEST);
-  if (!(await exists(staged)) || !Buffer.from(bytes).equals(await fs.readFile(staged))) return false;
+  if (!sameNames(await listFiles(dir), [...Object.keys(manifest.files), SERVICE_PAYLOAD_MANIFEST])) return false;
+  if (!Buffer.from(bytes).equals(await fs.readFile(path.join(dir, SERVICE_PAYLOAD_MANIFEST)))) return false;
   for (const [relative, digest] of Object.entries(manifest.files)) {
-    const file = path.join(dir, ...relative.split('/'));
-    if (!(await exists(file)) || (await sha256File(file)) !== digest) return false;
+    if ((await sha256File(path.join(dir, ...relative.split('/')), payloadFileError)) !== digest) return false;
   }
   return true;
+}
+
+/** Whether two lists of distinct names hold the same names. */
+function sameNames(found: readonly string[], expected: readonly string[]): boolean {
+  const names = new Set(expected);
+  return found.length === names.size && found.every((name) => names.has(name));
 }
 
 /** Every regular file under `dir`; a symlink or other entry fails the payload. */
