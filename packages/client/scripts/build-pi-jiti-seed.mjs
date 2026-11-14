@@ -133,29 +133,31 @@ async function verifyInstalled(installRoot) {
   const root = realpathSync(installRoot);
   const clientPkg = installed(root, '@byok-sdk/client');
   const shipped = readSeed(path.join(clientPkg.dir, 'dist/assets'));
-  const subagents = installed(clientPkg.dir, 'pi-subagents');
-  const jiti = installed(subagents.dir, 'jiti');
-  // npm verified each tarball against this integrity when it installed it.
-  const npmLock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
-  const expected = await generate(subagents.dir, jiti.dir);
-  const recorded = JSON.parse(readFileSync(path.join(clientPkg.dir, 'dist/assets', PI_JITI_SEED_DIR, shipped.digest, 'manifest.json'), 'utf8'));
-  for (const pkg of [subagents, jiti]) {
-    assert.equal(npmLock.packages?.[path.relative(root, pkg.dir).split(path.sep).join('/')]?.integrity, recorded.integrity[pkg.manifest.name],
-      `installed ${pkg.manifest.name} integrity differs from the seed's locked integrity`);
-  }
-  assert.equal(recorded.piClosureDigest, OFFICIAL_PI_PROVENANCE.closureDigest, 'seed is not bound to the official Pi closure');
-  assert.equal(shipped.digest, expected.digest, 'the packed seed is not the seed of the installed pi-subagents and jiti');
-  const expectedFiles = new Map([['manifest.json', sha256(expected.manifest)], ...[...expected.templates].map(([file, code]) => [file, sha256(code)])]);
-  assert.deepEqual(shipped.files, expectedFiles, 'packed seed files differ from their manifest');
-  const { copyPiRuntimeAssets } = await import(pathToFileURL(path.join(clientPkg.dir, 'dist/index.js')).href);
   const scratch = mkdtempSync(path.join(os.tmpdir(), 'byok-pi-seed-gate-'));
   try {
+    // The asset root a product builds from this install, run as one fresh execution.
+    const { copyPiRuntimeAssets } = await import(pathToFileURL(path.join(clientPkg.dir, 'dist/index.js')).href);
     const assetRoot = path.join(scratch, 'pi');
     await copyPiRuntimeAssets({ outDir: assetRoot, form: 'compiled-executable' });
-    assert.deepEqual(readSeed(assetRoot), shipped, 'copyPiRuntimeAssets changed the seed');
     const result = zeroTransformRun(assetRoot, path.join(scratch, 'execution'));
-    console.log(`[release-pack] Pi jiti seed ${shipped.digest.slice(0, 12)}: packed, bound to bun.lock and Pi closure ${OFFICIAL_PI_PROVENANCE.closureDigest.slice(0, 12)}, `
-      + `copied unchanged; ${result.entries} cache entries materialized, ${result.transforms} transforms`);
+    assert.deepEqual(readSeed(assetRoot), shipped, 'copyPiRuntimeAssets changed the seed');
+    // The seed is the one these installed inputs derive, under their locked integrities.
+    const subagents = installed(clientPkg.dir, 'pi-subagents');
+    const jiti = installed(subagents.dir, 'jiti');
+    const expected = await generate(subagents.dir, jiti.dir);
+    assert.equal(shipped.digest, expected.digest, 'the packed seed is not the seed of the installed pi-subagents and jiti');
+    const expectedFiles = new Map([['manifest.json', sha256(expected.manifest)], ...[...expected.templates].map(([file, code]) => [file, sha256(code)])]);
+    assert.deepEqual(shipped.files, expectedFiles, 'packed seed files differ from their manifest');
+    const recorded = JSON.parse(readFileSync(path.join(clientPkg.dir, 'dist/assets', PI_JITI_SEED_DIR, shipped.digest, 'manifest.json'), 'utf8'));
+    assert.equal(recorded.piClosureDigest, OFFICIAL_PI_PROVENANCE.closureDigest, 'seed is not bound to the official Pi closure');
+    // npm verified each tarball against this integrity when it installed it.
+    const npmLock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+    for (const pkg of [subagents, jiti]) {
+      assert.equal(npmLock.packages?.[path.relative(root, pkg.dir).split(path.sep).join('/')]?.integrity, recorded.integrity[pkg.manifest.name],
+        `installed ${pkg.manifest.name} integrity differs from the seed's locked integrity`);
+    }
+    console.log(`[release-pack] Pi jiti seed ${shipped.digest.slice(0, 12)}: ${result.entries} lookups after materializing, ${result.transforms} transforms; `
+      + `packed seed equals the installed pi-subagents/jiti derivation, bound to bun.lock and Pi closure ${OFFICIAL_PI_PROVENANCE.closureDigest.slice(0, 12)}, copied unchanged`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
