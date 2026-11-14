@@ -14,8 +14,9 @@ const close: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const dispose of close.splice(0)) await dispose(); });
 const now = new Date('2026-10-28T00:00:00Z');
 const old = new Date('2026-09-01T00:00:00Z');
-// Production limits scaled down 64x keep their ratios, so small fixtures reach the same branches.
-const limits: RetentionLimits = { passInspections: 128, treeScanEntries: 256, shares: { 'exec-runtime': 64, 'exec-sdk': 16, 'daemon-temp': 16, 'reader-run': 16 }, homeDeletionWindowMs: 250 };
+// Production limits scaled down 64x keep their ratios, so small fixtures reach the same branches; a one-day
+// home deletion window leaves the counts, not wall-clock time, to decide each pass.
+const limits: RetentionLimits = { passInspections: 128, treeScanEntries: 256, shares: { 'exec-runtime': 64, 'exec-sdk': 16, 'daemon-temp': 16, 'reader-run': 16 }, homeDeletionWindowMs: 86_400_000 };
 async function fixture() {
   const store = testScratchRoot();
   const config = resolveStorageConfig(store, { scratchRoot: testScratchRoot() });
@@ -66,10 +67,9 @@ it.each(['exec-sdk', 'exec-runtime', 'daemon-temp', 'reader-run'] as const)('%s 
   } else f.scratch.abandon(execution.token);
   const share = limits.shares[id];
   const exists = () => fs.lstat(target).then(() => true, () => false);
-  // exec-sdk, exec-runtime and daemon-temp passes are bounded only by their inspection share, so 40 drain
-  // the tree. reader-run deletion also stops at a 250 ms wall-clock window, so its pass count follows
-  // runner speed; it must still make progress every other pass, which bounds the loop by the entry count.
-  const passes = id === 'reader-run' ? Infinity : 40;
+  // With the home deletion window injected as a day, every class's pass is bounded only by its inspection
+  // share, so 40 passes drain the tree.
+  const passes = 40;
   let bytes = 0, deleted = 0, idle = 0, registry = f.registry;
   for (let pass = 0; pass < passes && await exists(); pass++) {
     const before = await count(target), b = budget();

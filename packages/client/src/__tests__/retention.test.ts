@@ -36,12 +36,14 @@ const cleanups: (()=>Promise<void>)[]=[];
 afterEach(async()=>{for(const cleanup of cleanups.splice(0).reverse())await cleanup();vi.restoreAllMocks();});
 const DAY=86_400_000;
 const identity:JournalIdentity={productId:'retention',tenantId:'tenant',deviceId:'device'};
+// Counts, not wall-clock windows, decide what a fixture pass removes; a test of the time cuts injects RETENTION_LIMITS.
+const untimedLimits:RetentionLimits={...RETENTION_LIMITS,homeDeletionWindowMs:DAY};
 async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:AgentHomeManager;store?:string;budget?:StorageBudgetInput;freeBytes?:number;usageScanLimit?:number;piSessionDir?:string;agySessionStore?:string;ttlMs?:Partial<Record<ExpiringClassId,number>>;maxPassDurationMs?:number;limits?:RetentionLimits}={}) {
  const store=input.store??testScratchRoot();let time=Date.parse('2026-10-14T00:00:00.000Z');const clock=()=>new Date(time);
- const config=resolveStorageConfig(store,{scratchRoot:testScratchRoot(),retention:{maxDeletionsPerPass:input.max??256,ttlMs:input.ttlMs,maxPassDurationMs:input.maxPassDurationMs},...(input.budget?{budget:input.budget}:{})});
+ const config=resolveStorageConfig(store,{scratchRoot:testScratchRoot(),retention:{maxDeletionsPerPass:input.max??256,ttlMs:input.ttlMs,maxPassDurationMs:input.maxPassDurationMs??DAY},...(input.budget?{budget:input.budget}:{})});
  const scratch=new ScratchRoot(config.scratchRoot,clock);await scratch.open(store);
  const registry=createRetentionRegistry({storeDir:store,scratch,config,clock,journal:()=>input.journal,identity:()=>identity,preparation:()=>undefined,
-  ...(input.home?{home:input.home,handoffs:new AgentSessionHandoffStore()}:{}),...(input.usageScanLimit===undefined?{}:{usageScanLimit:input.usageScanLimit}),...(input.piSessionDir===undefined?{}:{piSessionDir:input.piSessionDir}),...(input.agySessionStore===undefined?{}:{agySessionStore:input.agySessionStore}),...(input.limits?{limits:input.limits}:{})});
+  ...(input.home?{home:input.home,handoffs:new AgentSessionHandoffStore()}:{}),...(input.usageScanLimit===undefined?{}:{usageScanLimit:input.usageScanLimit}),...(input.piSessionDir===undefined?{}:{piSessionDir:input.piSessionDir}),...(input.agySessionStore===undefined?{}:{agySessionStore:input.agySessionStore}),limits:input.limits??untimedLimits});
  const pressure=new StoragePressure(config.budget),failures:string[]=[];
  const sweeper=new RetentionSweeper({registry,config,clock,pressure,freeBytes:async()=>input.freeBytes??1_000_000_000,jitter:(_s,ms)=>ms,onFailure:(_t,id,code,taskId)=>{failures.push([id,code,...(taskId===undefined?[]:[taskId])].join(':'));}});
  cleanups.push(()=>sweeper.stop());return {store,scratch,sweeper,registry,pressure,failures,config,clock,advance:(ms:number)=>{time+=ms;}};
@@ -189,8 +191,7 @@ it('idle homes lose result records past the TTL or the 256-record bound; a lease
  const fresh=Array.from({length:258},(_,index)=>path.join(results,resultName(16+index)));
  for(const [index,file] of fresh.entries()){await fs.writeFile(file,'{}');await stamp(file,new Date(Date.parse('2026-10-13T00:00:00Z')+index*1000).toISOString());}
  await stamp(freshTemp,'2026-10-13T00:00:00Z');
- // The record bound, not the pass or home wall-clock windows, must decide what each pass removes.
- const f=await fixture({home,maxPassDurationMs:DAY,limits:{...RETENTION_LIMITS,homeDeletionWindowMs:DAY}});
+ const f=await fixture({home});
  expect(f.registry.classes.find(entry=>entry.id==='agent-result')!.authority).toMatchObject({owner:'sdk',scope:'agent-home',bound:{kind:'ttl',ttlMs:7*DAY,maxEntries:256}});
  await f.sweeper.runPass('periodic');expect(usage(f,'agent-result')).toMatchObject({measured:true,truncated:false,entries:261});
  for(const file of [expired,expiredTemp,fresh[0]!])expect(await exists(file)).toBe(true);
@@ -349,11 +350,11 @@ it('production retention limits keep their reviewed values',()=>{
  expect(RETENTION_LIMITS).toEqual({passInspections:8192,treeScanEntries:16_384,shares:{'exec-runtime':4096,'exec-sdk':1024,'daemon-temp':1024,'reader-run':1024},homeDeletionWindowMs:250});
 });
 // Production limits scaled down 64x keep their ratios, so small fixtures reach the same branches.
-const limits:RetentionLimits={passInspections:128,treeScanEntries:256,shares:{'exec-runtime':64,'exec-sdk':16,'daemon-temp':16,'reader-run':16},homeDeletionWindowMs:250};
+const limits:RetentionLimits={passInspections:128,treeScanEntries:256,shares:{'exec-runtime':64,'exec-sdk':16,'daemon-temp':16,'reader-run':16},homeDeletionWindowMs:DAY};
 // Inspections, not wall-clock time, must bound these passes: under load the 10 s
 // default pass limit ends a pass before the runtime share is spent (#2082).
 it('reclaims a released runtime larger than the runtime pass share across periodic passes', async () => {
- const share=limits.shares['exec-runtime'],LARGE=share*3/2,f=await fixture({maxPassDurationMs:DAY,limits}),large=await f.scratch.create(),small=await f.scratch.create();
+ const share=limits.shares['exec-runtime'],LARGE=share*3/2,f=await fixture({limits}),large=await f.scratch.create(),small=await f.scratch.create();
  await Promise.all(Array.from({length:LARGE},(_,index)=>fs.writeFile(path.join(large.runtimeDir,`empty-${index}`),'')));
  await fs.writeFile(path.join(small.runtimeDir,'small'),'small');
  await large.release();await small.release();f.advance(DAY+1);
@@ -463,7 +464,7 @@ it('keeps bytes already removed when a later unlink fails mid-pass, then complet
 it('a large expired runtime backlog leaves pass budget for agent-result in the same pass',async()=>{
  const {home,binding,results}=await idleHome();await fs.mkdir(results,{recursive:true});
  const record=path.join(results,resultName(0));await fs.writeFile(record,'{}');await old(record);await binding.lease.release();
- const f=await fixture({home,maxPassDurationMs:DAY,limits}),s=await f.scratch.create();
+ const f=await fixture({home,limits}),s=await f.scratch.create();
  const backlog=limits.passInspections+limits.shares['reader-run'];
  await Promise.all(Array.from({length:backlog},(_,index)=>fs.writeFile(path.join(s.runtimeDir,`empty-${index}`),'')));
  await s.release();f.advance(DAY);
@@ -567,11 +568,11 @@ it.each([5,18,19])('Codex rollout cleanup reaches every folder through wide day 
  // Only this class's sweep is counted: once it has lstat'd `reads` rollouts the clock jumps past the per-home deadline, whatever the directory order or the usage walk does.
  let seen=0,counting=false;const now=performance.now.bind(performance),lstat=fs.lstat.bind(fs);vi.spyOn(performance,'now').mockImplementation(()=>now()+(counting&&seen>=reads?60_000:0));
  vi.spyOn(fs,'lstat').mockImplementation((async(...args:Parameters<typeof fs.lstat>)=>{if(counting&&String(args[0]).endsWith('.jsonl'))seen++;return lstat(...args);}) as typeof fs.lstat);
- let f=await fixture({home,store}),cut=0;
+ let f=await fixture({home,store,limits:RETENTION_LIMITS}),cut=0;
  const count=(g:typeof f)=>{const entry=g.registry.classes.find(item=>item.id==='codex-session-store') as {sweep(budget:never):Promise<void>},sweep=entry.sweep.bind(entry);entry.sweep=async budget=>{seen=0;counting=true;try{await sweep(budget);}finally{counting=false;}};};
  count(f);
  // A fixed number of passes, so the cuts do not depend on which pass finds the target.
- for(let pass=0;pass<25;pass++){const report=await f.sweeper.runPass('periodic');if(report.truncated)cut++;if(pass===2){f=await fixture({home,store});count(f);}}
+ for(let pass=0;pass<25;pass++){const report=await f.sweeper.runPass('periodic');if(report.truncated)cut++;if(pass===2){f=await fixture({home,store,limits:RETENTION_LIMITS});count(f);}}
  expect(await exists(target)).toBe(false);expect(cut).toBeGreaterThan(1);
 });
 it.skipIf(process.platform==='win32')('Codex rollout cleanup never reads or deletes through a linked store root or date folder',async()=>{
