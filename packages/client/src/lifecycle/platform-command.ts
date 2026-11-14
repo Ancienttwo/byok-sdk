@@ -1,5 +1,5 @@
-import { spawn, type SpawnOptions } from 'node:child_process';
-import { resolveSystemTool, systemExecutable } from '@byok-sdk/core/system-tool';
+import { spawn, type SpawnOptions, type ChildProcess } from 'node:child_process';
+import { assertNoNulSpawnInput, spawnStartError, resolveSystemTool, systemExecutable } from '@byok-sdk/core/system-tool';
 import { disposeOwnedProcessTree, withOwnedProcessTree } from '../adapters/process-tree.js';
 import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError, stopRoot } from '../util/command-timeouts.js';
 import type { RunResult, Runner } from '../util/exec-runner.js';
@@ -9,7 +9,9 @@ import { cmdQuote } from './service-unit.js';
  * Runs `executable` directly (never a shell) as the root of an owned process
  * tree and resolves with its exit code and output, whatever the code. It
  * rejects when the executable cannot start, ends on a signal or prints more
- * than 1 MiB. After `timeoutMs` it stops the tree with
+ * than 1 MiB. NUL input (including cwd) is refused before spawn. Start failures
+ * retain only a trusted string code and fixed message; no original cause or input.
+ * After `timeoutMs` it stops the tree with
  * `disposeOwnedProcessTree` (SIGTERM, then SIGKILL; `taskkill /T /F` on
  * Windows) and rejects with {@link PlatformCommandTimeoutError}, whose
  * `exitConfirmed` is true only when that cleanup proved the tree gone within
@@ -32,7 +34,10 @@ export function runBounded(
   { cwd, platform, spawnFn }: { cwd?: string; platform?: NodeJS.Platform; spawnFn?: typeof spawn } = {},
 ): Promise<RunResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, withOwnedProcessTree({ cwd, stdio: ['ignore', 'pipe', 'pipe'] as const, windowsHide: true }));
+    assertNoNulSpawnInput(executable, args, process.env, cwd);
+    let child: ChildProcess;
+    try { child = spawn(executable, args, withOwnedProcessTree({ cwd, stdio: ['ignore', 'pipe', 'pipe'] as const, windowsHide: true })); }
+    catch (error) { reject(spawnStartError(error)); return; }
     const output: [Buffer[], Buffer[]] = [[], []];
     let bytes = 0;
     let closed = false;
@@ -68,8 +73,9 @@ export function runBounded(
     const timer = setTimeout(() => stop(), timeoutMs);
     child.once('error', (error) => {
       if (failure !== undefined) return;
-      fail(error);
-      reject(error);
+      const sanitized = spawnStartError(error);
+      fail(sanitized);
+      reject(sanitized);
     });
     void closing.then(() => {
       closed = true;

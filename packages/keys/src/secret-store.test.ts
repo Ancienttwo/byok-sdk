@@ -30,11 +30,11 @@ describe('Linux Secret Service', () => {
     expect(Buffer.byteLength(runner.mock.calls[0]![2]!)).toBe(8192);
   });
 
-  it.runIf(process.platform !== 'win32')('refuses a signal-killed child as unavailable for lookup, clear and availability', async () => {
+  it.runIf(process.platform !== 'win32')('#2184 distinguishes a signal-killed command from unavailable tooling', async () => {
     const subject = store(() => runCommand(process.execPath, ['-e', 'process.kill(process.pid, "SIGTERM")']));
     expect(await Promise.allSettled([subject.get(name), subject.delete(name), subject.available()])).toMatchObject([
-      { status: 'rejected', reason: { code: 'KEYCHAIN_UNAVAILABLE' } },
-      { status: 'rejected', reason: { code: 'KEYCHAIN_UNAVAILABLE' } },
+      { status: 'rejected', reason: { code: 'KEYCHAIN_READ_FAILED' } },
+      { status: 'rejected', reason: { code: 'KEYCHAIN_DELETE_FAILED' } },
       { status: 'fulfilled', value: false },
     ]);
   });

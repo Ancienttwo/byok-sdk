@@ -6320,21 +6320,28 @@ export interface FirstPairingAttempt {
      */
     readonly storeIdentity?: string;
 }
+/** A real provider-command outcome; signal termination has null exitCode and carries signal. */
 export interface DeviceCommandResult {
-    readonly exitCode: number;
+    readonly exitCode: number | null;
+    readonly signal?: NodeJS.Signals;
     readonly stdout: string;
     readonly stderr: string;
 }
 /**
- * Runs one provider command. On `signal` abort the runner kills the child and
- * rejects at once, without waiting for its pipes to close.
+ * Runs one provider command. Start failures reject; returned exit codes are
+ * real child outcomes, with null exitCode and signal for signal termination.
+ * On `signal` abort the runner kills the child and rejects at once, without
+ * waiting for its pipes to close.
  */
 export type DeviceCommandRunner = (executable: string, args: readonly string[], stdin?: string, signal?: AbortSignal) => Promise<DeviceCommandResult>;
 /** The Windows generic-credential blob bound, kept on every OS entry of this product. */
 export declare const OS_CREDENTIAL_ENTRY_MAX_BYTES = 2400;
-/** Typed unavailability; callers must surface re-pair/operational failure, never write a file fallback. */
+/**
+ * Typed unavailability; callers must surface re-pair/operational failure, never write a file fallback.
+ * Provider start failures retain only a sanitized error with a trusted string code as cause.
+ */
 export declare class DeviceCredentialStoreUnavailableError extends Error {
-    constructor(message?: string);
+    constructor(message?: string, options?: ErrorOptions);
 }
 export declare class DeviceCredentialStoreError extends Error {
     constructor(message: string);
@@ -6422,6 +6429,14 @@ export declare class DeviceCredentialStore implements DeviceCredentialBackend {
     /** Returns true only after the sole secret authority is confirmed absent. */
     clear(signal?: AbortSignal): Promise<boolean>;
 }
+/**
+ * Runs a trusted system tool or an absolute executable. NUL input is refused before spawn.
+ * Start failures reject with only a trusted string code and `spawn failed: <code>`;
+ * missing trusted tools use `SYSTEM_TOOL_UNAVAILABLE`. Original message, path,
+ * spawnargs, env, cwd and cause are discarded. Classify with code, not exitCode 127:
+ * exit codes, including 127, come only from children that actually started.
+ * Signal termination returns null exitCode and signal; abort still rejects with signal.reason.
+ */
 export declare function runDeviceCommand(executable: string, args: readonly string[], stdin?: string, signal?: AbortSignal): Promise<DeviceCommandResult>;
 // ==== @byok-sdk/client dist/daemon/device-proof-signer.d.ts ====
 import { type DeviceProofEnvelopeV1 } from '@byok-sdk/core';

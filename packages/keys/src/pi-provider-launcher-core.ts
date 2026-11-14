@@ -434,10 +434,15 @@ function windowsSystemTool(systemRoot: string | undefined, name: 'icacls.exe' | 
 }
 
 async function runWindowsTool(run: CommandRunner, executable: string, step: 'icacls' | 'whoami', args: string[]): Promise<string> {
-  const result = await run(executable, args);
+  let result;
+  try { result = await run(executable, args); }
+  catch (error) {
+    const input = error instanceof Error && error.name === 'CommandInputError';
+    throw aclQueryFailure(step, input ? 'input_failed' : `${step}_unavailable`);
+  }
+  if (result.exitCode === null) throw aclQueryFailure(step, 'signal_terminated');
   if (result.exitCode === 0) return result.stdout;
-  const cause = result.exitCode === 127 ? `${step}_unavailable` : WINDOWS_TOOL_EXIT_CAUSES[result.exitCode] ?? 'unexpected';
-  throw aclQueryFailure(step, cause, result.exitCode);
+  throw aclQueryFailure(step, WINDOWS_TOOL_EXIT_CAUSES[result.exitCode] ?? 'unexpected', result.exitCode);
 }
 
 const SDDL_SIDS: Readonly<Record<string, string>> = Object.freeze({ OW: 'S-1-3-4', SY: 'S-1-5-18', BA: 'S-1-5-32-544' });

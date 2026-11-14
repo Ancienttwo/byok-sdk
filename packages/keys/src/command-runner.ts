@@ -1,16 +1,17 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { assertNoNulSpawnInput, spawnStartError } from '@byok-sdk/core/system-tool';
 
-/** A finished child process, ported from `aip-main-open@c6a5385` `index.ts:284-288`. */
+/** A finished child process. A signal termination has null exitCode and carries signal. */
 export interface CommandResult {
-  exitCode: number;
+  exitCode: number | null;
+  signal?: NodeJS.Signals;
   stderr: string;
   stdout: string;
 }
 
 /**
- * The injection seam the macOS backend is written against. Unit tests supply a
- * fake so no test ever reads or writes a real credential store; production code
- * gets {@link runCommand}.
+ * The injection seam the OS backends use. Test runners return actual exit
+ * codes or signal termination, and reject on start or input failures.
  */
 export type CommandRunner = (
   executable: string,
@@ -19,48 +20,41 @@ export type CommandRunner = (
 ) => Promise<CommandResult>;
 
 /**
- * Spawn `executable`, feed it `stdin`, and collect its output
- * (`index.ts:2498-2527`).
- *
- * It never rejects: spawn/input failures and abnormal termination resolve as exit code 127 so an
- * `available()` probe can treat "no such binary" the same way it treats "binary
- * said no". Stdin is always closed, otherwise a child that reads
- * to EOF would hang forever.
+ * Spawn `executable`, close stdin after sending input, and collect output.
+ * NUL command/args/env are refused before spawn; no cwd override is supplied.
+ * Start failures reject with only a trusted string code and fixed message,
+ * discarding original message/path/spawnargs/env/cwd/cause. Input failures
+ * also retain only code, with name `CommandInputError` and a fixed message.
+ * No exit code is synthesized: a signal termination returns null exitCode
+ * and signal. Callers that probe availability must catch failures themselves.
  */
 export async function runCommand(
   executable: string,
   args: string[],
   stdin?: string,
 ): Promise<CommandResult> {
-  return new Promise((resolveResult) => {
-    const child = spawn(executable, args, {
-      env: process.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+  assertNoNulSpawnInput(executable, args, process.env, undefined);
+  return new Promise((resolveResult, reject) => {
+    let child: ChildProcessWithoutNullStreams;
+    try {
+      child = spawn(executable, args, { env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+    } catch (error) { reject(spawnStartError(error)); return; }
     let stdout = '';
     let stderr = '';
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      stdout += chunk;
+    child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+    child.on('error', error => reject(spawnStartError(error)));
+    child.stdin.on('error', error => {
+      const failure = spawnStartError(error);
+      failure.name = 'CommandInputError';
+      failure.message = `command input failed: ${failure.code ?? 'unknown'}`;
+      reject(failure);
     });
-    child.stderr.on('data', (chunk: string) => {
-      stderr += chunk;
+    child.on('close', (exitCode, signal) => {
+      resolveResult({ exitCode, ...(signal === null ? {} : { signal }), stderr, stdout });
     });
-    const unavailable = () => {
-      resolveResult({
-        exitCode: 127,
-        stderr: 'command unavailable',
-        stdout: '',
-      });
-    };
-    child.on('error', unavailable);
-    child.stdin.on('error', unavailable);
-    child.on('close', (code, signal) => {
-      if (code === null || signal !== null) unavailable();
-      else resolveResult({ exitCode: code, stderr, stdout });
-    });
-    if (stdin === undefined) child.stdin.end();
-    else child.stdin.end(stdin);
+    child.stdin.end(stdin);
   });
 }

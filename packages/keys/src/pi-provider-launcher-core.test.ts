@@ -601,11 +601,19 @@ describe('Windows projection ACL verification', () => {
   }));
   it.each([
     ['icacls', 2, 'path_not_found'], ['icacls', 3, 'path_not_found'], ['icacls', 5, 'access_denied'],
-    ['icacls', 127, 'icacls_unavailable'], ['icacls', 1, 'unexpected'], ['whoami', 127, 'whoami_unavailable'], ['whoami', 1, 'unexpected'],
+    ['icacls', 127, 'unexpected'], ['icacls', 1, 'unexpected'], ['whoami', 127, 'unexpected'], ['whoami', 1, 'unexpected'],
   ] as const)('fails closed on %s exit %i with the closed cause %s and no host detail', async (step, exit, cause) => withDirectory(async directory => {
     const { run, saves } = fakeTools(good, step === 'icacls' ? { icacls: exit } : { whoami: exit });
     await expect(assertAcl(directory, run)).rejects.toThrow(new Error(queryFailure(cause, step, exit)));
     for (const file of saves) await expect(fs.access(path.dirname(file))).rejects.toMatchObject({ code: 'ENOENT' });
+  }));
+  it.each(['start', 'signal', 'input'])('#2184 classifies Windows tool %s failure without host detail', async kind => withDirectory(async directory => {
+    const run = async () => {
+      if (kind === 'signal') return { exitCode: null, signal: 'SIGTERM' as const, stdout: '', stderr: 'private-spawn-canary' };
+      throw Object.assign(new Error('private-spawn-canary'), { code: kind === 'input' ? 'EPIPE' : 'ENOENT', name: kind === 'input' ? 'CommandInputError' : 'Error' });
+    };
+    const failure = await assertWindowsPiProjectionAcl(directory, { systemRoot: 'C:\\Windows', run }).catch((error: unknown) => error);
+    expect(failure).toEqual(new Error(queryFailure(kind === 'start' ? 'whoami_unavailable' : kind === 'signal' ? 'signal_terminated' : 'input_failed', 'whoami')));
   }));
   it('classifies a missing leaf and a missing parent from the parent listing, before any tool runs', async () => withDirectory(async directory => {
     const { run } = fakeTools(good);

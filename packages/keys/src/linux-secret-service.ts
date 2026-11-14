@@ -111,6 +111,10 @@ export class LinuxSecretServiceSecretStore<TName extends string = string>
       'Linux Secret Service is unavailable; install secret-tool and unlock a keyring on the session D-Bus',
     );
     if (this.#platform !== 'linux') throw unavailable();
+    const failed = () => new ByokKeysError(
+      `KEYCHAIN_${operation === 'lookup' ? 'READ' : operation === 'clear' ? 'DELETE' : 'WRITE'}_FAILED`,
+      'Linux Secret Service command did not complete',
+    );
     let result: CommandResult;
     try {
       result = await this.#commandRunner('secret-tool', [
@@ -118,10 +122,12 @@ export class LinuxSecretServiceSecretStore<TName extends string = string>
         ...(operation === 'store' ? [`--label=${service}`] : []),
         'service', service, 'account', this.#account,
       ], stdin);
-    } catch {
-      // The runner error and tool output can contain credential bytes. Neither is attached.
+    } catch (error) {
+      // The injected runner can contain credential bytes; retain no unowned detail.
+      if (error instanceof Error && error.name === 'CommandInputError') throw failed();
       throw unavailable();
     }
+    if (result.exitCode === null) throw failed();
     // secret-tool's empty exit 1 is absence only for lookup and clear, never store.
     const absent = operation !== 'store' && result.exitCode === 1
       && result.stdout === '' && result.stderr === '';

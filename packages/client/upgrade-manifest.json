@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "8f4226d8b0b84d9014d1c027d9cefc2794af06e818861c1c3e74b938113a170d"
+    "snapshotSha256": "7bb8fdc86827ac6755113f80cec27055a9bd34c41b8f28ec2b1463ad9134185d"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,25 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "direct-command-start-errors",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client credential APIs now classify provider startup rejection as DeviceCredentialStoreUnavailableError with a sanitized code-bearing cause, and @byok-sdk/keys runCommand rejects startup failures instead of synthesizing exit 127. NUL input is refused before direct spawns, including cwd for durable Pi shell and lifecycle commands; startup errors discard original details while retaining string code. Hosts catch startup failures, inspect code/cause.code, handle keys CommandInputError separately, and let available() perform its own boolean mapping. Credential operations and Windows Pi ACL queries distinguish real exit 127 and signal termination from unavailable tooling (#2184).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#command-startup-failures-and-real-process-outcomes-2184",
+      "items": [
+        "behavior:direct-command-start-errors"
+      ]
+    },
+    {
+      "id": "command-process-outcomes",
+      "impact": "breaking",
+      "summary": "@byok-sdk/keys CommandResult uses number|null exitCode with optional signal for signal termination. Hosts check signal before numeric exit status and update injected runners. @byok-sdk/client DeviceCredentialStoreUnavailableError accepts ErrorOptions and exposes a sanitized code-bearing cause for provider start failures (#2184).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#command-startup-failures-and-real-process-outcomes-2184",
+      "items": [
+        "export:@byok-sdk/client#DeviceCredentialStoreUnavailableError",
+        "export:@byok-sdk/keys#CommandResult"
+      ]
+    },
     {
       "id": "task-home-live",
       "impact": "breaking",
@@ -354,6 +373,11 @@
       "entry": "enrollment-clear-store-scope"
     },
     {
+      "item": "export:@byok-sdk/client#DeviceCredentialStoreUnavailableError",
+      "change": "changed",
+      "entry": "command-process-outcomes"
+    },
+    {
       "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
       "change": "changed",
       "entry": "enrollment-clear-store-scope"
@@ -662,6 +686,11 @@
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
       "change": "changed",
       "entry": "keys-secret-corrupted-code"
+    },
+    {
+      "item": "export:@byok-sdk/keys#CommandResult",
+      "change": "changed",
+      "entry": "command-process-outcomes"
     },
     {
       "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",

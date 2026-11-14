@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { inspect } from 'node:util';
 
 import type { CommandResult } from './command-runner';
 import {
@@ -59,6 +60,22 @@ beforeEach(() => {
 });
 
 describe('MacOsKeychainSecretStore.available', () => {
+  it.each(['start', 'input', 'signal', 'exit127'])('#2184 handles %s failures at the credential boundary', async kind => {
+    const raw = Object.assign(new Error(CANARY), { code: kind === 'input' ? 'EPIPE' : 'EACCES', name: kind === 'input' ? 'CommandInputError' : 'Error', path: CANARY, spawnargs: [CANARY], env: { SECRET: CANARY }, cwd: CANARY, cause: new Error(CANARY) });
+    expect(inspect(raw, { showHidden: true, depth: null })).toContain(CANARY);
+    const subject = store({ commandRunner: async () => {
+      if (kind === 'signal') return { exitCode: null, signal: 'SIGTERM', stdout: '', stderr: '' };
+      if (kind === 'exit127') return { exitCode: 127, stdout: '', stderr: '' };
+      throw raw;
+    } });
+    await expect(subject.available()).resolves.toBe(false);
+    for (const [operation, code] of [[() => subject.get('key'), 'KEYCHAIN_READ_FAILED'], [() => subject.delete('key'), 'KEYCHAIN_DELETE_FAILED'], [() => subject.set('key', 'value'), 'KEYCHAIN_WRITE_FAILED']] as const) {
+      const failure = await operation().catch((error: unknown) => error);
+      expect(failure).toMatchObject({ code: kind === 'start' ? 'KEYCHAIN_UNAVAILABLE' : code });
+      if (kind === 'start' || kind === 'input') expect(failure).toMatchObject({ cause: { code: raw.code } });
+      expect(inspect(failure, { showHidden: true, depth: null })).not.toContain(CANARY);
+    }
+  });
   it('returns false on a non-darwin platform without spawning anything', async () => {
     const subject = store({ platform: 'linux' });
     await expect(subject.available()).resolves.toBe(false);

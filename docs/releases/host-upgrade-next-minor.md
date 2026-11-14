@@ -2,6 +2,18 @@
 
 Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Command startup failures and real process outcomes (#2184)
+
+`@byok-sdk/keys` `runCommand()` no longer synthesizes exit code 127 for a command that cannot start. Both synchronous spawn throws and asynchronous spawn error events reject with an Error containing only a trusted string `code` and `spawn failed: <code>` (`unknown` when code is absent or not a string). Original Node messages, paths, arguments, environment, cwd and causes are discarded. Hosts that checked `exitCode === 127` for unavailable tooling must catch startup failures and inspect `error.code` (`ENOENT` or `EACCES`). A real child exiting 127 remains an ordinary command result. The client's internal `runDeviceCommand()` follows the same rule and uses `SYSTEM_TOOL_UNAVAILABLE` for a missing trusted tool; it is not an export of `@byok-sdk/client`. Hosts observe those failures through the public credential APIs and `DeviceCredentialStoreUnavailableError.cause.code`.
+
+Keys `CommandResult.exitCode` is now `number | null`. Signal termination returns `exitCode: null` with `signal`; an ordinary exit has a numeric code and no signal field. Check `signal` before testing a nonzero exit code, and update injected runner fixtures accordingly. A signal is a command that started and was terminated, not unavailable tooling. The internal client `DeviceCommandResult` uses the same outcome shape; neither it nor `runDeviceCommand` is a new public export. Client command cancellation keeps its existing abort behavior.
+
+Keys `runCommand()` also rejects stdin transport failures with `name: 'CommandInputError'`, a fixed `command input failed: <code>` message and only the string `code` (for example `EPIPE`). Match `name` for the input-failure phase and `code` for diagnostics; no new class export is added. Callers must handle this rejection instead of interpreting the former synthesized 127 as a startup failure. Neither error form retains the original error object.
+
+Credential backends translate these results at their own boundary. Client `OsCredentialEntry` read/replace/delete map runner rejections to `DeviceCredentialStoreUnavailableError`, retaining a sanitized code-bearing cause, while real exit 127 and signal termination are credential-operation failures. Its constructor accepts optional `ErrorOptions`. The macOS keys backend maps startup rejection to `KEYCHAIN_UNAVAILABLE`, retains the sanitized cause, and reports input failure or signal termination through the operation's `KEYCHAIN_READ_FAILED`, `KEYCHAIN_DELETE_FAILED` or `KEYCHAIN_WRITE_FAILED`. Linux keys likewise distinguish signal/input failure from unavailable tooling. Both backends' `available()` remain boolean probes that catch failures. Windows Pi ACL queries report startup rejection as `<step>_unavailable`, signals as `signal_terminated`, input failure as `input_failed`, and a real 127 as `unexpected` with the exit code.
+
+The durable Pi shell and bounded lifecycle commands also use the shared NUL preflight (including cwd) and startup-error sanitizer. Durable shell keeps its outer `spawn_error` and carries the sanitized code in `cause`; lifecycle errors retain `code` directly. Hosts must classify these startup errors with code rather than raw message/path. NUL input is rejected before any spawn with a slot-only diagnostic. Timeout and disposal receipts keep their existing classification and ownership rules.
+
 ## Unique injected adapter IDs (#2135)
 
 `createDaemonWithAdapters(config, adapters)` now throws `DaemonConfigInvalidError`
