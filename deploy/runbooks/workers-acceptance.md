@@ -68,18 +68,91 @@ Do not start from an older SDK tag and edit package manifests to supply missing 
 
 Only the owner performs these dashboard/private-terminal steps. Seats do not run them while preparing this document. If resources already exist at handoff, verify their creator, window and names and report to t3. They still need teardown that day.
 
+On the window day, the operator seat saves the C5, C6 and C10 fenced blocks below verbatim on mini-cf as `_ops/p9/c5-roles.sql`, `_ops/p9/c6-baseline.sql` and `_ops/p9/p9.env.template`. Create mode 700 `_ops/p9`, set these files to mode 600 and confirm `git check-ignore _ops/p9`. These files contain SQL or placeholders only. The owner then makes and fills the separate private `p9.env`; seats never read or copy the filled file. This runbook is the tracked source for all three files.
+
 | Row | Who / command or action | Pass / stop condition | Acceptance mapping |
 | --- | --- | --- | --- |
 | C3 | owner: Cloudflare > Workers & Pages > Plans > Workers Paid; confirm the USD 10 cap and same-day teardown | Return "Paid on" and billing start time; stop if cost differs from approval | All cloud rows |
 | C4 | owner: PlanetScale > `aiphabee-staging` > New **development branch** `byok-p9` | Connect page confirms the target branch and its separate host/branch ID; not main | All storage rows |
-| C5 | owner: from repo root run `pscale shell aiphabee-staging byok-p9 --role admin`; at the prompt run `\i deploy/runbooks/workers-acceptance/c5-roles.sql`, then `\password byok_p9_h` and `\password byok_p9_canary` | Two roles, four schemas, database-scoped search_path. Stop on any failure, especially `GRANT CREATE ON DATABASE postgres` | #794 H, #654(d)(e) |
-| C6 | owner: in the same shell, `\i deploy/runbooks/workers-acceptance/c6-baseline.sql` | **major=18, ssl=on, available_connections>=13**. Record version, connection counts, sorted non-P9 schema/role lists and MD5. Stop on any failure; do not change configuration | All cloud rows |
+| C5 | owner: from repo root run `pscale shell aiphabee-staging byok-p9 --role admin`; at the prompt run `\i _ops/p9/c5-roles.sql`, then `\password byok_p9_h` and `\password byok_p9_canary` | Two roles, four schemas, database-scoped search_path. Stop on any failure, especially `GRANT CREATE ON DATABASE postgres` | #794 H, #654(d)(e) |
+| C6 | owner: in the same shell, `\i _ops/p9/c6-baseline.sql` | **major=18, ssl=on, available_connections>=13**. Record version, connection counts, sorted non-P9 schema/role lists and MD5. Stop on any failure; do not change configuration | All cloud rows |
 | C7 | owner: create Hyperdrive `byok-p9-h` / `byok-p9-canary`; origin is dev branch host:5432 / postgres, with branch-qualified `byok_p9_h.<branch_id>` / `byok_p9_canary.<branch_id>`, TLS and max origin connections=5 each | Both Active; give seats only non-secret configuration IDs. Do not open AiphaBee's three configurations | #794 pooling, #654(d) |
 | C8 | owner: create R2 bucket `byok-p9-staging`; S3 token grants Object Read & Write for this bucket only | Keep endpoint/keys private on operator. W4 uses same-origin `/member/ciphertext`; the page needs no R2 CORS rule | #794 5.7, #654(d)(e) |
 | C9 | owner: deployment token expiring that day, Account Workers Scripts: Edit + Workers Tail: Read, no zone permissions; enable workers.dev | Account ID / subdomain may go to seats; the token may not. Owner creates Hyperdrive/R2, so the deploy token needs no extra permissions | Shared |
-| C10 | owner: copy the [template](workers-acceptance/p9.env.template) to ignored `_ops/p9/p9.env`, directory mode 700 / file mode 600; fill it with a private editor and load it into the private process with the owner's env loader | Direct DSNs on 5432, `sslmode=verify-full`, correct roles/schemas; different H/canary token keys; single-line JSON. Return only "filled"; seats do not inspect file/env | Shared |
+| C10 | owner: copy `_ops/p9/p9.env.template` from the [C10 block](#c10-environment-template) to ignored `_ops/p9/p9.env`, directory mode 700 / file mode 600; fill it with a private editor and load it into the private process with the owner's env loader | Direct DSNs on 5432, `sslmode=verify-full`, correct roles/schemas; different H/canary token keys; single-line JSON. Return only "filled"; seats do not inspect file/env | Shared |
 
-[c5-roles.sql](workers-acceptance/c5-roles.sql) temporarily grants database CREATE to the H role for migration only; the owner revokes it after C12. [c6-baseline.sql](workers-acceptance/c6-baseline.sql) contains read-only queries excluding P9 names, so T4 can verify unchanged non-P9 names/hashes. It does not scan business data.
+### C5 role and schema file
+
+Save this block verbatim as `_ops/p9/c5-roles.sql`. It temporarily grants database CREATE to the H role for migration only; the owner revokes it after C12.
+
+```sql
+-- C5: run on the NEW dev branch only (never main), as the default role:
+--   pscale shell aiphabee-staging <new-branch> --role admin
+-- From the repo root, then: \i _ops/p9/c5-roles.sql
+-- No passwords in this file. Set them afterwards with \password (typed by the owner).
+\set ON_ERROR_STOP on
+CREATE ROLE byok_p9_h LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+CREATE ROLE byok_p9_canary LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+CREATE SCHEMA byok_p9_sdk_h AUTHORIZATION byok_p9_h;
+CREATE SCHEMA byok_p9_h AUTHORIZATION byok_p9_h;
+CREATE SCHEMA byok_p9_host AUTHORIZATION byok_p9_h;
+CREATE SCHEMA byok_p9_sdk_canary AUTHORIZATION byok_p9_canary;
+ALTER ROLE byok_p9_h IN DATABASE postgres SET search_path TO byok_p9_sdk_h, public;
+ALTER ROLE byok_p9_canary IN DATABASE postgres SET search_path TO byok_p9_sdk_canary, public;
+-- Needed only for steps 3.3-3.4 (store.migrate runs CREATE SCHEMA IF NOT EXISTS); revoked right after.
+-- If this GRANT is refused: STOP, change nothing else, and tell t3.
+GRANT CREATE ON DATABASE postgres TO byok_p9_h;
+\dn byok_p9_*
+\du byok_p9_*
+```
+
+### C6 baseline file
+
+Save this block verbatim as `_ops/p9/c6-baseline.sql`. These read-only queries exclude P9 names, so T4 can verify unchanged non-P9 names/hashes. They do not scan business data.
+
+```sql
+-- C6 baseline, NEW dev branch byok-p9 only. Names, hashes and connection counts; no data rows.
+\set ON_ERROR_STOP on
+select version();
+select current_setting('server_version_num')::integer / 10000 as major_version;
+show ssl;
+show max_connections;
+select count(*) as current_connections,
+  current_setting('max_connections')::integer - count(*) as available_connections
+  from pg_stat_activity;
+select nspname from pg_namespace
+  where nspname not like 'pg\_%' and nspname <> 'information_schema' and nspname not like 'byok\_p9\_%' order by nspname;
+select rolname from pg_roles where rolname not like 'byok\_p9\_%' order by rolname;
+select count(*) as schemas, md5(string_agg(nspname, ',' order by nspname)) as schema_list_md5
+  from pg_namespace where nspname not like 'pg\_%' and nspname <> 'information_schema' and nspname not like 'byok\_p9\_%';
+select count(*) as roles, md5(string_agg(rolname, ',' order by rolname)) as role_list_md5
+  from pg_roles where rolname not like 'byok\_p9\_%';
+```
+
+### C10 environment template
+
+Save this block verbatim as `_ops/p9/p9.env.template`. The owner copies it to private `_ops/p9/p9.env` and replaces placeholders there only. The template is not a shell script.
+
+```dotenv
+# Placeholder reference only; NOT a shell script. Owner enters real values privately.
+# Copy to ignored _ops/p9/p9.env, mode 600. Never source this placeholder file.
+# Use an owner-controlled env loader; JSON and URLs need quoting if converted to shell syntax.
+# Seats never read, print or copy the filled p9.env. Operator machine only.
+# PlanetScale Postgres 18, dev branch byok-p9, direct port 5432, sslmode=verify-full.
+P9_H_DATABASE_URL=<H_DIRECT_DSN>
+BYOK_CANARY_POSTGRES_URL=<CANARY_DIRECT_DSN>
+HOST_ADMIN_TOKEN=<OPERATOR_BEARER>
+BYOK_TOKEN_SECRET_H=<H_64_LOWERCASE_HEX>
+BYOK_TOKEN_SECRET_CANARY=<CANARY_64_LOWERCASE_HEX>
+BYOK_S3_ACCESS_KEY_ID=<BUCKET_SCOPED_ACCESS_KEY_ID>
+BYOK_S3_SECRET_ACCESS_KEY=<BUCKET_SCOPED_SECRET_ACCESS_KEY>
+BYOK_CANARY_STORAGE=<ONE_LINE_JSON_WITH_ENDPOINT_BUCKET_REGION_ACCESSKEYID_SECRETACCESSKEY>
+CLOUDFLARE_API_TOKEN=<END_OF_WINDOW_DEPLOY_TOKEN>
+CLOUDFLARE_ACCOUNT_ID=<ACCOUNT_ID>
+BYOK_CANARY_BASE_URL=<CANARY_HTTPS_ORIGIN>
+P9_H_BASE_URL=<H_HTTPS_ORIGIN>
+BYOK_CANARY_TAIL_FILE=<ABSOLUTE_OPERATOR_CHECKOUT>/_ops/p9/canary-tail.jsonl
+```
 
 ## P2: Migrate, deploy and smoke (owner handles credential commands; seats check redacted results, about 30-45 minutes)
 
