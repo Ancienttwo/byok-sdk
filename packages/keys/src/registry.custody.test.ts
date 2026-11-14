@@ -126,7 +126,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     await registry().configure(OPENAI, OLD_KEY);
     const echo = (code: string, value: unknown) => new ByokKeysError(code, `echo ${String(value)} ${OLD_KEY}`);
     const set = secrets.set.bind(secrets);
-    const failures = ['KEYCHAIN_WRITE_FAILED', 'STORE_DEFINED_CODE'];
+    const failures = ['KEYCHAIN_WRITE_FAILED', 'STORE_DEFINED_CODE', `SECRET_${NEW_KEY}`];
     vi.spyOn(secrets, 'set').mockImplementation(async (name, value) => {
       if (value === NEW_KEY && failures.length > 0) throw echo(failures.shift()!, value);
       return set(name, value);
@@ -134,11 +134,12 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     const errors = [
       await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error),
       await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error),
+      await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error),
     ];
     vi.spyOn(secrets, 'has').mockRejectedValueOnce(echo('KEYCHAIN_UNAVAILABLE', NEW_KEY));
     errors.push(await registry().configure({ ...OPENAI, model: 'gpt-5.2-mini' }).catch((error: unknown) => error));
-    expect(errors.map((error) => (error as ByokKeysError).code)).toEqual(['KEYCHAIN_WRITE_FAILED', 'PROVIDER_SECRET_STORE_FAILED', 'KEYCHAIN_UNAVAILABLE']);
-    expect((errors[2] as Error).message).toContain('install secret-tool');
+    expect(errors.map((error) => (error as ByokKeysError).code)).toEqual(['KEYCHAIN_WRITE_FAILED', 'PROVIDER_SECRET_STORE_FAILED', 'PROVIDER_SECRET_STORE_FAILED', 'KEYCHAIN_UNAVAILABLE']);
+    expect((errors[3] as Error).message).toContain('install secret-tool');
     expect(JSON.stringify(errors.map((error) => [(error as Error).message, (error as Error).stack, String((error as Error).cause)]))).not.toMatch(new RegExp(`${OLD_KEY}|${NEW_KEY}`, 'u'));
   });
 
