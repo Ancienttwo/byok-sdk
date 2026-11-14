@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { copyAgentMemoryHelperAssets, resolveAgentMemoryFilesystemHelper, verifyAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
 import { agentMemoryHelperDigest } from '../util/agent-memory-helper-digest';
 import { hasAgentMemoryHelperBuild } from './fixtures/agent-memory-helper-build';
+import { memoryTestTiming } from './fixtures/agent-memory-timing';
 
 vi.mock('node:fs', async importOriginal => ({ ...await importOriginal<typeof import('node:fs')>() }));
 
@@ -102,19 +103,30 @@ describe.skipIf(!hasAgentMemoryHelperBuild())('SDK memory helper product assets'
   });
 
   it.skipIf(process.platform !== 'darwin')('runs recall/save from an isolated single-file bundle after product re-signing', async () => {
+    const timing = memoryTestTiming('assets.bundle');
+    timing('begin');
     const { root, assetRoot } = await copied();
+    timing('copied');
     const bin = resolveAgentMemoryFilesystemHelper(assetRoot);
+    timing('resolved');
     execFileSync('codesign', ['--force', '--sign', '-', '--identifier', 'test.byok.relocated', '--options', 'runtime', bin]);
+    timing('codesign.signed');
     execFileSync('codesign', ['--verify', '--strict', bin]);
+    timing('codesign.verified');
     expect(resolveAgentMemoryFilesystemHelper(assetRoot)).toBe(bin);
     const outfile = path.join(root, 'product.mjs');
     const fixture = fileURLToPath(new URL('./fixtures/agent-memory-relocated-bundle.ts', import.meta.url));
+    timing('bundle.begin');
     buildSync({ entryPoints: [fixture], outfile, bundle: true, platform: 'node', format: 'esm' });
-    const result = JSON.parse(execFileSync(process.execPath, [outfile, assetRoot, root], { cwd: root, env: { PATH: process.env.PATH! }, encoding: 'utf8' }));
+    timing('bundle.built');
+    const result = JSON.parse(execFileSync(process.execPath, [outfile, assetRoot, root], { cwd: root, env: { PATH: process.env.PATH! }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }));
+    timing('bundle.executed');
     expect(result).toMatchObject({ path: 'MEMORY.md', content: 'relocated SDK helper' });
     const changed = await fs.readFile(bin); changed[16384] = changed[16384]! ^ 1;
     await fs.writeFile(bin, changed);
+    timing('tampered');
     expect(() => execFileSync(process.execPath, [outfile, assetRoot, root], { cwd: root, encoding: 'utf8', stdio: 'pipe' })).toThrow();
+    timing('tampered.refused');
   });
 });
 

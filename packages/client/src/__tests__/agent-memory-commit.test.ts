@@ -18,6 +18,9 @@ import { testScratchRoot } from './fixtures/execution-scratch';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
 import { StubRuntimeAdapter, type StubSession } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { memoryTestTiming } from './fixtures/agent-memory-timing';
+
+process.env.BYOK_MEMORY_TIMING = '1';
 
 /** #1440: a writer Attempt's memory writes stay only when its task ends in `task.complete`. */
 
@@ -211,6 +214,8 @@ describe.skipIf(!supported)('a commit Attempt on the device', () => {
   });
 
   async function start(capabilities?: ConstructorParameters<typeof StubRuntimeAdapter>[2], config?: Pick<Parameters<typeof createDaemonWithAdapters>[0], 'agentMemory'>) {
+    const timing = memoryTestTiming('commit.start');
+    timing('begin');
     const storeDir = await temp('byok-commit-daemon-store-');
     const hostStorageRoot = await temp('byok-commit-daemon-home-');
     const pi = new StubRuntimeAdapter('pi', undefined, capabilities);
@@ -226,10 +231,14 @@ describe.skipIf(!supported)('a commit Attempt on the device', () => {
       ...config,
     }, [pi]);
     await daemon.pair('pairing-code');
+    timing('paired');
     await daemon.start();
+    timing('daemon.started');
     const hello = await server.waitFor((entry) => entry.type === 'conn.hello' && (entry.payload as { capabilities: string[] }).capabilities.includes('agent-memory-commit-on-success'));
+    timing('capability.hello');
     const home = path.join(hostStorageRoot, AGENT_HOME_DIRECTORY, 'commit');
     await seed(home);
+    timing('seeded');
     return { pi, home, hello };
   }
   function offer(taskId: string, options: { commit?: boolean; reader?: boolean; limits?: { maxDurationMs: number } } = {}): void {
@@ -358,25 +367,37 @@ describe.skipIf(!supported)('a commit Attempt on the device', () => {
       await fs.writeFile(path.join(home, 'notes'), 'a file');
     }],
   ])('fails and rolls back a task that ends on %s, and the next one starts', async (_label, named, leave) => {
+    const timing = memoryTestTiming(`commit.rollback.${_label}`);
+    timing('begin');
     const { pi, home } = await start();
+    timing('ready');
     offer('over');
     await terminal('task.started', 'over');
+    timing('over.started');
     await writeAsRuntime(home);
     await leave(home);
+    timing('runtime.writes.done');
     pi.sessions[0]!.emit({ type: 'turn_end' });
     const failure = await terminal('task.fail', 'over');
+    timing('over.failed');
     expect(failure.payload).toMatchObject({ retryable: false, reason: expect.stringMatching(/^agent_memory_commit_refused: .*rolled back$/u) });
     expect((failure.payload as { reason: string }).reason).toMatch(named);
     await released();
+    timing('rollback.released');
     expect(await fs.readFile(path.join(home, 'notes', 'index.md'), 'utf8')).toBe('index\n');
     expect(await fs.readFile(path.join(home, 'MEMORY.md'), 'utf8')).toBe('as it started\n');
     expect(await copyFiles(home)).toEqual([]);
+    timing('rollback.asserted');
 
     offer('next');
+    timing('next.offered');
     await terminal('task.started', 'next');
+    timing('next.started');
     pi.sessions[1]!.emit({ type: 'turn_end' });
     await terminal('task.complete', 'next');
+    timing('next.completed');
     await released();
+    timing('next.released');
   });
 
   it('completes a task that removed MEMORY.md and notes/, which the next lease builds back', async () => {

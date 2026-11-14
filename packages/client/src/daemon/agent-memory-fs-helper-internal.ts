@@ -230,6 +230,11 @@ async function initializeHostStorageRoot(helperBin: string, root: string, timeou
 type HelperOpenOptions = Readonly<{ timeout?: number; signal?: AbortSignal }>;
 type ProbeLifetime = Readonly<{ deadline: number; signal?: AbortSignal }>;
 
+// Temporary #2206 diagnostics; removed after the Intel runner measurements.
+function memoryTiming(phase: string, started: number, fields: Record<string, unknown> = {}): void {
+  if (process.env.BYOK_MEMORY_TIMING === '1') process.stderr.write(`[memory-timing] ${JSON.stringify({ pid: process.pid, at: performance.now(), phase, ms: performance.now() - started, ...fields })}\n`);
+}
+
 class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
   private readonly pending = new Map<string, Pending>();
   private stdoutBuffer = Buffer.alloc(0);
@@ -265,12 +270,17 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
     if (typeof input.ancestorRoot !== 'string' || !path.isAbsolute(input.ancestorRoot) || /[\u0000\r\n]/u.test(input.ancestorRoot)) {
       throw new AgentMemoryError('Agent memory filesystem helper requires an explicit absolute ancestor root');
     }
+    const started = performance.now();
+    memoryTiming('helper.open.begin', started, { probe: options.timeout !== undefined });
     const helperBin = verifyAgentMemoryFilesystemHelper(safeHelperPath(input.helperBin), input.assetRoot);
+    memoryTiming('helper.open.verified', started);
     const expected = agentMemoryHelperIdentity(input.homeIdentity, process.platform);
     const probe = options.timeout === undefined ? undefined : { deadline: performance.now() + options.timeout, ...(options.signal === undefined ? {} : { signal: options.signal }) };
     const signal = options.signal;
     const budget = probe === undefined ? HELPER_REQUEST_TIMEOUT_MS : Math.max(1, Math.ceil(probe.deadline - performance.now()));
+    memoryTiming('helper.root.begin', started);
     await initializeHostStorageRoot(helperBin, input.ancestorRoot, budget, signal);
+    memoryTiming('helper.root.done', started);
     signal?.throwIfAborted();
     const child = spawn(helperBin, ['serve'], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -278,6 +288,8 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
       windowsHide: true,
       env: Object.freeze({}),
     });
+    memoryTiming('helper.serve.spawn', started, { child: child.pid });
+    child.once('exit', (code, signal) => memoryTiming('helper.serve.exit', started, { child: child.pid, code, signal }));
     const client = new AgentMemoryFilesystemHelperClient(child, probe);
     try {
       signal?.throwIfAborted();
@@ -288,6 +300,7 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
       }, probe === undefined ? HELPER_REQUEST_TIMEOUT_MS : Math.max(1, probe.deadline - performance.now()));
       if (result.helperVersion !== AGENT_MEMORY_FILESYSTEM_HELPER_VERSION) throw new AgentMemoryError('Agent memory filesystem helper version mismatch');
       if (!agentMemoryHelperIdentityMatches(result.identity, expected)) throw new AgentMemoryError('Agent memory filesystem helper root identity mismatch');
+      memoryTiming('helper.open.ready', started, { child: child.pid });
       return client;
     } catch (error) {
       await client.close().catch(() => {});
@@ -357,6 +370,8 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
   }
 
   private async closeAndWait(): Promise<void> {
+    const started = performance.now();
+    memoryTiming('helper.close.begin', started, { child: this.child.pid });
     try {
       try {
         if (this.child.exitCode === null && this.child.signalCode === null && this.fatalError === undefined) await this.requestInternal('close', {}, this.probe === undefined ? HELPER_REQUEST_TIMEOUT_MS : Math.max(1, this.probe.deadline - performance.now()));
@@ -382,6 +397,7 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
         if (performance.now() >= this.probe.deadline) throw helperExitTimedOut();
       }
     } finally {
+      memoryTiming('helper.close.done', started, { child: this.child.pid });
       this.rejectPending(new AgentMemoryError('Agent memory filesystem helper is closed'));
       this.probe?.signal?.removeEventListener('abort', this.abort);
     }
@@ -412,7 +428,13 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
         this.fail(error, this.probe === undefined ? 'SIGTERM' : 'SIGKILL');
       }, timeout);
       timer.unref?.();
-      this.pending.set(id, { resolve: (response) => resolve(response.result), reject, timer });
+      const started = performance.now();
+      const fields = { child: this.child.pid, op, id };
+      if (op === 'open' || op === 'close') memoryTiming('helper.request.begin', started, fields);
+      this.pending.set(id, {
+        resolve: (response) => { if (performance.now() - started >= 50 || op === 'open' || op === 'close') memoryTiming('helper.request.done', started, fields); resolve(response.result); },
+        reject: (error) => { memoryTiming('helper.request.failed', started, fields); reject(error); }, timer,
+      });
       this.child.stdin.write(line, (error) => {
         if (!error) return;
         const item = this.pending.get(id);
