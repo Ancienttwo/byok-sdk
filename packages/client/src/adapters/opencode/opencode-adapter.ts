@@ -22,6 +22,9 @@ import { OPENCODE_VERSION_POLICY, opencodeVersionToken } from './opencode-versio
 import { resolveOpenCodeBin } from './resolve-bin.js';
 import { object, OpenCodeProjection, type OpenCodeTurnOutcome } from './projection.js';
 
+/** OAR's record of a child's own update that arrived once the root prompt was answered: native only, no events (vendored `shared/acp/records.ts`). */
+const CHILD_UPDATE_AFTER_ANSWER = 'opencode/session/child_update/after_answer';
+
 export interface OpenCodeAdapterOptions {
   /** Ordered Host model ids. The SDK has no default and does not consult prices or a model catalog. */
   models: readonly string[];
@@ -221,7 +224,12 @@ class OpenCodeSession implements Session {
           }
         }
       }
-      if (this.prompting) this.projection?.consume(record, event => this.queue.push(event), outcome => this.settle?.(outcome));
+      if (record.kind === 'frame' && body?.type === CHILD_UPDATE_AFTER_ANSWER) {
+        console.warn(`[byok/client] opencode child ${record.sessionId} update after the root prompt answer is not delivered to this turn`);
+        return;
+      }
+      // The turn ends at the root turn end: later frames are recorded by OAR and not delivered to it.
+      if (this.prompting) this.projection?.consume(record, event => this.queue.push(event), outcome => { this.prompting = false; this.settle?.(outcome); });
     } catch (error) { this.halt(error); throw error; }
   }
   private halt(error: unknown): void {
@@ -266,6 +274,7 @@ class OpenCodeSession implements Session {
   }
   private stop(): Promise<void> {
     this.ending = true;
+    this.prompting = false;
     this.stopAttempt ??= (async () => {
       try {
         try { this.child?.observeDescendants(); }

@@ -10,10 +10,10 @@ import type { RuntimeFailurePhase } from '../runtime-failure';
 import { promises as fs } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { oarStartClassifier, runtimeStartFailure } from '../adapters/runtime-start-failure';
-import { SessionNotFoundError } from '../../vendor/oar/95c6547/contracts/session-not-found-error';
-import { SessionUnavailableError } from '../../vendor/oar/95c6547/contracts/session-unavailable-error';
-import { UnsupportedOptionError } from '../../vendor/oar/95c6547/contracts/errors';
-import { RuntimeFailureError } from '../../vendor/oar/95c6547/contracts/runtime-failure-error';
+import { SessionNotFoundError } from '../../vendor/oar/2f81b34/contracts/session-not-found-error';
+import { SessionUnavailableError } from '../../vendor/oar/2f81b34/contracts/session-unavailable-error';
+import { UnsupportedOptionError } from '../../vendor/oar/2f81b34/contracts/errors';
+import { RuntimeFailureError } from '../../vendor/oar/2f81b34/contracts/runtime-failure-error';
 
 const teardownIsNotExecutionPhase = (): RuntimeFailurePhase => {
   // @ts-expect-error teardown evidence belongs to Sprint Row 3, not the execution failure union.
