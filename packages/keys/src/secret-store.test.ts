@@ -20,6 +20,20 @@ describe('Linux Secret Service', () => {
   const result = (exitCode = 0, stdout = '', stderr = '') => ({ exitCode, stdout, stderr });
   const store = (commandRunner: CommandRunner) => new LinuxSecretServiceSecretStore({ platform: 'linux', commandRunner });
 
+  it('#2184 keeps NUL account input distinct from unavailable tooling, except the boolean probe', async () => {
+    const runner = vi.fn<CommandRunner>(runCommand);
+    const subject = new LinuxSecretServiceSecretStore({ platform: 'linux', account: CANARY + NUL, commandRunner: runner });
+    for (const operation of [() => subject.get(name), () => subject.delete(name), () => subject.set(name, 'value')]) {
+      const failure = await operation().catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure).toHaveProperty('message', expect.stringMatching(/^spawn argument [45] contains a NUL byte$/));
+      expect(failure).not.toHaveProperty('code');
+      expect(String(failure)).not.toContain(CANARY);
+    }
+    await expect(subject.available()).resolves.toBe(false);
+    expect(runner).not.toHaveBeenCalled();
+  });
+
   it('rejects oversized encoded stdin before spawning, including the storage prefix bytes', async () => {
     const runner = vi.fn<CommandRunner>().mockResolvedValue(result());
     await expect(store(runner).set(name, 'x'.repeat(6144))).rejects.toMatchObject({ code: 'KEYCHAIN_SECRET_INVALID' });
@@ -30,11 +44,11 @@ describe('Linux Secret Service', () => {
     expect(Buffer.byteLength(runner.mock.calls[0]![2]!)).toBe(8192);
   });
 
-  it.runIf(process.platform !== 'win32')('refuses a signal-killed child as unavailable for lookup, clear and availability', async () => {
+  it.runIf(process.platform !== 'win32')('#2184 distinguishes a signal-killed command from unavailable tooling', async () => {
     const subject = store(() => runCommand(process.execPath, ['-e', 'process.kill(process.pid, "SIGTERM")']));
     expect(await Promise.allSettled([subject.get(name), subject.delete(name), subject.available()])).toMatchObject([
-      { status: 'rejected', reason: { code: 'KEYCHAIN_UNAVAILABLE' } },
-      { status: 'rejected', reason: { code: 'KEYCHAIN_UNAVAILABLE' } },
+      { status: 'rejected', reason: { code: 'KEYCHAIN_READ_FAILED' } },
+      { status: 'rejected', reason: { code: 'KEYCHAIN_DELETE_FAILED' } },
       { status: 'fulfilled', value: false },
     ]);
   });

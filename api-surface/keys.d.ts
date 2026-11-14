@@ -37,26 +37,26 @@ export declare class AnthropicMessagesClient {
 /** Pull the assistant text out of a Messages API payload (`providers.ts:1084`). */
 export declare function anthropicMessageText(payload: Record<string, unknown>): string;
 // ==== @byok-sdk/keys dist/command-runner.d.ts ====
-/** A finished child process, ported from `aip-main-open@c6a5385` `index.ts:284-288`. */
+/** A finished child process. A signal termination has null exitCode and carries signal. */
 export interface CommandResult {
-    exitCode: number;
+    exitCode: number | null;
+    signal?: NodeJS.Signals;
     stderr: string;
     stdout: string;
 }
 /**
- * The injection seam the macOS backend is written against. Unit tests supply a
- * fake so no test ever reads or writes a real credential store; production code
- * gets {@link runCommand}.
+ * The injection seam the OS backends use. Runners return actual exit
+ * codes or signal termination, and reject on start or input failures.
  */
 export type CommandRunner = (executable: string, args: string[], stdin?: string) => Promise<CommandResult>;
 /**
- * Spawn `executable`, feed it `stdin`, and collect its output
- * (`index.ts:2498-2527`).
- *
- * It never rejects: spawn/input failures and abnormal termination resolve as exit code 127 so an
- * `available()` probe can treat "no such binary" the same way it treats "binary
- * said no". Stdin is always closed, otherwise a child that reads
- * to EOF would hang forever.
+ * Spawn `executable`, close stdin after sending input, and collect output.
+ * NUL command/args/env are refused before spawn; no cwd override is supplied.
+ * Start failures reject with only a trusted string code and fixed message,
+ * discarding original message/path/spawnargs/env/cwd/cause. Input failures
+ * also retain only code, with name `CommandInputError` and a fixed message.
+ * No exit code is synthesized: a signal termination returns null exitCode
+ * and signal. Callers that probe availability must catch failures themselves.
  */
 export declare function runCommand(executable: string, args: string[], stdin?: string): Promise<CommandResult>;
 // ==== @byok-sdk/keys dist/custody.d.ts ====

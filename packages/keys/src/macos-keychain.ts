@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { type CommandRunner, runCommand } from './command-runner.js';
+import { assertNoNulSpawnInput, spawnStartError } from '@byok-sdk/core/system-tool';
 import { ByokKeysError } from './errors.js';
 import { assertSecretName, assertSecretNamespace } from './secret-name.js';
 import {
@@ -75,18 +76,23 @@ export class MacOsKeychainSecretStore<TName extends string = string>
 
   async available(): Promise<boolean> {
     if (this.#platform !== 'darwin') return false;
-    const result = await this.#commandRunner('/usr/bin/security', [
-      ...(this.#keychainPath === undefined
-        ? ['default-keychain', '-d', 'user']
-        : ['show-keychain-info', this.#keychainPath]),
-    ]);
-    return result.exitCode === 0;
+    try {
+      const result = await this.#commandRunner('/usr/bin/security', [
+        ...(this.#keychainPath === undefined
+          ? ['default-keychain', '-d', 'user']
+          : ['show-keychain-info', this.#keychainPath]),
+      ]);
+      return result.exitCode === 0;
+    } catch {
+      // Availability is a boolean probe, including when its input is invalid.
+      return false;
+    }
   }
 
   async delete(name: TName): Promise<boolean> {
     const service = this.#service(name);
     this.#assertMacOs();
-    const result = await this.#commandRunner('/usr/bin/security', [
+    const result = await this.#invoke('DELETE', [
       'delete-generic-password',
       '-a',
       this.#account,
@@ -107,7 +113,7 @@ export class MacOsKeychainSecretStore<TName extends string = string>
   async get(name: TName): Promise<string | undefined> {
     const service = this.#service(name);
     this.#assertMacOs();
-    const result = await this.#commandRunner('/usr/bin/security', [
+    const result = await this.#invoke('READ', [
       'find-generic-password',
       '-a',
       this.#account,
@@ -173,8 +179,8 @@ export class MacOsKeychainSecretStore<TName extends string = string>
         ? []
         : [quoteSecurityInteractiveArgument(this.#keychainPath)]),
     ].join(' ');
-    const result = await this.#commandRunner(
-      '/usr/bin/security',
+    const result = await this.#invoke(
+      'WRITE',
       ['-i'],
       `${command}\n`,
     );
@@ -182,6 +188,25 @@ export class MacOsKeychainSecretStore<TName extends string = string>
       throw new ByokKeysError(
         'KEYCHAIN_WRITE_FAILED',
         'macOS Keychain could not store the requested secret',
+      );
+    }
+  }
+
+  async #invoke(operation: 'READ' | 'DELETE' | 'WRITE', args: string[], stdin?: string) {
+    // Refuse caller input before translating runner failures into provider availability.
+    assertNoNulSpawnInput('/usr/bin/security', args, process.env);
+    try { return await this.#commandRunner('/usr/bin/security', args, stdin); }
+    catch (error) {
+      const input = error instanceof Error && error.name === 'CommandInputError';
+      const cause = spawnStartError(error);
+      if (input) {
+        cause.name = 'CommandInputError';
+        cause.message = `command input failed: ${cause.code ?? 'unknown'}`;
+      }
+      throw new ByokKeysError(
+        input ? `KEYCHAIN_${operation}_FAILED` : 'KEYCHAIN_UNAVAILABLE',
+        input ? 'macOS Keychain command input failed' : 'macOS Keychain is unavailable',
+        { cause },
       );
     }
   }

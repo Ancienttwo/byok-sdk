@@ -1,3 +1,16 @@
+import { spawn as nodeSpawn } from 'node:child_process';
+import { inspect } from 'node:util';
+import { PassThrough } from 'node:stream';
+import { EventEmitter } from 'node:events';
+import { disposeOwnedProcessTree } from '../adapters/process-tree';
+vi.mock('../adapters/process-tree', async importOriginal => {
+  const actual = await importOriginal<typeof import('../adapters/process-tree')>();
+  return { ...actual, disposeOwnedProcessTree: vi.fn(actual.disposeOwnedProcessTree) };
+});
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { promises as fs, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -12,6 +25,33 @@ async function fixture(own:(pid:number)=>Promise<void> = async()=>{}){
 }
 // Production durable shell ownership is POSIX-only; Windows admission is explicitly refused.
 describe.skipIf(process.platform==='win32')('durable shell ownership and public output behavior',()=>{
+  it.each(['command', 'cwd'])('#2184 refuses NUL %s before spawn', async slot => {
+    const f = await fixture();
+    vi.mocked(nodeSpawn).mockClear();
+    const result = await f.env.exec(slot === 'command' ? 'private-spawn-canary\0' : 'true', { cwd: slot === 'cwd' ? 'private-spawn-canary\0' : f.root }, BACKGROUND_CONTEXT);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected failure');
+    expect(result.error).toMatchObject({ code: 'spawn_error', cause: { message: expect.stringContaining('contains a NUL byte') } });
+    expect(inspect(result.error, { showHidden: true, depth: null })).not.toContain('private-spawn-canary');
+    expect(nodeSpawn).not.toHaveBeenCalled();
+  });
+  it.each(['sync', 'async'])('#2184 sanitizes %s shell start causes and retains codes', async mode => {
+    for (const code of ['ENOENT', 'EACCES', undefined]) {
+      const canary = 'private-spawn-canary';
+      const raw = Object.assign(new Error(canary), { code, path: canary, spawnargs: [canary], env: { SECRET: canary }, cwd: canary, cause: new Error(canary) });
+      expect(inspect(raw, { showHidden: true, depth: null })).toContain(canary);
+      const child = Object.assign(new EventEmitter(), { pid: 123, stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() });
+      const f = await fixture(async () => { child.emit('error', raw); child.emit('close', null); });
+      if (mode === 'async') vi.mocked(disposeOwnedProcessTree).mockResolvedValueOnce(undefined);
+      vi.mocked(nodeSpawn).mockImplementationOnce(() => { if (mode === 'sync') throw raw; return child as unknown as ReturnType<typeof nodeSpawn>; });
+      const result = await f.env.exec('true', undefined, BACKGROUND_CONTEXT);
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected failure');
+      expect(result.error).toMatchObject({ code: 'spawn_error', cause: { message: `spawn failed: ${code ?? 'unknown'}`, code } });
+      expect(inspect(result.error, { showHidden: true, depth: null })).not.toContain(canary);
+      for (const key of ['path', 'spawnargs', 'env', 'cwd', 'cause']) expect(result.error.cause).not.toHaveProperty(key);
+    }
+  });
   it('holds real bash inert until parent ownership ACK, then runs once without provider env',async()=>{
     let pid:number|undefined;let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});releases.push(release);
     const f=await fixture(async observed=>{pid=observed;await gate;});let text='';

@@ -47,7 +47,7 @@ describe('system tools start from a trusted location, never PATH (#1304)', () =>
 
   it('the real runners start nothing for a bare name without a trusted location', async () => {
     await expect(defaultRunner('byok-no-such-tool', [])).rejects.toMatchObject({ name: 'SystemToolUnavailableError', tool: 'byok-no-such-tool' });
-    await expect(runDeviceCommand('byok-no-such-tool', [])).resolves.toEqual({ exitCode: 127, stdout: '', stderr: 'command unavailable' });
+    await expect(runDeviceCommand('byok-no-such-tool', [])).rejects.toMatchObject({ code: 'SYSTEM_TOOL_UNAVAILABLE', message: 'spawn failed: SYSTEM_TOOL_UNAVAILABLE' });
   });
 
   it.runIf(HOST_TOOLS[process.platform] !== undefined)('this host has every tool at its trusted location', () => {

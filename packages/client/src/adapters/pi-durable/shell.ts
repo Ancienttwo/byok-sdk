@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { assertNoNulSpawnInput, spawnStartError } from '@byok-sdk/core/system-tool';
 import { createWriteStream, promises as fs } from 'node:fs';
 import { once } from 'node:events';
 import { finished } from 'node:stream/promises';
@@ -20,7 +21,10 @@ function utf8Boundary(chunk: Buffer): number {
   return start;
 }
 
-/** Public ExecutionEnv override: a fixed gate waits for parent group ownership before exec of the tool command. */
+/**
+ * Public ExecutionEnv override: a fixed gate waits for parent group ownership before exec of the tool command.
+ * NUL input is refused before spawn; start-error causes retain only a trusted string code and fixed message.
+ */
 export function durableShell(env: NodeExecutionEnv, shellEnv: NodeJS.ProcessEnv, own: (pid: number) => Promise<void>, released: (pid: number) => void) {
   const active = new Set<() => Promise<void>>();
   const exec = async (command: string, options: ShellExecOptions | undefined, context: Context): Promise<Result<ShellExecResult, ExecutionError>> => {
@@ -30,8 +34,12 @@ export function durableShell(env: NodeExecutionEnv, shellEnv: NodeJS.ProcessEnv,
     let child: ChildProcess;
     const gate='IFS= read -r permit || exit 78; [ "$permit" = byok-durable-shell ] || exit 78; exec "$1" -c "$2" </dev/null';
     // bash may source ~/.bashrc when stdin is a socket; nothing may run before own(). dash rejects --norc.
-    try { child = spawn(shell, [...(shell==='/bin/bash'?['--norc']:[]),'-c',gate,'byok-durable-shell',shell,command], { cwd: options?.cwd ?? env.cwd, env: shellEnv, detached: true, stdio: ['pipe','pipe','pipe'] }); }
+    const args = [...(shell === '/bin/bash' ? ['--norc'] : []), '-c', gate, 'byok-durable-shell', shell, command];
+    const cwd = options?.cwd ?? env.cwd;
+    try { assertNoNulSpawnInput(shell, args, shellEnv, cwd); }
     catch (cause) { return err(new ExecutionError('spawn_error', 'Unable to spawn durable shell', cause as Error)); }
+    try { child = spawn(shell, args, { cwd, env: shellEnv, detached: true, stdio: ['pipe','pipe','pipe'] }); }
+    catch (cause) { return err(new ExecutionError('spawn_error', 'Unable to spawn durable shell', spawnStartError(cause))); }
     let closed = false, quiesced = false;
     const state: {failure?:ExecutionError}={};
     const hasFailure=()=>state.failure!==undefined;
@@ -77,7 +85,7 @@ export function durableShell(env: NodeExecutionEnv, shellEnv: NodeJS.ProcessEnv,
     let foregroundEnded = false;
     const foreground = new Promise<void>(resolve => {
       const end = () => { foregroundEnded = true; if (timeout) clearTimeout(timeout); resolve(); };
-      child.once('error', () => { state.failure ??= new ExecutionError('spawn_error', 'Unable to spawn durable shell'); end(); });
+      child.once('error', cause => { state.failure ??= new ExecutionError('spawn_error', 'Unable to spawn durable shell', spawnStartError(cause)); end(); });
       child.once('exit', value => { code = value; end(); });
     });
     try {

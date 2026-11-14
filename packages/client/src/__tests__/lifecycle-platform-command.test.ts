@@ -1,3 +1,11 @@
+import { spawn as nodeSpawn } from 'node:child_process';
+import { inspect } from 'node:util';
+import { PassThrough } from 'node:stream';
+
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,6 +31,30 @@ function alive(pid: number): boolean {
 }
 
 describe('lifecycle/platform-command: runBounded (#1971)', () => {
+  it('#2184 refuses NUL input before spawn with a slot-only diagnostic', async () => {
+    vi.mocked(nodeSpawn).mockClear();
+    await expect(runBounded(process.execPath, [], 1000, { cwd: 'private-spawn-canary\0' })).rejects.toThrow('spawn cwd contains a NUL byte');
+    expect(nodeSpawn).not.toHaveBeenCalled();
+  });
+
+  it.each(['sync', 'async'])('#2184 sanitizes %s start failures and retains classification codes', async mode => {
+    for (const code of ['ENOENT', 'EACCES', undefined]) {
+      const canary = 'private-spawn-canary';
+      const raw = Object.assign(new Error(canary), { code, path: canary, spawnargs: [canary], env: { SECRET: canary }, cwd: canary, cause: new Error(canary) });
+      expect(inspect(raw, { showHidden: true, depth: null })).toContain(canary);
+      const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() });
+      vi.mocked(nodeSpawn).mockImplementationOnce(() => {
+        if (mode === 'sync') throw raw;
+        queueMicrotask(() => { child.emit('error', raw); child.emit('close', null); });
+        return child as unknown as ReturnType<typeof nodeSpawn>;
+      });
+      const failure = await runBounded(process.execPath, [], 1000).catch((error: unknown) => error);
+      expect(failure).toMatchObject({ message: `spawn failed: ${code ?? 'unknown'}`, code });
+      expect(inspect(failure, { showHidden: true, depth: null })).not.toContain(canary);
+      for (const key of ['path', 'spawnargs', 'env', 'cwd', 'cause']) expect(failure).not.toHaveProperty(key);
+    }
+  });
+
   it('resolves a non-zero exit with its output', async () => {
     await expect(runBounded(process.execPath, ['-e', 'process.stdout.write("out"); process.stderr.write("err"); process.exit(3)'], 10_000))
       .resolves.toEqual({ code: 3, stdout: 'out', stderr: 'err' });
