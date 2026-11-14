@@ -166,7 +166,7 @@ describe('SqliteLocalTaskJournal', () => {
       } finally {
         db.close();
       }
-      await expect(journal.readTaskCancellation('task-1', IDENTITY, 1)).rejects.toThrow('durable cancellation candidate bytes/hash mismatch');
+      await expect(journal.readTaskCancellation('task-1', IDENTITY, 1)).rejects.toMatchObject({ name: 'JournalIntegrityError', cause: expect.objectContaining({ message: expect.stringContaining('durable cancellation candidate bytes/hash mismatch') }) });
       expect(readRows(storeDir, "SELECT bytes_hash FROM journal_envelope WHERE envelope_id = 'cancel-corrupt'"))
         .toEqual([{ bytes_hash: journalHash(bytes) }]);
       expect((await journal.readTask('task-1', IDENTITY))?.localState).toBe('received');
@@ -206,7 +206,7 @@ describe('SqliteLocalTaskJournal', () => {
       const journal = build(await tmpStore());
       const bytes = JSON.stringify({ v: 1, id: 'cancel-1', type: 'task.cancel', task_id: 'task-1' });
       await journal.appendEnvelope(envelopeRecord({ envelopeId: 'cancel-1', bytes, bytesHash: journalHash(bytes), opensTask: false }));
-      await expect(journal.readTaskCancellation('task-1', { ...IDENTITY, [field]: 'other' }, 1)).rejects.toThrow('journal enrollment identity mismatch');
+      await expect(journal.readTaskCancellation('task-1', { ...IDENTITY, [field]: 'other' }, 1)).rejects.toMatchObject({ name: 'JournalIntegrityError', cause: expect.objectContaining({ message: expect.stringContaining('journal enrollment identity mismatch') }) });
     });
   });
 
@@ -960,7 +960,7 @@ describe('SqliteLocalTaskJournal', () => {
         const { bytes, bytesHash } = cancel('cancelled', seq, bound);
         readRows(storeDir, `UPDATE journal_envelope SET bytes = '${bytes}', bytes_hash = '${bytesHash}' WHERE envelope_id = 'cancel-cancelled-${seq}'`);
       }
-      await expect(journal.pruneConfirmedJournalTask('cancelled', new Date(Date.now() + 60_000))).rejects.toThrow('invalid durable cancellation binding');
+      await expect(journal.pruneConfirmedJournalTask('cancelled', new Date(Date.now() + 60_000))).rejects.toMatchObject({ name: 'JournalIntegrityError', cause: expect.objectContaining({ message: expect.stringContaining('invalid durable cancellation binding') }) });
       expect(countRows(storeDir, 'journal_envelope')).toBe(1 + rows.length);
       expect(countRows(storeDir, 'journal_task')).toBe(1);
     });
@@ -974,8 +974,8 @@ describe('SqliteLocalTaskJournal', () => {
         ['enrollment', 'cancel-cancelled-3', undefined, "device_id = 'other'", 'enrollment identity mismatch'],
         ['withheld bytes', 'cancel-cancelled-3', undefined, 'withheld_bytes = length(bytes)', 'withheld offer row carries bytes'],
         ['withheld enrollment', 'cancel-cancelled-3', undefined, "withheld_bytes = length(bytes), bytes = '', tenant_id = 'other'", 'enrollment identity mismatch'],
-        // A parser error can quote stored bytes, so only the fixed reason reaches the message.
-        ['non-JSON bytes', 'offer-cancelled', undefined, `bytes = 'secret-text', bytes_hash = '${journalHash('secret-text')}'`, /^journal integrity check failed \(task "cancelled"\)$/],
+        // A parser error can quote stored bytes; it stays in cause, out of the fixed message.
+        ['non-JSON bytes', 'offer-cancelled', undefined, `bytes = 'secret-text', bytes_hash = '${journalHash('secret-text')}'`, 'is not valid JSON'],
       ] as const)('preserves all evidence for invalid %s', async (_kind, envelopeId, binding, mutation, error) => {
         const storeDir = await tmpStore();
         const journal = build(storeDir, { clock: at('2026-08-01T00:00:00.000Z') });
@@ -999,8 +999,8 @@ describe('SqliteLocalTaskJournal', () => {
         const snapshot = () => tables.map((table) => readRows(storeDir, `SELECT * FROM ${table} ORDER BY rowid`));
         const before = snapshot();
         const refused = journal.pruneConfirmedJournalTask('cancelled', new Date('2026-08-15T00:00:00.000Z'));
-        await expect(refused).rejects.toThrow(error);
-        await expect(refused).rejects.toMatchObject({ name: 'JournalIntegrityError', taskId: 'cancelled', message: expect.stringContaining('(task "cancelled")') });
+        await expect(refused).rejects.toMatchObject({ name: 'JournalIntegrityError', taskId: 'cancelled',
+          message: 'journal integrity check failed (task "cancelled")', cause: expect.objectContaining({ message: expect.stringContaining(error) }) });
         expect(snapshot()).toEqual(before);
       });
     });
@@ -1024,7 +1024,7 @@ describe('SqliteLocalTaskJournal', () => {
       await journal.appendEnvelope(offer('cancelled', 1));
       await journal.appendEnvelope(cancel('cancelled', 2));
       readRows(storeDir, "UPDATE journal_envelope SET bytes = replace(bytes, 'task.cancel', 'task.started') WHERE envelope_id = 'cancel-cancelled-2'");
-      await expect(journal.pruneConfirmedJournalTask('cancelled', new Date())).rejects.toThrow('durable cancellation candidate bytes/hash mismatch');
+      await expect(journal.pruneConfirmedJournalTask('cancelled', new Date())).rejects.toMatchObject({ name: 'JournalIntegrityError', cause: expect.objectContaining({ message: expect.stringContaining('durable cancellation candidate bytes/hash mismatch') }) });
       expect(countRows(storeDir, 'journal_envelope')).toBe(2);
       expect((await journal.readTask('cancelled', IDENTITY))?.localState).toBe('received');
     });

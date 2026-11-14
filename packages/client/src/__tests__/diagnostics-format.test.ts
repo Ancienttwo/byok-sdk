@@ -43,6 +43,10 @@ describe('diagnostics/format: formatAgentEvent', () => {
 });
 
 describe('diagnostics/format: formatDaemonEventLine', () => {
+  it('quotes a retention failure task id, which the protocol does not constrain', () => {
+    expect(formatDaemonEventLine({ kind: 'retention-failure', ts: 'T', trigger: 'periodic', classId: 'confirmed-journal', code: 'sweep_failed', count: 1, taskId: 'a\n\u001b[2Jb' }))
+      .toBe('[T] retention-failure trigger=periodic class=confirmed-journal count=1 code=sweep_failed taskId="a\\n\\u001b[2Jb"');
+  });
   it('F6 renders suppressed built-in risk codes on local decision and reminder lines', () => {
     expect(formatDaemonEventLine({ kind: 'tool-authorization', ts: 'T', taskId: 't', toolName: 'bash',
       decision: 'allow', authorization: { source: 'rule', ruleIds: ['push-origin'] }, reasons: [], suppressedReasons: ['destructive-git'] }))

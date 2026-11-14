@@ -147,6 +147,15 @@ it('confirmed tasks that cannot be pruned are paged past with one cursor query p
  expect(list.mock.calls.map(([,limit,after])=>[limit,after])).toEqual([[1,undefined],[1,'broken-0'],[1,'broken-1'],[1,'broken-2']]);
  expect(await journal.readTask('expired',identity)).toBeUndefined();expect(await journal.readTask('broken-0',identity)).toBeDefined();
 });
+it('a failed page query is reported after the task integrity failures already collected',async()=>{
+ const store=testScratchRoot(),journal=new SqliteLocalTaskJournal({storeDir:store});cleanups.push(()=>journal.close());
+ for(const id of ['broken-0','expired'])await terminal(journal,id,'confirmed','2026-08-01T00:00:00.000Z');
+ vi.spyOn(journal,'pruneConfirmedJournalTask').mockImplementation(async taskId=>{throw new JournalIntegrityError(taskId,new Error('integrity'));});
+ const list=journal.listPrunableConfirmedTasks.bind(journal);
+ vi.spyOn(journal,'listPrunableConfirmedTasks').mockImplementation(async(cutoff,limit,after)=>{if(after!==undefined)throw new Error('page');return list(cutoff,limit,after);});
+ const f=await fixture({store,journal,max:1});await f.sweeper.runPass('periodic');
+ expect(f.failures).toEqual(['confirmed-journal:sweep_failed:broken-0','confirmed-journal:sweep_failed']);
+});
 it('a journal that ignores the after cursor fails the confirmed-journal sweep with a contract error',async()=>{
  const store=testScratchRoot(),journal=new SqliteLocalTaskJournal({storeDir:store});cleanups.push(()=>journal.close());
  for(const id of ['broken-0','broken-1'])await terminal(journal,id,'confirmed');
