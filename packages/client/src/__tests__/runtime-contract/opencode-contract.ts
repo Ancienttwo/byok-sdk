@@ -130,7 +130,7 @@ export function openCodeContract(
     'gate.auto': notAdvertised(descriptor, 'toolAuthorizationAuto'),
     'egress.declaredHostsOnly': egressCheck(async () => { await turn(); }, declaredHosts),
   };
-  return { title: `${line} runtime contract (${target.mode} ${target.expectedVersion})`, descriptor, plan, lifecycle: openCodeLifecycle(runtime, target, openCodeEnv) };
+  return { title: `${line} runtime contract (${target.mode} ${target.expectedVersion})`, descriptor, plan, lifecycle: openCodeLifecycle(runtime, target, openCodeEnv), target, openCodeEnv };
 }
 
 const isAlive = (pid: number): boolean => {

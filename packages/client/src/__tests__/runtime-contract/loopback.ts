@@ -98,7 +98,7 @@ export type ProviderStep =
   | { readonly kind: 'tool'; readonly tool: ProviderTool; readonly args: Record<string, unknown> }
   | { readonly kind: 'text'; readonly chunks: readonly string[] };
 
-export type ProviderScript = (request: ProviderRequest) => ProviderStep;
+export type ProviderScript = (request: ProviderRequest) => ProviderStep | Promise<ProviderStep>;
 
 export interface LoopbackProvider {
   readonly baseUrl: string;
@@ -282,7 +282,7 @@ export async function startLoopbackProvider(wire: ProviderWire, script: Provider
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => chunks.push(chunk));
-    request.on('end', () => {
+    request.on('end', async () => {
       const method = request.method ?? 'GET';
       const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
       const text = Buffer.concat(chunks).toString('utf8');
@@ -301,7 +301,12 @@ export async function startLoopbackProvider(wire: ProviderWire, script: Provider
         }
         return;
       }
-      const step = script(recorded);
+      let step: ProviderStep;
+      try { step = await script(recorded); }
+      catch (error) {
+        response.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { message: String(error) } }));
+        return;
+      }
       const stream = body.stream === true;
       if (wire === 'openai-responses') respondResponses(response, step);
       else if (wire === 'openai-chat') respondChat(response, step, stream, model);
