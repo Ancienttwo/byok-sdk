@@ -109,6 +109,20 @@ test('the client manifest admits only the exact runtime contract script', t => {
   }
 });
 
+test('the client build admits exactly the Pi jiti seed step after the export assets (#1927)', t => {
+  const f = fixture(t), build = 'tsup && node scripts/build-pi-export-assets.mjs && tsc -p tsconfig.build.json';
+  f.write('packages/client/package.json', { ...f.manifest, scripts: { build } });
+  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qam', 'build'], { cwd: f.cwd });
+  f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
+  const seed = ' && node scripts/build-pi-jiti-seed.mjs';
+  f.write('packages/client/package.json', { ...f.manifest, scripts: { build: build.replace('export-assets.mjs', `export-assets.mjs${seed}`) } });
+  assert.deepEqual(selectImpact(['packages/client/package.json'], f).families, ['npm-release-pack']);
+  for (const changed of [`${build}${seed}`, build.replace('export-assets.mjs', `export-assets.mjs${seed}`).replace('tsup', 'tsup --minify')]) {
+    f.write('packages/client/package.json', { ...f.manifest, scripts: { build: changed } });
+    assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
+  }
+});
+
 // #1094: the generated DaemonConfig schema is appended after the upgrade manifest, exactly.
 test('the client files list admits exactly the appended upgrade history (#1316)', t => {
   const f = fixture(t);

@@ -481,6 +481,13 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
         && before.scripts.build === after.scripts.build.replace(' && tsc -p', sealedBuild + ' && tsc -p') && before.scripts.build.includes(sealedBuild + ' && tsc -p')) {
         after.scripts.build = before.scripts.build;
       }
+      // #1927 generates the Pi jiti seed: exactly one build step, right after the Pi export assets.
+      const exportAssets = ' && node scripts/build-pi-export-assets.mjs', seedBuild = ' && node scripts/build-pi-jiti-seed.mjs';
+      if (typeof before.scripts?.build === 'string' && typeof after.scripts?.build === 'string'
+        && before.scripts.build.includes(exportAssets) && !before.scripts.build.includes(seedBuild)
+        && after.scripts.build === before.scripts.build.replace(exportAssets, exportAssets + seedBuild)) {
+        after.scripts.build = before.scripts.build;
+      }
       if (before.scripts?.['test:runtime-contract'] === undefined && after.scripts?.['test:runtime-contract'] === RUNTIME_CONTRACT_SCRIPT) {
         delete after.scripts['test:runtime-contract'];
       }
