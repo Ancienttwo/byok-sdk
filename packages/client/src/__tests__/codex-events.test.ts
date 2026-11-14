@@ -144,6 +144,8 @@ describe('required Codex native projection', () => {
         first.push(e);
       }),
     ).toThrow('sink failed');
+    // A later record that derives no event must not drop the unfinished one (#2180 review).
+    s.projection.consume(s.kernel, s.kernel.frame({ type: 'x', native: {}, events: [] } as never), (e) => first.push(e));
     s.projection.consume(s.kernel, row, (e) => first.push(e));
     s.projection.consume(s.kernel, row, (e) => first.push(e));
     expect(first.map((e) => e.type)).toEqual(['tool_result', 'artifact']);
