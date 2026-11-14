@@ -18,7 +18,7 @@ import { AGENT_MEMORY_INTENT_CAPABILITY, createEnvelope } from '@byok-sdk/protoc
 import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
 import * as memoryRuntime from '../daemon/agent-memory';
 import { CursorStore } from '../daemon/cursor-store';
-import * as helperClient from '../daemon/agent-memory-fs-helper';
+import * as helperClient from '../daemon/agent-memory-fs-helper-internal';
 import type { AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 
 const helperBuilt = builtAgentMemoryFilesystemHelperBin() !== undefined;
@@ -170,11 +170,9 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       { mail: { mcpServers: { gmail: { command: '/private/device/gmail-connector' } } } },
       daemon.status().toolsets.revision,
     );
-    await vi.waitFor(
-      () => expect(server.received.filter((envelope) => envelope.type === 'conn.hello')).toHaveLength(2),
-      { timeout: 5_000 },
-    );
-    const reconnectedHello = server.received.filter((envelope) => envelope.type === 'conn.hello').at(-1);
+    // Memory proof may independently refresh hello while the toolset reload is
+    // in flight. Select the reload's snapshot by its exact declared toolsets.
+    const reconnectedHello = await server.waitFor((envelope) => envelope.type === 'conn.hello' && JSON.stringify(envelope.payload.configuredToolsets) === JSON.stringify(['mail']));
     if (reconnectedHello?.type !== 'conn.hello') throw new Error('unreachable');
     expect(reconnectedHello.payload.configuredToolsets).toEqual(['mail']);
     expect(JSON.stringify(reconnectedHello.payload)).not.toContain('/private/device/gmail-connector');
@@ -406,7 +404,7 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
     await server.close();
   });
 
-  async function helloCapabilities(overrides: { transport?: AgentMemoryIntentTransport; agentHome?: boolean; helperBin?: string }): Promise<readonly string[]> {
+  async function helloCapabilities(overrides: { transport?: AgentMemoryIntentTransport; agentHome?: boolean; helperBin?: string; waitForProof?: boolean }): Promise<readonly string[]> {
     const storeDir = await tmpDir('byok-conn-hello-intent-store-');
     lastStoreDir = storeDir;
     const hostStorageRoot = await tmpDir('byok-conn-hello-intent-root-');
@@ -425,13 +423,13 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
     );
     await daemon.pair('pairing-code');
     await daemon.start();
-    const hello = await server.waitFor((event) => event.type === 'conn.hello');
+    const hello = await server.waitFor((event) => event.type === 'conn.hello' && (!overrides.waitForProof || event.payload.capabilities?.includes(AGENT_MEMORY_INTENT_CAPABILITY) === true));
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
     return hello.payload.capabilities ?? [];
   }
 
   itProvenBackend('advertises with a transport and an Agent home with a proven Linux or SDK macOS backend', async () => {
-    const capabilities = await helloCapabilities({ transport });
+    const capabilities = await helloCapabilities({ transport, waitForProof: isAgentMemorySecureFilesystemAvailable(false) || process.platform === 'darwin' });
     if (isAgentMemorySecureFilesystemAvailable(false) || process.platform === 'darwin') {
       expect(capabilities).toContain(AGENT_MEMORY_INTENT_CAPABILITY);
     } else {
@@ -449,12 +447,12 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
   });
 
   itMacHelper('advertises on macOS only after the SDK helper passes the real volume probe', async () => {
-    const capabilities = await helloCapabilities({ transport });
+    const capabilities = await helloCapabilities({ transport, waitForProof: true });
     expect(capabilities).toContain(AGENT_MEMORY_INTENT_CAPABILITY);
   });
 
   itWindowsHelper('withholds Windows intents with the SDK helper, before any volume probe', async () => {
-    const probe = vi.spyOn(helperClient, 'openAgentMemoryFilesystemHelper');
+    const probe = vi.spyOn(helperClient, 'openAgentMemoryFilesystemHelperWithBudget');
     try {
       expect(await helloCapabilities({ transport })).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
       expect(probe).not.toHaveBeenCalled();
@@ -462,12 +460,15 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
   });
 
   itMacHelper.each(['ENOTSUP', 'EINVAL', 'EPERM', 'EIO'])('withholds macOS intents when the real-volume helper probe refuses %s', async code => {
-    const probe = vi.spyOn(helperClient, 'openAgentMemoryFilesystemHelper').mockRejectedValue(Object.assign(new Error('strict volume barrier failed'), { code }));
+    const probe = vi.spyOn(helperClient, 'openAgentMemoryFilesystemHelperWithBudget').mockRejectedValue(Object.assign(new Error('strict volume barrier failed'), { code }));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       const capabilities = await helloCapabilities({ transport });
+      await vi.waitFor(() => expect(log).toHaveBeenCalledWith(`[byok/client] agent memory backend refused: ${code}`));
       expect(probe).toHaveBeenCalledTimes(1);
       expect(capabilities).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
-    } finally { probe.mockRestore(); }
+      expect(server.received.filter(event => event.type === 'conn.hello').every(event => event.type === 'conn.hello' && !event.payload.capabilities?.includes(AGENT_MEMORY_INTENT_CAPABILITY))).toBe(true);
+    } finally { probe.mockRestore(); log.mockRestore(); }
   });
 
   (process.platform === 'linux' ? it : it.skip).each(['EINVAL', 'EPERM', 'EIO'])('withholds Linux intents after a real directory-probe %s and refuses a stale notice before fetch', async code => {
@@ -491,7 +492,7 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       expect(await helloCapabilities({ transport: { fetch, complete: async () => { throw new Error('not reached'); } } })).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
-      expect(refusals).toBeGreaterThan(0);
+      await vi.waitFor(() => expect(refusals).toBeGreaterThan(0));
       const notice = createEnvelope('agent.memory.intent.available', { intentId: '00000000-0000-4000-8000-000000000001', agentRef: { agentId: 'one', profileRevision: '1' } }, { seq: server.nextSeq() });
       server.pushLongPollEvent(notice);
       await vi.waitFor(() => expect(errors.mock.calls.some(args => String(args[0]).includes('agent.memory.intent.available') && (args[1] as { reason?: string })?.reason === 'filesystem_unavailable')).toBe(true));
