@@ -2182,7 +2182,10 @@ export declare function readSealedProvisioningResult(input: {
  * digest) or `request_conflict`; a generation at or below the profile's
  * watermark is `operation_generation_stale`. Every decision after that consumes the
  * generation and is recorded as a receipt: time window, catalog/pi_model,
- * expected provider triple, pending state, credential scope. An applied
+ * expected provider triple, pending state, credential scope. A credential
+ * store whose `available()` is `false` then rejects with
+ * `secret_store_unavailable` without a receipt or the generation, so the same
+ * request can be sent again once the store is available. An applied
  * operation marks pending, performs its credential-store step, then commits
  * profile + receipt + watermark and clears pending in one store transaction.
  */
