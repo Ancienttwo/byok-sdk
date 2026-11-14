@@ -67,7 +67,7 @@ Do not start from an older SDK tag and edit package manifests to supply missing 
 
 ## P1: Owner resources and private configuration (about 50-65 minutes)
 
-Only the owner performs these dashboard/private-terminal steps. Seats do not run them while preparing this document. If resources already exist at handoff, verify their creator, window and names and report to t3. They still need teardown that day.
+Only the owner performs these dashboard/private-terminal steps. Seats do not run them while preparing this document. If resources already exist, follow [Reusing resources left from 11-11](#reusing-resources-left-from-11-11) before C3. They still need teardown that day.
 
 On the window day, the operator seat saves the C5, C6 and C10 fenced blocks below verbatim on mini-cf as `_ops/p9/c5-roles.sql`, `_ops/p9/c6-baseline.sql` and `_ops/p9/p9.env.template`. Create mode 700 `_ops/p9`, set these files to mode 600 and confirm `git check-ignore _ops/p9`. These files contain SQL or placeholders only. The owner then makes and fills the separate private `p9.env`; seats never read or copy the filled file. This runbook is the tracked source for all three files.
 
@@ -174,6 +174,19 @@ BYOK_CANARY_BASE_URL=<CANARY_HTTPS_ORIGIN>
 P9_H_BASE_URL=<H_HTTPS_ORIGIN>
 BYOK_CANARY_TAIL_FILE=<ABSOLUTE_OPERATOR_CHECKOUT>/_ops/p9/canary-tail.jsonl
 ```
+
+### Reusing resources left from 11-11
+
+The default is to create every resource fresh in C3-C10. Reuse one only after the owner has checked the dashboards, listed what exists, and t3 has recorded the reuse decision in #654. The owner runs every check below; seats see only the result. If a check fails, or the owner is unsure, delete that resource as in P5 and create it from its C row. A reused resource is torn down in P5 like a new one.
+
+| Resource | Reuse only if | Otherwise |
+| --- | --- | --- |
+| Workers Paid (C3) | The plan is active on the same account, and its billing start and charges so far are known. Count those charges against the USD 10 cap | Keep or cancel per T6 |
+| Dev branch `byok-p9` (C4) | It is a development branch of `aiphabee-staging`, not main, with its own host and branch ID, and nothing else uses it. Run the C5 preflight first. If any `byok_p9_*` schema or role exists, drop it with the T4 block, then run C5 and C6 from the start: data and grants from 11-11 are not acceptance evidence | Delete the branch; run C4 |
+| Hyperdrive `byok-p9-h` / `byok-p9-canary` (C7) | The origin is the reused `byok-p9` branch host, port 5432, database `postgres`, user `byok_p9_h.<branch_id>` / `byok_p9_canary.<branch_id>`, TLS on, max origin connections 5. C5 sets new role passwords, so update each configuration's password after C5 | Delete both; run C7 |
+| R2 bucket `byok-p9-staging` (C8) | The bucket is empty, or the owner empties it. Revoke its 11-11 S3 token and create a new token scoped to this bucket | Delete the bucket; run C8 |
+| 11-11 deploy API token (C9) | Never reused. Revoke it if it still exists, then create a new token that expires on the window day | - |
+| Workers `byok-p9-h` / `byok-p9-canary`, if still deployed | Never reused. `byok-p9-h` runs a cron every minute and bills while it exists. Delete both as in T2 before C15, so the window deploys only from the window SHA | - |
 
 ## P2: Migrate, deploy and smoke (owner handles credential commands; seats check redacted results, about 30-45 minutes)
 
