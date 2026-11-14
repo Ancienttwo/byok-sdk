@@ -220,10 +220,16 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     if (journal === undefined) return;
     const cutoff = new Date(budget.now.getTime() - config.ttlMs['confirmed-journal']);
     const tasks = await journal.listPrunableConfirmedTasks(cutoff, budget.remaining());
+    // Tasks are listed oldest first: one that cannot be pruned is reported
+    // after the pass instead of blocking every later confirmed task.
+    const failures: unknown[] = [];
     for (const taskId of tasks) {
       if (!budget.available()) break;
-      if (await journal.pruneConfirmedJournalTask(taskId, cutoff)) budget.removed(0);
+      try { if (await journal.pruneConfirmedJournalTask(taskId, cutoff)) budget.removed(0); }
+      catch (error) { failures.push(error); }
     }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, 'confirmed journal tasks could not be pruned');
   }
   async function sweepPreparation(budget: SweepBudget): Promise<void> {
     const service = options.preparation();
