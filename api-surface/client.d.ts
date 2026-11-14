@@ -11106,7 +11106,7 @@ export interface CreateServiceLifecycleOptions {
      * WinSW binaries obviously aren't present on the "wrong" OS).
      */
     platform?: NodeJS.Platform;
-    /** Platform-specific DI seams (mocked exec, mocked fs, mocked homedir/getuid) — only the fields matching the resolved platform are ever read. */
+    /** Platform-specific DI seams (mocked exec, mocked fs, mocked homedir/uid) — only the fields matching the resolved platform are ever read. */
     deps?: LaunchdDeps & SystemdDeps & WinswDeps & WindowsUserDeps;
     /**
      * An isolated root for the `service-lifecycle` gate that install, repair,
@@ -11231,7 +11231,12 @@ export interface LaunchdDeps {
     run?: Runner;
     fs?: ManagedLifecycleFs;
     homedir?: () => string;
-    /** Defaults to `process.getuid` — macOS/Linux only; this module is never constructed on `win32` (see `create-service-lifecycle.ts`). */
+    /**
+     * The uid of the `gui/<uid>` domain. Defaults to `process.geteuid`, the
+     * uid that owns the plist, launcher and store this process writes, so the
+     * job launchd runs as can read them (#2031). macOS/Linux only; this module
+     * is never constructed on `win32` (see `create-service-lifecycle.ts`).
+     */
     getuid?: () => number;
     /** Clock and wait for the unload deadline; tests drive them. */
     now?: () => number;
