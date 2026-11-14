@@ -82,6 +82,16 @@ export async function canonical(at: string): Promise<string> {
 }
 
 /**
+ * The existing directory `at` and every directory a lookup of it passes
+ * through up to `/`, along the path as given and along its real path: whoever
+ * can rename an entry in one of them can replace `at` (#2028).
+ */
+export async function lookupDirectories(at: string): Promise<string[]> {
+  const chain = (dir: string): string[] => path.dirname(dir) === dir ? [dir] : [dir, ...chain(path.dirname(dir))];
+  return [...new Set([...chain(path.resolve(at)), ...chain(await fs.realpath(at))])];
+}
+
+/**
  * A directory store path without terminal separators and `.` components,
  * exposing its root to lstat. Links and interior `..` stay: resolving them
  * could change the target.

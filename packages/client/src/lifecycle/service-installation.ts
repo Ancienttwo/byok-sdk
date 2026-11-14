@@ -12,7 +12,7 @@ import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-pr
 import { ownedProcessGroupRecord, ownedProcessGroupRuns, type OwnedProcessGroupRecord } from '../adapters/process-tree.js';
 import { acquirePathMutationGate, acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate.js';
 import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle.js';
-import { canonical, checkRestoreTargets, checkStorePaths, directoryStorePath, mkdirReal, parseSnapshotRecord, SNAPSHOT_FORMAT, within, type SnapshotEntry, type SnapshotRecord, type StorePathRefusal } from './store-path-identity.js';
+import { canonical, checkRestoreTargets, checkStorePaths, directoryStorePath, lookupDirectories, mkdirReal, parseSnapshotRecord, SNAPSHOT_FORMAT, within, type SnapshotEntry, type SnapshotRecord, type StorePathRefusal } from './store-path-identity.js';
 import type { HeldServiceLifecycle, ManagedServiceLifecycle } from './managed-lifecycle.js';
 import {
   isJsonObject, isPayloadPath, listPayloadFiles, SERVICE_PAYLOAD_MANIFEST, sha256File, SHA256_HEX, VERSION_ID, type ServicePayloadManifest,
@@ -765,8 +765,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       throw error;
     };
     if ((await fs.stat(root)).uid !== euid) refuse(root, 'install_root_foreign_owner');
-    const chain = (at: string): string[] => path.dirname(at) === at ? [at] : [at, ...chain(path.dirname(at))];
-    for (const dir of new Set([...chain(path.resolve(root)), ...chain(await fs.realpath(root))])) {
+    for (const dir of await lookupDirectories(root)) {
       const { uid, mode } = await fs.stat(dir);
       if ((uid !== euid && uid !== 0) || ((mode & 0o002) !== 0 && (mode & 0o1000) === 0)) refuse(dir);
     }
