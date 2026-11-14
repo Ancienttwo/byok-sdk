@@ -1859,7 +1859,6 @@ jobs:
       - name: CLI and App service install, upgrade recovery, rollback and uninstall
         run: node examples/service-upgrade/upgrade-smoke.mjs
       - name: Real two-user install-root ancestor check
-        id: two-user
         if: runner.os != 'Windows'
         shell: bash
         env:
