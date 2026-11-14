@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "040e60352b8548d769db3ea7b69f51ac072c5f0d05a329481bbea5ec2433ebd6"
+    "snapshotSha256": "8f4226d8b0b84d9014d1c027d9cefc2794af06e818861c1c3e74b938113a170d"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,24 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "task-home-live",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client DaemonConfig.runtimeEnvironment and runtimes.<id>.runtimeEnvironment now give task children the daemon's live HOME under the default login-shell base (#2084), instead of the startup snapshot's HOME. A startup file that exports another HOME no longer redirects task HOME. PATH, XDG_* and other snapshot-derived paths are unchanged: pass consistent live values explicitly or use base: 'allowlist'. Policies already passing HOME or using allowlist keep their behavior.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#behavior-only-upgrade-notices-2117",
+      "items": [
+        "behavior:task-home-live"
+      ]
+    },
+    {
+      "id": "upgrade-breaking-summary",
+      "impact": "additive",
+      "summary": "@byok-sdk/client checkUpgradeFrom returns each breaking entry's authored summary, including behavior-only declarations, alongside its id, release and migration. Hosts can show the description directly; fixtures constructing UpgradeFromBreakingEntry supply summary as well.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#behavior-only-upgrade-notices-2117",
+      "items": [
+        "export:@byok-sdk/client#UpgradeFromBreakingEntry"
+      ]
+    },
     {
       "id": "committed-cancel-drain-error",
       "impact": "breaking",
@@ -237,6 +255,16 @@
         "export:@byok-sdk/core/system-tool#assertNoNulSpawnInput",
         "export:@byok-sdk/core/system-tool#spawnStartError"
       ]
+    },
+    {
+      "id": "retention-failure-task-id",
+      "impact": "additive",
+      "summary": "A `retention-failure` DaemonEvent (and its audit record) for the confirmed-journal class gains `taskId?: string` when a task's stored rows failed the journal integrity check that refuses pruning; one event is emitted per such task. Other failures carry no `taskId`. DaemonObserver.noteRetentionFailure accepts the optional `taskId`.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2145",
+      "items": [
+        "export:@byok-sdk/client#DaemonEvent",
+        "export:@byok-sdk/client#DaemonObserver"
+      ]
     }
   ],
   "changes": [
@@ -309,6 +337,16 @@
       "item": "export:@byok-sdk/client#ClaudeAdapterOptions",
       "change": "changed",
       "entry": "retained-records-one-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEvent",
+      "change": "changed",
+      "entry": "retention-failure-task-id"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonObserver",
+      "change": "changed",
+      "entry": "retention-failure-task-id"
     },
     {
       "item": "export:@byok-sdk/client#DeviceCredentialBackend",
@@ -404,6 +442,11 @@
       "item": "export:@byok-sdk/client#StoreCompatibility",
       "change": "added",
       "entry": "client-store-compatibility-type"
+    },
+    {
+      "item": "export:@byok-sdk/client#UpgradeFromBreakingEntry",
+      "change": "changed",
+      "entry": "upgrade-breaking-summary"
     },
     {
       "item": "export:@byok-sdk/client#clearDeviceEnrollment",

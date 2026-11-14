@@ -721,6 +721,8 @@ export declare function resolvePinnedPiPackage(remedy: string): {
     readonly identity: PiRuntimeIdentity;
     readonly bin: string | Record<string, string> | undefined;
 };
+/** Canonical installed extension loader URL; a changed Pi layout fails closed. */
+export declare function resolveInstalledPiLoaderUrl(): string;
 /**
  * Resolve the pi CLI executable from the required package installed alongside
  * `@byok-sdk/client`. There is intentionally no automatic PATH fallback: a
@@ -7206,6 +7208,16 @@ export declare class JournalUnknownTaskError extends Error {
     readonly taskId: string;
     constructor(taskId: string, operation: string);
 }
+/**
+ * A stored task row failed an integrity check, so the journal refused to read or prune it.
+ * Not a package export: retention reads `taskId` to name the task in its `retention-failure`
+ * event, and the message names it too. The message is fixed text: the failed check's own
+ * error, whose text can quote stored bytes (a parser error does), stays in `cause` alone.
+ */
+export declare class JournalIntegrityError extends Error {
+    readonly taskId: string;
+    constructor(taskId: string, cause: unknown);
+}
 /** Thrown when the journal is used after {@link LocalTaskJournal.close}. */
 export declare class JournalClosedError extends Error {
     constructor(operation: string);
@@ -7444,13 +7456,16 @@ export type DaemonEvent = ({
 })) | ({
     kind: 'retention-sweep';
     ts: string;
-} & SweepReport) | {
+} & SweepReport)
+/** `taskId`: the confirmed-journal task whose stored rows failed an integrity check; absent for every other failure. */
+ | {
     kind: 'retention-failure';
     ts: string;
     trigger: RetentionTrigger;
     classId: RetentionClassId;
     count: number;
     code: string;
+    taskId?: string;
 } | {
     kind: 'offered';
     ts: string;
@@ -7949,7 +7964,7 @@ export declare class DaemonObserver {
      * cursor advancement or the next envelope being processed.
      */
     noteRetentionSweep(report: SweepReport): void;
-    noteRetentionFailure(trigger: RetentionTrigger, classId: RetentionClassId, code: string): void;
+    noteRetentionFailure(trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string): void;
     private emit;
 }
 // ==== @byok-sdk/client dist/daemon/operational-health.d.ts ====
@@ -8460,7 +8475,8 @@ export interface RetentionSweeperOptions {
     readonly timers?: RetentionTimers;
     readonly jitter: (sequence: number, baseMs: number) => number;
     readonly onSweep?: (report: SweepReport) => void;
-    readonly onFailure?: (trigger: RetentionTrigger, classId: RetentionClassId, code: string) => void;
+    /** `taskId` is set only for a journal task that failed its integrity check; one call per such task. */
+    readonly onFailure?: (trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string) => void;
 }
 /** All maintenance has this one lifecycle owner, including daemons without a journal. */
 export declare class RetentionSweeper {
@@ -12390,6 +12406,8 @@ export declare function createSystemdLifecycle(def: ServiceDefinition, deps?: Sy
 export type UpgradeFromRefusalCode = 'upgrade_from_unsupported' | 'upgrade_history_unavailable' | 'upgrade_train_unresolved';
 export interface UpgradeFromBreakingEntry {
     readonly id: string;
+    /** Authored behavior or surface-change description and the Host action. */
+    readonly summary: string;
     /** The release that ships the change. */
     readonly release: string;
     /** `<repo doc>.md#<anchor>` or a byok-sdk issue/PR URL. */
@@ -12404,7 +12422,7 @@ export interface UpgradeFromReport {
     readonly from: string;
     /** The resolved `@byok-sdk/client` version; `null` when it does not resolve. */
     readonly to: string | null;
-    /** Every breaking entry released after `from`, up to and including `to`. */
+    /** Every breaking entry, including behavior-only declarations, released after `from` through `to`. */
     readonly breaking: readonly UpgradeFromBreakingEntry[];
     readonly additiveCount: number;
     readonly train: {
@@ -12424,6 +12442,8 @@ export interface UpgradeFromReport {
  * up to the `@byok-sdk/client` that resolves from `options.resolveFrom`
  * (default: the working directory), and checks that every public
  * `@byok-sdk/*` package resolving from there is on that client's version.
+ * Includes author-declared behavior changes with their summary and migration;
+ * entries need not have a corresponding generated snapshot change.
  *
  * Throws when `fromVersion` is not a version or is newer than the client.
  */

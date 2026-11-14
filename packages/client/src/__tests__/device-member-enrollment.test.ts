@@ -80,6 +80,7 @@ describe('E2EE member enrollment (E2d-1)', () => {
 
     await paired.start();
     await until(() => state(custody)?.anchor !== undefined, 'the member anchor');
+    await until(() => !custody.entries.has('pairing-verification'), 'the pairing verification secret deletion');
     expect(state(custody)).toMatchObject({
       member: server.e2ee.registration(deviceId)?.member,
       anchor: { approverSigningPublicJwk: client.member.signingPublicJwk, entry: client.head },

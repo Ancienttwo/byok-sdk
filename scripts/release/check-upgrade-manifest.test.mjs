@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { run } from './check-upgrade-manifest.mjs';
 import { packageSurface, splitStatements } from './upgrade-manifest/dts-surface.mjs';
 import { HISTORY_DIR } from './upgrade-manifest/history.mjs';
-import { BASELINE_PATH, MANIFEST_PATH, breakingAllowed, bumpKind, markdownAnchors, renderManifest, serialize } from './upgrade-manifest/manifest.mjs';
+import { BASELINE_PATH, MANIFEST_PATH, breakingAllowed, bumpKind, checkManifest, markdownAnchors, renderManifest, serialize } from './upgrade-manifest/manifest.mjs';
 import { CONFIG_SCHEMA_PATH, INTERPROCESS_PROTOCOLS, PUBLIC_PACKAGES, STORES, VENDORED_EXAMPLES, buildSnapshot } from './upgrade-manifest/snapshot.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -116,6 +116,56 @@ test('an unchanged tree passes and the snapshot is deterministic', (t) => {
   f.edit('api-surface/core.d.ts', (text) => text.replace(/\n/g, '\r\n'));
   f.edit('packages/server/src/stores/sqlite/index.ts', (text) => text.replace(/\n/g, '\r\n'));
   assert.equal(JSON.stringify(buildSnapshot(f.root).items), before);
+});
+
+test('behavior-only entries survive write without changing the snapshot (#2117)', (t) => {
+  const f = fixture(t);
+  const before = buildSnapshot(f.root);
+  const entry = { id: 'task-home-live', impact: 'breaking', summary: '@byok-sdk/client DaemonConfig.runtimeEnvironment pins task HOME to the daemon HOME; pass derived paths explicitly.', migration: `${DOC}#new-event`, items: ['behavior:task-home-live'] };
+  f.entries([entry]);
+  const result = f.gate('--write');
+  assert.equal(result.status, 0, result.output);
+  assert.match(result.output, /must be a MINOR/);
+  const written = readFileSync(path.join(f.root, MANIFEST_PATH), 'utf8');
+  assert.deepEqual(JSON.parse(written).entries, [entry]);
+  assert.deepEqual(JSON.parse(written).changes, []);
+  assert.deepEqual(buildSnapshot(f.root), before);
+  assert.equal(f.gate('--write').status, 0);
+  assert.equal(readFileSync(path.join(f.root, MANIFEST_PATH), 'utf8'), written);
+  f.edit('api-surface/core.d.ts', (text) => removeExport(text, 'DEVICE_PROOF_HEADER'));
+  assert.match(f.gate().output, /export:@byok-sdk\/core#DEVICE_PROOF_HEADER removed since \S+ without a manifest entry/);
+});
+
+test('behavior entries enforce their declaration contract (#2117)', () => {
+  const baseline = { version: '0.42.0', items: {} };
+  const entry = { id: 'task-home-live', impact: 'breaking', summary: '@byok-sdk/client task HOME comes from the daemon HOME.', migration: 'https://github.com/Ancienttwo/byok-sdk/issues/2084', items: ['behavior:task-home-live'] };
+  for (const [patch, error] of [
+    [{ impact: 'additive' }, /behavior.*must be breaking/],
+    [{ migration: undefined }, /migration anchor is required/],
+    [{ migration: 'missing.md#heading' }, /does not exist/],
+    [{ items: ['behavior:another-id'] }, /behavior.*must match/],
+    [{ items: ['behavior:'] }, /behavior.*must match/],
+    [{ id: 'Bad', items: ['behavior:Bad'] }, /id must be a lowercase slug/],
+    [{ items: ['behavior:task-home-live', 'export:@byok-sdk/client#Daemon'] }, /behavior.*only item/],
+    [{ acceptance: 'accept' }, /behavior.*cannot carry acceptance/],
+    [{ summary: '' }, /summary.*required/],
+    [{ items: [null] }, /items must be an array of strings/],
+    [{ items: {} }, /items must be an array of strings/],
+    [{ items: [] }, /items must list at least one/],
+  ]) {
+    const manifestText = JSON.stringify({ entries: [{ ...entry, ...patch }] });
+    const result = checkManifest({ root: repo, baseline, current: baseline, manifestText });
+    assert.match(result.errors.join('\n'), error, JSON.stringify(patch));
+  }
+  const store = 'store:client-journal';
+  const before = { ...baseline, items: { [store]: 'before' } };
+  const current = { ...baseline, items: { [store]: 'after' } };
+  for (const items of [[...entry.items, store], [store, ...entry.items]]) {
+    const manifestText = JSON.stringify({ entries: [{ ...entry, items, acceptance: 'accept' }] });
+    const { errors } = checkManifest({ root: repo, baseline: before, current, manifestText });
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /entry task-home-live:.*behavior.*only item/);
+  }
 });
 
 test('removing a public export demands a breaking entry with a migration anchor', (t) => {
@@ -258,7 +308,8 @@ test('a PATCH bump with a breaking entry fails (Q8); a MINOR bump passes', (t) =
   const released = buildSnapshot(f.root).version;
   const [major, minor, patch] = released.split(/[.-]/).map(Number);
   f.edit('api-surface/core.d.ts', (text) => removeExport(text, 'DEVICE_PROOF_HEADER'));
-  f.entries([{ id: 'drop-header', impact: 'breaking', summary: 'Use the literal header name.', migration: `${DOC}#removed-export`, items: ['export:@byok-sdk/core#DEVICE_PROOF_HEADER'] }]);
+  f.entries([{ id: 'drop-header', impact: 'breaking', summary: 'Use the literal header name.', migration: `${DOC}#removed-export`, items: ['export:@byok-sdk/core#DEVICE_PROOF_HEADER'] },
+    { id: 'task-home-live', impact: 'breaking', summary: '@byok-sdk/client task HOME comes from the daemon HOME.', migration: `${DOC}#new-event`, items: ['behavior:task-home-live'] }]);
   let result = f.gate('--write');
   assert.equal(result.status, 0, result.output);
   assert.match(result.output, /the next release after \S+ must be a MINOR/);
@@ -266,7 +317,7 @@ test('a PATCH bump with a breaking entry fails (Q8); a MINOR bump passes', (t) =
   f.setVersion(`${major}.${minor}.${patch + 1}`);
   result = f.gate('--write');
   assert.equal(result.status, 1);
-  assert.match(result.output, /is a PATCH after .* but carries breaking entries \(drop-header\); breaking changes ship only in a MINOR before 1\.0 \(Q8\)/);
+  assert.match(result.output, /is a PATCH after .* but carries breaking entries \(drop-header, task-home-live\); breaking changes ship only in a MINOR before 1\.0 \(Q8\)/);
 
   f.setVersion(`${major}.${minor + 1}.0`);
   assert.equal(f.gate('--write').status, 0);
@@ -306,6 +357,7 @@ test('rebaseline snapshots a release checkout and refuses a version that is not 
   const next = `${major}.${minor + 1}.0`;
   // The release checkout's manifest is not a release of its version until --write spans it.
   assert.throws(() => run(['--root', f.root, '--rebaseline', release.root], { log() {}, error() {} }), /not a release of/);
+  release.entries([{ id: 'task-home-live', impact: 'breaking', summary: '@byok-sdk/client task HOME comes from the daemon HOME.', migration: `${DOC}#new-event`, items: ['behavior:task-home-live'] }]);
   assert.equal(release.gate('--write').status, 0);
   const archives = readdirSync(path.join(f.root, HISTORY_DIR));
   assert.equal(run(['--root', f.root, '--rebaseline', release.root], { log() {}, error() {} }), 1);

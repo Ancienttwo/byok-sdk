@@ -42,6 +42,7 @@ import {
   JournalRecordTooLargeError,
   JournalUnavailableError,
   JournalUnknownTaskError,
+  JournalIntegrityError,
   type AdmissionRecord,
   type CompactOptions,
   type CompactResult,
@@ -871,16 +872,18 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       ORDER BY seq, envelope_id`).all(taskId) as Record<string, unknown>[];
     // Validate every candidate before its content can exclude it, including
     // candidates after the first valid cancellation.
-    for (const row of rows) {
-      this.#assertIdentity(row, identity);
-      if (row.withheld_bytes !== null) {
-        if (row.bytes !== '') throw new Error('withheld offer row carries bytes');
-        continue;
+    integrity(taskId, () => {
+      for (const row of rows) {
+        this.#assertIdentity(row, identity);
+        if (row.withheld_bytes !== null) {
+          if (row.bytes !== '') throw new Error('withheld offer row carries bytes');
+          continue;
+        }
+        if (typeof row.bytes !== 'string' || journalHash(row.bytes) !== row.bytes_hash) {
+          throw new Error('durable cancellation candidate bytes/hash mismatch');
+        }
       }
-      if (typeof row.bytes !== 'string' || journalHash(row.bytes) !== row.bytes_hash) {
-        throw new Error('durable cancellation candidate bytes/hash mismatch');
-      }
-    }
+    });
     return rows.filter((row) => row.withheld_bytes === null);
   }
 
@@ -1128,7 +1131,8 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
   /** Both prune branches delete all task envelopes, so neither may bypass their integrity checks. */
   #prunableTaskCancellations(taskId: string, task: Record<string, unknown>): Record<string, unknown>[] {
     const identity = { tenantId: task.tenant_id as string, productId: task.product_id as string, deviceId: task.device_id as string };
-    return this.#taskEnvelopeRows(taskId, identity).filter((row) => {
+    const rows = this.#taskEnvelopeRows(taskId, identity);
+    return integrity(taskId, () => rows.filter((row) => {
       const envelope = JSON.parse(row.bytes as string) as { type?: unknown; task_id?: unknown };
       if (envelope.type === 'task.cancel') {
         if (assertTaskCancellationBinding(row.bytes as string, taskId, Number(row.seq) - 1) !== Number(row.seq)) {
@@ -1138,7 +1142,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       }
       if (envelope.task_id !== taskId) throw new Error('invalid durable envelope task binding');
       return false;
-    });
+    }));
   }
 
   /**
@@ -1195,4 +1199,10 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     this.#closing = run;
     return run;
   }
+}
+
+/** Names the task in a failed integrity check over its stored rows; the cause stays attached. */
+function integrity<T>(taskId: string, check: () => T): T {
+  try { return check(); }
+  catch (error) { throw new JournalIntegrityError(taskId, error); }
 }

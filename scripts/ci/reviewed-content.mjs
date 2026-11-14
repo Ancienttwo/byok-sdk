@@ -371,6 +371,15 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
       for (const name of Object.keys(pins)) delete after.devDependencies[name];
     }
   }
+  // #2149: the graph probe reuses the client's exact esbuild development pin.
+  if (path === 'package.json' && before.private === true && after.private === true
+    && before.devDependencies?.esbuild === undefined && after.devDependencies?.esbuild !== undefined) {
+    const client = JSON.parse(readFileSync(resolve(cwd, 'packages/client/package.json'), 'utf8'));
+    const pin = client.devDependencies?.esbuild;
+    if (/^\d+\.\d+\.\d+$/.test(pin) && after.devDependencies.esbuild === pin) {
+      delete after.devDependencies.esbuild;
+    }
+  }
   if (path !== 'bun.lock') qualify.push(...normalizeDependencyVersions(before, after, path, cwd));
   if (path === 'bun.lock') {
     // Newly introduced hosted workspaces retain their shape/ownership gate.

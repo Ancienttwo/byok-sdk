@@ -197,8 +197,8 @@ describe('execution record as a DaemonEvent, an audit record and a live-view lin
 
   it('renders one live-view line with its counts and closed codes', () => {
     expect([partial, unknown].map(event => formatDaemonEventLine(event))).toEqual([
-      '[2026-10-20T00:00:00.000Z] execution-record taskId=task-1 terminal=complete status=partial source=event-stream gaps=unpaired_tool_call:1,decode_dropped:2',
-      '[2026-10-20T00:00:01.000Z] execution-record taskId=task-2 terminal=failed status=unknown source=none unknownReason=source_not_declared',
+      '[2026-10-20T00:00:00.000Z] execution-record taskId="task-1" terminal=complete status=partial source=event-stream gaps=unpaired_tool_call:1,decode_dropped:2',
+      '[2026-10-20T00:00:01.000Z] execution-record taskId="task-2" terminal=failed status=unknown source=none unknownReason=source_not_declared',
     ]);
   });
 

@@ -106,33 +106,33 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
   const prefix = `[${event.ts}]`;
   switch (event.kind) {
     case 'outbound-rejected':
-      return `${prefix} outbound-rejected envelopeId=${event.envelopeId} type=${event.type} reason=${event.reason} terminal=${event.terminal}${event.taskId === undefined ? '' : ` taskId=${event.taskId}`}`;
+      return `${prefix} outbound-rejected envelopeId=${event.envelopeId} type=${event.type} reason=${event.reason} terminal=${event.terminal}${event.taskId === undefined ? '' : ` taskId=${quote(event.taskId)}`}`;
     case 'retention-sweep': return `${prefix} retention-sweep trigger=${event.trigger} deleted=${event.deleted} bytesReclaimed=${event.bytesReclaimed} failures=${event.failures} truncated=${event.truncated}`;
-    case 'retention-failure': return `${prefix} retention-failure trigger=${event.trigger} class=${event.classId} count=${event.count} code=${event.code}`;
+    case 'retention-failure': return `${prefix} retention-failure trigger=${event.trigger} class=${event.classId} count=${event.count} code=${event.code}${event.taskId === undefined ? '' : ` taskId=${quote(event.taskId)}`}`;
     case 'offered':
-      return `${prefix} offered taskId=${event.taskId}${event.runtime ? ` runtime=${event.runtime}` : ''}`;
+      return `${prefix} offered taskId=${quote(event.taskId)}${event.runtime ? ` runtime=${event.runtime}` : ''}`;
     case 'claimed':
-      return `${prefix} claimed taskId=${event.taskId}${event.claimedRuntime !== undefined ? ` claimedRuntime=${event.claimedRuntime}` : ''}`;
+      return `${prefix} claimed taskId=${quote(event.taskId)}${event.claimedRuntime !== undefined ? ` claimedRuntime=${event.claimedRuntime}` : ''}`;
     case 'started':
-      return `${prefix} started taskId=${event.taskId}`;
+      return `${prefix} started taskId=${quote(event.taskId)}`;
     case 'progress':
-      return `${prefix} progress taskId=${event.taskId} ${formatAgentEvent(event.event)}`;
+      return `${prefix} progress taskId=${quote(event.taskId)} ${formatAgentEvent(event.event)}`;
     case 'artifact':
-      return `${prefix} artifact taskId=${event.taskId} name=${event.name} contentType=${event.contentType}`;
+      return `${prefix} artifact taskId=${quote(event.taskId)} name=${event.name} contentType=${event.contentType}`;
     case 'awaiting-approval': {
       // Finding F4: approvalId is what an operator actually needs to call
       // `approve`/`reject`/`approvals` against this pending decision —
       // omitted (rather than shown as e.g. "approvalId=undefined") for the
       // rare event with none, so the plain-text shape never implies a
       // literal "undefined" id exists.
-      return `${prefix} awaiting-approval taskId=${event.taskId}${event.approvalId ? ` approvalId=${event.approvalId}` : ''} summary=${quote(event.summary)}`;
+      return `${prefix} awaiting-approval taskId=${quote(event.taskId)}${event.approvalId ? ` approvalId=${event.approvalId}` : ''} summary=${quote(event.summary)}`;
     }
     case 'completed':
-      return `${prefix} completed taskId=${event.taskId} sessionRef=${event.sessionRef} summary=${quote(event.summary)}`;
+      return `${prefix} completed taskId=${quote(event.taskId)} sessionRef=${event.sessionRef} summary=${quote(event.summary)}`;
     case 'failed':
-      return `${prefix} failed taskId=${event.taskId} retryable=${event.retryable}${event.preClaim ? ' preClaim=true' : ''} reason=${quote(event.reason)}`;
+      return `${prefix} failed taskId=${quote(event.taskId)} retryable=${event.retryable}${event.preClaim ? ' preClaim=true' : ''} reason=${quote(event.reason)}`;
     case 'cancelled':
-      return `${prefix} cancelled taskId=${event.taskId}${event.reason ? ` reason=${quote(event.reason)}` : ''}`;
+      return `${prefix} cancelled taskId=${quote(event.taskId)}${event.reason ? ` reason=${quote(event.reason)}` : ''}`;
     case 'lifecycle':
       return `${prefix} lifecycle ${formatLifecycle(event.lifecycle)}`;
     case 'paired':
@@ -153,14 +153,14 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
       // predates this fix and simply has no such field at all.
       return `${prefix} shutdown-complete reason=${quote(event.reason)}${event.undeliveredOutboxCount !== undefined ? ` undeliveredOutboxCount=${event.undeliveredOutboxCount}` : ''}`;
     case 'stale-approval-decision':
-      return `${prefix} stale-approval-decision taskId=${event.taskId} decision=${event.decision}${event.reason ? ` reason=${quote(event.reason)}` : ''}`;
+      return `${prefix} stale-approval-decision taskId=${quote(event.taskId)} decision=${event.decision}${event.reason ? ` reason=${quote(event.reason)}` : ''}`;
     case 'tool-reminder':
-      return `${prefix} tool-reminder taskId=${event.taskId} tool=${quote(event.toolName)} source=${event.authorization.source} ruleIds=${JSON.stringify(event.authorization.ruleIds)} reasons=${event.reasons.join(',')}${event.suppressedReasons === undefined ? '' : ` suppressedReasons=${event.suppressedReasons.join(',')}`} summary=${quote(event.summary)}`;
+      return `${prefix} tool-reminder taskId=${quote(event.taskId)} tool=${quote(event.toolName)} source=${event.authorization.source} ruleIds=${JSON.stringify(event.authorization.ruleIds)} reasons=${event.reasons.join(',')}${event.suppressedReasons === undefined ? '' : ` suppressedReasons=${event.suppressedReasons.join(',')}`} summary=${quote(event.summary)}`;
     case 'tool-authorization':
-      return `${prefix} tool-authorization taskId=${event.taskId} tool=${quote(event.toolName)} decision=${event.decision} source=${event.authorization.source} ruleIds=${JSON.stringify(event.authorization.ruleIds)} reasons=${event.reasons.join(',')}${event.suppressedReasons === undefined ? '' : ` suppressedReasons=${event.suppressedReasons.join(',')}`}`;
+      return `${prefix} tool-authorization taskId=${quote(event.taskId)} tool=${quote(event.toolName)} decision=${event.decision} source=${event.authorization.source} ruleIds=${JSON.stringify(event.authorization.ruleIds)} reasons=${event.reasons.join(',')}${event.suppressedReasons === undefined ? '' : ` suppressedReasons=${event.suppressedReasons.join(',')}`}`;
     case 'file-scope': {
       const parts = [
-        `${prefix} file-scope taskId=${event.taskId}`,
+        `${prefix} file-scope taskId=${quote(event.taskId)}`,
         `decision=${event.decision}`,
         `lane=${event.lane}`,
         `homeAccess=${event.homeAccess}`,
@@ -177,10 +177,10 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
     case 'agent-memory-intent-integrity':
       return `${prefix} agent-memory-intent-integrity intentId=${event.intentId} disposition=${event.disposition}`;
     case 'runtime-disposal-failed':
-      return `${prefix} runtime-disposal-failed taskId=${event.taskId} runtime=${event.runtimeId} stage=${event.stage} reason=${quote(event.reason)}`;
+      return `${prefix} runtime-disposal-failed taskId=${quote(event.taskId)} runtime=${event.runtimeId} stage=${event.stage} reason=${quote(event.reason)}`;
     case 'execution-record': {
       const parts = [
-        `${prefix} execution-record taskId=${event.taskId}`,
+        `${prefix} execution-record taskId=${quote(event.taskId)}`,
         `terminal=${event.terminal}`,
         `status=${event.status}`,
         `source=${event.source}`,
@@ -205,7 +205,7 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
           ? [
               `${prefix} device-assertion result=issued`,
               `lane=${event.lane}`,
-              event.taskId !== undefined ? `taskId=${event.taskId}` : undefined,
+              event.taskId !== undefined ? `taskId=${quote(event.taskId)}` : undefined,
               `audience=${quote(event.audience)}`,
               `jti=${event.jti}`,
               `expiresAt=${event.expiresAt}`,
@@ -213,7 +213,7 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
           : [
               `${prefix} device-assertion result=denied`,
               `lane=${event.lane}`,
-              event.taskId !== undefined ? `taskId=${event.taskId}` : undefined,
+              event.taskId !== undefined ? `taskId=${quote(event.taskId)}` : undefined,
               `reason=${event.reason}`,
               event.audienceSize !== undefined ? `audienceSize=${event.audienceSize}` : undefined,
             ].filter((part): part is string => part !== undefined);
@@ -224,7 +224,7 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
 
 export function formatTaskLine(task: DaemonTaskInfo | DerivedTaskInfo): string {
   const parts = [
-    task.taskId,
+    quote(task.taskId),
     task.state,
     task.runtime ? `runtime=${task.runtime}` : undefined,
     task.claimedRuntime !== undefined ? `claimedRuntime=${task.claimedRuntime}` : undefined,
@@ -429,7 +429,7 @@ export function formatLiveStatusLines(live: ControlStatusResult): string[] {
     lines.push('live-active-tasks: (none)');
   } else {
     for (const task of live.activeTasks) {
-      lines.push(`live-active-task: ${task.taskId} ${task.state}`);
+      lines.push(`live-active-task: ${quote(task.taskId)} ${task.state}`);
     }
   }
   // M4 Phase 4 (part B.3): queue watermarks — see ControlStatusResult's own
@@ -446,7 +446,7 @@ export function formatLiveStatusLines(live: ControlStatusResult): string[] {
     lines.push('live-approvals: (none)');
   } else {
     for (const approval of live.approvals) {
-      lines.push(`live-approval: ${approval.approvalId} taskId=${approval.taskId} summary=${quote(summaryExcerpt(approval.summary))}`);
+      lines.push(`live-approval: ${approval.approvalId} taskId=${quote(approval.taskId)} summary=${quote(summaryExcerpt(approval.summary))}`);
     }
   }
   if (live.queueWatermarks.length === 0) {
@@ -454,7 +454,7 @@ export function formatLiveStatusLines(live: ControlStatusResult): string[] {
   } else {
     for (const watermark of live.queueWatermarks) {
       lines.push(
-        `live-queue-watermark: ${watermark.taskId} progressBatcherPending=${watermark.progressBatcherPending} pendingApprovals=${watermark.pendingApprovals}`,
+        `live-queue-watermark: ${quote(watermark.taskId)} progressBatcherPending=${watermark.progressBatcherPending} pendingApprovals=${watermark.pendingApprovals}`,
       );
     }
   }
@@ -520,6 +520,6 @@ export function formatApprovalsListLines(approvals: readonly PendingApproval[], 
   if (approvals.length === 0) return ['(no pending approvals)'];
   return approvals.map((approval) => {
     const ageMs = nowMs - Date.parse(approval.createdAt);
-    return `${approval.approvalId} taskId=${approval.taskId} age=${formatAge(ageMs)} summary=${quote(summaryExcerpt(approval.summary))}`;
+    return `${approval.approvalId} taskId=${quote(approval.taskId)} age=${formatAge(ageMs)} summary=${quote(summaryExcerpt(approval.summary))}`;
   });
 }

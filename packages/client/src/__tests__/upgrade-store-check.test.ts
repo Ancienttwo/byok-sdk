@@ -340,16 +340,51 @@ describe('upgrade check --from (#1316)', () => {
   }
 
   it('lists the breaking entries released after --from and exits 2', () => {
-    const { code, report } = command('0.33.0', host());
+    const root = host();
+    const { code, report } = command('0.33.0', root);
     expect(code).toBe(UPGRADE_CHECK_REFUSED_EXIT_CODE);
     expect(report.breaking).toEqual([
-      { id: 'wire-v5-durable-lane', release: '0.34.0', migration: 'docs/migrations/wire-v5-durable-lane.md#drain-and-upgrade' },
-      { id: 'runtime-generic-names', release: '0.34.0', migration: 'docs/migrations/wire-v5-durable-lane.md#runtime-names' },
+      { id: 'wire-v5-durable-lane', release: '0.34.0', summary: expect.any(String), migration: 'docs/migrations/wire-v5-durable-lane.md#drain-and-upgrade' },
+      { id: 'runtime-generic-names', release: '0.34.0', summary: expect.any(String), migration: 'docs/migrations/wire-v5-durable-lane.md#runtime-names' },
     ]);
     expect(report.additiveCount).toBe(2);
+    const lines: string[] = [];
+    expect(runUpgradeFromCheckCommand({ fromVersion: '0.33.0', json: false, resolveFrom: root, log: (line) => lines.push(line) })).toBe(code);
+    for (const entry of report.breaking) {
+      const line = lines.find((line) => line.startsWith(`breaking ${entry.release} ${entry.id} `));
+      expect(line).toContain(entry.summary);
+      expect(line).toContain(entry.migration);
+    }
     expect(command('0.31.0', host()).report.breaking.map((entry) => entry.release)).toEqual([
       ...Array<string>(28).fill('0.32.0'), ...Array<string>(7).fill('0.33.0'), '0.34.0', '0.34.0',
     ]);
+  });
+
+  it.each(['current', 'history'])('delivers task-home-live and its behavior summary from the %s manifest to an upgrading Host (#2117)', (location) => {
+    const clientSource = join(REPO, 'packages/client');
+    const candidates = ['upgrade-manifest.json', ...readdirSync(join(clientSource, 'upgrade-history')).map((name) => `upgrade-history/${name}`)];
+    const authored = candidates.map((file) => JSON.parse(readFileSync(join(clientSource, file), 'utf8')))
+      .find((candidate) => candidate.entries.some((entry: { id: string }) => entry.id === 'task-home-live'));
+    expect(authored, 'task-home-live stays shipped after rebaseline archives it').toBeDefined();
+    const behavior = authored.entries.find((entry: { id: string }) => entry.id === 'task-home-live');
+    expect(behavior).toMatchObject({ impact: 'breaking', items: ['behavior:task-home-live'], summary: expect.stringContaining('HOME') });
+    const from = authored.from.version;
+    const [major, minor] = from.split('.').map(Number);
+    const candidate = `${major}.${minor + 1}.0`;
+    const root = host({ versions: Object.fromEntries(TRAIN.map((name) => [name, candidate])) });
+    const client = join(root, 'node_modules/@byok-sdk/client');
+    const file = location === 'current' ? 'upgrade-manifest.json' : `upgrade-history/${from}-${candidate}.json`;
+    // Keep only the shipped behavior declaration so it alone must refuse the upgrade.
+    writeFileSync(join(client, file), JSON.stringify({ ...authored, entries: [behavior], to: { ...authored.to, version: candidate } }));
+    const { code, report } = command(from, root);
+    expect(code).toBe(UPGRADE_CHECK_REFUSED_EXIT_CODE);
+    expect(report.verdict).toBe('refused');
+    expect(report.breaking).toContainEqual({ id: 'task-home-live', release: candidate, summary: behavior.summary, migration: behavior.migration });
+    const lines: string[] = [];
+    expect(runUpgradeFromCheckCommand({ fromVersion: from, json: false, resolveFrom: root, log: (line) => lines.push(line) })).toBe(code);
+    const line = lines.find((line) => line.startsWith(`breaking ${candidate} task-home-live `));
+    expect(line).toContain(behavior.summary);
+    expect(line).toContain(behavior.migration);
   });
 
   it('passes from the current version with a consistent train', () => {

@@ -23,4 +23,5 @@ export interface PiJitiSeedUse {
   /** Writes the group's private cache files, or turns the process cold. */
   materialize(group: PiJitiSeedGroup, root: string): void;
 }
-export function usePiJitiSeed(seedRoot: string, loaderUrls: readonly string[], report: (reason: string) => void): PiJitiSeedUse;
+/** An absent seed root checks only the execution-private cache location. */
+export function usePiJitiSeed(seedRoot: string | undefined, loaderUrls: readonly string[], report: (reason: string) => void): PiJitiSeedUse;
