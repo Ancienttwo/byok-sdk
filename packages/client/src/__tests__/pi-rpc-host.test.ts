@@ -1,6 +1,7 @@
 import { AgentSession, VERSION as PI_VERSION } from '@earendil-works/pi-coding-agent';
 import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { PiRpcClient } from '../adapters/pi/rpc-client';
+import { resolveInstalledPiLoaderUrl } from '../adapters/pi/resolve-bin';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, realpathSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -684,7 +685,7 @@ describe('SDK ordinary Pi RPC entry', () => {
       const built = spawnSync(bun, ['build', f.entry, '--target=bun', '--define=PI_BUNDLED_NODE=true', '--outfile', bundle], { cwd: clientRoot, encoding: 'utf8', timeout: 30_000 });
       expect(built.status, built.stderr).toBe(0); argv[0] = bundle;
     }
-    const loader = bundled ? argv[0]! : fileURLToPath(new URL('./core/extensions/loader.js', import.meta.resolve('@earendil-works/pi-coding-agent')));
+    const loader = bundled ? argv[0]! : fileURLToPath(resolveInstalledPiLoaderUrl());
     const adjacent = join(dirname(loader), 'node_modules');
     // This fixture owns this directory in this worktree's dependency copy.
     expect(existsSync(adjacent)).toBe(false);

@@ -1,10 +1,8 @@
 import path from 'node:path';
-import { realpathSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
 import { VERSION } from '@earendil-works/pi-coding-agent';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding.js';
 import { applyPiHostNetworkDefaults } from './pi-host-network-defaults.js';
-import { resolvePinnedPiPackage, resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin.js';
+import { resolveInstalledPiLoaderUrl, resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin.js';
 import { usePiJitiSeed } from '../adapters/pi/jiti-seed.mjs';
 import { parseTaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool.js';
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension.js';
@@ -35,7 +33,7 @@ export async function runPiTeamOperatorHost(argv: readonly string[]): Promise<vo
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
   if (Object.keys(mcp.observation).length !== 0) fail('operator MCP requires an empty host observation');
   if (VERSION !== resolvePiRuntimeIdentity().version) fail('native version differs from the static SDK pin');
-  const loaderUrl = pathToFileURL(realpathSync(path.join(resolvePinnedPiPackage('reinstall @byok-sdk/client dependencies').dir, 'dist/core/extensions/loader.js'))).href;
+  const loaderUrl = resolveInstalledPiLoaderUrl();
   usePiJitiSeed(undefined, [loaderUrl], () => {});
   await runPiSessionRuntime({
     cwd: raw.cwd as string, credentialSource: 'pi-auth-store', sessionDir: raw.sessionDir as string,

@@ -721,6 +721,8 @@ export declare function resolvePinnedPiPackage(remedy: string): {
     readonly identity: PiRuntimeIdentity;
     readonly bin: string | Record<string, string> | undefined;
 };
+/** Canonical installed extension loader URL; a changed Pi layout fails closed. */
+export declare function resolveInstalledPiLoaderUrl(): string;
 /**
  * Resolve the pi CLI executable from the required package installed alongside
  * `@byok-sdk/client`. There is intentionally no automatic PATH fallback: a
