@@ -325,7 +325,8 @@ export interface ServiceInstallation {
    * switched to, under a `pending` receipt written first. Store writes since
    * that switch are discarded. It also resolves a `switch_unhealthy`
    * receipt. The unit must be the exact one this SDK writes, as on
-   * upgrade().
+   * upgrade(). A snapshot SDK 0.42 took is `snapshot_upgrade_required`
+   * before anything changes; roll it back with SDK 0.42, or keep `current`.
    *
    * The top-level code follows the outcome (#2010). A call that wrote its
    * final receipt throws its first failure's own class and code; later
@@ -357,13 +358,16 @@ export interface ServiceInstallation {
    * `receipt_state_inconsistent` and nothing changes. It does not check the
    * unit: a pending receipt is only written after upgrade() or rollback()
    * checked it. A final version 1 receipt is rewritten as version 2.
-   * Before a restore changes any store, every snapshot entry is checked as
-   * the precheck checks a store (#2102): one with a `..` segment is
-   * `precheck_failed`, one in the install root or a `service/` is
-   * `store_overlaps_service_state`, each naming the path. An earlier
-   * version could record either. The call then throws `upgrade_pending`
-   * with that refusal in its cause, and the receipt, `current`, the
-   * snapshot and every store stay as they were. Returns the receipt, or
+   * A snapshot SDK 0.42 took is `snapshot_upgrade_required` before
+   * anything changes: finish or abandon that upgrade with SDK 0.42 first.
+   * Before a restore changes any store, every snapshot entry is checked
+   * (#2102, #2106): a `..` segment, two stores inside each other, or a path
+   * that no longer resolves as it did at the snapshot is
+   * `precheck_failed`; a store in the install root or a `service/` is
+   * `store_overlaps_service_state`; each names the path. The call then
+   * throws `upgrade_pending` with that refusal in its cause, and the
+   * receipt, `current`, the snapshot and every store stay as they were.
+   * Returns the receipt, or
    * `undefined` when there is none. Release
    * failures follow the same rule as on `rollback()`.
    */
@@ -399,6 +403,7 @@ const ERROR_MESSAGES = {
   no_rollback: 'There is no previous version with a store snapshot to roll back to.',
   install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.',
   receipt_upgrade_required: 'Pending SDK 0.42 receipt: run recover() with SDK 0.42 first.',
+  snapshot_upgrade_required: 'A snapshot SDK 0.42 took would be restored. Nothing was changed; with SDK 0.42, finish or abandon that upgrade (recover() or rollback()), then upgrade with this version.',
   receipt_state_inconsistent: 'The receipt does not match the version pointers. Nothing was changed.',
   switch_unhealthy: 'The new version stays current but is unhealthy. Call rollback(), or keep it.',
   repair_interrupted: 'A same-version reinstall was interrupted. Run install() again.',
@@ -423,7 +428,7 @@ const STORE_FILE_SUFFIXES = ['', '-wal', '-journal'] as const;
 const STORE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 const STORE_KINDS: ReadonlySet<unknown> = new Set([undefined, 'file', 'directory']);
 /** A directory store's tree is copied as it is: links stay links, nothing is overwritten, a clone where the file system has one. */
-/** `snapshot.json` format: 2 records each entry's canonical path, and a restore writes there (#2106). 0.42.0 wrote no format. */
+/** `snapshot.json` format: 2 records each entry's canonical path, and a restore writes there (#2106). SDK 0.42 wrote none, and its snapshots are refused. */
 const SNAPSHOT_FORMAT = 2;
 const TREE_COPY = { recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false, preserveTimestamps: true, mode: fsConstants.COPYFILE_FICLONE } as const;
 /** How long a stale-token probe waits for the control endpoint to accept or refuse. */
@@ -1352,14 +1357,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    */
   async function restoreSnapshot(to: string): Promise<void> {
     const dir = path.join(snapshotsDir, to);
-    const snapshot = JSON.parse(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8')) as { format?: unknown; entries: SnapshotEntry[] };
-    // 0.42.0 wrote no format and no canonical paths: its entries are
-    // restored at the listed paths, without the identity check (#2155
-    // removes this branch).
-    const legacy = snapshot.format === undefined;
-    if (!legacy && (snapshot.format !== SNAPSHOT_FORMAT || snapshot.entries.some((entry) => typeof entry.canonical !== 'string'))) {
-      throw new ServiceInstallationError('precheck_failed');
-    }
+    const snapshot = JSON.parse(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8')) as { entries: SnapshotEntry[] };
     // Older snapshots retain the Host's spelling. Check every directory root
     // before changing any store, including links hidden by a trailing / or /.
     const entries = snapshot.entries.map((entry) => entry.kind === 'directory' ? { ...entry, path: directoryStorePath(entry.path) } : entry);
@@ -1371,17 +1369,15 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
     }));
-    if (!legacy) {
-      for (const entry of entries) {
-        if (await resolvesTo(entry.path, entry.canonical!)) continue;
-        const error = new ServiceInstallationError('precheck_failed');
-        error.message += ` A store path no longer resolves as it did at the snapshot. (${entry.path})`;
-        throw error;
-      }
+    for (const entry of entries) {
+      if (await resolvesTo(entry.path, entry.canonical)) continue;
+      const error = new ServiceInstallationError('precheck_failed');
+      error.message += ` A store path no longer resolves as it did at the snapshot. (${entry.path})`;
+      throw error;
     }
     for (const entry of entries) {
-      const target = legacy ? entry.path : entry.canonical!;
-      if (!legacy) await mkdirReal(path.dirname(target));
+      const target = entry.canonical;
+      await mkdirReal(path.dirname(target));
       if (entry.kind === 'directory') {
         await fs.rm(target, { recursive: true, force: true });
         if (entry.files[''] !== undefined) await fs.cp(path.join(dir, entry.files['']), target, TREE_COPY);
@@ -1430,14 +1426,25 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
   }
 
-  /** Checks `snapshots/<name>` and every copy in it a restore reads, before the operation's first side effect. */
+  /**
+   * Checks `snapshots/<name>` and every copy in it a restore reads, before
+   * the operation's first side effect. A snapshot SDK 0.42 took (no
+   * `format`) is `snapshot_upgrade_required`, as a version 1 pending
+   * receipt is `receipt_upgrade_required`: it records no canonical paths,
+   * so this version cannot restore it safely.
+   */
   async function refuseLinkedSnapshot(name: string): Promise<void> {
     const dir = path.join(snapshotsDir, name);
     const index = path.join(dir, 'snapshot.json');
     await refuseLinkedSnapshots(dir);
     await refuseLinkedSnapshots(index);
     if (!(await exists(index))) return;
-    const { entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: SnapshotEntry[] };
+    const { format, entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { format?: unknown; entries: SnapshotEntry[] };
+    if (format !== SNAPSHOT_FORMAT) {
+      const error = new ServiceInstallationError('snapshot_upgrade_required');
+      error.message = `${error.message} (${dir})`;
+      throw error;
+    }
     for (const entry of entries) {
       for (const file of Object.values(entry.files)) {
         let at = dir;
@@ -1755,8 +1762,8 @@ interface SnapshotEntry {
   path: string;
   /** Absent in a snapshot 0.34 wrote, and for every file store. */
   kind?: 'directory';
-  /** `path` with its links resolved when the snapshot was taken (#2106); absent in a snapshot 0.42 wrote. */
-  canonical?: string;
+  /** `path` with its links resolved when the snapshot was taken (#2106). */
+  canonical: string;
   /** Saved files by suffix (`''`, `-wal`, `-journal`; a directory's tree under `''`); empty when the store was absent. */
   files: Record<string, string>;
 }

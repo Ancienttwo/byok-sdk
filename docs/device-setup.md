@@ -803,11 +803,10 @@ Windows): such a store is refused with
 normalized absolute paths: a path with a `..` segment is
 `precheck_failed`. On an upgrade's first precheck either refusal leaves the
 stores untouched and starts the previous version again. A restore checks
-every snapshot entry the same way before it changes any store (#2102), so a
-snapshot an older version took is refused, naming the path, with
-`upgrade_pending` and the refusal in its cause; see
-[the upgrade notes](releases/host-upgrade-next-minor.md) for how to resolve
-it.
+every snapshot entry the same way before it changes any store (#2102), and a
+snapshot SDK 0.42 took is refused with `snapshot_upgrade_required` (#2106);
+see [the upgrade notes](releases/host-upgrade-next-minor.md) for how to
+resolve either.
 [`examples/service-upgrade`](../examples/service-upgrade/) is such an App.
 
 ### Other installs
