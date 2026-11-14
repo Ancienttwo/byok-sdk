@@ -41,7 +41,9 @@ function fixture(t) {
 test('runtime smoke includes Node exports and refuses eager and lazy Cloudflare imports', async t => {
   const f = fixture(t);
   f.policies();
-  for (const target of ['index.js', 'entry']) {
+  f.write('packages/client/dist/real.js', '');
+  symlinkSync('real.js', path.join(f.root, 'packages/client/dist/linked.js'));
+  for (const target of ['index.js', 'entry', 'linked.js']) {
     f.json('packages/client/package.json', { name: '@byok-sdk/client', type: 'module',
       exports: { '.': { types: './dist/index.d.ts', import: `./dist/${target}` } } });
     f.write(`packages/client/dist/${target}`, "export const data = 'cloudflare:workers'; export const load = () => import('./lazy.js');\n");
@@ -74,6 +76,20 @@ test('runtime smoke follows lazy relative graphs before accepting a Node entry',
   f.write('packages/client/dist/lazy.js', "export { worker } from './nested.js';");
   for (const source of ["export const worker = 'cloudflare:workers';", "import { WorkerEntrypoint } from 'cloudflare:workers'; export const worker = WorkerEntrypoint;"]) {
     f.write('packages/client/dist/nested.js', source);
+    f.policies();
+    assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
+    if (source.startsWith('export')) assert.ok((await runtimeSmokeImports(f.root)).node.includes('@byok-sdk/client'));
+    else await assert.rejects(() => runtimeSmokeImports(f.root), /Cloudflare entry requires a reviewed runtime smoke/);
+  }
+});
+
+test('workerd graph treats private workspace helpers as SDK code', async t => {
+  const f = fixture(t);
+  f.json('packages/helper/package.json', { private: true, type: 'module' });
+  f.write('packages/client/dist/index.js', "export const load = () => import('./lazy.js');");
+  f.write('packages/client/dist/lazy.js', "import '../../helper/index.js';");
+  for (const source of ["export const value = 'cloudflare:workers';", "import 'cloudflare:workers';"]) {
+    f.write('packages/helper/index.js', source);
     f.policies();
     assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
     if (source.startsWith('export')) assert.ok((await runtimeSmokeImports(f.root)).node.includes('@byok-sdk/client'));

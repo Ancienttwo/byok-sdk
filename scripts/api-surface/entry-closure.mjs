@@ -139,7 +139,7 @@ export async function runtimeSmokeImports(root) {
       boundaries.set(boundaryKey(importer, edge.path), boundary);
     }
   }
-  const workspace = publicPackages(root).map(pkg => realpathSync(pkg.directory));
+  const workspace = realpathSync(path.join(root, 'packages'));
   const thirdPartyCloudflare = new Map();
   for (const entry of exports) {
     const seen = new Set();
@@ -149,8 +149,8 @@ export async function runtimeSmokeImports(root) {
       for (const edge of metafile.inputs[file]?.imports ?? []) {
         if (edge.path.startsWith('cloudflare:')) {
           const location = realpathSync(path.resolve(root, file));
-          const owned = workspace.some(directory => inside(directory, location)
-            && !path.relative(directory, location).split(path.sep).includes('node_modules'));
+          const owned = inside(workspace, location)
+            && !path.relative(workspace, location).split(path.sep).includes('node_modules');
           const via = [...trail, file, edge.path];
           if (owned) throw new Error(`${entry.id}: Cloudflare entry requires a reviewed runtime smoke; ${via.join(' -> ')}`);
           thirdPartyCloudflare.set(boundaryKey(file, edge.path), { importer: file, specifier: edge.path, via });
@@ -158,7 +158,7 @@ export async function runtimeSmokeImports(root) {
         if (!edge.external) visit(edge.path, [...trail, file]);
       }
     }
-    visit(posix(path.relative(root, entry.target)));
+    visit(posix(path.relative(root, realpathSync(entry.target))));
   }
   const workerdBoundaries = [...boundaries.values()].sort((a, b) => a.importer.localeCompare(b.importer) || a.specifier.localeCompare(b.specifier));
   for (const boundary of workerdBoundaries) console.log(`[runtime-smoke] ${boundary.kind}: ${boundary.importer} -> ${boundary.specifier}`);
