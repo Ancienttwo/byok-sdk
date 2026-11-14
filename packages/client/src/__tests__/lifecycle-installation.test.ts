@@ -1945,12 +1945,12 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect([await fs.readFile(db, 'utf8'), (await fs.lstat(tree)).isSymbolicLink()]).toEqual(['v2 data', true]);
     });
 
-    it('a store whose parent directory became a file is precheck_failed before any store is restored', async () => {
+    it.each(['file', 'directory'] as const)('a %s store whose parent directory became a file is precheck_failed before any store is restored', async (kind) => {
       const parent = path.join(await fs.realpath(root), 'parent');
       await fs.writeFile(parent, 'a file now');
       const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
       const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
-      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'nested', path: path.join(parent, 'db'), canonical: path.join(parent, 'db'), files: {} }] }));
+      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'nested', path: path.join(parent, 'db'), canonical: path.join(parent, 'db'), ...(kind === 'directory' ? { kind } : {}), files: {} }] }));
       const error = await installation.rollback().catch((caught: unknown) => caught);
       expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ name: 'ServiceInstallationError', code: 'precheck_failed' }));
       expect([await fs.readFile(db, 'utf8'), await fs.readFile(parent, 'utf8')]).toEqual(['v2 data', 'a file now']);

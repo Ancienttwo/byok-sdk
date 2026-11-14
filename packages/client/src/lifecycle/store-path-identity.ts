@@ -151,6 +151,10 @@ export async function checkStorePaths(written: readonly string[], guarded: reado
  * is why the root check is separate.
  */
 export async function checkRestoreTargets(entries: ReadonlyArray<{ path: string; canonical: string; kind?: 'directory' }>, guarded: readonly string[], platform: NodeJS.Platform): Promise<StorePathRefusal | undefined> {
+  return returningRefusal(() => checkRestoreEntries(entries, guarded, platform));
+}
+
+async function checkRestoreEntries(entries: ReadonlyArray<{ path: string; canonical: string; kind?: 'directory' }>, guarded: readonly string[], platform: NodeJS.Platform): Promise<StorePathRefusal | undefined> {
   const checked = await checkStorePaths(entries.map((entry) => entry.path), guarded, platform);
   if ('refusal' in checked) return checked.refusal;
   // A directory store's root must not be a link, a junction included: its
@@ -192,18 +196,41 @@ async function resolvesTo(listed: string, recorded: string): Promise<boolean> {
 
 /** Creates `dir` and its missing ancestors as real directories, never following a link; an existing entry that is not a directory is refused. */
 export async function mkdirReal(dir: string): Promise<StorePathRefusal | undefined> {
+  return returningRefusal(() => mkdirRealDirs(dir));
+}
+
+async function mkdirRealDirs(dir: string): Promise<StorePathRefusal | undefined> {
   const stat = await lstatOrUndefined(dir);
   if (stat !== undefined) return stat.isDirectory() ? undefined : { code: 'precheck_failed', detail: ` A store's parent is not a directory. (${dir})` };
-  const refused = path.dirname(dir) === dir ? undefined : await mkdirReal(path.dirname(dir));
+  const refused = path.dirname(dir) === dir ? undefined : await mkdirRealDirs(path.dirname(dir));
   if (refused === undefined) await fs.mkdir(dir);
   return refused;
 }
 
+/** A refusal raised below a checking function, which returns it: nothing untyped leaves this module from a path lookup. */
+class Refused extends Error {
+  constructor(readonly refusal: StorePathRefusal) {
+    super(refusal.detail);
+  }
+}
+
+async function returningRefusal<T>(check: () => Promise<T>): Promise<T | StorePathRefusal> {
+  try {
+    return await check();
+  } catch (error) {
+    if (error instanceof Refused) return error.refusal;
+    throw error;
+  }
+}
+
+/** `lstat`, or `undefined` when nothing is there. A component that is not a directory (ENOTDIR) or a link loop (ELOOP) is a refused path. */
 async function lstatOrUndefined(at: string): Promise<import('node:fs').Stats | undefined> {
   try {
     return await fs.lstat(at);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return undefined;
+    if (code === 'ENOTDIR' || code === 'ELOOP') throw new Refused({ code: 'precheck_failed', detail: ` A store path runs through a file or a link loop. (${at})` });
     throw error;
   }
 }
