@@ -1,6 +1,6 @@
 # Workers acceptance runbook (#654 / #794)
 
-Status: window preparation only. This document claims no cloud or physical-device acceptance PASS. On 2026-11-14 the owner approved restarting W1-W4 acceptance with a total cap of **USD 10**, `workers.dev` only (no zone or route), a PlanetScale **development branch**, and teardown on the same day. This work does not block 0.43.0. Each real model call still needs approval for its model, call count and budget allocation; the deployment budget does not authorize model calls.
+Status: window preparation only. This document claims no cloud or physical-device acceptance PASS. On 2026-11-14 the owner approved restarting W1-W4 acceptance with a total cap of **USD 10: Workers Paid USD 5 + runtime USD 5**, `workers.dev` only (no zone or route), a PlanetScale **development branch**, and teardown on the same day. This work does not block 0.43.0. Each real model call still needs approval for its model, call count and budget allocation; the deployment budget does not authorize model calls.
 
 Roles: the **owner** creates and deletes cloud resources, enters all credentials, operates the GUI and compares approval codes. The **operator seat** prepares builds and non-sensitive materials on mini-cf and records redacted evidence. The **device seat** uses hc to operate dedicated device checkouts. **t3** fixes the window and records each row's verdict. The owner runs commands that use credentials in a private operator terminal; seats may guide the owner but must not read the filled environment or secrets in command output. mac-pro belongs to another account: remote verification for this documentation/code delivery is limited to build, typecheck and pure unit tests. The pairing, keychain, browser and other acceptance commands below are for the owner's actual window, with the roles specified in each row.
 
@@ -15,8 +15,8 @@ Start with the [Worker example](../../examples/hosted-bot-collaboration-worker/R
 - Seats may stop only processes they can prove are their own: cwd/argv points to their worktree, or the ppid chain reaches their shell. Record the hc terminal, PID and cwd/argv. Report unknown processes to t3. Do not kill node/wrangler by name. The owner also checks runner ownership before cleanup.
 - Keep `_ops/p9` on the operator machine only, with mode 700 directories and mode 600 private files. Do not send DSNs, S3 keys, bearers, raw tails or member private keys to devices. Devices receive only the Host URL, pairing code, pv, public bundle and synthetic input. Disable shell tracing; do not print env, dump keychains or read `member-keys`.
 - For each row record UTC start/end, operator, command with secrets removed, `WINDOW_SHA`, SDK tag/SHA, overlay file hashes, deployment version ID, OS/browser versions, counts/hashes, PASS/FAIL/OPEN and cleanup status. Keep Node, Worker, cross-process, each physical device, each browser engine, synthetic runtime and real runtime results separate. Do not combine them into one PASS.
-- Do not commit tokens, passwords, DSNs, pairing/pv/approval codes, presigned URLs, canary plaintext, raw objects or raw tails. Put research and runtime evidence in `docs/researches/` and row verdicts in the issue/PR. Do not mark the two [VALIDATION](../../packages/bot-collaboration/VALIDATION.md) rows PASS without their evidence.
-- If any C5 statement fails, especially GRANT, or any C6 gate fails, stop and report immediately; do not change database configuration. Do not pair devices after a P2 smoke failure. After an acceptance row fails, continue only independent rows. Do not change code and retry in the window: stop your runner, record FAIL, then perform P5. Code changes require a new window SHA and rebuild.
+- Do not commit tokens, passwords, DSNs, pairing/pv/approval codes, presigned URLs, canary plaintext, raw objects or raw tails. Put research and runtime evidence in `docs/researches/` and row verdicts in the issue/PR. Do not mark either of the two [VALIDATION](../../packages/bot-collaboration/VALIDATION.md#open-acceptance-rows) rows PASS without its own evidence: **Two physical computers** maps to the macOS + Windows chain / W2.10 row below; **Two Topology L Host processes** is outside this Workers window and stays **OPEN (#606 O4)**. Worker/DO or two-daemon evidence does not close the Topology L service-relay and durable request/verdict recovery gap.
+- If any C5 preflight/statement fails, especially GRANT, or any C6 comparison fails, stop and report immediately; do not change database configuration. Do not pair devices after a P2 smoke failure. After an acceptance row fails, continue only independent rows. Do not change code and retry in the window: stop your runner, record FAIL, then perform P5. Code changes require a new window SHA and rebuild.
 - If a secret is exposed, stop the affected operation. The owner rotates/revokes it; evidence records only the incident and response. Stop acceptance when spending reaches USD 10 or the remaining budget cannot cover the remaining operations, leaving time for teardown. Complete P5 that day even after failure, a machine handoff or an hc interruption.
 - This work does not enable CI `test:browser` or `BYOK_TEST_WORKER_SEALED_CANARY`, and does not cover #1499, downstream migration or #977. Manual W3 and remote HTTPS W1 in the window are separate from those CI switches.
 
@@ -33,6 +33,7 @@ Start with the [Worker example](../../examples/hosted-bot-collaboration-worker/R
 Pin versions (operator / t3; all later steps reuse these variables, without taking a new main SHA mid-window):
 
 ```sh
+set -e
 git fetch origin main --tags
 WINDOW_SHA="$(git rev-parse origin/main)"
 # #1663's implementation merged in #1705; the issue number is not a commit.
@@ -72,14 +73,32 @@ On the window day, the operator seat saves the C5, C6 and C10 fenced blocks belo
 
 | Row | Who / command or action | Pass / stop condition | Acceptance mapping |
 | --- | --- | --- | --- |
-| C3 | owner: Cloudflare > Workers & Pages > Plans > Workers Paid; confirm the USD 10 cap and same-day teardown | Return "Paid on" and billing start time; stop if cost differs from approval | All cloud rows |
+| C3 | owner: Cloudflare > Workers & Pages > Plans > Workers Paid; confirm Workers Paid USD 5 + runtime USD 5 = USD 10 and same-day teardown | Return "Paid on" and billing start time; stop if cost differs from approval | All cloud rows |
 | C4 | owner: PlanetScale > `aiphabee-staging` > New **development branch** `byok-p9` | Connect page confirms the target branch and its separate host/branch ID; not main | All storage rows |
-| C5 | owner: from repo root run `pscale shell aiphabee-staging byok-p9 --role admin`; at the prompt run `\i _ops/p9/c5-roles.sql`, then `\password byok_p9_h` and `\password byok_p9_canary` | Two roles, four schemas, database-scoped search_path. Stop on any failure, especially `GRANT CREATE ON DATABASE postgres` | #794 H, #654(d)(e) |
-| C6 | owner: in the same shell, `\i _ops/p9/c6-baseline.sql` | **major=18, ssl=on, available_connections>=13**. Record version, connection counts, sorted non-P9 schema/role lists and MD5. Stop on any failure; do not change configuration | All cloud rows |
+| C5 | owner: from repo root run `pscale shell aiphabee-staging byok-p9 --role admin`; run the [preflight](#c5-preflight-before-role-or-grant-changes) **before** `\i _ops/p9/c5-roles.sql`, then `\password byok_p9_h` and `\password byok_p9_canary` | **major=18, ssl=on, available_connections>=13** before any role/GRANT changes. Two roles, four schemas, database-scoped search_path. Stop on any failure, especially `GRANT CREATE ON DATABASE postgres` | #794 H, #654(d)(e) |
+| C6 | owner: in the same shell, `\i _ops/p9/c6-baseline.sql` | Keep sorted non-P9 schema/role names only in the private `_ops/p9` file below. Public evidence contains version, connection counts, schema/role counts and MD5 only; exclude `current_user` from role comparison | All cloud rows |
 | C7 | owner: create Hyperdrive `byok-p9-h` / `byok-p9-canary`; origin is dev branch host:5432 / postgres, with branch-qualified `byok_p9_h.<branch_id>` / `byok_p9_canary.<branch_id>`, TLS and max origin connections=5 each | Both Active; give seats only non-secret configuration IDs. Do not open AiphaBee's three configurations | #794 pooling, #654(d) |
 | C8 | owner: create R2 bucket `byok-p9-staging`; S3 token grants Object Read & Write for this bucket only | Keep endpoint/keys private on operator. W4 uses same-origin `/member/ciphertext`; the page needs no R2 CORS rule | #794 5.7, #654(d)(e) |
 | C9 | owner: deployment token expiring that day, Account Workers Scripts: Edit + Workers Tail: Read, no zone permissions; enable workers.dev | Account ID / subdomain may go to seats; the token may not. Owner creates Hyperdrive/R2, so the deploy token needs no extra permissions | Shared |
 | C10 | owner: copy `_ops/p9/p9.env.template` from the [C10 block](#c10-environment-template) to ignored `_ops/p9/p9.env`, directory mode 700 / file mode 600; fill it with a private editor and load it into the private process with the owner's env loader | Direct DSNs on 5432, `sslmode=verify-full`, correct roles/schemas; different H/canary token keys; single-line JSON. Return only "filled"; seats do not inspect file/env | Shared |
+
+### C5 preflight before role or GRANT changes
+
+At the private branch-admin prompt, run this read-only gate **before** `\i _ops/p9/c5-roles.sql`. A failed gate exits the shell; report to t3 and do not change configuration. Continue monitoring connection headroom throughout the window.
+
+```sql
+\set ON_ERROR_STOP on
+select current_setting('server_version_num')::integer / 10000 = 18
+  and current_setting('ssl') = 'on'
+  and current_setting('max_connections')::integer - (select count(*) from pg_stat_activity) >= 13
+  as p9_preflight_ok \gset
+\if :p9_preflight_ok
+  \echo 'P9 preflight OK; role SQL may proceed'
+\else
+  \echo 'P9 preflight failed; stop'
+  \quit
+\endif
+```
 
 ### C5 role and schema file
 
@@ -108,10 +127,10 @@ GRANT CREATE ON DATABASE postgres TO byok_p9_h;
 
 ### C6 baseline file
 
-Save this block verbatim as `_ops/p9/c6-baseline.sql`. These read-only queries exclude P9 names, so T4 can verify unchanged non-P9 names/hashes. They do not scan business data.
+Save this block verbatim as `_ops/p9/c6-baseline.sql`. These read-only queries exclude P9 names and the shell's temporary `current_user` role, so T4 can compare non-P9 counts/hashes across admin sessions. They do not scan business data. Before running C6, the owner creates an empty mode 600 `_ops/p9/non-p9-names.private.txt` on mini-cf. `\o` keeps schema/role names in that private file; never paste its contents into a public issue/PR. Publish only counts and MD5. T4 overwrites the private file and compares the public counts/hashes with C6.
 
 ```sql
--- C6 baseline, NEW dev branch byok-p9 only. Names, hashes and connection counts; no data rows.
+-- C6 baseline, NEW dev branch byok-p9 only. Names stay in the private file; no data rows.
 \set ON_ERROR_STOP on
 select version();
 select current_setting('server_version_num')::integer / 10000 as major_version;
@@ -120,13 +139,15 @@ show max_connections;
 select count(*) as current_connections,
   current_setting('max_connections')::integer - count(*) as available_connections
   from pg_stat_activity;
+\o _ops/p9/non-p9-names.private.txt
 select nspname from pg_namespace
   where nspname not like 'pg\_%' and nspname <> 'information_schema' and nspname not like 'byok\_p9\_%' order by nspname;
-select rolname from pg_roles where rolname not like 'byok\_p9\_%' order by rolname;
+select rolname from pg_roles where rolname not like 'byok\_p9\_%' and rolname <> current_user order by rolname;
+\o
 select count(*) as schemas, md5(string_agg(nspname, ',' order by nspname)) as schema_list_md5
   from pg_namespace where nspname not like 'pg\_%' and nspname <> 'information_schema' and nspname not like 'byok\_p9\_%';
 select count(*) as roles, md5(string_agg(rolname, ',' order by rolname)) as role_list_md5
-  from pg_roles where rolname not like 'byok\_p9\_%';
+  from pg_roles where rolname not like 'byok\_p9\_%' and rolname <> current_user;
 ```
 
 ### C10 environment template
@@ -168,13 +189,16 @@ BYOK_CANARY_TAIL_FILE=<ABSOLUTE_OPERATOR_CHECKOUT>/_ops/p9/canary-tail.jsonl
 | C18 | owner: W5 scope CLI below; owner session token is printed once to the owner and stored privately | Scope entitlement + host_scope exist. Rerunning rotates the session token; do not paste stdout to seats | #794 5.1-5.8 |
 | C19 | t3 / seat: check H smoke, canary auth/static, versions, budget and remaining teardown time; go/no-go | Historical handoff calls this phase C14-C22, but the execution sheet defines rows only through C19. This runbook preserves C14-C19 without inventing other rows. Any P2 failure leads to P5 | Shared |
 
-H DDL: the owner runs this at repository root after selecting the H role in private `DATABASE_URL`. Imports come from the window SHA. Fixed error messages prevent driver errors from printing DSNs:
+H DDL: the owner starts at repository root after selecting the H role in private `DATABASE_URL`. The subshell changes to the Worker example so Bun's isolated dependencies resolve, then returns to repository root. Imports come from the window SHA. Fixed error messages prevent driver errors from printing DSNs:
 
 ```sh
+(
+set -e
+cd examples/hosted-bot-collaboration-worker
 DATABASE_URL="$P9_H_DATABASE_URL" node --import tsx --input-type=module <<'JS'
 import pg from 'pg';
-import { HostedCollaborationStore } from './examples/hosted-bot-collaboration/src/index.ts';
-import { hostScopeDdl, hostProjectionDdl } from './examples/hosted-bot-collaboration-worker/src/host-scopes.ts';
+import { HostedCollaborationStore } from '../hosted-bot-collaboration/src/index.ts';
+import { hostScopeDdl, hostProjectionDdl } from './src/host-scopes.ts';
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
 try {
   const store = new HostedCollaborationStore(pool, 'byok_p9_h', { host: async () => ({ models: {} }) });
@@ -185,6 +209,7 @@ try {
 } catch { console.error('H DDL failed; stop and report'); process.exitCode = 1; }
 finally { await pool.end(); }
 JS
+)
 ```
 
 C13 configuration checklist (operator seat prepares; owner checks account and IDs):
@@ -235,14 +260,14 @@ JS
 
 | Row | Who / command or action | Pass / stop condition | Acceptance mapping |
 | --- | --- | --- | --- |
-| 5.9 / W1.1 | owner/operator: `bunx wrangler@4.158.0 tail byok-p9-canary --format json > _ops/p9/canary-tail.jsonl`; keep its own tail process alive and record terminal/PID | Capture logs throughout; an interrupted tail cannot support complete zero-hit evidence | #654(d) logs |
-| 5.10 / W1.2 | owner/operator: load canary URL, direct DSN, bearer, storage JSON and absolute tail path privately; **leave BYOK_CANARY_DEVICE unset**; run the W1 command below | Sealed and plain twin complete; sealedHits=0; inventory missing/unexpected arrays empty; twin found in outbox.body and an object; member decrypts. Label separately "operator-machine daemon (mini-cf)" | #654(d), does not replace physical-device evidence |
-| 5.4 / W2.1 | owner/operator: open `GET /byok/board/stream` with a separate SDK device client; after headers arrive, `POST /host/board-item {"scope":"p9-scope","item":{"itemId":"p9-after-headers","channel":"worker","title":"synthetic"}}` (admin) | A new `event: board` arrives; record event ID. Requires a device bearer, not the admin bearer. Without an authorized client, wait for P4; do not claim PASS without a device | #794 SSE/pool lifetime |
-| 5.5 / W2.2 | owner/operator: use the window's `src/clock.test.ts` routine fixture with Node `store.seed`/`bindDevice` to set a future slot; let cron/alarm run it, without `/host/passes` | Fires `scheduled` within the 60-second late bound; one occurrence, one offer. If unpaired/not ready, wait for P4 | #794 DO/cron |
-| 5.6 / W2.3 | owner/operator: send 10 concurrent `POST /host/input {"botId":"main","key":"<distinct-id>","request":"synthetic"}` requests to a ready Bot (owner session) | Each commits once; tail has no prepared statement/search_path errors. Without a ready Bot, wait for P4 | #794 Hyperdrive pooling |
+| 5.9 / W1.1 | owner (on mini-cf): `bunx wrangler@4.158.0 tail byok-p9-canary --format json > _ops/p9/canary-tail.jsonl`; keep its own tail process alive and record terminal/PID | Capture logs throughout; an interrupted tail cannot support complete zero-hit evidence | #654(d) logs |
+| 5.10 / W1.2 | owner (on mini-cf): load canary URL, direct DSN, bearer, storage JSON and absolute tail path privately; **leave BYOK_CANARY_DEVICE unset**; run the W1 command below | Sealed and plain twin complete; sealedHits=0; inventory missing/unexpected arrays empty; twin found in outbox.body and an object; member decrypts. Label separately "operator-machine daemon (mini-cf)" | #654(d), does not replace physical-device evidence |
+| 5.4 / W2.1 | owner (on mini-cf): open `GET /byok/board/stream` with a separate SDK device client; after headers arrive, `POST /host/board-item {"scope":"p9-scope","item":{"itemId":"p9-after-headers","channel":"worker","title":"synthetic"}}` (admin) | A new `event: board` arrives; record event ID. Requires a device bearer, not the admin bearer. Without an authorized client, wait for P4; do not claim PASS without a device | #794 SSE/pool lifetime |
+| 5.5 / W2.2 | owner (on mini-cf): use the window's `src/clock.test.ts` routine fixture with Node `store.seed`/`bindDevice` to set a future slot; let cron/alarm run it, without `/host/passes` | Fires `scheduled` within the 60-second late bound; one occurrence, one offer. If unpaired/not ready, wait for P4 | #794 DO/cron |
+| 5.6 / W2.3 | owner (on mini-cf): send 10 concurrent `POST /host/input {"botId":"main","key":"<distinct-id>","request":"synthetic"}` requests to a ready Bot (owner session) | Each commits once; tail has no prepared statement/search_path errors. Without a ready Bot, wait for P4 | #794 Hyperdrive pooling |
 | 5.13 / W3 | owner on mac-pro's separate main checkout: `cd examples/hosted-bot-collaboration-worker`, `PLAYWRIGHT_BROWSERS_PATH="$HOME/byok-p9/ms-playwright" bun run test:browser` | Chromium/Firefox/WebKit pass; record each userAgent and Playwright version. Record a failed engine FAIL and a missing engine OPEN | #654(e) Layer V |
 
-W1 command (operator owner; the remote HTTPS case opts in through `BYOK_CANARY_BASE_URL`, **without enabling the local canary CI switch**):
+W1 command (owner on mini-cf; the remote HTTPS case opts in through `BYOK_CANARY_BASE_URL`, **without enabling the local canary CI switch**):
 
 ```sh
 bun run --filter @byok-sdk/example-hosted-bot-collaboration-worker test \
@@ -277,14 +302,15 @@ Repeat the round trip as the same OS user and in the same launch context as the 
 
 | Row | Who / command or action | Pass / stop condition | Acceptance mapping |
 | --- | --- | --- | --- |
-| 5.1 / W2.5 | owner/operator: `POST /host/pairing-code {"scope":"p9-scope"}` (admin); use the fresh code promptly | Code stays out of evidence; re-pair if expired | #794 |
+| 5.1 / W2.5 | owner (on mini-cf): `POST /host/pairing-code {"scope":"p9-scope"}` (admin); use the fresh code promptly | Code stays out of evidence; re-pair if expired | #794 |
 | 5.2 / W2.6 | owner/mac-pro: runner command below, root under `~/byok-p9/`, stub runtime, dedicated keychain argument | ready event; DB device.machine_id non-null. Record device hash, SDK tag/SHA and overlay hashes | #794 macOS |
-| setup / 5.3 | owner/operator: update C18 HostConfig with the actual deviceId; follow Node setup in `src/worker.test-support.ts#openHome.bot`: `store.seed` (seedCollaboration, initial t1 terminal state, main.execution) and `store.bindDevice`. Do not call `openHome`, which creates a local substrate. Then `POST /host/input {"botId":"main","key":"p9-turn-1","request":"synthetic"}` > pass > started > `hc send <owned-terminal> '{"type":"finish","taskId":"<id>","document":{"text":"synthetic"}}'` > pass | One offer, one command/outcome, Turn settled; #1663 sender runs every pass, projections deduplicate and home becomes ready. Do not continue dependent rows after failure | #794 single device and sender |
+| setup / 5.3 | owner (on mini-cf): update C18 HostConfig with the actual deviceId; follow Node setup in `src/worker.test-support.ts#openHome.bot`: `store.seed` (seedCollaboration, initial t1 terminal state, main.execution) and `store.bindDevice`. Do not call `openHome`, which creates a local substrate. Then `POST /host/input {"botId":"main","key":"p9-turn-1","request":"synthetic"}` > pass > started > `hc send <owned-terminal> '{"type":"finish","taskId":"<id>","document":{"text":"synthetic"}}'` > pass | One offer, one command/outcome, Turn settled; #1663 sender runs every pass, projections deduplicate and home becomes ready. Do not continue dependent rows after failure | #794 single device and sender |
 | 5.7 / W2.8 | owner/mac-pro: upload a synthetic artifact through SDK blob prepare/upload/commit, then download through presigned GET; W1 physical-device row also covers artifact upload | R2 object and manifest exist, sizes/hashes match. Record hashes/sizes, not URLs/bytes. W1 upload alone cannot prove download PASS | #794 R2 |
-| 5.8 / W2.9 | owner/operator: redeploy the same window code/config during an in-flight scenario, `wrangler deploy -c _ops/p9/byok-p9-h.wrangler.jsonc` | Next alarm rereads PG and completes once; record both version IDs and before/after counts. Redeploy proves version-switch recovery, not observation of natural platform eviction | #794 isolate recovery |
+| 5.8 / W2.9 | owner (on mini-cf): redeploy the same window code/config during an in-flight scenario, `bunx wrangler@4.158.0 deploy -c _ops/p9/byok-p9-h.wrangler.jsonc` | Next alarm rereads PG and completes once; record both version IDs and before/after counts. Redeploy proves version-switch recovery, not observation of natural platform eviction | #794 isolate recovery |
 | chain / W2.10 | owner: only with an available, approved physical Windows slot on win-ci, pair a second Bot with independent enrollment/home; run A->B->A from `src/two-devices.test.ts` | Two distinct non-null machine_ids; each Turn runs once on its assigned device, each outcome/reply once. With mac-pro only, leave OPEN; a second Mac does not satisfy macOS+Windows | #794 two physical devices |
+| Topology L / #606 O4 | t3: outside this Workers window; no Topology L Host relay acceptance is run | **OPEN**; needs service relay and durable request/verdict recovery evidence | #794 VALIDATION: Two Topology L Host processes |
 | real / W2.10 | owner approves runtime/model and the 3-Turn budget for each run, then repeats the chain with `--runtime real` | Record model/runtime, usage/cost and the same counts in a separate real row. Without approval or Windows, leave OPEN | #794 real runtime |
-| 5.11 / W1.3 | owner/operator: set BYOK_CANARY_DEVICE below and rerun the W1 command | Automatic 50-digit code/MAC comparison, sealed zero hits, positive twin and member decryption; label "physical device (mac-pro)" | #654(d) macOS |
+| 5.11 / W1.3 | owner (on mini-cf): first stop 5.2 and any prior runner and clear the four T1 product accounts as required below; set BYOK_CANARY_DEVICE below and rerun the W1 command | Automatic 50-digit code/MAC comparison, sealed zero hits, positive twin and member decryption; label "physical device (mac-pro)" | #654(d) macOS |
 | 5.12 / W1.4 | owner: independent Windows root, machine=win-ci, omit macosKeychainPath; repeat W1 | Separate Windows evidence; label a VM as VM. If unreachable, OPEN | #654(d)(e) Windows |
 
 Runner example (the owner may launch it with `hc run --bg --on mac-pro --cwd <device-checkout>/examples/hosted-bot-collaboration-worker`; pairing argv/hc history remain private):
@@ -302,19 +328,22 @@ In W1's private operator environment, set only public path configuration here. U
 export BYOK_CANARY_DEVICE='{"machine":"mac-pro","cwd":"<absolute-device-checkout>","root":"<absolute-fresh-canary-root>","macosKeychainPath":"<absolute-dedicated-keychain-path>"}'
 ```
 
-W1 operates, stops and removes only the runner terminal returned by its own `hc run`. It must not handle other sessions. After any pairing/binding failure, discard that root's anchor rather than resuming it. Clean up that root's keychain entries before pairing with a fresh root, and keep the failed row. Different roots sharing one keychain must not contend for the same product enrollment concurrently.
+W1 operates, stops and removes only the runner terminal returned by its own `hc run`. It must not handle other sessions. Keychain records are keyed by **product**, not root: service=SHA-256(productId), with the four fixed T1 accounts. A fresh root for the same product overwrites the previous enrollment in that keychain. **Before 5.11 and before every 5.15 run**, the owner stops the 5.2 runner and any prior W1/W4 runner, confirms they ended using the T1 ownership rules, and deletes all four product accounts listed in T1 from the dedicated keychain (keep the keychain itself until teardown). Then pair with a fresh root under `~/byok-p9/`. After any pairing/binding failure, keep the failed verdict, clear those same four product accounts and discard that root's anchor before pairing again. To resume 5.2 later, repeat this stop/clear/fresh-root pairing and update C18/5.3 with the new deviceId; do not resume the overwritten enrollment.
 
-### 5.3 Node preparation command (owner/operator)
+### 5.3 Node preparation command (owner on mini-cf)
 
-At the operator repository root, select the H role in private `DATABASE_URL` and set `P9_DEVICE_ID` to the paired device's public ID. This command sets up the initial scenario, not acceptance results. Then rerun the C18 scope CLI to rotate the owner token. It uses the same fixture setup as `openHome.bot`; provisioning a scope alone does not make its Bot ready:
+At the operator repository root, select the H role in private `DATABASE_URL` and set `P9_DEVICE_ID` to the paired device's public ID. The subshell changes to the Worker example for dependency resolution and returns to repository root. This command sets up the initial scenario, not acceptance results. Then rerun the C18 scope CLI to rotate the owner token. It uses the same fixture setup as `openHome.bot`; provisioning a scope alone does not make its Bot ready:
 
 ```sh
+(
+set -e
+cd examples/hosted-bot-collaboration-worker
 DATABASE_URL="$P9_H_DATABASE_URL" node --import tsx --input-type=module <<'JS'
 import pg from 'pg';
 import { writeFile } from 'node:fs/promises';
-import { HostedCollaborationStore } from './examples/hosted-bot-collaboration/src/index.ts';
+import { HostedCollaborationStore } from '../hosted-bot-collaboration/src/index.ts';
 import { seedCollaboration } from '@byok-sdk/bot-collaboration/testing';
-import { template } from './examples/host-execution-core/src/test-support.ts';
+import { template } from '../host-execution-core/src/test-support.ts';
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
 try {
   if (!process.env.P9_DEVICE_ID) throw new Error();
@@ -327,19 +356,20 @@ try {
     state.team.bots.main.execution = execution;
   });
   await store.bindDevice('p9-scope', process.env.P9_DEVICE_ID);
-  await writeFile('_ops/p9/host-config.json', JSON.stringify(config), { mode: 0o600 });
+  await writeFile('../../_ops/p9/host-config.json', JSON.stringify(config), { mode: 0o600 });
   console.log('H scenario prepared; reprovision scope before input');
 } catch { console.error('H scenario preparation failed; stop and report'); process.exitCode = 1; }
 finally { await pool.end(); }
 JS
+)
 ```
 
 ### W4 browser member page (#654(e) Layer M; owner; about 15-20 minutes per engine)
 
 | Row | Who / command or GUI action | Pass / stop condition |
 | --- | --- | --- |
-| 5.14 / W4.1-2 | owner/operator first runs C18 `entitlement <fresh-tenant>` with the canary DSN; owner opens `https://byok-p9-canary.<subdomain>.workers.dev/member` in the target browser, enters bearer, tenant and product=`hosted-collaboration-worker`, creates keys | Only public bundles displayed; bearer stays in tab memory, not console/URL. Fresh tenant each run |
-| 5.15 / W4.3 | owner: start fresh tenant on the page; give private pairingCode/pv to mac-pro runner with `--verification-secret <pv> --runtime stub --stub-canary --macos-keychain-path <dedicated-path>` and a fresh root | paired event; 10-minute pair-verification TTL. On timeout record FAIL and use a fresh root |
+| 5.14 / W4.1-2 | owner (on mini-cf) first runs C18 `entitlement <fresh-tenant>` with the canary DSN; owner opens `https://byok-p9-canary.<subdomain>.workers.dev/member` in the target browser, enters bearer, tenant and product=`hosted-collaboration-worker`, creates keys | Only public bundles displayed; bearer stays in tab memory, not console/URL. Fresh tenant each run |
+| 5.15 / W4.3 | owner: first stop 5.2 and any prior runner and clear the four T1 product accounts as required below; start fresh tenant on the page; give private pairingCode/pv to mac-pro runner with `--verification-secret <pv> --runtime stub --stub-canary --macos-keychain-path <dedicated-path>` and a fresh root under `~/byok-p9/` | paired event; 10-minute pair-verification TTL. On timeout record FAIL and use a fresh root |
 | 5.16 / W4.4 | owner: enter deviceId on page and verify MAC; Copy public bundle; send `{"type":"member-bundle","bundle":<public-json>}` on device stdin. Compare all 50 approval-code digits on both screens. Only on a match send `{"type":"approve"}` to the device and check page confirmation; otherwise `{"type":"reject"}` | Device becomes ready only after anchor match. Do not send the code to the page or evidence, or bypass visual comparison |
 | 5.17 / W4.5 | owner: active tab signs C1/C3 policy and issues epoch 1 scope keys; paste routing template `{deviceId,payload}` (fields in W4 README; omit instruction/sealing/sealed), submit then decrypt C3 | Page PASS, hash=device canary-result sha256, chain length/task/epoch/userAgent. finished must arrive; digest alone is not completion |
 | 5.18 / W4.6 | owner: approve a second tab through both-screen comparison per W4 README; remove one member; remaining tab signs a fresh epoch and submits a new task | Removed tab FAIL/member_revoked + scopeKey absent; remaining tab PASS with matching hash. Old-epoch failure is not new-epoch revocation evidence |
@@ -352,11 +382,11 @@ This is a manual checklist, with **no script that automatically deletes cloud re
 
 | Row | Who / command or action | Completion evidence / stop condition | Acceptance mapping |
 | --- | --- | --- | --- |
-| T0 | **owner**: immediately after the last W4 run, rotate both Workers with `wrangler secret put HOST_ADMIN_TOKEN -c <P9-config>`; test old bearer on H `POST /host/pairing-code` and canary `POST /probe/call` | Both reject old token with 401; owner verifies privately without recording values. If this fails, stop acceptance and continue revocation/resource deletion | #654(e) cleanup after bearer entered in page |
+| T0 | **owner**: immediately after the last W4 run, rotate both Workers with `bunx wrangler@4.158.0 secret put HOST_ADMIN_TOKEN -c <P9-config>`; test old bearer on H `POST /host/pairing-code` and canary `POST /probe/call` | Both reject old token with 401; owner verifies privately without recording values. If this fails, stop acceptance and continue revocation/resource deletion | #654(e) cleanup after bearer entered in page |
 | T1 | **owner** stops acceptance runners. Seats may stop only their own processes with cwd/argv/ppid ownership proof: first `hc send <owned-terminal> '{"type":"stop"}'`, confirm ended, then `hc rm`; kill after timeout only with ownership proof. Device seat deletes runner keychain entries, round-trip item and dedicated keychain as listed below. Seat checks each own checkout with `git status -uall` and removes its `~/byok-p9` checkouts/roots/browser cache and this window's enrollment data | Terminals ended, own processes gone, roots/checkouts removed. Report unknown files/processes to t3. On Windows clean only the specified Credential Manager targets | #794 and #654 device cleanup |
 | T2 | **owner**: in Cloudflare dashboard delete Worker `byok-p9-h` (including this window's HostClock DO/cron) and `byok-p9-canary`; verify associated DO storage/bindings are removed, with no cron deployment left | Worker/DO/cron name lists contain no window resources. Changing an existing Worker is not teardown | Shared |
 | T3 | **owner**: delete Hyperdrive configurations `byok-p9-h` and `byok-p9-canary`; empty/delete R2 bucket **byok-p9-staging**; revoke its S3 token | Dashboard confirms both new configs, bucket and token absent. Do not open the other three configs | Shared |
-| T4 | **owner**: connect only with `pscale shell aiphabee-staging byok-p9 --role admin`; revoke CREATE, explicitly drop four schemas/two roles below, rerun C6 and compare non-P9 lists/hashes; then delete dev branch **byok-p9** in dashboard | Baseline matches and dev branch is deleted. Report drop/comparison failure to t3; do not change main or delete non-P9 objects | Shared |
+| T4 | **owner**: connect only with `pscale shell aiphabee-staging byok-p9 --role admin`; revoke CREATE, explicitly drop four schemas/two roles below, rerun C6 and compare non-P9 counts/hashes; then delete dev branch **byok-p9** in dashboard | Baseline matches and dev branch is deleted. Report drop/comparison failure to t3; do not change main or delete non-P9 objects | Shared |
 | T5 | **owner**: revoke that day's Cloudflare deploy API token | Dashboard confirms revocation; do not merely wait for TTL | Shared |
 | T6 | **owner**: decide whether to keep Workers Paid. If not, cancel in dashboard (effective at period end); if kept, record reason and expected bill in teardown | Explicit owner decision, daily cost and no remaining P9 billable resources recorded. Do not cancel a plan serving other uses without the owner's decision | Budget |
 | T7 | **owner**: save redacted counts/hashes, then delete operator `_ops/p9` (env, tails, private config/token captures). **Seats** delete only extra worktrees/non-secret temporary files they created; first `git status -uall`, then `git worktree remove <exact-owned-path>` | Private directory absent. Do not use `/tmp/byok-sdk-wt-*` wildcard deletion or clean another seat's directory | Shared |
@@ -367,6 +397,8 @@ T1 keychain cleanup (device seat, without reading values): verify the service fo
 
 ```sh
 # Device seat: verify ownership of this dedicated path; never target login.keychain-db.
+P9_KEYCHAIN="$HOME/Library/Keychains/byok-p9.keychain-db"
+test -f "$P9_KEYCHAIN" || { echo 'dedicated keychain missing; stop'; exit 1; }
 security delete-generic-password -s byok-p9-roundtrip -a byok-p9-probe "$P9_KEYCHAIN"
 # The round-trip item should already be gone; record item-not-found, not other errors.
 security delete-keychain "$P9_KEYCHAIN"
@@ -382,18 +414,11 @@ DROP SCHEMA byok_p9_h, byok_p9_host, byok_p9_sdk_h, byok_p9_sdk_canary CASCADE;
 ALTER ROLE byok_p9_h IN DATABASE postgres RESET ALL;
 ALTER ROLE byok_p9_canary IN DATABASE postgres RESET ALL;
 DROP ROLE byok_p9_h, byok_p9_canary;
--- Rerun c6-baseline.sql and compare non-P9 names/hashes; owner then deletes byok-p9 in dashboard.
+-- Rerun c6-baseline.sql and compare non-P9 counts/hashes; owner then deletes byok-p9 in dashboard.
 ```
 
 ## Sources and recovery
 
 This runbook combines the original P9 plan, updated n1 runbook, 11-11 deploy-day-sheet/exec-log and [handoff section 6](../../docs/releases/2026-11-11-coordination-handoff.md#6-%E9%83%A8%E7%BD%B2%E6%97%A5654794). The 11-11 log proves only C1/C2/C11 preflight/build, with **no successful deployment evidence after C3**. Do not carry its PASS results into the new window. Current paths use `packages/bot-collaboration`. The old plan's W1-W4 implementation gaps and W5 missing CLI have been addressed by the merged PRs.
-
-Recovery sources (local historical materials; record locations without committing transcripts):
-
-- Original P9 plan and deploy-day-sheet/exec-log: the named files in `/private/tmp/claude-501/-Users-kito-Projects-byok-sdk/20e86ea1-4e4b-4141-ad07-f1ed7e27e5bc/scratchpad/`.
-- Updated `n1-runbook-794-654.md`: Write call content at line 169 of `~/.claude/projects/-private-tmp-byok-sdk-wt-n1-runbook/168de601-9100-48e3-88cc-3ea8ed80857e.jsonl`.
-- Original SQL/env files: the three `cat > ... <<'EOF'` bodies in the Bash call at line 1307 of `~/.claude/projects/-private-tmp-byok-sdk-wt-runbook/1ad10efe-9763-4cb9-b218-13d694c6b3ab.jsonl`, not a Write call. Parse JSON line by line with Python and extract only these three bodies.
-- Before using the recovered contents, `rg -n -i 'token|password|secret|postgres(ql)?://'` found only comments, variable names, empty values and an explicit placeholder DSN, with no real tokens/passwords/connection strings. The committed template makes every assignment a `<PLACEHOLDER>` and removes the old seat's fixed tail path and copyable DSN shape. Do not read credentials from other transcript output. SQL preserves the role/schema/GRANT intent, scopes search_path to the database, and adds ON_ERROR_STOP, major version/available connections and sorted name lists to the baseline.
 
 For local compatibility verification, check out `v0.42.0` (`14e0628d2`) in a temporary worktree, overlay only the two runner files, then run `bun ci`, `bun run build` and the example typecheck. The PR verification record gives the final SHA, file hashes, commands and results. This proves compilation compatibility only; P1-P5 require separate evidence during the owner's window.

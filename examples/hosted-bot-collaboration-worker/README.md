@@ -104,7 +104,7 @@ by its hash.
 
 ## Running a device
 
-`device-runner` is a private example CLI. For device acceptance, use the latest published release tag on the day of the
+`device-runner` is a private example CLI. For device acceptance, use the published stable release tag selected by t3 for the
 window, **at least `v0.42.0`**. Build the SDK packages from that tag, then overlay only `device-runner.ts` and
 `device-session.ts` from the agreed **window SHA** on `main`. The runner calls `daemon.whenTaskSettled` (#1838), which
 requires this minimum SDK version. Record the release tag, its SDK source commit and the window SHA separately;
@@ -115,13 +115,14 @@ Use Node satisfying the tagged client's `engines` requirement. Run one runner pe
 The Host must already have a provisioned scope and supply a fresh pairing code from `POST /host/pairing-code`; the
 device needs only the Host URL and that code, never the operator bearer.
 
-macOS, from a fresh device checkout (select and record the window SHA before switching to the tag; replace Host and
+macOS, from a fresh device checkout (use the same window SHA and SDK tag supplied by t3; replace Host and
 pairing-code placeholders privately). On mac-pro, create and verify the dedicated keychain as in runbook row 2.7 first:
 
 ```sh
+set -e
 git fetch origin main --tags
-WINDOW_SHA="$(git rev-parse origin/main)"
-SDK_TAG="$(gh release view --json tagName --jq .tagName)"
+WINDOW_SHA='<t3-supplied>'
+SDK_TAG='<t3-supplied>'
 # Confirm SDK_TAG is a published stable release >= v0.42.0 before continuing.
 git checkout --detach "$SDK_TAG"
 git checkout "$WINDOW_SHA" -- \
@@ -143,11 +144,11 @@ Windows PowerShell, from the repository root:
 
 ```powershell
 git fetch origin main --tags
-$WindowSha = git rev-parse origin/main
-$SdkTag = gh release view --json tagName --jq .tagName
-# Confirm SdkTag is a published stable release >= v0.42.0 before continuing.
-git checkout --detach $SdkTag
-git checkout $WindowSha -- `
+$WINDOW_SHA = '<t3-supplied>'
+$SDK_TAG = '<t3-supplied>'
+# Use the same WINDOW_SHA and SDK_TAG supplied by t3; stable release >= v0.42.0.
+git checkout --detach $SDK_TAG
+git checkout $WINDOW_SHA -- `
   examples/hosted-bot-collaboration-worker/src/device-runner.ts `
   examples/hosted-bot-collaboration-worker/src/device-session.ts
 bun install --frozen-lockfile
@@ -157,7 +158,7 @@ Set-Location examples/hosted-bot-collaboration-worker
 node --import tsx src/device-runner.ts `
   --server-url 'https://HOST.workers.dev' `
   --pairing-code 'PAIRING_CODE' `
-  --root "$env:USERPROFILE\byok-worker-device" `
+  --root "$env:USERPROFILE\byok-p9\device-root" `
   --runtime stub
 ```
 
