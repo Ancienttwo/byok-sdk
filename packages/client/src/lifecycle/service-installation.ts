@@ -1139,13 +1139,21 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
     const paths = await Promise.all(stores.map((store) => canonical(store.path)));
     if (overlaps(stores, paths, platform) || stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
-    // A store that is, holds or lies in the install root or a daemon store's
-    // service/ would have the versions, receipt, live leases or launcher
-    // replaced by a restore (#2011). Each is guarded both as its target and
-    // as the entry naming it, since a restore removes a link, not its target.
+    await refuseServiceOverlap(paths);
+    return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path) } : store);
+  }
+
+  /**
+   * A store that is, holds or lies in the install root or a daemon store's
+   * service/ would have the versions, receipt, live leases or launcher
+   * replaced by a restore (#2011). Each is guarded both as its target and
+   * as the entry naming it, since a restore removes a link, not its target.
+   * `paths` are canonical. Checked at the precheck and again before a
+   * restore, for a snapshot taken without the precheck check (#2102).
+   */
+  async function refuseServiceOverlap(paths: readonly string[]): Promise<void> {
     const guarded = (await Promise.all([root, ...serviceDirs].map(async (at) => [await canonical(at), path.join(await canonical(path.dirname(at)), path.basename(at))]))).flat();
     if (paths.some((a) => guarded.some((b) => within(a, b, platform) || within(b, a, platform)))) throw new ServiceInstallationError('store_overlaps_service_state');
-    return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path) } : store);
   }
 
   /** One candidate store preparation sequence for install and upgrade, retaining the quiescent leases until the caller switches. */
@@ -1315,6 +1323,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
     }));
+    await refuseServiceOverlap(await Promise.all(entries.map((entry) => canonical(entry.path))));
     for (const entry of entries) {
       if (entry.kind === 'directory') {
         await fs.rm(entry.path, { recursive: true, force: true });

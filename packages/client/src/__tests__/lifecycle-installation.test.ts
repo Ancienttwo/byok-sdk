@@ -1858,6 +1858,18 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect([await pointer('current'), await fs.readlink(path.join(holder, 'app'))]).toEqual(['2.0.0', installRoot]);
     });
 
+    it('a snapshot taken without the overlap check is refused before a restore changes any store (#2102)', async () => {
+      const marker = path.join(storeDir, 'service', 'marker');
+      await fs.writeFile(marker, 'live');
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const { entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+      await fs.writeFile(index, JSON.stringify({ entries: [...entries, { store: 'old', path: path.join(storeDir, 'service'), kind: 'directory', files: {} }] }));
+      const error = await installation.rollback().catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'upgrade_pending' });
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'store_overlaps_service_state' }));
+      expect([await fs.readFile(marker, 'utf8'), await fs.readFile(db, 'utf8'), existsSync(index)]).toEqual(['live', 'v2 data', true]);
+    });
+
     it('a linked snapshots/<version> is refused before it is probed or removed (#2061)', async () => {
       const elsewhere = path.join(root, 'elsewhere');
       await fs.mkdir(elsewhere);
