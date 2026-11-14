@@ -441,10 +441,9 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
       after.scripts['test:scripts'] = after.scripts['test:scripts'].slice(ciPrefix.length);
       delete after.scripts[ciHelper];
     }
-    // repo-harness owns its generated command scripts. Admit additions, removals
-    // and edits whose old and new values both invoke repo-harness; every other
+    // Admit rh script changes when both values invoke rh; every other
     // script and field stays in the deep comparison below.
-    const harnessScript = value => typeof value === 'string' && value.startsWith('repo-harness ');
+    const harnessScript = value => typeof value === 'string' && value.startsWith('rh ');
     for (const name of new Set([...Object.keys(before.scripts ?? {}), ...Object.keys(after.scripts ?? {})])) {
       const oldValue = before.scripts?.[name], newValue = after.scripts?.[name];
       if ((oldValue === undefined || harnessScript(oldValue)) && (newValue === undefined || harnessScript(newValue))) {
