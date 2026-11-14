@@ -11548,11 +11548,13 @@ export interface ServiceInstallationOptions {
     stopTimeoutMs?: number;
     /**
      * The Host's own payload policy (#1842), such as a Node floor, file-size
-     * ceilings or file modes. Runs on the staged copy after every digest
-     * passed and before it becomes `versions/<id>`, and on an existing
-     * `versions/<id>` whose manifest matched, so it checks the exact bytes
-     * that will run. `manifest` is a frozen copy. A throw is `payload_invalid` with the error as `cause`;
-     * nothing new appears under `versions/`.
+     * ceilings or file modes. Runs on a fresh staged copy after every digest
+     * passed, also when `versions/<id>` already exists with a matching
+     * manifest, so it checks the exact bytes that will run and never sees the
+     * installed version (#1962). `manifest` is a frozen copy. A throw is
+     * `payload_invalid` with the error as `cause`, and so is a staged copy that
+     * no longer matches the manifest afterwards; nothing under `versions/`
+     * changes.
      */
     verifyPayload?(stagedDir: string, manifest: ServicePayloadManifest): void | Promise<void>;
     /** Test seams for the underlying lifecycle. */
@@ -14058,12 +14060,26 @@ export declare function isPayloadPath(relative: string): boolean;
 export declare function isJsonObject(value: unknown): value is JsonObject;
 /** Every regular file under `dir`, `/`-separated and relative. Any other entry type throws `refuse(relative)`. */
 export declare function listPayloadFiles(dir: string, refuse: (relative: string) => Error, prefix?: string): Promise<string[]>;
-export declare function sha256File(file: string): Promise<string>;
+/**
+ * The SHA-256 of the regular file at `file`, or `refuse(file)` for anything
+ * else (#1962). One rule on every platform: `lstat` must show a regular
+ * file, the descriptor opened (no-follow and non-blocking where the platform
+ * defines those flags) must be a regular file with the same device and
+ * inode. A last segment swapped for a link or a FIFO is refused and never
+ * read or waited on. An ancestor swapped after the listing is not caught:
+ * see {@link writeServicePayloadManifest}'s input contract.
+ */
+export declare function sha256File(file: string, refuse: (file: string) => Error): Promise<string>;
 /**
  * Writes `byok-payload.json` for the payload in `dir` at build time (#1842)
  * and returns the bytes written. Every regular file is listed; a symlink or
  * other entry type, an existing manifest, an empty directory, an invalid id
  * and a `meta` that is not a JSON object throw.
+ *
+ * Input contract (#1962): `dir` is the Host's trusted build output and
+ * nothing changes it while this runs. A file swapped for a link or a FIFO is
+ * refused, but a directory above a listed file that is swapped for a link
+ * after the listing can still lead a read outside `dir`.
  */
 export declare function writeServicePayloadManifest(dir: string, options: {
     id: string;
