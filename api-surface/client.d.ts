@@ -11772,6 +11772,7 @@ declare const ERROR_MESSAGES: {
     readonly installation_absent: 'No version is installed under this install root. Install a payload first.';
     readonly installation_exists: 'A version is already installed under this install root. Upgrade it instead.';
     readonly payload_invalid: 'The payload manifest is missing, malformed, or does not match the payload files.';
+    readonly payload_name_collision: 'Two payload paths differ only in letter case or Unicode normalization, so a volume that ignores either stores them as one. Nothing was changed; rename one of';
     readonly version_current: 'The payload is the version already running.';
     readonly version_conflict: 'A different payload with the same version id is already staged.';
     readonly upgrade_pending: 'An earlier upgrade, rollback or install was interrupted or left its stores unrestored. Run recover() (CLI: byok-agent upgrade recover) first.';
@@ -14058,23 +14059,35 @@ export declare const VERSION_ID: RegExp;
 export declare const SHA256_HEX: RegExp;
 export declare function isPayloadPath(relative: string): boolean;
 export declare function isJsonObject(value: unknown): value is JsonObject;
+/**
+ * Two payload paths, or two of their directories, that differ only in letter
+ * case or Unicode normalization (NFC), or `undefined` (#1962). One volume
+ * that ignores case or normalization (macOS by default, Windows) stores
+ * them as one entry, so such a payload cannot install as listed anywhere:
+ * the manifest writer and the installer both refuse it.
+ */
+export declare function collidingPayloadPaths(relatives: readonly string[]): readonly [string, string] | undefined;
 /** Every regular file under `dir`, `/`-separated and relative. Any other entry type throws `refuse(relative)`. */
 export declare function listPayloadFiles(dir: string, refuse: (relative: string) => Error, prefix?: string): Promise<string[]>;
 /**
- * The SHA-256 of the regular file at `file`, or `refuse(file)` for anything
- * else (#1962). One rule on every platform: `lstat` must show a regular
- * file, the descriptor opened (no-follow and non-blocking where the platform
- * defines those flags) must be a regular file with the same device and
- * inode. A last segment swapped for a link or a FIFO is refused and never
- * read or waited on. An ancestor swapped after the listing is not caught:
- * see {@link writeServicePayloadManifest}'s input contract.
+ * The SHA-256 of the regular file at `file`, or `refuse(file, cause)` (#1962)
+ * for anything else and for any failure to read it. `lstat` must show a
+ * regular file, and the descriptor opened (no-follow and non-blocking where
+ * the platform defines those flags) must be a regular file with the same
+ * device and inode, compared as `bigint`. So the bytes hashed are those of
+ * the file `lstat` saw, and a FIFO is never waited on. Where `open` cannot
+ * refuse a link (Windows), that file renamed and a link to it put in its
+ * place is still read; on POSIX the link is refused. A directory above
+ * `file` swapped after the listing is not caught: see
+ * {@link writeServicePayloadManifest}'s input contract.
  */
-export declare function sha256File(file: string, refuse: (file: string) => Error): Promise<string>;
+export declare function sha256File(file: string, refuse: (file: string, cause?: unknown) => Error): Promise<string>;
 /**
  * Writes `byok-payload.json` for the payload in `dir` at build time (#1842)
  * and returns the bytes written. Every regular file is listed; a symlink or
  * other entry type, an existing manifest, an empty directory, an invalid id
- * and a `meta` that is not a JSON object throw.
+ * a `meta` that is not a JSON object and two paths that differ only in
+ * letter case or Unicode normalization throw.
  *
  * Input contract (#1962): `dir` is the Host's trusted build output and
  * nothing changes it while this runs. A file swapped for a link or a FIFO is
