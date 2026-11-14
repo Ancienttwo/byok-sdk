@@ -14,6 +14,8 @@
 
 - **Fixed (examples; #2142)** — The desktop conversation service and the local routine vector adapter log `drainError` after committed cancellation, including an undefined rejection value, and explain that failed jobs remain pending for retry on the next drain. The desktop bridge returns a fixed summary while keeping the original error and its details in local logs.
 
+- **Fixed (client; #2117)** — The upgrade manifest can now record behavior-only breaking changes with a `behavior:<entry-id>` item, a public-entrypoint description and a migration link. The task HOME change (#2084) is recorded as `task-home-live`; `checkUpgradeFrom()` and its CLI JSON report include every breaking entry's authored `summary`, so Hosts see the behavior and migration action. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#behavior-only-upgrade-notices-2117).
+
 - **Fixed (keys; #2031)** — Pi projection directory ownership is checked against the effective uid, which owns files created by the process. When real and effective uids differ, an effective-uid-owned directory is accepted and a directory owned only by the real uid is refused.
 
 - **Security (client, cloud, server, bot-collaboration; #2118)** — Raise the declared dependency floors to `hono` `^4.13.16` and `@hono/node-server` `^2.1.6`, and update the lockfile to 4.13.18 and 2.1.8 respectively, fixing the seven Hono advisories reported by the security nightly. This includes bot-collaboration's optional node-server peer for its testing entry and the client and bot-collaboration development dependencies. Hosts that pin an older copy must update it; existing Host lockfiles and bundled distributions need to be refreshed and rebuilt.

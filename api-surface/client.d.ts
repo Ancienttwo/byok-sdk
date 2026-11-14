@@ -12404,6 +12404,8 @@ export declare function createSystemdLifecycle(def: ServiceDefinition, deps?: Sy
 export type UpgradeFromRefusalCode = 'upgrade_from_unsupported' | 'upgrade_history_unavailable' | 'upgrade_train_unresolved';
 export interface UpgradeFromBreakingEntry {
     readonly id: string;
+    /** Authored behavior or surface-change description and the Host action. */
+    readonly summary: string;
     /** The release that ships the change. */
     readonly release: string;
     /** `<repo doc>.md#<anchor>` or a byok-sdk issue/PR URL. */
@@ -12418,7 +12420,7 @@ export interface UpgradeFromReport {
     readonly from: string;
     /** The resolved `@byok-sdk/client` version; `null` when it does not resolve. */
     readonly to: string | null;
-    /** Every breaking entry released after `from`, up to and including `to`. */
+    /** Every breaking entry, including behavior-only declarations, released after `from` through `to`. */
     readonly breaking: readonly UpgradeFromBreakingEntry[];
     readonly additiveCount: number;
     readonly train: {
@@ -12438,6 +12440,8 @@ export interface UpgradeFromReport {
  * up to the `@byok-sdk/client` that resolves from `options.resolveFrom`
  * (default: the working directory), and checks that every public
  * `@byok-sdk/*` package resolving from there is on that client's version.
+ * Includes author-declared behavior changes with their summary and migration;
+ * entries need not have a corresponding generated snapshot change.
  *
  * Throws when `fromVersion` is not a version or is newer than the client.
  */

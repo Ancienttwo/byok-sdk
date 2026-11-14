@@ -22,6 +22,8 @@ export type UpgradeFromRefusalCode = 'upgrade_from_unsupported' | 'upgrade_histo
 
 export interface UpgradeFromBreakingEntry {
   readonly id: string;
+  /** Authored behavior or surface-change description and the Host action. */
+  readonly summary: string;
   /** The release that ships the change. */
   readonly release: string;
   /** `<repo doc>.md#<anchor>` or a byok-sdk issue/PR URL. */
@@ -38,7 +40,7 @@ export interface UpgradeFromReport {
   readonly from: string;
   /** The resolved `@byok-sdk/client` version; `null` when it does not resolve. */
   readonly to: string | null;
-  /** Every breaking entry released after `from`, up to and including `to`. */
+  /** Every breaking entry, including behavior-only declarations, released after `from` through `to`. */
   readonly breaking: readonly UpgradeFromBreakingEntry[];
   readonly additiveCount: number;
   readonly train: { readonly version: string | null; readonly packages: readonly UpgradeTrainPackage[] };
@@ -51,7 +53,7 @@ export interface UpgradeFromReport {
 interface ManifestFile {
   readonly from: { readonly version: string };
   readonly to: { readonly version: string };
-  readonly entries: readonly { readonly id: string; readonly impact: 'additive' | 'breaking'; readonly migration: string }[];
+  readonly entries: readonly { readonly id: string; readonly impact: 'additive' | 'breaking'; readonly summary: string; readonly migration: string }[];
 }
 
 const VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
@@ -90,6 +92,8 @@ function resolvePackageJson(require: NodeJS.Require, name: string): string | und
  * up to the `@byok-sdk/client` that resolves from `options.resolveFrom`
  * (default: the working directory), and checks that every public
  * `@byok-sdk/*` package resolving from there is on that client's version.
+ * Includes author-declared behavior changes with their summary and migration;
+ * entries need not have a corresponding generated snapshot change.
  *
  * Throws when `fromVersion` is not a version or is newer than the client.
  */
@@ -130,7 +134,7 @@ export function checkUpgradeFrom(fromVersion: string, options: { readonly resolv
     const release = manifest.from.version === manifest.to.version ? current : manifest.to.version;
     if (compareVersions(release, fromVersion) <= 0 || compareVersions(release, current) > 0) continue;
     for (const entry of manifest.entries) {
-      if (entry.impact === 'breaking') breaking.push({ id: entry.id, release, migration: entry.migration });
+      if (entry.impact === 'breaking') breaking.push({ id: entry.id, release, summary: entry.summary, migration: entry.migration });
       else additiveCount += 1;
     }
   }
