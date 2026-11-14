@@ -14079,6 +14079,19 @@ export declare function isJsonObject(value: unknown): value is JsonObject;
  * knows is refused.
  */
 export declare function collidingPayloadPaths(relatives: readonly string[]): readonly [string, string] | undefined;
+/**
+ * NFC, then each code point uppercased and each resulting code point
+ * lowercased, twice, then NFC again. Per code point, so JavaScript's
+ * final-sigma rule does not apply (`σ`, `ς` and `Σ` all become `σ`). Twice,
+ * because one pass takes `ẞ` only to `ß`; the last NFC recomposes what
+ * uppercasing decomposed (`ΐ`). The result depends on the runtime's Unicode
+ * tables (Node 24: Unicode 17); the every-code-point check in the
+ * installation tests runs on each Node version and fails if an upgrade
+ * breaks the property {@link collidingPayloadPaths} relies on.
+ *
+ * @internal Exported for that check.
+ */
+export declare function collisionKey(name: string): string;
 /** Every regular file under `dir`, `/`-separated and relative. Any other entry type throws `refuse(relative)`. */
 export declare function listPayloadFiles(dir: string, refuse: (relative: string) => Error, prefix?: string): Promise<string[]>;
 /**
