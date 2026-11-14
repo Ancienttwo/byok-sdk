@@ -102,7 +102,7 @@ export interface ClaudeAdapterOptions {
   spawnFn?: SpawnFn;
   /** Deadline for native interrupt ACK before owned-process termination fallback. */
   interruptTimeoutMs?: number;
-  /** Native payload bytes the session retains; past it the oldest are elided and the task continues. Default 16 MiB. */
+  /** Native and tool payload bytes the session retains; past it the oldest are elided and the task continues. Default 16 MiB. Text and reasoning have their own 16 MiB limit. */
   maxRetainedBytes?: number;
   /** Local Host callbacks for native stdio requests; never enables remote boolean approvals. */
   nativeInteractions?: NativeInteractionHostOptions;

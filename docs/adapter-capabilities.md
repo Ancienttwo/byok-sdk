@@ -1299,14 +1299,13 @@ live events, the closing reply and usage are unchanged, and the newest frame
 keeps its payload. The task keeps running; exceeding the limit is not a
 failure.
 
-The limit bounds only native and tool payloads. Text and reasoning, envelopes
-and event kinds are kept whole, because the folds read them, so
-`maxRetainedBytes` is not a bound on total retained bytes (#2056). A task's
-text grows with the provider's per-turn output limit times the number of turns;
-a Host that needs a hard bound sets `maxDurationMs` (the offer's
-`limits.maxDurationMs`, or `DaemonConfig.defaultMaxDurationMs`). For Claude
-this is the behavior since #1892. Codex, Grok, agy, OpenCode and dsh used to
-count their text toward the limit and fail the task past it.
+Text and reasoning have their own 16 MiB limit, with no option (#2056).
+Past it, the oldest frames have their `text_delta` text and readable reasoning
+text emptied and carry `elided: true`; the newest frame stays whole. The text
+limit is a separate budget, so a task with much text does not elide native or
+tool payloads earlier. Envelopes, `seq` and event kinds are kept. Before #1932,
+Codex, Grok, agy, OpenCode and dsh counted their text toward
+`maxRetainedBytes` and failed the task past it.
 
 Limit: Grok classifies a failed prompt from the turn's retained frames. If more
 than `maxRetainedBytes` of frame payload arrives between a failed
