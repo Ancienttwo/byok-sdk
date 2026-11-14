@@ -17,7 +17,6 @@ import type { ScratchRoot } from './scratch.js';
 import { authorityBudget, classBudget, registryPassInspections, RETENTION_LIMITS, type RetentionLimits } from './runtime-accounting.js';
 import { TreeCleanup } from './tree-cleanup.js';
 import { selectReaderRuns } from '../../agent-home-reader-retention.js';
-import { RuntimeCleanup } from './runtime-cleanup.js';
 import { agentSessionFileTtlMs, isAgentSessionLedgerName, isAgentTaskTerminalName, codexThreadIdFromRolloutName, isCodexRolloutFileName, isPiSessionFileName, piSessionRefFromFileName, pruneByLastWrite } from './session-ledgers.js';
 import { existingDirectory, measureTree, removeOwnedPath } from './usage.js';
 import { acquireAgySessionRetention, agySessionPaths, isAgyConversationFileName } from '../../util/agy-session-retention.js';
@@ -145,7 +144,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     }
   }
 
-  let runtimeCleanup: { collector: RuntimeCleanup; released: number } | undefined;
+  let runtimeCleanup: { collector: TreeCleanup; released: number } | undefined;
   async function sweepRuntime(budget: SweepBudget): Promise<void> {
     const available = budget.available;
     async function resume(): Promise<boolean> {
@@ -163,7 +162,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
       if (!TOKEN.test(entry.name) || !entry.isDirectory() || scratch.isLive(entry.name)) continue;
       const directory = path.join(execRoot, entry.name), released = await releasedAt(directory);
       if (released === undefined || budget.now.getTime() - released < config.ttlMs['exec-runtime']) continue;
-      const collector = await RuntimeCleanup.create(directory);
+      const collector = await TreeCleanup.create(directory, true);
       if (collector === undefined) continue;
       runtimeCleanup = { collector, released };
       if (!await resume()) return;
