@@ -1,6 +1,6 @@
 # Host upgrade to 0.43.0
 
-Candidate checklist for a Host moving from 0.42.0 to the 0.43.0 MINOR, prepared from main `bd193cf82`. Earlier Hosts must first apply the preceding Host upgrade checklists. See the [0.43.0 release notes](v0.43.0.md) for the combined migration order and release status.
+Candidate checklist for a Host moving from 0.42.0 to the 0.43.0 MINOR, prepared from main `bbe8b7185`. Earlier Hosts must first apply the preceding Host upgrade checklists. See the [0.43.0 release notes](v0.43.0.md) for the combined migration order and release status.
 
 ## Recoverable memory-helper volume probes (#2200)
 
