@@ -95,7 +95,11 @@ component at a time, every directory read on the way must belong to the
 installing user or root and must not be writable by everyone unless it has
 the sticky bit, and every symbolic link on the way must belong to the
 installing user or root (at most 40 links). Root's own links such as macOS
-`/tmp` pass. Move such an install root under a
+`/tmp` pass. An install root written with a `..` segment, or one whose links lead
+through `..` after a missing directory, is refused the same way; a missing
+install root is created one directory at a time only after its whole path
+passes, and the install root itself owned by another user stays
+`install_root_foreign_owner`. Move such an install root under a
 directory only the installing user or root can change. Group-writable
 directories are accepted and their group trusted (macOS `/Applications` is
 root:admin 775). Windows has neither check, since rename rights there follow

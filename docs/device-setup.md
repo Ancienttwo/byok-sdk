@@ -515,7 +515,11 @@ directory or link (#2028): the root's path is resolved one component at a
 time, every directory read on the way must belong to the installing user or
 root and must not be writable by everyone unless it has the sticky bit (as
 `/tmp` has), and every symbolic link on the way must belong to the
-installing user or root (at most 40 links). A
+installing user or root (at most 40 links). An install root written with a `..` segment, or one whose links lead
+through `..` after a missing directory, is refused the same way; a missing
+install root is created one directory at a time only after its whole path
+passes, and the install root itself owned by another user stays
+`install_root_foreign_owner`. A
 group-writable directory is accepted, so its group members are trusted; for
 example macOS `/Applications` is root:admin 775, so any admin user could
 rename an install root placed directly in it. Windows has neither check: who
