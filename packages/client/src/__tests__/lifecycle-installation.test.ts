@@ -7,7 +7,7 @@ import { existsSync, promises as fs, type BigIntStats, type Stats } from 'node:f
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createServiceInstallation,
   serviceInstallationOver,
@@ -32,6 +32,22 @@ import { OwnedProcessLedger, OwnedProcessResidueError, type OwnedProcessReconcil
 import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';
 
 useInProcessServiceLifecycleGate();
+
+// A fresh second user pays Python's first-start cost once, before the attack's
+// 30s budget. Use the same opt-in as the real two-user cases below.
+beforeAll(() => {
+  if (process.env.BYOK_TWO_USER_TEST !== '1') return;
+  const user = process.env.BYOK_TWO_USER_NAME;
+  expect(user, 'BYOK_TWO_USER_NAME is required for the real two-user cases').toBeTruthy();
+  const warm = spawnSync('sudo', ['-n', '-u', user!, '--', '/usr/bin/python3', '-c', 'pass'],
+    { encoding: 'utf8', timeout: 60_000 });
+  if (warm.error) {
+    throw new Error((warm.error as NodeJS.ErrnoException).code === 'ETIMEDOUT'
+      ? 'second-user python warm-up exceeded 60 s'
+      : `second-user python warm-up failed: ${warm.error.message}`, { cause: warm.error });
+  }
+  expect(warm.status, `second-user python warm-up failed: ${warm.stderr}`).toBe(0);
+}, 65_000);
 
 /** Prints the verdicts in `<root>/verdicts.json` the way `upgrade check --store --json` does. */
 const PRECHECK = [
@@ -1211,8 +1227,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
           await fs.mkdir(target);
           await fs.chmod(shared, mode);
           const beforeEntry = await fs.lstat(entry);
-          // First sudo/Python launch for a new macOS user measured 16.6s in CI.
-          // Bound it separately from the whole case's setup/assertion/cleanup budget.
+          // Python was warmed before the cases; the attack keeps its own 30s budget.
           const attack = spawnSync('sudo', ['-n', '-u', user!, '--', '/usr/bin/python3', '-c', `
 import errno, json, os, sys
 shared, entry, moved, target = sys.argv[1:]
