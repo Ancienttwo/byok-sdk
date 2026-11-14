@@ -34,25 +34,50 @@ export function isJsonObject(value: unknown): value is JsonObject {
 }
 
 /**
- * Two payload paths, or two of their directories, that differ only in letter
- * case or Unicode normalization (NFC), or `undefined` (#1962). One volume
- * that ignores case or normalization (macOS by default, Windows) stores
- * them as one entry, so such a payload cannot install as listed anywhere:
- * the manifest writer and the installer both refuse it.
+ * Two payload paths, or two of their directories, that a volume ignoring
+ * letter case or Unicode normalization could store as one entry, or
+ * `undefined` (#1962). `byok-payload.json` takes part as a path, so a payload
+ * file or directory spelled like it collides too. Such a payload cannot
+ * install as listed on macOS (APFS by default) or Windows (NTFS), so the
+ * manifest writer and the installer refuse it on every volume.
+ *
+ * Two names collide when their {@link collisionKey}s are equal. The key is
+ * meant to be at least as coarse as APFS case folding with normalization and
+ * NTFS's per-character uppercase table: it is unchanged by uppercasing,
+ * lowercasing or normalizing any single code point (checked for every code
+ * point against the runtime's Unicode tables), and both volumes' folds are
+ * made of those steps. It is coarser in places, and those names are refused
+ * too: `ß` and `ss`, `σ` and `ς`, and an NFC and an NFD spelling are one name,
+ * though NTFS keeps each pair apart. Where the runtime's Unicode version and a
+ * volume's table differ, the key errs the same way: a case pair either one
+ * knows is refused.
  */
 export function collidingPayloadPaths(relatives: readonly string[]): readonly [string, string] | undefined {
   const seen = new Map<string, string>();
-  for (const relative of relatives) {
+  for (const relative of [SERVICE_PAYLOAD_MANIFEST, ...relatives]) {
     const parts = relative.split('/');
     for (let end = 1; end <= parts.length; end += 1) {
       const spelled = parts.slice(0, end).join('/');
-      const key = spelled.normalize('NFC').toLowerCase();
+      const key = collisionKey(spelled);
       const first = seen.get(key);
       if (first === undefined) seen.set(key, spelled);
       else if (first !== spelled) return [first, spelled];
     }
   }
   return undefined;
+}
+
+/**
+ * NFC, then each code point uppercased and each resulting code point
+ * lowercased, twice, then NFC again. Per code point, so JavaScript's
+ * final-sigma rule does not apply (`σ`, `ς` and `Σ` all become `σ`). Twice,
+ * because one pass takes `ẞ` only to `ß`; the last NFC recomposes what
+ * uppercasing decomposed (`ΐ`).
+ */
+function collisionKey(name: string): string {
+  const each = (text: string, map: (point: string) => string): string => Array.from(text, map).join('');
+  const once = (text: string): string => each(each(text, (point) => point.toUpperCase()), (point) => point.toLowerCase());
+  return once(once(name.normalize('NFC'))).normalize('NFC');
 }
 
 /** Every regular file under `dir`, `/`-separated and relative. Any other entry type throws `refuse(relative)`. */
@@ -101,13 +126,15 @@ export async function sha256File(file: string, refuse: (file: string, cause?: un
  * Writes `byok-payload.json` for the payload in `dir` at build time (#1842)
  * and returns the bytes written. Every regular file is listed; a symlink or
  * other entry type, an existing manifest, an empty directory, an invalid id
- * a `meta` that is not a JSON object and two paths that differ only in
- * letter case or Unicode normalization throw.
+ * a `meta` that is not a JSON object and paths that collide under
+ * {@link collidingPayloadPaths} (including with `byok-payload.json` itself)
+ * throw.
  *
  * Input contract (#1962): `dir` is the Host's trusted build output and
- * nothing changes it while this runs. A file swapped for a link or a FIFO is
- * refused, but a directory above a listed file that is swapped for a link
- * after the listing can still lead a read outside `dir`.
+ * nothing changes it while this runs. Each file is hashed under
+ * {@link sha256File}'s contract, with its platform limits; a directory above
+ * a listed file that is swapped for a link after the listing can still lead
+ * a read outside `dir`.
  */
 export async function writeServicePayloadManifest(dir: string, options: { id: string; meta?: JsonObject }): Promise<Uint8Array> {
   if (!VERSION_ID.test(options.id)) throw new TypeError(`Invalid payload id ${JSON.stringify(options.id)}: 1-64 of A-Z a-z 0-9 . _ -, starting with a letter or digit`);

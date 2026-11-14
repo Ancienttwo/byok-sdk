@@ -456,8 +456,9 @@ every digest passed, before that copy becomes `versions/<id>`. An existing
 verified on a fresh copy too, which is then discarded. A throw is
 `payload_invalid` with nothing new under `versions/`, and so is a copy that
 afterwards no longer holds exactly the manifest's file names, manifest bytes
-and digests. Two listed paths that differ only in letter case or Unicode
-normalization are `payload_name_collision` on every volume. A `byok-agent` payload ships the single-file bundle
+and digests. Two listed paths that a volume ignoring letter case or Unicode
+normalization could store as one, `byok-payload.json` itself included, are
+`payload_name_collision` on every volume. A `byok-agent` payload ships the single-file bundle
 `byok-agent.mjs` (built with `@byok-sdk/client/packaging`).
 
 ```sh

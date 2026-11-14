@@ -894,7 +894,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       await verifyStaged(staging, manifest);
       // Checked again after the hook, which may have changed or removed the copy (#1962).
       const matched = await matchesManifest(staging, manifest, bytes).catch((error: unknown) => { throw error instanceof ServiceInstallationError ? error : payloadFileError(staging, error); });
-      if (!matched) throw new ServiceInstallationError('payload_invalid');
+      if (!matched) throw payloadFileError(staging);
       if (!installed) await fs.rename(staging, target);
     } catch (error) {
       await fs.rm(staging, { recursive: true, force: true });

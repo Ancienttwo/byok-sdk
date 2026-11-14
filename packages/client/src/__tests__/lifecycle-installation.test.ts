@@ -664,6 +664,14 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     }) as typeof fs.readdir);
     await expect(writeServicePayloadManifest(empty, { id: '1.0.0' }).finally(() => merged.mockRestore())).rejects.toThrow('host.js and HOST.js differ only in letter case');
     expect(existsSync(path.join(empty, SERVICE_PAYLOAD_MANIFEST))).toBe(false);
+    // A payload file or directory spelled like the manifest itself.
+    for (const spelled of ['BYOK-PAYLOAD.JSON', path.join('BYOK-PAYLOAD.JSON', 'x.js')]) {
+      await fs.rm(empty, { recursive: true });
+      await fs.mkdir(path.dirname(path.join(empty, spelled)), { recursive: true });
+      await fs.writeFile(path.join(empty, spelled), 'x');
+      await expect(writeServicePayloadManifest(empty, { id: '1.0.0' })).rejects.toThrow('byok-payload.json and BYOK-PAYLOAD.JSON differ only');
+      expect(await fs.readdir(empty)).toEqual(['BYOK-PAYLOAD.JSON']);
+    }
   });
 
   it('verifyPayload runs on the staged copy and on a matched existing version; a throw is payload_invalid (#1842)', async () => {
@@ -704,7 +712,19 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     }
   });
 
-  it.each([['letter case', 'A.js', 'a.js', 'A.js and a.js'], ['Unicode normalization', '\u00e9.js', 'e\u0301.js', '\u00e9.js and e\u0301.js'], ['a directory\'s letter case', 'Lib/x.js', 'lib/y.js', 'Lib and lib']])('a manifest naming two paths that differ only in %s is payload_name_collision before anything is staged (#1962)', async (_label, first, second, named) => {
+  it.each([
+    ['letter case', 'A.js', 'a.js', 'A.js and a.js'],
+    ['a directory\'s letter case', 'Lib/x.js', 'lib/y.js', 'Lib and lib'],
+    ['a final sigma', '\u03c3.js', '\u03c2.js', '\u03c3.js and \u03c2.js'],
+    ['a final sigma JavaScript lowercases in context', '\u039f\u03a3', '\u03bf\u03c3', '\u039f\u03a3 and \u03bf\u03c3'],
+    ['a directory\'s final sigma', '\u039f\u03a3/x.js', '\u03bf\u03c3/y.js', '\u039f\u03a3 and \u03bf\u03c3'],
+    ['Unicode normalization', '\u00e9.js', 'e\u0301.js', '\u00e9.js and e\u0301.js'],
+    ['sharp s', '\u00df.js', 'ss.js', '\u00df.js and ss.js'],
+    ['capital sharp s', '\u1e9e.js', 'ss.js', '\u1e9e.js and ss.js'],
+    ['an uppercase that decomposes', '\u0390.js', '\u03aa\u0301.js', '\u0390.js and \u03aa\u0301.js'],
+    ['the manifest\'s own name', 'x.js', 'BYOK-PAYLOAD.JSON', 'byok-payload.json and BYOK-PAYLOAD.JSON'],
+    ['the manifest\'s own name as a directory', 'x.js', 'Byok-Payload.json/y.js', 'byok-payload.json and Byok-Payload.json'],
+  ])('a manifest naming two paths that differ only in %s is payload_name_collision before anything is staged (#1962)', async (_label, first, second, named) => {
     const dir = await payload('1.0.0', { [first]: 'same' });
     const manifestPath = path.join(dir, SERVICE_PAYLOAD_MANIFEST);
     const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as ServicePayloadManifest;
@@ -723,7 +743,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         await fs.rename(path.join(dir, 'tmp.js'), path.join(dir, 'HOST.js'));
       },
     });
-    await expect(renaming.install(await payload('1.0.0'))).rejects.toMatchObject({ code: 'payload_invalid' });
+    await expect(renaming.install(await payload('1.0.0'))).rejects.toMatchObject({ code: 'payload_invalid', message: expect.stringContaining('.staging-') });
     expect(existsSync(path.join(installRoot, 'versions', '1.0.0'))).toBe(false);
   });
 

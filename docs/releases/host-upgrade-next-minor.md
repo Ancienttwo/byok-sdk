@@ -106,12 +106,18 @@ manifest bytes and digests, or the operation is `payload_invalid` naming the
 copy, also when the hook removed it. A hook that adds, renames or changes a
 file is therefore refused.
 
-A manifest that lists two paths, or two of their directories, that differ
-only in letter case or Unicode normalization (NFC), such as `A.js` and `a.js`,
-is refused before anything is staged with the new `ServiceInstallationErrorCode`
-`payload_name_collision`, naming both, on every volume: macOS by default and
-Windows store such names as one file. `writeServicePayloadManifest` refuses to
-write such a manifest. Rename one of the two in the build.
+A manifest that lists two paths, or two of their directories, that a volume
+ignoring letter case or Unicode normalization could store as one, such as
+`A.js` and `a.js`, is refused before anything is staged with the new
+`ServiceInstallationErrorCode` `payload_name_collision`, naming both, on every
+volume: macOS by default and Windows store such names as one file. A payload
+file or directory spelled like `byok-payload.json` collides with the manifest
+itself. `writeServicePayloadManifest` refuses to write such a manifest. Rename
+one of the two in the build. The comparison is meant to be at least as coarse
+as both APFS and NTFS folding, so it refuses some names one of them keeps
+apart: `ß` and `ss`, `σ` and `ς`, and an NFC and an NFD spelling count as one
+name. Where the SDK's Unicode tables and a volume's differ, it refuses rather
+than allows.
 
 A payload file that cannot be read is `payload_invalid` naming the file, with
 the read error as its cause. Keep the payload directory a stable build output
