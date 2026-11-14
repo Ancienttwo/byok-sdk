@@ -6,7 +6,7 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { resolveStorageConfig } from '../daemon/retention/config';
 import { createRetentionRegistry } from '../daemon/retention/producers';
 import type { SweepBudget } from '../daemon/retention/registry';
-import { PASS_INSPECTIONS } from '../daemon/retention/runtime-accounting';
+import { RETENTION_LIMITS } from '../daemon/retention/runtime-accounting';
 import { ScratchRoot } from '../daemon/retention/scratch';
 import { testScratchRoot } from './fixtures/execution-scratch';
 
@@ -75,7 +75,7 @@ function passBudget(f: Awaited<ReturnType<typeof fixture>>, clock: { ms: number 
   const value: SweepBudget = {
     trigger: 'periodic', now: f.now,
     available: () => {
-      const allowed = ++tally.inspections <= PASS_INSPECTIONS
+      const allowed = ++tally.inspections <= RETENTION_LIMITS.passInspections
         && tally.deleted < f.config.maxDeletionsPerPass
         && clock.ms - started < f.config.maxPassDurationMs;
       if (!allowed) tally.truncated = true;
@@ -110,7 +110,7 @@ it('makes deletion progress after a complete reference scan exceeding 250ms with
   expect(clock.reads).toBe(4);
   expect(clock.ms).toBe(400);
   expect(clock.ms).toBeLessThan(f.config.maxPassDurationMs);
-  expect(b.tally.inspections).toBeLessThanOrEqual(PASS_INSPECTIONS);
+  expect(b.tally.inspections).toBeLessThanOrEqual(RETENTION_LIMITS.passInspections);
   expect(b.tally.deleted).toBe(1);
   await expect(fs.lstat(f.unreferenced)).rejects.toMatchObject({ code: 'ENOENT' });
   expect(await fs.readFile(path.join(f.referenced, 'keep-or-remove'), 'utf8')).toBe('payload');
@@ -122,7 +122,7 @@ it.each(['time', 'inspections'] as const)('protects all runs when global %s is e
   const clock = controlledReads(f.home);
   observeLease(f, clock);
   clock.perReadMs = exhausted === 'time' ? 4000 : 100;
-  const first = passBudget(f, clock, exhausted === 'inspections' ? PASS_INSPECTIONS - 3 : 0);
+  const first = passBudget(f, clock, exhausted === 'inspections' ? RETENTION_LIMITS.passInspections - 3 : 0);
   await f.registry.sweep('reader-run', first.value);
   expect(clock.reads).toBeGreaterThan(0);
   expect(clock.reads).toBeLessThan(4);

@@ -3,7 +3,7 @@ import path from 'node:path';
 
 export interface TreeUsage { bytes: number; entries: number; oldestAgeMs: number | null }
 /** A complete physical measurement; symbolic links are counted, never followed. */
-export async function measureTree(root: string, now: Date, maxEntries = 16_384): Promise<TreeUsage> {
+export async function measureTree(root: string, now: Date, maxEntries: number): Promise<TreeUsage> {
   let bytes = 0, entries = 0, oldestAgeMs: number | null = null, scanned = 0;
   async function visit(target: string): Promise<void> {
     const stat = await fs.lstat(target).catch((error: NodeJS.ErrnoException) => {
@@ -36,7 +36,7 @@ export async function existingDirectory(directory: string): Promise<boolean> {
   return true;
 }
 
-export async function removeOwnedPath(root: string, target: string, now: Date, maxEntries = 16_384): Promise<number> {
+export async function removeOwnedPath(root: string, target: string, now: Date, maxEntries: number): Promise<number> {
   const relative = path.relative(root, target);
   if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('retention_path_outside_root');
   if (!await existingDirectory(root)) return 0;
