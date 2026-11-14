@@ -108,7 +108,7 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
     case 'outbound-rejected':
       return `${prefix} outbound-rejected envelopeId=${event.envelopeId} type=${event.type} reason=${event.reason} terminal=${event.terminal}${event.taskId === undefined ? '' : ` taskId=${event.taskId}`}`;
     case 'retention-sweep': return `${prefix} retention-sweep trigger=${event.trigger} deleted=${event.deleted} bytesReclaimed=${event.bytesReclaimed} failures=${event.failures} truncated=${event.truncated}`;
-    case 'retention-failure': return `${prefix} retention-failure trigger=${event.trigger} class=${event.classId} count=${event.count} code=${event.code}`;
+    case 'retention-failure': return `${prefix} retention-failure trigger=${event.trigger} class=${event.classId} count=${event.count} code=${event.code}${event.taskId === undefined ? '' : ` taskId=${event.taskId}`}`;
     case 'offered':
       return `${prefix} offered taskId=${event.taskId}${event.runtime ? ` runtime=${event.runtime}` : ''}`;
     case 'claimed':

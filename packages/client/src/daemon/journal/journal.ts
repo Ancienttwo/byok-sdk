@@ -457,6 +457,18 @@ export class JournalUnknownTaskError extends Error {
   }
 }
 
+/**
+ * A stored task row failed an integrity check, so the journal refused to read or prune it.
+ * Not a package export: retention reads `taskId` to name the task in its `retention-failure`
+ * event, and the message names it too. Neither carries stored bytes.
+ */
+export class JournalIntegrityError extends Error {
+  constructor(readonly taskId: string, cause: unknown) {
+    super(`${cause instanceof Error ? cause.message : String(cause)} (task "${taskId}")`, { cause });
+    this.name = 'JournalIntegrityError';
+  }
+}
+
 /** Thrown when the journal is used after {@link LocalTaskJournal.close}. */
 export class JournalClosedError extends Error {
   constructor(operation: string) {

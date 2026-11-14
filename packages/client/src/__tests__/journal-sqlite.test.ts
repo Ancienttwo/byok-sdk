@@ -996,7 +996,9 @@ describe('SqliteLocalTaskJournal', () => {
         const tables = ['journal_envelope', 'journal_task', 'journal_terminal', 'journal_transition', 'journal_idempotency'];
         const snapshot = () => tables.map((table) => readRows(storeDir, `SELECT * FROM ${table} ORDER BY rowid`));
         const before = snapshot();
-        await expect(journal.pruneConfirmedJournalTask('cancelled', new Date('2026-08-15T00:00:00.000Z'))).rejects.toThrow(error);
+        const refused = journal.pruneConfirmedJournalTask('cancelled', new Date('2026-08-15T00:00:00.000Z'));
+        await expect(refused).rejects.toThrow(error);
+        await expect(refused).rejects.toMatchObject({ name: 'JournalIntegrityError', taskId: 'cancelled', message: expect.stringContaining('(task "cancelled")') });
         expect(snapshot()).toEqual(before);
       });
     });

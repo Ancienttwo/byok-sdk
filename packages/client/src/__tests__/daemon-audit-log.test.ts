@@ -30,8 +30,10 @@ describe('daemon/audit-log: appendAuditRecord / readAuditRecords', () => {
   it('reads back a retention failure for the agent-result class', async () => {
     const storeDir = await tmpDir('byok-audit-retention-');
     const record: DaemonRecord = { kind: 'retention-failure', ts: '2026-10-14T00:00:00.000Z', trigger: 'periodic', classId: 'agent-result', code: 'sweep_failed', count: 1 };
+    const integrity: DaemonRecord = { kind: 'retention-failure', ts: '2026-10-14T00:00:01.000Z', trigger: 'periodic', classId: 'confirmed-journal', code: 'sweep_failed', count: 1, taskId: 'task-1' };
     await appendAuditRecord(storeDir, record);
-    expect(await readAuditRecords(storeDir)).toEqual([record]);
+    await appendAuditRecord(storeDir, integrity);
+    expect(await readAuditRecords(storeDir)).toEqual([record, integrity]);
   });
 
   it('skips an older build\'s retention failure for the removed workspace class (#925)', async () => {

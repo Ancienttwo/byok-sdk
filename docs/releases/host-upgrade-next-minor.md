@@ -526,3 +526,7 @@ Every other rejection has its own source, and none of them is `DaemonTaskUnknown
 - **Offer append refused:** the waiters of an offer whose journal append failed reject with that append's error (for example `LocalStorageEmergencyError`). A redelivery starts a new wait.
 
 The last three are faults.
+
+## Retention failures name the journal task (#2145)
+
+No change is required. A `retention-failure` DaemonEvent, and the matching `audit.jsonl` record, gains `taskId?: string`. It is set only for the `confirmed-journal` class when a task's stored journal rows fail the integrity check that refuses pruning; `code` stays `sweep_failed`, and the daemon emits one event, `count: 1`, per such task in the pass. Any other retention failure carries no `taskId`. The event names the task only, never its stored bytes. An operator can use the task ID to inspect or export that task's journal rows before resolving it. A Host that rebuilds `retention-failure` objects field by field, or validates them against a closed schema, should keep `taskId`. A Host that calls `DaemonObserver.noteRetentionFailure` directly may pass it as the new optional fourth argument.

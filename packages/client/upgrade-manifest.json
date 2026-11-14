@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "59729f712f2348da58e2ce95ea1d1668e3e04b376614320624cab6029d5d66d7"
+    "snapshotSha256": "7f44f9f41a6dafea8cb624eb427533fb4ddef594ba94dcb62410ca449fee2335"
   },
   "configFields": {
     "status": "tracked",
@@ -237,6 +237,16 @@
         "export:@byok-sdk/core/system-tool#assertNoNulSpawnInput",
         "export:@byok-sdk/core/system-tool#spawnStartError"
       ]
+    },
+    {
+      "id": "retention-failure-task-id",
+      "impact": "additive",
+      "summary": "A `retention-failure` DaemonEvent (and its audit record) for the confirmed-journal class gains `taskId?: string` when a task's stored rows failed the journal integrity check that refuses pruning; one event is emitted per such task. Other failures carry no `taskId`. DaemonObserver.noteRetentionFailure accepts the optional `taskId`.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2145",
+      "items": [
+        "export:@byok-sdk/client#DaemonEvent",
+        "export:@byok-sdk/client#DaemonObserver"
+      ]
     }
   ],
   "changes": [
@@ -309,6 +319,16 @@
       "item": "export:@byok-sdk/client#ClaudeAdapterOptions",
       "change": "changed",
       "entry": "retained-records-one-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEvent",
+      "change": "changed",
+      "entry": "retention-failure-task-id"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonObserver",
+      "change": "changed",
+      "entry": "retention-failure-task-id"
     },
     {
       "item": "export:@byok-sdk/client#DeviceCredentialBackend",
