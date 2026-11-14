@@ -12,7 +12,7 @@ import { helperAgentMemoryIntentBackend, NATIVE_AGENT_MEMORY_INTENT_BACKEND } fr
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { DaemonScope } from '../daemon/create-daemon/scope';
-import { provenAgentMemoryBackend } from '../daemon/create-daemon/services';
+import { agentMemoryBackendProof, initializeAgentMemoryBackend, recoverAgentMemoryBackend } from '../daemon/create-daemon/services';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
@@ -86,13 +86,20 @@ describe('the backend proof when the helper stops verifying', () => {
     resolveAgentMemoryFilesystemHelperBin: () => { throw new Error('helper unverified'); },
   }) as unknown as DaemonScope;
 
-  it('still fails the start of a daemon configured for intents', async () => {
-    await expect(provenAgentMemoryBackend(scope({ agentMemoryIntents: {} }))).rejects.toThrow('helper unverified');
+  it('fails configured-intent startup with the original helper verification error', async () => {
+    await expect(initializeAgentMemoryBackend(scope({ agentMemoryIntents: {} }))).rejects.toThrow('helper unverified');
   });
 
-  it('only withholds the proof from a daemon without them', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    await expect(provenAgentMemoryBackend(scope({}))).resolves.toBeUndefined();
+  it('withholds commit proof without failing a daemon that has no intent transport', async () => {
+    const selected = scope({});
+    const abort = new AbortController();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await initializeAgentMemoryBackend(selected);
+    recoverAgentMemoryBackend(selected, abort.signal, vi.fn());
+    await vi.waitFor(() => expect(agentMemoryBackendProof(selected).status).toBe('refused'));
+    expect(agentMemoryBackendProof(selected).backend).toBeUndefined();
+    expect(log.mock.calls).toEqual([['[byok/client] agent memory backend refused: Error']]);
+    abort.abort();
   });
 });
 
@@ -220,7 +227,7 @@ describe.skipIf(!supported)('a commit Attempt on the device', () => {
     }, [pi]);
     await daemon.pair('pairing-code');
     await daemon.start();
-    const hello = await server.waitFor((entry) => entry.type === 'conn.hello');
+    const hello = await server.waitFor((entry) => entry.type === 'conn.hello' && (entry.payload as { capabilities: string[] }).capabilities.includes('agent-memory-commit-on-success'));
     const home = path.join(hostStorageRoot, AGENT_HOME_DIRECTORY, 'commit');
     await seed(home);
     return { pi, home, hello };
