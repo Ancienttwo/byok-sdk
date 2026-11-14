@@ -511,9 +511,11 @@ install root owned by another user, including one that user created first,
 is refused with `install_root_foreign_owner` before anything is written in
 it. An install root another user could rename or replace with a symlink
 after that check is refused with `install_root_ancestor_unsafe`, naming the
-directory (#2028): every directory from the root up to `/`, along the path as
-given and its real path, must belong to the installing user or root and must
-not be writable by everyone unless it has the sticky bit (as `/tmp` has). A
+directory or link (#2028): the root's path is resolved one component at a
+time, every directory read on the way must belong to the installing user or
+root and must not be writable by everyone unless it has the sticky bit (as
+`/tmp` has), and every symbolic link on the way must belong to the
+installing user or root (at most 40 links). A
 group-writable directory is accepted, so its group members are trusted; for
 example macOS `/Applications` is root:admin 775, so any admin user could
 rename an install root placed directly in it. Windows has neither check: who

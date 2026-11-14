@@ -89,10 +89,13 @@ new `ServiceInstallationErrorCode` `install_root_foreign_owner` before
 anything is written in it; run the operation as the owner of the root. The
 gate and the owner check use the effective uid. An install root another
 user could rename or replace with a symlink after the check is refused with
-the new code `install_root_ancestor_unsafe`, naming the directory (#2028):
-every directory from the root up to `/`, along the path as given and its real
-path, must belong to the installing user or root and must not be writable by
-everyone unless it has the sticky bit. Move such an install root under a
+the new code `install_root_ancestor_unsafe`, naming the directory or link
+and why, before anything is created (#2028): the root's path is resolved one
+component at a time, every directory read on the way must belong to the
+installing user or root and must not be writable by everyone unless it has
+the sticky bit, and every symbolic link on the way must belong to the
+installing user or root (at most 40 links). Root's own links such as macOS
+`/tmp` pass. Move such an install root under a
 directory only the installing user or root can change. Group-writable
 directories are accepted and their group trusted (macOS `/Applications` is
 root:admin 775). Windows has neither check, since rename rights there follow

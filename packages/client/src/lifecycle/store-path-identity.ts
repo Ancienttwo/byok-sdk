@@ -75,20 +75,73 @@ export function within(child: string, parent: string, platform: NodeJS.Platform)
   return relative === '' || (relative.split(path.sep)[0] !== '..' && !path.isAbsolute(relative));
 }
 
-/** `at` with the symbolic links of its deepest existing ancestor resolved and the missing rest appended, so an alias compares as its target. */
-export async function canonical(at: string): Promise<string> {
-  const found = await resolveExistingAncestor(at);
+/** `at` with the symbolic links of its deepest existing ancestor resolved and the missing rest appended, so an alias compares as its target; a link loop is refused. */
+export async function canonical(at: string): Promise<string | StorePathRefusal> {
+  return returningRefusal(() => canonicalPath(at));
+}
+
+async function canonicalPath(at: string): Promise<string> {
+  const found = await existingAncestor(at);
   return found === undefined ? path.resolve(at) : path.join(found.canonical, ...found.tail);
 }
 
+/** {@link resolveExistingAncestor}, with a link loop (ELOOP) as a refused path. */
+async function existingAncestor(at: string): ReturnType<typeof resolveExistingAncestor> {
+  try {
+    return await resolveExistingAncestor(at);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP') throw new Refused({ code: 'precheck_failed', detail: ` A store path runs through a link loop. (${at})` });
+    throw error;
+  }
+}
+
+/** The most links {@link resolveTrusted} follows, as Linux's limit: past it the path is refused. */
+const MAX_LINKS = 40;
+
 /**
- * The existing directory `at` and every directory a lookup of it passes
- * through up to `/`, along the path as given and along its real path: whoever
- * can rename an entry in one of them can replace `at` (#2028).
+ * Resolves `at` one component at a time, as the kernel does, and returns
+ * its real path (with the first missing directory, when part is absent) or
+ * the first entry another user could change (#2028). Invariant: every
+ * directory read on the way belongs to `euid` or root and is not writable by
+ * everyone unless it has the sticky bit, and every link on the way, checked
+ * with `lstat`, belongs to `euid` or root. Then no other user can change
+ * what `at` resolves to after the check, so the check cannot be raced. A
+ * relative link target is followed from the link's directory; root's own
+ * links (macOS `/tmp`, `/var`, `/etc`) pass by the same rule.
  */
-export async function lookupDirectories(at: string): Promise<string[]> {
-  const chain = (dir: string): string[] => path.dirname(dir) === dir ? [dir] : [dir, ...chain(path.dirname(dir))];
-  return [...new Set([...chain(path.resolve(at)), ...chain(await fs.realpath(at))])];
+export async function resolveTrusted(at: string, euid: number): Promise<{ resolved: string; missing?: string } | { untrusted: string; reason: string }> {
+  const untrusted = (entry: string, stat: import('node:fs').Stats): string | undefined => {
+    if (stat.uid !== euid && stat.uid !== 0) return `owner uid ${stat.uid}`;
+    return stat.isDirectory() && (stat.mode & 0o002) !== 0 && (stat.mode & 0o1000) === 0 ? 'writable by everyone, no sticky bit' : undefined;
+  };
+  const absolute = path.resolve(at);
+  let current = path.parse(absolute).root;
+  const top = untrusted(current, await fs.lstat(current));
+  if (top !== undefined) return { untrusted: current, reason: top };
+  const pending = absolute.slice(current.length).split(path.sep).filter((part) => part !== '' && part !== '.');
+  let links = 0;
+  while (pending.length > 0) {
+    const name = pending.shift()!;
+    if (name === '..') {
+      current = path.dirname(current);
+      continue;
+    }
+    const next = path.join(current, name);
+    const stat = await fs.lstat(next).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+    if (stat === undefined) return { resolved: path.join(next, ...pending), missing: next };
+    const reason = untrusted(next, stat);
+    if (reason !== undefined) return { untrusted: next, reason };
+    if (stat.isSymbolicLink()) {
+      if (++links > MAX_LINKS) return { untrusted: absolute, reason: `more than ${MAX_LINKS} links` };
+      const target = await fs.readlink(next);
+      if (path.isAbsolute(target)) current = path.parse(target).root;
+      pending.unshift(...target.split(path.sep).filter((part) => part !== '' && part !== '.'));
+      continue;
+    }
+    if (!stat.isDirectory() && pending.length > 0) return { untrusted: next, reason: 'not a directory' };
+    current = next;
+  }
+  return { resolved: current };
 }
 
 /**
@@ -123,16 +176,21 @@ export function directoryStorePath(input: string, platform: NodeJS.Platform): st
  *   the entry naming it, since a restore removes a link, not its target.
  */
 export async function checkStorePaths(written: readonly string[], guarded: readonly string[], platform: NodeJS.Platform): Promise<{ canonical: string[] } | { refusal: StorePathRefusal }> {
+  const checked = await returningRefusal(() => checkStorePathsThrowing(written, guarded, platform));
+  return 'code' in checked ? { refusal: checked } : checked;
+}
+
+async function checkStorePathsThrowing(written: readonly string[], guarded: readonly string[], platform: NodeJS.Platform): Promise<{ canonical: string[] } | { refusal: StorePathRefusal }> {
   const dotted = written.find((at) => at.split(platform === 'win32' ? /[\\/]/u : '/').includes('..'));
   if (dotted !== undefined) return { refusal: { code: 'precheck_failed', detail: ` A store path must not contain .. segments; pass a normalized absolute path. (${dotted})` } };
-  const paths = await Promise.all(written.map(canonical));
+  const paths = await Promise.all(written.map(canonicalPath));
   for (const spelled of [written.map((at) => path.resolve(at)), paths]) {
     for (const [i, a] of spelled.entries()) {
       const j = spelled.findIndex((b, at) => at !== i && within(b, a, platform));
       if (j !== -1) return { refusal: { code: 'precheck_failed', detail: ` Two stores must not be or contain each other. (${written[i]}, ${written[j]})` } };
     }
   }
-  const guards = (await Promise.all(guarded.map(async (at) => [await canonical(at), path.join(await canonical(path.dirname(at)), path.basename(at))]))).flat();
+  const guards = (await Promise.all(guarded.map(async (at) => [await canonicalPath(at), path.join(await canonicalPath(path.dirname(at)), path.basename(at))]))).flat();
   const overlapping = paths.findIndex((a) => guards.some((b) => within(a, b, platform) || within(b, a, platform)));
   if (overlapping !== -1) return { refusal: { code: 'store_overlaps_service_state', detail: ` (${written[overlapping]})` } };
   return { canonical: paths };
@@ -177,7 +235,7 @@ async function checkRestoreEntries(entries: ReadonlyArray<{ path: string; canoni
  * too, as on a case-insensitive volume after the store was removed.
  */
 async function resolvesTo(listed: string, recorded: string): Promise<boolean> {
-  const found = await resolveExistingAncestor(listed);
+  const found = await existingAncestor(listed);
   if (found === undefined) return false;
   if (found.tail.length === 0) return found.canonical === recorded;
   // A segment is missing only when nothing is there: a dangling link, or an

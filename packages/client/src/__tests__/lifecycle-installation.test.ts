@@ -1010,10 +1010,12 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     });
 
     it.skipIf(process.platform === 'win32')('an install root another user could rename or replace is install_root_ancestor_unsafe before anything is written (#2028)', async () => {
-      const shared = path.join(root, 'shared');
+      // Refusals name the directory as resolved: root's own links (macOS /tmp, /var) pass and are followed.
+      const real = await fs.realpath(root);
+      const shared = path.join(real, 'shared');
       const app = path.join(shared, 'app');
       await fs.mkdir(app, { recursive: true });
-      const over = installationOver(fakeLifecycle(), { installRoot: app });
+      const over = installationOver(fakeLifecycle(), { installRoot: path.join(root, 'shared', 'app') });
       // A parent anyone can write without the sticky bit, then the root itself; a sticky parent like /tmp is accepted.
       for (const [dir, mode] of [[shared, 0o777], [app, 0o777]] as const) {
         await fs.chmod(dir, mode);
@@ -1021,9 +1023,43 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         expect(await tree(app)).toEqual({});
         await fs.chmod(dir, 0o755);
       }
+      // A missing root is not created under an unchecked parent.
+      await fs.rm(app, { recursive: true });
+      await fs.chmod(shared, 0o777);
+      await expect(over.recover()).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe' });
+      expect(existsSync(app)).toBe(false);
       await fs.chmod(shared, 0o1777);
       await expect(over.recover()).resolves.toBeUndefined();
     });
+
+    it.skipIf(process.platform === 'win32')('every directory and link a lookup of the install root reads is checked, through every hop (#2028)', async () => {
+      const real = await fs.realpath(root);
+      const [safe, shared, sticky] = [path.join(real, 'safe'), path.join(real, 'shared'), path.join(real, 'sticky')];
+      await fs.mkdir(path.join(safe, 'real', 'app'), { recursive: true });
+      await fs.mkdir(shared);
+      await fs.mkdir(sticky);
+      await fs.chmod(shared, 0o777);
+      await fs.chmod(sticky, 0o1777);
+      const refused = (installRoot: string) => installationOver(fakeLifecycle(), { installRoot }).recover();
+      // safe/entry -> shared/hop -> safe/real: the middle directory is writable by everyone.
+      await fs.symlink(path.join(shared, 'hop'), path.join(safe, 'entry'));
+      await fs.symlink('../safe/real', path.join(shared, 'hop'));
+      await expect(refused(path.join(safe, 'entry', 'app'))).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${shared} (writable`) });
+      // A link another user owns in a sticky directory: its owner could repoint it.
+      const link = path.join(sticky, 'link');
+      await fs.symlink(path.join(safe, 'real'), link);
+      const lstat = fs.lstat.bind(fs);
+      const foreign = vi.spyOn(fs, 'lstat').mockImplementation((async (at: string, ...rest: []) => {
+        const stat = await lstat(at, ...rest);
+        return at === link ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 }) : stat;
+      }) as typeof fs.lstat);
+      await expect(refused(path.join(link, 'app')).finally(() => foreign.mockRestore())).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${link} (owner uid`) });
+      await expect(refused(path.join(link, 'app'))).resolves.toBeUndefined();
+      // More than 40 links is refused, not an ELOOP.
+      for (let n = 0; n < 41; n += 1) await fs.symlink(n === 40 ? path.join(safe, 'real') : `l${n + 1}`, path.join(safe, `l${n}`));
+      await expect(refused(path.join(safe, 'l0', 'app'))).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining('more than 40 links') });
+    });
+
 
     it('uninstall refuses a symlinked snapshots/ and changes nothing behind it', async () => {
       await installation.install(await payload('1.0.0'));
@@ -2875,6 +2911,10 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
           { store: 'research-index', path: index, kind: 'directory', verdict: 'accepted', reason: 'ok' },
           { store: 'shard', path: path.join(index, 'x', 'shard.db'), verdict: 'accepted', reason: 'ok' },
         );
+      }],
+      ['a store path through a link loop', async () => {
+        await fs.symlink(path.join(root, 'loop'), path.join(root, 'loop'));
+        await verdictsWith({ store: 'host', path: path.join(root, 'loop', 'host.db'), verdict: 'accepted', reason: 'ok' });
       }],
       ['a file store that is a directory', () => verdictsWith({ store: 'research-index', path: index, verdict: 'accepted', reason: 'ok' })],
       ['a directory store that is a symlink', async () => {

@@ -12,7 +12,7 @@ import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-pr
 import { ownedProcessGroupRecord, ownedProcessGroupRuns, type OwnedProcessGroupRecord } from '../adapters/process-tree.js';
 import { acquirePathMutationGate, acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate.js';
 import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle.js';
-import { canonical, checkRestoreTargets, checkStorePaths, directoryStorePath, lookupDirectories, mkdirReal, parseSnapshotRecord, SNAPSHOT_FORMAT, within, type SnapshotEntry, type SnapshotRecord, type StorePathRefusal } from './store-path-identity.js';
+import { canonical, checkRestoreTargets, checkStorePaths, directoryStorePath, mkdirReal, parseSnapshotRecord, resolveTrusted, SNAPSHOT_FORMAT, within, type SnapshotEntry, type SnapshotRecord, type StorePathRefusal } from './store-path-identity.js';
 import type { HeldServiceLifecycle, ManagedServiceLifecycle } from './managed-lifecycle.js';
 import {
   isJsonObject, isPayloadPath, listPayloadFiles, SERVICE_PAYLOAD_MANIFEST, sha256File, SHA256_HEX, VERSION_ID, type ServicePayloadManifest,
@@ -708,18 +708,16 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * `root` (#2001). The gate always uses the default gate root, never the
    * lifecycle's `gateRoot`, so installations under different gate roots that
    * share an install root still exclude each other. A held gate is
-   * `lifecycle_owner_busy`. The root is created first, so the gate and the
-   * owner check act on an existing directory: the gate resolves its real
-   * path, one spelling for every alias (a symlink, or another letter case on
-   * a case-insensitive volume), and whoever creates a missing root owns it.
-   * The gate is per effective uid, so on POSIX a root another user owns is
-   * `install_root_foreign_owner` before anything is written under it. A
-   * root another user could rename or replace with a link after the check
-   * is `install_root_ancestor_unsafe` (#2028): every directory from the
-   * root up to `/`, along the path as given and along its real path, must
-   * belong to this user or to root and must not be writable by everyone
-   * unless it has the sticky bit. A
-   * group-writable directory is accepted: its group is trusted (macOS
+   * `lifecycle_owner_busy`. On POSIX the root's lookup is checked first
+   * (#2028): an install root another user could rename or replace, through
+   * any directory or link {@link resolveTrusted} reads, is
+   * `install_root_ancestor_unsafe` before anything is created. Then the root
+   * is created, so the gate and the owner check act on an existing
+   * directory: the gate resolves its real path, one spelling for every alias
+   * (a symlink, or another letter case on a case-insensitive volume), and
+   * whoever creates a missing root owns it. The gate is per effective uid,
+   * so a root another user owns is `install_root_foreign_owner` before
+   * anything is written under it. A group-writable directory is accepted: its group is trusted (macOS
    * `/Applications` is root:admin 775). Windows has neither check: who can
    * rename an entry there follows ACLs (FILE_DELETE_CHILD on the parent,
    * DELETE on the entry, inheritance), which have no sticky-bit equivalent
@@ -729,10 +727,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   function rootOwned<T>(operation: (held: HeldServiceLifecycle) => Promise<T>): Promise<T> {
     return lifecycle.owned(async (held) => {
       let gate: PathMutationGate;
-      // Created without `recursive` so an existing root is never taken for
-      // one this call made; either way the checks below decide (#2028).
-      await fs.mkdir(path.dirname(root), { recursive: true });
-      await fs.mkdir(root).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
+      await prepareInstallRoot();
       try {
         gate = await acquirePathMutationGate({ scope: 'install-root', targetPath: root }, { waitMs: 0 });
       } catch (error) {
@@ -756,20 +751,37 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     });
   }
 
+  /**
+   * Checks the install root's lookup with {@link resolveTrusted} before
+   * anything is created (#2028), then creates each missing directory alone,
+   * never recursively, and checks again, so an existing one (EEXIST
+   * included) is never taken for one this call made. Windows has no such
+   * check (see {@link rootOwned}).
+   */
+  async function prepareInstallRoot(): Promise<void> {
+    const euid = process.geteuid?.();
+    if (euid === undefined) {
+      await fs.mkdir(root, { recursive: true });
+      return;
+    }
+    for (;;) {
+      const walked = await resolveTrusted(root, euid);
+      if ('untrusted' in walked) {
+        const error = new ServiceInstallationError('install_root_ancestor_unsafe');
+        error.message = `${error.message} ${walked.untrusted} (${walked.reason}).`;
+        throw error;
+      }
+      if (walked.missing === undefined) return;
+      await fs.mkdir(walked.missing).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
+    }
+  }
+
   async function assertOwnInstallRoot(): Promise<void> {
     const euid = process.geteuid?.();
     if (euid === undefined) return;
     if ((await fs.stat(root)).uid !== euid) {
       const error = new ServiceInstallationError('install_root_foreign_owner');
       error.message = `${error.message} (${root})`;
-      throw error;
-    }
-    for (const dir of await lookupDirectories(root)) {
-      const { uid, mode } = await fs.stat(dir);
-      const unsafe = uid !== euid && uid !== 0 ? `owner uid ${uid}` : (mode & 0o002) !== 0 && (mode & 0o1000) === 0 ? 'writable by everyone, no sticky bit' : undefined;
-      if (unsafe === undefined) continue;
-      const error = new ServiceInstallationError('install_root_ancestor_unsafe');
-      error.message = `${error.message} ${dir} (${unsafe}).`;
       throw error;
     }
   }
@@ -1064,7 +1076,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       }
       // One store is one canonical path, the identity a snapshot restore uses too.
       const identity = await canonical(store.storeDir);
-      if (seen.has(identity)) throw new ServiceInstallationError('daemon_stores_invalid');
+      if (typeof identity !== 'string' || seen.has(identity)) throw new ServiceInstallationError('daemon_stores_invalid');
       seen.add(identity);
       stores.push({ storeDir: path.resolve(store.storeDir), productId: store.productId });
     }
@@ -1314,7 +1326,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           else await fs.copyFile(`${store.path}${suffix}`, path.join(dir, name));
           files[suffix] = name;
         }
-        entries.push({ store: store.store, path: store.path, canonical: await canonical(store.path), ...(store.kind === 'directory' ? { kind: 'directory' as const } : {}), files });
+        const recorded = await canonical(store.path);
+        if (typeof recorded !== 'string') throw storePathError(recorded);
+        entries.push({ store: store.store, path: store.path, canonical: recorded, ...(store.kind === 'directory' ? { kind: 'directory' as const } : {}), files });
       }
       await writeFileAtomic(path.join(dir, 'snapshot.json'), `${JSON.stringify({ format: SNAPSHOT_FORMAT, entries }, null, 2)}\n`);
     } catch (error) {
