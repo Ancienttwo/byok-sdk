@@ -9,6 +9,8 @@ import { isAgentMemorySecureFilesystemAvailable, probeAgentMemoryStrictDirectory
 import { promises as fs } from 'node:fs';
 import { createAgentMemoryCommitStore, type AgentMemoryCommitStore } from '../agent-memory-commit.js';
 import { openAgentMemoryFilesystemHelper } from '../agent-memory-fs-helper.js';
+import { isAgentMemoryHelperTimeout, withAgentMemoryHelperProbe } from '../agent-memory-helper-probe.js';
+import { backoffCeilingMs } from '../deterministic-jitter.js';
 import type { DaemonScope } from './scope.js';
 
 /** The daemon's lazily initialized local services: input preparation, the owned hosted journal and the Agent memory intent backend (#926). */
@@ -84,7 +86,77 @@ export function initializeOwnedHostedStorage(daemonScope: DaemonScope): LocalTas
  * strict barrier would otherwise fail every write). Host-approved intents and
  * commit on success both need it; without it neither capability is advertised.
  */
-export async function provenAgentMemoryBackend(daemonScope: DaemonScope): Promise<AgentMemoryIntentBackend | undefined> {
+type MemoryProof = {
+  status: 'proven' | 'unproven' | 'refused' | undefined;
+  backend: AgentMemoryIntentBackend | undefined;
+  refusal?: string;
+  pending?: Promise<AgentMemoryIntentBackend | undefined> | undefined;
+};
+const memoryProofs = new WeakMap<DaemonScope, MemoryProof>();
+
+export function agentMemoryBackendProof(scope: DaemonScope): MemoryProof {
+  let proof = memoryProofs.get(scope);
+  if (proof === undefined) {
+    proof = { status: undefined, backend: undefined };
+    memoryProofs.set(scope, proof);
+  }
+  return proof;
+}
+
+/** Coalesced proof; only a missed deadline is retryable, never an authoritative refusal. */
+export async function provenAgentMemoryBackend(scope: DaemonScope, signal?: AbortSignal): Promise<AgentMemoryIntentBackend | undefined> {
+  const proof = agentMemoryBackendProof(scope);
+  if (proof.status === 'proven' || proof.status === 'refused') return proof.backend;
+  return proof.pending ??= (async () => {
+    let status: MemoryProof['status'];
+    let backend: AgentMemoryIntentBackend | undefined;
+    try {
+      backend = await probeAgentMemoryBackend(scope, signal);
+      status = backend === undefined ? 'refused' : 'proven';
+    } catch (error) {
+      if (signal?.aborted) return undefined;
+      if (!isAgentMemoryHelperTimeout(error)) throw error;
+      status = 'unproven';
+    }
+    if (signal?.aborted) return undefined;
+    if (proof.status !== status && scope.config.agentHome !== undefined) {
+      const transition = status === 'proven' && proof.status === 'unproven' ? 'recovered' : status;
+      console.error(`[byok/client] agent memory backend ${transition}${proof.refusal === undefined ? '' : `: ${proof.refusal}`}`);
+    }
+    proof.backend = backend;
+    proof.status = status;
+    return proof.backend;
+  })().finally(() => { proof.pending = undefined; });
+}
+
+/** This run owns the timer and in-flight probe through its lifecycle signal. */
+export function recoverAgentMemoryBackend(scope: DaemonScope, signal: AbortSignal, changed: () => void): void {
+  let attempt = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cancel = () => { clearTimeout(timer); };
+  signal.addEventListener('abort', cancel, { once: true });
+  const schedule = () => {
+    if (signal.aborted || agentMemoryBackendProof(scope).status !== 'unproven') {
+      signal.removeEventListener('abort', cancel);
+      return;
+    }
+    timer = setTimeout(async () => {
+      try {
+        await provenAgentMemoryBackend(scope, signal);
+        if (!signal.aborted) changed();
+      } catch {
+        // A newly invalid helper is authoritative; it must not spin forever.
+        agentMemoryBackendProof(scope).status = 'refused';
+        console.error('[byok/client] agent memory backend refused: helper verification failed');
+      }
+      schedule();
+    }, Math.min(backoffCeilingMs(attempt++, 1_000), 30_000));
+    timer.unref?.();
+  };
+  schedule();
+}
+
+async function probeAgentMemoryBackend(daemonScope: DaemonScope, signal?: AbortSignal): Promise<AgentMemoryIntentBackend | undefined> {
   const { config, agentHomeManager, resolveAgentMemoryFilesystemHelperBin } = daemonScope;
   if (config.agentHome === undefined || agentHomeManager === undefined) return undefined;
   let helperBin: string | undefined;
@@ -99,7 +171,7 @@ export async function provenAgentMemoryBackend(daemonScope: DaemonScope): Promis
     // Intents need this helper. Commit on success is asked of every Agent-home
     // daemon, and only its capability depends on the proof.
     if (config.agentMemoryIntents !== undefined) throw error;
-    console.error(`[byok/client] agent memory commit on success is off: the memory helper failed verification: ${error instanceof Error ? error.message : String(error)}`);
+    agentMemoryBackendProof(daemonScope).refusal = 'helper verification failed';
     return undefined;
   }
   if (!backend.strictLedgerBarrier) return undefined;
@@ -109,10 +181,11 @@ export async function provenAgentMemoryBackend(daemonScope: DaemonScope): Promis
     try {
       const canonicalHome = await fs.realpath(config.agentHome.hostStorageRoot);
       const stat = await fs.stat(canonicalHome, { bigint: true });
-      const probe = await openAgentMemoryFilesystemHelper({ helperBin, assetRoot: config.agentMemoryHelperAssetRoot, ancestorRoot: canonicalHome, canonicalHome, homeIdentity: { dev: stat.dev, ino: stat.ino } });
+      const probe = await withAgentMemoryHelperProbe(() => openAgentMemoryFilesystemHelper({ helperBin, assetRoot: config.agentMemoryHelperAssetRoot, ancestorRoot: canonicalHome, canonicalHome, homeIdentity: { dev: stat.dev, ino: stat.ino } }), signal);
       await probe.close();
     } catch (error) {
-      console.error(`[byok/client] agent memory intents and commit on success are off: the memory helper failed its volume probe: ${error instanceof Error ? error.message : String(error)}`);
+      if (isAgentMemoryHelperTimeout(error) || signal?.aborted) throw error;
+      agentMemoryBackendProof(daemonScope).refusal = error instanceof Error ? error.message : String(error);
       return undefined;
     }
   }
@@ -123,18 +196,14 @@ export async function provenAgentMemoryBackend(daemonScope: DaemonScope): Promis
 }
 
 /**
- * The commit store of this daemon. `backend` defaults to a fresh proof: the
- * lease hook runs from before a start has proved anything, and only a home with
- * a leftover copy gets that far. The journal answers for the task; before a
- * start opened it, a leftover copy fails its acquire.
+ * The commit store shares this daemon's proof. The lease hook can run before
+ * startup, and only a home with a leftover copy gets that far. The journal
+ * answers for the task; before a start opened it, a leftover copy fails its acquire.
  */
-export function agentMemoryCommitStore(
-  daemonScope: DaemonScope,
-  backend: () => Promise<AgentMemoryIntentBackend | undefined> = () => provenAgentMemoryBackend(daemonScope),
-): AgentMemoryCommitStore {
+export function agentMemoryCommitStore(daemonScope: DaemonScope): AgentMemoryCommitStore {
   const { daemonState } = daemonScope;
   return createAgentMemoryCommitStore({
-    backend,
+    backend: () => provenAgentMemoryBackend(daemonScope),
     taskCompleted: async (taskId) => {
       const { journal, retentionIdentity } = daemonState;
       if (journal === undefined || retentionIdentity === undefined) throw new Error('the task journal is not open');

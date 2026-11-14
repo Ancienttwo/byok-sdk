@@ -4,7 +4,7 @@ import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host.js';
 import { preflightAgentResultMcp } from '../agent-result-mcp-preflight.js';
 import { resolveAgentMessageMcpBin } from '../resolve-agent-message-mcp-bin.js';
 import { preflightAgentMessageMcp } from '../agent-message-mcp-preflight.js';
-import { agentMemoryCommitStore } from './services.js';
+import { agentMemoryBackendProof, agentMemoryCommitStore } from './services.js';
 import type { DaemonScope } from './scope.js';
 import type { StartRun } from './start-run.js';
 import type { StartLanes } from './start-lanes.js';
@@ -14,7 +14,7 @@ import type { StartTerminals } from './start-terminals.js';
  * The fourth stage of `runStartUnderLease` (#926), synchronous: builds the
  * `TaskRunnerDeps` for this start.
  */
-export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<StartRun & StartLanes & StartTerminals, 'record' | 'sendEnvelope' | 'withReplyTransition' | 'activeJournal' | 'journalIdentity' | 'recordReplyState' | 'blobClient' | 'opened' | 'activePressureEngine' | 'agentMemoryBackend' | 'capabilities'>) {
+export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<StartRun & StartLanes & StartTerminals, 'record' | 'sendEnvelope' | 'withReplyTransition' | 'activeJournal' | 'journalIdentity' | 'recordReplyState' | 'blobClient' | 'opened' | 'activePressureEngine' | 'capabilities'>) {
   const {
     adapters, config, agentHomeManager, agentHomeReaderLimit, scratchRoot, agentSessionHandoffs,
     toolsetRegistry, daemonState, inputPreparationLimits, egressBatcherOptions, egressPolicy,
@@ -27,6 +27,7 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     record, sendEnvelope, withReplyTransition, activeJournal, journalIdentity, recordReplyState,
     blobClient, opened, activePressureEngine,
   } = run;
+  const memoryCommit = agentMemoryCommitStore(daemonScope);
   const deps: TaskRunnerDeps = {
     adapters,
     ...(run.capabilities.includes('native-sessions') ? { nativeSessions: { sessionDir: config.piByokLauncher!.sessionDir! } } : {}),
@@ -121,9 +122,7 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     shutdownInterruptTimeoutMs: overrides.shutdown?.taskInterruptTimeoutMs,
     // M5 batch-3 (workstream 2): see DaemonConfig.maxTaskOutputBytes's own doc comment — already validated above.
     awaitTerminalCommit: taskId => terminalCommits.receipt(taskId),
-    ...(run.agentMemoryBackend === undefined ? {} : {
-      agentMemoryCommit: agentMemoryCommitStore(daemonScope, () => Promise.resolve(run.agentMemoryBackend)),
-    }),
+    get agentMemoryCommit() { return agentMemoryBackendProof(daemonScope).backend === undefined ? undefined : memoryCommit; },
     maxTaskOutputBytes: config.maxTaskOutputBytes,
     artifactLimits: config.artifactLimits,
     startupTimeoutMs: config.startupTimeoutMs,

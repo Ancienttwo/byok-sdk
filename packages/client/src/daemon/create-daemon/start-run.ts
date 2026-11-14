@@ -256,7 +256,7 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
   observer.noteRuntimesDetected(daemonState.runtimeObservations.map(observation => ({ ...observation })));
   daemonState.detectedRuntimeFacts = runtimes;
   daemonState.detectedRuntimeUnavailable = runtimeUnavailable;
-  const agentMemoryBackend = await provenAgentMemoryBackend();
+  const agentMemoryBackend = await provenAgentMemoryBackend(daemonState.blobLifecycleAbort.signal);
   const agentMemoryIntentBackend = config.agentMemoryIntents === undefined ? undefined : agentMemoryBackend;
   return {
     record, activeJournal, activePressureEngine, journalIdentity, resultReplyRecoveryTasks,

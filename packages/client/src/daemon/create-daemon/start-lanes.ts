@@ -1,3 +1,5 @@
+import { agentMemoryBackendProof, recoverAgentMemoryBackend } from './services.js';
+import { AGENT_MEMORY_INTENT_CAPABILITY, AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY } from '@byok-sdk/protocol';
 import { computeCapabilities } from './support.js';
 import { AgentHomeProjectionCompletionClient } from '../agent-home-projection-client.js';
 import { createProviderProvisioningNoticeProcessor } from '../provider-provisioning.js';
@@ -56,7 +58,7 @@ export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 
     deviceId: record.deviceId,
     transport: config.agentMemoryIntents,
     homes: agentHomeManager,
-    backend: agentMemoryIntentBackend,
+    get backend() { return config.agentMemoryIntents === undefined ? undefined : agentMemoryBackendProof(daemonScope).backend; },
     onIntegrity: (event) => observer.noteAgentMemoryIntentIntegrity(event),
   });
 
@@ -144,6 +146,12 @@ export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 
   // deployment it has not spoken to yet.
   daemonState.deploymentDeclaration = undefined;
   daemonState.helloCapabilities = capabilities;
+  recoverAgentMemoryBackend(daemonScope, daemonState.blobLifecycleAbort!.signal, () => {
+    const proven = agentMemoryBackendProof(daemonScope).status === 'proven';
+    const commitChanged = daemonScope.setHelloCapability(AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY, proven);
+    const intentChanged = daemonScope.setHelloCapability(AGENT_MEMORY_INTENT_CAPABILITY, proven && config.agentMemoryIntents !== undefined);
+    if (commitChanged || intentChanged) daemonState.connection?.refreshHello();
+  });
   return {
     capabilities, agentHomeProjectionCompletion, processProviderProvisioningNotice,
     processAgentMemoryIntentNotice, handleRemoteInputPreparation, opened,

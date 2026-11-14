@@ -52,7 +52,7 @@ export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch:
   const { deps } = composeStartRunnerDeps(daemonScope, {
     capabilities,
     record, sendEnvelope, withReplyTransition, activeJournal, journalIdentity, recordReplyState,
-    blobClient, opened, activePressureEngine, agentMemoryBackend,
+    blobClient, opened, activePressureEngine,
   });
   daemonState.runner = new TaskRunner(deps);
   if (config.agentHome !== undefined && config.agentEgress !== undefined) {

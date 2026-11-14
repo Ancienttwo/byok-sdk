@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2799661,
+      "budgetBytes": 2803168,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -35,6 +35,7 @@
         "async_hooks",
         "crypto",
         "fs",
+        "node:async_hooks",
         "node:child_process",
         "node:crypto",
         "node:fs",
@@ -80,6 +81,7 @@
           "async_hooks",
           "crypto",
           "fs",
+          "node:async_hooks",
           "node:child_process",
           "node:crypto",
           "node:fs",
@@ -286,7 +288,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3251254,
+      "budgetBytes": 3254761,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -325,6 +327,7 @@
         "fs/promises",
         "hono",
         "http",
+        "node:async_hooks",
         "node:child_process",
         "node:crypto",
         "node:fs",
@@ -382,6 +385,7 @@
           "fs",
           "fs/promises",
           "http",
+          "node:async_hooks",
           "node:child_process",
           "node:crypto",
           "node:fs",
@@ -460,7 +464,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2468426,
+      "budgetBytes": 2471933,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -487,6 +491,7 @@
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
         "fs",
+        "node:async_hooks",
         "node:child_process",
         "node:crypto",
         "node:fs",
@@ -529,6 +534,7 @@
       "nodeBuiltins": {
         "workspace": [
           "fs",
+          "node:async_hooks",
           "node:child_process",
           "node:crypto",
           "node:fs",
@@ -647,7 +653,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 80957,
+      "budgetBytes": 82051,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -666,6 +672,7 @@
       "bareImports": [
         "@byok-sdk/protocol/agent-memory",
         "@byok-sdk/protocol/constants",
+        "node:async_hooks",
         "node:child_process",
         "node:crypto",
         "node:fs",
@@ -678,6 +685,7 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "node:async_hooks",
           "node:child_process",
           "node:crypto",
           "node:fs",
@@ -2542,7 +2550,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2463129,
+      "budgetBytes": 2466636,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2565,6 +2573,7 @@
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
         "fs",
+        "node:async_hooks",
         "node:child_process",
         "node:crypto",
         "node:fs",
@@ -2608,6 +2617,7 @@
       "nodeBuiltins": {
         "workspace": [
           "fs",
+          "node:async_hooks",
           "node:child_process",
           "node:crypto",
           "node:fs",

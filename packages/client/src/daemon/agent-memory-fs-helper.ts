@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import type { AgentHomeLease } from '../agent-home.js';
 import { verifyAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release.js';
+import { agentMemoryHelperTimeout, isAgentMemoryHelperTimeout, agentMemoryHelperProbe } from './agent-memory-helper-probe.js';
 import { AgentMemoryIoError, AgentMemoryRevisionConflictError } from './agent-memory.js';
 import type { AgentMemoryFileObservation, AgentMemoryFilesystem, AgentMemoryFilesystemFileState, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalk, AgentMemoryWalkEntry } from './agent-memory-filesystem.js';
 import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
@@ -149,7 +150,7 @@ const ROOT_BARRIER_CAUSES: ReadonlySet<string> = new Set([
   'root_barrier_process_failed',
 ]);
 
-async function initializeHostStorageRoot(helperBin: string, root: string): Promise<void> {
+async function initializeHostStorageRoot(helperBin: string, root: string, timeout: number, signal?: AbortSignal): Promise<void> {
   // Windows promises no strict ledger durability and must not require access
   // to the root's parent (for example the drive root of C:\\ByokHost).
   if (process.platform === 'win32') return;
@@ -160,14 +161,16 @@ async function initializeHostStorageRoot(helperBin: string, root: string): Promi
         await new Promise<void>((resolve, reject) => {
           const child = execFile(helperBin, ['root-barrier'], {
             shell: false, windowsHide: true, env: Object.freeze({}),
-            timeout: HELPER_REQUEST_TIMEOUT_MS, maxBuffer: HELPER_MAX_STDERR_BYTES,
+            timeout, signal, killSignal: 'SIGKILL', maxBuffer: HELPER_MAX_STDERR_BYTES,
           }, (error, _stdout, stderr) => {
-            if (error) reject(stderr.trim()); else resolve();
+            if (error?.killed && !stderr.trim()) reject(agentMemoryHelperTimeout(new AgentMemoryIoError('Agent memory hostStorageRoot probe timed out')));
+            else if (error) reject(stderr.trim()); else resolve();
           });
           child.stdin!.on('error', () => reject('root_barrier_process_failed'));
           child.stdin!.end(JSON.stringify({ root }));
         });
       } catch (cause) {
+        if (isAgentMemoryHelperTimeout(cause)) throw cause;
         const code = typeof cause === 'string' && ROOT_BARRIER_CAUSES.has(cause) ? cause : 'root_barrier_process_failed';
         throw Object.assign(new AgentMemoryIoError(`Agent memory hostStorageRoot durability barrier failed (${code}); helper open refused`), { cause: code });
       }
@@ -211,7 +214,11 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
     }
     const helperBin = verifyAgentMemoryFilesystemHelper(safeHelperPath(input.helperBin), input.assetRoot);
     const expected = agentMemoryHelperIdentity(input.homeIdentity, process.platform);
-    await initializeHostStorageRoot(helperBin, input.ancestorRoot);
+    const probe = agentMemoryHelperProbe.getStore();
+    const signal = probe?.signal;
+    const budget = probe === undefined ? HELPER_REQUEST_TIMEOUT_MS : Math.max(1, Math.ceil(probe.deadline - performance.now()));
+    await initializeHostStorageRoot(helperBin, input.ancestorRoot, budget, signal);
+    signal?.throwIfAborted();
     const child = spawn(helperBin, ['serve'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
@@ -219,18 +226,23 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
       env: Object.freeze({}),
     });
     const client = new AgentMemoryFilesystemHelperClient(child);
+    const abort = () => client.fail(new AgentMemoryIoError('Agent memory filesystem helper probe cancelled'));
+    signal?.addEventListener('abort', abort, { once: true });
     try {
-      const result = await client.request('open', {
+      signal?.throwIfAborted();
+      const result = await client.requestInternal('open', {
         root: path.resolve(input.canonicalHome),
         ancestorRoot: input.ancestorRoot,
         expectedIdentity: expected,
-      });
+      }, probe === undefined ? HELPER_REQUEST_TIMEOUT_MS : Math.max(1, probe.deadline - performance.now()));
       if (result.helperVersion !== AGENT_MEMORY_FILESYSTEM_HELPER_VERSION) throw new AgentMemoryError('Agent memory filesystem helper version mismatch');
       if (!agentMemoryHelperIdentityMatches(result.identity, expected)) throw new AgentMemoryError('Agent memory filesystem helper root identity mismatch');
       return client;
     } catch (error) {
       await client.close().catch(() => {});
       throw error;
+    } finally {
+      signal?.removeEventListener('abort', abort);
     }
   }
 
@@ -318,7 +330,7 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
     return this.requestInternal(op, fields);
   }
 
-  private requestInternal(op: string, fields: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  private requestInternal(op: string, fields: Readonly<Record<string, unknown>>, timeout = HELPER_REQUEST_TIMEOUT_MS): Promise<Record<string, unknown>> {
     if (this.fatalError !== undefined) return Promise.reject(this.fatalError);
     const id = `m${++this.sequence}`;
     let line: string;
@@ -333,10 +345,10 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
     return new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        const error = new AgentMemoryIoError('Agent memory filesystem helper request timed out');
+        const error = agentMemoryHelperTimeout(new AgentMemoryIoError('Agent memory filesystem helper request timed out'));
         reject(error);
         this.fail(error);
-      }, HELPER_REQUEST_TIMEOUT_MS);
+      }, timeout);
       timer.unref?.();
       this.pending.set(id, { resolve: (response) => resolve(response.result), reject, timer });
       this.child.stdin.write(line, (error) => {
