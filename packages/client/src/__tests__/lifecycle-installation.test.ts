@@ -1899,6 +1899,25 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect([await fs.readFile(db, 'utf8'), (await installation.receipt())?.state]).toEqual(['v3 data', 'pending']);
     });
 
+    it.each(['', '/', '/.'])('a directory store root swapped for a link while its realpath still matches, listed as tree%s, is refused before any store is restored', async (spelling) => {
+      const real = await fs.realpath(root);
+      const [a, b, alias] = [path.join(real, 'aa'), path.join(real, 'bb'), path.join(real, 'alias')];
+      await fs.mkdir(path.join(a, 'tree'), { recursive: true });
+      await fs.writeFile(path.join(a, 'tree', 'marker'), 'kept');
+      await fs.mkdir(b);
+      await fs.symlink(a, alias, 'dir');
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'tree', path: `${path.join(alias, 'tree')}${spelling}`, canonical: path.join(a, 'tree'), kind: 'directory', files: {} }] }));
+      // The migration repoints alias and links bb/tree back to aa/tree: alias/tree still resolves to aa/tree, but is a link.
+      await fs.rm(alias);
+      await fs.symlink(b, alias, 'dir');
+      await fs.symlink(path.join(a, 'tree'), path.join(b, 'tree'), 'dir');
+      const error = await installation.rollback().catch((caught: unknown) => caught);
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining('must not be a link') }));
+      expect([await fs.readFile(db, 'utf8'), await fs.readFile(path.join(a, 'tree', 'marker'), 'utf8')]).toEqual(['v2 data', 'kept']);
+    });
+
     it.each(['', '/', '/.'])('a directory store root that became a dangling link, recorded as tree%s, is refused before any store is restored', async (spelling) => {
       const tree = path.join(await fs.realpath(root), 'tree');
       await fs.symlink(path.join(root, 'gone'), tree, 'dir');

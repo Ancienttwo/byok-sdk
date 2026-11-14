@@ -411,6 +411,13 @@ service that had already restarted.
   by hand from `<installRoot>/snapshots/<version>/` (a directory entry's
   tree is `<index>.d`, a file entry's files are `<index><suffix>`) and
   remove that snapshot directory, then call `recover()`.
+- **Daemon stores are listed once by identity (#2161):** `daemonStores()`
+  must not list one store under two spellings. A second spelling of a
+  `storeDir`, through a symbolic link or in another letter case on a
+  case-insensitive volume, is now `daemon_stores_invalid` before any lease is
+  taken; before, it waited for its own first lease and failed with
+  `store_busy` after `stopTimeoutMs`. De-duplicate the list by each
+  `storeDir`'s real path (`fs.realpath`) before returning it.
 - **Snapshot removal (#2062):** a snapshot that cannot be removed after the
   final receipt no longer fails the call; it stays.
 - On systemd, a start runs `systemctl --user reset-failed` first, since the

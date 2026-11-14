@@ -130,16 +130,26 @@ export async function checkStorePaths(written: readonly string[], guarded: reado
 
 /**
  * Checks a snapshot's entries before a restore changes any store:
- * {@link checkStorePaths}, then that each listed path still resolves to the
- * canonical path recorded for it. A restore then writes to the recorded
- * paths, which is safe: (a) the listed path resolves exactly to a realpath,
- * so no directory on that chain is a link now; (b) no two recorded paths
- * contain each other, so the tree another entry's restore replaces holds
- * neither this target nor an ancestor of it.
+ * {@link checkStorePaths}; that no directory store's root, as listed, is a
+ * link; then that each listed path still resolves to the canonical path
+ * recorded for it. A restore then writes only to the recorded paths. That
+ * write is safe because (a) the listed path resolves exactly to the
+ * recorded realpath now, so the target's existing ancestors are real
+ * directories, and (b) no two recorded paths contain each other, so the tree
+ * another entry's restore replaces holds neither this target nor an
+ * ancestor of it. (a) says nothing about the listed path's own links, which
+ * is why the root check is separate.
  */
-export async function checkRestoreTargets(entries: ReadonlyArray<{ path: string; canonical: string }>, guarded: readonly string[], platform: NodeJS.Platform): Promise<StorePathRefusal | undefined> {
+export async function checkRestoreTargets(entries: ReadonlyArray<{ path: string; canonical: string; kind?: 'directory' }>, guarded: readonly string[], platform: NodeJS.Platform): Promise<StorePathRefusal | undefined> {
   const checked = await checkStorePaths(entries.map((entry) => entry.path), guarded, platform);
   if ('refusal' in checked) return checked.refusal;
+  // A directory store's root must not be a link, a junction included: its
+  // realpath can still equal the recorded one through a link swapped in
+  // above it, so the identity check below does not prove this.
+  for (const entry of entries) {
+    const root = entry.kind === 'directory' ? directoryStorePath(entry.path, platform) : undefined;
+    if (root !== undefined && (await lstatOrUndefined(root))?.isSymbolicLink()) return { code: 'precheck_failed', detail: ` A directory store's root must not be a link. (${entry.path})` };
+  }
   for (const entry of entries) {
     if (!(await resolvesTo(entry.path, entry.canonical))) return { code: 'precheck_failed', detail: ` A store path no longer resolves as it did at the snapshot. (${entry.path})` };
   }
