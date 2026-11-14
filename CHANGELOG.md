@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (client; #2132, #2135)** — The upgrade manifest now records the existing sealed-provisioning retry and duplicate injected adapter ID changes as separate breaking behavior entries, with links to their Host migration steps. Hosts reading upgrade reports can see both required actions.
+
 - **Fixed (keys; #2133)** — `scopeSecretStore()` passes an error from the injected store's `scope()` only through the fixed-message secret-store error boundary: a keychain, Credential Manager or secret-shape code keeps its code with a fixed message and no cause, and any other error becomes `PROVIDER_SECRET_STORE_FAILED`. Before, the store's original error, which may carry a key, passed through unchanged. The SDK's own backends build their scope without credential I/O and are unaffected.
 
 - **Breaking (keys; #2132)** — `applySealedProviderProvisioning()` returns `secret_store_unavailable` for a credential store whose `available()` is `false` without recording it or consuming the request's `operationGeneration`, so the same request, or a new one at the same generation, applies once the store is available. Before, the rejection was recorded and the same request stayed rejected after the store recovered. A `secret_store_unavailable` from a failed credential write is still recorded and keeps the operation pending. No type or code changes. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#sealed-provisioning-retries-an-unavailable-credential-store-2132).

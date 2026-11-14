@@ -4,6 +4,8 @@ Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts m
 
 ## Unique injected adapter IDs (#2135)
 
+The upgrade manifest records this breaking behavior as `duplicate-injected-adapter-ids`.
+
 `createDaemonWithAdapters(config, adapters)` now throws `DaemonConfigInvalidError`
 synchronously when two injected adapters have the same `descriptor.id`. The
 error has `code: 'daemon_config_invalid'` and names the duplicate ID in its
@@ -519,6 +521,8 @@ Credential-store errors from every `ProviderRegistry` method (`get()`, `list()`,
 
 
 ## Sealed provisioning retries an unavailable credential store (#2132)
+
+The upgrade manifest records this breaking behavior as `sealed-provisioning-store-unavailable-retry`.
 
 **Breaking (behavior only).** `applySealedProviderProvisioning()` no longer records a rejection when the device's credential store reports `available()` as `false` before any write. The result is still `rejected` with `secret_store_unavailable`, but the device keeps no receipt for it and does not consume its `operationGeneration`. Before, the rejection was recorded and the generation consumed, so the same request stayed rejected after the store recovered (for example after a keyring was unlocked) and a new request needed a higher generation.
 
