@@ -643,7 +643,7 @@
       "sourcePath": "packages/oar/src/shared/acp/opening.ts",
       "upstreamSha256": "b57be839d67d9c7117c2a18347a4391892226ed7c8e1c0f2588124448e42becf",
       "vendoredSha256": "ab23b1e4be04e3fa0584dcade497c5ef076ff1eabc7606a81263d8296d3fd8ef",
-      "delta": "Beside the opening boundary: createAcpPromptAnswers marks, in wire order on the decoded stream, each notification read while a session/prompt request awaits its answer, and withAcpPromptAnswers chains it onto the opening observer. The opening boundary keeps upstream behavior."
+      "delta": "Beside the opening boundary: createAcpPromptAnswers marks, in wire order on the decoded stream, each notification read while a session/prompt request awaits its answer, and withAcpPromptAnswers chains it onto the opening observer. The opening boundary keeps upstream behavior. The window is per connection, not per prompt: OpenCode's standard channel also requires the child's turn to be the running prompt's (`projectChild`, `child.turnID === ctx.start.id`), so on one connection with prompts A then B, a child that A started still projects events while B awaits its answer. The SDK runs one turn per OpenCode process (`followUp` and `steer` are refused, and the model fallback disposes the process before it opens the next), so that case does not reach a Host."
     },
     {
       "path": "shared/acp/process.ts",
@@ -675,7 +675,7 @@
       "sourcePath": "packages/oar/src/shared/acp/records.ts",
       "upstreamSha256": "1c177fc1e4069c7daf20c587d819a5094ea26540f54d0521c11354406a185e3b",
       "vendoredSha256": "a50614aba51c1e454454db412e52e59f9988c7ba419912d74d162b0c9a42f32a",
-      "delta": "A child's own update on a childNotification channel that was read while no session/prompt request awaited its answer (whilePromptAwaited, from shared/acp/opening.ts through shared/acp/session.ts) is recorded under the child as `<method>/after_answer`, with its native payload and no events, as the standard channel stops projecting a child once its creating prompt was answered. Status reports and lineage are unchanged."
+      "delta": "A child's own update on a childNotification channel that was read while no session/prompt request awaited its answer (whilePromptAwaited, from shared/acp/opening.ts through shared/acp/session.ts) is recorded under the child as `<method>/after_answer`, with its native payload and no events, as the standard channel stops projecting a child once its creating prompt was answered. Status reports and lineage are unchanged. The window is per connection, not per prompt: OpenCode's standard channel also requires the child's turn to be the running prompt's (`projectChild`, `child.turnID === ctx.start.id`), so on one connection with prompts A then B, a child that A started still projects events while B awaits its answer. The SDK runs one turn per OpenCode process (`followUp` and `steer` are refused, and the model fallback disposes the process before it opens the next), so that case does not reach a Host."
     },
     {
       "path": "shared/acp/resume-cwd.ts",
