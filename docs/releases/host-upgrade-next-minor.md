@@ -103,6 +103,35 @@ try {
 
 A Host that already handles `PROVIDER_CONFIGURATION_BUSY` from `configure()` or `resolveDefaultModelProvider()` can reuse that handling. When one profile's credential read fails, `list()` now rejects with that failure only after the other reads have finished. No configuration change is needed.
 
+## Payload staging and name collisions (#1962)
+
+`verifyPayload(stagedDir, manifest)` now always receives a fresh staged copy,
+also when `versions/<id>` already exists with a matching manifest; the
+installed version is never passed to it and is not changed. A hook that
+edited `versions/<id>` or relied on its path must work on `stagedDir`. After
+the hook returns, the copy must still hold exactly the manifest's file names,
+manifest bytes and digests, or the operation is `payload_invalid` naming the
+copy, also when the hook removed it. A hook that adds, renames or changes a
+file is therefore refused.
+
+A manifest that lists two paths, or two of their directories, that a volume
+ignoring letter case or Unicode normalization could store as one, such as
+`A.js` and `a.js`, is refused before anything is staged with the new
+`ServiceInstallationErrorCode` `payload_name_collision`, naming both, on every
+volume: macOS by default and Windows store such names as one file. A payload
+file or directory spelled like `byok-payload.json` collides with the manifest
+itself. `writeServicePayloadManifest` refuses to write such a manifest. Rename
+one of the two in the build. The comparison is meant to be at least as coarse
+as both APFS and NTFS folding, so it refuses some names one of them keeps
+apart: `ß` and `ss`, `σ` and `ς`, and an NFC and an NFD spelling count as one
+name. Where the SDK's Unicode tables and a volume's differ, it refuses rather
+than allows.
+
+A payload file that cannot be read is `payload_invalid` naming the file, with
+the read error as its cause. Keep the payload directory a stable build output
+while it is installed: on Windows, which cannot open a file without following
+a link, a file renamed and replaced by a link to it is still read.
+
 ## One operation at a time per install root
 
 Every `install()`, `upgrade()`, `rollback()`, `recover()` and `uninstall()`

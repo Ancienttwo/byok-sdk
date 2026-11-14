@@ -3,7 +3,7 @@ import { ownedProcessGroupRecord } from '../adapters/process-tree';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { existsSync, promises as fs, type Stats } from 'node:fs';
+import { existsSync, promises as fs, type BigIntStats, type Stats } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -16,7 +16,7 @@ import {
   type ServiceInstallationOptions,
 } from '../lifecycle/service-installation';
 import { installationHoldsStart, readServiceInstallationRecord } from '../util/service-installation-record';
-import { SERVICE_PAYLOAD_MANIFEST, writeServicePayloadManifest, type ServicePayloadManifest } from '../service-payload-manifest';
+import { collisionKey, SERVICE_PAYLOAD_MANIFEST, sha256File, writeServicePayloadManifest, type ServicePayloadManifest } from '../service-payload-manifest';
 import { createManagedLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
 import { createLaunchdLifecycle } from '../lifecycle/launchd';
 import type { Runner } from '../util/exec-runner';
@@ -584,6 +584,41 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(await pointer('current')).toBeUndefined();
   });
 
+  it.each(['a link', 'a FIFO', 'another file once opened'])('sha256File refuses a payload file that is %s, without reading or waiting on it (#1962)', async (swap) => {
+    if (swap === 'a FIFO' && process.platform === 'win32') return;
+    const dir = path.join(root, 'hash');
+    await fs.mkdir(dir);
+    const [file, outside] = [path.join(dir, 'host.js'), path.join(root, 'outside.js')];
+    await fs.writeFile(outside, 'outside');
+    if (swap === 'a link') await fs.symlink(outside, file);
+    else if (swap === 'a FIFO') expect(spawnSync('mkfifo', [file]).status).toBe(0);
+    else await fs.writeFile(file, 'payload');
+    const open = fs.open.bind(fs);
+    // Swapped between the lstat and the open: the descriptor is another file.
+    const swapped = vi.spyOn(fs, 'open').mockImplementation((async (at: string, ...rest: []) => open(swap === 'another file once opened' && at === file ? outside : at, ...rest)) as typeof fs.open);
+    const refused = new Error('refused');
+    await expect(sha256File(file, () => refused).finally(() => swapped.mockRestore())).rejects.toBe(refused);
+  }, 5_000);
+
+  it('sha256File compares device and inode as bigint, and a failed read is its typed refusal with the cause (#1962)', async () => {
+    const file = path.join(root, 'hash.js');
+    await fs.writeFile(file, 'payload');
+    const probe = await fs.open(file);
+    const handles = Object.getPrototypeOf(probe) as { stat: typeof probe.stat; readFile: typeof probe.readFile };
+    await probe.close();
+    const refuse = (_file: string, cause?: unknown) => Object.assign(new Error('refused'), { cause });
+    // Two inode numbers above 2^53 that one Number cannot tell apart.
+    const [lstat, stat] = [fs.lstat.bind(fs), handles.stat];
+    const high = (value: Stats | BigIntStats | undefined, ino: bigint) => Object.assign(Object.create(Object.getPrototypeOf(value)), value, { ino: typeof value!.ino === 'bigint' ? ino : Number(ino) });
+    const spies: Array<{ mockRestore(): void }> = [
+      vi.spyOn(fs, 'lstat').mockImplementation((async (at: string, options?: object) => high(await lstat(at, options), 2n ** 54n + 1n)) as typeof fs.lstat),
+      vi.spyOn(handles, 'stat').mockImplementation(async function (this: typeof probe, options?: object) { return high(await stat.call(this, options as never), 2n ** 54n); } as typeof probe.stat),
+    ];
+    await expect(sha256File(file, refuse).finally(() => { for (const spy of spies) spy.mockRestore(); })).rejects.toThrow('refused');
+    const failing = vi.spyOn(handles, 'readFile').mockRejectedValueOnce(Object.assign(new Error('EIO'), { code: 'EIO' }));
+    await expect(sha256File(file, refuse).finally(() => failing.mockRestore())).rejects.toMatchObject({ message: 'refused', cause: { code: 'EIO' } });
+  });
+
   it('writeServicePayloadManifest writes a manifest stage accepts, with meta, and refuses what it cannot list (#1842)', async () => {
     const dir = path.join(root, 'built');
     await fs.mkdir(path.join(dir, 'lib'), { recursive: true });
@@ -617,6 +652,26 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await expect(writeServicePayloadManifest(empty, { id: '1.0.0' })).rejects.toThrow('has no files');
     await fs.symlink(path.join(dir, 'host.js'), path.join(empty, 'link.js'));
     await expect(writeServicePayloadManifest(empty, { id: '1.0.0' })).rejects.toThrow('link.js is not a regular file');
+
+    // Names one volume would merge, as a case-sensitive build volume can hold them (#1962).
+    await fs.rm(empty, { recursive: true });
+    await fs.mkdir(empty);
+    await fs.writeFile(path.join(empty, 'host.js'), 'x');
+    const readdir = fs.readdir.bind(fs);
+    const merged = vi.spyOn(fs, 'readdir').mockImplementation((async (at: string, options: object) => {
+      const entries = await readdir(at, options as never) as unknown as Array<{ name: string }>;
+      return at === empty ? [...entries, Object.assign(Object.create(Object.getPrototypeOf(entries[0])), entries[0], { name: 'HOST.js' })] : entries;
+    }) as typeof fs.readdir);
+    await expect(writeServicePayloadManifest(empty, { id: '1.0.0' }).finally(() => merged.mockRestore())).rejects.toThrow('host.js and HOST.js differ only in letter case');
+    expect(existsSync(path.join(empty, SERVICE_PAYLOAD_MANIFEST))).toBe(false);
+    // A payload file or directory spelled like the manifest itself.
+    for (const spelled of ['BYOK-PAYLOAD.JSON', path.join('BYOK-PAYLOAD.JSON', 'x.js')]) {
+      await fs.rm(empty, { recursive: true });
+      await fs.mkdir(path.dirname(path.join(empty, spelled)), { recursive: true });
+      await fs.writeFile(path.join(empty, spelled), 'x');
+      await expect(writeServicePayloadManifest(empty, { id: '1.0.0' })).rejects.toThrow('byok-payload.json and BYOK-PAYLOAD.JSON differ only');
+      expect(await fs.readdir(empty)).toEqual(['BYOK-PAYLOAD.JSON']);
+    }
   });
 
   it('verifyPayload runs on the staged copy and on a matched existing version; a throw is payload_invalid (#1842)', async () => {
@@ -631,11 +686,100 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     });
     await installation.install(await payload('1.0.0'));
     await expect(installation.upgrade(await payload('1.0.0'))).rejects.toMatchObject({ code: 'version_current' });
-    expect(staged).toEqual(['.staging', '1.0.0']);
+    // A matched existing version is verified on a fresh copy too, never on versions/1.0.0 itself (#1962).
+    expect(staged).toEqual(['.staging', '.staging']);
     refuse = true;
     const error = await installation.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught);
     expect(error).toMatchObject({ code: 'payload_invalid', cause: { message: 'node too old' } });
     expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual(['1.0.0']);
+  });
+
+  it('a verifier that changes the staged copy cannot change an installed version, and its change is payload_invalid (#1962)', async () => {
+    let fail = false;
+    const tampering = installationOver(fakeLifecycle(), {
+      verifyPayload: async (dir) => {
+        await fs.writeFile(path.join(dir, 'host.js'), 'tampered');
+        if (fail) throw new Error('refused');
+      },
+    });
+    await expect(tampering.install(await payload('1.0.0'))).rejects.toMatchObject({ code: 'payload_invalid' });
+    expect(existsSync(path.join(installRoot, 'versions', '1.0.0'))).toBe(false);
+    await installation.install(await payload('1.0.0'));
+    for (const throws of [true, false]) {
+      fail = throws;
+      await expect(tampering.install(await payload('1.0.0'))).rejects.toMatchObject({ code: 'payload_invalid' });
+      expect(await fs.readFile(path.join(installRoot, 'versions', '1.0.0', 'host.js'), 'utf8')).toBe('// 1.0.0');
+    }
+  });
+
+  it.each([
+    ['letter case', 'A.js', 'a.js', 'A.js and a.js'],
+    ['a directory\'s letter case', 'Lib/x.js', 'lib/y.js', 'Lib and lib'],
+    ['a final sigma', '\u03c3.js', '\u03c2.js', '\u03c3.js and \u03c2.js'],
+    ['a final sigma JavaScript lowercases in context', '\u039f\u03a3', '\u03bf\u03c3', '\u039f\u03a3 and \u03bf\u03c3'],
+    ['a directory\'s final sigma', '\u039f\u03a3/x.js', '\u03bf\u03c3/y.js', '\u039f\u03a3 and \u03bf\u03c3'],
+    ['Unicode normalization', '\u00e9.js', 'e\u0301.js', '\u00e9.js and e\u0301.js'],
+    ['sharp s', '\u00df.js', 'ss.js', '\u00df.js and ss.js'],
+    ['capital sharp s', '\u1e9e.js', 'ss.js', '\u1e9e.js and ss.js'],
+    // The code points one pass of upper then lower missed: an uppercase that decomposes, against its NFC spelling.
+    ...['\u0390', '\u03b0', '\u1fd2', '\u1fd3', '\u1fd7', '\u1fe2', '\u1fe3', '\u1fe7'].map((point) => {
+      const upper = point.toUpperCase().normalize('NFC');
+      return [`U+${point.codePointAt(0)!.toString(16).toUpperCase()} and its uppercase`, `${point}.js`, `${upper}.js`, `${point}.js and ${upper}.js`];
+    }),
+    ['the manifest\'s own name', 'x.js', 'BYOK-PAYLOAD.JSON', 'byok-payload.json and BYOK-PAYLOAD.JSON'],
+    ['the manifest\'s own name as a directory', 'x.js', 'Byok-Payload.json/y.js', 'byok-payload.json and Byok-Payload.json'],
+  ])('a manifest naming two paths that differ only in %s is payload_name_collision before anything is staged (#1962)', async (_label, first, second, named) => {
+    const dir = await payload('1.0.0', { [first]: 'same' });
+    const manifestPath = path.join(dir, SERVICE_PAYLOAD_MANIFEST);
+    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as ServicePayloadManifest;
+    await fs.writeFile(manifestPath, JSON.stringify({ ...manifest, files: { ...manifest.files, [second]: manifest.files[first] } }));
+    await expect(installation.install(dir)).rejects.toMatchObject({ code: 'payload_name_collision', message: expect.stringContaining(named) });
+    expect(existsSync(path.join(installRoot, 'versions'))).toBe(false);
+  });
+
+  it('the payload collision key is idempotent and unchanged by uppercasing, lowercasing or decomposing any code point (#1962)', () => {
+    // Run on every Node version: a Unicode table change that breaks the key fails here.
+    const broken: string[] = [];
+    for (let point = 0; point <= 0x10ffff; point += 1) {
+      if (point >= 0xd800 && point <= 0xdfff) continue;
+      const character = String.fromCodePoint(point);
+      // No case and no decomposition: every step leaves it as it is, so there is nothing to check.
+      if (character.toUpperCase() === character && character.toLowerCase() === character && character.normalize('NFD') === character && character.normalize('NFC') === character) continue;
+      const key = collisionKey(character);
+      for (const variant of [key, character.toUpperCase(), character.toLowerCase(), character.normalize('NFD')]) {
+        if (collisionKey(variant) !== key) broken.push(`U+${point.toString(16).toUpperCase()} ${variant}`);
+      }
+    }
+    expect(broken).toEqual([]);
+  });
+
+  it('a verifier that removes the staged copy or renames a file in it is payload_invalid, naming the copy (#1962)', async () => {
+    const removing = installationOver(fakeLifecycle(), { verifyPayload: (dir) => fs.rm(dir, { recursive: true, force: true }) });
+    await expect(removing.install(await payload('1.0.0'))).rejects.toMatchObject({ code: 'payload_invalid', message: expect.stringContaining('.staging-'), cause: { code: 'ENOENT' } });
+    // Another spelling of a listed name: on a case-insensitive volume the listed name still opens it.
+    const renaming = installationOver(fakeLifecycle(), {
+      verifyPayload: async (dir) => {
+        await fs.rename(path.join(dir, 'host.js'), path.join(dir, 'tmp.js'));
+        await fs.rename(path.join(dir, 'tmp.js'), path.join(dir, 'HOST.js'));
+      },
+    });
+    await expect(renaming.install(await payload('1.0.0'))).rejects.toMatchObject({ code: 'payload_invalid', message: expect.stringContaining('.staging-') });
+    expect(existsSync(path.join(installRoot, 'versions', '1.0.0'))).toBe(false);
+  });
+
+  it('a copy that overwrites an earlier one, as two names on a case-insensitive volume do, is payload_invalid (#1962)', async () => {
+    const dir = await payload('1.0.0', { 'A.js': 'first', 'b.js': 'second' });
+    const copyFile = fs.copyFile.bind(fs);
+    // b.js lands on A.js, as a.js would on a case-insensitive install volume.
+    const collide = vi.spyOn(fs, 'copyFile').mockImplementation((async (source: string, destination: string, mode?: number) => {
+      if (path.basename(String(destination)) !== 'b.js') return copyFile(source, destination, mode);
+      const first = path.join(path.dirname(String(destination)), 'A.js');
+      await copyFile(source, first, mode);
+      await fs.link(first, destination);
+    }) as typeof fs.copyFile);
+    const error = await installation.install(dir).catch((caught: unknown) => caught).finally(() => collide.mockRestore());
+    expect(error).toMatchObject({ code: 'payload_invalid' });
+    expect(existsSync(path.join(installRoot, 'versions', '1.0.0'))).toBe(false);
   });
 
   it('upgrade stops, prechecks, snapshots, switches and confirms health', async () => {
