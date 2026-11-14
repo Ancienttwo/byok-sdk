@@ -117,6 +117,18 @@ describe('DeviceCredentialStore', () => {
     expect(JSON.stringify(calls)).not.toContain(credentials.devicePrivateKeyPem);
   });
 
+  it('#2184 preserves NUL input errors across the provider boundary', async () => {
+    const run = vi.fn<DeviceCommandRunner>(runDeviceCommand);
+    const entry = new OsCredentialEntry({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'linux', commandRunner: run, account: 'private-spawn-canary\0', label: 'test', subject: 'test' });
+    for (const operation of [() => entry.read(), () => entry.replace('value'), () => entry.delete()]) {
+      const failure = await operation().catch((error: unknown) => error);
+      expect(failure).toHaveProperty('message', expect.stringMatching(/^spawn argument [45] contains a NUL byte$/));
+      expect(failure).not.toBeInstanceOf(DeviceCredentialStoreUnavailableError);
+      expect(inspect(failure, { showHidden: true, depth: null })).not.toContain('private-spawn-canary');
+    }
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it.each(['read', 'replace', 'delete'] as const)('#2184 maps provider %s start failures to typed unavailability with sanitized code', async operation => {
     const canary = 'private-spawn-canary';
     const raw = Object.assign(new Error(canary), { code: 'EACCES', path: canary, spawnargs: [canary], env: { SECRET: canary }, cwd: canary, cause: new Error(canary) });

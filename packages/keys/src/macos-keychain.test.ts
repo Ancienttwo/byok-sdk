@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { inspect } from 'node:util';
 
-import type { CommandResult } from './command-runner';
+import { runCommand, type CommandResult } from './command-runner';
 import {
   DEFAULT_KEYCHAIN_SECRET_STORAGE_PREFIX,
   MacOsKeychainSecretStore,
@@ -60,6 +60,20 @@ beforeEach(() => {
 });
 
 describe('MacOsKeychainSecretStore.available', () => {
+  it('#2184 keeps NUL account input distinct from provider unavailability', async () => {
+    const account = CANARY + NUL;
+    expect(account).toContain(CANARY);
+    const run = vi.fn(runCommand);
+    const subject = store({ account, commandRunner: run });
+    for (const operation of [() => subject.get('key'), () => subject.delete('key')]) {
+      const failure = await operation().catch((error: unknown) => error);
+      expect(failure).toEqual(new Error('spawn argument 2 contains a NUL byte'));
+      expect(inspect(failure, { showHidden: true, depth: null })).not.toContain(CANARY);
+    }
+    expect(run).not.toHaveBeenCalled();
+    const invalidProbe = store({ commandRunner: async () => { throw new Error('spawn argument 0 contains a NUL byte'); } });
+    await expect(invalidProbe.available()).resolves.toBe(false);
+  });
   it.each(['start', 'input', 'signal', 'exit127'])('#2184 handles %s failures at the credential boundary', async kind => {
     const raw = Object.assign(new Error(CANARY), { code: kind === 'input' ? 'EPIPE' : 'EACCES', name: kind === 'input' ? 'CommandInputError' : 'Error', path: CANARY, spawnargs: [CANARY], env: { SECRET: CANARY }, cwd: CANARY, cause: new Error(CANARY) });
     expect(inspect(raw, { showHidden: true, depth: null })).toContain(CANARY);
@@ -72,7 +86,7 @@ describe('MacOsKeychainSecretStore.available', () => {
     for (const [operation, code] of [[() => subject.get('key'), 'KEYCHAIN_READ_FAILED'], [() => subject.delete('key'), 'KEYCHAIN_DELETE_FAILED'], [() => subject.set('key', 'value'), 'KEYCHAIN_WRITE_FAILED']] as const) {
       const failure = await operation().catch((error: unknown) => error);
       expect(failure).toMatchObject({ code: kind === 'start' ? 'KEYCHAIN_UNAVAILABLE' : code });
-      if (kind === 'start' || kind === 'input') expect(failure).toMatchObject({ cause: { code: raw.code } });
+      if (kind === 'start' || kind === 'input') expect(failure).toMatchObject({ cause: { code: raw.code, name: raw.name, message: kind === 'input' ? 'command input failed: EPIPE' : 'spawn failed: EACCES' } });
       expect(inspect(failure, { showHidden: true, depth: null })).not.toContain(CANARY);
     }
   });

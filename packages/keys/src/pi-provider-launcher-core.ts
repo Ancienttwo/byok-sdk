@@ -434,6 +434,7 @@ function windowsSystemTool(systemRoot: string | undefined, name: 'icacls.exe' | 
 }
 
 async function runWindowsTool(run: CommandRunner, executable: string, step: 'icacls' | 'whoami', args: string[]): Promise<string> {
+  assertNoNulSpawnInput(executable, args, process.env);
   let result;
   try { result = await run(executable, args); }
   catch (error) {

@@ -452,6 +452,8 @@ export class OsCredentialEntry {
 
   #command(executable: string, args: readonly string[], stdin: string | undefined, signal: AbortSignal | undefined): Promise<DeviceCommandResult> {
     return this.#bounded(signal, async bounded => {
+      // Invalid input is not provider unavailability; keep the slot-only preflight error.
+      assertNoNulSpawnInput(executable, args, process.env);
       try { return await this.#run(executable, args, stdin, bounded); }
       catch (error) { throw new DeviceCredentialStoreUnavailableError(undefined, { cause: spawnStartError(error) }); }
     });

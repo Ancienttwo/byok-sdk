@@ -10,7 +10,7 @@ export interface CommandResult {
 }
 
 /**
- * The injection seam the OS backends use. Test runners return actual exit
+ * The injection seam the OS backends use. Runners return actual exit
  * codes or signal termination, and reject on start or input failures.
  */
 export type CommandRunner = (

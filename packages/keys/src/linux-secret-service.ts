@@ -1,4 +1,4 @@
-import { resolveSystemTool } from '@byok-sdk/core/system-tool';
+import { assertNoNulSpawnInput, resolveSystemTool } from '@byok-sdk/core/system-tool';
 
 import { type CommandResult, type CommandRunner, runCommand } from './command-runner.js';
 import { ByokKeysError } from './errors.js';
@@ -50,6 +50,7 @@ export class LinuxSecretServiceSecretStore<TName extends string = string>
       await this.#invoke('lookup', 'availability-probe');
       return true;
     } catch {
+      // Availability is a boolean probe, including when its input is invalid.
       return false;
     }
   }
@@ -115,13 +116,15 @@ export class LinuxSecretServiceSecretStore<TName extends string = string>
       `KEYCHAIN_${operation === 'lookup' ? 'READ' : operation === 'clear' ? 'DELETE' : 'WRITE'}_FAILED`,
       'Linux Secret Service command did not complete',
     );
+    const args = [
+      operation,
+      ...(operation === 'store' ? [`--label=${service}`] : []),
+      'service', service, 'account', this.#account,
+    ];
+    assertNoNulSpawnInput('secret-tool', args, process.env);
     let result: CommandResult;
     try {
-      result = await this.#commandRunner('secret-tool', [
-        operation,
-        ...(operation === 'store' ? [`--label=${service}`] : []),
-        'service', service, 'account', this.#account,
-      ], stdin);
+      result = await this.#commandRunner('secret-tool', args, stdin);
     } catch (error) {
       // The injected runner can contain credential bytes; retain no unowned detail.
       if (error instanceof Error && error.name === 'CommandInputError') throw failed();

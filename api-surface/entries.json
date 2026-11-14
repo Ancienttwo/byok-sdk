@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2796215,
+      "budgetBytes": 2796266,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -286,7 +286,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3247828,
+      "budgetBytes": 3247879,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -460,7 +460,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2464980,
+      "budgetBytes": 2465031,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1906,7 +1906,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 249818,
+      "budgetBytes": 250116,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2542,7 +2542,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2459693,
+      "budgetBytes": 2459744,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2881,7 +2881,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 186848,
+      "budgetBytes": 187146,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

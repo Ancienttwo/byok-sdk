@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 import { type CommandRunner, runCommand } from './command-runner.js';
-import { spawnStartError } from '@byok-sdk/core/system-tool';
+import { assertNoNulSpawnInput, spawnStartError } from '@byok-sdk/core/system-tool';
 import { ByokKeysError } from './errors.js';
 import { assertSecretName, assertSecretNamespace } from './secret-name.js';
 import {
@@ -83,7 +83,10 @@ export class MacOsKeychainSecretStore<TName extends string = string>
           : ['show-keychain-info', this.#keychainPath]),
       ]);
       return result.exitCode === 0;
-    } catch { return false; }
+    } catch {
+      // Availability is a boolean probe, including when its input is invalid.
+      return false;
+    }
   }
 
   async delete(name: TName): Promise<boolean> {
@@ -190,13 +193,20 @@ export class MacOsKeychainSecretStore<TName extends string = string>
   }
 
   async #invoke(operation: 'READ' | 'DELETE' | 'WRITE', args: string[], stdin?: string) {
+    // Refuse caller input before translating runner failures into provider availability.
+    assertNoNulSpawnInput('/usr/bin/security', args, process.env);
     try { return await this.#commandRunner('/usr/bin/security', args, stdin); }
     catch (error) {
       const input = error instanceof Error && error.name === 'CommandInputError';
+      const cause = spawnStartError(error);
+      if (input) {
+        cause.name = 'CommandInputError';
+        cause.message = `command input failed: ${cause.code ?? 'unknown'}`;
+      }
       throw new ByokKeysError(
         input ? `KEYCHAIN_${operation}_FAILED` : 'KEYCHAIN_UNAVAILABLE',
         input ? 'macOS Keychain command input failed' : 'macOS Keychain is unavailable',
-        { cause: spawnStartError(error) },
+        { cause },
       );
     }
   }
