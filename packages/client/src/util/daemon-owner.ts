@@ -5,7 +5,7 @@ import path from 'node:path';
 import { sameContent } from './file-state.js';
 import { ensureSecureStoreRoot } from './secure-dir.js';
 import { listenPrivateUnixSocket, privateSocketEndpoint, PrivateSocketInUseError, reclaimPrivateSocketFallbackDirectory } from './private-unix-socket.js';
-import { releaseAfterFailure, withRelease } from './with-release.js';
+import { withRelease } from './with-release.js';
 import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
@@ -417,7 +417,13 @@ export async function acquireDaemonOwner(
           await pathGate.release();
           pathGate = undefined;
         } catch (error) {
-          return await releaseAfterFailure(error, () => fs.rm(ownerPath, { force: true }), (primary, errors) => { failures.push(...errors); return primary; });
+          try { await fs.rm(ownerPath, { force: true }); } catch (removal) {
+            // The gate error stays the thrown error, class and code intact; the
+            // removal failure rides on its cause.
+            if (error instanceof Error) error.cause = new AggregateError(error.cause === undefined ? [removal] : [error.cause, removal], 'removing the unpublished owner record failed too');
+            else failures.push(removal);
+          }
+          throw error;
         }
         const ownedLiveness = liveness;
         const ownedMutex = mutex;
