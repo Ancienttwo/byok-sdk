@@ -247,7 +247,10 @@ type Decision =
  * digest) or `request_conflict`; a generation at or below the profile's
  * watermark is `operation_generation_stale`. Every decision after that consumes the
  * generation and is recorded as a receipt: time window, catalog/pi_model,
- * expected provider triple, pending state, credential scope. An applied
+ * expected provider triple, pending state, credential scope. A credential
+ * store whose `available()` is `false` then rejects with
+ * `secret_store_unavailable` without a receipt or the generation, so the same
+ * request can be sent again once the store is available. An applied
  * operation marks pending, performs its credential-store step, then commits
  * profile + receipt + watermark and clears pending in one store transaction.
  */
@@ -357,11 +360,14 @@ export async function applySealedProviderProvisioning(
       const current = identityMatches(await options.readIdentity(header.agentId), header);
       if (current !== null) return rejectedResult(facts, profileRef, current);
 
-      // Every decision from here on consumes the generation and is recorded.
+      // Every decision from here on consumes the generation and is recorded,
+      // except an unavailable credential store: that is a device condition,
+      // not a verdict on the request, so it is returned unrecorded and the
+      // same request applies once the store is back.
       const decision = await decide(request, profileRef, secret, options);
       if (decision.kind === 'reject') return recordRejection(decision.code);
       if (decision.credential.kind !== 'keep' && !(await secretStoreCall(() => secrets.available()))) {
-        return recordRejection('secret_store_unavailable');
+        return rejectedResult(facts, profileRef, 'secret_store_unavailable');
       }
 
       await profiles.markPending({

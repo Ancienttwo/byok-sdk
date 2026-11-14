@@ -297,7 +297,28 @@ and calls `applySealedProviderProvisioning`.
      key, placement or ciphertext (so rotation or a placement change never
      rewrites a historical fact; a different digest is `request_conflict`),
      and only then validates and applies.
-  3. Complete to the Host with the credential-free result and advance the
+  3. If the result is `rejected` with `secret_store_unavailable`, call
+     `readSealedProvisioningResult` for the same `requestId` + digest. When it
+     returns `absent`, the device recorded nothing (its credential store was
+     unavailable before any write): do not complete to the Host and throw from
+     the handler, so the notice stays unacknowledged, the Host keeps the
+     request and its ciphertext, and redelivery applies it once the store is
+     back (still subject to the time window, identity, expected profile and
+     generation watermark). When it returns `completed`, the device has a
+     recorded result for this request: either this call's failed credential
+     write, or another local call that applied the same request after this
+     one saw the store unavailable. Continue to step 4 with `readback.result`
+     (which may be `applied`), not the rejection this call returned. When it
+     returns `conflict` (another request now holds this `requestId` locally)
+     or `interrupted` (a local call reserved this request after this one and
+     has not recorded a result), call `applySealedProviderProvisioning` again
+     with the same request and continue to step 4 with that result. It
+     settles the id before any credential-store check: `request_conflict`
+     for a conflict, and for a reservation it takes the configuration lock,
+     so it returns the other call's recorded result once that call finishes,
+     or records `local_commit_interrupted` if it never will. If it throws,
+     throw from the handler and leave the notice unacknowledged.
+  4. Complete to the Host with the credential-free result and advance the
      notice cursor only after the Host's durable readback.
 - **Identity fence.** Requests bind `expectedEnrollmentRevision` and
   `expectedPlacementRevision` (in the AAD). `readIdentity(agentId)` must
