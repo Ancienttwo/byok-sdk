@@ -182,15 +182,28 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
     const journal = this.#journal;
     if (journal === undefined) throw new Error('daemon is not started; call start() first');
     let entry = this.#entries.get(taskId);
-    if (entry === undefined) {
-      const durable = await this.#readDurable(journal, taskId, signal);
+    while (entry === undefined) {
+      const read = { journaled: false };
+      const reads = this.#reads.get(taskId) ?? new Set();
+      this.#reads.set(taskId, reads.add(read));
+      let durable: DaemonTaskSettlement | 'pending' | 'unknown';
+      try {
+        durable = await abortable(durableSettlement(journal, taskId), signal);
+      } finally {
+        reads.delete(read);
+        if (reads.size === 0) this.#reads.delete(taskId);
+      }
+      // Decide in the continuation that unregistered the read: no offer fact can
+      // land between the read's end and this check.
       signal?.throwIfAborted();
       entry = this.#entries.get(taskId);
-      if (entry === undefined) {
-        if (durable === 'unknown' && !this.#offersSeen.has(taskId)) throw new DaemonTaskUnknownError(taskId);
-        if (durable !== 'unknown' && durable !== 'pending') return durable;
-        entry = this.#entry(taskId);
+      if (entry !== undefined) break;
+      if (durable === 'unknown' && !this.#offersSeen.has(taskId)) {
+        if (read.journaled) continue;
+        throw new DaemonTaskUnknownError(taskId);
       }
+      if (durable !== 'unknown' && durable !== 'pending') return durable;
+      entry = this.#entry(taskId);
     }
     if (entry.result !== undefined) return entry.result;
     const target = entry;
@@ -210,26 +223,6 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
       signal.addEventListener('abort', abort, { once: true });
       detach = () => signal.removeEventListener('abort', abort);
     });
-  }
-
-  async #readDurable(journal: TaskSettlementJournal, taskId: string, signal: AbortSignal | undefined): Promise<DaemonTaskSettlement | 'pending' | 'unknown'> {
-    for (;;) {
-      signal?.throwIfAborted();
-      const read = { journaled: false };
-      let reads = this.#reads.get(taskId);
-      if (reads === undefined) {
-        reads = new Set();
-        this.#reads.set(taskId, reads);
-      }
-      reads.add(read);
-      try {
-        const durable = await abortable(durableSettlement(journal, taskId), signal);
-        if (durable !== 'unknown' || !read.journaled) return durable;
-      } finally {
-        reads.delete(read);
-        if (reads.size === 0) this.#reads.delete(taskId);
-      }
-    }
   }
 
   #entry(taskId: string): Entry {

@@ -710,6 +710,49 @@ describe('Daemon.whenTaskSettled', () => {
       await expect(waiting).rejects.toBe('stop');
     });
 
+    it('does not report unknown when the offer is journaled right after an empty read ends', async () => {
+      let row: { localState: string; seq: number } | undefined;
+      const r = new TaskSettlementRegistry();
+      r.bindJournal({ readTask: async () => row, hasTaskCancellation: async () => false, unconfirmedTerminal: async () => undefined });
+      r.offerSeen('task-gap');
+      const waiting = r.wait('task-gap');
+      const outcome = track(waiting);
+      queueMicrotask(() => queueMicrotask(() => {
+        row = { localState: 'received', seq: 1 };
+        r.offerJournaled('task-gap');
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(outcome.settled()).toBe(false);
+      r.terminalSettled('task-gap', 'complete', 'accepted');
+      await expect(waiting).resolves.toEqual({ terminal: 'complete', delivery: 'accepted', disposal: 'none' });
+    });
+
+    it('returns the settlement reached during a stale read instead of reading again', async () => {
+      let release = (): void => {};
+      let reads = 0;
+      const r = new TaskSettlementRegistry();
+      r.bindJournal({
+        readTask: async () => {
+          reads += 1;
+          if (reads > 1) throw new Error('journal closed');
+          await new Promise<void>((resolve) => { release = resolve; });
+          return undefined;
+        },
+        hasTaskCancellation: async () => false,
+        unconfirmedTerminal: async () => undefined,
+      });
+      const waiting = r.wait('task-done');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      r.offerSeen('task-done');
+      r.offerJournaled('task-done');
+      r.runtimeHeld('task-done');
+      r.terminalSettled('task-done', 'complete', 'accepted');
+      r.runtimeDisposed('task-done');
+      release();
+      await expect(waiting).resolves.toEqual({ terminal: 'complete', delivery: 'accepted', disposal: 'disposed' });
+      expect(reads).toBe(1);
+    });
+
     it('reads an offer as unknown once it is journaled without a row, not as seen', async () => {
       const { registry: r } = registry();
       r.offerSeen('task-gone');
