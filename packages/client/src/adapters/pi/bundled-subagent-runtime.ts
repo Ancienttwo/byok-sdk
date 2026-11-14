@@ -3,6 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ExtensionFactory } from '@earendil-works/pi-coding-agent';
 import { PI_SUBAGENTS_ASSET_DIR, PI_SUBAGENT_EXTENSIONS_ASSET_DIR, isNodeSea, writePiSubagentsHostSdk } from './subagents.js';
+import { PI_SUBAGENTS_PEERS_KEY as PEERS_KEY, piSubagentHostPeersSource } from './jiti-seed.mjs';
 
 export const BUNDLED_SUBAGENT_DIR = 'pi-subagent-runtime';
 export interface TrustedBunSubagentAssets {
@@ -39,8 +40,6 @@ export function pinBunSubagentAssets(): TrustedBunSubagentAssets | undefined {
   return absent ? undefined : trusted;
 }
 
-const PEERS_KEY = 'byok-sdk.pi-subagents.peers';
-const HOST_KEY = 'byok-sdk.pi-subagents.host-sdk';
 const BINARY_BOOTSTRAP = 'src/runs/background/binary-bootstrap.js';
 const BINARY_ARGS = ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-session', '--mode', 'rpc', '--extension'];
 const HOST_PEER = '@earendil-works/pi-coding-agent';
@@ -68,8 +67,11 @@ async function loadPeers(root: string): Promise<Record<string, Record<string, un
   return peers;
 }
 
-/** Private launch data; Bun executes code from the filesystem-trusted install root. */
-export async function prepareBundledSubagents(root: string, assetRoot: string, trustedBun: TrustedBunSubagentAssets): Promise<string> {
+/**
+ * Private launch data; Bun executes code from the filesystem-trusted install root.
+ * `seedPeers` writes the private jiti cache of the generated peer probe before Pi loads it.
+ */
+export async function prepareBundledSubagents(root: string, assetRoot: string, trustedBun: TrustedBunSubagentAssets, seedPeers: (root: string) => void): Promise<string> {
   mkdirSync(root, { recursive: true, mode: 0o700 });
   // The installed runner owns its peer catalogue; keep it and TypeBox outside client dist.
   trustedBun.verify();
@@ -78,13 +80,8 @@ export async function prepareBundledSubagents(root: string, assetRoot: string, t
     HOST_PEER_ALIASES: ReadonlyArray<{ specifier: string; optional?: boolean }>;
   };
   const specifiers = aliases.filter(alias => !alias.optional).map(alias => alias.specifier);
-  writeFileSync(path.join(root, 'host-peers.ts'), [
-    ...specifiers.map((specifier, index) => `import * as peer${index} from ${JSON.stringify(specifier)};`),
-    `const peers = { ${specifiers.map((specifier, index) => `${JSON.stringify(specifier)}: peer${index}`).join(', ')} };`,
-    `globalThis[Symbol.for(${JSON.stringify(PEERS_KEY)})] = peers;`,
-    `globalThis[Symbol.for(${JSON.stringify(HOST_KEY)})] = peers[${JSON.stringify(HOST_PEER)}];`,
-    'export default function captureHostPeers() {}',
-  ].join('\n'), { flag: 'wx' });
+  writeFileSync(path.join(root, 'host-peers.ts'), piSubagentHostPeersSource(specifiers), { flag: 'wx' });
+  seedPeers(root);
   const peers = await loadPeers(root);
   await writePiSubagentsHostSdk(root, assetRoot);
   const manifests = new Map<string, { dir: string; exports: Record<string, string> }>();
@@ -160,6 +157,12 @@ export async function runBundledSubagentCommand(argv: readonly string[]): Promis
     (globalThis as { PI_BUNDLED_NODE?: boolean }).PI_BUNDLED_NODE = true;
     Reflect.get(globalThis, 'Headers');
     const { DefaultResourceLoader, getAgentDir } = await import('@earendil-works/pi-coding-agent');
+    // #1927: this runner's own graph, loaded by Pi's loader and by the
+    // bootstrap's second jiti; a seed failure is reported once on the runner's
+    // stderr and both transform cold with the fs cache off.
+    const { usePiJitiSeed } = await import('#byok-pi-runtime-host');
+    usePiJitiSeed(trusted.root, [import.meta.url, pathToFileURL(path.join(pkg, BINARY_BOOTSTRAP)).href],
+      (reason: string) => process.stderr.write(`byok-pi-runner: pi_jiti_seed_unavailable: ${reason}\n`)).materialize('runner', pkg);
     const loader = new DefaultResourceLoader({ cwd: process.cwd(), agentDir: getAgentDir(), noExtensions: true,
       noSkills: true, noPromptTemplates: true, additionalExtensionPaths: [path.join(pkg, BINARY_BOOTSTRAP)] });
     trusted.verify();

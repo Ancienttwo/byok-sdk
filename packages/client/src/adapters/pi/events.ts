@@ -243,6 +243,7 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage, identities?: McpEven
  */
 export const ROUTINE_PI_EVENT_TYPES: ReadonlySet<string> = new Set([
   'byok_host_ready',
+  'byok_host_diagnostic',
   'agent_start',
   'agent_end',
   'turn_start',

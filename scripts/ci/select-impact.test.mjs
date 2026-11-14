@@ -786,7 +786,10 @@ test('the embedded Host packaging paths select the packaging consistency lane', 
   }
   assert.deepEqual(selectImpact(['examples/packaging/vitest.config.ts']).families, ['packageability-smoke']);
   for (const path of ['packages/client/src/adapters/packaging.ts', 'packages/client/src/sdk-distribution-bins.json', 'packages/client/src/adapters/pi/runtime-assets.ts',
-    'packages/keys/src/pi-provider-launcher-core.ts']) assert.ok(selectImpact([path]).families.includes('packaging-consistency'), path);
+    'packages/client/src/adapters/pi/jiti-seed.mjs', 'packages/keys/src/pi-provider-launcher-core.ts']) assert.ok(selectImpact([path]).families.includes('packaging-consistency'), path);
+  // #1927: the seed generator is a reviewed client build input that also gates the release pack.
+  const seed = selectImpact(['packages/client/scripts/build-pi-jiti-seed.mjs']);
+  assert.ok(seed.dirs.includes('packages/client') && seed.families.includes('npm-release-pack') && seed.families.includes('packaging-consistency'), JSON.stringify(seed));
   // Package membership alone never selects it: the bundle test in the example suite guards every SDK source change.
   for (const path of ['packages/client/src/daemon/task-runner.ts', 'packages/server/src/index.ts', 'examples/packaging/launcher.ts']) {
     assert.ok(!selectImpact([path]).families.includes('packaging-consistency'), path);

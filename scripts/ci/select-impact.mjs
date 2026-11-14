@@ -384,7 +384,7 @@ export const familyOwners = Object.freeze({
   'packaging-consistency': [
     /^examples\/packaging\/(?:embedded-host-(?:fixture\.ts|smoke\.mjs)|bundle-import-meta\.test\.ts)$/,
     /^packages\/client\/src\/(?:adapters\/packaging|sdk-native-assets|sdk-reserved-helper-host|sdk-distribution-bins|lifecycle\/sdk-reserved-helper-command)\b/,
-    /^packages\/client\/src\/adapters\/pi\/(?:runtime-assets|todo-locale-assets|client-manifest)\.ts$/,
+    /^packages\/client\/src\/adapters\/pi\/(?:(?:runtime-assets|todo-locale-assets|client-manifest)\.ts|jiti-seed\.mjs)$/,
     /^packages\/keys\/src\/pi-provider-launcher-core\.ts$/,
   ],
   // #1804: the private desktop example; its lane builds it and runs the Electron fuse and bridge checks.
@@ -754,6 +754,10 @@ export function selectImpact(paths, context = {}) {
     }
     // #636: the keys pi-catalog subpath entry, and the generator that keys
     // source imports and the client drift test re-runs.
+    // #1927: the Pi jiti seed generator; it builds client dist assets, gates the release pack, and its seed ships in every Pi asset root.
+    if (path === 'packages/client/scripts/build-pi-jiti-seed.mjs') {
+      dirs.add('packages/client'); families.add('npm-release-pack'); families.add('packaging-consistency'); continue;
+    }
     if (path === 'packages/keys/tsup.config.ts') { dirs.add('packages/keys'); families.add('npm-release-pack'); continue; }
     // #654: the core sealed-payload subpath entry.
     if (path === 'packages/core/tsup.config.ts') { dirs.add('packages/core'); families.add('npm-release-pack'); continue; }

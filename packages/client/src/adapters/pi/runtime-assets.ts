@@ -8,6 +8,7 @@ import todoLayout from './todo-locale-layout.json';
 import { clientPackageRoot } from './client-manifest.js';
 import { resolvePinnedPiPackage } from './resolve-bin.js';
 import { verifyTodoLocaleAssets } from './todo-locale-assets.js';
+import { PI_JITI_SEED_DIR } from './jiti-seed.mjs';
 import {
   PI_SUBAGENT_EXTENSIONS_ASSET_DIR, PI_SUBAGENT_FILE_SCOPE_FILE, PI_SUBAGENT_GATE_FILE, PI_SUBAGENTS_ASSET_DIR, PI_SUBAGENTS_PIN,
 } from './subagents.js';
@@ -123,7 +124,7 @@ async function piSubagentsCopies(): Promise<PlannedCopy[]> {
  * match their build manifest; a mismatch fails closed. The root also holds the
  * client's exact pi-subagents with its runtime dependencies and the SDK
  * extensions its native children load, so the product's Pi offers foreground
- * subagents. Returns the written
+ * subagents, and the SDK's prebuilt jiti seed of that extension. Returns the written
  * file paths, relative to `outDir`, in sorted order.
  */
 export async function copyPiRuntimeAssets(options: CopyPiRuntimeAssetsOptions): Promise<readonly string[]> {
@@ -152,6 +153,8 @@ export async function copyPiRuntimeAssets(options: CopyPiRuntimeAssetsOptions): 
     })),
     { from: path.join(path.dirname(photon), PHOTON_WASM), to: PHOTON_WASM },
     ...(await listFiles(sdkAssets, todoLayout.basePath)).map(relative => ({ from: path.join(sdkAssets, relative), to: relative })),
+    // SDK-derived, never written into an official package; the Pi host verifies it before use.
+    ...(await listFiles(sdkAssets, PI_JITI_SEED_DIR)).map(relative => ({ from: path.join(sdkAssets, relative), to: relative })),
     ...await piSubagentsCopies(),
   ];
 

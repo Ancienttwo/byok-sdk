@@ -935,7 +935,7 @@ export interface CopyPiRuntimeAssetsOptions {
  * match their build manifest; a mismatch fails closed. The root also holds the
  * client's exact pi-subagents with its runtime dependencies and the SDK
  * extensions its native children load, so the product's Pi offers foreground
- * subagents. Returns the written
+ * subagents, and the SDK's prebuilt jiti seed of that extension. Returns the written
  * file paths, relative to `outDir`, in sorted order.
  */
 export declare function copyPiRuntimeAssets(options: CopyPiRuntimeAssetsOptions): Promise<readonly string[]>;

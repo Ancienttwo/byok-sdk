@@ -22,10 +22,13 @@ import { parseSerializedFileScopeGrant, verifySerializedFileScopeGrant, type Ser
 import { createPiFileScopeExtension } from '../adapters/pi/file-scope-extension.js';
 import { assertPiFileScopeRegistry } from '../adapters/pi/file-scope-registry.js';
 import { createPiMemoryLane, assertPiMemoryToolLoadout } from './pi-memory-lane.js';
+import { usePiJitiSeed } from '../adapters/pi/jiti-seed.mjs';
+import { PI_SUBAGENTS_ASSET_DIR } from '../adapters/pi/subagents.js';
 
 const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
 
 export { parsePiHostReadyEvent, type PiHostReadyEvent } from '../adapters/pi/host-ready.js';
+import { createPiHostDiagnostic } from '../adapters/pi/host-ready.js';
 import type { PiHostReadyEvent } from '../adapters/pi/host-ready.js';
 
 /** Readiness receipt consumed only by memory-lane admission. */
@@ -290,14 +293,23 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
       const bunExecutable = process.versions.bun !== undefined && /^(?:\/\$bunfs\/|B:[\\/]~BUN[\\/])/u.test(process.argv[1] ?? '');
       let subagentAssets = assetRoot;
       const trustedBun = bunExecutable ? pinBunSubagentAssets() : undefined;
+      // #1927: a verified seed replaces this execution's cold transform of the
+      // embedded extension graph. A seed that does not open turns jiti's fs
+      // cache off before Pi creates any loader and is reported once; Pi then
+      // transforms cold in memory. A later materialization failure turns it
+      // off before the session's extension loaders; only the peer probe's
+      // loader may precede it, and it ran on the cache the open proved private.
+      const seed = usePiJitiSeed(trustedBun?.root ?? assetRoot, [import.meta.url],
+        reason => writeHostFrame(JSON.stringify(createPiHostDiagnostic(reason)) + '\n'));
       if (trustedBun !== undefined) {
         const root = join(resolve(dirname(args.configPath)), BUNDLED_SUBAGENT_DIR);
-        subagentAssets = await prepareBundledSubagents(root, assetRoot, trustedBun);
+        subagentAssets = await prepareBundledSubagents(root, assetRoot, trustedBun, peers => seed.materialize('host-peers', peers));
       } else {
         process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = await writePiSubagentsHostSdk(join(resolve(dirname(args.configPath)), 'pi-subagents-host-sdk'), assetRoot);
         extensionFactories.push(refuseBundledBackground);
       }
       const asset = await loadPiSubagentsAsset(subagentAssets, config.toolAuthorization, fileScoped);
+      seed.materialize('parent', join(subagentAssets, PI_SUBAGENTS_ASSET_DIR));
       subagentExtensionPaths.push(asset.extensionPath);
       extensionFactories.push(...asset.factories);
     }
