@@ -6,8 +6,8 @@
     "snapshotSha256": "47d5ae4ed87551abbe8e30dc50c222a5aa80ee42ed3cb94b7137e6e65b617643"
   },
   "to": {
-    "version": "0.42.0",
-    "snapshotSha256": "c336b4bec1b8dc1371c2c396418ee6c1d7bc2da3d4a22d67174bcd3647794757"
+    "version": "0.43.0",
+    "snapshotSha256": "d940aa4d8d088c6376521a5bcd4e27b588c0a39320f752e0aaa191b5c17b83ce"
   },
   "configFields": {
     "status": "tracked",
@@ -19,7 +19,7 @@
       "id": "sealed-provisioning-store-unavailable-retry",
       "impact": "breaking",
       "summary": "@byok-sdk/keys applySealedProviderProvisioning() no longer records secret_store_unavailable or consumes operationGeneration when available() is false before any credential write (#2132). Hosts must use readSealedProvisioningResult() before completing a providerProvisioning notice: for absent, throw without completing or acknowledging and retain the request and ciphertext for retry after store recovery; for completed, submit readback.result; for conflict or interrupted, apply the same request again and submit that result, propagating throws to leave the notice unacknowledged. Retries still pass all admission checks. Credential-write failures remain recorded and pending; if the Host already stored an unrecorded rejection as terminal, submit a new request at the same generation.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#sealed-provisioning-retries-an-unavailable-credential-store-2132",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#sealed-provisioning-retries-an-unavailable-credential-store-2132",
       "items": [
         "behavior:sealed-provisioning-store-unavailable-retry"
       ]
@@ -28,7 +28,7 @@
       "id": "duplicate-injected-adapter-ids",
       "impact": "breaking",
       "summary": "@byok-sdk/client createDaemonWithAdapters(config, adapters) now throws DaemonConfigInvalidError synchronously for duplicate descriptor.id values instead of accepting the array and selecting the first matching adapter (#2135). checkDaemonConfig(config, { source: 'embedded', adapters }) rejects the same input with ok: false and matching invalid_value issues at adapters[i].descriptor.id. Hosts must register one implementation per ID, or give distinct custom runtimes distinct IDs and update routing; correct the adapter list before retrying construction.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#unique-injected-adapter-ids-2135",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#unique-injected-adapter-ids-2135",
       "items": [
         "behavior:duplicate-injected-adapter-ids"
       ]
@@ -37,7 +37,7 @@
       "id": "direct-command-start-errors",
       "impact": "breaking",
       "summary": "@byok-sdk/client credential APIs now classify provider startup rejection as DeviceCredentialStoreUnavailableError with a sanitized code-bearing cause, and @byok-sdk/keys runCommand rejects startup failures instead of synthesizing exit 127. NUL input is refused before direct spawns, including cwd for durable Pi shell and lifecycle commands; startup errors discard original details while retaining string code. Hosts catch startup failures, inspect code/cause.code, handle keys CommandInputError separately, and let available() perform its own boolean mapping. Client device credentials, macOS keys and Windows Pi ACL queries distinguish real exit 127 from unavailable tooling. Linux keys distinguish signal/input failures but keep KEYCHAIN_UNAVAILABLE for non-absent nonzero exits, including 127. NUL preflight remains an input-validation rejection outside availability translation; boolean available() probes still catch failures (#2184).",
-      "migration": "docs/releases/host-upgrade-next-minor.md#command-startup-failures-and-real-process-outcomes-2184",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#command-startup-failures-and-real-process-outcomes-2184",
       "items": [
         "behavior:direct-command-start-errors"
       ]
@@ -46,7 +46,7 @@
       "id": "command-process-outcomes",
       "impact": "breaking",
       "summary": "@byok-sdk/keys CommandResult uses number|null exitCode with optional signal for signal termination. Hosts check signal before numeric exit status and update injected runners. @byok-sdk/client DeviceCredentialStoreUnavailableError accepts ErrorOptions and exposes a sanitized code-bearing cause for provider start failures (#2184).",
-      "migration": "docs/releases/host-upgrade-next-minor.md#command-startup-failures-and-real-process-outcomes-2184",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#command-startup-failures-and-real-process-outcomes-2184",
       "items": [
         "export:@byok-sdk/client#DeviceCredentialStoreUnavailableError",
         "export:@byok-sdk/keys#CommandResult"
@@ -56,7 +56,7 @@
       "id": "task-home-live",
       "impact": "breaking",
       "summary": "@byok-sdk/client DaemonConfig.runtimeEnvironment and runtimes.<id>.runtimeEnvironment now give task children the daemon's live HOME under the default login-shell base (#2084), instead of the startup snapshot's HOME. A startup file that exports another HOME no longer redirects task HOME. PATH, XDG_* and other snapshot-derived paths are unchanged: pass consistent live values explicitly or use base: 'allowlist'. Policies already passing HOME or using allowlist keep their behavior.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#behavior-only-upgrade-notices-2117",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#behavior-only-upgrade-notices-2117",
       "items": [
         "behavior:task-home-live"
       ]
@@ -65,7 +65,7 @@
       "id": "upgrade-breaking-summary",
       "impact": "additive",
       "summary": "@byok-sdk/client checkUpgradeFrom returns each breaking entry's authored summary, including behavior-only declarations, alongside its id, release and migration. Hosts can show the description directly; fixtures constructing UpgradeFromBreakingEntry supply summary as well.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#behavior-only-upgrade-notices-2117",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#behavior-only-upgrade-notices-2117",
       "items": [
         "export:@byok-sdk/client#UpgradeFromBreakingEntry"
       ]
@@ -74,7 +74,7 @@
       "id": "committed-cancel-drain-error",
       "impact": "breaking",
       "summary": "HostExecutionCore.cancel returns an object instead of void (#2004); update callers requiring Promise<void>. Its result and BotCollaboration.cancelTurn/cancelHostIntent/abortSwitch retain wakePending: true for wake-only failure and add drainError?: unknown for other post-commit failures (#2072, #2144). cancelHostIntent callers move post-commit failure handling from catch to the resolved HostIntentCancelResult, including later process failures. Its cancelled result confirms a committed cancel; conclusion can be absent until a later successful drain settles it. Replay after drain/recovery to read already_settled with the conclusion, or cancel_pending while a submitted intent awaits its terminal. The coalesced drain can fail on other Host work. Check property presence, report the unchanged rejection (the whole AggregateError for mixed failures), and retry pending work through drain/recovery, not the committed operation. cancelTurn and cancelHostIntent retain the first non-wake failure even if a later pass succeeds. Explicit drains and pre-commit failures still reject; job/outbox retry state is unchanged. See committed-cancel-wake-pending for WakeDispatchError and bot-collaboration-cancel-host-intents for the additional BotCollaboration cancellation API.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#committed-cancellation-with-a-drain-failure-2072",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#committed-cancellation-with-a-drain-failure-2072",
       "items": [
         "export:@byok-sdk/server/execution-core#HostExecutionCore",
         "export:@byok-sdk/bot-collaboration#BotCollaboration",
@@ -106,7 +106,7 @@
       "id": "service-store-release-failures",
       "impact": "breaking",
       "summary": "Store lease and gate release failures preserve a refused ServiceInstallationError and its code, with the refusal and all release failures in its AggregateError cause; Hosts that matched the 0.42.0 AggregateError on first install must read cause instead. The code follows the outcome (#2010): a call that leaves its receipt pending or its stores unrestored throws upgrade_pending with every failure in its cause, so the Host runs recover(), first restarting the Host process if a stuck lease makes it fail with store_busy; a preparation error that is not the SDK's own is the new store_preparation_failed with the original error as its cause. The same type gains install_root_foreign_owner (#2001): every ServiceInstallation operation holds an install-root gate, so a second operation on one install root fails at once with lifecycle_owner_busy, and an install root owned by another user is refused before anything changes. An install root another user could rename or replace is install_root_ancestor_unsafe (#2028): on POSIX the root's path is resolved one component at a time, and every directory read must belong to the user or root and not be world-writable without the sticky bit, and every link on the way must belong to the user or root (at most 40 links). A .. in the install root, a directory on the way the user cannot read, or a .. after a missing directory in a link target is refused before anything is created; the root itself owned by another user stays install_root_foreign_owner. The receipt commit protocol (#2011) adds receipt_upgrade_required, receipt_state_inconsistent, switch_unhealthy, repair_interrupted and service_program_not_current (see service-upgrade-receipt-v2), and store_overlaps_service_state: a precheck store that is, holds or lies in the install root or a daemon store's service/ directory, after resolving links and without case on darwin and win32, is refused before it is snapshotted. Two stores that are or lie inside each other, as written or with links resolved, are precheck_failed (#2106) at the precheck and before a restore; split such stores. A snapshot SDK 0.42 took is snapshot_upgrade_required before anything changes (#2106): finish or abandon that upgrade with SDK 0.42, then upgrade. A manifest listing two paths that a volume ignoring letter case or Unicode normalization could store as one, byok-payload.json included, is payload_name_collision (#1962), and verifyPayload always receives a fresh staged copy, never versions/<id>. A daemonStores() list that names one store twice, also through a link or in another case, is daemon_stores_invalid before any lease (#2161); before, the second spelling failed with store_busy after stopTimeoutMs.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#store-release-failures-name-the-next-step",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#store-release-failures-name-the-next-step",
       "items": [
         "export:@byok-sdk/client#ServiceInstallationErrorCode"
       ]
@@ -115,7 +115,7 @@
       "id": "service-upgrade-receipt-v2",
       "impact": "breaking",
       "summary": "upgrade-receipt.json is version 2 (#2011): ServiceUpgradeReceipt.version is 2 and a pending receipt carries kind (upgrade, rollback or repair). recover() acts on the kind, the code and where current points, starting a present current as it is instead of restoring the snapshot over its writes; a candidate found unhealthy is failed with switch_unhealthy and nothing starts, and an interrupted same-version reinstall is repair_interrupted. A pending version 1 receipt is receipt_upgrade_required: run recover() with SDK 0.42 before upgrading the SDK; a final one reads as version 2 and the next write stores version 2. Hosts that parse the receipt accept version 2 and kind; Hosts that switch on codes handle the five new ServiceInstallationErrorCode values. createServiceInstallation refuses a program that does not run from current, and upgrade() and rollback() a unit the SDK did not write, with service_program_not_current.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#upgrades-commit-through-current-2011",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#upgrades-commit-through-current-2011",
       "items": [
         "export:@byok-sdk/client#ServiceUpgradeReceipt"
       ]
@@ -124,7 +124,7 @@
       "id": "keys-secret-corrupted-code",
       "impact": "breaking",
       "summary": "macOS Keychain and Linux Secret Service report an SDK entry that does not decode as the new KEYCHAIN_SECRET_CORRUPTED instead of KEYCHAIN_SECRET_DECODE_FAILED, and ProviderRegistry.replaceSecret/configure overwrite it with a new key. KEYCHAIN_SECRET_DECODE_FAILED now means an entry the SDK did not write; the registry never overwrites it and refuses before any write. A Host that offered 'enter the key again' for KEYCHAIN_SECRET_DECODE_FAILED offers it for KEYCHAIN_SECRET_CORRUPTED and shows delete, rename or other-profile guidance for KEYCHAIN_SECRET_DECODE_FAILED. ProviderRegistry.configure/replaceSecret/setDefaultModelProvider/delete reject with the new PROVIDER_CHANGE_COMMITTED when the change committed but a later step (the auth-none key delete, an unconfirmed profile-store write or the lock release) failed; treat it as success and read the status again. ProviderRegistry.configure without a secret reuses the stored key only for an authenticating profile with an unchanged base_url and otherwise rejects with PROVIDER_SECRET_MISSING.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#provider-key-changes-roll-back-on-failure-1946",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#provider-key-changes-roll-back-on-failure-1946",
       "items": [
         "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES"
       ]
@@ -133,7 +133,7 @@
       "id": "bot-collaboration-cancel-host-intents",
       "impact": "breaking",
       "summary": "cancelHostIntents atomically cancels selected unsubmitted Host intents without a pass. HostIntentError.rejected lists all refused keys and code gains inflight; update exhaustive switches. Existing cancelHostIntent, drainForSwitch and abortSwitch retain their other behavior, and the store format is unchanged; see committed-cancel-wake-pending for the wake-dispatch change. Hosts may replace freeze, individual cancels and abort with this call, retaining freeze when other device work must be held. Successors wait for a later pass or an explicit drain().",
-      "migration": "docs/releases/host-upgrade-next-minor.md#cancel-selected-host-intents-without-a-pass-2003",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#cancel-selected-host-intents-without-a-pass-2003",
       "items": [
         "export:@byok-sdk/bot-collaboration/host-kit#HostIntentError"
       ]
@@ -142,7 +142,7 @@
       "id": "bot-collaboration-ledger-precheck",
       "impact": "breaking",
       "summary": "The local bot-collaboration entry exports inspectLedger(path, tenant), a read-only precheck returning StoreCompatibility. It reports migration-required for would-do rows without turnId; run migrateWouldDo after snapshot and before serving. LocalStoreId gains bot-collaboration-ledger; Hosts with exhaustive switches or Record<LocalStoreId, ...> must add this member.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#ledger-precheck-and-store-id-1981",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#ledger-precheck-and-store-id-1981",
       "items": [
         "export:@byok-sdk/bot-collaboration#inspectLedger",
         "export:@byok-sdk/core#LocalStoreId",
@@ -153,7 +153,7 @@
       "id": "journal-prune-cutoff",
       "impact": "breaking",
       "summary": "Custom LocalTaskJournal implementations must accept the new cutoff argument of pruneConfirmedJournalTask(taskId, cutoff) (#1990) and recheck it in the delete transaction under the write lock. It returns false and deletes nothing when the task is valid but not prunable: a confirmed terminal last updated at or after cutoff, or a received offer whose first stored task.cancel sequenced above the offer was committed at or after cutoff (including evidence replaced under the same task id) or that has no such cancellation. For a received offer it throws and deletes nothing when the task.cancel that qualifies it fails its hash or enrollment check, names another task id, or carries a seq different from its row's. A confirmed terminal's envelopes, withheld rows and the task's other envelopes are not verified before deletion. An implementation that ignores cutoff still compiles but can delete unexpired or replaced evidence; the SDK does not repeat these checks. A custom LocalTaskJournal must also implement the new optional after argument of listPrunableConfirmedTasks(cutoff, limit, after) (#2137): list only tasks strictly greater than after's (at, task_id), and nothing when after is no longer listable. Confirmed-journal retention pages past tasks it could not prune with it; a page that returns such a task again fails the sweep with LocalStorageConfigError, reported as sweep_failed.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#stored-cancellation-pruning-cutoff",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#stored-cancellation-pruning-cutoff",
       "items": [
         "export:@byok-sdk/client#LocalTaskJournal",
         "export:@byok-sdk/client#SqliteLocalTaskJournal"
@@ -163,7 +163,7 @@
       "id": "path-gate-release-failures",
       "impact": "breaking",
       "summary": "A path mutation gate release that fails while another error is thrown is kept: PathMutationGateBusyError, ServiceUnitError and LocalStateRelocation errors keep their class and code with an AggregateError of the original error and the release failures in cause, and an error of another class from a managed service lifecycle operation becomes that AggregateError. ServiceUnitError and the LocalStateRelocation error classes accept ErrorOptions. Hosts that read the original error of such a failure read it from cause.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#gate-release-failures-join-the-thrown-error",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#gate-release-failures-join-the-thrown-error",
       "items": [
         "export:@byok-sdk/client#LocalStateRelocationBusyError",
         "export:@byok-sdk/client#LocalStateRelocationError",
@@ -175,7 +175,7 @@
       "id": "service-command-timeout",
       "impact": "breaking",
       "summary": "ServiceUnitErrorCode gains service_command_timeout (#1971): a platform command a service lifecycle or installation ran (launchctl, systemctl --user, WinSW, sc.exe, the Windows Startup launcher query and launch, the Host's Windows stop program, or icacls when a ServiceInstallation leases a store on Windows) outlived its fixed bound and was stopped, where the operation could hang before. Where it is reported: every ServiceInstallation operation's restore of an earlier install's repair snapshot (when current is absent) is upgrade_pending on a timed-out stop or lease; install() throws a timed-out stop or store lease before anything is installed as is, and a timed-out activation, start or cleanup removal is install_health_check_failed with it in cause (upgrade_pending when cleanup cannot restore the stores); a same-version reinstall throws a timed-out stop as is and keeps its pending repair receipt; upgrade() is upgrade_pending on a timed-out stop or lease before the switch, health_check_failed with it in cause on a timed-out candidate start (upgrade_pending when the rollback's stop or lease times out too), and keeps a store refusal's code when the restart of the previous version times out; rollback() throws a timed-out stop or lease as is but resolves with a failed rollback_unhealthy receipt on a timed-out start; recover() is upgrade_pending on a timed-out stop or lease before a restore but resolves with a failed receipt on a timed-out start; uninstall() throws a timed-out stop, unregistration or daemon-reload as is; the lifecycle's own operations reject with it as is. The service's state is then unknown, never \"the change did not happen\". ServiceUnitError gains exitConfirmed, set only with this code: true when the command is proven to have exited, false when it may still run and change the service, so a retry can race it. An exhaustive switch over ServiceUnitErrorCode needs the new case.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#service-manager-commands-time-out-1971",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#service-manager-commands-time-out-1971",
       "items": [
         "export:@byok-sdk/client#ServiceUnitErrorCode"
       ]
@@ -184,7 +184,7 @@
       "id": "secure-dir-command-timeout",
       "impact": "breaking",
       "summary": "SecureDirHardeningError gains a code (secure_dir_hardening, or secure_dir_command_timeout) and exitConfirmed (#2116). On Windows an icacls run that outlives its 30 s bound while ensureSecureDir() or another SDK operation hardens a directory now rejects with SecureDirHardeningError code secure_dir_command_timeout instead of an internal, unexported timeout class. The ACL's state is then unknown, never \"it was not applied\". exitConfirmed is set only with the timeout code: true when the stopped icacls has exited, so run the operation again; false when it may still run and change the ACL, so a retry can race it. A Host that narrows ServiceUnitError | SecureDirHardeningError with `code in error` and then exhausts the service codes no longer compiles or routes correctly: SecureDirHardeningError now carries code, so branch on instanceof SecureDirHardeningError first, then on code (secure_dir_command_timeout versus secure_dir_hardening) and exitConfirmed. A ServiceInstallation store lease still reports a timeout as ServiceUnitError service_command_timeout. The public support-bundle export is unchanged: exportDeviceSupportBundle still rejects with DeviceOperatorError operation-failed.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#windows-acl-hardening-timeouts-are-hardening-errors-2116",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#windows-acl-hardening-timeouts-are-hardening-errors-2116",
       "items": [
         "export:@byok-sdk/client#SecureDirHardeningError"
       ]
@@ -193,7 +193,7 @@
       "id": "enrollment-clear-store-scope",
       "impact": "breaking",
       "summary": "clearDeviceEnrollment and Daemon.unpair() no longer delete another store's credential or staged first pairing under the same productId: they hold a per-user productId lock from validation through deletion, and pairing takes it across its credential writes, each waiting up to 30 seconds. FirstPairingAttempt gains storeIdentity (DeviceStore.identity, the SHA-256 hex of the resolved storeDir); an injected DeviceCredentialBackend keeps every attempt field, or the store's own attempt is refused. A clear refuses another store's attempt as store_not_bound and an attempt that names no store (staged by 0.42.0) with the new DeviceEnrollmentClearErrorCode pairing_attempt_unattributed; clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }) deletes it. Pairing applies the same rule (#2033): it reuses only its own store's staged attempt and otherwise throws the new FirstPairingAttemptRefusedError (store_not_bound, which replaceOtherStore discards, or pairing_attempt_unattributed). A running daemon's token renewal takes the same lock around its write and writes only while the OS entry still holds its store's enrollment; otherwise the daemon halts as store_not_bound or re_pair_required (#2034). A renewal never holds the lock across a network request. A pairing is one critical section: it rereads the enrollment and staged attempt under the lock, never a cached record, refuses another store's or an unattributed attempt even beside its own enrollment, and holds the lock across its own request, because server registration has no fencing, and through its E2EE member entries. A running daemon's member resume and KEM rotation write the member entries only under the same lock while its enrollment still holds, otherwise they write nothing and the daemon halts the same way (#2055). BlobClient and InstallSkillPacksOptions change only through the types they reference (#1964).",
-      "migration": "docs/releases/host-upgrade-next-minor.md#enrollment-clear-is-scoped-to-its-store-1964",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#enrollment-clear-is-scoped-to-its-store-1964",
       "items": [
         "export:@byok-sdk/client#BlobClient",
         "export:@byok-sdk/client#DeviceCredentialBackend",
@@ -208,7 +208,7 @@
       "id": "retained-records-one-policy",
       "impact": "breaking",
       "summary": "maxRetainedBytes (default 16 MiB) bounds only native and tool payloads: past it the oldest are elided in place and the task keeps running; it also covers runtime request and reply native payloads. Text and reasoning have their own 16 MiB limit, past which the oldest frames lose their text the same way (#2056). For Claude this is the existing behavior (since #1892). For Codex, Grok, Antigravity, OpenCode and dsh it changes: their text used to count toward the 16 MiB total and passing it failed the task ('<runtime> retained record byte budget exceeded'); that failure no longer occurs. ClaudeAdapterOptions gains maxRetainedBytes.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#retained-records-elide-past-the-limit-1932",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#retained-records-elide-past-the-limit-1932",
       "items": [
         "export:@byok-sdk/client#ClaudeAdapter",
         "export:@byok-sdk/client#ClaudeAdapterOptions",
@@ -220,7 +220,7 @@
       "id": "host-layout-subpath",
       "impact": "breaking",
       "summary": "Move resolveHostLayout, HostLayoutInputError, HostLayout, HostLayoutOptions and HostLayoutPlatform imports from @byok-sdk/client to @byok-sdk/client/host-layout, including type-only imports. Split mixed imports and leave other symbols at the root. The new pure entry avoids loading Pi and provider SDKs in a shell or installer; paths, error codes and existing stores are unchanged (#1925).",
-      "migration": "docs/releases/host-upgrade-next-minor.md#host-layout-import-moves-to-a-subpath",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#host-layout-import-moves-to-a-subpath",
       "items": [
         "entry:@byok-sdk/client/host-layout",
         "export:@byok-sdk/client#HostLayout",
@@ -239,7 +239,7 @@
       "id": "committed-cancel-wake-pending",
       "impact": "breaking",
       "summary": "HostExecutionCore.cancel returns an object; BotCollaboration.cancelTurn and abortSwitch may return wakePending: true when wake dispatch fails after commit. The durable outbox records lastError and retries; drain and wake hooks still reject WakeDispatchError, an AggregateError. Update callers expecting cancel to return void. See committed-cancel-drain-error for these methods and their drainError result on other post-commit failures (#2072).",
-      "migration": "docs/releases/host-upgrade-next-minor.md#committed-cancellation-with-a-pending-wake-2004",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#committed-cancellation-with-a-pending-wake-2004",
       "items": [
         "export:@byok-sdk/server/execution-core#WakeDispatchError"
       ]
@@ -248,7 +248,7 @@
       "id": "cloud-do-archived",
       "impact": "breaking",
       "summary": "@byok-sdk/cloud-do is archived after 0.42.0 and leaves the release train. Remove the dependency or pin it to exactly 0.42.0; no later fixes will be published and its npm versions will be deprecated.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#cloud-do-archived",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#cloud-do-archived",
       "items": [
         "entry:@byok-sdk/cloud-do",
         "entry:@byok-sdk/cloud-do/package.json",
@@ -287,7 +287,7 @@
       "id": "core-spawn-input-rules",
       "impact": "additive",
       "summary": "@byok-sdk/core/system-tool exports assertNoNulSpawnInput(command, args, env, cwd?), which refuses a NUL byte in command, args, env or the optional cwd and names only its slot, and spawnStartError, which retains only a string code as `spawn failed: <code>` (unknown for absent or non-string codes). Client process transports and the keys Pi launcher share these rules, including cwd preflight and synchronous spawn failures (#2111, #2151).",
-      "migration": "docs/releases/host-upgrade-next-minor.md#spawn-input-and-start-errors-2151",
+      "migration": "docs/releases/host-upgrade-0.43.0.md#spawn-input-and-start-errors-2151",
       "items": [
         "export:@byok-sdk/core/system-tool#assertNoNulSpawnInput",
         "export:@byok-sdk/core/system-tool#spawnStartError"
