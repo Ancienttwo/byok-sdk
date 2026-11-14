@@ -16,6 +16,16 @@
   },
   "entries": [
     {
+      "id": "committed-cancel-drain-error",
+      "impact": "breaking",
+      "summary": "HostExecutionCore.cancel returns an object instead of void (#2004); update callers requiring Promise<void>. Its result and BotCollaboration.cancelTurn/abortSwitch retain wakePending: true for wake-only failure and add drainError?: unknown for other post-commit failures (#2072). Check property presence, report the unchanged rejection (the whole AggregateError for mixed failures), and retry pending work through drain/recovery, not the committed operation. cancelTurn retains the first non-wake failure even if a later pass succeeds. Explicit drains and pre-commit failures still reject; job/outbox retry state is unchanged. See committed-cancel-wake-pending for WakeDispatchError and bot-collaboration-cancel-host-intents for the additional BotCollaboration cancellation API.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#committed-cancellation-with-a-drain-failure-2072",
+      "items": [
+        "export:@byok-sdk/server/execution-core#HostExecutionCore",
+        "export:@byok-sdk/bot-collaboration#BotCollaboration"
+      ]
+    },
+    {
       "id": "client-store-compatibility-type",
       "impact": "additive",
       "summary": "The client root exports the StoreCompatibility type used by bot-collaboration ledger inspection, so strict package installations can resolve the published declaration.",
@@ -69,7 +79,6 @@
       "summary": "cancelHostIntents atomically cancels selected unsubmitted Host intents without a pass. HostIntentError.rejected lists all refused keys and code gains inflight; update exhaustive switches. Existing cancelHostIntent, drainForSwitch and abortSwitch retain their other behavior, and the store format is unchanged; see committed-cancel-wake-pending for the wake-dispatch change. Hosts may replace freeze, individual cancels and abort with this call, retaining freeze when other device work must be held. Successors wait for a later pass or an explicit drain().",
       "migration": "docs/releases/host-upgrade-next-minor.md#cancel-selected-host-intents-without-a-pass-2003",
       "items": [
-        "export:@byok-sdk/bot-collaboration#BotCollaboration",
         "export:@byok-sdk/bot-collaboration/host-kit#HostIntentError"
       ]
     },
@@ -164,10 +173,9 @@
     {
       "id": "committed-cancel-wake-pending",
       "impact": "breaking",
-      "summary": "HostExecutionCore.cancel returns an object; BotCollaboration.cancelTurn and abortSwitch may return wakePending: true when wake dispatch fails after commit. The durable outbox records lastError and retries; drain and wake hooks still reject WakeDispatchError, an AggregateError. Update callers expecting cancel to return void.",
+      "summary": "HostExecutionCore.cancel returns an object; BotCollaboration.cancelTurn and abortSwitch may return wakePending: true when wake dispatch fails after commit. The durable outbox records lastError and retries; drain and wake hooks still reject WakeDispatchError, an AggregateError. Update callers expecting cancel to return void. See committed-cancel-drain-error for these methods and their drainError result on other post-commit failures (#2072).",
       "migration": "docs/releases/host-upgrade-next-minor.md#committed-cancellation-with-a-pending-wake-2004",
       "items": [
-        "export:@byok-sdk/server/execution-core#HostExecutionCore",
         "export:@byok-sdk/server/execution-core#WakeDispatchError"
       ]
     },
@@ -240,7 +248,7 @@
     {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
       "change": "changed",
-      "entry": "bot-collaboration-cancel-host-intents"
+      "entry": "committed-cancel-drain-error"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration#inspectLedger",
@@ -595,7 +603,7 @@
     {
       "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",
       "change": "changed",
-      "entry": "committed-cancel-wake-pending"
+      "entry": "committed-cancel-drain-error"
     },
     {
       "item": "export:@byok-sdk/server/execution-core#WakeDispatchError",

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createByokServer } from '@byok-sdk/server';
-import { HostExecutionCore, HostLedger, type RoutineDefinition } from '@byok-sdk/server/execution-core';
+import { HostExecutionCore, HostLedger, OutboxFullError, project, type HostOptions, type HostLedgerOptions, type AgentRoutineDefinition } from '@byok-sdk/server/execution-core';
 import { template } from './test-support';
 
 let root: string | undefined;
@@ -18,10 +18,10 @@ afterEach(async () => {
 });
 
 // No daemon: fake timers drive only the K4 timers and the embedded server.
-async function setup() {
+async function setup(options: HostOptions = {}, ledgerOptions: HostLedgerOptions = {}) {
   vi.useFakeTimers(); vi.setSystemTime(Date.UTC(2026, 9, 19, 8));
   root = await mkdtemp(path.join(tmpdir(), 'hc-wake-retry-'));
-  ledger = new HostLedger(path.join(root, 'host.sqlite'), 'wake-retry');
+  ledger = new HostLedger(path.join(root, 'host.sqlite'), 'wake-retry', ledgerOptions);
   server = createByokServer({ productId: 'wake-retry', storage: { kind: 'sqlite', path: path.join(root, 'server.sqlite') },
     wake: { consume: async () => {} } });
   const probe = { fail: true, attempts: 0, failCancel: false, cancels: 0 };
@@ -32,10 +32,10 @@ async function setup() {
   }, cancel: async key => {
     if (key.startsWith('daily:')) { probe.cancels++; if (probe.failCancel) throw new Error('cancel unavailable'); }
     return sdk.wakes.cancel(key);
-  } } }, ledger, { admitSubmit: () => false });
+  } } }, ledger, { admitSubmit: () => false, ...options });
   return probe;
 }
-const routine = (): RoutineDefinition => ({ id: 'daily', version: 1, timeZone: 'UTC', rule: { anchorMs: Date.now() + 3_600_000, everyMs: 86_400_000 },
+const routine = (): AgentRoutineDefinition => ({ id: 'daily', version: 1, timeZone: 'UTC', rule: { anchorMs: Date.now() + 3_600_000, everyMs: 86_400_000 },
   execution: template('device'), waitMs: 60_000, lateAfterMs: 1000 });
 const failedWakes = () => Object.values(ledger!.snapshot().outbox).filter(row => row.kind === 'schedule' && row.lastError !== undefined);
 
@@ -50,6 +50,44 @@ it('reports a pending wake after a committed cancel while drain still rejects', 
   probe.fail = false;
   await vi.advanceTimersByTimeAsync(1000);
   expect(failedWakes()).toEqual([]);
+});
+
+it.each(['job', 'capacity'] as const)('returns the original post-commit %s failure and retains retry work', async kind => {
+  const jobError = { reason: 'Host source unavailable' };
+  let failJob = true;
+  const handler = vi.fn(() => { if (failJob) throw jobError; return { summary: 'recovered' }; });
+  const probe = await setup({ hostJobs: { watch: handler } }, { projectionOutboxLimits: { maxCount: 1 } });
+  await core!.enqueue({ key: 'held', source: 'user', execution: template('device'), waitUntil: Date.now() + 60_000 });
+  if (kind === 'job') {
+    const at = Date.now() + 100;
+    await core!.addRoutine({ ...routine(), id: 'watch', execution: undefined, hostJob: { type: 'watch', input: null },
+      rule: { anchorMs: at, everyMs: 86_400_000 } });
+    await expect(core!.consume({ wakeId: 'watch', dedupKey: `watch:1:${at}`, availableAt: at, deliveredAt: at, delivery: 1 },
+      new AbortController().signal)).rejects.toMatchObject({ errors: [jobError] });
+  } else ledger!.transaction(state => project(state, 'occupied', null));
+  // Cover the non-wake failure alone, then the same failure mixed with wake dispatch.
+  for (const mixed of [false, true]) {
+    if (mixed) await expect(core!.addRoutine(routine())).rejects.toThrow();
+    const result = await core!.cancel('held');
+    expect(result).toHaveProperty('drainError');
+    const failures = result.drainError instanceof AggregateError ? result.drainError.errors : [result.drainError];
+    if (kind === 'job') expect(failures).toContain(jobError);
+    else expect(failures[0]).toBeInstanceOf(OutboxFullError);
+    if (mixed) expect(failures).toContainEqual(expect.objectContaining({ message: 'schedule unavailable' }));
+    expect(core!.intent('held')).toMatchObject({ cancelReason: 'cancelled' });
+    const before = handler.mock.calls.length;
+    await expect(core!.drain()).rejects.toThrow();
+    if (kind === 'job') {
+      expect(handler.mock.calls.length).toBeGreaterThan(before);
+      expect(Object.values(ledger!.snapshot().outbox)).toContainEqual(expect.objectContaining({ kind: 'host-job' }));
+    } else expect(core!.intent('held')?.conclusion).toBeUndefined();
+  }
+  failJob = false; probe.fail = false;
+  await core!.flushProjections(async () => {});
+  await core!.drain();
+  expect(core!.intent('held')?.conclusion).toBe('cancelled');
+  if (kind === 'job') expect(Object.values(ledger!.snapshot().occurrences)[0]).toMatchObject({ conclusion: 'succeeded', job: { summary: 'recovered' } });
+  await expect(core!.cancel('missing')).rejects.toThrow('Intent not found');
 });
 
 it('retries a failed wake call from its own timer with backoff, then stops at the bound and keeps the row', async () => {
