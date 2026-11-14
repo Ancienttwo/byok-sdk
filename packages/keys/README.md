@@ -304,8 +304,11 @@ and calls `applySealedProviderProvisioning`.
      the handler, so the notice stays unacknowledged, the Host keeps the
      request and its ciphertext, and redelivery applies it once the store is
      back (still subject to the time window, identity, expected profile and
-     generation watermark). When it returns `completed`, the failure came from
-     a credential write and is recorded; continue to step 4.
+     generation watermark). When it returns `completed`, the device has a
+     recorded result for this request: either this call's failed credential
+     write, or another local call that applied the same request after this
+     one saw the store unavailable. Continue to step 4 with `readback.result`
+     (which may be `applied`), not the rejection this call returned.
   4. Complete to the Host with the credential-free result and advance the
      notice cursor only after the Host's durable readback.
 - **Identity fence.** Requests bind `expectedEnrollmentRevision` and

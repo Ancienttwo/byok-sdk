@@ -1317,8 +1317,10 @@ device's notice handler tells them apart with the local readback for
 unrecorded, and the handler must not submit a completion and must throw, so the
 notice stays unacknowledged and the Host keeps the request and its ciphertext
 for a replay once the store is available (still bound by the time window,
-identity, expected profile and watermark); `completed` means recorded, and the
-handler completes it as a terminal result like any other. A Host that has
+identity, expected profile and watermark); `completed` means the device has a
+recorded result, and the handler completes the readback's `result` (the
+recorded rejection, or `applied` when another local call applied the same
+request in the meantime), not the rejection it first received. A Host that has
 already stored an unrecorded `secret_store_unavailable` as terminal cannot
 replace it by replaying the same request (a different result is `conflict`);
 it submits a new request instead. Re-sending an identical completion yields `idempotent` with the stored
