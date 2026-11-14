@@ -503,7 +503,7 @@ const NO_ROW_HOST_TERMINAL_DISPOSITIONS: ReadonlySet<string> = new Set(['host_te
 export function createAgentMemoryIntentProcessor(
   options: AgentMemoryIntentProcessorOptions,
 ): (payload: AgentMemoryIntentAvailablePayload) => Promise<AgentMemoryIntentProcessResult> {
-  const { tenantId, deviceId, transport, homes, backend, onIntegrity } = options;
+  const { tenantId, deviceId, transport, homes, onIntegrity } = options;
   const agentQueues = new Map<string, Promise<void>>();
 
   async function serial<T>(agentId: string, fn: () => Promise<T>): Promise<T> {
@@ -523,6 +523,7 @@ export function createAgentMemoryIntentProcessor(
   return async (payload) => {
     // `payload` already passed the strict protocol schema.
     const intentId = payload.intentId;
+    const { backend } = options;
     if (transport === undefined) throw new AgentMemoryIntentNoticeError('transport_unconfigured', intentId);
     if (homes === undefined || backend === undefined || !backend.strictLedgerBarrier) {
       throw new AgentMemoryIntentNoticeError('filesystem_unavailable', intentId);

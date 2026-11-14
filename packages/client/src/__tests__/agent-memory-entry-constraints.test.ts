@@ -110,6 +110,8 @@ describe('the embedded agent-memory entry module graph', () => {
     // #1687: agent-home.ts folds configured roots through the leaf util/fold-name-aliases.ts.
     // #1759: agent-home.ts and path-mutation-gate.ts walk to the deepest existing ancestor through the leaf util/existing-ancestor.ts (node:fs/node:path only).
     // #2018: agent-home.ts releases its gates through the leaf util/with-release.ts, which imports only util/path-mutation-gate.ts.
+    // #2200 splits the helper facade into its private implementation and probe
+    // outcome/budget leaf. Both stay within memory filesystem authority.
     expect(GRAPH.modules).toEqual([
       'agent-home-readers.ts',
       'agent-home.ts',
@@ -117,7 +119,9 @@ describe('the embedded agent-memory entry module graph', () => {
       'agent-memory/mcp-server.ts',
       'agent-memory/tool-manifest.ts',
       'daemon/agent-memory-filesystem.ts',
+      'daemon/agent-memory-fs-helper-internal.ts',
       'daemon/agent-memory-fs-helper.ts',
+      'daemon/agent-memory-helper-probe.ts',
       'daemon/agent-memory-home-check.ts',
       'daemon/agent-memory-start-record.ts',
       'daemon/agent-memory.ts',

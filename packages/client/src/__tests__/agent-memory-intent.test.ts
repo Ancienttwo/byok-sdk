@@ -1680,6 +1680,25 @@ describe('WP2I-S2 backend proof and fail-closed entry', () => {
     expect(w.host.fetches).toHaveLength(0);
   });
 
+  it('a recovered backend serves the same previously refused intent processor', async () => {
+    const w = await world();
+    const intent = await makeIntent({ path: 'notes/recovered.md', operation: 'replace', base: EMPTY, content: 'recovered' });
+    w.host.add(intent);
+    let backend: AgentMemoryIntentBackend | undefined;
+    const process = createAgentMemoryIntentProcessor({ tenantId: TENANT, deviceId: DEVICE, transport: w.host, homes: w.homes, get backend() { return backend; } });
+    expect(await failureReason(process(notice(intent)))).toBe('filesystem_unavailable');
+    expect(w.host.fetches).toHaveLength(0);
+    expect(w.host.completes).toHaveLength(0);
+    backend = w.backend.descriptor();
+    const result = await process(notice(intent));
+    expect(result.kind).toBe('acknowledged');
+    if (result.kind !== 'acknowledged') throw new Error('expected acknowledged recovered intent');
+    expect(result.completion.outcome).toBe('applied');
+    expect(w.host.completes).toHaveLength(1);
+    expect((await w.record(intent.intentId))?.ackedAt).not.toBeNull();
+    expect(await fs.readFile(path.join(w.canonicalHome, 'notes/recovered.md'), 'utf8')).toBe('recovered');
+  });
+
   itForeignHelper('refuses a foreign helper rather than granting it either proof', () => {
     const message = isAgentMemoryFilesystemHelperSupported() ? 'SDK release artifact' : 'SDK Agent memory helper is not admitted on this platform';
     expect(() => helperAgentMemoryIntentBackend(process.platform === 'win32' ? process.execPath : '/bin/sh', os.tmpdir())).toThrow(message);
