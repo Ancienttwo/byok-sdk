@@ -886,6 +886,12 @@ export interface AssertionIssueProbe {
   onIssued(meta: { jti: string; audience: string }): void;
 }
 
+/**
+ * Construct a daemon with Host-supplied runtime adapters, one per `descriptor.id`.
+ * @throws {DaemonConfigInvalidError} If adapter IDs repeat; the message names
+ * the duplicate ID. Remove duplicate registrations or give distinct custom
+ * runtimes distinct IDs before constructing the daemon.
+ */
 export function createDaemonWithAdapters(
   config: DaemonConfig,
   adapters: RuntimeAdapter[],
@@ -893,6 +899,15 @@ export function createDaemonWithAdapters(
 ): Daemon {
   const [conflict] = injectedAdapterConfigConflicts(config);
   if (conflict !== undefined) throw new TypeError(conflict.message);
+  const ids = new Set<string>();
+  for (const [index, adapter] of adapters.entries()) {
+    const id = adapter.descriptor.id;
+    if (ids.has(id)) throw new DaemonConfigInvalidError([{
+      severity: 'error', code: 'invalid_value', path: `adapters[${index}].descriptor.id`,
+      message: `duplicate adapter descriptor.id: ${id}`,
+    }]);
+    ids.add(id);
+  }
   return buildDaemonWithAdapters(config, adapters, overrides);
 }
 

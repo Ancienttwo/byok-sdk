@@ -2,6 +2,20 @@
 
 Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Unique injected adapter IDs (#2135)
+
+`createDaemonWithAdapters(config, adapters)` now throws `DaemonConfigInvalidError`
+synchronously when two injected adapters have the same `descriptor.id`. The
+error has `code: 'daemon_config_invalid'` and names the duplicate ID in its
+message. Previously the array was accepted and lookup by ID silently selected
+the first matching adapter.
+
+Before constructing the daemon, remove duplicate registrations and choose one
+implementation for each ID. If two custom runtimes are distinct, give them
+distinct IDs and update the Host's runtime routing to match. Handle this error
+at construction as a configuration defect: correct the adapter list before
+retrying; calling `daemon.start()` cannot resolve it.
+
 ## Committed cancellation with a pending wake (#2004)
 
 `HostExecutionCore.cancel()` now returns an object instead of `void`. Update callers and test doubles that require `Promise<void>` to accept its result. `BotCollaboration.cancelTurn()` and `abortSwitch()` keep their existing result fields. When only wake dispatch fails after one of these operations commits, it resolves with `wakePending: true` instead of rejecting. The failure can concern any wake in that drain, including one unrelated to the operation, and a concurrent retry may succeed before the result returns. Do not repeat the committed operation solely because the flag is present.
