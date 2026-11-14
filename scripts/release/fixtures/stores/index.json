@@ -194,19 +194,22 @@
       }
     },
     "0.42.0": {
-      "source": "npm @byok-sdk/{server,client,keys}@0.42.0",
+      "source": "npm @byok-sdk/{server,client,keys,bot-collaboration}@0.42.0",
       "piDurable": "1.5.2",
+      "ledgerTenant": "store-fixture",
       "stores": {
         "server-sqlite": "0.42.0/server-sqlite.db",
         "client-journal": "0.42.0/daemon-store/daemon.db",
         "pi-durable": "0.42.0/daemon-store/durable-replicas/fixture/durable-fixture.sqlite",
-        "keys-profile-store": "0.42.0/keys-profile-store.db"
+        "keys-profile-store": "0.42.0/keys-profile-store.db",
+        "bot-collaboration-ledger": "0.42.0/bot-collaboration-ledger.sqlite"
       },
       "expected": {
         "server-sqlite": "accepted",
         "client-journal": "accepted",
         "pi-durable": "accepted",
-        "keys-profile-store": "accepted"
+        "keys-profile-store": "accepted",
+        "bot-collaboration-ledger": "accepted"
       }
     },
     "main": {
