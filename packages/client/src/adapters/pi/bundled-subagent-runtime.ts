@@ -3,7 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ExtensionFactory } from '@earendil-works/pi-coding-agent';
 import { PI_SUBAGENTS_ASSET_DIR, PI_SUBAGENT_EXTENSIONS_ASSET_DIR, isNodeSea, writePiSubagentsHostSdk } from './subagents.js';
-import { PI_SUBAGENTS_PEERS_KEY as PEERS_KEY, openPiJitiSeed, piSubagentHostPeersSource } from './jiti-seed.mjs';
+import { PI_SUBAGENTS_PEERS_KEY as PEERS_KEY, piSubagentHostPeersSource } from './jiti-seed.mjs';
 
 export const BUNDLED_SUBAGENT_DIR = 'pi-subagent-runtime';
 export interface TrustedBunSubagentAssets {
@@ -159,6 +159,7 @@ export async function runBundledSubagentCommand(argv: readonly string[]): Promis
     const { DefaultResourceLoader, getAgentDir } = await import('@earendil-works/pi-coding-agent');
     // #1927: this runner's own graph; a seed that does not verify is reported
     // once on the runner's stderr and the runner transforms cold.
+    const { openPiJitiSeed } = await import('#byok-pi-runtime-host');
     try { openPiJitiSeed(trusted.root, import.meta.url).materialize('runner', pkg); } catch (error) {
       process.stderr.write(`byok-pi-runner: ${error instanceof Error ? error.message : String(error)}\n`);
     }
