@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { checkEntryClosure, createWalker, manifestEntries, runtimeSmokeImports } from './entry-closure.mjs';
-import { scanModule } from './module-scan.mjs';
+import { normalizedModuleBytes, scanModule } from './module-scan.mjs';
+import { transformSync } from 'esbuild';
 import { typesBearingEntries } from '../release/node-next-consumer-probe.mjs';
 
 function fixture(t) {
@@ -38,6 +39,51 @@ function fixture(t) {
   }
   return { root, write, json, policies, loadZod, read: file => readFileSync(path.join(root, file), 'utf8') };
 }
+
+const normalized = (source, sourceType = 'module') => normalizedModuleBytes(source, scanModule(source, { sourceType }).program);
+
+test('private suffix widths 9→10, 99→100 and 96→103 do not change normalized bytes', () => {
+  for (const [before, after] of [[9, 10], [99, 100], [96, 103]]) {
+    // Real esbuild output, retaining private locals through an explicit export alias.
+    const build = suffix => transformSync(`const path${suffix} = input; const init_foo${suffix} = () => path${suffix}; export { init_foo${suffix} as run };`, { format: 'esm' }).code;
+    const a = build(before), b = build(after);
+    assert.equal(Buffer.byteLength(b) - Buffer.byteLength(a), 4);
+    assert.equal(normalized(a), normalized(b));
+    const prefix = 'const earlier100 = input; use(earlier100);\n';
+    assert.equal(normalized(prefix + b) - normalized(b), Buffer.byteLength(prefix) - 4);
+  }
+});
+
+test('only eligible private binding positions receive a suffix discount', () => {
+  for (const [source, discount] of [
+    ['const path99=0; use(path99,path99);', 3], // initializer write and definition share a token
+    ['const path99=0; use({path99:path99}, obj.path99, obj[path99], `path99:${path99}`);', 4],
+    ['use(path99, "path99", /path99/, `path99`); path99: for(;;) break path99; // path99', 0],
+    ['const path99=0; function f(path99){return path99} use(path99);', 2],
+    ['const path99=0; use({path99}); use(path99);', 0],
+    ['const {path99=0}=input; use(path99);', 0],
+    ['const {external99:path99}=input; use(path99);', 2],
+    ['export const path99=0; use(path99);', 0],
+    ['export function path99(){} use(path99);', 0],
+    ['export default class path99{} use(path99);', 0],
+    ['const path99=0; export {path99}; use(path99);', 0],
+    ['import {path99} from "pkg"; use(path99);', 0],
+    ['import {external99 as path99} from "pkg"; export {path99 as public99};', 2],
+    ['import path99 from "pkg"; use(path99);', 2],
+    [String.raw`const path\u0039\u0039=0; use(path99);`, 0],
+  ]) assert.equal(Buffer.byteLength(source) - normalized(source), discount, source);
+  const cjs = 'const path99=0; module.exports=path99;';
+  assert.equal(Buffer.byteLength(cjs) - normalized(cjs, 'script'), 2);
+});
+
+test('non-suffix growth retains every UTF-8 byte including whitespace and escapes', () => {
+  const source = '#!/usr/bin/env node\r\nconst path99=1;\r\nuse(path99);\r\n';
+  for (const addition of ['// 中文 path999\r\n', 'globalThis.extra =                    "增量";\r\n', 'use("\\u0061", /path999/, `path999`);']) {
+    assert.equal(normalized(source + addition) - normalized(source), Buffer.byteLength(addition));
+    assert.equal(normalized(source) - normalized(source + addition), -Buffer.byteLength(addition));
+  }
+  assert.throws(() => normalized('const broken = ;'), SyntaxError);
+});
 
 test('runtime smoke includes Node exports and refuses eager and lazy Cloudflare imports', async t => {
   const f = fixture(t);
@@ -252,15 +298,26 @@ test('manifest coverage includes all runtime conditional leaves, bins, imports a
   assert.ok(entries.some(entry => entry.id === '@byok-sdk/client#host'));
 });
 
-test('follows workspace exports and relative edges, records lazy edges without eager byte cost', t => {
+test('closure deduplicates workspace bytes, preserves JSON and excludes lazy and third-party bytes', t => {
   const f = fixture(t);
-  f.write('packages/client/dist/index.js', "export { value } from '@byok-sdk/protocol'; export const lazy = () => import('./lazy.js');\n");
-  f.write('packages/client/dist/lazy.js', 'export const lazy = 1;\n' + '// padding\n'.repeat(100));
-  const entry = manifestEntries(f.root).find(entry => entry.id === '@byok-sdk/client');
-  const result = createWalker(f.root)(entry);
-  assert.equal(result.bytes, Buffer.byteLength(f.read('packages/client/dist/index.js')) + Buffer.byteLength(f.read('packages/protocol/dist/index.js')));
-  assert.deepEqual(result.bareImports, ['@byok-sdk/protocol']);
+  f.write('packages/client/dist/index.js', "import '@byok-sdk/protocol'; import './shared.js'; import './data.json'; import('./lazy.js');\n");
+  f.write('packages/client/dist/shared.js', "import '@byok-sdk/protocol'; const path99=0; use(path99);\n");
+  f.write('packages/client/dist/data.json', '{"path999":"中文"}\n');
+  f.write('packages/client/dist/lazy.js', 'const path999=0;\n' + '// padding\n'.repeat(100));
+  f.write('packages/protocol/dist/index.js', "import 'zod'; const path99=0; use(path99);\n");
+  f.json('node_modules/zod/package.json', { name: 'zod', type: 'module', exports: './index.js' });
+  f.write('node_modules/zod/index.js', 'const path999=0; use(path999);\n');
+  const walk = createWalker(f.root), entries = manifestEntries(f.root);
+  const result = walk(entries.find(entry => entry.id === '@byok-sdk/client'));
+  const raw = ['client/dist/index.js', 'client/dist/shared.js', 'client/dist/data.json', 'protocol/dist/index.js']
+    .reduce((sum, file) => sum + Buffer.byteLength(f.read(`packages/${file}`)), 0);
+  assert.equal(result.rawBytes, raw);
+  assert.equal(result.normalizedBytes, raw - 4);
+  assert.deepEqual(result.bareImports, ['@byok-sdk/protocol', 'zod']);
   assert.deepEqual(result.lazyImports, ['./lazy.js']);
+  const cached = walk(entries.find(entry => entry.id === '@byok-sdk/protocol'));
+  assert.equal(cached.rawBytes, Buffer.byteLength(f.read('packages/protocol/dist/index.js')));
+  assert.equal(cached.normalizedBytes, cached.rawBytes - 2);
 });
 
 test('zod injection identifies the entry and protocol specifier; --update cannot bypass it', t => {
@@ -276,13 +333,20 @@ test('zod injection identifies the entry and protocol specifier; --update cannot
   }
 });
 
-test('budget failure is enforced before writing any generated facts', t => {
-  const f = fixture(t);
-  f.policies(entries => { entries['@byok-sdk/client'].policy.budgetBytes = 1; });
-  const before = f.read('api-surface/entries.json');
+test('normalized budget equality passes; one byte over cannot update facts or README', t => {
+  const f = fixture(t), source = 'const path99=0; use(path99);\n';
+  f.write('packages/client/dist/index.js', source);
+  f.policies(entries => { entries['@byok-sdk/client'].policy.budgetBytes = Buffer.byteLength(source) - 2; });
+  assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
+  assert.deepEqual(checkEntryClosure(f.root).failures, []);
+  const before = f.read('api-surface/entries.json'), readme = f.read('README.md');
+  const facts = JSON.parse(before)['@byok-sdk/client'].facts;
+  for (const name of ['bytes', 'rawBytes', 'normalizedBytes']) assert.equal(Object.hasOwn(facts, name), false);
+  f.write('packages/client/dist/index.js', source + '\n');
   for (const update of [false, true]) {
-    assert.ok(checkEntryClosure(f.root, { update }).failures.some(error => /@byok-sdk\/client: closure \d+ bytes exceeds budget 1/.test(error)));
+    assert.ok(checkEntryClosure(f.root, { update }).failures.some(error => /@byok-sdk\/client: closure \d+ normalized bytes exceeds budget \d+ \(\d+ raw bytes\)/.test(error)));
     assert.equal(f.read('api-surface/entries.json'), before);
+    assert.equal(f.read('README.md'), readme);
   }
 });
 

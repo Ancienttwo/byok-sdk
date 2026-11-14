@@ -362,6 +362,11 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   const qualify = [];
   const before = parse(beforeText), after = parse(afterText);
   if (path.startsWith('examples/') && (before.private !== true || after.private !== true)) throw new Error('Example workspaces must stay private');
+  // #2104: admit only the exact private-root manifest migration, before other admissions.
+  if (path === 'package.json' && before.private === true && before.devDependencies?.['eslint-scope'] === undefined
+    && isDeepStrictEqual(after, { ...before, devDependencies: { ...before.devDependencies, 'eslint-scope': '9.1.2' } })) {
+    delete after.devDependencies['eslint-scope'];
+  }
   // #654 W3: keep the provider in the private root's peer context so cross-workspace helpers share Vitest.
   if (path === 'package.json' && before.private === true && after.private === true
     && after.devDependencies?.vitest === '5.1.0') {
