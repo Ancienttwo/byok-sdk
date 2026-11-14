@@ -1310,7 +1310,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     if (refusal !== undefined) throw storePathError(refusal);
     for (const entry of entries) {
       const target = entry.canonical;
-      await mkdirReal(path.dirname(target));
+      const refused = await mkdirReal(path.dirname(target));
+      if (refused !== undefined) throw storePathError(refused);
       if (entry.kind === 'directory') {
         await fs.rm(target, { recursive: true, force: true });
         if (entry.files[''] !== undefined) await fs.cp(path.join(dir, entry.files['']), target, TREE_COPY);
@@ -1360,16 +1361,17 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   /**
-   * The one reader of `snapshots/<name>/snapshot.json`. A record that is not
-   * format 2 with a canonical path on every entry, such as one SDK 0.42
-   * wrote, is `snapshot_upgrade_required` naming the snapshot, as a
+   * The one reader of `snapshots/<name>/snapshot.json`. A record
+   * {@link parseSnapshotRecord} refuses, such as one SDK 0.42 wrote, or one
+   * naming a copy that is not in the snapshot, is `snapshot_upgrade_required` naming the snapshot, as a
    * version 1 pending receipt is `receipt_upgrade_required`: this version
    * cannot restore it safely.
    */
   async function readSnapshot(name: string): Promise<SnapshotRecord> {
     const dir = path.join(snapshotsDir, name);
     const record = parseSnapshotRecord(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8'));
-    if (record !== undefined) return record;
+    const copies = record === undefined ? [] : record.entries.flatMap((entry) => Object.values(entry.files));
+    if (record !== undefined && (await Promise.all(copies.map((name) => exists(path.join(dir, name))))).every(Boolean)) return record;
     const error = new ServiceInstallationError('snapshot_upgrade_required');
     error.message = `${error.message} (${dir})`;
     throw error;

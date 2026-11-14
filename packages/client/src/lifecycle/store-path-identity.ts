@@ -33,7 +33,14 @@ export interface SnapshotRecord {
   readonly entries: readonly SnapshotEntry[];
 }
 
-/** `snapshot.json` parsed and checked once, or `undefined` for anything else, such as a record SDK 0.42 wrote without `format` and `canonical`. */
+/**
+ * `snapshot.json` parsed and checked once, or `undefined` for anything else,
+ * such as a record SDK 0.42 wrote without `format` and `canonical`. `files`
+ * must be a plain object naming exactly the copies a snapshot writes: a
+ * directory entry's tree as `''` -> `<index>.d`, a file entry's files as
+ * `''`, `-wal` or `-journal` -> `<index><suffix>`. `{}` is a store that was
+ * absent; any other shape would make a restore delete a store.
+ */
 export function parseSnapshotRecord(text: string): SnapshotRecord | undefined {
   let record: unknown;
   try {
@@ -43,9 +50,11 @@ export function parseSnapshotRecord(text: string): SnapshotRecord | undefined {
   }
   const { format, entries } = (record ?? {}) as { format?: unknown; entries?: unknown };
   const string = (value: unknown): value is string => typeof value === 'string';
-  const isEntry = (entry: Partial<Record<keyof SnapshotEntry, unknown>> | null): boolean => entry !== null && typeof entry === 'object'
+  const isFiles = (files: unknown, index: number, directory: boolean): boolean => files !== null && typeof files === 'object' && Object.getPrototypeOf(files) === Object.prototype
+    && Object.entries(files).every(([suffix, name]) => (directory ? suffix === '' : ['', '-wal', '-journal'].includes(suffix)) && name === `${index}${directory ? '.d' : suffix}`);
+  const isEntry = (entry: Partial<Record<keyof SnapshotEntry, unknown>> | null, index: number): boolean => entry !== null && typeof entry === 'object'
     && string(entry.store) && string(entry.path) && string(entry.canonical) && (entry.kind === undefined || entry.kind === 'directory')
-    && typeof entry.files === 'object' && entry.files !== null && Object.values(entry.files).every(string);
+    && isFiles(entry.files, index, entry.kind === 'directory');
   return format === SNAPSHOT_FORMAT && Array.isArray(entries) && entries.every(isEntry) ? record as SnapshotRecord : undefined;
 }
 
@@ -147,6 +156,9 @@ async function resolvesTo(listed: string, recorded: string): Promise<boolean> {
   const found = await resolveExistingAncestor(listed);
   if (found === undefined) return false;
   if (found.tail.length === 0) return found.canonical === recorded;
+  // A segment is missing only when nothing is there: a dangling link, or an
+  // existing part that is not a directory, is not a missing tail.
+  if (!(await lstatOrUndefined(found.canonical))?.isDirectory() || await lstatOrUndefined(path.join(found.canonical, found.tail[0]!)) !== undefined) return false;
   const prefix = found.canonical.endsWith(path.sep) ? found.canonical : `${found.canonical}${path.sep}`;
   if (!recorded.startsWith(prefix)) return false;
   const rest = recorded.slice(prefix.length).split(path.sep);
@@ -158,15 +170,13 @@ async function resolvesTo(listed: string, recorded: string): Promise<boolean> {
   return true;
 }
 
-/** Creates `dir` and its missing ancestors as real directories, never following a link; an existing entry that is not a directory is ENOTDIR. */
-export async function mkdirReal(dir: string): Promise<void> {
+/** Creates `dir` and its missing ancestors as real directories, never following a link; an existing entry that is not a directory is refused. */
+export async function mkdirReal(dir: string): Promise<StorePathRefusal | undefined> {
   const stat = await lstatOrUndefined(dir);
-  if (stat !== undefined) {
-    if (!stat.isDirectory()) throw Object.assign(new Error(`${dir} is not a directory`), { code: 'ENOTDIR' });
-    return;
-  }
-  if (path.dirname(dir) !== dir) await mkdirReal(path.dirname(dir));
-  await fs.mkdir(dir);
+  if (stat !== undefined) return stat.isDirectory() ? undefined : { code: 'precheck_failed', detail: ` A store's parent is not a directory. (${dir})` };
+  const refused = path.dirname(dir) === dir ? undefined : await mkdirReal(path.dirname(dir));
+  if (refused === undefined) await fs.mkdir(dir);
+  return refused;
 }
 
 async function lstatOrUndefined(at: string): Promise<import('node:fs').Stats | undefined> {

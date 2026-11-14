@@ -1899,6 +1899,37 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect([await fs.readFile(db, 'utf8'), (await installation.receipt())?.state]).toEqual(['v3 data', 'pending']);
     });
 
+    it.each(['', '/', '/.'])('a directory store root that became a dangling link, recorded as tree%s, is refused before any store is restored', async (spelling) => {
+      const tree = path.join(await fs.realpath(root), 'tree');
+      await fs.symlink(path.join(root, 'gone'), tree, 'dir');
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'tree', path: `${tree}${spelling}`, canonical: tree, kind: 'directory', files: {} }] }));
+      const error = await installation.rollback().catch((caught: unknown) => caught);
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining('no longer resolves') }));
+      expect([await fs.readFile(db, 'utf8'), (await fs.lstat(tree)).isSymbolicLink()]).toEqual(['v2 data', true]);
+    });
+
+    it('a store whose parent directory became a file is precheck_failed before any store is restored', async () => {
+      const parent = path.join(await fs.realpath(root), 'parent');
+      await fs.writeFile(parent, 'a file now');
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'nested', path: path.join(parent, 'db'), canonical: path.join(parent, 'db'), files: {} }] }));
+      const error = await installation.rollback().catch((caught: unknown) => caught);
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ name: 'ServiceInstallationError', code: 'precheck_failed' }));
+      expect([await fs.readFile(db, 'utf8'), await fs.readFile(parent, 'utf8')]).toEqual(['v2 data', 'a file now']);
+    });
+
+    it.each([['an array', []], ['an array of names', ['0']], ['an unknown suffix', { '-shm': '0' }], ['another name', { '': '9' }], ['a missing copy', { '-wal': '0-wal' }]])('snapshot files as %s are snapshot_upgrade_required before rollback() changes anything', async (_label, files) => {
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: Array<Record<string, unknown>> };
+      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: snapshot.entries.map((entry, at) => at === 0 ? { ...entry, files } : entry) }));
+      const before = await tree(root);
+      await expect(installation.rollback()).rejects.toMatchObject({ code: 'snapshot_upgrade_required' });
+      expect(await tree(root)).toEqual(before);
+    });
+
     it('a snapshot entry with a .. segment after a link is refused by recover() before any store changes, every time (#2102)', async () => {
       const marker = path.join(storeDir, 'service', 'marker');
       await fs.writeFile(marker, 'live');
