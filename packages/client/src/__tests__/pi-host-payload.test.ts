@@ -48,7 +48,8 @@ async function tempRoot(prefix: string): Promise<string> {
 }
 
 describe('copyPiRuntimeAssets', () => {
-  it.each(['interpreter+bundle', 'compiled-executable'] as const)('writes the %s asset root that the Pi host verifies', async (form) => {
+  // A full asset-root copy writes the 330 jiti seed files too; on Windows each is a scanned file write.
+  it.each(['interpreter+bundle', 'compiled-executable'] as const)('writes the %s asset root that the Pi host verifies', { timeout: 60_000 }, async (form) => {
     const sdk = await loadClient();
     const outDir = path.join(await tempRoot('byok-pi-assets-'), 'pi');
     const files = await sdk.copyPiRuntimeAssets({ outDir, form });
@@ -68,7 +69,7 @@ describe('copyPiRuntimeAssets', () => {
     expect([pinned.name, pinned.version]).toEqual([sdk.PI_PACKAGE_NAME, '1.5.2']);
   });
 
-  it('pins the published 0.88.1 bootstrap paths and both runner argv shapes', async () => {
+  it('pins the published 0.88.1 bootstrap paths and both runner argv shapes', { timeout: 60_000 }, async () => {
     const sdk = await loadClient();
     const root = path.join(await tempRoot('byok-pi-runner-pin-'), 'pi');
     await sdk.copyPiRuntimeAssets({ outDir: root, form: 'interpreter+bundle' });
