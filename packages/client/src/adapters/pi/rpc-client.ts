@@ -3,7 +3,7 @@ import { AsyncQueue } from '../../util/async-queue.js';
 import { createJsonlLineDecoder } from '../../util/jsonl-lines.js';
 import { observePiRpcSettlement, closePiRpcSettlement } from './interrupt-settlement.js';
 import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree.js';
-import { assertNoNulSpawnInput, spawnStartError } from '../../util/spawn-input.js';
+import { assertNoNulSpawnInput, spawnStartError } from '@byok-sdk/core/system-tool';
 
 export type SpawnFn = typeof spawn;
 

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "ce605303d6fae80af78499dc9cb351c3845d29a19f6c59b68a91bdf19c0292c6"
+    "snapshotSha256": "85d037f511f3c48317e163eb2553a0811dcbd6406a34f3d4cdff3030b3cf2211"
   },
   "configFields": {
     "status": "tracked",
@@ -208,6 +208,16 @@
         "export:@byok-sdk/cloud-do#getSessionObject",
         "export:@byok-sdk/cloud-do#openDurableObjectStorage",
         "export:@byok-sdk/cloud-do#sessionObjectName"
+      ]
+    },
+    {
+      "id": "core-spawn-input-rules",
+      "impact": "additive",
+      "summary": "@byok-sdk/core/system-tool exports assertNoNulSpawnInput, which refuses a spawn command, argument or env entry holding a NUL byte and names only its slot, and spawnStartError, which reduces a spawn failure to `spawn failed: <code>` with only `code`. The client and the keys Pi launcher now share these rules; their behavior is unchanged.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2111",
+      "items": [
+        "export:@byok-sdk/core/system-tool#assertNoNulSpawnInput",
+        "export:@byok-sdk/core/system-tool#spawnStartError"
       ]
     }
   ],
@@ -566,6 +576,16 @@
       "item": "export:@byok-sdk/core#LocalStoreId",
       "change": "changed",
       "entry": "bot-collaboration-ledger-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/core/system-tool#assertNoNulSpawnInput",
+      "change": "added",
+      "entry": "core-spawn-input-rules"
+    },
+    {
+      "item": "export:@byok-sdk/core/system-tool#spawnStartError",
+      "change": "added",
+      "entry": "core-spawn-input-rules"
     },
     {
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
