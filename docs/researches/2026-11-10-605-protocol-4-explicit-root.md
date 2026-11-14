@@ -65,7 +65,7 @@ Breaking signatures, on the next MINOR train:
 
 No public Agent-home config or lease field is added. The upgrade manifest
 covers the changed public helper-open export and links the [Host upgrade
-section](../releases/host-upgrade-next-minor.md#agent-memory-helper-protocol-4).
+section](../releases/host-upgrade-0.42.0.md#agent-memory-helper-protocol-4).
 There is no extracted upgrade-manifest item for this private helper protocol;
 its version cut is included in that entry's migration text.
 

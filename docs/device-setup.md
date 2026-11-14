@@ -825,7 +825,7 @@ normalized absolute paths: a path with a `..` segment is
 stores untouched and starts the previous version again. A restore checks
 every snapshot entry the same way before it changes any store (#2102), and a
 snapshot SDK 0.42 took is refused with `snapshot_upgrade_required` (#2106);
-see [the upgrade notes](releases/host-upgrade-next-minor.md) for how to
+see [the upgrade notes](releases/host-upgrade-0.43.0.md#upgrades-commit-through-current-2011) for how to
 resolve either.
 [`examples/service-upgrade`](../examples/service-upgrade/) is such an App.
 
@@ -1422,7 +1422,7 @@ their source contract rather than being assigned invented release versions:
   [the shared approval path](security.md#3-shared-approval-path).
 
 <!-- generated:migrations:start -->
-Manifest transition: **0.42.0 → 0.42.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
+Manifest transition: **0.42.0 → 0.43.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
