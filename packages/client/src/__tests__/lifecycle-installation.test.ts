@@ -761,7 +761,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     });
     try {
       for (const exitConfirmed of [false, true]) {
-        const timeout = new PlatformCommandTimeoutError('icacls timed out', exitConfirmed);
+        const timeout = new secureDir.SecureDirHardeningError(storeDir, 'icacls timed out', new PlatformCommandTimeoutError('icacls timed out', exitConfirmed));
         const hardening = vi.spyOn(secureDir, 'ensureSecureStoreRoot').mockImplementationOnce(async () => { armed = true; throw timeout; });
         const error = await installation.rollback().catch((caught: unknown) => caught).finally(() => hardening.mockRestore());
         expect(error).toMatchObject({ name: 'ServiceUnitError', code: 'service_command_timeout', exitConfirmed });

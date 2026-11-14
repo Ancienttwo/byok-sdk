@@ -224,6 +224,28 @@ resolves the receipt from where `current` points, and a present `current`
 runs as it is, so read the receipt it returns and call `rollback()` to go
 back to the previous version.
 
+## Windows ACL hardening timeouts are hardening errors (#2116)
+
+On Windows, the `icacls` run that hardens a private directory or file has a
+30 s bound (#1971). A run that outlives it is stopped and now rejects with the
+public hardening error instead of an internal, unexported timeout class:
+`SecureDirHardeningError` with `code: 'secure_dir_command_timeout'` from
+`ensureSecureDir()` and from every SDK operation that reports a directory
+hardening failure (for example pairing), and
+`SecureFileHardeningError` with `code: 'secure_file_command_timeout'` for a
+single file such as a support bundle. Other hardening failures carry
+`secure_dir_hardening` or `secure_file_hardening`. A Host that matched these
+errors by class keeps working; one that let the internal timeout through
+unclassified now sees the hardening error.
+
+A timeout means the ACL's state is unknown, never that it was not applied.
+`exitConfirmed` is set only with the timeout code, with the meaning it has on
+`ServiceUnitError`: `true`, the stopped `icacls` has exited, so run the
+operation again; `false`, it may still be running and still change the ACL,
+so a retry now can race it. `cause` is the timeout, for diagnostics only. A
+`ServiceInstallation` store lease still reports this timeout as
+`ServiceUnitError` `service_command_timeout`, as listed above.
+
 ## Upgrade resolves when an old snapshot cannot be pruned
 
 After a healthy switch, `upgrade()` removes the snapshots of earlier

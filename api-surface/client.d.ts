@@ -12168,7 +12168,8 @@ export declare class ServiceUnitError extends Error {
     });
 }
 /**
- * Throws `error`, with an internal `PlatformCommandTimeoutError` as the public
+ * Throws `error`, with an internal `PlatformCommandTimeoutError`, or the store
+ * lease's `secure_dir_command_timeout` (#2116), as the public
  * `service_command_timeout`. The lifecycle and installation boundaries call
  * it; inside them the internal error stays. A timeout whose gate release
  * failed too arrives as the `AggregateError` of the timeout and the release
@@ -15199,7 +15200,24 @@ export interface EnsureSecureDirOptions {
  */
 export declare class SecureDirHardeningError extends Error {
     readonly dir: string;
-    constructor(dir: string, reason: string);
+    /**
+     * `secure_dir_hardening`: `icacls` could not run or exited non-zero, so the
+     * restrictive ACL is not in place. `secure_dir_command_timeout` (#1971,
+     * #2116): `icacls` outlived its bound and was stopped; whether the ACL was
+     * applied is UNKNOWN, never "it was not". Read {@link exitConfirmed} before
+     * running the operation again.
+     */
+    readonly code: 'secure_dir_hardening' | 'secure_dir_command_timeout';
+    /**
+     * Set only with `secure_dir_command_timeout`. `true`: the timed-out `icacls`
+     * is proven to have exited. `false`: it may still be running and still
+     * change the ACL, so a retry now can race it. `cause` is the timeout, for
+     * diagnostics only.
+     */
+    readonly exitConfirmed?: boolean;
+    constructor(dir: string, reason: string, timeout?: Error & {
+        readonly exitConfirmed: boolean;
+    });
 }
 /** An owned directory whose mode is not 0700 and cannot be set to it; `cause` is the chmod error when chmod failed. */
 export declare class SecureDirModeError extends Error {
@@ -15207,9 +15225,14 @@ export declare class SecureDirModeError extends Error {
     readonly code = "secure_dir_mode";
     constructor(dir: string, cause?: unknown);
 }
+/** {@link SecureDirHardeningError} for one file, with the same `code` and `exitConfirmed` meanings. */
 export declare class SecureFileHardeningError extends Error {
     readonly filePath: string;
-    constructor(filePath: string, reason: string);
+    readonly code: 'secure_file_hardening' | 'secure_file_command_timeout';
+    readonly exitConfirmed?: boolean;
+    constructor(filePath: string, reason: string, timeout?: Error & {
+        readonly exitConfirmed: boolean;
+    });
 }
 /**
  * Creates (if needed) and secures `dir`: POSIX `{mode: 0o700}` plus a

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "ce605303d6fae80af78499dc9cb351c3845d29a19f6c59b68a91bdf19c0292c6"
+    "snapshotSha256": "674ca68cd6a1675d41d78f38e99411127d86cfdcd3f54cc7e2794bc35885d3cd"
   },
   "configFields": {
     "status": "tracked",
@@ -113,6 +113,15 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#service-manager-commands-time-out-1971",
       "items": [
         "export:@byok-sdk/client#ServiceUnitErrorCode"
+      ]
+    },
+    {
+      "id": "secure-dir-command-timeout",
+      "impact": "additive",
+      "summary": "SecureDirHardeningError gains a code (secure_dir_hardening, or secure_dir_command_timeout) and exitConfirmed (#2116). On Windows an icacls run that outlives its 30 s bound while ensureSecureDir() or another SDK operation hardens a directory now rejects with SecureDirHardeningError code secure_dir_command_timeout instead of an internal, unexported timeout class; a single file's hardening rejects with SecureFileHardeningError code secure_file_command_timeout. The ACL's state is then unknown, never \"it was not applied\". exitConfirmed is set only with the timeout code: true when the stopped icacls has exited, false when it may still run and change the ACL, so a retry can race it. A ServiceInstallation store lease still reports it as ServiceUnitError service_command_timeout.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#windows-acl-hardening-timeouts-are-hardening-errors-2116",
+      "items": [
+        "export:@byok-sdk/client#SecureDirHardeningError"
       ]
     },
     {
@@ -336,6 +345,11 @@
       "item": "export:@byok-sdk/client#LocalTaskJournal",
       "change": "changed",
       "entry": "journal-prune-cutoff"
+    },
+    {
+      "item": "export:@byok-sdk/client#SecureDirHardeningError",
+      "change": "changed",
+      "entry": "secure-dir-command-timeout"
     },
     {
       "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",

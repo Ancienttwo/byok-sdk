@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveSystemTool } from '@byok-sdk/core/system-tool';
 import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError } from '../util/command-timeouts';
 import type { Runner } from '../util/exec-runner';
-import { buildIcaclsArgs, ensurePiProjectionDir, ensureSecureDir, ensureSecureStoreRoot, SecureDirHardeningError, SecureDirModeError } from '../util/secure-dir';
+import { buildIcaclsArgs, ensurePiProjectionDir, ensureSecureDir, ensureSecureFile, ensureSecureStoreRoot, SecureDirHardeningError, SecureDirModeError, SecureFileHardeningError } from '../util/secure-dir';
 
 vi.mock('@byok-sdk/core/system-tool', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@byok-sdk/core/system-tool')>();
@@ -130,16 +130,22 @@ describe('util/secure-dir: ensureSecureDir (finding F7/R4)', () => {
       await vi.advanceTimersByTimeAsync(COMMAND_TIMEOUT_MS.platform - 500);
       expect(settled).toBe(false);
       await vi.advanceTimersByTimeAsync(500);
-      expect(await secured).toMatchObject({ constructor: PlatformCommandTimeoutError, exitConfirmed: true });
+      expect(await secured).toMatchObject({ constructor: SecureDirHardeningError, code: 'secure_dir_command_timeout', exitConfirmed: true });
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('#1971: an icacls timeout surfaces as PlatformCommandTimeoutError, not a hardening error', async () => {
-    const dir = path.join(await tmpDir('byok-secure-dir-win-'), 'store');
-    const timeout = new PlatformCommandTimeoutError('icacls timed out', false);
-    await expect(ensureSecureDir(dir, { platform: 'win32', run: async () => Promise.reject(timeout) })).rejects.toBe(timeout);
+  it('#2116: an icacls timeout is the public hardening error with its timeout code and exitConfirmed, never the internal timeout', async () => {
+    const root = await tmpDir('byok-secure-dir-win-');
+    const file = path.join(root, 'secret');
+    await fs.writeFile(file, '');
+    for (const exitConfirmed of [false, true]) {
+      const timeout = new PlatformCommandTimeoutError('icacls timed out', exitConfirmed);
+      const run: Runner = async () => Promise.reject(timeout);
+      await expect(ensureSecureDir(path.join(root, 'store'), { platform: 'win32', run })).rejects.toMatchObject({ constructor: SecureDirHardeningError, code: 'secure_dir_command_timeout', exitConfirmed, cause: timeout });
+      await expect(ensureSecureFile(file, { platform: 'win32', run })).rejects.toMatchObject({ constructor: SecureFileHardeningError, code: 'secure_file_command_timeout', exitConfirmed, cause: timeout });
+    }
   });
 
   // #1373: only the keys Pi projection directory also grants OWNER RIGHTS READ_CONTROL, without inheritance.
