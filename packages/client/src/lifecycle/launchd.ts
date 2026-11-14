@@ -55,10 +55,16 @@ export interface LaunchdDeps {
   fs?: ManagedLifecycleFs;
   homedir?: () => string;
   /**
-   * The uid of the `gui/<uid>` domain. Defaults to `process.geteuid`, the
-   * uid that owns the plist, launcher and store this process writes, so the
-   * job launchd runs as can read them (#2031). macOS/Linux only; this module
-   * is never constructed on `win32` (see `create-service-lifecycle.ts`).
+   * The uid of the `gui/<uid>` domain. Defaults to `process.getuid`, the real
+   * uid: the domain belongs to the logged-in session user, and a setuid Host
+   * (ruid 501, euid 0) still targets that user's `gui/501`; root has no GUI
+   * session. Ownership checks on files this process creates use
+   * `process.geteuid` instead, since the effective uid is who owns them
+   * (#2031). Under `sudo` both uids are 0 and the default is `gui/0`; a Host
+   * that manages a user's session service from a root process passes that
+   * user's uid here (`createServiceLifecycle(def, { deps: { getuid: () => 501 } })`).
+   * macOS/Linux only; this module is never constructed on `win32` (see
+   * `create-service-lifecycle.ts`).
    */
   getuid?: () => number;
   /** Clock and wait for the unload deadline; tests drive them. */
@@ -170,10 +176,10 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
   const getuid =
     deps.getuid ??
     (() => {
-      if (typeof process.geteuid !== 'function') {
-        throw new Error('launchd lifecycle requires a POSIX uid (process.geteuid unavailable) — this module only runs on macOS');
+      if (typeof process.getuid !== 'function') {
+        throw new Error('launchd lifecycle requires a POSIX uid (process.getuid unavailable) — this module only runs on macOS');
       }
-      return process.geteuid();
+      return process.getuid();
     });
 
   const now = deps.now ?? Date.now;

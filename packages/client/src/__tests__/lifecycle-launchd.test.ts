@@ -81,13 +81,13 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     expect(run).toHaveBeenCalledWith('launchctl', ['enable', 'gui/501/Acme-Agent-']);
   });
 
-  it('#2031: the gui domain defaults to the effective uid that owns the files it writes', async () => {
+  it('#2031: the gui domain defaults to the real uid, the session user, not the effective uid', async () => {
     const run = vi.fn<Runner>().mockImplementation(async (_cmd, args) => (args[0] === 'print' ? ABSENT : ok()));
     const getuid = vi.spyOn(process, 'getuid').mockReturnValue(501);
-    const geteuid = vi.spyOn(process, 'geteuid').mockReturnValue(502);
+    const geteuid = vi.spyOn(process, 'geteuid').mockReturnValue(0);
     try {
       await createLaunchdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h' }).install();
-      expect(run).toHaveBeenCalledWith('launchctl', ['bootstrap', 'gui/502', PLIST]);
+      expect(run).toHaveBeenCalledWith('launchctl', ['bootstrap', 'gui/501', PLIST]);
     } finally {
       getuid.mockRestore();
       geteuid.mockRestore();
@@ -376,15 +376,15 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     expect(status.determinate).toBe(false);
   });
 
-  it('throws a clear error if geteuid is unavailable (non-POSIX) and no override was given', async () => {
-    const originalGeteuid = process.geteuid;
-    delete process.geteuid;
+  it('throws a clear error if getuid is unavailable (non-POSIX) and no override was given', async () => {
+    const originalGetuid = process.getuid;
+    delete process.getuid;
     try {
       const fs = installedFs();
       const lifecycle = createLaunchdLifecycle(def(), { run: vi.fn().mockResolvedValue(ok()), fs, homedir: () => '/h' });
-      await expect(lifecycle.status()).rejects.toThrow(/process\.geteuid unavailable/);
+      await expect(lifecycle.status()).rejects.toThrow(/process\.getuid unavailable/);
     } finally {
-      process.geteuid = originalGeteuid;
+      process.getuid = originalGetuid;
     }
   });
 });
