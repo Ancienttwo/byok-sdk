@@ -48,15 +48,24 @@ async function count(directory: string) {
   try { return (await fs.readdir(directory)).length; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0; throw error; }
 }
-it.each(['exec-sdk', 'daemon-temp', 'reader-run'] as const)('%s drains a real oversized tree across bounded passes with exact byte accounting', async id => {
+// Each tree exceeds the 16,384-entry measureTree limit, so a class that measured the whole tree
+// before its resumable cleanup would never reclaim it.
+it.each(['exec-sdk', 'exec-runtime', 'daemon-temp', 'reader-run'] as const)('%s drains a real oversized tree across bounded passes with exact byte accounting', async id => {
   const f = await fixture();
-  const execution = await f.scratch.create(); f.scratch.abandon(execution.token);
-  const target = id === 'exec-sdk' ? execution.sdkDir : id === 'daemon-temp'
+  const execution = await f.scratch.create();
+  const target = id === 'exec-sdk' ? execution.sdkDir : id === 'exec-runtime' ? execution.runtimeDir : id === 'daemon-temp'
     ? path.join(f.store, 'tmp/daemon/diag-abc123') : path.join(f.home, '.byok/runs/run-large');
   await populate(target, 16_384);
+  let marker = 0;
+  if (id === 'exec-runtime') {
+    // The release marker must predate the fixed clock by the runtime TTL; it is reclaimed with the token.
+    await execution.release(); await fs.writeFile(path.join(path.dirname(target), 'released'), old.toISOString());
+    marker = Buffer.byteLength(old.toISOString());
+  } else f.scratch.abandon(execution.token);
+  const share = id === 'exec-runtime' ? 4096 : 1024;
   const exists = () => fs.lstat(target).then(() => true, () => false);
-  // exec-sdk and daemon-temp passes are bounded only by the 1024-inspection share, so 40 drain 16,384
-  // entries. reader-run deletion also stops at a 250 ms wall-clock window, so its pass count follows
+  // exec-sdk, exec-runtime and daemon-temp passes are bounded only by their inspection share, so 40 drain
+  // 16,384 entries. reader-run deletion also stops at a 250 ms wall-clock window, so its pass count follows
   // runner speed; it must still make progress every other pass, which bounds the loop by the entry count.
   const passes = id === 'reader-run' ? Infinity : 40;
   let bytes = 0, deleted = 0, idle = 0, registry = f.registry;
@@ -64,20 +73,21 @@ it.each(['exec-sdk', 'daemon-temp', 'reader-run'] as const)('%s drains a real ov
     const before = await count(target), b = budget();
     await registry.sweep(id, b.value);
     bytes += b.tally.bytes + (runtimeReclaimedBytes.get(b.value) ?? 0); deleted += b.tally.deleted;
-    expect(b.tally.inspections).toBeLessThanOrEqual(1024);
+    expect(b.tally.inspections).toBeLessThanOrEqual(share);
     const after = await count(target);
-    expect(before - after).toBeLessThanOrEqual(1024);
+    expect(before - after).toBeLessThanOrEqual(share);
     // A pass that finds the agents cursor at its end only rewinds it, so progress may skip one pass.
     idle = after < before || !await exists() ? 0 : idle + 1;
     expect(idle).toBeLessThanOrEqual(1);
     if (pass === 0) {
       expect(await count(target)).toBeLessThan(16_384); expect(b.tally.truncated).toBe(true);
-      expect((await fs.stat(target)).mtimeMs).toBe(old.getTime());
+      // Classes that age by mtime keep it across partial cleanup; exec-runtime ages by its released marker.
+      if (id !== 'exec-runtime') expect((await fs.stat(target)).mtimeMs).toBe(old.getTime());
       await registry.close(); registry = f.createRegistry();
     }
   }
   expect(await exists()).toBe(false);
-  expect(bytes).toBe(16_384); expect(deleted).toBe(1);
+  expect(bytes).toBe(16_384 + marker); expect(deleted).toBe(1);
 }, 60_000);
 it('startup makes bounded SDK progress without publishing a released marker until secrets are gone', async () => {
   const f = await fixture(), execution = await f.scratch.create(); f.scratch.abandon(execution.token);
