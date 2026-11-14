@@ -419,9 +419,15 @@ export async function acquireDaemonOwner(
         } catch (error) {
           try { await fs.rm(ownerPath, { force: true }); } catch (removal) {
             // The gate error stays the thrown error, class and code intact; the
-            // removal failure rides on its cause.
-            if (error instanceof Error) error.cause = new AggregateError(error.cause === undefined ? [removal] : [error.cause, removal], 'removing the unpublished owner record failed too');
-            else failures.push(removal);
+            // removal failure rides on its cause only where the error accepts one.
+            if (!(error instanceof Error)) failures.push(removal);
+            else {
+              const current = Object.getOwnPropertyDescriptor(error, 'cause');
+              if (current === undefined ? Object.isExtensible(error) : current.configurable || current.writable === true) {
+                const cause = new AggregateError(error.cause === undefined ? [removal] : [error.cause, removal], 'removing the unpublished owner record failed too');
+                Object.defineProperty(error, 'cause', current === undefined ? { value: cause, writable: true, configurable: true } : { value: cause });
+              }
+            }
           }
           throw error;
         }

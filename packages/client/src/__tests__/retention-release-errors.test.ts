@@ -139,7 +139,7 @@ it('preserves maintenance work and release failures', async () => {
   expect(error.errors).toEqual([primary, failure]);
 });
 
-it('keeps a coded publication gate failure and attaches owner record removal failure as its cause', async () => {
+it('keeps a coded publication gate failure, frozen or not, and attaches owner record removal failure where it can', async () => {
   const root = testScratchRoot();
   const failure = Object.assign(new Error('close'), { code: 'EINTR' });
   const removal = Object.assign(new Error('remove owner'), { code: 'EBUSY' });
@@ -153,6 +153,11 @@ it('keeps a coded publication gate failure and attaches owner record removal fai
   expect(error).toBe(failure);
   expect(error.code).toBe('EINTR');
   expect(error.cause.errors).toEqual([removal]);
+  const frozen = Object.freeze(Object.assign(new Error('close'), { code: 'EINTR' }));
+  vi.spyOn(gates, 'acquirePathMutationGate').mockResolvedValue({ release: vi.fn().mockRejectedValueOnce(frozen).mockResolvedValue(undefined) } as never);
+  const thrown = await acquireDaemonOwner(testScratchRoot(), 'daemon').catch(e => e);
+  expect(thrown).toBe(frozen);
+  expect(thrown.code).toBe('EINTR');
 });
 
 it('preserves owner publication failure and gate release failure', async () => {
