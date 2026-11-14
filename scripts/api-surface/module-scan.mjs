@@ -1,4 +1,38 @@
 import { parse, tokenizer } from 'acorn';
+import { analyze } from 'eslint-scope';
+
+// This is a byte-cost convention, not a proof that a name came from esbuild.
+// Keep source text intact: only private top-level binding suffixes cost one byte.
+export function normalizedModuleBytes(source, program) {
+  const scopes = analyze(program, { ecmaVersion: 2026, sourceType: program.sourceType,
+    nodejsScope: program.sourceType === 'script' });
+  const top = scopes.acquire(program, true), excluded = new Set(), shared = new Set();
+  function visit(node) {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) { node.forEach(visit); return; }
+    if (['ExportNamedDeclaration', 'ExportDefaultDeclaration'].includes(node.type) && node.declaration) {
+      for (const variable of scopes.getDeclaredVariables(node.declaration)) excluded.add(variable);
+    }
+    if (node.type === 'Property' && node.shorthand) shared.add(node.key.start);
+    if (node.type === 'ImportSpecifier' && node.imported.start === node.local.start) shared.add(node.local.start);
+    if (node.type === 'ExportSpecifier' && node.local.start === node.exported.start) shared.add(node.local.start);
+    for (const [key, value] of Object.entries(node)) if (!['loc', 'range'].includes(key)) visit(value);
+  }
+  visit(program);
+  let reduction = 0;
+  for (const variable of top.variables) {
+    const suffix = variable.name.match(/\d+$/)?.[0];
+    if (!suffix || excluded.has(variable)) continue;
+    const positions = new Map([...variable.identifiers, ...variable.references.map(ref => ref.identifier)]
+      .map(node => [node.start, node]));
+    // A shared spelling also carries an external name. Escaped spellings are
+    // conservatively left raw, so escape bytes are never silently discounted.
+    if ([...positions.values()].some(node => shared.has(node.start)
+      || source.slice(node.start, node.end) !== variable.name)) continue;
+    reduction += positions.size * (suffix.length - 1);
+  }
+  return Buffer.byteLength(source) - reduction;
+}
 
 // Tokens decode escapes and omit comments. Declarations need tokenization;
 // runtime modules additionally use the AST to distinguish calls from data.
@@ -28,9 +62,9 @@ export function scanModule(source, { declaration = false, sourceType = 'module' 
       }
     }
   }
+  let program;
   if (!declaration) {
-    const parseAs = type => parse(source, { ecmaVersion: 'latest', sourceType: type, locations: true, allowReturnOutsideFunction: type === 'script' });
-    let program;
+    const parseAs = type => parse(source, { ecmaVersion: 'latest', sourceType: type, locations: true, ranges: true, allowReturnOutsideFunction: type === 'script' });
     // Node 24 detects syntax for .js without an explicit package type. Both
     // supported grammars are parsed; no failed parse falls back to a text scan.
     if (sourceType === 'auto') { try { program = parseAs('module'); } catch { program = parseAs('script'); } }
@@ -97,7 +131,7 @@ export function scanModule(source, { declaration = false, sourceType = 'module' 
     visit(program);
     codegen.sort((a, b) => hitPositions.get(a) - hitPositions.get(b));
   }
-  return { imports, lazyImports, codegen };
+  return { imports, lazyImports, codegen, program };
 }
 
 export function specifiers(source) {

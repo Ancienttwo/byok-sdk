@@ -2,7 +2,7 @@ import { existsSync, globSync, readFileSync, readdirSync, realpathSync, statSync
 import { builtinModules, isBuiltin } from 'node:module';
 import { build } from 'esbuild';
 import path from 'node:path';
-import { scanModule } from './module-scan.mjs';
+import { normalizedModuleBytes, scanModule } from './module-scan.mjs';
 
 const readJson = file => JSON.parse(readFileSync(file, 'utf8'));
 const posix = value => value.split(path.sep).join('/');
@@ -261,13 +261,16 @@ export function createWalker(root) {
   return entry => {
     if (closureCache.has(entry.target)) return closureCache.get(entry.target);
     const seen = new Set(), bare = [], lazy = [], third = [], unavailableOptional = [], opaqueImports = [], builtins = { workspace: [], thirdParty: [] }, codegen = [];
-    let bytes = 0;
+    let rawBytes = 0, normalizedBytes = 0;
     function visit(file, pkg) {
       if (seen.has(file)) return;
       seen.add(file);
-      if (pkg.workspace) bytes += statSync(file).size;
+      if (pkg.workspace) rawBytes += statSync(file).size;
       else third.push(pkg.manifest.name);
-      if (file.endsWith('.json')) return;
+      if (file.endsWith('.json')) {
+        if (pkg.workspace) normalizedBytes += statSync(file).size;
+        return;
+      }
       if (path.extname(file) && !/\.(?:js|mjs|cjs)$/.test(file)) throw new Error(`unsupported runtime module ${file}`);
       if (!tokenCache.has(file)) {
         let type = pkg.manifest.type;
@@ -276,10 +279,15 @@ export function createWalker(root) {
           if (existsSync(manifest)) { type = readJson(manifest).type; break; }
         }
         const sourceType = file.endsWith('.mjs') || type === 'module' ? 'module' : file.endsWith('.cjs') || type === 'commonjs' ? 'script' : 'auto';
-        try { tokenCache.set(file, scanModule(readFileSync(file, 'utf8'), { sourceType })); }
-        catch (error) { throw new Error(`${file}: ${error.message}`); }
+        try {
+          const source = readFileSync(file, 'utf8');
+          const { program, ...scan } = scanModule(source, { sourceType });
+          if (pkg.workspace) scan.normalizedBytes = normalizedModuleBytes(source, program);
+          tokenCache.set(file, scan);
+        } catch (error) { throw new Error(`${file}: ${error.message}`); }
       }
       const scan = tokenCache.get(file);
+      if (pkg.workspace) normalizedBytes += scan.normalizedBytes;
       const display = pkg.workspace ? posix(path.relative(root, file)) : `${pkg.manifest.name}/${posix(path.relative(pkg.directory, file))}`;
       for (const hit of scan.codegen) codegen.push({ file: display, ...hit });
       for (const edge of scan.lazyImports) {
@@ -304,7 +312,7 @@ export function createWalker(root) {
       }
     }
     visit(fileAt(entry.target, entry.pkg), entry.pkg);
-    const result = { bytes, bareImports: sorted(bare), lazyImports: sorted(lazy), thirdParty: sorted(third), unavailableOptional: sorted(unavailableOptional), opaqueImports: sorted(opaqueImports),
+    const result = { rawBytes, normalizedBytes, bareImports: sorted(bare), lazyImports: sorted(lazy), thirdParty: sorted(third), unavailableOptional: sorted(unavailableOptional), opaqueImports: sorted(opaqueImports),
       nodeBuiltins: { workspace: sorted(builtins.workspace), thirdParty: sorted(builtins.thirdParty) }, codegen: codegen.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.rule.localeCompare(b.rule)) };
     closureCache.set(entry.target, result);
     return result;
@@ -314,7 +322,7 @@ export function createWalker(root) {
 export function renderEntryTable(contract) {
   const escape = value => String(value).replaceAll('|', '\\|').replaceAll('\n', ' ');
   const rows = Object.entries(contract).map(([id, record]) => `| \`${escape(id)}\` | ${escape(record.policy.purpose)} | ${record.facts.thirdParty.map(name => `\`${name}\``).join(', ') || '—'} | ${record.policy.zod ? 'allowed' : 'forbidden'} | ${record.policy.budgetBytes} B |`);
-  return `${START}\n\nWorkspace static closure budgets exclude third-party bytes, sourcemaps and literal lazy imports.\nThird-party dependencies and code-generation evidence follow static dependency edges; these are build facts, not a CSP sandbox guarantee.\n\n| Import / command | Purpose | Third-party dependencies | Zod | Budget |\n| --- | --- | --- | --- | ---: |\n${rows.join('\n')}\n\n${END}`;
+  return `${START}\n\nWorkspace static closure budgets exclude third-party bytes, sourcemaps and literal lazy imports.\nBudgets use normalized bytes: private top-level binding decimal suffixes cost one byte; all other source bytes are preserved. The check also reports raw bytes.\nThird-party dependencies and code-generation evidence follow static dependency edges; these are build facts, not a CSP sandbox guarantee.\n\n| Import / command | Purpose | Third-party dependencies | Zod | Normalized budget |\n| --- | --- | --- | --- | ---: |\n${rows.join('\n')}\n\n${END}`;
 }
 
 export function checkEntryClosure(root, { update = false } = {}) {
@@ -339,7 +347,7 @@ export function checkEntryClosure(root, { update = false } = {}) {
         if (!inside(path.join(entry.pkg.directory, 'dist'), target) || !existsSync(target)) throw new Error(`missing or escaped declaration target ${type}`);
       }
       const result = walk(entry);
-      measured.push({ id: entry.id, bytes: result.bytes, budgetBytes: policy.budgetBytes });
+      measured.push({ id: entry.id, rawBytes: result.rawBytes, normalizedBytes: result.normalizedBytes, budgetBytes: policy.budgetBytes });
       const via = result.bareImports.join(', ');
       if (!policy.zod && [...result.thirdParty, ...result.unavailableOptional.map(packageName)].includes('zod')) throw new Error(`zod is forbidden; specifiers: ${via}`);
       if ((result.unavailableOptional.length || result.opaqueImports.length) && (!policy.codegen || !policy.nodeBuiltins.thirdParty)) throw new Error(`strict policy cannot prove optional dependency safety: ${[...result.unavailableOptional, ...result.opaqueImports].join(', ')}`);
@@ -350,8 +358,8 @@ export function checkEntryClosure(root, { update = false } = {}) {
         const denied = result.nodeBuiltins[layer].filter(name => forbidden.has(name.replace(/^node:/, '')));
         if (denied.length) throw new Error(`Node builtins are forbidden in ${layer}: ${denied.join(', ')}`);
       }
-      if (result.bytes > policy.budgetBytes) throw new Error(`closure ${result.bytes} bytes exceeds budget ${policy.budgetBytes}`);
-      const { bytes: _bytes, ...facts } = result;
+      if (result.normalizedBytes > policy.budgetBytes) throw new Error(`closure ${result.normalizedBytes} normalized bytes exceeds budget ${policy.budgetBytes} (${result.rawBytes} raw bytes)`);
+      const { rawBytes: _rawBytes, normalizedBytes: _normalizedBytes, ...facts } = result;
       const next = { kind: entry.kind, policy, facts: { target: posix(path.relative(root, entry.target)), conditions: entry.conditions, types: entry.types, ...facts } };
       updated[entry.id] = next;
       if (!update && JSON.stringify(record) !== JSON.stringify(next)) throw new Error('entry facts drifted; review then run check:api-surface -- --update');

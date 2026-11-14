@@ -361,7 +361,7 @@ export function run(argv, out = console) {
     try {
       const result = checkEntryClosure(options.root, { update: options.update && failures.length === 0 });
       failures.push(...result.failures);
-      for (const measurement of result.measured) out.log(`entry-closure: ${measurement.id}: ${measurement.bytes}/${measurement.budgetBytes} bytes`);
+      for (const measurement of result.measured) out.log(`entry-closure: ${measurement.id}: ${measurement.rawBytes} raw bytes; ${measurement.normalizedBytes}/${measurement.budgetBytes} normalized bytes/budget`);
     } catch (error) { failures.push(`entry-closure: ${error.message}`); }
   }
 

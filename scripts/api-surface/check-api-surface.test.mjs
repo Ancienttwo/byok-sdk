@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { PACKAGES } from './check-api-surface.mjs';
+import { manifestEntries } from './entry-closure.mjs';
 
 const script = path.join(path.dirname(fileURLToPath(import.meta.url)), 'check-api-surface.mjs');
 
@@ -38,6 +40,36 @@ function runCheck(root, args = []) {
 }
 
 const goldenPath = (root, pkg) => path.join(root, 'api-surface', `${pkg}.d.ts`);
+
+test('full CLI reports raw and normalized bytes and refuses normalized overflow under --update', t => {
+  const root = makeRoot(t), source = 'const path99=0; use(path99);\n';
+  const raw = Buffer.byteLength(source), budget = raw - 2;
+  for (const pkg of PACKAGES) writePackage(root, pkg, { exports: singleEntry,
+    dist: { 'index.js': source, 'index.d.ts': 'export declare const value: number;\n' } });
+  mkdirSync(path.join(root, 'api-surface'));
+  const entriesPath = path.join(root, 'api-surface/entries.json'), readmePath = path.join(root, 'README.md');
+  writeFileSync(entriesPath, JSON.stringify(Object.fromEntries(manifestEntries(root).map(entry => [entry.id, {
+    kind: entry.kind, policy: { purpose: entry.id, budgetBytes: budget, zod: false, codegen: false,
+      nodeBuiltins: { workspace: false, thirdParty: false } }, facts: {},
+  }]))));
+  writeFileSync(readmePath, '<!-- BEGIN generated: api-surface/entries.json -->\n<!-- END generated: api-surface/entries.json -->\n');
+  const full = args => spawnSync(process.execPath, [script, '--root', root, ...args], { encoding: 'utf8' });
+  const updated = full(['--update']);
+  assert.equal(updated.status, 0, updated.stderr);
+  const checked = full([]);
+  assert.equal(checked.status, 0, checked.stderr);
+  assert.ok(checked.stdout.includes(`entry-closure: @byok-sdk/core: ${raw} raw bytes; ${budget}/${budget} normalized bytes/budget`));
+  const entries = readFileSync(entriesPath, 'utf8'), readme = readFileSync(readmePath, 'utf8');
+  assert.match(readme, /private top-level binding decimal suffixes cost one byte/);
+  writeFileSync(path.join(root, 'packages/core/dist/index.js'), source + '\n');
+  for (const args of [[], ['--update']]) {
+    const failed = full(args);
+    assert.equal(failed.status, 1);
+    assert.ok(failed.stderr.includes(`closure ${budget + 1} normalized bytes exceeds budget ${budget} (${raw + 1} raw bytes)`));
+    assert.equal(readFileSync(entriesPath, 'utf8'), entries);
+    assert.equal(readFileSync(readmePath, 'utf8'), readme);
+  }
+});
 
 test('walks a two-hop relative chain, orders by path, and ignores unreachable files', (t) => {
   const root = makeRoot(t);
