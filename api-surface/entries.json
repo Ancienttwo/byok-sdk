@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2784526,
+      "budgetBytes": 2786054,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -286,7 +286,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3236139,
+      "budgetBytes": 3237667,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -460,7 +460,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2453291,
+      "budgetBytes": 2454819,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -577,7 +577,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 556424,
+      "budgetBytes": 557493,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -874,7 +874,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 4730,
+      "budgetBytes": 4769,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -902,7 +902,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Single-file Host build: esbuild packaging plugin and SDK asset copy",
-      "budgetBytes": 33069,
+      "budgetBytes": 33233,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -948,7 +948,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 518690,
+      "budgetBytes": 519759,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1088,7 +1088,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 578765,
+      "budgetBytes": 584263,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2542,7 +2542,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2447597,
+      "budgetBytes": 2448666,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
