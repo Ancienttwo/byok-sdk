@@ -1320,7 +1320,14 @@ for a replay once the store is available (still bound by the time window,
 identity, expected profile and watermark); `completed` means the device has a
 recorded result, and the handler completes the readback's `result` (the
 recorded rejection, or `applied` when another local call applied the same
-request in the meantime), not the rejection it first received. A Host that has
+request in the meantime), not the rejection it first received; `conflict`
+(another local request holds the id with a different digest) or `interrupted`
+(a local call reserved the request and has not recorded a result) means the
+handler applies the same request again and completes that result, which
+settles the id before any credential-store check: `request_conflict`, the
+other call's recorded result once it finishes under the configuration lock, or
+a recorded `local_commit_interrupted` when it never will; if that call throws,
+the handler throws and the notice stays unacknowledged. A Host that has
 already stored an unrecorded `secret_store_unavailable` as terminal cannot
 replace it by replaying the same request (a different result is `conflict`);
 it submits a new request instead. Re-sending an identical completion yields `idempotent` with the stored

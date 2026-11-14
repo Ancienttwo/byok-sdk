@@ -308,7 +308,16 @@ and calls `applySealedProviderProvisioning`.
      recorded result for this request: either this call's failed credential
      write, or another local call that applied the same request after this
      one saw the store unavailable. Continue to step 4 with `readback.result`
-     (which may be `applied`), not the rejection this call returned.
+     (which may be `applied`), not the rejection this call returned. When it
+     returns `conflict` (another request now holds this `requestId` locally)
+     or `interrupted` (a local call reserved this request after this one and
+     has not recorded a result), call `applySealedProviderProvisioning` again
+     with the same request and continue to step 4 with that result. It
+     settles the id before any credential-store check: `request_conflict`
+     for a conflict, and for a reservation it takes the configuration lock,
+     so it returns the other call's recorded result once that call finishes,
+     or records `local_commit_interrupted` if it never will. If it throws,
+     throw from the handler and leave the notice unacknowledged.
   4. Complete to the Host with the credential-free result and advance the
      notice cursor only after the Host's durable readback.
 - **Identity fence.** Requests bind `expectedEnrollmentRevision` and
