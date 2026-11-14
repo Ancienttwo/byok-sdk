@@ -3,7 +3,8 @@ import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-
 import { applyPiHostNetworkDefaults } from './pi-host-network-defaults.js';
 import { readFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { resolvePinnedPiPackage } from '../adapters/pi/resolve-bin.js';
 import { getAgentDir, type CreateAgentSessionOptions, type InlineExtension } from '@earendil-works/pi-coding-agent';
 import { MODEL_THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
 import { PI_RPC_IPC_KEY_MARKER, receiveLauncherCredential } from '../adapters/pi/launcher-credential.js';
@@ -226,7 +227,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     // uses this module's URL. These lanes expect no seed, but share its cache
     // proof and must disable an unproved cache before the first extension.
     const loaderUrl = packaging === 'installed'
-      ? new URL('./core/extensions/loader.js', import.meta.resolve('@earendil-works/pi-coding-agent')).href
+      ? pathToFileURL(realpathSync(join(resolvePinnedPiPackage('reinstall @byok-sdk/client dependencies').dir, 'dist/core/extensions/loader.js'))).href
       : import.meta.url;
     usePiJitiSeed(undefined, [loaderUrl], () => {});
   }

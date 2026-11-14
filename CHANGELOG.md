@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Fixed (client; #2163)** — Installed and keys-profile Pi hosts disable jiti's filesystem cache before loading extensions unless its location is proven private to the execution, preventing cache writes to a shared adjacent `node_modules` directory.
+- **Fixed (client; #2163)** — Installed, keys-profile, and team-operator Pi hosts disable jiti's filesystem cache before loading extensions unless its location is proven private to the execution, preventing cache writes to a shared adjacent `node_modules` directory.
 
 - **Fixed (keys; #2031)** — Pi projection directory ownership is checked against the effective uid, which owns files created by the process. When real and effective uids differ, an effective-uid-owned directory is accepted and a directory owned only by the real uid is refused.
 

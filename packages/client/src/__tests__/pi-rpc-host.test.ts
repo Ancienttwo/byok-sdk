@@ -654,6 +654,8 @@ describe('SDK ordinary Pi RPC entry', () => {
     { lane: 'installed keys-profile', shared: true },
     { lane: 'bundled keys-profile', shared: true },
     { lane: 'installed', shared: false },
+    { lane: 'team-operator', shared: true },
+    { lane: 'team-operator', shared: false },
   ])('uses only a private jiti cache before loading an extension: $lane, shared=$shared (#2163)', async ({ lane, shared }) => {
     const keys = lane.includes('keys-profile'), bundled = lane.startsWith('bundled');
     const f = custodyFixture(keys ? 'keys-profile' : 'pi-auth-store');
@@ -663,9 +665,18 @@ describe('SDK ordinary Pi RPC entry', () => {
         writeFileSync(${JSON.stringify(marker)},JSON.stringify({cache:process.env.JITI_FS_CACHE}));
         pi.on('session_start',()=>process.exit(0));
       }`);
-    const serialized = serializePiHostConfig({ ...f.config, credentialSource: keys ? 'keys-profile' : 'pi-auth-store', agentExtensionPaths: [extension] });
+    const serialized = serializePiHostConfig(lane === 'team-operator'
+      ? { format: 'byok.pi.team-operator', version: 1, cwd: f.cwd, sessionDir: join(f.root, 'sessions'), provider: 'byok-sdk-probe',
+        model: 'probe', systemPromptPath: join(f.root, 'system.md'), extensionPaths: [extension], mcp: f.config.mcp }
+      : { ...f.config, credentialSource: keys ? 'keys-profile' : 'pi-auth-store', agentExtensionPaths: [extension] });
     writeFileSync(f.configPath, serialized.bytes);
     const argv = [...f.argv]; argv[1] = `--config-digest=${serialized.digest}`;
+    if (lane === 'team-operator') {
+      writeFileSync(join(f.root, 'system.md'), 'Cache policy probe.');
+      writeFileSync(f.entry, `import {runPiTeamOperatorHost} from ${JSON.stringify(resolve(clientRoot, 'dist/bin/pi-runtime-host.js'))};
+        runPiTeamOperatorHost(process.argv.slice(2)).catch(error=>{console.error(error);process.exit(1)});`);
+      argv.splice(4);
+    }
     if (bundled) {
       writeFileSync(f.entry, `import {runPiRpcHost} from ${JSON.stringify(resolve(clientRoot, 'dist/bin/pi-runtime-host.js'))};
         runPiRpcHost(process.argv.slice(2),'bundled').catch(error=>{console.error(error);process.exit(1)});`);
@@ -681,7 +692,7 @@ describe('SDK ordinary Pi RPC entry', () => {
     const runtime = join(f.root, 'runtime'); mkdirSync(runtime);
     try {
       const child = spawn(bundled ? bun : process.execPath, argv, { cwd: f.sealed, env: { ...f.env, TMPDIR: runtime, TMP: runtime, TEMP: runtime,
-        PI_PACKAGE_DIR: resolve(clientRoot, 'dist/assets'), PI_CODING_AGENT_SESSION_DIR: join(f.root, 'sessions') },
+        ...(bundled ? { PI_PACKAGE_DIR: resolve(clientRoot, 'dist/assets') } : {}), PI_CODING_AGENT_SESSION_DIR: join(f.root, 'sessions') },
         stdio: keys ? ['pipe', 'pipe', 'pipe', 'ipc'] : ['pipe', 'pipe', 'pipe'], timeout: 20_000 });
       let stderr = '';
       child.stderr!.on('data', data => { stderr += data; }); child.stdout!.resume();
