@@ -970,7 +970,7 @@
                   ]
                 }
               ],
-              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`."
+              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
             },
             "packageDir": {
               "type": "string",
@@ -1171,7 +1171,7 @@
                   ]
                 }
               ],
-              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`."
+              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
             }
           }
         },
@@ -1368,7 +1368,7 @@
                   ]
                 }
               ],
-              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`."
+              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
             }
           }
         },
@@ -1565,7 +1565,7 @@
                   ]
                 }
               ],
-              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`."
+              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
             }
           },
           "description": "Applies only when `runtimeAllowlist` lists `grok`."
@@ -1787,7 +1787,7 @@
                   ]
                 }
               ],
-              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`."
+              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
             }
           },
           "required": [
@@ -1984,7 +1984,7 @@
                   ]
                 }
               ],
-              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`."
+              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
             }
           },
           "required": [
@@ -2179,7 +2179,7 @@
                   ]
                 }
               ],
-              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`."
+              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
             }
           },
           "required": [
@@ -2230,7 +2230,7 @@
           ]
         }
       ],
-      "description": "The default environment a runtime `createDaemon` builds gives its\nchildren (#1095): by default the user's login-shell snapshot, so a\nvariable the Host sets in `process.env` reaches a runtime only when `pass`\nnames it. `runtimes.<id>.runtimeEnvironment` overrides it for that runtime\n(#1759): it replaces this policy and is not merged with this `pass`.\n`createDaemonWithAdapters` refuses this field: each injected adapter\ntakes its own `runtimeEnvironment` option."
+      "description": "The default environment a runtime `createDaemon` builds gives its\nchildren (#1095): by default the user's login-shell snapshot, so a\nvariable the Host sets in `process.env` reaches a runtime only when `pass`\nnames it. One exception: after applying the snapshot, the default base\nsets `HOME` to the daemon's own live `HOME` (#2084); `PATH`, `XDG_*` and\nother values the rc derived from its `HOME` stay as the snapshot has them.\nA policy that passes `HOME` or uses `allowlist` is unchanged.\n`runtimes.<id>.runtimeEnvironment` overrides it for that runtime\n(#1759): it replaces this policy and is not merged with this `pass`.\n`createDaemonWithAdapters` refuses this field: each injected adapter\ntakes its own `runtimeEnvironment` option."
     },
     "piByokLauncher": {
       "type": "object",
