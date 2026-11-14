@@ -46,6 +46,22 @@ test('root test command permits only existing additive CI tests, retaining comma
     assert.throws(() => selectImpact(['package.json'], f));
   }
 });
+test('root admits adding the exact client esbuild pin and refuses wider dependency changes', t => {
+  const f = fixture(t);
+  const root = { ...f.rootManifest, private: true, devDependencies: { tooling: '1.0.0' } };
+  f.write('package.json', root);
+  f.write('packages/client/package.json', { ...f.manifest, devDependencies: { esbuild: '0.28.1' } });
+  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qam', 'esbuild baseline'], { cwd: f.cwd });
+  f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
+  f.write('package.json', { ...root, devDependencies: { ...root.devDependencies, esbuild: '0.28.1' } });
+  assert.equal(selectImpact(['package.json'], f).reason, 'root-ci-scripts');
+  for (const devDependencies of [{ ...root.devDependencies, esbuild: '0.28.2' },
+    { ...root.devDependencies, esbuild: '^0.28.1' }, { ...root.devDependencies, esbuild: '0.28.1', extra: '1.0.0' }]) {
+    f.write('package.json', { ...root, devDependencies });
+    assert.throws(() => selectImpact(['package.json'], f), /more than the reviewed fields/);
+  }
+});
+
 test('root package.json admits only repo-harness script additions, removals and edits', t => {
   const f = fixture(t), old = f.rootManifest.scripts['test:scripts'];
   const scripts = extra => ({ ...f.rootManifest, scripts: { ...f.rootManifest.scripts, ...extra } });
