@@ -13,9 +13,14 @@ export interface CodexRecord {
 }
 type CodexEvent = AgentEvent | MessageDraftDelta;
 interface StreamState {
-  readonly seen: Map<number, readonly CodexEvent[]>;
+  /** Highest seq projected; a record at or below it is delivered only from `unfinished`. */
+  projected: number;
+  /**
+   * Projected records whose events are not all delivered, by seq: a failed consumer resumes at `next`.
+   * Bounded in practice: a consumer failure halts the adapter (`CodexSession.record`), so no later record arrives to add an entry.
+   */
+  readonly unfinished: Map<number, { readonly events: readonly CodexEvent[]; next: number }>;
   readonly active: Map<string, { tool: string; toolCallId: string; mcp?: { server: string; tool: string } }>;
-  readonly delivered: Set<string>;
   lastUsage?: Extract<AgentEvent, { type: 'usage' }>;
   activeTurnId?: string;
   baseline: Record<string, unknown> | null;
@@ -72,25 +77,27 @@ export class CodexProjection {
     let state = this.streams.get(stream);
     if (!state) {
       state = {
-        seen: new Map(),
+        projected: -1,
+        unfinished: new Map(),
         active: new Map(),
-        delivered: new Set(),
         baseline: this.fresh ? {} : null,
         zeroBaseline: this.fresh,
       };
       this.streams.set(stream, state);
     }
-    let events = state.seen.get(input.seq);
-    if (events === undefined) {
-      events = this.project(state, input);
-      state.seen.set(input.seq, events);
+    // Records arrive in seq order, so a seq at or below `projected` was projected;
+    // only records a failed consumer left unfinished keep their events.
+    let pending = state.unfinished.get(input.seq);
+    if (pending === undefined) {
+      if (input.seq <= state.projected) return;
+      pending = { events: this.project(state, input), next: 0 };
+      state.projected = input.seq;
+      state.unfinished.set(input.seq, pending);
     }
-    for (const [ordinal, event] of events.entries()) {
-      const key = `${input.seq}:${ordinal}`;
-      if (state.delivered.has(key)) continue;
-      emit(event); // a failed required consumer propagates; already-delivered ordinals are not replayed.
-      state.delivered.add(key);
+    for (; pending.next < pending.events.length; pending.next += 1) {
+      emit(pending.events[pending.next]!); // a failed required consumer propagates; already-delivered ordinals are not replayed.
     }
+    state.unfinished.delete(input.seq);
   }
 
   /** A transport close cannot invent a turn outcome, but must retain observed metering. */
