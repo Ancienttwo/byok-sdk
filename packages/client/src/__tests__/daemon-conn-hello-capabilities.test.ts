@@ -19,6 +19,7 @@ import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
 import * as memoryRuntime from '../daemon/agent-memory';
 import { CursorStore } from '../daemon/cursor-store';
 import * as helperClient from '../daemon/agent-memory-fs-helper-internal';
+import { copyAgentMemoryHelperAssets, resolveAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
 import type { AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 
 const helperBuilt = builtAgentMemoryFilesystemHelperBin() !== undefined;
@@ -404,7 +405,7 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
     await server.close();
   });
 
-  async function helloCapabilities(overrides: { transport?: AgentMemoryIntentTransport; agentHome?: boolean; helperBin?: string; waitForProof?: boolean }): Promise<readonly string[]> {
+  async function helloCapabilities(overrides: { transport?: AgentMemoryIntentTransport; agentHome?: boolean; helperBin?: string; helperAssetRoot?: string; waitForProof?: boolean }): Promise<readonly string[]> {
     const storeDir = await tmpDir('byok-conn-hello-intent-store-');
     lastStoreDir = storeDir;
     const hostStorageRoot = await tmpDir('byok-conn-hello-intent-root-');
@@ -418,6 +419,7 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
         ...(overrides.agentHome === false ? {} : { agentHome: { hostStorageRoot } }),
         ...(overrides.transport === undefined ? {} : { agentMemoryIntents: overrides.transport }),
         ...(overrides.helperBin === undefined ? {} : { agentMemoryFilesystem: { helperBin: overrides.helperBin } }),
+        ...(overrides.helperAssetRoot === undefined ? {} : { agentMemoryHelperAssetRoot: overrides.helperAssetRoot }),
       },
       [],
     );
@@ -449,6 +451,16 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
   itMacHelper('advertises on macOS only after the SDK helper passes the real volume probe', async () => {
     const capabilities = await helloCapabilities({ transport, waitForProof: true });
     expect(capabilities).toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+  });
+
+  itMacHelper('fails configured-intent startup when the verified SDK helper loses executable permission', async () => {
+    const assets = await tmpDir('byok-helper-no-exec-');
+    try {
+      await copyAgentMemoryHelperAssets({ outDir: assets });
+      await fs.chmod(resolveAgentMemoryFilesystemHelper(assets), 0o600);
+      await expect(helloCapabilities({ transport, helperAssetRoot: assets })).rejects.toMatchObject({ code: 'EACCES' });
+      expect(server.received.some(event => event.type === 'conn.hello')).toBe(false);
+    } finally { await fs.rm(assets, { recursive: true, force: true }); }
   });
 
   itWindowsHelper('withholds Windows intents with the SDK helper, before any volume probe', async () => {

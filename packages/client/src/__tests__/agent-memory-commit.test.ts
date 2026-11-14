@@ -12,7 +12,7 @@ import { helperAgentMemoryIntentBackend, NATIVE_AGENT_MEMORY_INTENT_BACKEND } fr
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { DaemonScope } from '../daemon/create-daemon/scope';
-import { agentMemoryBackendProof, recoverAgentMemoryBackend } from '../daemon/create-daemon/services';
+import { agentMemoryBackendProof, initializeAgentMemoryBackend, recoverAgentMemoryBackend } from '../daemon/create-daemon/services';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
@@ -86,10 +86,15 @@ describe('the backend proof when the helper stops verifying', () => {
     resolveAgentMemoryFilesystemHelperBin: () => { throw new Error('helper unverified'); },
   }) as unknown as DaemonScope;
 
-  it.each([{}, { agentMemoryIntents: {} }])('withholds the background proof after verification fails (%j)', async config => {
-    const selected = scope(config);
+  it('fails configured-intent startup with the original helper verification error', async () => {
+    await expect(initializeAgentMemoryBackend(scope({ agentMemoryIntents: {} }))).rejects.toThrow('helper unverified');
+  });
+
+  it('withholds commit proof without failing a daemon that has no intent transport', async () => {
+    const selected = scope({});
     const abort = new AbortController();
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await initializeAgentMemoryBackend(selected);
     recoverAgentMemoryBackend(selected, abort.signal, vi.fn());
     await vi.waitFor(() => expect(agentMemoryBackendProof(selected).status).toBe('refused'));
     expect(agentMemoryBackendProof(selected).backend).toBeUndefined();

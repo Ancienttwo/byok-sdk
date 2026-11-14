@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { AgentHomeLease } from '../agent-home.js';
 import type { AgentMemoryHelperIdentity } from './agent-memory-fs-helper.js';
 import { verifyAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release.js';
-import { agentMemoryHelperTimeout, isAgentMemoryHelperTimeout, agentMemoryHelperCancellation, isAgentMemoryHelperCancellation, HELPER_PROBE_TIMEOUT_MS } from './agent-memory-helper-probe.js';
+import { agentMemoryHelperTimeout, agentMemoryHelperCancellation, agentMemoryHelperExit, HELPER_PROBE_TIMEOUT_MS } from './agent-memory-helper-probe.js';
 import { AgentMemoryIoError, AgentMemoryRevisionConflictError } from './agent-memory.js';
 import type { AgentMemoryFileObservation, AgentMemoryFilesystem, AgentMemoryFilesystemFileState, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalk, AgentMemoryWalkEntry } from './agent-memory-filesystem.js';
 import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
@@ -153,31 +153,40 @@ function helperCancelled(): Error {
   return agentMemoryHelperCancellation(new AgentMemoryIoError('Agent memory filesystem helper probe cancelled'));
 }
 
+function helperExitTimedOut(): Error {
+  return agentMemoryHelperTimeout(new AgentMemoryIoError('Agent memory filesystem helper exit timed out'));
+}
+
+/** One exit classifier for both helper subprocesses; transport/protocol errors stay separate. */
+function helperExitError(code: number | null, signal: NodeJS.Signals | null, options: { stopped?: boolean; timedOut?: boolean; rootCause?: string } = {}): Error | undefined {
+  if (options.stopped) return helperCancelled();
+  if (options.timedOut) return helperExitTimedOut();
+  if (code === 0 && signal === null) return undefined;
+  const cause = options.rootCause === undefined ? undefined : ROOT_BARRIER_CAUSES.has(options.rootCause) ? options.rootCause : 'root_barrier_process_failed';
+  const error = new AgentMemoryIoError(cause === undefined ? 'Agent memory filesystem helper exited unexpectedly' : `Agent memory hostStorageRoot durability barrier failed (${cause}); helper open refused`);
+  if (cause !== undefined) Object.assign(error, { cause });
+  return code !== null || signal !== null ? agentMemoryHelperExit(error, code, signal) : error;
+}
+
 function startRootBarrier(helperBin: string, root: string): RootBarrier {
   const controller = new AbortController();
-  const entry: RootBarrier = { controller, waiters: 0, settled: false, promise: (async () => {
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const child = execFile(helperBin, ['root-barrier'], {
-          shell: false, windowsHide: true, env: Object.freeze({}),
-          timeout: HELPER_PROBE_TIMEOUT_MS, signal: controller.signal, killSignal: 'SIGKILL', maxBuffer: HELPER_MAX_STDERR_BYTES,
-        }, (error, _stdout, stderr) => {
-          if (controller.signal.aborted) reject(helperCancelled());
-          else if (error?.killed && !stderr.trim()) reject(agentMemoryHelperTimeout(new AgentMemoryIoError('Agent memory hostStorageRoot probe timed out')));
-          else if (error) reject(stderr.trim()); else resolve();
-        });
-        child.stdin!.on('error', () => reject('root_barrier_process_failed'));
-        child.stdin!.end(JSON.stringify({ root }));
+  const entry: RootBarrier = { controller, waiters: 0, settled: false, promise: new Promise<void>((resolve, reject) => {
+    const child = execFile(helperBin, ['root-barrier'], {
+      shell: false, windowsHide: true, env: Object.freeze({}),
+      timeout: HELPER_PROBE_TIMEOUT_MS, signal: controller.signal, killSignal: 'SIGKILL', maxBuffer: HELPER_MAX_STDERR_BYTES,
+    }, (error, _stdout, stderr) => {
+      const failure = helperExitError(error === null ? 0 : typeof error.code === 'number' ? error.code : null, error?.signal ?? null, {
+        stopped: controller.signal.aborted, timedOut: error?.killed === true, rootCause: stderr.trim(),
       });
-    } catch (cause) {
-      if (isAgentMemoryHelperTimeout(cause) || isAgentMemoryHelperCancellation(cause)) throw cause;
-      const code = typeof cause === 'string' && ROOT_BARRIER_CAUSES.has(cause) ? cause : 'root_barrier_process_failed';
-      throw Object.assign(new AgentMemoryIoError(`Agent memory hostStorageRoot durability barrier failed (${code}); helper open refused`), { cause: code });
-    }
-  })().catch(error => {
+      if (failure === undefined) resolve(); else reject(failure);
+    });
+    child.stdin!.on('error', () => reject(helperExitError(null, null, { rootCause: 'root_barrier_process_failed' })));
+    child.stdin!.end(JSON.stringify({ root }));
+  }).finally(() => {
+    entry.settled = true;
+    // Only in-flight work is shared. A later open/run must prove the current root.
     if (rootBarriers.get(root) === entry) rootBarriers.delete(root);
-    throw error;
-  }).finally(() => { entry.settled = true; }) };
+  }) };
   return entry;
 }
 
@@ -210,7 +219,7 @@ async function initializeHostStorageRoot(helperBin: string, root: string, timeou
   } finally {
     entry.waiters--;
     // A caller owns only its wait. The shared process ends when its last waiter
-    // leaves, or its own 60 s deadline expires. Successful barriers stay cached.
+    // leaves, or its own 60 s deadline expires. Completed entries are evicted.
     if (entry.waiters === 0 && !entry.settled) {
       if (rootBarriers.get(root) === entry) rootBarriers.delete(root);
       entry.controller.abort();
@@ -243,7 +252,9 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
     child.stdin.on('error', () => this.fail(new AgentMemoryError('Agent memory filesystem helper request could not be written')));
     child.once('error', () => this.fail(new AgentMemoryError('Agent memory filesystem helper could not be started')));
     child.once('exit', (code, signal) => {
-      if (!this.closed || code !== 0) this.fail(new AgentMemoryIoError(`Agent memory filesystem helper exited unexpectedly (${code ?? signal ?? 'unknown'})`));
+      const failure = helperExitError(code, signal);
+      if (failure !== undefined) this.fail(failure);
+      else if (!this.closed) this.fail(new AgentMemoryIoError('Agent memory filesystem helper exited before close'));
     });
     probe?.signal?.addEventListener('abort', this.abort, { once: true });
     if (probe?.signal?.aborted) this.abort();
@@ -347,18 +358,30 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
 
   private async closeAndWait(): Promise<void> {
     try {
-      if (this.child.exitCode === null && this.child.signalCode === null && this.fatalError === undefined) await this.requestInternal('close', {}, this.probe === undefined ? HELPER_REQUEST_TIMEOUT_MS : Math.max(1, this.probe.deadline - performance.now()));
-    } finally {
-      this.child.stdin.end();
-      if (this.child.exitCode === null && this.child.signalCode === null) {
-        let timer: NodeJS.Timeout | undefined;
-        try {
-          await Promise.race([this.exited, new Promise<void>(resolve => {
-            timer = setTimeout(() => { this.child.kill('SIGKILL'); resolve(); }, 1_000);
-          })]);
-          await this.exited;
-        } finally { if (timer !== undefined) clearTimeout(timer); }
+      try {
+        if (this.child.exitCode === null && this.child.signalCode === null && this.fatalError === undefined) await this.requestInternal('close', {}, this.probe === undefined ? HELPER_REQUEST_TIMEOUT_MS : Math.max(1, this.probe.deadline - performance.now()));
+      } finally {
+        this.child.stdin.end();
+        if (this.child.exitCode === null && this.child.signalCode === null) {
+          let timer: NodeJS.Timeout | undefined;
+          try {
+            await Promise.race([this.exited, new Promise<void>(resolve => {
+              timer = setTimeout(() => {
+                if (this.probe === undefined) this.child.kill('SIGKILL');
+                else this.fail(helperExitTimedOut(), 'SIGKILL');
+                resolve();
+              }, this.probe === undefined ? 1_000 : Math.max(1, this.probe.deadline - performance.now()));
+            })]);
+          } finally { if (timer !== undefined) clearTimeout(timer); }
+        }
+        await this.exited;
       }
+      // A close reply alone proves nothing: the probe child must also exit zero.
+      if (this.probe !== undefined) {
+        if (this.fatalError !== undefined) throw this.fatalError;
+        if (performance.now() >= this.probe.deadline) throw helperExitTimedOut();
+      }
+    } finally {
       this.rejectPending(new AgentMemoryError('Agent memory filesystem helper is closed'));
       this.probe?.signal?.removeEventListener('abort', this.abort);
     }

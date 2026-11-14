@@ -1,16 +1,19 @@
 import { EventEmitter } from 'node:events';
-import { promises as fs } from 'node:fs';
+import { promises as fs, constants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const wire = vi.hoisted(() => ({ protocol: 4, helperVersion: '4', requests: [] as Record<string, unknown>[],
   barriers: [] as Record<string, unknown>[], commands: [] as string[], deferBarrier: false,
   finishBarrier: undefined as (() => void) | undefined, barrierError: null as Error | null, barrierStderr: '',
   error: undefined as { code: string; message: string } | undefined, hangOpen: false,
   finishOpen: undefined as (() => void) | undefined,
-  budgets: [] as number[], barrierSignals: [] as AbortSignal[], hangClose: false }));
+  budgets: [] as number[], barrierSignals: [] as AbortSignal[], hangClose: false,
+  hangExit: false, closeExitCode: 0 as number | null, closeExitSignal: null as NodeJS.Signals | null,
+  kills: [] as NodeJS.Signals[], openStartedAt: undefined as number | undefined,
+  onRoot: undefined as (() => void) | undefined, onOpen: undefined as (() => void) | undefined }));
 vi.mock('../util/agent-memory-helper-release', () => ({ verifyAgentMemoryFilesystemHelper: (bin: string) => bin }));
 vi.mock('node:child_process', () => ({
   execFile: (_bin: string, args: string[], options: Record<string, unknown>, callback: (error: Error | null, stdout: string, stderr: string) => void) => {
@@ -23,7 +26,9 @@ vi.mock('node:child_process', () => ({
     wire.budgets.push(timeout as number);
     wire.barrierSignals.push(options.signal as AbortSignal);
     return { stdin: new Writable({
-      write(chunk, _encoding, done) { wire.barriers.push(JSON.parse(String(chunk))); done(); },
+      write(chunk, _encoding, done) {
+        wire.barriers.push(JSON.parse(String(chunk))); wire.onRoot?.(); wire.onRoot = undefined; done();
+      },
       final(done) {
         let settled = false;
         const signal = options.signal as AbortSignal | undefined;
@@ -46,18 +51,24 @@ vi.mock('node:child_process', () => ({
   spawn: () => {
     wire.commands.push('serve');
     const child = Object.assign(new EventEmitter(), {
-      stdout: new PassThrough(), stderr: new PassThrough(), exitCode: null as number | null, signalCode: null,
-      kill: () => { child.exitCode = 0; child.emit('exit', 0, null); return true; },
+      stdout: new PassThrough(), stderr: new PassThrough(), exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+      kill: (signal: NodeJS.Signals = 'SIGTERM') => { wire.kills.push(signal); child.signalCode = signal; child.emit('exit', null, signal); return true; },
       stdin: new Writable({
         write(chunk, _encoding, done) {
           const request = JSON.parse(String(chunk)) as Record<string, unknown>;
           wire.requests.push(request);
+          if (request.op === 'open') {
+            wire.openStartedAt = performance.now(); wire.onOpen?.(); wire.onOpen = undefined;
+          }
           const reply = () => {
             const response = wire.error === undefined
               ? { ok: true, result: request.op === 'open' ? { helperVersion: wire.helperVersion, identity: request.expectedIdentity } : {} }
               : { ok: false, error: wire.error };
             child.stdout.write(`${JSON.stringify({ id: request.id, protocol: wire.protocol, ...response })}\n`);
-            if (request.op === 'close') { child.exitCode = 0; child.emit('exit', 0, null); }
+            if (request.op === 'close' && !wire.hangExit) {
+              child.exitCode = wire.closeExitCode; child.signalCode = wire.closeExitSignal;
+              child.emit('exit', wire.closeExitCode, wire.closeExitSignal);
+            }
           };
           if (wire.hangOpen && request.op === 'open') wire.finishOpen = reply;
           else if (wire.hangClose && request.op === 'close') { /* controlled stalled close */ }
@@ -71,8 +82,9 @@ vi.mock('node:child_process', () => ({
 }));
 import { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper';
 import { openAgentMemoryFilesystemHelperWithBudget } from '../daemon/agent-memory-fs-helper-internal';
+import * as helperInternal from '../daemon/agent-memory-fs-helper-internal';
 import { AgentHomeLayout } from '../agent-home';
-import { agentMemoryBackendProof, agentMemoryCommitStore, recoverAgentMemoryBackend } from '../daemon/create-daemon/services';
+import { agentMemoryBackendProof, agentMemoryCommitStore, initializeAgentMemoryBackend, recoverAgentMemoryBackend } from '../daemon/create-daemon/services';
 import { openStartRun } from '../daemon/create-daemon/start-run';
 import * as processTree from '../adapters/process-tree';
 import * as shellEnvironment from '../login-shell-environment';
@@ -87,6 +99,7 @@ import { AGENT_MEMORY_INTENT_CAPABILITY, AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILI
 const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
 const arch = Object.getOwnPropertyDescriptor(process, 'arch')!;
 const roots: string[] = [];
+beforeEach(() => { vi.spyOn(fs, 'access').mockResolvedValue(); });
 afterEach(async () => {
   Object.defineProperty(process, 'platform', platform);
   Object.defineProperty(process, 'arch', arch);
@@ -98,6 +111,9 @@ afterEach(async () => {
   wire.budgets.length = 0;
   wire.barrierSignals.length = 0;
   wire.hangClose = false;
+  wire.hangExit = false; wire.closeExitCode = 0; wire.closeExitSignal = null;
+  wire.kills.length = 0; wire.openStartedAt = undefined;
+  wire.onRoot = undefined; wire.onOpen = undefined;
   wire.barriers.length = 0;
   wire.commands.length = 0;
   wire.deferBarrier = false;
@@ -135,8 +151,10 @@ describe('protocol 4 transport contract (#605)', () => {
     expect(wire.requests).toEqual([]);
     wire.finishBarrier!();
     const filesystems = await Promise.all([first, second]);
+    wire.deferBarrier = false;
     filesystems.push(await openAgentMemoryFilesystemHelper(selected));
-    expect(wire.commands).toEqual(['root-barrier', 'serve', 'serve', 'serve']);
+    expect(wire.commands).toEqual(['root-barrier', 'serve', 'serve', 'root-barrier', 'serve']);
+    expect(wire.barriers).toHaveLength(2);
     await Promise.all(filesystems.map(filesystem => filesystem.close()));
   });
 
@@ -244,6 +262,7 @@ describe('recoverable daemon memory proof (#2200)', () => {
       adapters: [], overrides: {}, observer: {},
     } as unknown as DaemonScope;
     Object.assign(selected, { setHelloCapability: (flag: Parameters<typeof setHelloCapability>[1], wanted: boolean) => setHelloCapability(selected, flag, wanted) });
+    await initializeAgentMemoryBackend(selected);
     return { selected, abort, refreshHello, fetch, acquire, root };
   }
   function lanes(selected: DaemonScope) {
@@ -253,11 +272,15 @@ describe('recoverable daemon memory proof (#2200)', () => {
     const { deps } = composeStartRunnerDeps(selected, { ...run, ...result, sendEnvelope: vi.fn(), withReplyTransition: async work => work(), recordReplyState: vi.fn() });
     return { ...result, deps };
   }
+  function nextHelperRequest(kind: 'root' | 'open'): Promise<void> {
+    return new Promise(resolve => { if (kind === 'root') wire.onRoot = resolve; else wire.onOpen = resolve; });
+  }
   async function timeout(selected: DaemonScope, kind: 'root' | 'open') {
     wire.deferBarrier = kind === 'root';
     wire.hangOpen = kind === 'open';
+    const ready = nextHelperRequest(kind);
     recoverAgentMemoryBackend(selected, selected.daemonState.blobLifecycleAbort!.signal, vi.fn());
-    await vi.waitFor(() => expect(kind === 'root' ? wire.barriers.length : wire.requests.length).toBeGreaterThan(0));
+    await ready;
     await vi.advanceTimersByTimeAsync(10_001);
     expect(agentMemoryBackendProof(selected).status).toBeUndefined();
     await vi.advanceTimersByTimeAsync(49_999);
@@ -325,20 +348,24 @@ describe('recoverable daemon memory proof (#2200)', () => {
     await timeout(selected, 'open');
     for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]) {
       const count = wire.commands.length;
+      const ready = nextHelperRequest('open');
       await vi.advanceTimersByTimeAsync(delay - 1);
       expect(wire.commands).toHaveLength(count);
       await vi.advanceTimersByTimeAsync(1);
-      await vi.waitFor(() => expect(wire.commands.length).toBeGreaterThan(count));
+      await ready;
+      expect(wire.commands.length).toBeGreaterThan(count);
       await vi.advanceTimersByTimeAsync(60_000);
     }
     expect(log.mock.calls).toEqual([['[byok/client] agent memory backend unproven']]);
     const count = wire.commands.length;
+    const ready = nextHelperRequest('open');
     await vi.advanceTimersByTimeAsync(30_000);
-    await vi.waitFor(() => expect(wire.commands.length).toBeGreaterThan(count));
+    await ready;
+    expect(wire.commands.length).toBeGreaterThan(count);
     abort.abort();
     await vi.advanceTimersByTimeAsync(0);
     expect(vi.getTimerCount()).toBe(0);
-    expect(agentMemoryBackendProof(selected).status).toBe('unproven');
+    expect(agentMemoryBackendProof(selected).status).toBeUndefined();
     expect(log).toHaveBeenCalledTimes(1);
   });
   it.each(['root', 'open', 'close'] as const)('stop cancels an in-flight %s proof without declaring a refusal', async kind => {
@@ -441,21 +468,21 @@ describe('recoverable daemon memory proof (#2200)', () => {
   it('refusal diagnostics include code/class without original message or path', async () => {
     const { selected, abort } = await scope();
     const error = Object.assign(new TypeError('private /home/secret value'), { code: 'ERR_HELPER_VERIFICATION' });
-    Object.assign(selected, { resolveAgentMemoryFilesystemHelperBin: () => { throw error; } });
+    const probe = vi.spyOn(helperInternal, 'openAgentMemoryFilesystemHelperWithBudget').mockRejectedValue(error);
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     recoverAgentMemoryBackend(selected, abort.signal, vi.fn());
     await vi.waitFor(() => expect(agentMemoryBackendProof(selected).status).toBe('refused'));
     expect(log.mock.calls).toEqual([['[byok/client] agent memory backend refused: ERR_HELPER_VERIFICATION']]);
     const fallback = await scope();
-    Object.assign(fallback.selected, { resolveAgentMemoryFilesystemHelperBin: () => { throw new TypeError('private /home/secret value'); } });
+    probe.mockRejectedValue(new TypeError('private /home/secret value'));
     recoverAgentMemoryBackend(fallback.selected, fallback.abort.signal, vi.fn());
     await vi.waitFor(() => expect(agentMemoryBackendProof(fallback.selected).status).toBe('refused'));
     expect(log.mock.calls.at(-1)).toEqual(['[byok/client] agent memory backend refused: TypeError']);
     abort.abort(); fallback.abort.abort();
   });
-  it('openStartRun returns within the ordinary budget while its background helper is stalled', async () => {
-    const { selected, abort } = await scope();
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+  async function startupScope() {
+    const fixture = await scope();
+    const { selected } = fixture;
     vi.spyOn(processTree, 'attachOwnedProcessGroupLedger').mockReturnValue(vi.fn());
     vi.spyOn(shellEnvironment, 'loginShellSnapshot').mockResolvedValue({ status: { source: 'inherited' } });
     const noop = vi.fn(async () => {});
@@ -472,6 +499,179 @@ describe('recoverable daemon memory proof (#2200)', () => {
     });
     Object.assign(selected.agentHomeManager!, { preflight: noop });
     Object.assign(selected.daemonState, { auth: { loadExisting: async () => ({ tenantId: 'tenant', deviceId: 'device' }) } });
+    return fixture;
+  }
+
+  it.each(['ENOENT', 'EACCES'])('configured intents preserve the original startup helper error %s', async code => {
+    const { selected } = await startupScope();
+    const failure = Object.assign(new Error('helper configuration invalid'), { code });
+    Object.assign(selected, { resolveAgentMemoryFilesystemHelperBin: () => { throw failure; } });
+    await expect(openStartRun(selected, 0)).rejects.toBe(failure);
+    expect(wire.commands).toEqual([]);
+    expect(agentMemoryBackendProof(selected).backend).toBeUndefined();
+  });
+
+  it('configured intents fail startup when a verified helper is not executable', async () => {
+    const { selected } = await startupScope();
+    const failure = Object.assign(new Error('helper executable permission denied'), { code: 'EACCES' });
+    vi.mocked(fs.access).mockRejectedValueOnce(failure);
+    await expect(openStartRun(selected, 0)).rejects.toBe(failure);
+    expect(fs.access).toHaveBeenLastCalledWith(path.resolve('helper'), constants.X_OK);
+    expect(wire.commands).toEqual([]);
+  });
+
+  it('configured intents fail startup on an invalid canonical helper root', async () => {
+    const { selected, root } = await startupScope();
+    Object.assign(selected.agentHomeManager!.layout, { hostRootInput: () => path.join(root, 'missing') });
+    await expect(openStartRun(selected, 0)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(wire.commands).toEqual([]);
+  });
+
+  it('refused proof can recover after stop, helper repair and a new start run', async () => {
+    const { selected } = await startupScope();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    wire.barrierError = new Error('unsupported'); wire.barrierStderr = 'root_barrier_unsupported';
+    await openStartRun(selected, 0);
+    const first = lanes(selected);
+    await vi.waitFor(() => expect(agentMemoryBackendProof(selected).status).toBe('refused'));
+    expect(first.capabilities).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+    selected.daemonState.blobLifecycleAbort!.abort();
+    expect(agentMemoryBackendProof(selected).status).toBeUndefined();
+    wire.barrierError = null; wire.barrierStderr = '';
+    const restarted = await openStartRun(selected, 0);
+    expect(restarted?.agentMemoryBackend).toBeUndefined();
+    const second = lanes(selected);
+    expect(second.capabilities).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+    await vi.waitFor(() => expect(second.capabilities).toContain(AGENT_MEMORY_INTENT_CAPABILITY));
+    expect(agentMemoryBackendProof(selected).status).toBe('proven');
+    expect(wire.barriers).toHaveLength(2);
+    selected.daemonState.blobLifecycleAbort!.abort();
+  });
+
+  it('a previously proven run and root do not authorize a changed volume on restart', async () => {
+    const { selected } = await startupScope();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await openStartRun(selected, 0);
+    const first = lanes(selected);
+    await vi.waitFor(() => expect(first.capabilities).toContain(AGENT_MEMORY_INTENT_CAPABILITY));
+    selected.daemonState.blobLifecycleAbort!.abort();
+    wire.barrierError = new Error('new volume unsupported'); wire.barrierStderr = 'root_barrier_unsupported';
+    const restarted = await openStartRun(selected, 0);
+    expect(restarted?.agentMemoryBackend).toBeUndefined();
+    const second = lanes(selected);
+    expect(second.capabilities).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+    await vi.waitFor(() => expect(agentMemoryBackendProof(selected).status).toBe('refused'));
+    expect(second.capabilities).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+    expect(wire.barriers).toHaveLength(2);
+    selected.daemonState.blobLifecycleAbort!.abort();
+  });
+
+  it('a changed helper is revalidated before a previously proven daemon restarts', async () => {
+    const { selected } = await startupScope();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await openStartRun(selected, 0);
+    const first = lanes(selected);
+    await vi.waitFor(() => expect(first.capabilities).toContain(AGENT_MEMORY_INTENT_CAPABILITY));
+    selected.daemonState.blobLifecycleAbort!.abort();
+    const failure = Object.assign(new Error('helper removed'), { code: 'ENOENT' });
+    Object.assign(selected, { resolveAgentMemoryFilesystemHelperBin: () => { throw failure; } });
+    await expect(openStartRun(selected, 0)).rejects.toBe(failure);
+    expect(agentMemoryBackendProof(selected).backend).toBeUndefined();
+  });
+
+  it.each(['SIGTERM', 'SIGKILL'] as const)('root-barrier external %s stays unproven and reports its signal', async signal => {
+    const { selected, abort } = await scope();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    wire.barrierError = Object.assign(new Error('root helper terminated'), { code: null, signal, killed: false });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+    const live = lanes(selected);
+    await vi.waitFor(() => expect(agentMemoryBackendProof(selected).status).toBe('unproven'));
+    expect(wire.requests).toEqual([]);
+    expect(live.capabilities).not.toContain(AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY);
+    expect(log.mock.calls).toEqual([[`[byok/client] agent memory backend unproven: signal=${signal}`]]);
+    abort.abort();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([7, 23])('root-barrier exit %s refuses proof and reports its exit code', async code => {
+    const { selected, abort } = await scope();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    wire.barrierError = Object.assign(new Error('root helper refused'), { code, signal: null, killed: false });
+    wire.barrierStderr = 'root_barrier_unsupported';
+    const live = lanes(selected);
+    await vi.waitFor(() => expect(agentMemoryBackendProof(selected).status).toBe('refused'));
+    expect(wire.requests).toEqual([]);
+    expect(live.capabilities).not.toContain(AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY);
+    expect(log.mock.calls).toEqual([[`[byok/client] agent memory backend refused: exit_code=${code}`]]);
+    abort.abort();
+  });
+
+  it('a close reply without child exit exhausts the same absolute deadline and stays unproven', async () => {
+    const { selected, abort } = await scope();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    wire.hangOpen = true; wire.hangExit = true;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+    const live = lanes(selected);
+    await vi.waitFor(() => expect(wire.finishOpen).toBeDefined());
+    await vi.advanceTimersByTimeAsync(60_000 - (performance.now() - wire.openStartedAt!) - 100);
+    wire.finishOpen!();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(wire.requests.at(-1)?.op).toBe('close');
+    expect(agentMemoryBackendProof(selected).status).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(99);
+    expect(wire.kills).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(wire.kills).toEqual(['SIGKILL']);
+    expect(agentMemoryBackendProof(selected).status).toBe('unproven');
+    expect(live.capabilities).not.toContain(AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY);
+    expect(log.mock.calls).toEqual([['[byok/client] agent memory backend unproven']]);
+    abort.abort();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('stop cancels child reaping after a successful close reply', async () => {
+    const { selected, abort } = await scope();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    wire.hangExit = true;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+    recoverAgentMemoryBackend(selected, abort.signal, vi.fn());
+    await vi.waitFor(() => expect(wire.requests.at(-1)?.op).toBe('close'));
+    expect(agentMemoryBackendProof(selected).backend).toBeUndefined();
+    abort.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(wire.kills).toEqual(['SIGKILL']);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(agentMemoryBackendProof(selected).backend).toBeUndefined();
+  });
+
+  it.each([7, 23])('nonzero exit %s after close refuses proof and reports the exit code', async code => {
+    const { selected, abort } = await scope();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    wire.closeExitCode = code;
+    const live = lanes(selected);
+    await vi.waitFor(() => expect(agentMemoryBackendProof(selected).status).toBe('refused'));
+    expect(live.capabilities).not.toContain(AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY);
+    expect(log.mock.calls).toEqual([[`[byok/client] agent memory backend refused: exit_code=${code}`]]);
+    abort.abort();
+  });
+
+  it.each(['SIGTERM', 'SIGKILL'] as const)('external %s after close leaves proof unproven and reports the signal', async signal => {
+    const { selected, abort } = await scope();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    wire.closeExitCode = null; wire.closeExitSignal = signal;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+    const live = lanes(selected);
+    await vi.waitFor(() => expect(agentMemoryBackendProof(selected).status).toBe('unproven'));
+    expect(live.capabilities).not.toContain(AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY);
+    expect(log.mock.calls).toEqual([[`[byok/client] agent memory backend unproven: signal=${signal}`]]);
+    expect(wire.kills).toEqual([]);
+    abort.abort();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('openStartRun returns within the ordinary budget while its background helper is stalled', async () => {
+    const { selected, abort } = await startupScope();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     wire.deferBarrier = true;
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
     let opened = false;

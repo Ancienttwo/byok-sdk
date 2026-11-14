@@ -6,10 +6,10 @@ import type { LocalTaskJournal } from '../journal/journal.js';
 import { SqliteLocalTaskJournal, JournalHandleCleanupError } from '../journal/sqlite-journal.js';
 import { type AgentMemoryIntentBackend, NATIVE_AGENT_MEMORY_INTENT_BACKEND, helperAgentMemoryIntentBackend } from '../agent-memory-intent.js';
 import { isAgentMemorySecureFilesystemAvailable, probeAgentMemoryStrictDirectorySync } from '../agent-memory.js';
-import { promises as fs } from 'node:fs';
+import { promises as fs, constants } from 'node:fs';
 import { createAgentMemoryCommitStore, type AgentMemoryCommitStore } from '../agent-memory-commit.js';
 import { openAgentMemoryFilesystemHelperWithBudget } from '../agent-memory-fs-helper-internal.js';
-import { isAgentMemoryHelperTimeout, isAgentMemoryHelperCancellation, HELPER_PROBE_TIMEOUT_MS } from '../agent-memory-helper-probe.js';
+import { isAgentMemoryHelperTimeout, isAgentMemoryHelperCancellation, agentMemoryHelperExitOutcome, HELPER_PROBE_TIMEOUT_MS } from '../agent-memory-helper-probe.js';
 import { backoffCeilingMs } from '../deterministic-jitter.js';
 import type { DaemonScope } from './scope.js';
 
@@ -89,6 +89,9 @@ export function initializeOwnedHostedStorage(daemonScope: DaemonScope): LocalTas
 type MemoryProof = {
   status: 'proven' | 'unproven' | 'refused' | undefined;
   backend: AgentMemoryIntentBackend | undefined;
+  candidate?: AgentMemoryIntentBackend;
+  helper?: Readonly<{ bin: string; root: string }>;
+  failure?: string;
   active?: AbortSignal;
 };
 const memoryProofs = new WeakMap<DaemonScope, MemoryProof>();
@@ -101,6 +104,29 @@ export function agentMemoryBackendProof(scope: DaemonScope): MemoryProof {
     memoryProofs.set(scope, proof);
   }
   return proof;
+}
+
+/** Cheap configuration validation retains main's fail-closed intent startup behavior. */
+export async function initializeAgentMemoryBackend(scope: DaemonScope): Promise<void> {
+  const proof: MemoryProof = { status: undefined, backend: undefined };
+  memoryProofs.set(scope, proof);
+  const { config, agentHomeManager, resolveAgentMemoryFilesystemHelperBin } = scope;
+  if (config.agentHome === undefined || agentHomeManager === undefined) return;
+  try {
+    const helperBin = resolveAgentMemoryFilesystemHelperBin?.();
+    if (!isAgentMemorySecureFilesystemAvailable(helperBin !== undefined)) return;
+    let candidate = NATIVE_AGENT_MEMORY_INTENT_BACKEND;
+    if (helperBin !== undefined) {
+      const root = await fs.realpath(agentHomeManager.layout.hostRootInput());
+      candidate = helperAgentMemoryIntentBackend(helperBin, root, config.agentMemoryHelperAssetRoot);
+      await fs.access(helperBin, constants.X_OK);
+      proof.helper = { bin: helperBin, root };
+    }
+    if (candidate.strictLedgerBarrier) proof.candidate = candidate;
+  } catch (error) {
+    if (config.agentMemoryIntents !== undefined) throw error;
+    proof.failure = proofFailureKind(error);
+  }
 }
 
 function proofFailureKind(error: unknown): string {
@@ -116,28 +142,31 @@ export function recoverAgentMemoryBackend(scope: DaemonScope, signal: AbortSigna
   proof.active = signal;
   let attempt = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const cancel = () => { clearTimeout(timer); };
+  const cancel = () => {
+    clearTimeout(timer);
+    proof.backend = undefined;
+    if (memoryProofs.get(scope) === proof) memoryProofs.delete(scope);
+  };
   signal.addEventListener('abort', cancel, { once: true });
   const schedule = () => {
-    if (signal.aborted || proof.status !== 'unproven') {
-      signal.removeEventListener('abort', cancel);
-      return;
-    }
+    if (signal.aborted || proof.status !== 'unproven') return;
     timer = setTimeout(() => { void run(); }, Math.min(backoffCeilingMs(attempt++, 1_000), 30_000));
     timer.unref?.();
   };
   const run = async () => {
-    if (signal.aborted) return;
+    if (signal.aborted || memoryProofs.get(scope) !== proof) return;
     let backend: AgentMemoryIntentBackend | undefined;
     let status: 'proven' | 'unproven' | 'refused';
-    let failure: string | undefined;
+    let failure = proof.failure;
     try {
-      backend = await probeAgentMemoryBackend(scope, signal);
+      backend = await probeAgentMemoryBackend(scope, proof, signal);
       status = backend === undefined ? 'refused' : 'proven';
     } catch (error) {
       if (signal.aborted) return;
-      status = isAgentMemoryHelperTimeout(error) || isAgentMemoryHelperCancellation(error) ? 'unproven' : 'refused';
-      if (status === 'refused') failure = proofFailureKind(error);
+      const exit = agentMemoryHelperExitOutcome(error);
+      status = isAgentMemoryHelperTimeout(error) || isAgentMemoryHelperCancellation(error) || (exit?.code === null && exit.signal !== null) ? 'unproven' : 'refused';
+      failure = exit === undefined ? (status === 'refused' ? proofFailureKind(error) : undefined)
+        : exit.code === null ? `signal=${exit.signal}` : `exit_code=${exit.code}`;
     }
     if (signal.aborted) return;
     if (proof.status !== status) {
@@ -153,25 +182,20 @@ export function recoverAgentMemoryBackend(scope: DaemonScope, signal: AbortSigna
   else schedule();
 }
 
-async function probeAgentMemoryBackend(daemonScope: DaemonScope, signal: AbortSignal): Promise<AgentMemoryIntentBackend | undefined> {
-  const { config, agentHomeManager, resolveAgentMemoryFilesystemHelperBin } = daemonScope;
+async function probeAgentMemoryBackend(daemonScope: DaemonScope, proof: MemoryProof, signal: AbortSignal): Promise<AgentMemoryIntentBackend | undefined> {
+  const { config } = daemonScope;
   signal.throwIfAborted();
-  if (config.agentHome === undefined || agentHomeManager === undefined) return undefined;
-  const helperBin = resolveAgentMemoryFilesystemHelperBin?.();
-  if (!isAgentMemorySecureFilesystemAvailable(helperBin !== undefined)) return undefined;
-  const backend = helperBin === undefined
-    ? NATIVE_AGENT_MEMORY_INTENT_BACKEND
-    : helperAgentMemoryIntentBackend(helperBin, await fs.realpath(agentHomeManager.layout.hostRootInput()), config.agentMemoryHelperAssetRoot);
-  if (!backend.strictLedgerBarrier) return undefined;
-  if (helperBin !== undefined) {
-    const canonicalHome = await fs.realpath(config.agentHome.hostStorageRoot);
+  const backend = proof.candidate;
+  if (backend === undefined) return undefined;
+  if (proof.helper !== undefined) {
+    const { bin: helperBin, root: canonicalHome } = proof.helper;
     const stat = await fs.stat(canonicalHome, { bigint: true });
     signal.throwIfAborted();
     // Explicit options cover the entire probe, including close and child reaping.
     const probe = await openAgentMemoryFilesystemHelperWithBudget({ helperBin, assetRoot: config.agentMemoryHelperAssetRoot, ancestorRoot: canonicalHome, canonicalHome, homeIdentity: { dev: stat.dev, ino: stat.ino } }, { timeout: HELPER_PROBE_TIMEOUT_MS, signal });
     await probe.close();
   }
-  if (backend.openFilesystem === undefined && !(await probeAgentMemoryStrictDirectorySync(config.agentHome.hostStorageRoot))) return undefined;
+  if (backend.openFilesystem === undefined && !(await probeAgentMemoryStrictDirectorySync(config.agentHome!.hostStorageRoot))) return undefined;
   return backend;
 }
 
