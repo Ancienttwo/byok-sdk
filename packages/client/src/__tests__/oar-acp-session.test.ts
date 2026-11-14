@@ -281,6 +281,20 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     const frame = { kind: 'frame', seq: 0, body: { type: 'x', native: {}, events: [] } } as unknown as RawEvent;
     expect(retain([frame, reply(1), reply(2), reply(3)])).toEqual([false, true, true, false]);
   });
+  it('bounds retained text and reasoning on their own limit and keeps native and tool payloads whole (#2056)', () => {
+    const frame = (seq: number, events: unknown[], native: unknown = {}) => ({ kind: 'frame', seq, body: { type: 'x', native, events } }) as unknown as RawEvent;
+    const tool = frame(0, [{ kind: 'tool_call_started', callId: 'c', tool: 'bash', input: 'ls' }], { id: 'tool' });
+    const text = (seq: number) => frame(seq, [{ kind: 'reasoning', content: { kind: 'text', text: 'r'.repeat(50) } }, { kind: 'text_delta', text: 't'.repeat(100) }]);
+    const last = frame(11, [{ kind: 'tool_call_ended', callId: 'c', content: 'out' }, { kind: 'text_delta', text: 't'.repeat(100) }], { id: 'last' });
+    const log = [tool, ...Array.from({ length: 10 }, (_, index) => text(index + 1)), last];
+    recordRetention(1024, 300)(log, log.length);
+    const kept = log.flatMap(record => record.kind === 'frame' ? record.body.events : [])
+      .reduce((bytes, event) => bytes + (event.kind === 'text_delta' ? event.text.length : event.kind === 'reasoning' && event.content.kind === 'text' ? event.content.text.length : 0), 0);
+    expect(kept).toBeLessThanOrEqual(300);
+    expect(log[0]).toBe(tool);
+    expect(log[11]).toBe(last);
+    expect(log[1]!.body).toEqual({ type: 'x', native: {}, elided: true, events: [{ kind: 'reasoning', content: { kind: 'text', text: '' } }, { kind: 'text_delta', text: '' }] });
+  });
   it('reaps a hosted terminal tree when the session is disposed mid-turn', async () => {
     const { dir, log } = workspace();
     const records: RawEvent[] = [];

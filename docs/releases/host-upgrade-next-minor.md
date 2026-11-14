@@ -479,11 +479,10 @@ Pairing is one critical section of the same lock. It rereads the OS entry, `devi
 
 ## Retained records elide past the limit (#1932)
 
-`maxRetainedBytes` (default 16 MiB) bounds only native and tool payloads. Past it the oldest are elided in place and the task keeps running. The limit also covers the native payload of a runtime request and its reply. Text and reasoning are kept whole, because the folds read them, so `maxRetainedBytes` is not a bound on total retained bytes (#2056). `ClaudeAdapterOptions` gains `maxRetainedBytes` with the same validation and default.
+`maxRetainedBytes` (default 16 MiB) bounds only native and tool payloads. Past it the oldest are elided in place and the task keeps running. The limit also covers the native payload of a runtime request and its reply. Text and reasoning have their own 16 MiB limit, past which the oldest frames lose their text the same way; the newest frame stays whole (#2056). `ClaudeAdapterOptions` gains `maxRetainedBytes` with the same validation and default.
 
-For Claude this is the existing behavior (since #1892). For Codex, Grok, Antigravity, OpenCode and dsh it changes: their text used to count toward the 16 MiB total and passing it failed the task with `<runtime> retained record byte budget exceeded`. That failure no longer occurs, and their text now has no byte bound.
+For Claude this is the existing behavior (since #1892). For Codex, Grok, Antigravity, OpenCode and dsh it changes: their text used to count toward the 16 MiB total and passing it failed the task with `<runtime> retained record byte budget exceeded`. That failure no longer occurs.
 
-- A task's text grows with the provider's per-turn output limit times the number of turns. A Host that needs a hard bound sets `maxDurationMs`: the offer's `limits.maxDurationMs`, or `DaemonConfig.defaultMaxDurationMs`.
 - A Host that matched the failure message drops that match; it no longer occurs.
 - A Host that passes no `maxRetainedBytes` needs no change.
 
