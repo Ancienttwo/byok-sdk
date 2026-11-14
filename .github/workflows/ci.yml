@@ -1831,7 +1831,7 @@ jobs:
               "$BYOK_TWO_USER_NAME"
           else
             sudo sysadminctl -addUser "$BYOK_TWO_USER_NAME" \
-              -password "$(uuidgen)" -home /var/empty -shell /usr/bin/false
+              -password "$(uuidgen)" -shell /usr/bin/false
           fi
           id "$BYOK_TWO_USER_NAME"
           bun run --filter @byok-sdk/client test -- \
