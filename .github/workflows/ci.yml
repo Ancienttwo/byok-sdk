@@ -1858,6 +1858,57 @@ jobs:
       # (Startup .cmd + batch launcher, no SCM registration; #1337).
       - name: CLI and App service install, upgrade recovery, rollback and uninstall
         run: node examples/service-upgrade/upgrade-smoke.mjs
+      - name: Real two-user install-root ancestor check
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          BYOK_TWO_USER_TEST: '1'
+          BYOK_TWO_USER_NAME: byok-attacker
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo useradd --no-create-home --shell /usr/sbin/nologin \
+              "$BYOK_TWO_USER_NAME"
+          else
+            sudo sysadminctl -addUser "$BYOK_TWO_USER_NAME" \
+              -password "$(uuidgen)" -shell /usr/bin/false
+          fi
+          id "$BYOK_TWO_USER_NAME"
+          bun run --filter @byok-sdk/client test -- \
+            src/__tests__/lifecycle-installation.test.ts \
+            -t '#2153' --reporter=verbose --reporter=json \
+            --outputFile.json="$RUNNER_TEMP/two-user.json"
+          node <<'JS'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const report = JSON.parse(fs.readFileSync(
+            path.join(process.env.RUNNER_TEMP, 'two-user.json'), 'utf8'));
+          const cases = report.testResults.flatMap(r => r.assertionResults)
+            .filter(r => r.fullName.includes('#2153'));
+          assert.equal(report.numPassedTests, 2);
+          assert.equal(report.numFailedTests, 0);
+          assert.equal(cases.length, 2);
+          // Filtered-out tests in this file are pending in Vitest's totals.
+          // Neither of the two selected cases may be pending or skipped.
+          for (const test of cases) {
+            assert.equal(test.status, 'passed', test.fullName);
+          }
+          console.log('two-user JSON evidence: 2 passed, 0 skipped');
+          JS
+      - name: Remove the second test user
+        if: ${{ always() && runner.os != 'Windows' }}
+        shell: bash
+        env:
+          BYOK_TWO_USER_NAME: byok-attacker
+        run: |
+          if id "$BYOK_TWO_USER_NAME" >/dev/null 2>&1; then
+            if [ "$RUNNER_OS" = Linux ]; then
+              sudo userdel "$BYOK_TWO_USER_NAME"
+            else
+              sudo sysadminctl -deleteUser "$BYOK_TWO_USER_NAME"
+            fi
+            ! id "$BYOK_TWO_USER_NAME" >/dev/null 2>&1
+          fi
 
   linux-systemd-smoke:
     needs: select

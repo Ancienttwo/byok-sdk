@@ -390,6 +390,7 @@ export const familyOwners = Object.freeze({
   // #1804: the private desktop example; its lane builds it and runs the Electron fuse and bridge checks.
   desktop: [/^examples\/desktop-bot-app\//],
   'service-upgrade-smoke': [
+    /^packages\/client\/src\/__tests__\/lifecycle-installation\.test\.ts$/,
     /^examples\/service-upgrade\//,
     /^templates\/service\//,
     /^packages\/client\/src\/lifecycle\//,

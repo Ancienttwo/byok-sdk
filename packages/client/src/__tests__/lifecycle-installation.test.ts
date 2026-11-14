@@ -1189,6 +1189,92 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await expect(over.recover()).resolves.toBeUndefined();
     });
 
+    // A real second uid is provisioned only by the GitHub CI step. Local runs
+    // deliberately skip: they must neither create users nor invoke sudo.
+    it.skipIf(process.env.BYOK_TWO_USER_TEST !== '1').each([0o777, 0o1777])(
+      'real two-user ancestor replacement, mode %i (#2153; requires CI BYOK_TWO_USER_TEST=1 and BYOK_TWO_USER_NAME)',
+      async (mode) => {
+        expect(process.env.GITHUB_ACTIONS).toBe('true');
+        expect(['darwin', 'linux']).toContain(process.platform);
+        const user = process.env.BYOK_TWO_USER_NAME;
+        expect(user).toBeTruthy();
+        expect(process.geteuid!()).not.toBe(0);
+        // /tmp is traversable by both users, unlike the runner's private TMPDIR.
+        const scratch = await fs.realpath(await fs.mkdtemp('/tmp/byok-two-user-'));
+        try {
+          await fs.chmod(scratch, 0o755);
+          const shared = path.join(scratch, 'shared');
+          const entry = path.join(shared, 'entry');
+          const moved = path.join(shared, 'moved');
+          const target = path.join(scratch, 'target');
+          await fs.mkdir(entry, { recursive: true });
+          await fs.mkdir(target);
+          await fs.chmod(shared, mode);
+          const beforeEntry = await fs.lstat(entry);
+          // First sudo/Python launch for a new macOS user measured 16.6s in CI.
+          // Bound it separately from the whole case's setup/assertion/cleanup budget.
+          const attack = spawnSync('sudo', ['-n', '-u', user!, '--', '/usr/bin/python3', '-c', `
+import errno, json, os, sys
+shared, entry, moved, target = sys.argv[1:]
+# Prove this uid can traverse the fixture and write its own entry in either mode.
+with open(os.path.join(shared, 'attacker-probe'), 'w') as probe:
+    probe.write('second user')
+result = {'uid': os.geteuid()}
+for name, operation in [('rename', lambda: os.rename(entry, moved)),
+                        ('symlink', lambda: os.symlink(target, entry))]:
+    try:
+        operation()
+        result[name] = None
+    except OSError as error:
+        result[name] = errno.errorcode[error.errno]
+print(json.dumps(result))
+`, shared, entry, moved, target], { cwd: scratch, encoding: 'utf8', timeout: 30_000 });
+          expect(attack.error).toBeUndefined();
+          expect(attack.status, attack.stderr).toBe(0);
+          const result = JSON.parse(attack.stdout) as { uid: number; rename: string | null; symlink: string | null };
+          expect(result.uid).not.toBe(0);
+          expect(result.uid).not.toBe(process.geteuid!());
+          expect((await fs.lstat(path.join(shared, 'attacker-probe'))).uid).toBe(result.uid);
+          const over = installationOver(fakeLifecycle(), { installRoot: path.join(entry, 'app') });
+          if (mode === 0o777) {
+            expect(result).toMatchObject({ rename: null, symlink: null });
+            expect((await fs.lstat(moved)).ino).toBe(beforeEntry.ino);
+            expect((await fs.lstat(entry)).uid).toBe(result.uid);
+            expect(await fs.readlink(entry)).toBe(target);
+            const before = [await tree(scratch), await tree(root)];
+            // Observe real fs calls without replacing their implementations: even
+            // a transient create-and-remove before the refusal is a failure.
+            const writes = (['mkdir', 'open', 'writeFile', 'appendFile', 'rename', 'rm', 'unlink', 'copyFile', 'cp', 'symlink', 'chmod', 'chown'] as const)
+              .map((method) => vi.spyOn(fs, method));
+            try {
+              await expect(over.recover()).rejects.toMatchObject({
+                code: 'install_root_ancestor_unsafe', message: expect.stringContaining(shared),
+              });
+              for (const write of writes) expect(write).not.toHaveBeenCalled();
+            } finally {
+              for (const write of writes) write.mockRestore();
+            }
+            expect([await tree(scratch), await tree(root)]).toEqual(before);
+            expect(existsSync(path.join(moved, 'app'))).toBe(false);
+            expect(existsSync(path.join(target, 'app'))).toBe(false);
+            expect(events).toEqual([]);
+          } else {
+            expect(['EPERM', 'EACCES']).toContain(result.rename);
+            expect(result.symlink).toBe('EEXIST');
+            expect((await fs.lstat(entry)).ino).toBe(beforeEntry.ino);
+            expect((await fs.lstat(entry)).isDirectory()).toBe(true);
+            expect(existsSync(moved)).toBe(false);
+            await expect(over.recover()).resolves.toBeUndefined();
+            expect((await fs.lstat(path.join(entry, 'app'))).uid).toBe(process.geteuid!());
+            expect(await tree(target)).toEqual({});
+          }
+        } finally {
+          await fs.rm(scratch, { recursive: true, force: true });
+        }
+      },
+      60_000,
+    );
+
     it.skipIf(process.platform === 'win32')('every directory and link a lookup of the install root reads is checked, through every hop (#2028)', async () => {
       const real = await fs.realpath(root);
       const [safe, shared, sticky] = [path.join(real, 'safe'), path.join(real, 'shared'), path.join(real, 'sticky')];

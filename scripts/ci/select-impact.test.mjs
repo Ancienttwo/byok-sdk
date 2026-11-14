@@ -296,6 +296,42 @@ test('the desktop keys browser script selects its owner and unknown siblings rem
   assert.throws(() => selectImpact(['examples/desktop-bot-app/scripts/other.browser.mjs']), /Reviewed CI mapping required/);
 });
 
+test('the two-user install-root test selects its macOS/Linux service matrix (#2153)', () => {
+  const impact = selectImpact(['packages/client/src/__tests__/lifecycle-installation.test.ts']);
+  assert.deepEqual(impact.families, ['dataplane', 'service-upgrade-smoke']);
+});
+
+test('the two-user CI evidence gate refuses missing, skipped or failed cases (#2153)', t => {
+  const workflow = readFileSync(new URL('.github/workflows/ci.yml', root), 'utf8');
+  const start = workflow.indexOf('      - name: Real two-user install-root ancestor check');
+  const step = workflow.slice(start, workflow.indexOf('\n  linux-systemd-smoke:', start));
+  const verifier = step.match(/node <<'JS'\n([\s\S]*?)\n\s+JS/)[1];
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-two-user-evidence-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  for (const [label, statuses, tag, expected] of [
+    ['both executed', ['passed', 'passed'], '#2153', 0],
+    ['both skipped', ['skipped', 'skipped'], '#2153', 1],
+    ['no match', [], '#2153', 1],
+    ['one skipped', ['passed', 'skipped'], '#2153', 1],
+    ['one failed', ['passed', 'failed'], '#2153', 1],
+    ['wrong tests passed', ['passed', 'passed'], '#unrelated', 1],
+  ]) {
+    const assertionResults = statuses.map((status, i) => ({ fullName: `${tag} mode ${i}`, status }));
+    // Vitest also reports unrelated tests excluded by -t as skipped.
+    assertionResults.push({ fullName: 'unrelated excluded test', status: 'skipped' });
+    writeFileSync(join(cwd, 'two-user.json'), JSON.stringify({
+      numPassedTests: statuses.filter(s => s === 'passed').length,
+      numFailedTests: statuses.filter(s => s === 'failed').length,
+      numPendingTests: assertionResults.filter(r => r.status === 'skipped').length,
+      testResults: [{ assertionResults }],
+    }));
+    const result = spawnSync(process.execPath, ['-e', verifier], {
+      env: { ...process.env, RUNNER_TEMP: cwd }, encoding: 'utf8',
+    });
+    assert.equal(result.status, expected, `${label}: ${result.stderr}`);
+  }
+});
+
 test('a platform family is selected only by a path it owns', () => {
   const owned = {
     'agent-memory-export-linux': 'packages/client/src/daemon/agent-memory-export.ts',
