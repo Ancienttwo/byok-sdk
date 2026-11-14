@@ -8,6 +8,8 @@
 
 - **Fixed (client; #2134)** — `whenTaskSettled` observes an abort triggered synchronously by a Host journal read and releases the pending-read registration. Runtime settlement can also finish the wait while its first journal read is still pending, so a hanging read or its later failure no longer hides that settlement.
 
+- **Fixed (core, client, keys; #2151)** — Spawn preflight now rejects a NUL byte in cwd with a slot-only message. `assertNoNulSpawnInput(command, args, env, cwd?)` accepts the spawn directory as an optional fourth argument; the client process transports and Pi custody launcher pass it. Synchronous client spawn failures now pass through `spawnStartError`, which retains only string codes and treats other code values as unknown. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#spawn-input-and-start-errors-2151).
+
 - **Fixed (keys; #2031)** — Pi projection directory ownership is checked against the effective uid, which owns files created by the process. When real and effective uids differ, an effective-uid-owned directory is accepted and a directory owned only by the real uid is refused.
 
 - **Security (client, cloud, server, bot-collaboration; #2118)** — Raise the declared dependency floors to `hono` `^4.13.16` and `@hono/node-server` `^2.1.6`, and update the lockfile to 4.13.18 and 2.1.8 respectively, fixing the seven Hono advisories reported by the security nightly. This includes bot-collaboration's optional node-server peer for its testing entry and the client and bot-collaboration development dependencies. Hosts that pin an older copy must update it; existing Host lockfiles and bundled distributions need to be refreshed and rebuilt.

@@ -666,7 +666,7 @@ export async function startPiProvider(
     });
     if (ipcLane === undefined && secret !== undefined) env[PI_PROJECTED_KEY_ENV] = secret;
     const childArgs = [...(options.piEntry === undefined ? [] : [options.piEntry]), ...options.piFixedArgs, `--config-digest=${configDigest}`, ...delegated];
-    assertNoNulSpawnInput(options.piBin, childArgs, env);
+    assertNoNulSpawnInput(options.piBin, childArgs, env, piCwd);
     const spawnChild = dependencies.spawn ?? spawn;
     let child: ChildProcess;
     try {

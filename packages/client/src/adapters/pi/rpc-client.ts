@@ -99,12 +99,16 @@ export class PiRpcClient {
 
   constructor(private readonly options: PiRpcClientOptions) {
     const spawnFn = options.spawnFn ?? spawn;
-    assertNoNulSpawnInput(options.command, options.args, options.env);
-    this.child = spawnFn(options.command, options.args, withOwnedProcessTree({
-      cwd: options.cwd,
-      env: options.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })) as ChildProcessWithoutNullStreams;
+    assertNoNulSpawnInput(options.command, options.args, options.env, options.cwd);
+    try {
+      this.child = spawnFn(options.command, options.args, withOwnedProcessTree({
+        cwd: options.cwd,
+        env: options.env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })) as ChildProcessWithoutNullStreams;
+    } catch (error) {
+      throw spawnStartError(error);
+    }
     this.closedPromise = new Promise((resolve) => {
       this.resolveClosed = resolve;
     });

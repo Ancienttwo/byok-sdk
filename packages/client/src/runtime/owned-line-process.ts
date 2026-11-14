@@ -26,11 +26,16 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
   const label = deps.label ?? 'codex app-server';
   return (command: string, args: readonly string[], options: { readonly env: Readonly<Record<string, string>>; readonly cwd?: string }) => {
     if (options.env === undefined) throw new Error('owned line process requires an explicit filtered environment');
-    assertNoNulSpawnInput(command, args, options.env);
-    const child = (deps.spawnFn ?? spawn)(command, [...args], withOwnedProcessTree({
-      ...('cwd' in options ? { cwd: options.cwd } : {}), env: options.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })) as ChildProcessWithoutNullStreams;
+    assertNoNulSpawnInput(command, args, options.env, options.cwd);
+    let child: ChildProcessWithoutNullStreams;
+    try {
+      child = (deps.spawnFn ?? spawn)(command, [...args], withOwnedProcessTree({
+        ...('cwd' in options ? { cwd: options.cwd } : {}), env: options.env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })) as ChildProcessWithoutNullStreams;
+    } catch (error) {
+      throw spawnStartError(error);
+    }
     const lineHandlers: Array<(line: string) => void> = [];
     const exitHandlers: Array<(code: number | null) => void> = [];
     const held: string[] = [];

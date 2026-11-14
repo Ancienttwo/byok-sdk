@@ -62,7 +62,8 @@ describe('BYOK owned line process', () => {
 
   it('rejects NUL-bearing spawn input on every client spawn before starting it, naming only the slot', async () => {
     const secret = 'fake-key\0tail';
-    const cases: Array<{ command: string; args: string[]; env: Record<string, string>; message: string; inherited?: boolean }> = [
+    const cases: Array<{ command: string; args: string[]; env: Record<string, string>; cwd?: string; message: string; inherited?: boolean }> = [
+      { command: process.execPath, args: [], env: {}, cwd: secret, message: 'spawn cwd contains a NUL byte' },
       { command: `/bin/${secret}`, args: [], env: {}, message: 'spawn command contains a NUL byte' },
       { command: process.execPath, args: ['-e', secret], env: {}, message: 'spawn argument 1 contains a NUL byte' },
       { command: process.execPath, args: [], env: { [secret]: '' }, message: 'spawn env variable name contains a NUL byte' },
@@ -70,13 +71,13 @@ describe('BYOK owned line process', () => {
       // Node reads inherited enumerable keys too; MCP copies own keys only, so it is not handed one.
       { command: process.execPath, args: [], env: Object.create({ BYOK_TEST_KEY: secret }), message: 'spawn env variable BYOK_TEST_KEY contains a NUL byte', inherited: true },
     ];
-    for (const { command, args, env, message, inherited } of cases) {
+    for (const { command, args, env, cwd = '.', message, inherited } of cases) {
       vi.mocked(spawn).mockClear();
       const entries: Array<[string, () => unknown]> = [
-        ['line', () => createOwnedLineProcessSpawn()(command, args, { env })],
-        ['terminal', () => createOwnedTerminalSpawn()(command, args, { cwd: '.', env, shell: false })],
-        ['pi rpc', () => new PiRpcClient({ command, args, cwd: '.', env })],
-        ...(inherited ? [] : [['mcp', () => new McpStdioClient({ command, args }, { env }).connect()] as [string, () => unknown]]),
+        ['line', () => createOwnedLineProcessSpawn()(command, args, { env, cwd })],
+        ['terminal', () => createOwnedTerminalSpawn()(command, args, { cwd, env, shell: false })],
+        ['pi rpc', () => new PiRpcClient({ command, args, cwd, env })],
+        ...(inherited ? [] : [['mcp', () => new McpStdioClient({ command, args }, { env, cwd }).connect()] as [string, () => unknown]]),
       ];
       for (const [entry, start] of entries) {
         const error = await (async () => { try { await start(); } catch (caught) { return caught as Error; } })();
@@ -89,10 +90,31 @@ describe('BYOK owned line process', () => {
     await expect(new McpStdioClient({ command: '' }, { env: {} }).connect()).rejects.toThrow(/^MCP server failed to spawn: ERR_INVALID_ARG_VALUE$/);
   });
 
-  it('falls back to fixed text for a code-less spawn error', () => {
-    const error = spawnStartError(new Error('spawn /bin/fake-key-2065 failed'));
+  it.each([undefined, null, 42, { toString: () => 'fake-key-object' }, Symbol('fake-key')])('uses fixed text for a non-string spawn code (%s)', (code) => {
+    const source = Object.assign(new Error('spawn /bin/fake-key failed'), { code, cause: 'fake-key' });
+    expect(carriesSecret(source)).toBe(true);
+    const error = spawnStartError(source);
     expect(error).toMatchObject({ message: 'spawn failed: unknown', code: undefined });
     expect(carriesSecret(error)).toBe(false);
+  });
+
+  it.each(['ERR_INVALID_ARG_VALUE', undefined])('sanitizes synchronous spawn throws on every client entry (code %s)', async (code) => {
+    const source = Object.assign(new Error('fake-key synchronous failure'), { code, path: 'fake-key', spawnargs: ['fake-key'], cause: 'fake-key' });
+    const entries: Array<[string, () => unknown]> = [
+      ['line', () => createOwnedLineProcessSpawn()(process.execPath, [], { env: {} })],
+      ['terminal', () => createOwnedTerminalSpawn()(process.execPath, [], { cwd: '.', env: {}, shell: false })],
+      ['pi rpc', () => new PiRpcClient({ command: process.execPath, args: [], cwd: '.', env: {} })],
+      ['mcp', () => new McpStdioClient({ command: process.execPath }, { env: {} }).connect()],
+    ];
+    expect(carriesSecret(source)).toBe(true);
+    for (const [entry, start] of entries) {
+      vi.mocked(spawn).mockClear().mockImplementationOnce(() => { throw source; });
+      const error = await (async () => { try { await start(); } catch (caught) { return caught as Error; } })();
+      expect.soft(error?.message, entry).toBe(entry === 'mcp' ? `MCP server failed to spawn: ${code ?? 'unknown'}` : `spawn failed: ${code ?? 'unknown'}`);
+      expect.soft(carriesSecret(error), entry).toBe(false);
+      if (entry !== 'mcp') expect.soft(error, entry).toMatchObject({ code });
+      expect.soft(spawn, entry).toHaveBeenCalledTimes(1);
+    }
   });
 
   it('rejects spawn failure with only its code on every client spawn and still settles its exit receipt', async () => {

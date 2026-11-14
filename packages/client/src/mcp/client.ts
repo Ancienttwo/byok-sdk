@@ -222,9 +222,14 @@ class BoundedStdioTransport implements Transport {
   async start(): Promise<void> {
     this.checkDeadline();
     if (this.child !== undefined) throw new Error(`${this.label} transport already started`);
+    try {
+      assertNoNulSpawnInput(this.server.command, this.server.args ?? [], this.childEnv, this.options.cwd);
+    } catch (error) {
+      // Only the preflight's slot-only diagnostic may cross verbatim.
+      throw new McpTransportError(`${this.label} failed to spawn: ${(error as Error).message}`);
+    }
     let child: ChildProcessWithoutNullStreams;
     try {
-      assertNoNulSpawnInput(this.server.command, this.server.args ?? [], this.childEnv);
       child = spawn(this.server.command, [...(this.server.args ?? [])], {
         env: this.childEnv,
         ...(this.options.cwd === undefined ? {} : { cwd: this.options.cwd }),
@@ -232,10 +237,7 @@ class BoundedStdioTransport implements Transport {
         windowsHide: true,
       });
     } catch (error) {
-      // Node's own spawn exceptions can quote input values, so only their code crosses;
-      // the NUL rejection carries a code-less message that names the slot alone.
-      const code = (error as NodeJS.ErrnoException).code;
-      throw new McpTransportError(`${this.label} failed to spawn: ${code ?? (error as Error).message}`);
+      throw new McpTransportError(`${this.label} failed to spawn: ${spawnStartError(error).code ?? 'unknown'}`);
     }
     this.child = child;
 
