@@ -1,3 +1,4 @@
+// BYOK change: Modified from OAR 2f81b34 so a child's own update read after the prompt answer is projected nothing (Apache-2.0).
 import type { RuntimeEventBody } from "../../contracts/session.js";
 import { asRecord, type JsonRecord } from "../json.js";
 import type { SessionKernel } from "../session-kernel.js";
@@ -73,7 +74,7 @@ export function acpLineageOf(params: JsonRecord): { readonly parent: string; rea
   return null;
 }
 
-export function createAcpRecorder(usageGate: UsageUpdateGate, attributeUpdate?: AcpSessionProfile["attributeUpdate"], tokenUsage?: AcpTokenUsage, associations?: (method: string, params: JsonRecord) => readonly { readonly parent: string; readonly child: string }[], projectUpdate?: AcpSessionProfile["projectUpdate"], projectExtension?: AcpSessionProfile["projectExtension"], nativeTurns?: { project: (method: string, params: JsonRecord, rootId: string, afterOpen: boolean) => readonly RuntimeEventBody[] }, derived: Pick<AcpDerivedSessionHooks, "childNotification" | "spawnedSessions"> = {}): AcpRecorder {
+export function createAcpRecorder(usageGate: UsageUpdateGate, attributeUpdate?: AcpSessionProfile["attributeUpdate"], tokenUsage?: AcpTokenUsage, associations?: (method: string, params: JsonRecord) => readonly { readonly parent: string; readonly child: string }[], projectUpdate?: AcpSessionProfile["projectUpdate"], projectExtension?: AcpSessionProfile["projectExtension"], nativeTurns?: { project: (method: string, params: JsonRecord, rootId: string, afterOpen: boolean) => readonly RuntimeEventBody[] }, derived: Pick<AcpDerivedSessionHooks, "childNotification" | "spawnedSessions"> & { readonly whilePromptAwaited?: (params: object) => boolean } = {}): AcpRecorder {
   const hostRequests = new Map<string, string>();
   // Children reported on an extension channel: their standard copies stay native-only.
   const notifiedChildren = new Set<string>();
@@ -153,6 +154,12 @@ export function createAcpRecorder(usageGate: UsageUpdateGate, attributeUpdate?: 
             return;
           }
           notifiedChildren.add(notice.sessionId);
+          // BYOK change: a child's own update read while no prompt awaited its answer keeps its native payload under the child as
+          // `<method>/after_answer` and projects nothing, as the standard channel stops projecting a child once its creating prompt ended.
+          if (notice.update !== null && derived.whilePromptAwaited?.(params) === false) {
+            kernel.frame({ type: `${method}/after_answer`, native: params, events: [] }, { ...(notice.sessionId === kernel.sessionId ? {} : { sessionId: notice.sessionId }), ...at });
+            return;
+          }
           // A child's own update is its frame; a lifecycle report belongs to the parent that started it.
           const sessionId = notice.update === null ? notice.parent : notice.sessionId;
           const events: RuntimeEventBody[] = notice.update === null

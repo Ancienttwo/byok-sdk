@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.105.0",
-    "commit": "9334d79eb7c1f86931df6667624f0c70cedc0a4f"
+    "commit": "261241f2efaa8348934d48ae859399829360fa4a"
   },
   "release": {
     "ecosystem": "npm",
@@ -145,8 +145,8 @@
       "path": "contracts/records.ts",
       "sourcePath": "packages/oar/src/contracts/records.ts",
       "upstreamSha256": "a1e3563b87393cfedad20c11ec98c9802bf48aae4c1d02023902576fe806e5f7",
-      "vendoredSha256": "0dc3fafdb013aa15f5c7abdbc771d0963be7e78626757589a9a6adcff29d8884",
-      "delta": "Type only: the native RequestBody variant and the accepted, rejected and answered ResponseBody variants take an optional elided: true, set when retainedBytes removed their native payload."
+      "vendoredSha256": "9c29e2f935b76886637c34e45e6be9d37276e40d0f4d78be1c030ce72c7e386a",
+      "delta": "Type only: the native RequestBody variant and the accepted, rejected and answered ResponseBody variants take an optional elided: true, set when retainedBytes removed their native payload. Comment only (#2056): FrameBody.elided and Event.elided also cover text and reasoning text emptied by the text limit."
     },
     {
       "path": "contracts/runtime-failure-error.ts",
@@ -170,7 +170,8 @@
       "path": "contracts/session-options.ts",
       "sourcePath": "packages/oar/src/contracts/session-options.ts",
       "upstreamSha256": "8bf54cd3ee81df67e3694bbccb8b60330a35ef92c684cda9463150830a8aec01",
-      "vendoredSha256": "8bf54cd3ee81df67e3694bbccb8b60330a35ef92c684cda9463150830a8aec01"
+      "vendoredSha256": "1aea0525614940a91c3ea1f017ef02e0735654388c5a1c2ee8bf957b4eb04466",
+      "delta": "Comment only (#2056): retainedBytes says text and reasoning text have their own 16 MiB retained limit, past which the oldest frames lose them; the newest frame is always whole."
     },
     {
       "path": "contracts/session-unavailable-error.ts",
@@ -641,7 +642,8 @@
       "path": "shared/acp/opening.ts",
       "sourcePath": "packages/oar/src/shared/acp/opening.ts",
       "upstreamSha256": "b57be839d67d9c7117c2a18347a4391892226ed7c8e1c0f2588124448e42becf",
-      "vendoredSha256": "b57be839d67d9c7117c2a18347a4391892226ed7c8e1c0f2588124448e42becf"
+      "vendoredSha256": "ab23b1e4be04e3fa0584dcade497c5ef076ff1eabc7606a81263d8296d3fd8ef",
+      "delta": "Beside the opening boundary: createAcpPromptAnswers marks, in wire order on the decoded stream, each notification read while a session/prompt request awaits its answer, and withAcpPromptAnswers chains it onto the opening observer. The opening boundary keeps upstream behavior."
     },
     {
       "path": "shared/acp/process.ts",
@@ -672,7 +674,8 @@
       "path": "shared/acp/records.ts",
       "sourcePath": "packages/oar/src/shared/acp/records.ts",
       "upstreamSha256": "1c177fc1e4069c7daf20c587d819a5094ea26540f54d0521c11354406a185e3b",
-      "vendoredSha256": "1c177fc1e4069c7daf20c587d819a5094ea26540f54d0521c11354406a185e3b"
+      "vendoredSha256": "a50614aba51c1e454454db412e52e59f9988c7ba419912d74d162b0c9a42f32a",
+      "delta": "A child's own update on a childNotification channel that was read while no session/prompt request awaited its answer (whilePromptAwaited, from shared/acp/opening.ts through shared/acp/session.ts) is recorded under the child as `<method>/after_answer`, with its native payload and no events, as the standard channel stops projecting a child once its creating prompt was answered. Status reports and lineage are unchanged."
     },
     {
       "path": "shared/acp/resume-cwd.ts",
@@ -684,8 +687,8 @@
       "path": "shared/acp/session.ts",
       "sourcePath": "packages/oar/src/shared/acp/session.ts",
       "upstreamSha256": "32ea4a1f797d0fb8b4436fe03c0af9c03a63a16a11e3caee1c31d96a02012f1c",
-      "vendoredSha256": "d2424cb9fc68ab74382da427b69659a77b996b6b156cf3b25be0781fa60ce44c",
-      "delta": "Raw adapter for the SDK: AcpSessionHooks.onPermission forwards to AcpClientHooks.permission. acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, does not use the upstream shared-connection pool or lifecycle wrapper, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady and onRecord hooks; onRecord is registered as a kernel observer before the recorder binds. A throwing onReady releases the process and the terminal host. The exit observer terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader. Dispose does not call prepareShutdown or markNativeStop, and control does not wait on a pending cancellation observation. Upstream configUpdates, manual compaction and the adapter-held queue are wired in; compact goes through the redaction guard. OAR 0.99: the session keeps its own state construction in place of upstream session-state.ts (that module builds the terminal host without the injected spawn); it wires the upstream native-turn tracker (prompt naming, tracker-fed token usage and recorder, the recorder bound after the turn driver) and the profile steerRequest RPC through steer-request.ts; upstream turn-terminals.ts is not wired because endTurnProcessesOnAbort is omitted. endTurnProcessesOnAbort is omitted from AcpSessionOptions; the caller's retainedBytes goes to the upstream kernel's record retention. Upstream #652 agentPid wiring is omitted. Dispose starts the abort (descendant read and cancel write are synchronous) and does not wait for the write before it kills the process."
+      "vendoredSha256": "ea99e46695f6449f233a0d383f0649bda39eda0acd60d19c096c75ee6a965357",
+      "delta": "Raw adapter for the SDK: AcpSessionHooks.onPermission forwards to AcpClientHooks.permission. acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, does not use the upstream shared-connection pool or lifecycle wrapper, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady and onRecord hooks; onRecord is registered as a kernel observer before the recorder binds. A throwing onReady releases the process and the terminal host. The exit observer terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader. Dispose does not call prepareShutdown or markNativeStop, and control does not wait on a pending cancellation observation. Upstream configUpdates, manual compaction and the adapter-held queue are wired in; compact goes through the redaction guard. OAR 0.99: the session keeps its own state construction in place of upstream session-state.ts (that module builds the terminal host without the injected spawn); it wires the upstream native-turn tracker (prompt naming, tracker-fed token usage and recorder, the recorder bound after the turn driver) and the profile steerRequest RPC through steer-request.ts; upstream turn-terminals.ts is not wired because endTurnProcessesOnAbort is omitted. endTurnProcessesOnAbort is omitted from AcpSessionOptions; the caller's retainedBytes goes to the upstream kernel's record retention. Upstream #652 agentPid wiring is omitted. Dispose starts the abort (descendant read and cancel write are synchronous) and does not wait for the write before it kills the process. The process stream observes the prompt-answer boundary with the opening boundary (shared/acp/opening.ts), and the recorder gets whilePromptAwaited (shared/acp/records.ts)."
     },
     {
       "path": "shared/acp/steer-request.ts",
@@ -815,8 +818,8 @@
       "path": "shared/record-retention.ts",
       "sourcePath": "packages/oar/src/shared/record-retention.ts",
       "upstreamSha256": "e9e09d26dfdf38f226c033696a616a7562d37fe4c32601422f22068f39b0e432",
-      "vendoredSha256": "0bfbfe97acba79043cbbcf6ebe958ffca85378f00f5d8454b6f964180e2b5d39",
-      "delta": "The retention limit bounds every native payload the kernel retains: a toApp request's native, and the native of an accepted, rejected or answered response, are measured as UTF-8 JSON bytes beside frame payloads, and elision sets that native to null with elided: true, oldest first, in the same pass. The elide pass walks every measured record not yet elided and skips only the newest frame, so requests and replies after it, or in a log with no frame, are elided too."
+      "vendoredSha256": "e26692cba19be0fe283aaadfe955a531bd6750c38845b21636478392ea989ae0",
+      "delta": "The retention limit bounds every native payload the kernel retains: a toApp request's native, and the native of an accepted, rejected or answered response, are measured as UTF-8 JSON bytes beside frame payloads, and elision sets that native to null with elided: true, oldest first, in the same pass. The elide pass walks every measured record not yet elided and skips only the newest frame, so requests and replies after it, or in a log with no frame, are elided too. (#2056) Text and readable reasoning text have their own retained limit, RETAINED_TEXT_BYTES (16 MiB): past it the oldest frames have that text emptied and are marked elided, oldest first, after every observer has the complete record; the newest frame stays whole, and text never takes the native and tool budget."
     },
     {
       "path": "shared/redact-text.ts",

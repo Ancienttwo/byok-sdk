@@ -160,9 +160,13 @@ Child-session text is excluded from root answer progress. The SDK's flat event
 schema has no parent-graph field; no spawning-tool edge is invented. On 2.3 and
 later, OAR declares OpenCode's child-session-updates capability, so a `task`
 subagent's updates arrive on `opencode/session/child_update`; the adapter reads
-them under the child's session id as above. Child output after the root turn
-ends is not read: the task ends at the root `turn_ended` and the process tree is
-disposed. No SDK live run has started a subagent on this channel (#2182). OAR exposes a
+them under the child's session id as above. A child update read after the root
+prompt's answer delivers no event on either channel: the standard channel stops
+sending the child then, and OAR records a `child_update` read then as
+`opencode/session/child_update/after_answer` with no events, which the adapter
+reports with a `console.warn` diagnostic (#2188). The turn stops reading at the
+root `turn_ended`, and the process tree is disposed. No SDK live run has started
+a subagent on this channel (#2182). OAR exposes a
 v2 `steer` through `_session/steering`; the adapter does not call it. Usage fields
 are emitted only when OAR supplies native counters.
 

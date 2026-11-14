@@ -81,6 +81,7 @@ function promptText(params) {
 }
 
 let opencodeModel;
+let childUpdates = false;
 async function prompt(message) {
   const full = promptText(message.params);
   log({ kind: 'prompt', text: full });
@@ -113,6 +114,26 @@ async function prompt(message) {
     update({ sessionUpdate: 'usage_update', used: 321, size: 1000 });
     update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'child private text' }, _meta: { 'opencode/child-session': { id: 'native-child', parentID: SESSION, depth: 1 } } });
     text('done'); result(message.id, { stopReason: 'end_turn' }); return;
+  }
+  // OpenCode 2.3 background child: call `in-call` while the root prompt runs, then `bg-call` in the same stdout write as the
+  // root answer. A client that declared child-session-updates gets every child update on child_update; otherwise the child
+  // is projected on session/update only while its creating prompt runs, so `bg-call` never reaches it.
+  if (input === 'opencode-background-child') {
+    const child = { rootSessionId: SESSION, childSessionId: 'ses_bg_child', parentSessionId: SESSION, depth: 1, title: 'background' };
+    const meta = { _meta: { 'opencode/child-session': { id: 'ses_bg_child', parentID: SESSION, depth: 1 } } };
+    const childUpdate = (value) => ({ jsonrpc: '2.0', method: 'opencode/session/child_update', params: { ...child, type: 'update', update: { ...value, ...meta } } });
+    const call = (id) => [{ sessionUpdate: 'tool_call', toolCallId: id, title: 'read', kind: 'read', status: 'in_progress', rawInput: { filePath: `${id}.md` } },
+      { sessionUpdate: 'tool_call_update', toolCallId: id, status: 'completed', content: [{ type: 'content', content: { type: 'text', text: `${id} read` } }] }];
+    if (childUpdates) {
+      send({ method: 'opencode/session/child_update', params: { ...child, type: 'status', status: 'created' } });
+      for (const value of call('in-call')) send(childUpdate(value));
+    } else {
+      for (const value of call('in-call')) update({ ...value, ...meta });
+    }
+    text('done');
+    const lines = [{ jsonrpc: '2.0', id: message.id, result: { stopReason: 'end_turn' } }, ...(childUpdates ? call('bg-call').map(childUpdate) : [])];
+    process.stdout.write(lines.map(line => `${JSON.stringify(line)}\n`).join(''));
+    return;
   }
   // Grok's own turn after the prompt (a background command finished): it runs until FAKE_ACP_OWN_TURN_GATE exists.
   if (input === 'own-turn') {
@@ -325,6 +346,7 @@ function request(message) {
   switch (message.method) {
     case 'initialize':
       log({ kind: 'initialize', params: message.params });
+      childUpdates = message.params?.clientCapabilities?._meta?.['opencode/child-session-updates'] === true;
       if (process.env.FAKE_ACP_INITIALIZE === 'exit') process.exit(1);
       if (process.env.FAKE_ACP_INITIALIZE === 'auth') { error(message.id, -32000, 'Authentication required'); return; }
       if (process.env.FAKE_ACP_INITIALIZE === 'error') { error(message.id, -32603, 'Internal error'); return; }
