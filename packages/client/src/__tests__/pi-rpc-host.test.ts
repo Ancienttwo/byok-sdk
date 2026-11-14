@@ -9,6 +9,7 @@ import { refusePiSubagentHostCommands } from '../adapters/pi/subagents';
 import { resolveFileScopeGrant } from '../file-scope-guard';
 import { serializeFileScopeGrant } from '../file-scope-launch';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -647,6 +648,55 @@ describe('SDK ordinary Pi RPC entry', () => {
     const argv = [f.entry, `--config-digest=${serialized.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'byok-sdk-probe', '--model', 'probe'];
     return { ...f, argv };
   }
+
+  it.each([
+    { lane: 'installed', shared: true },
+    { lane: 'installed keys-profile', shared: true },
+    { lane: 'bundled keys-profile', shared: true },
+    { lane: 'installed', shared: false },
+  ])('uses only a private jiti cache before loading an extension: $lane, shared=$shared (#2163)', async ({ lane, shared }) => {
+    const keys = lane.includes('keys-profile'), bundled = lane.startsWith('bundled');
+    const f = custodyFixture(keys ? 'keys-profile' : 'pi-auth-store');
+    const marker = join(f.root, 'extension-loaded.json'), extension = join(f.root, 'cache-probe.ts');
+    writeFileSync(extension, `import {writeFileSync} from 'node:fs';
+      export default function probe(pi): void {
+        writeFileSync(${JSON.stringify(marker)},JSON.stringify({cache:process.env.JITI_FS_CACHE}));
+        pi.on('session_start',()=>process.exit(0));
+      }`);
+    const serialized = serializePiHostConfig({ ...f.config, credentialSource: keys ? 'keys-profile' : 'pi-auth-store', agentExtensionPaths: [extension] });
+    writeFileSync(f.configPath, serialized.bytes);
+    const argv = [...f.argv]; argv[1] = `--config-digest=${serialized.digest}`;
+    if (bundled) {
+      writeFileSync(f.entry, `import {runPiRpcHost} from ${JSON.stringify(resolve(clientRoot, 'dist/bin/pi-runtime-host.js'))};
+        runPiRpcHost(process.argv.slice(2),'bundled').catch(error=>{console.error(error);process.exit(1)});`);
+      const bundle = join(f.root, 'host.mjs');
+      const built = spawnSync(bun, ['build', f.entry, '--target=bun', '--define=PI_BUNDLED_NODE=true', '--outfile', bundle], { cwd: clientRoot, encoding: 'utf8', timeout: 30_000 });
+      expect(built.status, built.stderr).toBe(0); argv[0] = bundle;
+    }
+    const loader = bundled ? argv[0]! : fileURLToPath(new URL('./core/extensions/loader.js', import.meta.resolve('@earendil-works/pi-coding-agent')));
+    const adjacent = join(dirname(loader), 'node_modules');
+    // This fixture owns this directory in this worktree's dependency copy.
+    expect(existsSync(adjacent)).toBe(false);
+    if (shared) mkdirSync(adjacent);
+    const runtime = join(f.root, 'runtime'); mkdirSync(runtime);
+    try {
+      const child = spawn(bundled ? bun : process.execPath, argv, { cwd: f.sealed, env: { ...f.env, TMPDIR: runtime, TMP: runtime, TEMP: runtime,
+        PI_PACKAGE_DIR: resolve(clientRoot, 'dist/assets'), PI_CODING_AGENT_SESSION_DIR: join(f.root, 'sessions') },
+        stdio: keys ? ['pipe', 'pipe', 'pipe', 'ipc'] : ['pipe', 'pipe', 'pipe'], timeout: 20_000 });
+      let stderr = '';
+      child.stderr!.on('data', data => { stderr += data; }); child.stdout!.resume();
+      if (keys) child.once('message', (request: { configDigest: string }) => child.send({
+        type: 'byok.pi.rpc.credential', configDigest: request.configDigest, secret: 'synthetic-cache-probe',
+      }));
+      const code = await new Promise<number | null>(done => child.once('close', done));
+      expect(code, stderr).toBe(0);
+      expect(existsSync(join(adjacent, '.cache/jiti'))).toBe(false);
+      expect(JSON.parse(readFileSync(marker, 'utf8'))).toEqual(shared ? { cache: 'false' } : {});
+      expect(existsSync(join(runtime, 'jiti'))).toBe(!shared);
+      if (!shared) expect(readdirSync(join(runtime, 'jiti')).length).toBeGreaterThan(0);
+      expect(stderr).not.toContain('pi_jiti_seed_unavailable');
+    } finally { if (shared) rmSync(adjacent, { recursive: true, force: true }); }
+  }, 60_000);
 
   it('refuses a keys-profile launch without the launcher custody channel, before any session', () => {
     const f = custodyFixture('keys-profile');

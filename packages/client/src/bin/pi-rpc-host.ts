@@ -221,6 +221,15 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   };
   const args = parsePiRpcHostArgs(argv, failUsage);
   const config = parsePiRpcHostConfig(readPiHostConfig(args.configPath, args.configDigest));
+  if (packaging === 'installed' || config.credentialSource === 'keys-profile') {
+    // Installed Pi creates jiti in its external extension loader; bundled Pi
+    // uses this module's URL. These lanes expect no seed, but share its cache
+    // proof and must disable an unproved cache before the first extension.
+    const loaderUrl = packaging === 'installed'
+      ? new URL('./core/extensions/loader.js', import.meta.resolve('@earendil-works/pi-coding-agent')).href
+      : import.meta.url;
+    usePiJitiSeed(undefined, [loaderUrl], () => {});
+  }
   // #1061 D14: re-resolve every serialized root before an extension or
   // session exists. A missing/replaced/symlinked root, a changed dev+ino, or
   // a Windows/unknown platform fails here; the host never continues unscoped.
