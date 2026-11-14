@@ -101,12 +101,7 @@ describe('scopeSecretStore', () => {
     ] as const;
     for (const [thrown, code] of cases) {
       vi.spyOn(store, 'scope').mockImplementationOnce(() => { throw thrown; });
-      let error: Error | undefined;
-      try {
-        scopeSecretStore(store, SCOPE);
-      } catch (caught) {
-        error = caught as Error;
-      }
+      const error = (() => { try { scopeSecretStore(store, SCOPE); } catch (caught) { return caught as Error; } })();
       expect(error).toMatchObject({ code });
       expect(error?.cause).toBeUndefined();
       expect(`${error?.message} ${error?.stack}`).not.toContain(CANARY);
