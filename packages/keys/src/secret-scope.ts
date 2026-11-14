@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { ByokKeysError } from './errors.js';
 import { assertSecretName, assertSecretNamespace } from './secret-name.js';
+import { secretStoreCall } from './secret-store-call.js';
 import { type SecretStore, assertSharedSecretValue } from './secret-store.js';
 
 /**
@@ -62,6 +63,12 @@ export function scopeSecretStore<TName extends string>(
  * value to `undefined`, which made a foreign value look like an absent secret
  * and let the next `set()` overwrite it. Here a stored value that is not a
  * well-formed envelope raises `SECRET_ENVELOPE_INVALID`.
+ *
+ * The underlying store's errors leave only through the shared secret-store
+ * boundary: a known keychain, Credential Manager or secret-shape code keeps its
+ * code with a fixed message and no cause, and anything else becomes
+ * `PROVIDER_SECRET_STORE_FAILED`, so a backend that echoes a key in its error
+ * cannot pass it on through this decorator.
  */
 export class EnvelopeScopedSecretStore<TName extends string = string>
   implements SecretStore<TName>
@@ -84,7 +91,7 @@ export class EnvelopeScopedSecretStore<TName extends string = string>
   }
 
   available(): Promise<boolean> {
-    return this.#store.available();
+    return secretStoreCall(() => this.#store.available());
   }
 
   async delete(name: TName): Promise<boolean> {
@@ -93,8 +100,8 @@ export class EnvelopeScopedSecretStore<TName extends string = string>
       return false;
     }
     delete envelope[this.#scopeId];
-    if (Object.keys(envelope).length === 0) return this.#store.delete(name);
-    await this.#store.set(name, this.#serialize(envelope));
+    if (Object.keys(envelope).length === 0) return secretStoreCall(() => this.#store.delete(name));
+    await secretStoreCall(() => this.#store.set(name, this.#serialize(envelope)));
     return true;
   }
 
@@ -120,7 +127,7 @@ export class EnvelopeScopedSecretStore<TName extends string = string>
       (await this.#readEnvelope(name)) ??
       (Object.create(null) as Record<string, string>);
     envelope[this.#scopeId] = secret;
-    await this.#store.set(name, this.#serialize(envelope));
+    await secretStoreCall(() => this.#store.set(name, this.#serialize(envelope)));
   }
 
   /**
@@ -135,7 +142,8 @@ export class EnvelopeScopedSecretStore<TName extends string = string>
   async #readEnvelope(
     name: TName,
   ): Promise<Record<string, string> | undefined> {
-    const stored = await this.#store.get(assertSecretName(name));
+    const checked = assertSecretName(name);
+    const stored = await secretStoreCall(() => this.#store.get(checked));
     if (stored === undefined) return undefined;
     if (!stored.startsWith(this.#envelopePrefix)) throw envelopeInvalid();
     const decoded = decodeBase64Url(stored.slice(this.#envelopePrefix.length));

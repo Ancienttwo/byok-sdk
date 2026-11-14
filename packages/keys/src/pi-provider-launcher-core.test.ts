@@ -5,6 +5,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 
 import { ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
+import { ByokKeysError } from './errors';
 import { InMemorySecretStore, modelProviderSecretName } from './secret-store';
 import {
   assertPiPreparedProviderProfile,
@@ -195,6 +196,15 @@ describe('Pi provider launcher core', () => {
     await expect(
       resolvePiProviderSecret(profile('bearer'), () => new InMemorySecretStore()),
     ).rejects.toMatchObject({ code: 'PROVIDER_SECRET_MISSING' });
+  });
+
+  it('passes an availability check error on only through the secret-store boundary (#2096)', async () => {
+    const store = new InMemorySecretStore();
+    vi.spyOn(store, 'available').mockRejectedValueOnce(new ByokKeysError('PROVIDER_STORE_UNAVAILABLE', CANARY, { cause: new Error(CANARY) }));
+    const error = await resolvePiProviderSecret(profile('bearer'), () => store).catch((caught: unknown) => caught as Error);
+    expect(error).toMatchObject({ code: 'PROVIDER_SECRET_STORE_FAILED' });
+    expect((error as Error).cause).toBeUndefined();
+    expect(`${(error as Error).message} ${(error as Error).stack}`).not.toContain(CANARY);
   });
 
   it('builds the Pi child environment from a closed baseline plus only the resolved key', () => {
