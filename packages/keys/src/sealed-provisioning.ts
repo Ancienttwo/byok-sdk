@@ -360,7 +360,7 @@ export async function applySealedProviderProvisioning(
       // Every decision from here on consumes the generation and is recorded.
       const decision = await decide(request, profileRef, secret, options);
       if (decision.kind === 'reject') return recordRejection(decision.code);
-      if (decision.credential.kind !== 'keep' && !(await secrets.available())) {
+      if (decision.credential.kind !== 'keep' && !(await secretStoreCall(() => secrets.available()))) {
         return recordRejection('secret_store_unavailable');
       }
 

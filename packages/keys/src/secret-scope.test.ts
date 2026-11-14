@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ByokKeysError } from './errors';
 import {
@@ -251,6 +251,27 @@ describe('EnvelopeScopedSecretStore', () => {
     const scoped = envelope('acct_00000000');
     expect(scoped.providerLabel).toBe(backing.providerLabel);
     await expect(scoped.available()).resolves.toBe(true);
+  });
+
+  it.each([
+    ['available', (store: EnvelopeScopedSecretStore) => store.available()],
+    ['get', (store: EnvelopeScopedSecretStore) => store.get(NAME)],
+    ['set', (store: EnvelopeScopedSecretStore) => store.set(NAME, 'next')],
+    ['delete', (store: EnvelopeScopedSecretStore) => store.delete(NAME)],
+  ] as const)('passes a wrapped store %s error on only through the secret-store boundary (#2096)', async (method, call) => {
+    const scoped = envelope('acct_00000000');
+    await scoped.set(NAME, 'stored');
+    const cases = [
+      [new ByokKeysError('KEYCHAIN_READ_FAILED', CANARY, { cause: new Error(CANARY) }), 'KEYCHAIN_READ_FAILED'],
+      [new Error(CANARY), 'PROVIDER_SECRET_STORE_FAILED'],
+    ] as const;
+    for (const [thrown, code] of cases) {
+      vi.spyOn(backing, method as 'get').mockRejectedValueOnce(thrown);
+      const error = await call(scoped).then(() => undefined, (caught: unknown) => caught as Error);
+      expect(error).toMatchObject({ code });
+      expect(error?.cause).toBeUndefined();
+      expect(`${error?.message} ${error?.stack}`).not.toContain(CANARY);
+    }
   });
 
   it('honours an injected envelope prefix', async () => {
