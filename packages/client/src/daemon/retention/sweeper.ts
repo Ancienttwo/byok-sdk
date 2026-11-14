@@ -1,4 +1,4 @@
-import { PASS_INSPECTIONS, runtimeReclaimedBytes } from './runtime-accounting.js';
+import { RETENTION_LIMITS, registryPassInspections, runtimeReclaimedBytes } from './runtime-accounting.js';
 import type { ResolvedStorageConfig } from './config.js';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, type ClassUsage, type RetentionClassId, type RetentionTrigger, type SweepBudget, type SweepReport, RetentionRegistry } from './registry.js';
 import { StoragePressure } from './pressure.js';
@@ -70,10 +70,11 @@ export class RetentionSweeper {
   private async pass(trigger: RetentionTrigger): Promise<SweepReport> {
     const started = performance.now(), now = this.clock();
     let deleted = 0, bytesReclaimed = 0, failures = 0, truncated = false, inspections = 0;
+    const passInspections = registryPassInspections.get(this.options.registry) ?? RETENTION_LIMITS.passInspections;
     const budget: SweepBudget = {
       trigger, now,
       available: () => {
-        const allowed = ++inspections <= PASS_INSPECTIONS && deleted < this.options.config.maxDeletionsPerPass && performance.now() - started < this.options.config.maxPassDurationMs;
+        const allowed = ++inspections <= passInspections && deleted < this.options.config.maxDeletionsPerPass && performance.now() - started < this.options.config.maxPassDurationMs;
         if (!allowed) truncated = true;
         return allowed;
       },

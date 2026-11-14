@@ -14,7 +14,7 @@ import { readInstalledSkillPack, skillPacksRoot } from '../skill-pack-installer.
 import { LocalStorageConfigError, type ResolvedStorageConfig } from './config.js';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_BOUNDS, PROTECTED_CLASS_IDS, RetentionRegistry, type ClassAuthority, type ProtectedClassId, type ClassUsage, type ExpiringClassId, type RetentionClassId, type SweepBudget } from './registry.js';
 import type { ScratchRoot } from './scratch.js';
-import { authorityBudget, classBudget } from './runtime-accounting.js';
+import { authorityBudget, classBudget, registryPassInspections, RETENTION_LIMITS, type RetentionLimits } from './runtime-accounting.js';
 import { TreeCleanup } from './tree-cleanup.js';
 import { selectReaderRuns } from '../../agent-home-reader-retention.js';
 import { RuntimeCleanup } from './runtime-cleanup.js';
@@ -39,6 +39,8 @@ interface ProducerOptions {
   readonly clock: () => Date;
   /** Entries one usage walk visits before it stops and reports truncated classes. */
   readonly usageScanLimit?: number;
+  /** Defaults to RETENTION_LIMITS; a sweeper over this registry uses its pass limit. */
+  readonly limits?: RetentionLimits;
 }
 const inside = (root: string, target: string): boolean => target === root || target.startsWith(`${root}${path.sep}`);
 const TOKEN = /^[a-f0-9]{12}$/u;
@@ -48,6 +50,7 @@ const HOME_TEMP = /^\.byok-(?:memory|agent-memory)-[a-f0-9-]{36}\.tmp$/u;
 export function createRetentionRegistry(options: ProducerOptions): RetentionRegistry {
   const { storeDir, scratch, config, clock } = options;
   const { piSessionDir, agySessionStore } = options;
+  const limits = options.limits ?? RETENTION_LIMITS;
   const execRoot = path.join(scratch.root, 'exec');
   const daemonRoot = path.join(storeDir, 'tmp', 'daemon');
   const replicas = path.join(storeDir, 'durable-replicas');
@@ -98,7 +101,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
   async function remove(root: string, target: string, budget: SweepBudget): Promise<void> {
     const present = await fs.lstat(target).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
     if (present === undefined) return;
-    budget.removed(await removeOwnedPath(root, target, budget.now));
+    budget.removed(await removeOwnedPath(root, target, budget.now, limits.treeScanEntries));
   }
   const pendingTrees = new Map<string, { collector: TreeCleanup }>();
   async function reclaimTree(root: string, target: string, eligible: () => Promise<boolean>, budget: SweepBudget, available = budget.available): Promise<boolean> {
@@ -208,7 +211,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
         catch { continue; } // Lock helper deliberately coalesces locked/invalid; both remain protected.
         await withRelease(async () => {
           let bytes = 0;
-          for (const candidate of [file, `${file}-wal`, `${file}-shm`]) bytes += (await measureTree(candidate, budget.now)).bytes;
+          for (const candidate of [file, `${file}-wal`, `${file}-shm`]) bytes += (await measureTree(candidate, budget.now, limits.treeScanEntries)).bytes;
           await resetReplica(file); budget.removed(bytes);
         }, () => lock.release());
         await fs.rm(`${file}.lock.sqlite`, { force: true });
@@ -608,7 +611,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
   }
   let lastCompactionMs: number | undefined;
   const registry = new RetentionRegistry([
-    ...EXPIRING_CLASS_IDS.map(id => ({ id, authority: authority(id), measure: () => measure(id), sweep: async (budget: SweepBudget) => { measurement = undefined; await sweep[id](classBudget(id, budget)); } })),
+    ...EXPIRING_CLASS_IDS.map(id => ({ id, authority: authority(id), measure: () => measure(id), sweep: async (budget: SweepBudget) => { measurement = undefined; await sweep[id](classBudget(id, budget, limits.shares)); } })),
     ...PROTECTED_CLASS_IDS.map(id => ({ id, authority: authority(id), measure: () => measure(id) })),
   ], async () => { await Promise.all([...cursors.values()].map(cursor => cursor.close())); cursors.clear(); measurement = undefined; },
     () => { measurement = undefined; }, async (budget, underPressure) => {
@@ -619,5 +622,6 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
         lastCompactionMs = budget.now.getTime();
       }
     });
+  registryPassInspections.set(registry, limits.passInspections);
   return registry;
 }

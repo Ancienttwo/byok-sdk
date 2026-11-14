@@ -7,7 +7,7 @@ import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { acquirePiSessionRetention, acquirePiSessionWriter } from '../util/pi-session-retention';
 import { acquireAgySessionRetention, brandAgySessionStore } from '../util/agy-session-retention';
-import { PASS_INSPECTIONS, runtimeReclaimedBytes } from '../daemon/retention/runtime-accounting';
+import { RETENTION_LIMITS, runtimeReclaimedBytes, type RetentionLimits } from '../daemon/retention/runtime-accounting';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { projectSkillPack } from '../daemon/skill-pack-installer';
 import { promises as fs } from 'node:fs';
@@ -36,12 +36,12 @@ const cleanups: (()=>Promise<void>)[]=[];
 afterEach(async()=>{for(const cleanup of cleanups.splice(0).reverse())await cleanup();vi.restoreAllMocks();});
 const DAY=86_400_000;
 const identity:JournalIdentity={productId:'retention',tenantId:'tenant',deviceId:'device'};
-async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:AgentHomeManager;store?:string;budget?:StorageBudgetInput;freeBytes?:number;usageScanLimit?:number;piSessionDir?:string;agySessionStore?:string;ttlMs?:Partial<Record<ExpiringClassId,number>>;maxPassDurationMs?:number}={}) {
+async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:AgentHomeManager;store?:string;budget?:StorageBudgetInput;freeBytes?:number;usageScanLimit?:number;piSessionDir?:string;agySessionStore?:string;ttlMs?:Partial<Record<ExpiringClassId,number>>;maxPassDurationMs?:number;limits?:RetentionLimits}={}) {
  const store=input.store??testScratchRoot();let time=Date.parse('2026-10-14T00:00:00.000Z');const clock=()=>new Date(time);
  const config=resolveStorageConfig(store,{scratchRoot:testScratchRoot(),retention:{maxDeletionsPerPass:input.max??256,ttlMs:input.ttlMs,maxPassDurationMs:input.maxPassDurationMs},...(input.budget?{budget:input.budget}:{})});
  const scratch=new ScratchRoot(config.scratchRoot,clock);await scratch.open(store);
  const registry=createRetentionRegistry({storeDir:store,scratch,config,clock,journal:()=>input.journal,identity:()=>identity,preparation:()=>undefined,
-  ...(input.home?{home:input.home,handoffs:new AgentSessionHandoffStore()}:{}),...(input.usageScanLimit===undefined?{}:{usageScanLimit:input.usageScanLimit}),...(input.piSessionDir===undefined?{}:{piSessionDir:input.piSessionDir}),...(input.agySessionStore===undefined?{}:{agySessionStore:input.agySessionStore})});
+  ...(input.home?{home:input.home,handoffs:new AgentSessionHandoffStore()}:{}),...(input.usageScanLimit===undefined?{}:{usageScanLimit:input.usageScanLimit}),...(input.piSessionDir===undefined?{}:{piSessionDir:input.piSessionDir}),...(input.agySessionStore===undefined?{}:{agySessionStore:input.agySessionStore}),...(input.limits?{limits:input.limits}:{})});
  const pressure=new StoragePressure(config.budget),failures:string[]=[];
  const sweeper=new RetentionSweeper({registry,config,clock,pressure,freeBytes:async()=>input.freeBytes??1_000_000_000,jitter:(_s,ms)=>ms,onFailure:(_t,id,code,taskId)=>{failures.push([id,code,...(taskId===undefined?[]:[taskId])].join(':'));}});
  cleanups.push(()=>sweeper.stop());return {store,scratch,sweeper,registry,pressure,failures,config,clock,advance:(ms:number)=>{time+=ms;}};
@@ -344,11 +344,16 @@ it('a daemon store with a long path claims and uses its short default scratch ro
  await new ScratchRoot(resolveStorageConfig(store).scratchRoot).open(store);
 });
 
+it('production retention limits keep their reviewed values',()=>{
+ expect(RETENTION_LIMITS).toEqual({passInspections:8192,treeScanEntries:16_384,shares:{'exec-runtime':4096,'exec-sdk':1024,'daemon-temp':1024,'reader-run':1024}});
+});
+// Production limits scaled down 64x keep their ratios, so small fixtures reach the same branches.
+const limits:RetentionLimits={passInspections:128,treeScanEntries:256,shares:{'exec-runtime':64,'exec-sdk':16,'daemon-temp':16,'reader-run':16}};
 // Inspections, not wall-clock time, must bound these passes: under load the 10 s
 // default pass limit ends a pass before the runtime share is spent (#2082).
 it('reclaims a released runtime larger than the runtime pass share across periodic passes', async () => {
- const LARGE=PASS_INSPECTIONS/2+2_048,f=await fixture({maxPassDurationMs:DAY}),large=await f.scratch.create(),small=await f.scratch.create();
- for(let start=0;start<LARGE;start+=128) await Promise.all(Array.from({length:128},(_,offset)=>fs.writeFile(path.join(large.runtimeDir,`empty-${start+offset}`),'')));
+ const share=limits.shares['exec-runtime'],LARGE=share*3/2,f=await fixture({maxPassDurationMs:DAY,limits}),large=await f.scratch.create(),small=await f.scratch.create();
+ await Promise.all(Array.from({length:LARGE},(_,index)=>fs.writeFile(path.join(large.runtimeDir,`empty-${index}`),'')));
  await fs.writeFile(path.join(small.runtimeDir,'small'),'small');
  await large.release();await small.release();f.advance(DAY+1);
  const observations=[];
@@ -358,11 +363,11 @@ it('reclaims a released runtime larger than the runtime pass share across period
  }
  expect(observations.some(item=>item.largeFiles<LARGE)).toBe(true);
  // The first pass makes progress but spends at most the runtime share of the pass budget.
- expect(observations[0]!.largeFiles).toBeLessThan(LARGE);expect(observations[0]!.largeFiles).toBeGreaterThanOrEqual(LARGE-PASS_INSPECTIONS/2);
+ expect(observations[0]!.largeFiles).toBeLessThan(LARGE);expect(observations[0]!.largeFiles).toBeGreaterThanOrEqual(LARGE-share);
  expect(f.failures).not.toContain('exec-runtime:sweep_failed');
  expect(await exists(small.runtimeDir)).toBe(false);
  expect(await exists(large.runtimeDir)).toBe(false);
-}, 30_000);
+});
 
 it('accounts partial runtime bytes and resumes after registry restart without counting partial tokens',async()=>{
  const f=await fixture(),s=await f.scratch.create();
@@ -453,19 +458,19 @@ it('keeps bytes already removed when a later unlink fails mid-pass, then complet
  expect(tally.deleted).toBe(1);expect(5+retried+tally.bytes).toBe(15+Buffer.byteLength(released));
  expect(await exists(target)).toBe(false);
 });
-// 9216 files plus one 4096-inspection pass: up to 15 s measured on mac-pro x64 with four
-// concurrent copies of this file (#2082), so this test keeps the same headroom as the one above.
+// The backlog alone exceeds the whole pass, so only the runtime share leaves agent-result its turn.
 it('a large expired runtime backlog leaves pass budget for agent-result in the same pass',async()=>{
  const {home,binding,results}=await idleHome();await fs.mkdir(results,{recursive:true});
  const record=path.join(results,resultName(0));await fs.writeFile(record,'{}');await old(record);await binding.lease.release();
- const f=await fixture({home,maxPassDurationMs:DAY}),s=await f.scratch.create();
- for(let start=0;start<9_216;start+=128) await Promise.all(Array.from({length:128},(_,offset)=>fs.writeFile(path.join(s.runtimeDir,`empty-${start+offset}`),'')));
+ const f=await fixture({home,maxPassDurationMs:DAY,limits}),s=await f.scratch.create();
+ const backlog=limits.passInspections+limits.shares['reader-run'];
+ await Promise.all(Array.from({length:backlog},(_,index)=>fs.writeFile(path.join(s.runtimeDir,`empty-${index}`),'')));
  await s.release();f.advance(DAY);
  const report=await f.sweeper.runPass('periodic');
  expect(report.truncated).toBe(true);expect(await exists(record)).toBe(false);
  expect((await fs.readdir(s.runtimeDir)).length).toBeGreaterThan(0);
  expect(f.failures).toEqual([]);
-}, 30_000);
+});
 const ledgerHex=(c:string)=>c.repeat(64);
 async function sessionLedgers(directory:string,files:Record<string,string>){
  const root=path.join(directory,'.byok','runtime-sessions');await fs.mkdir(root,{recursive:true});

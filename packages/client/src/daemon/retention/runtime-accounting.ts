@@ -1,13 +1,23 @@
 import type { SweepBudget } from './registry.js';
-/** Entries one sweep pass may inspect across every class; internal, like the accounting below. */
-export const PASS_INSPECTIONS = 8192;
+/** Internal retention limits, like the accounting below; tests inject smaller ones to reach the same branches. */
+export interface RetentionLimits {
+  /** Entries one sweep pass may inspect across every class. */
+  readonly passInspections: number;
+  /** Entries a whole-tree measurement or removal visits before it refuses. */
+  readonly treeScanEntries: number;
+  /** Inspection share of one pass for each class with resumable directory cleanup. */
+  readonly shares: Readonly<Record<'exec-runtime' | 'exec-sdk' | 'daemon-temp' | 'reader-run', number>>;
+}
+export const RETENTION_LIMITS: RetentionLimits = Object.freeze({ passInspections: 8192, treeScanEntries: 16_384,
+  shares: Object.freeze({ 'exec-runtime': 4096, 'exec-sdk': 1024, 'daemon-temp': 1024, 'reader-run': 1024 }) });
+/** The pass limit a registry was built with, kept off the public sweeper options; one injection sets both. */
+export const registryPassInspections = new WeakMap<object, number>();
 /** Partial leaf reclamation is private pass state, not a public SweepBudget capability. */
 export const runtimeReclaimedBytes = new WeakMap<object, number>();
 
 const parentBudgets = new WeakMap<SweepBudget, SweepBudget>();
-const shares: Readonly<Record<string, number>> = { 'exec-runtime': 4096, 'exec-sdk': 1024, 'daemon-temp': 1024, 'reader-run': 1024 };
-export function classBudget(id: string, budget: SweepBudget): SweepBudget {
-  const limit = shares[id];
+export function classBudget(id: string, budget: SweepBudget, shares: RetentionLimits['shares']): SweepBudget {
+  const limit = (shares as Readonly<Record<string, number>>)[id];
   if (limit === undefined) return budget;
   let used = 0;
   const bounded = { ...budget, available: () => {
