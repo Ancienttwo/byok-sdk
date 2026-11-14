@@ -469,9 +469,10 @@ Credential-store errors from every `ProviderRegistry` method (`get()`, `list()`,
 
 What a Host does:
 
-- After the operator fixes the credential store, send the same request again, or a new request at the same generation; it applies. `readSealedProvisioningResult()` returns no stored result for the unrecorded request.
-- A `secret_store_unavailable` from a failed credential write is unchanged: it is recorded, the operation stays pending, and only a new key submission resolves it. Sending that request again returns the recorded rejection.
-- A Host that showed `secret_store_unavailable` as final can offer a retry instead. No type, code or API changes.
+- Change the device's `providerProvisioning` notice handler before it completes a result. Both cases return `rejected` with `secret_store_unavailable`, so on that code call `readSealedProvisioningResult({ profileStore, requestId, requestDigest })`:
+  - `absent`: nothing was recorded. Do not complete to the Host and throw from the handler. The notice stays unacknowledged, the Host keeps the request and its ciphertext, and the redelivered notice applies the same request once the operator fixes the credential store. The retry still passes the time window, identity, expected profile and generation watermark checks; once the window closes it returns `request_expired`, which completes as usual.
+  - `completed`: the failure came from a credential write. It is recorded, the operation stays pending, and only a new key submission resolves it. Complete it as a terminal result, as before; sending that request again returns the recorded rejection.
+- A handler that keeps completing every result makes the Host store the unrecorded rejection as terminal and acknowledge the notice. Replaying that request later applies on the device but the Host reports `conflict` and keeps the rejection; submit a new request at the same generation instead. The [keys README handler order](../../packages/keys/README.md#sealed-remote-provisioning) shows the updated steps. No type, code or API changes.
 
 ## Stored cancellation pruning cutoff
 

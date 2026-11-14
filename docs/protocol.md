@@ -1311,7 +1311,17 @@ store reports itself unavailable before any write: that rejection is not
 recorded and does not consume the generation, so the same request, or a new one
 at the same generation, applies once the store is available. A
 `secret_store_unavailable` from a failed credential write is recorded and
-leaves the operation pending, as before. Re-sending an identical completion yields `idempotent` with the stored
+leaves the operation pending, as before. The two return the same code, so the
+device's notice handler tells them apart with the local readback for
+`requestId` + `requestDigest` (`readSealedProvisioningResult`): `absent` means
+unrecorded, and the handler must not submit a completion and must throw, so the
+notice stays unacknowledged and the Host keeps the request and its ciphertext
+for a replay once the store is available (still bound by the time window,
+identity, expected profile and watermark); `completed` means recorded, and the
+handler completes it as a terminal result like any other. A Host that has
+already stored an unrecorded `secret_store_unavailable` as terminal cannot
+replace it by replaying the same request (a different result is `conflict`);
+it submits a new request instead. Re-sending an identical completion yields `idempotent` with the stored
 result and no rewrite; a different digest or result yields `conflict` with the
 stored result unchanged. `host_terminal` is valid only for a rejected
 completion the Host recorded on its own authority (`request_expired`,

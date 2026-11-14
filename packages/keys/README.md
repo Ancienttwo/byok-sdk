@@ -297,7 +297,16 @@ and calls `applySealedProviderProvisioning`.
      key, placement or ciphertext (so rotation or a placement change never
      rewrites a historical fact; a different digest is `request_conflict`),
      and only then validates and applies.
-  3. Complete to the Host with the credential-free result and advance the
+  3. If the result is `rejected` with `secret_store_unavailable`, call
+     `readSealedProvisioningResult` for the same `requestId` + digest. When it
+     returns `absent`, the device recorded nothing (its credential store was
+     unavailable before any write): do not complete to the Host and throw from
+     the handler, so the notice stays unacknowledged, the Host keeps the
+     request and its ciphertext, and redelivery applies it once the store is
+     back (still subject to the time window, identity, expected profile and
+     generation watermark). When it returns `completed`, the failure came from
+     a credential write and is recorded; continue to step 4.
+  4. Complete to the Host with the credential-free result and advance the
      notice cursor only after the Host's durable readback.
 - **Identity fence.** Requests bind `expectedEnrollmentRevision` and
   `expectedPlacementRevision` (in the AAD). `readIdentity(agentId)` must
