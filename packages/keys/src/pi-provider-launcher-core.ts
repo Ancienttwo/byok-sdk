@@ -582,7 +582,10 @@ export async function assertWindowsPiProjectionAcl(
   if (!userControl) throw new Error('pi_projection_acl_owner_access_missing');
 }
 
-/** Validate the client-owned empty directory before any credential access. */
+/**
+ * Validate the client-owned empty directory before any credential access.
+ * POSIX ownership uses the effective uid, which owns files this process creates.
+ */
 export async function assertPiProjectionDirectory(projectionDir: string): Promise<void> {
   if (!path.isAbsolute(projectionDir) || path.normalize(projectionDir) !== projectionDir) {
     throw new Error('pi_projection_path_not_normal: Pi projection directory must be an absolute normalized path');
@@ -593,7 +596,7 @@ export async function assertPiProjectionDirectory(projectionDir: string): Promis
   if (process.platform === 'win32') {
     await assertWindowsPiProjectionAcl(projectionDir);
   } else {
-    if (stat.uid !== process.getuid!()) throw new Error('pi_projection_owner_mismatch: Pi projection directory must be owned by the current uid');
+    if (stat.uid !== process.geteuid!()) throw new Error('pi_projection_owner_mismatch: Pi projection directory must be owned by the effective uid');
     if ((stat.mode & 0o7777) !== 0o700) throw new Error('pi_projection_mode_mismatch: Pi projection directory must have mode 0700');
   }
   if ((await fs.readdir(projectionDir)).length !== 0) throw new Error('pi_projection_not_empty: Pi projection directory must be empty');

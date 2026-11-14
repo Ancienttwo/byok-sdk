@@ -906,8 +906,14 @@ export interface BotOptions {
 export type HostIntentHandler = (document: unknown, transaction: OutcomeTransaction) => void;
 /** Synchronous. A throw rolls the message transaction back, and a thenable or another result throws. */
 export type HostIntentMessageHandler = (input: AgentMessageInput, transaction: MessageTransaction) => MessageDisposition;
-/** The cancel answer of a Host intent (K8 `IntentCancelResult`). */
-export type HostIntentCancelResult = IntentCancelResult<Conclusion>;
+/**
+ * The cancel answer of a Host intent (K8 `IntentCancelResult`). `conclusion` is optional: an in-flight intent awaits its
+ * terminal, and an unsubmitted intent may await a successful drain after a `drainError` or `wakePending` result.
+ */
+export type HostIntentCancelResult = IntentCancelResult<Conclusion> & {
+    wakePending?: true;
+    drainError?: unknown;
+};
 /** Reply readback port (§3.3). The Host acceptance record stays the body authority. */
 export type MessageServer = {
     tasks: Partial<Pick<ByokServer['tasks'], 'agentMessage'>>;
@@ -1012,23 +1018,26 @@ export declare class BotCollaboration {
     enqueueHostIntent(input: IntentInput, handler: string): Promise<Intent>;
     /**
      * Owner API (#1320): cancels a Host intent through K4, which records the cancel on the intent row. A settled intent returns
-     * `already_settled` and sends nothing, so a replay does not fail. An unsubmitted intent settles as `cancelled` inside the
-     * call: no handler runs, and its FIFO moves on. A submitted intent gets an SDK cancel and returns `cancel_pending`; a
+     * `already_settled` and sends nothing, so a replay does not fail. An unsubmitted intent returns `cancelled` once its cancel
+     * commits; `conclusion` is absent if a failed drain or process pass leaves settlement unfinished. A later successful
+     * drain settles it without running its handler and advances its FIFO. Replay to read `already_settled` with its conclusion,
+     * or `cancel_pending` while a submitted intent awaits its terminal. A submitted intent gets an SDK cancel; a
      * `task.complete` that arrived before the cancel still runs the handler once. A `handler_failed` intent stays stuck,
      * because K4 applies its terminal again: `failStuckIntent` settles it. Refuses a Bot Turn key and an unknown key.
      *
-     * The call can still reject after `core.cancel` has committed: it rethrows a `drainError`, and a later `process()` failure
-     * also rejects. The cancel may already be in effect then, so do not treat a rejection as "not cancelled". Calling again is
-     * safe: an intent that already concluded returns `already_settled`, a committed cancel returns `cancel_pending`, a replay whose
-     * drain settles it returns `cancelled`, and the same failure (for example a still-full outbox) rejects again. This differs from `cancelTurn`,
-     * which handles `drainError` differently; aligning the two is tracked in #2144.
+     * After commit, a wake-only failure returns `wakePending: true`. Other failures return `drainError`, the unchanged
+     * first drain or process rejection (the whole AggregateError for mixed failures), even if a later pass succeeds.
+     * A drain error comes from that same drain, which coalesces with an in-flight drain and may fail on other Host work.
+     * Check `'drainError' in result`, report it and retry pending work with `drain()` or recovery. The cancellation
+     * committed; reconciliation may be unfinished. Job/outbox retry state is unchanged; explicit drains and wake hooks
+     * still reject. Pre-commit failures still reject.
      */
     cancelHostIntent(key: string, ...by: PrincipalArg): Promise<HostIntentCancelResult>;
     /**
      * Cancel selected Host intents atomically without a pass. A submitted intent refuses the whole set; after a successful
      * call, successors wait for the next pass, or the Host can call `drain()`. Results keep input order and are replayable.
      */
-    cancelHostIntents(keys: readonly string[], ...by: PrincipalArg): Promise<(HostIntentCancelResult & {
+    cancelHostIntents(keys: readonly string[], ...by: PrincipalArg): Promise<(IntentCancelResult<Conclusion> & {
         result: 'cancelled' | 'already_settled';
         conclusion: Conclusion;
     })[]>;
@@ -3271,7 +3280,10 @@ export declare function applyDelegate(state: DelegationState, turn: Turn, taskId
 export declare function observeStart(state: DelegationState, turn: Turn, now: number, emit: Publish): void;
 /** Presence is display evidence only. It never controls submit, expiry, or a verdict. */
 export declare function observeDevices(state: DelegationState, facts: IntentFacts, devices: ReadonlyMap<string, boolean>, emit: Publish): void;
-/** The result of an owner cancel (#1405). `cancel_pending` and `already_settled` write nothing and send no cancel. */
+/**
+ * The result of an owner cancel (#1405). `cancelled` confirms the cancel committed, not necessarily its settlement.
+ * Turn/delegation replays that return `cancel_pending` or `already_settled` write nothing and send no cancel.
+ */
 export type CancelOutcome = 'cancelled' | 'cancel_pending' | 'already_settled';
 export interface TurnCancelResult {
     turnId: string;
@@ -3312,8 +3324,10 @@ export declare class HostIntentError extends Error {
     }[]);
 }
 /**
- * `cancelled`: the intent was not submitted and settled as `cancelled`. `cancel_pending`: the SDK cancel went out, and K4
- * settles the intent at its terminal. `already_settled`: no cancel was sent; `conclusion` is the earlier one.
+ * `cancelled`: the intent was not submitted and its cancel committed. `conclusion` is optional: a `drainError` or
+ * `wakePending` result can precede settlement, which waits for a later successful drain. Replay then returns
+ * `already_settled` with the conclusion. `cancel_pending`: the SDK cancel was requested and K4 awaits its terminal;
+ * `conclusion` is absent until settlement. `already_settled`: no cancel was sent; `conclusion` is the earlier one.
  */
 export interface IntentCancelResult<C extends string> {
     key: string;
