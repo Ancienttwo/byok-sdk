@@ -109,7 +109,14 @@ function executionCacheDir(loaderUrls) {
     try { dir = os.tmpdir(); } finally { process.env.TMPDIR = value; }
   }
   if (dir !== tmp) refuse(`the Pi loader would leave the working directory for ${dir}`);
-  return path.join(tmp, 'jiti');
+  const cacheDir = path.join(tmp, 'jiti');
+  try {
+    mkdirSync(cacheDir, { recursive: true });
+    accessSync(cacheDir, constants.W_OK);
+  } catch {
+    refuse(`${cacheDir} is not writable`);
+  }
+  return cacheDir;
 }
 
 /**
@@ -135,12 +142,6 @@ export function openPiJitiSeed(seedRoot, loaderUrls) {
   const jitiVersion = JSON.parse(readFileSync(path.join(jitiDir, 'package.json'), 'utf8')).version;
   if (jitiVersion !== manifest.jiti) refuse(`seed is for jiti ${manifest.jiti}, not ${jitiVersion}`);
   const cacheDir = executionCacheDir(loaderUrls);
-  try {
-    mkdirSync(cacheDir, { recursive: true });
-    accessSync(cacheDir, constants.W_OK);
-  } catch {
-    refuse(`${cacheDir} is not writable`);
-  }
   let body;
   const jiti = createRequire(path.join(jitiDir, 'package.json'))(path.join(jitiDir, 'lib', 'jiti.cjs')).createJiti(path.join(cacheDir, 'seed.cjs'), {
     fsCache: cacheDir, moduleCache: false,
@@ -185,13 +186,14 @@ export function openPiJitiSeed(seedRoot, loaderUrls) {
 }
 
 /**
- * The seed of one Pi process. jiti's fs cache stays on only while the seed
- * opened, which proves the cache directory is this execution's own, and every
- * materialization verified. Any failure, whatever its cause, sets
+ * The cache policy of one Pi process. With a seedRoot, jiti's fs cache stays
+ * on only while the seed opened, which proves the cache directory is this
+ * execution's own, and every materialization verified. Any failure sets
  * `JITI_FS_CACHE=false` for this process and the processes it starts, so
  * every later jiti loader transforms in memory; `report` receives the reason
  * once. Call this, and `materialize` each group, before the first jiti loader
- * of the process is created.
+ * of the process is created. Without a seedRoot, only prove the private cache
+ * location: installed and keys-profile hosts have no seed to materialize.
  */
 export function usePiJitiSeed(seedRoot, loaderUrls, report) {
   let seed;
@@ -200,7 +202,10 @@ export function usePiJitiSeed(seedRoot, loaderUrls, report) {
     process.env.JITI_FS_CACHE = 'false';
     report(refusalReason(error));
   };
-  try { seed = openPiJitiSeed(seedRoot, loaderUrls); } catch (error) { cold(error); }
+  try {
+    if (seedRoot === undefined) executionCacheDir(loaderUrls);
+    else seed = openPiJitiSeed(seedRoot, loaderUrls);
+  } catch (error) { cold(error); }
   return {
     materialize(group, root) {
       if (seed === undefined) return;

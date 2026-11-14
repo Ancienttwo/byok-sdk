@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readClientPiRuntimePin } from './client-manifest.js';
 
 /**
@@ -121,6 +121,12 @@ export function resolvePinnedPiPackage(remedy: string): {
     );
   }
   return { dir, identity: expected, bin: manifest.bin };
+}
+
+/** Canonical installed extension loader URL; a changed Pi layout fails closed. */
+export function resolveInstalledPiLoaderUrl(): string {
+  const { dir } = resolvePinnedPiPackage('reinstall @byok-sdk/client dependencies');
+  return pathToFileURL(realpathSync(path.join(dir, 'dist/core/extensions/loader.js'))).href;
 }
 
 const PI_BIN_REMEDY = 'reinstall @byok-sdk/client dependencies, or ship pi through sdkHelperHost and copyPiRuntimeAssets';
