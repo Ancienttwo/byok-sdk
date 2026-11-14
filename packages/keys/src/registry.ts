@@ -5,7 +5,7 @@ import {
   configurationPendingError,
   withConfigurationLock,
 } from './custody.js';
-import { BYOK_KEYS_ERROR_CODES, ByokKeysError } from './errors.js';
+import { BYOK_KEYS_ERROR_CODES, ByokKeysError, type ByokKeysErrorCode } from './errors.js';
 import type { ProviderFetch } from './http.js';
 import { OpenAiCompatibleChatClient } from './openai-client.js';
 import { type ProviderProfileStore, providerNotConfigured } from './profile-store.js';
@@ -445,7 +445,7 @@ export class ProviderRegistry {
       if (!done && !isChangeCommitted(error)) throw error;
       // The failed step may be an injected store or lock echoing a key, so
       // only its known code survives, under a fixed message.
-      const code = error instanceof ByokKeysError && Object.hasOwn(BYOK_KEYS_ERROR_CODES, error.code) ? error.code : undefined;
+      const code = knownByokKeysCode(error);
       throw new ByokKeysError(
         'PROVIDER_CHANGE_COMMITTED',
         'The provider change was committed, but a step after the commit failed; read the provider status again',
@@ -537,4 +537,15 @@ export class ProviderRegistry {
       configurationPending: (await this.#profiles.getPending(profileRef)) !== undefined,
     };
   }
+}
+
+/**
+ * The code of `error` when it is a `ByokKeysError` with a string code from
+ * {@link BYOK_KEYS_ERROR_CODES}. An injected store or lock builds its own
+ * errors and the constructor does not check `code`, so a non-string whose
+ * primitive form is a known code must not qualify.
+ */
+function knownByokKeysCode(error: unknown): ByokKeysErrorCode | undefined {
+  const code: unknown = error instanceof ByokKeysError ? error.code : undefined;
+  return typeof code === 'string' && Object.hasOwn(BYOK_KEYS_ERROR_CODES, code) ? code as ByokKeysErrorCode : undefined;
 }
