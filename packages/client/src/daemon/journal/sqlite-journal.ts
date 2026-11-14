@@ -1056,20 +1056,23 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     });
   }
 
-  listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]> {
+  listPrunableConfirmedTasks(cutoff: Date, limit: number, after?: string): Promise<string[]> {
     if (!Number.isFinite(cutoff.getTime()) || !Number.isSafeInteger(limit) || limit <= 0) return Promise.reject(new TypeError('invalid journal retention bounds'));
     return this.#enqueue('listPrunableConfirmedTasks', () => {
       // A cancelled received offer ages from its cancellation's commit. Once it
       // is pruned, a conforming mailbox never redelivers the offer: it replays
       // only above the acknowledged cursor and suppresses a cancelled task's
       // offer through a task record it never deletes (spec, #1990).
-      const rows = this.#db.prepare(`SELECT task_id FROM (
-          SELECT task.task_id, term.updated_at AS at FROM journal_task task
+      const candidates = `SELECT task.task_id, term.updated_at AS at FROM journal_task task
             JOIN journal_terminal term ON term.task_id = task.task_id
            WHERE term.truth_state = 'confirmed' AND task.recovery_marker IS NULL
           UNION ALL
-          SELECT t.task_id, (SELECT MIN(c.committed_at) ${LATER_CANCELLATION}) AS at FROM journal_task t WHERE ${CANCELLED_RECEIVED_TASK})
-        WHERE at < ? ORDER BY at, task_id LIMIT ?`).all(cutoff.toISOString(), limit) as { task_id: string }[];
+          SELECT t.task_id, (SELECT MIN(c.committed_at) ${LATER_CANCELLATION}) AS at FROM journal_task t WHERE ${CANCELLED_RECEIVED_TASK}`;
+      const rows = (after === undefined
+        ? this.#db.prepare(`SELECT task_id FROM (${candidates}) WHERE at < ? ORDER BY at, task_id LIMIT ?`).all(cutoff.toISOString(), limit)
+        : this.#db.prepare(`WITH candidate AS (${candidates})
+            SELECT task_id FROM candidate WHERE at < ? AND (at, task_id) > (SELECT at, task_id FROM candidate WHERE task_id = ?)
+            ORDER BY at, task_id LIMIT ?`).all(cutoff.toISOString(), after, limit)) as { task_id: string }[];
       return rows.map(row => row.task_id);
     });
   }

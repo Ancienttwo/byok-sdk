@@ -24,7 +24,7 @@ import { defaultScratchRoot, ScratchRoot, ScratchRootPathError, validateScratchR
 import { createRetentionRegistry } from '../daemon/retention/producers';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
 import { StoragePressure } from '../daemon/retention/pressure';
-import { resolveStorageConfig, type StorageBudgetInput } from '../daemon/retention/config';
+import { LocalStorageConfigError, resolveStorageConfig, type StorageBudgetInput } from '../daemon/retention/config';
 import { assertAgySessionStoreTtl } from '../daemon/create-daemon/support';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_BOUNDS, PROTECTED_CLASS_IDS, RetentionRegistry, type SweepBudget, type RetentionClassId, type ClassUsage, type ClassAuthority, type ExpiringClassId, type ProtectedClassId } from '../daemon/retention/registry';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
@@ -136,14 +136,25 @@ it('default journal retention discovers old confirmed rows and protects unconfir
  expect(await journal.readTask('expired',identity)).toBeUndefined();for(const id of ['pending','marked','recent'])expect(await journal.readTask(id,identity)).toBeDefined();
  expect(await journal.pruneConfirmedJournalTask('marked',new Date())).toBe(false);
 });
-it('an oldest confirmed task that cannot be pruned is reported without taking the only deletion slot from a later one',async()=>{
+it('confirmed tasks that cannot be pruned are paged past with one cursor query per page, not taking the only deletion slot',async()=>{
  const store=testScratchRoot(),journal=new SqliteLocalTaskJournal({storeDir:store});cleanups.push(()=>journal.close());
- await terminal(journal,'broken','confirmed','2026-08-01T00:00:00.000Z');await terminal(journal,'expired','confirmed');
+ for(const id of ['broken-0','broken-1','broken-2'])await terminal(journal,id,'confirmed','2026-08-01T00:00:00.000Z');await terminal(journal,'expired','confirmed');
  const prune=journal.pruneConfirmedJournalTask.bind(journal);
- vi.spyOn(journal,'pruneConfirmedJournalTask').mockImplementation(async(taskId,cutoff)=>{if(taskId==='broken')throw new Error('integrity');return prune(taskId,cutoff);});
+ vi.spyOn(journal,'pruneConfirmedJournalTask').mockImplementation(async(taskId,cutoff)=>{if(taskId.startsWith('broken'))throw new Error('integrity');return prune(taskId,cutoff);});
+ const list=vi.spyOn(journal,'listPrunableConfirmedTasks');
  const f=await fixture({store,journal,max:1});await f.sweeper.runPass('periodic');
  expect(f.failures).toEqual(['confirmed-journal:sweep_failed']);
- expect(await journal.readTask('expired',identity)).toBeUndefined();expect(await journal.readTask('broken',identity)).toBeDefined();
+ expect(list.mock.calls.map(([,limit,after])=>[limit,after])).toEqual([[1,undefined],[1,'broken-0'],[1,'broken-1'],[1,'broken-2']]);
+ expect(await journal.readTask('expired',identity)).toBeUndefined();expect(await journal.readTask('broken-0',identity)).toBeDefined();
+});
+it('a journal that ignores the after cursor fails the confirmed-journal sweep with a contract error',async()=>{
+ const store=testScratchRoot(),journal=new SqliteLocalTaskJournal({storeDir:store});cleanups.push(()=>journal.close());
+ for(const id of ['broken-0','broken-1'])await terminal(journal,id,'confirmed');
+ const list=journal.listPrunableConfirmedTasks.bind(journal);
+ vi.spyOn(journal,'listPrunableConfirmedTasks').mockImplementation((cutoff,limit)=>list(cutoff,limit));
+ vi.spyOn(journal,'pruneConfirmedJournalTask').mockRejectedValue(new Error('integrity'));
+ const f=await fixture({store,journal}),tally={deleted:0,bytes:0};
+ await expect(f.registry.sweep('confirmed-journal',runtimeBudget(f,tally))).rejects.toBeInstanceOf(LocalStorageConfigError);
 });
 it('locked and unknown replicas survive; journal-terminal replicas require an exclusive lock before deletion',async()=>{
  const store=testScratchRoot(),journal=new SqliteLocalTaskJournal({storeDir:store});cleanups.push(()=>journal.close());await terminal(journal,'locked','pending');await terminal(journal,'closed','pending');

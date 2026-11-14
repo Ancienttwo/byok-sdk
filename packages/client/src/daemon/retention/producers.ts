@@ -11,7 +11,7 @@ import type { JournalIdentity, LocalTaskJournal } from '../journal/journal.js';
 import { withRelease } from '../../util/with-release.js';
 import { acquirePathMutationGate, PathMutationGateBusyError, withGateReleaseFailures } from '../../util/path-mutation-gate.js';
 import { readInstalledSkillPack, skillPacksRoot } from '../skill-pack-installer.js';
-import type { ResolvedStorageConfig } from './config.js';
+import { LocalStorageConfigError, type ResolvedStorageConfig } from './config.js';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_BOUNDS, PROTECTED_CLASS_IDS, RetentionRegistry, type ClassAuthority, type ProtectedClassId, type ClassUsage, type ExpiringClassId, type RetentionClassId, type SweepBudget } from './registry.js';
 import type { ScratchRoot } from './scratch.js';
 import { authorityBudget, classBudget } from './runtime-accounting.js';
@@ -219,21 +219,26 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     const journal = options.journal();
     if (journal === undefined) return;
     const cutoff = new Date(budget.now.getTime() - config.ttlMs['confirmed-journal']);
-    // Tasks are listed oldest first. A task that stays listed after its
-    // attempt (a failed or refused prune) must not hold a deletion slot: each
-    // page widens the limit by the tasks already tried and skips them, so later
-    // tasks are reached in the same pass. Failures are reported after it.
-    const tried = new Set<string>(), failures: unknown[] = [];
+    // Tasks are listed oldest first. A task that is not pruned (its prune
+    // failed or was refused) stays listed, so the next page starts after the
+    // last such task (journal cursor) instead of spending this pass's deletion
+    // slots on it again. Failures are reported after the pass.
+    const kept = new Set<string>(), failures: unknown[] = [];
+    let after: string | undefined;
     pages: for (;;) {
-      const tasks = await journal.listPrunableConfirmedTasks(cutoff, budget.remaining() + tried.size);
-      const fresh = tasks.filter(taskId => !tried.has(taskId));
-      if (fresh.length === 0) break;
-      for (const taskId of fresh) {
-        if (budget.remaining() <= 0 || !budget.available()) break pages;
-        tried.add(taskId);
-        try { if (await journal.pruneConfirmedJournalTask(taskId, cutoff)) budget.removed(0); }
+      const limit = budget.remaining();
+      if (limit <= 0) break;
+      const tasks = await journal.listPrunableConfirmedTasks(cutoff, limit, after);
+      if (tasks.some(taskId => kept.has(taskId))) throw new LocalStorageConfigError('config', 'journal listPrunableConfirmedTasks ignored its after cursor');
+      for (const taskId of tasks) {
+        if (!budget.available()) break pages;
+        let pruned = false;
+        try { pruned = await journal.pruneConfirmedJournalTask(taskId, cutoff); }
         catch (error) { failures.push(error); }
+        if (pruned) budget.removed(0);
+        else { kept.add(taskId); after = taskId; }
       }
+      if (tasks.length < limit) break;
     }
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1) throw new AggregateError(failures, 'confirmed journal tasks could not be pruned');
