@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (keys; #2133)** — `scopeSecretStore()` passes an error from the injected store's `scope()` only through the fixed-message secret-store error boundary: a keychain, Credential Manager or secret-shape code keeps its code with a fixed message and no cause, and any other error becomes `PROVIDER_SECRET_STORE_FAILED`. Before, the store's original error, which may carry a key, passed through unchanged. The SDK's own backends build their scope without credential I/O and are unaffected.
+
 - **Fixed (keys; #2031)** — Pi projection directory ownership is checked against the effective uid, which owns files created by the process. When real and effective uids differ, an effective-uid-owned directory is accepted and a directory owned only by the real uid is refused.
 
 - **Security (client, cloud, server, bot-collaboration; #2118)** — Raise the declared dependency floors to `hono` `^4.13.16` and `@hono/node-server` `^2.1.6`, and update the lockfile to 4.13.18 and 2.1.8 respectively, fixing the seven Hono advisories reported by the security nightly. This includes bot-collaboration's optional node-server peer for its testing entry and the client and bot-collaboration development dependencies. Hosts that pin an older copy must update it; existing Host lockfiles and bundled distributions need to be refreshed and rebuilt.

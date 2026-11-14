@@ -92,6 +92,26 @@ describe('scopeSecretStore', () => {
     await expect(left.get(NAME)).resolves.toBe('left');
     await expect(right.get(NAME)).resolves.toBe('right');
   });
+
+  it('passes an injected store scope error on only through the secret-store boundary (#2133)', () => {
+    const store = new InMemorySecretStore();
+    const cases = [
+      [new ByokKeysError('KEYCHAIN_UNAVAILABLE', CANARY, { cause: new Error(CANARY) }), 'KEYCHAIN_UNAVAILABLE'],
+      [new Error(CANARY, { cause: new Error(CANARY) }), 'PROVIDER_SECRET_STORE_FAILED'],
+    ] as const;
+    for (const [thrown, code] of cases) {
+      vi.spyOn(store, 'scope').mockImplementationOnce(() => { throw thrown; });
+      let error: Error | undefined;
+      try {
+        scopeSecretStore(store, SCOPE);
+      } catch (caught) {
+        error = caught as Error;
+      }
+      expect(error).toMatchObject({ code });
+      expect(error?.cause).toBeUndefined();
+      expect(`${error?.message} ${error?.stack}`).not.toContain(CANARY);
+    }
+  });
 });
 
 describe('EnvelopeScopedSecretStore', () => {

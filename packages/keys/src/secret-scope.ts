@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { ByokKeysError } from './errors.js';
 import { assertSecretName, assertSecretNamespace } from './secret-name.js';
-import { secretStoreCall } from './secret-store-call.js';
+import { sanitizeSecretStoreError, secretStoreCall } from './secret-store-call.js';
 import { type SecretStore, assertSharedSecretValue } from './secret-store.js';
 
 /**
@@ -46,7 +46,14 @@ export function scopeSecretStore<TName extends string>(
   store: SecretStore<TName>,
   scope: SecretScope,
 ): SecretStore<TName> {
-  return store.scope(secretScopeId(scope));
+  const id = secretScopeId(scope);
+  // `scope` is synchronous, so the shared boundary is applied here directly:
+  // an injected store's error leaves only in its credential-free form.
+  try {
+    return store.scope(id);
+  } catch (error) {
+    throw sanitizeSecretStoreError(error);
+  }
 }
 
 /**
