@@ -27,10 +27,10 @@ Start with the [Worker example](../../examples/hosted-bot-collaboration-worker/R
 | C1 / 2.1 | t3 / operator seat: `git fetch origin main --tags`; pin `WINDOW_SHA` below in a clean checkout, record `git rev-parse HEAD`; `hc machine ls` | SHA is on main and includes #1663's sender fix and this runbook's keychain argument; otherwise stop | #794 D3, shared by #654(d)(e) |
 | C2 / 2.2 | device seat: `hc exec --on mac-pro 'uname -sm; sw_vers; node -v; bun -v; git --version'`; inspect only the directories/checkouts it prepared under `~/byok-p9` | Node meets the selected tag's engines; Bun follows that tag's packageManager. Do not reuse a root paired on 11-11 | #794 devices / #654(d)(e) |
 | C11 | operator seat: `bun ci`, `bun run build`, `bun run typecheck` at the window SHA; confirm `bunx wrangler@4.158.0 --version` in the example directory | All exit 0; otherwise stop in P0 | All rows |
-| 2.3-2.6 | device seat: latest published stable tag (at least v0.42.0) plus the two-file window SHA overlay; build/typecheck with the commands below | Exactly two overlay files, compilation exits 0; no unpublished SDK code | #794 5.2/chain, #654 5.11/5.15 |
+| 2.3-2.6 | device seat: the published stable tag t3 supplies (at least v0.42.0) plus the two-file window SHA overlay; build/typecheck with the commands below | Exactly two overlay files, compilation exits 0; no unpublished SDK code | #794 5.2/chain, #654 5.11/5.15 |
 | 2.8 | device seat: `bun ci && bun run build` in a separate window SHA checkout. During the window the owner installs browsers: `PLAYWRIGHT_BROWSERS_PATH="$HOME/byok-p9/ms-playwright" bun node_modules/playwright/cli.js install chromium firefox webkit` | W3 uses the main checkout; do not install browser dependencies into the SDK tag checkout. Record an affected engine OPEN/FAIL on failure | #654(e) 5.13 |
 
-Pin versions (operator / t3; all later steps reuse these variables, without taking a new main SHA mid-window):
+Pin versions (operator / t3; all later steps reuse these variables, without taking a new main SHA mid-window). The block uses `set -e`, so run it in the shell that keeps the variables for the window, not one you mind losing: a failed check ends that shell.
 
 ```sh
 set -e
@@ -127,7 +127,7 @@ GRANT CREATE ON DATABASE postgres TO byok_p9_h;
 
 ### C6 baseline file
 
-Save this block verbatim as `_ops/p9/c6-baseline.sql`. These read-only queries exclude P9 names and the shell's temporary `current_user` role, so T4 can compare non-P9 counts/hashes across admin sessions. They do not scan business data. Before running C6, the owner creates an empty mode 600 `_ops/p9/non-p9-names.private.txt` on mini-cf. `\o` keeps schema/role names in that private file; never paste its contents into a public issue/PR. Publish only counts and MD5. T4 overwrites the private file and compares the public counts/hashes with C6.
+Save this block verbatim as `_ops/p9/c6-baseline.sql`. These read-only queries exclude P9 names and the shell's temporary `current_user` role, so T4 can compare non-P9 counts/hashes across admin sessions. They do not scan business data. Before running C6, the owner runs `umask 077` and creates an empty mode 600 `_ops/p9/non-p9-names.private.txt` on mini-cf, in the same shell that later runs `pscale shell`. `\o` keeps schema/role names in that private file; never paste its contents into a public issue/PR. Publish only counts and MD5. T4 overwrites the private file and compares the public counts/hashes with C6.
 
 ```sql
 -- C6 baseline, NEW dev branch byok-p9 only. Names stay in the private file; no data rows.
