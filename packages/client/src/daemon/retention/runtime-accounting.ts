@@ -7,9 +7,11 @@ export interface RetentionLimits {
   readonly treeScanEntries: number;
   /** Inspection share of one pass for each class with resumable directory cleanup. */
   readonly shares: Readonly<Record<'exec-runtime' | 'exec-sdk' | 'daemon-temp' | 'reader-run', number>>;
+  /** Wall-clock window one idle Agent home gets for deletion in a pass. */
+  readonly homeDeletionWindowMs: number;
 }
 export const RETENTION_LIMITS: RetentionLimits = Object.freeze({ passInspections: 8192, treeScanEntries: 16_384,
-  shares: Object.freeze({ 'exec-runtime': 4096, 'exec-sdk': 1024, 'daemon-temp': 1024, 'reader-run': 1024 }) });
+  shares: Object.freeze({ 'exec-runtime': 4096, 'exec-sdk': 1024, 'daemon-temp': 1024, 'reader-run': 1024 }), homeDeletionWindowMs: 250 });
 /** The pass limit a registry was built with, kept off the public sweeper options; one injection sets both. */
 export const registryPassInspections = new WeakMap<object, number>();
 /** Partial leaf reclamation is private pass state, not a public SweepBudget capability. */

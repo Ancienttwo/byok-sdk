@@ -189,7 +189,8 @@ it('idle homes lose result records past the TTL or the 256-record bound; a lease
  const fresh=Array.from({length:258},(_,index)=>path.join(results,resultName(16+index)));
  for(const [index,file] of fresh.entries()){await fs.writeFile(file,'{}');await stamp(file,new Date(Date.parse('2026-10-13T00:00:00Z')+index*1000).toISOString());}
  await stamp(freshTemp,'2026-10-13T00:00:00Z');
- const f=await fixture({home});
+ // The record bound, not the pass or home wall-clock windows, must decide what each pass removes.
+ const f=await fixture({home,maxPassDurationMs:DAY,limits:{...RETENTION_LIMITS,homeDeletionWindowMs:DAY}});
  expect(f.registry.classes.find(entry=>entry.id==='agent-result')!.authority).toMatchObject({owner:'sdk',scope:'agent-home',bound:{kind:'ttl',ttlMs:7*DAY,maxEntries:256}});
  await f.sweeper.runPass('periodic');expect(usage(f,'agent-result')).toMatchObject({measured:true,truncated:false,entries:261});
  for(const file of [expired,expiredTemp,fresh[0]!])expect(await exists(file)).toBe(true);
@@ -345,10 +346,10 @@ it('a daemon store with a long path claims and uses its short default scratch ro
 });
 
 it('production retention limits keep their reviewed values',()=>{
- expect(RETENTION_LIMITS).toEqual({passInspections:8192,treeScanEntries:16_384,shares:{'exec-runtime':4096,'exec-sdk':1024,'daemon-temp':1024,'reader-run':1024}});
+ expect(RETENTION_LIMITS).toEqual({passInspections:8192,treeScanEntries:16_384,shares:{'exec-runtime':4096,'exec-sdk':1024,'daemon-temp':1024,'reader-run':1024},homeDeletionWindowMs:250});
 });
 // Production limits scaled down 64x keep their ratios, so small fixtures reach the same branches.
-const limits:RetentionLimits={passInspections:128,treeScanEntries:256,shares:{'exec-runtime':64,'exec-sdk':16,'daemon-temp':16,'reader-run':16}};
+const limits:RetentionLimits={passInspections:128,treeScanEntries:256,shares:{'exec-runtime':64,'exec-sdk':16,'daemon-temp':16,'reader-run':16},homeDeletionWindowMs:250};
 // Inspections, not wall-clock time, must bound these passes: under load the 10 s
 // default pass limit ends a pass before the runtime share is spent (#2082).
 it('reclaims a released runtime larger than the runtime pass share across periodic passes', async () => {

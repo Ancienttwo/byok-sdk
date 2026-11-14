@@ -15,7 +15,7 @@ afterEach(async () => { for (const dispose of close.splice(0)) await dispose(); 
 const now = new Date('2026-10-28T00:00:00Z');
 const old = new Date('2026-09-01T00:00:00Z');
 // Production limits scaled down 64x keep their ratios, so small fixtures reach the same branches.
-const limits: RetentionLimits = { passInspections: 128, treeScanEntries: 256, shares: { 'exec-runtime': 64, 'exec-sdk': 16, 'daemon-temp': 16, 'reader-run': 16 } };
+const limits: RetentionLimits = { passInspections: 128, treeScanEntries: 256, shares: { 'exec-runtime': 64, 'exec-sdk': 16, 'daemon-temp': 16, 'reader-run': 16 }, homeDeletionWindowMs: 250 };
 async function fixture() {
   const store = testScratchRoot();
   const config = resolveStorageConfig(store, { scratchRoot: testScratchRoot() });
