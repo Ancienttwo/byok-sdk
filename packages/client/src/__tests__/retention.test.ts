@@ -424,6 +424,8 @@ it('keeps bytes already removed when a later unlink fails mid-pass, then complet
  expect(tally.deleted).toBe(1);expect(5+retried+tally.bytes).toBe(15+Buffer.byteLength(released));
  expect(await exists(target)).toBe(false);
 });
+// 9216 files plus one 4096-inspection pass: up to 15 s measured on mac-pro x64 with four
+// concurrent copies of this file (#2082), so this test keeps the same headroom as the one above.
 it('a large expired runtime backlog leaves pass budget for agent-result in the same pass',async()=>{
  const {home,binding,results}=await idleHome();await fs.mkdir(results,{recursive:true});
  const record=path.join(results,resultName(0));await fs.writeFile(record,'{}');await old(record);await binding.lease.release();
@@ -434,7 +436,7 @@ it('a large expired runtime backlog leaves pass budget for agent-result in the s
  expect(report.truncated).toBe(true);expect(await exists(record)).toBe(false);
  expect((await fs.readdir(s.runtimeDir)).length).toBeGreaterThan(0);
  expect(f.failures).toEqual([]);
-});
+}, 30_000);
 const ledgerHex=(c:string)=>c.repeat(64);
 async function sessionLedgers(directory:string,files:Record<string,string>){
  const root=path.join(directory,'.byok','runtime-sessions');await fs.mkdir(root,{recursive:true});
