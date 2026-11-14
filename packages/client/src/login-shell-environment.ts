@@ -165,6 +165,24 @@ export function setLoginShellSnapshotSource(source: (() => Promise<LoginShellSna
 }
 
 /**
+ * Sets `env.HOME` to this process's own `HOME` from `live`, the rule wherever
+ * the login-shell snapshot stands in for this process's environment: the
+ * daemon under `--service` (#2017) and the default runtime environment of
+ * its tasks (#2084). An rc that resets `HOME` cannot move either to another
+ * home. When `live` has no `HOME`, `env` keeps the snapshot's. Returns the
+ * names it wrote. Only `HOME` is pinned: `PATH`, `XDG_*` and other values an
+ * rc derived from its own `HOME` stay as the rc set them.
+ *
+ * @internal
+ */
+export function pinLiveHome(env: Record<string, string | undefined>, live: Readonly<Record<string, string | undefined>>): readonly string[] {
+  const home = live.HOME;
+  if (home === undefined) return [];
+  env.HOME = home;
+  return ['HOME'];
+}
+
+/**
  * Takes one snapshot without the once-per-process latch.
  *
  * @internal

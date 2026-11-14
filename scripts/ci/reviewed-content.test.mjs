@@ -454,7 +454,7 @@ test('#794 D3: the Worker example manifest and lock rows are admitted by the sam
   assert.throws(() => selectImpact(['bun.lock'], f), /lock rows differ/, 'a lock entry that differs from the manifest');
 });
 
-test('#1845: the published K8 manifest has one reviewed shape; the K4 example stays a devDependency', t => {
+function k8Fixture(t) {
   const f = fixture(t);
   for (const id of ['protocol', 'server', 'cloud', 'core']) {
     const manifest = { name: `@byok-sdk/${id}`, version: '0.28.0' };
@@ -478,6 +478,11 @@ test('#1845: the published K8 manifest has one reviewed shape; the K4 example st
     dependencies: { '@byok-sdk/client': 'workspace:*', '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/server': 'workspace:*' },
     peerDependencies: peers, peerDependenciesMeta: { '@hono/node-server': { optional: true }, vitest: { optional: true } },
     devDependencies: { '@byok-sdk/cloud': 'workspace:*', '@byok-sdk/core': 'workspace:*', '@byok-sdk/example-host-execution-core': 'workspace:*', ...peers } };
+  return { f, dir, path, manifest };
+}
+
+test('#1845: the published K8 manifest has one reviewed shape; the K4 example stays a devDependency', t => {
+  const { f, dir, path, manifest } = k8Fixture(t);
   f.write(path, manifest);
   assert.ok(selectImpact([path], f).dirs.includes(dir));
 
@@ -489,10 +494,67 @@ test('#1845: the published K8 manifest has one reviewed shape; the K4 example st
     [{ ...manifest, files: [...manifest.files, 'src'] }, /unreviewed shape/],
     [{ ...manifest, private: true }, /unreviewed field/],
     [{ ...manifest, devDependencies: { ...manifest.devDependencies, 'left-pad': '1.0.0' } }, /reuse a base dependency spec \(left-pad\)/],
+    [{ ...manifest, devDependencies: { ...manifest.devDependencies, '@hono/node-server': '^2.1.6' },
+      peerDependencies: { ...manifest.peerDependencies, '@hono/node-server': '^2.1.6' } }, /reuse a base dependency spec \(@hono\/node-server\)/],
     [{ ...manifest, devDependencies: (({ '@byok-sdk/cloud': _cloud, ...rest }) => rest)(manifest.devDependencies) }, /edges differ from the reviewed graph/],
   ]) {
     f.write(path, candidate);
     assert.throws(() => selectImpact([path], f), reason);
+  }
+});
+
+test('#2118: published K8 dependency updates keep package identity and a nondecreasing stable registry floor', async t => {
+  const { f, dir, path, manifest } = k8Fixture(t);
+  manifest.devDependencies['@types/node'] = '^24';
+  manifest.devDependencies.typescript = '^7.0.2';
+  f.write(path, manifest); rebase(f, 'published K8');
+  const candidate = spec => ({ ...manifest,
+    devDependencies: { ...manifest.devDependencies, '@hono/node-server': spec },
+    peerDependencies: { ...manifest.peerDependencies, '@hono/node-server': spec },
+  });
+  for (const spec of ['^2.1.3', '~2.1.3', '2.1.3', '^2.1.6', '~2.1.6', '2.1.6', '^2.1.10', '^2.2.0', '^3.0.0']) {
+    await t.test(`admits ${spec} from ^2.1.3`, () => {
+      f.write(path, candidate(spec));
+      const plan = selectImpact([path], f);
+      assert.ok(plan.dirs.includes(dir));
+      assert.ok(plan.families.includes('npm-release-pack'));
+    });
+  }
+  for (const spec of [
+    '^2.1.2', '~2.0.99', '1.99.99', '^2.1.6 || ^1', '>=2.1.6', '<3.0.0', '2.1.3 - 2.1.6',
+    '^2.1.6 ', ' ^2.1.6', '^ 2.1.6', '2.1.6\n', '2.1.6\t', '2.1.6-rc.1', '^2.1.6-alpha.1', '~2.1.6-rc.1',
+    '2.1.6+build.1', '^2.1', '2.1.x', '*', 'latest', 'v2.1.6', '2.01.6',
+    'git+https://github.com/honojs/node-server.git#v2.1.6', 'https://registry.npmjs.org/@hono/node-server/-/node-server-2.1.6.tgz',
+    'file:../node-server', 'link:../node-server', 'workspace:*', 'npm:another-package@2.1.6', 'github:honojs/node-server',
+    'honojs/node-server', 216, null,
+  ]) {
+    await t.test(`refuses ${JSON.stringify(spec)}`, () => {
+      f.write(path, candidate(spec));
+      assert.throws(() => selectImpact([path], f), /stable registry range with a nondecreasing floor/);
+    });
+  }
+  for (const [name, change, reason] of [
+    ['new devDependency, even when declared elsewhere in the base', m => { m.devDependencies.x = '1.0.0'; }, /dependency names/],
+    ['deleted devDependency', m => { delete m.devDependencies.typescript; }, /dependency names/],
+    ['renamed devDependency', m => { delete m.devDependencies.typescript; m.devDependencies.x = '1.0.0'; }, /dependency names/],
+    ['changed workspace edge', m => { m.devDependencies['@byok-sdk/cloud'] = '1.0.0'; }, /workspace dependency/],
+    ['old abbreviated range', m => { m.devDependencies['@types/node'] = '^24.1.0'; }, /stable registry range/],
+    ['unequal optional peer and devDependency', m => { m.peerDependencies['@hono/node-server'] = '^2.1.3'; }, /optional testing peers/],
+    ['non-optional peer', m => { m.peerDependenciesMeta = { ...m.peerDependenciesMeta, '@hono/node-server': { optional: false } }; }, /optional testing peers/],
+    ['unreviewed manifest shape', m => { m.scripts = { ...m.scripts, test: 'echo pass' }; }, /unreviewed shape/],
+  ]) {
+    await t.test(`refuses ${name}`, () => {
+      const m = candidate('^2.1.6'); change(m); f.write(path, m);
+      assert.throws(() => selectImpact([path], f), reason);
+    });
+  }
+  for (const previous of ['~2.1.3', '2.1.3', 'git+https://github.com/honojs/node-server.git#v2.1.3', '^2.1.3 || ^1', '2.1.3-rc.1']) {
+    await t.test(`checks the original range ${previous}`, () => {
+      f.write(path, candidate(previous)); rebase(f, `base range ${previous}`);
+      f.write(path, candidate('^2.1.6'));
+      if (previous === '~2.1.3' || previous === '2.1.3') assert.ok(selectImpact([path], f).dirs.includes(dir));
+      else assert.throws(() => selectImpact([path], f), /stable registry range with a nondecreasing floor/);
+    });
   }
 });
 

@@ -229,13 +229,13 @@
         "@byok-sdk/cloud": "workspace:*",
         "@byok-sdk/core": "workspace:*",
         "@byok-sdk/example-host-execution-core": "workspace:*",
-        "@hono/node-server": "^2.1.3",
+        "@hono/node-server": "^2.1.6",
         "@types/node": "^24",
         "typescript": "^7.0.2",
         "vitest": "^5.1.0",
       },
       "peerDependencies": {
-        "@hono/node-server": "^2.1.3",
+        "@hono/node-server": "^2.1.6",
         "vitest": "^5.1.0",
       },
       "optionalPeers": [
@@ -276,7 +276,7 @@
       },
       "devDependencies": {
         "@byok-sdk/server": "workspace:*",
-        "@hono/node-server": "^2.1.3",
+        "@hono/node-server": "^2.1.6",
         "esbuild": "0.28.1",
       },
       "optionalDependencies": {
@@ -289,7 +289,7 @@
       "dependencies": {
         "@byok-sdk/core": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
-        "hono": "^4.13.11",
+        "hono": "^4.13.16",
         "zod": "^4.6.6",
       },
     },
@@ -366,8 +366,8 @@
         "@byok-sdk/cloud": "workspace:*",
         "@byok-sdk/core": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
-        "@hono/node-server": "^2.1.3",
-        "hono": "^4.13.11",
+        "@hono/node-server": "^2.1.6",
+        "hono": "^4.13.16",
       },
       "devDependencies": {
         "@byok-sdk/conformance": "workspace:*",
@@ -613,7 +613,7 @@
 
     "@google/genai": ["@google/genai@2.21.0", "", { "dependencies": { "google-auth-library": "^10.3.0", "p-retry": "^4.6.2", "protobufjs": "^7.5.4", "ws": "^8.18.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.25.2" }, "optionalPeers": ["@modelcontextprotocol/sdk"] }, "sha512-+PDtco2/Z0ONdzCGekCoCT+O1VJS9xJQNN4XzQpXG/t3El/SWWMkCWlFRO1KmivOHPa4Q0VjUYu1HBKCZ/v33Q=="],
 
-    "@hono/node-server": ["@hono/node-server@2.1.5", "", { "peerDependencies": { "hono": "^4 || ^5.0.0-0" } }, "sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q=="],
+    "@hono/node-server": ["@hono/node-server@2.1.8", "", { "peerDependencies": { "hono": "^4 || ^5.0.0-0" } }, "sha512-jdf7FHh6A1lzjpHHQUgxsg2GeER2vMetnAOfeActzcoli6jamlK+NAwL6Dsr5Fl3BS3tYUQzCdtZjU8Qxv7bEA=="],
 
     "@hpke/common": ["@hpke/common@1.11.0", "", {}, "sha512-ZV551VgT4+pjTN1xlM1Zu9CrvLcff1sV1F2iFQJgg3gVNLy/hiOgLOjK3cz5LZYMKYkt54xe7ityu0rTYVSDGw=="],
 
@@ -1383,7 +1383,7 @@
 
     "highlight.js": ["highlight.js@10.7.3", "", {}, "sha512-tzcUFauisWKNHaRkN4Wjl/ZA07gENAjFl3J/c480dprkGTg5EQstgaNFqBfUqCq54kZRIEcreTsAgF/m2quD7A=="],
 
-    "hono": ["hono@4.13.14", "", {}, "sha512-yhRLQ21U6qa9Hsu2N7Qcbh8tE+WKEcoErjIo56LeSGiGXGp9sA7UpE86Ui9uexb61KakiGwuHMn2QdV7w6i6kQ=="],
+    "hono": ["hono@4.13.18", "", {}, "sha512-H9q/E1XizaWstJxUW881dmLxEj+t/TrGGnyxINkm4+sK0qUwsMtFdo2BWI9Vs3cIS19MU6b6iCijoUoEf4f3DA=="],
 
     "hosted-git-info": ["hosted-git-info@9.0.3", "", { "dependencies": { "lru-cache": "^11.1.0" } }, "sha512-Hc+ghLoSt6QaYZUv0WBiIvmMDZuZZ7oaDvdH8MbfOO4lOsxdXLEvuC6ePoGs9H1X9oCLyq6+NVN0MKqD+ydxyg=="],
 

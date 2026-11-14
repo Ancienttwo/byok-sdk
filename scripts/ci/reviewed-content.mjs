@@ -193,8 +193,47 @@ function verifyDeclaredSpecs(manifest, fields, { base, cwd }, additions) {
   }
 }
 
+/** Parse only a stable registry version, optionally prefixed by ^ or ~. */
+function stableRegistryFloor(spec) {
+  if (typeof spec !== 'string') return undefined;
+  const match = /^[~^]?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(spec);
+  // `$` also matches before a final newline; dependency specs must match in full.
+  return match?.[0] === spec ? match.slice(1).map(BigInt) : undefined;
+}
+
+/**
+ * Supply-chain gate for an already published K8 workspace. Same-field package
+ * names must stay fixed so an update cannot add, remove or rename a dependency;
+ * workspace edges stay byte-identical so it cannot redirect local authority.
+ * Both old and new external specs must be single stable registry ranges (^X.Y.Z,
+ * ~X.Y.Z or X.Y.Z): this excludes source/alias switches, prereleases, tags,
+ * whitespace and composite ranges that could hide a different package or floor.
+ * Compare numeric version components, ignoring ^/~, to prevent lowering the
+ * CI_BASE floor and re-admitting versions an earlier dependency update excluded.
+ * Unchanged specs (including existing abbreviated ranges) remain unchanged;
+ * first publication still uses the original base-declaration admission below.
+ */
+function verifyK8DependencyUpdates(before, after) {
+  for (const field of [...DEPENDENCY_FIELDS, 'peerDependencies']) {
+    if (!plain(before[field]) || !plain(after[field])
+      || !isDeepStrictEqual(Object.keys(before[field]).sort(), Object.keys(after[field]).sort())) {
+      throw new Error(`Reviewed CI mapping required: K8 ${field} dependency names must not change`);
+    }
+    for (const [name, spec] of Object.entries(after[field])) {
+      const previous = before[field][name];
+      if (previous === spec) continue;
+      if (name.startsWith('@byok-sdk/')) throw new Error(`Reviewed CI mapping required: K8 workspace dependency must not change (${name})`);
+      const oldFloor = stableRegistryFloor(previous), newFloor = stableRegistryFloor(spec);
+      const difference = newFloor && oldFloor ? newFloor.findIndex((part, index) => part !== oldFloor[index]) : -1;
+      if (!oldFloor || !newFloor || (difference !== -1 && newFloor[difference] < oldFloor[difference])) {
+        throw new Error(`Reviewed CI mapping required: K8 ${field}.${name} must retain a stable registry range with a nondecreasing floor`);
+      }
+    }
+  }
+}
+
 /** #1845: the whole K8 manifest against its reviewed shape (see K8 above). */
-function verifyK8Manifest(manifest, { base, cwd, workspaceGraph }) {
+function verifyK8Manifest(manifest, { base, cwd, workspaceGraph, before }) {
   const refuse = reason => { throw new Error(`Reviewed CI mapping required: the K8 manifest ${reason}`); };
   if (!plain(manifest) || Object.keys(manifest).some(key => !K8_FIELDS.has(key))) refuse('has an unreviewed field');
   if (manifest.name !== K8.name || manifest.type !== 'module' || !version(manifest.version) || typeof manifest.description !== 'string'
@@ -210,7 +249,8 @@ function verifyK8Manifest(manifest, { base, cwd, workspaceGraph }) {
     || K8_OPTIONAL_PEERS.some(name => peers[name] !== manifest.devDependencies?.[name])) {
     refuse('peers must be the optional testing peers at the tested devDependency specs');
   }
-  verifyDeclaredSpecs(manifest, ['devDependencies'], { base, cwd });
+  if (before?.name === K8.name && before.private !== true) verifyK8DependencyUpdates(before, manifest);
+  else verifyDeclaredSpecs(manifest, ['devDependencies'], { base, cwd });
   const edges = [...new Set(DEPENDENCY_FIELDS.flatMap(field => Object.keys(manifest[field] ?? {}).filter(name => name.startsWith('@byok-sdk/'))))].sort();
   if (!isDeepStrictEqual(edges, [...(workspaceGraph?.[K8.dir]?.dependencies ?? [])].sort())) refuse('edges differ from the reviewed graph');
   return manifest;
@@ -272,7 +312,8 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     return { dirs: [] };
   }
   if (path === `${K8.dir}/package.json`) {
-    verifyK8Manifest(JSON.parse(readFileSync(resolve(cwd, path), 'utf8')), { base, cwd, workspaceGraph });
+    const before = existed ? JSON.parse(execFileSync('git', ['show', `${base}:${path}`], { cwd, encoding: 'utf8' })) : undefined;
+    verifyK8Manifest(JSON.parse(readFileSync(resolve(cwd, path), 'utf8')), { base, cwd, workspaceGraph, before });
     return { dirs: [K8.dir] };
   }
   if (!existed && /^examples\/[^/]+\/package\.json$/.test(path)) {
