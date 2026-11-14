@@ -109,7 +109,7 @@ const TERMINALS: ReadonlySet<string> = new Set<DaemonTaskTerminal>(['complete', 
 export class TaskSettlementRegistry implements TaskRuntimeOwnership {
   readonly #entries = new Map<string, Entry>();
   readonly #offersSeen = new Set<string>();
-  readonly #reads = new Map<string, Set<{ journaled: boolean }>>();
+  readonly #reads = new Map<string, Set<{ journaled: boolean; resolve(settlement: DaemonTaskSettlement): void }>>();
   #journal: TaskSettlementJournal | undefined;
 
   bindJournal(journal: TaskSettlementJournal): void {
@@ -150,21 +150,21 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
     const entry = this.#entry(taskId);
     if (entry.result !== undefined || entry.runtime === 'failed') return;
     entry.runtime = 'disposed';
-    this.#settle(entry);
+    this.#settle(taskId, entry);
   }
 
   runtimeDisposalFailed(taskId: string): void {
     const entry = this.#entry(taskId);
     if (entry.result !== undefined) return;
     entry.runtime = 'failed';
-    this.#settle(entry);
+    this.#settle(taskId, entry);
   }
 
   terminalSettled(taskId: string, terminal: DaemonTaskTerminal, delivery: DaemonTaskSettlement['delivery']): void {
     this.#offersSeen.delete(taskId);
     const entry = this.#entry(taskId);
     entry.delivered ??= { terminal, delivery };
-    this.#settle(entry);
+    this.#settle(taskId, entry);
   }
 
   /** Only for a received offer with no execution owner, after its cloud cancel is durable. */
@@ -183,13 +183,19 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
     if (journal === undefined) throw new Error('daemon is not started; call start() first');
     let entry = this.#entries.get(taskId);
     while (entry === undefined) {
-      const read = { journaled: false };
+      const { promise, resolve, reject } = Promise.withResolvers<DaemonTaskSettlement | 'pending' | 'unknown'>();
+      const read = { journaled: false, resolve };
       const reads = this.#reads.get(taskId) ?? new Set();
       this.#reads.set(taskId, reads.add(read));
+      const abort = (): void => reject(signal?.reason);
       let durable: DaemonTaskSettlement | 'pending' | 'unknown';
       try {
-        durable = await abortable(durableSettlement(journal, taskId), signal);
+        signal?.addEventListener('abort', abort, { once: true });
+        // Register before entering Host code; a runtime result can also finish this read.
+        void durableSettlement(journal, taskId).then(resolve, reject);
+        durable = await promise;
       } finally {
+        signal?.removeEventListener('abort', abort);
         reads.delete(read);
         if (reads.size === 0) this.#reads.delete(taskId);
       }
@@ -234,22 +240,13 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
     return entry;
   }
 
-  #settle(entry: Entry): void {
+  #settle(taskId: string, entry: Entry): void {
     if (entry.result !== undefined || entry.delivered === undefined || entry.runtime === 'held') return;
     entry.result = { ...entry.delivered, disposal: entry.runtime === 'none' ? 'none' : entry.runtime };
+    for (const read of this.#reads.get(taskId) ?? []) read.resolve(entry.result);
     for (const waiter of entry.waiters) waiter.resolve(entry.result);
     entry.waiters.clear();
   }
-}
-
-// The journal read keeps running after an abort; only the wait stops.
-function abortable<T>(read: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-  if (signal === undefined) return read;
-  return new Promise<T>((resolve, reject) => {
-    const abort = (): void => reject(signal.reason);
-    signal.addEventListener('abort', abort, { once: true });
-    void read.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
-  });
 }
 
 async function durableSettlement(journal: TaskSettlementJournal, taskId: string): Promise<DaemonTaskSettlement | 'pending' | 'unknown'> {
