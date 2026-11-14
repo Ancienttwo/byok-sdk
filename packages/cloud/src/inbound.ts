@@ -724,19 +724,8 @@ async function applyInboundGate(
       && harnessId !== attempt.claimedHarnessId) return refuse('claim_harness_mismatch');
     const device = await stores.devices.get(deviceId);
     if (harnessId !== undefined && device?.harnesses?.some(harness => harness.id === harnessId) !== true) return refuse('claim_harness_unavailable');
-    const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, attempt.agentRef, hashOfferBytes);
-    const offer = await stores.receipts.get(`task-offer:${messageId}`);
-    // Redaction and the archive (#1120) leave the offer a tombstone. Only an
-    // archived task without a redaction receipt is answered past it: a claimed
-    // one keeps its immutable claim snapshot, which the winning claim was
-    // checked against the offer to get, and the harness check above and the
-    // claim CAS compare a replay with that snapshot, so the replay answers as
-    // it did before the archive. Every other tombstoned offer refuses.
-    if (offer !== undefined && isTaskRedactionTombstone(offer.body)) {
-      if (!(await archivedWithoutRedaction(stores, attempt)) || attempt.ownerDeviceId === undefined) return refuse('claim_offer_mismatch');
-    } else if (offer !== undefined) {
-      if (offerHarnessBindingConflicts(offer.body, harnessId)) return refuse('claim_offer_mismatch');
-    } else if (harnessId !== undefined) return refuse('claim_offer_mismatch');
+    const rejected = await checkOfferHarnessBinding(stores, deviceId, attempt, envelope, 'claim_offer_mismatch');
+    if (rejected !== undefined) return rejected;
   }
   let unclaimedInterruption = false;
   if (envelope.type === 'task.fail' && envelope.payload.recovery !== undefined) {
@@ -746,26 +735,8 @@ async function applyInboundGate(
     if (envelope.payload.sealed !== undefined || envelope.payload.reason !== 'daemon_interrupted' || envelope.payload.retryable !== false) {
       return refuse('recovery_report_invalid');
     }
-    const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, attempt.agentRef, hashOfferBytes);
-    if (envelope.payload.recovery.offerId !== messageId) return refuse('recovery_offer_mismatch');
-    const offer = await stores.receipts.get(`task-offer:${messageId}`);
-    if (offer === undefined) return refuse('recovery_offer_mismatch');
-    if (isTaskRedactionTombstone(offer.body)) {
-      // The offer content is gone (see the claim above), and only an archived
-      // task without a redaction receipt goes on. A claimed one's harness
-      // binding is its claim snapshot, checked below; an unclaimed one keeps
-      // only its terminal receipt, which only an exact replay of the recorded
-      // recovery matches.
-      if (!(await archivedWithoutRedaction(stores, attempt))) return refuse('recovery_offer_mismatch');
-      if (attempt.ownerDeviceId === undefined) {
-        const terminal = await stores.receipts.get(terminalReceiptKey(taskId));
-        if (terminal === undefined || !(await sameTaskBody(terminal.body, encodeEnvelope(envelope), { sha256: hashOfferBytes }))) {
-          return refuse('recovery_offer_mismatch');
-        }
-      }
-    } else {
-      if (offerHarnessBindingConflicts(offer.body, envelope.payload.harnessId)) return refuse('recovery_offer_mismatch');
-    }
+    const rejected = await checkOfferHarnessBinding(stores, deviceId, attempt, envelope, 'recovery_offer_mismatch');
+    if (rejected !== undefined) return rejected;
     // For automatic selection the target device reports its sealed local
     // admission. Inventory is mutable and is not historical claim authority.
     unclaimedInterruption = attempt.ownerDeviceId === undefined && attempt.claimedHarnessId === undefined;
@@ -1078,11 +1049,38 @@ async function taskRedacted(stores: TenantStores, taskId: string): Promise<boole
   return await stores.receipts.get(taskRedactionReceiptKey(taskId)) !== undefined;
 }
 
-/** A claim or recovery report's harness binding contradicts the sealed offer: a different harness, or a harness named for an offer that pins a runtime or dispatch selection. */
-function offerHarnessBindingConflicts(offerBody: string, harnessId: string | undefined): boolean {
-  const sealed = JSON.parse(offerBody) as { payload: { harnessId?: string; runtime?: string; dispatchSelection?: unknown } };
-  if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return true;
-  return sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId;
+/** Check a claim or recovery against its sealed offer, retaining each report's missing-offer and archive rules. */
+async function checkOfferHarnessBinding(
+  stores: TenantStores,
+  deviceId: string,
+  attempt: TaskAttempt,
+  envelope: Extract<Envelope, { type: 'task.claim' | 'task.fail' }>,
+  reason: 'claim_offer_mismatch' | 'recovery_offer_mismatch',
+): Promise<Refused | undefined> {
+  const harnessId = envelope.payload.harnessId;
+  const messageId = await taskOfferMessageId(stores.tenant, attempt.taskId, deviceId, attempt.agentRef, hashOfferBytes);
+  if (envelope.type === 'task.fail' && envelope.payload.recovery?.offerId !== messageId) return refuse(reason);
+  const offer = await stores.receipts.get(`task-offer:${messageId}`);
+  if (offer === undefined) {
+    return envelope.type === 'task.fail' || harnessId !== undefined ? refuse(reason) : undefined;
+  }
+  if (isTaskRedactionTombstone(offer.body)) {
+    // Only an archive without explicit redaction permits replay. A claim
+    // needs its immutable ownership snapshot; unclaimed recovery needs the
+    // exact recorded terminal. Claimed harness identity is fenced by the caller.
+    if (!(await archivedWithoutRedaction(stores, attempt))) return refuse(reason);
+    if (attempt.ownerDeviceId === undefined) {
+      if (envelope.type === 'task.claim') return refuse(reason);
+      const terminal = await stores.receipts.get(terminalReceiptKey(attempt.taskId));
+      if (terminal === undefined || !(await sameTaskBody(terminal.body, encodeEnvelope(envelope), { sha256: hashOfferBytes }))) {
+        return refuse(reason);
+      }
+    }
+    return;
+  }
+  const sealed = JSON.parse(offer.body) as { payload: { harnessId?: string; runtime?: string; dispatchSelection?: unknown } };
+  if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return refuse(reason);
+  if (sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId) return refuse(reason);
 }
 
 /** The archive (#1120) removed the content, and no explicit redaction did: redaction's refusals take precedence. */
