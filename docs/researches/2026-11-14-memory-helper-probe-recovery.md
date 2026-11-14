@@ -43,10 +43,10 @@ Normalized static closure measurements (budgets set exactly to measurement):
 
 | Entry | Before | After | Delta |
 | --- | ---: | ---: | ---: |
-| `@byok-sdk/client` | 2,468,426 | 2,471,933 | +3,507 B |
-| `bin:byok-agent` | 2,463,129 | 2,466,636 | +3,507 B |
-| `@byok-sdk/bot-collaboration` | 2,799,661 | 2,803,168 | +3,507 B |
-| `@byok-sdk/bot-collaboration/testing` | 3,251,254 | 3,254,761 | +3,507 B |
+| `@byok-sdk/client` | 2,468,426 | 2,471,972 | +3,546 B |
+| `bin:byok-agent` | 2,463,129 | 2,466,675 | +3,546 B |
+| `@byok-sdk/bot-collaboration` | 2,799,661 | 2,803,207 | +3,546 B |
+| `@byok-sdk/bot-collaboration/testing` | 3,251,254 | 3,254,800 | +3,546 B |
 | `@byok-sdk/client/agent-memory` | 80,957 | 82,051 | +1,094 B |
 
 The retry calculation reuses `backoffCeilingMs`; the existing timer utility only defines the maximum native timer delay, so it does not implement this cancellable retry loop. The >=2 KB entry growth was approved by t3 with t4's joint sign-off before budget updates. No diagnostics or regression cases were removed to reduce size.

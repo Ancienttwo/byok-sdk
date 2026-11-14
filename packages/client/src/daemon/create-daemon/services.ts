@@ -143,12 +143,12 @@ export function recoverAgentMemoryBackend(scope: DaemonScope, signal: AbortSigna
     timer = setTimeout(async () => {
       try {
         await provenAgentMemoryBackend(scope, signal);
-        if (!signal.aborted) changed();
       } catch {
         // A newly invalid helper is authoritative; it must not spin forever.
         agentMemoryBackendProof(scope).status = 'refused';
         console.error('[byok/client] agent memory backend refused: helper verification failed');
       }
+      if (!signal.aborted) changed();
       schedule();
     }, Math.min(backoffCeilingMs(attempt++, 1_000), 30_000));
     timer.unref?.();
@@ -203,7 +203,7 @@ async function probeAgentMemoryBackend(daemonScope: DaemonScope, signal?: AbortS
 export function agentMemoryCommitStore(daemonScope: DaemonScope): AgentMemoryCommitStore {
   const { daemonState } = daemonScope;
   return createAgentMemoryCommitStore({
-    backend: () => provenAgentMemoryBackend(daemonScope),
+    backend: () => provenAgentMemoryBackend(daemonScope, daemonState.blobLifecycleAbort?.signal),
     taskCompleted: async (taskId) => {
       const { journal, retentionIdentity } = daemonState;
       if (journal === undefined || retentionIdentity === undefined) throw new Error('the task journal is not open');
