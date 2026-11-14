@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, globSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { builtinModules, isBuiltin } from 'node:module';
 import { build } from 'esbuild';
 import path from 'node:path';
@@ -111,21 +111,22 @@ export async function runtimeSmokeImports(root) {
         }
         if (!conditions || !specifier) return null;
         return { importer: location.file, specifier: JSON.parse(specifier),
-          kind: /package definition \("(?:types", ")?node"\)/.test(conditions.text)
-            ? 'node-only boundary' : 'non-workerd condition boundary' };
+          kind: 'unmatched condition boundary',
+          conditions: JSON.parse(`[${conditions.text.match(/package definition \(([^)]*)\)/)[1]}]`) };
       });
       if (!classified.length || classified.some(boundary => !boundary
         || boundaries.has(boundaryKey(boundary.importer, boundary.specifier)))) throw error;
       for (const boundary of classified) boundaries.set(boundaryKey(boundary.importer, boundary.specifier), boundary);
     }
   }
-  // esbuild leaves unresolved guarded require() edges external. These are
-  // optional package loads; a missing relative file is still a broken graph.
+  // esbuild leaves unresolved guarded require() edges external. Only absent
+  // bare packages are optional; relative, absolute and #imports targets belong
+  // to the package's own graph and must resolve even inside try/catch.
   for (const [importer, input] of Object.entries(metafile.inputs)) {
     for (const edge of input.imports) {
       if (!edge.external || isBuiltin(edge.path) || edge.path.startsWith('cloudflare:')
         || boundaries.has(boundaryKey(importer, edge.path))) continue;
-      if (edge.path.startsWith('.') || path.isAbsolute(edge.path)) throw new Error(`${importer}: missing module ${edge.path}`);
+      if (edge.path.startsWith('.') || edge.path.startsWith('#') || path.isAbsolute(edge.path)) throw new Error(`${importer}: missing module ${edge.path}`);
       let directory = path.dirname(path.resolve(root, importer));
       for (;;) {
         if (existsSync(path.join(directory, 'node_modules', packageName(edge.path)))) {
@@ -139,7 +140,9 @@ export async function runtimeSmokeImports(root) {
       boundaries.set(boundaryKey(importer, edge.path), boundary);
     }
   }
-  const workspace = realpathSync(path.join(root, 'packages'));
+  const workspaces = globSync(readJson(path.join(root, 'package.json')).workspaces, { cwd: root })
+    .filter(directory => existsSync(path.join(root, directory, 'package.json')))
+    .map(directory => realpathSync(path.join(root, directory)));
   const thirdPartyCloudflare = new Map();
   for (const entry of exports) {
     const seen = new Set();
@@ -149,8 +152,8 @@ export async function runtimeSmokeImports(root) {
       for (const edge of metafile.inputs[file]?.imports ?? []) {
         if (edge.path.startsWith('cloudflare:')) {
           const location = realpathSync(path.resolve(root, file));
-          const owned = inside(workspace, location)
-            && !path.relative(workspace, location).split(path.sep).includes('node_modules');
+          const owned = workspaces.some(workspace => inside(workspace, location)
+            && !path.relative(workspace, location).split(path.sep).includes('node_modules'));
           const via = [...trail, file, edge.path];
           if (owned) throw new Error(`${entry.id}: Cloudflare entry requires a reviewed runtime smoke; ${via.join(' -> ')}`);
           thirdPartyCloudflare.set(boundaryKey(file, edge.path), { importer: file, specifier: edge.path, via });
@@ -161,7 +164,7 @@ export async function runtimeSmokeImports(root) {
     visit(posix(path.relative(root, realpathSync(entry.target))));
   }
   const workerdBoundaries = [...boundaries.values()].sort((a, b) => a.importer.localeCompare(b.importer) || a.specifier.localeCompare(b.specifier));
-  for (const boundary of workerdBoundaries) console.log(`[runtime-smoke] ${boundary.kind}: ${boundary.importer} -> ${boundary.specifier}`);
+  for (const boundary of workerdBoundaries) console.log(`[runtime-smoke] ${boundary.kind}${boundary.conditions ? ` (declared conditions: ${boundary.conditions.join(', ')})` : ''}: ${boundary.importer} -> ${boundary.specifier}`);
   const thirdPartyCloudflareImports = [...thirdPartyCloudflare.values()];
   for (const reference of thirdPartyCloudflareImports) console.log(`[runtime-smoke] third-party Cloudflare reference: ${reference.via.join(' -> ')}`);
   return { node: sorted(imports), workerdBoundaries, thirdPartyCloudflareImports };

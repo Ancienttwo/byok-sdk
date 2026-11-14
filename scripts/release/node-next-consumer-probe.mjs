@@ -15,12 +15,12 @@ import { runtimeSmokeImports } from '../api-surface/entry-closure.mjs';
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 /** The Node runtime smoke exports that carry declarations. */
-export async function typesBearingEntries(root = repoRoot) {
+export function typesBearingEntries(root, smokeImports) {
   const entries = JSON.parse(readFileSync(path.join(root, 'api-surface', 'entries.json'), 'utf8'));
   const typed = new Set(Object.entries(entries)
     .filter(([, entry]) => entry.facts?.types?.length > 0)
     .map(([id]) => id.replace(/\[.*\]$/, '')));
-  return (await runtimeSmokeImports(root)).node.filter(specifier => typed.has(specifier));
+  return smokeImports.node.filter(specifier => typed.has(specifier));
 }
 
 function probeSource(specifiers, wrong) {
@@ -59,7 +59,6 @@ function compilerOptions() {
 }
 
 export async function nodeNextConsumerProbe(installRoot, entries) {
-  entries ??= await typesBearingEntries();
   const consumer = path.join(installRoot, 'node-next-consumer-node');
   mkdirSync(consumer);
   const { source, wrongLine } = probeSource(entries, { from: '@byok-sdk/client', name: 'createDaemonWithAdapters' });
@@ -82,5 +81,5 @@ export async function nodeNextConsumerProbe(installRoot, entries) {
 
 if (import.meta.main) {
   if (!process.argv[2]) throw new Error('provide the installed tarball consumer root');
-  await nodeNextConsumerProbe(path.resolve(process.argv[2]));
+  await nodeNextConsumerProbe(path.resolve(process.argv[2]), typesBearingEntries(repoRoot, await runtimeSmokeImports(repoRoot)));
 }
