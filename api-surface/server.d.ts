@@ -143,12 +143,16 @@ export declare class HostExecutionCore {
     private routineCommands;
     lifecycle(id: string, lifecycle: Routine['lifecycle']): Promise<void>;
     /**
-     * Commits the cancellation, then drains. Returns `wakePending: true` if that drain fails only on wake dispatch;
-     * the outbox retains failed wakes for retry. The failure may concern another wake or already be retried before return.
-     * Other errors can still reject after commit, including a Host job or outbox capacity failure (#2072).
+     * Commits the cancellation, then drains. A wake-only failure returns `wakePending: true`; failed wakes stay queued.
+     * Other post-commit failures return `drainError`, the unchanged drain rejection (the whole AggregateError for mixed
+     * failures). Its presence means cancellation committed, not that reconciliation finished. Inspect/report it and retry
+     * pending work with `drain()` or recovery, rather than repeating the cancellation. Job/outbox retry state is unchanged;
+     * explicit drains and wake hooks still reject. A failure may concern other work or already be retried before return.
+     * Failures before the cancellation commits still reject.
      */
     cancel(key: string): Promise<{
         wakePending?: true;
+        drainError?: unknown;
     }>;
     readonly consume: (wake: DueWake, signal: AbortSignal) => Promise<void>;
     /** The hook shares the occurrence commit: both persist, or neither does. */

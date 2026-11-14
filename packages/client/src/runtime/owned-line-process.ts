@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams, type ChildProcess, type Spa
 import {
   adoptOwnedProcessTree, disposeOwnedProcessTree, rememberOwnedDescendants, withOwnedProcessTree,
 } from '../adapters/process-tree.js';
-import { assertNoNulSpawnInput, spawnStartError } from '../util/spawn-input.js';
+import { assertNoNulSpawnInput, spawnStartError } from '@byok-sdk/core/system-tool';
 import { createJsonlLineDecoder } from '../util/jsonl-lines.js';
 
 const MAX_LINE_BYTES = 1024 * 1024;

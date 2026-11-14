@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createByokServer } from '@byok-sdk/server';
 import type { ExecutionServer } from '@byok-sdk/server/execution-core';
-import { hash, HostLedger } from '@byok-sdk/server/execution-core';
+import { createRoutine, hash, HostExecutionCore, HostLedger, nextIntervalOccurrence, OutboxFullError, recordOccurrence } from '@byok-sdk/server/execution-core';
 import { template } from './k4-fixtures.test-support';
 import type { ChannelPort } from './channel';
 import { BotCollaboration, type BotOptions } from './host';
@@ -54,6 +54,57 @@ it('reports pending wake dispatch for committed cancel and switch abort', async 
   probe.fail = false;
   await vi.advanceTimersByTimeAsync(1000);
   expect(outbox()).toEqual([]);
+});
+
+it.each(['cancel', 'abort'] as const)('reports mixed drain failures after committed %s and retries the failed job', async operation => {
+  const probe = failingSchedule('failing'), jobError = { reason: 'Host source unavailable' };
+  let failJob = true;
+  const handler = vi.fn(() => { if (failJob) throw jobError; return { summary: 'recovered' }; });
+  await setup(probe.wrap, { hostJobs: { watch: handler } });
+  const turn = await bot.input('cancel-me', 'hello');
+  await bot.freezeForSwitch('device', 0);
+  await expect(seedRoutine(bot, 'failing', 'failing')).rejects.toThrow('Wake dispatch failed');
+  const at = Date.now() + 100;
+  ledger.transaction(state => {
+    createRoutine(state, { id: 'watch', version: 1, timeZone: 'UTC', rule: { anchorMs: at, everyMs: 86_400_000 },
+      hostJob: { type: 'watch', input: null }, waitMs: 60_000, lateAfterMs: 1000 }, Date.now(), nextIntervalOccurrence);
+    recordOccurrence(state, ledger.tenant, { wakeId: 'watch', dedupKey: `watch:1:${at}`, availableAt: at, deliveredAt: at, delivery: 1 },
+      at, nextIntervalOccurrence);
+  });
+  const result = operation === 'cancel' ? await bot.cancelTurn(turn) : await bot.abortSwitch('device', 1);
+  expect(result).toMatchObject(operation === 'cancel' ? { turnId: turn, result: 'cancelled' } : { mode: 'L', revision: 2 });
+  expect(result.drainError).toBeInstanceOf(AggregateError);
+  expect((result.drainError as AggregateError).errors).toContain(jobError);
+  expect((result.drainError as AggregateError).errors).toContainEqual(expect.objectContaining({ message: 'schedule unavailable' }));
+  const before = handler.mock.calls.length;
+  await expect(bot.drain()).rejects.toMatchObject({ errors: expect.arrayContaining([jobError]) });
+  expect(handler.mock.calls.length).toBeGreaterThan(before);
+  expect(Object.values(ledger.snapshot().outbox)).toContainEqual(expect.objectContaining({ kind: 'host-job' }));
+  failJob = false; probe.fail = false;
+  await bot.drain();
+  expect(Object.values(ledger.snapshot().occurrences).find(row => row.routineId === 'watch')).toMatchObject({ conclusion: 'succeeded' });
+  await expect(bot.abortSwitch('device', 0)).rejects.toThrow();
+  await expect(bot.cancelTurn('missing')).rejects.toThrow('Turn not found');
+});
+
+it.each([undefined, new OutboxFullError(), { reason: 'transient' }])('preserves a transient drain rejection after commit: %j', async error => {
+  await setup(server => server, { hostIntents: { research: () => {} } });
+  const turn = await bot.input('cancel-me', 'hello');
+  const drain = vi.spyOn(HostExecutionCore.prototype, 'drain').mockRejectedValueOnce(error);
+  const cancelled = await bot.cancelTurn(turn);
+  expect(cancelled).toHaveProperty('drainError');
+  expect(cancelled.drainError).toBe(error);
+  expect(drain.mock.calls.length).toBeGreaterThan(1); // The later successful pass must not erase the first error.
+  await bot.freezeForSwitch('device', 0);
+  drain.mockRejectedValueOnce(error);
+  const aborted = await bot.abortSwitch('device', 1);
+  expect(aborted).toMatchObject({ mode: 'L', revision: 2 });
+  expect(aborted).toHaveProperty('drainError');
+  expect(aborted.drainError).toBe(error);
+  await bot.enqueueHostIntent({ key: 'host', source: 'user', execution: template('device'), waitUntil: Date.now() + 60_000 }, 'research');
+  drain.mockRejectedValueOnce(error);
+  // The separate Host-intent API keeps its existing rejection contract.
+  await expect(bot.cancelHostIntent('host')).rejects.toBe(error);
 });
 
 // K4 owns the routine wake outbox. A failed SDK call rejects the drain and keeps the row for a later drain.

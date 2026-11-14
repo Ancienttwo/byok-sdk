@@ -4,7 +4,8 @@
 // Each fixture is the set of local stores one SDK build writes when it opens
 // them for the first time: the embedded server SQLite store, a daemon store
 // directory (journal `daemon.db` plus one pi-durable replica under
-// `durable-replicas/`) and the provider profile store. A released build is
+// `durable-replicas/`) and the provider profile store. From 0.42.0 it also
+// includes an exported bot-collaboration Host ledger. A released build is
 // installed from npm into a temporary directory; `main` is this workspace
 // (run `bun run build` first). Each store is then copied, switched to a
 // rollback journal and vacuumed with 512-byte pages, which keeps the files
@@ -14,7 +15,7 @@
 //   node scripts/release/fixtures/stores/generate.mjs [--release <version>]... [--main]
 // With no arguments it regenerates every release in RELEASES and `main`.
 // The repository ignores *.db and *.sqlite: add a new fixture with `git add -f`.
-// The package tests (server, keys, client) assert, for every fixture in
+// The package tests (server, keys, client, bot-collaboration) assert, for every fixture in
 // index.json, the verdict its authored `expected` map gives each store. A new
 // fixture has no `expected` map, so those tests fail until one is written.
 
@@ -38,6 +39,7 @@ export const FIXTURE_LAYOUT = {
   'client-journal': 'daemon-store/daemon.db',
   'pi-durable': 'daemon-store/durable-replicas/fixture/durable-fixture.sqlite',
   'keys-profile-store': 'keys-profile-store.db',
+  'bot-collaboration-ledger': 'bot-collaboration-ledger.sqlite',
 };
 
 function parseArgs(argv) {
@@ -84,14 +86,43 @@ async function writeStores(dirs, out) {
     return target;
   };
   const byok = server.createByokServer({ productId: 'store-fixture', storage: { kind: 'sqlite', path: file('server-sqlite') } });
-  await byok.close();
+  try {
+    if (dirs.botCollaboration) {
+      const { BotCollaboration, botCompactVeto } = await import(packageEntry(dirs.botCollaboration).url);
+      const { HostLedger } = await import(packageEntry(dirs.server, './execution-core').url);
+      const ledger = new HostLedger(file('bot-collaboration-ledger'), 'store-fixture', { compactVeto: botCompactVeto });
+      let bot;
+      try {
+        bot = new BotCollaboration(byok, ledger, {
+          botId: 'main', dreaming: false, now: () => 1_000_000, connector: async () => null,
+          execution: { deviceId: 'fixture-device', payload: {
+            runtime: 'pi', session: { mode: 'fresh' }, instruction: 'Return the fixture result.',
+            agentRef: { agentId: 'main', profileRevision: '1' },
+            egressPolicy: { policyRevision: 'fixture-v1',
+              activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
+              reliable: { maxPendingEventsPerAgent: 16, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 16384 },
+              transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
+            terminalProjection: { mode: 'result-document', contract: 'store-fixture-v1', schema: { type: 'object' } },
+          } },
+        });
+        await bot.freezeForSwitch('fixture-device', 0);
+        await bot.core.flushProjections(async () => {});
+        await bot.exportForSwitch([{ deviceId: 'fixture-device', expectedRevision: 1 }]);
+      } finally {
+        await bot?.close();
+        ledger.close();
+      }
+    }
+  } finally {
+    await byok.close();
+  }
   const journal = new client.SqliteLocalTaskJournal({ storeDir: path.dirname(file('client-journal')) });
   await journal.close();
   const storage = await openNodeSqliteStorage(file('pi-durable'));
   await storage.close(BACKGROUND_CONTEXT);
   const profiles = new keys.SqliteProviderProfileStore({ path: file('keys-profile-store') });
   await profiles.close();
-  return { piDurable: durable.version };
+  return { piDurable: durable.version, ...(dirs.botCollaboration ? { ledgerTenant: 'store-fixture' } : {}) };
 }
 
 /** Rewrite a store in place as one small rollback-journal file with the same schema and rows. */
@@ -108,33 +139,38 @@ function compact(file) {
 function finish(label, scratch, record) {
   const target = path.join(here, label);
   rmSync(target, { recursive: true, force: true });
-  for (const relative of Object.values(FIXTURE_LAYOUT)) {
+  const layout = Object.entries(FIXTURE_LAYOUT).filter(([store]) => store !== 'bot-collaboration-ledger' || record.ledgerTenant);
+  for (const [, relative] of layout) {
     const source = path.join(scratch, relative);
     compact(source);
     mkdirSync(path.dirname(path.join(target, relative)), { recursive: true });
     copyFileSync(source, path.join(target, relative));
   }
-  return { ...record, stores: Object.fromEntries(Object.entries(FIXTURE_LAYOUT).map(([store, relative]) => [store, `${label}/${relative}`])) };
+  return { ...record, stores: Object.fromEntries(layout.map(([store, relative]) => [store, `${label}/${relative}`])) };
 }
 
 async function generateRelease(version) {
+  const [major, minor] = version.split('.').map(Number);
+  const includeLedger = major > 0 || minor >= 42;
   const install = mkdtempSync(path.join(tmpdir(), `byok-store-fixture-${version}-`));
   try {
     writeFileSync(path.join(install, 'package.json'), '{"private":true}\n');
     execFileSync('npm', [
       'install', '--no-save', '--ignore-scripts', '--no-audit', '--no-fund', '--omit=optional', '--engine-strict=false',
       `@byok-sdk/server@${version}`, `@byok-sdk/client@${version}`, `@byok-sdk/keys@${version}`,
+      ...(includeLedger ? [`@byok-sdk/bot-collaboration@${version}`] : []),
     ], { cwd: install, stdio: 'inherit' });
     const modules = path.join(install, 'node_modules');
     const scratch = path.join(install, 'stores');
-    const { piDurable } = await writeStores({
+    const versions = await writeStores({
       server: path.join(modules, '@byok-sdk/server'),
       client: path.join(modules, '@byok-sdk/client'),
       keys: path.join(modules, '@byok-sdk/keys'),
+      ...(includeLedger ? { botCollaboration: path.join(modules, '@byok-sdk/bot-collaboration') } : {}),
       piDurable: path.join(modules, '@earendil-works/pi-durable'),
       chord: path.join(modules, '@earendil-works/chord'),
     }, scratch);
-    return finish(version, scratch, { source: `npm @byok-sdk/{server,client,keys}@${version}`, piDurable });
+    return finish(version, scratch, { source: `npm @byok-sdk/{server,client,keys${includeLedger ? ',bot-collaboration' : ''}}@${version}`, ...versions });
   } finally {
     rmSync(install, { recursive: true, force: true });
   }
@@ -144,15 +180,16 @@ async function generateMain() {
   const scratch = mkdtempSync(path.join(tmpdir(), 'byok-store-fixture-main-'));
   try {
     const clientModules = path.join(repoRoot, 'packages/client/node_modules');
-    const { piDurable } = await writeStores({
+    const versions = await writeStores({
       server: path.join(repoRoot, 'packages/server'),
       client: path.join(repoRoot, 'packages/client'),
       keys: path.join(repoRoot, 'packages/keys'),
+      botCollaboration: path.join(repoRoot, 'packages/bot-collaboration'),
       piDurable: realpathSync(path.join(clientModules, '@earendil-works/pi-durable')),
       chord: realpathSync(path.join(clientModules, '@earendil-works/chord')),
     }, scratch);
     const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
-    return finish('main', scratch, { source: `workspace at ${commit}`, piDurable });
+    return finish('main', scratch, { source: `workspace at ${commit}`, ...versions });
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

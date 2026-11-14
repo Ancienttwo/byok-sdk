@@ -249,11 +249,14 @@ export class HostExecutionCore {
     await this.drain();
   }
   /**
-   * Commits the cancellation, then drains. Returns `wakePending: true` if that drain fails only on wake dispatch;
-   * the outbox retains failed wakes for retry. The failure may concern another wake or already be retried before return.
-   * Other errors can still reject after commit, including a Host job or outbox capacity failure (#2072).
+   * Commits the cancellation, then drains. A wake-only failure returns `wakePending: true`; failed wakes stay queued.
+   * Other post-commit failures return `drainError`, the unchanged drain rejection (the whole AggregateError for mixed
+   * failures). Its presence means cancellation committed, not that reconciliation finished. Inspect/report it and retry
+   * pending work with `drain()` or recovery, rather than repeating the cancellation. Job/outbox retry state is unchanged;
+   * explicit drains and wake hooks still reject. A failure may concern other work or already be retried before return.
+   * Failures before the cancellation commits still reject.
    */
-  async cancel(key: string): Promise<{ wakePending?: true }> {
+  async cancel(key: string): Promise<{ wakePending?: true; drainError?: unknown }> {
     this.assertOpen();
     this.ledger.transaction(state => {
       const intent = state.intents[hash(key)];
@@ -261,7 +264,7 @@ export class HostExecutionCore {
       if (!intent.conclusion) intent.cancelReason = 'cancelled';
     });
     try { await this.drain(); }
-    catch (error) { if (error instanceof WakeDispatchError) return { wakePending: true }; throw error; }
+    catch (error) { return error instanceof WakeDispatchError ? { wakePending: true } : { drainError: error }; }
     return {};
   }
   readonly consume = async (wake: DueWake, signal: AbortSignal): Promise<void> => {

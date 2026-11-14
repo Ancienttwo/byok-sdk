@@ -1,6 +1,8 @@
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
 import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, occurrenceIntentKey, taskId, type ExecutionServer, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { template as baseTemplate } from './k4-fixtures.test-support';
@@ -24,6 +26,32 @@ const roots: string[] = [], closers: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
   for (const close of closers.splice(0).reverse()) await close();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+it('opens published ledger fixtures including the exported domain without modifying their files (#2032)', () => {
+  const directory = fileURLToPath(new URL('../../../scripts/release/fixtures/stores/', import.meta.url));
+  const index = JSON.parse(readFileSync(join(directory, 'index.json'), 'utf8')) as {
+    fixtures: Record<string, { ledgerTenant?: string; stores: Record<string, string>; expected?: Record<string, string> }>;
+  };
+  const store = 'bot-collaboration-ledger';
+  expect(index.fixtures['0.42.0']?.stores[store], 'generate the published ledger fixture').toBeDefined();
+  for (const [label, fixture] of Object.entries(index.fixtures)) {
+    if (!fixture.stores[store]) continue;
+    expect(fixture.ledgerTenant, label).toBe('store-fixture');
+    expect(fixture.expected?.[store], label).toBe('accepted');
+    const file = join(directory, fixture.stores[store]);
+    const before = readFileSync(file), names = readdirSync(join(directory, label)).sort();
+    expect(inspectLedger(file, fixture.ledgerTenant!)).toMatchObject({ store, verdict: fixture.expected![store],
+      reason: expect.stringContaining('switch is aborted') });
+    const database = new DatabaseSync(file, { readOnly: true });
+    try {
+      const row = database.prepare('SELECT body FROM host_ledger WHERE tenant = ?').get(fixture.ledgerTenant!) as { body: string };
+      expect(stateOf(JSON.parse(row.body).application).switchExport).toEqual({ digest: expect.stringMatching(/^[a-f0-9]{64}$/),
+        exportedAt: 1_000_000, devices: [{ deviceId: 'fixture-device', frozenRevision: 1 }] });
+    } finally { database.close(); }
+    expect(readFileSync(file)).toEqual(before);
+    expect(readdirSync(join(directory, label)).sort()).toEqual(names);
+  }
 });
 
 it('archives a settled root out of the window, replays its input, and refuses a root in use', async () => {

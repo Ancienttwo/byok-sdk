@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promises as fs, type Dirent } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { assertNoNulSpawnInput, spawnStartError } from '@byok-sdk/core/system-tool';
 import { runCommand, type CommandRunner } from './command-runner.js';
 import { configurationPendingError, withConfigurationLock } from './custody.js';
 import { ByokKeysError } from './errors.js';
@@ -608,27 +609,6 @@ export interface PiProviderLaunchDependencies {
   }) => ChildProcess;
 }
 
-/**
- * 与 client util/spawn-input 的 NUL 检查同语义，core 下次加公开面时合成一份 (#2043).
- * Node's rejection quotes a NUL-bearing input escaped, which credential redaction misses,
- * so only the argument position or env name is reported; `for...in` matches Node's
- * inclusion of inherited enumerable env keys.
- */
-function assertNoNulSpawnInput(command: string, args: readonly string[], env: NodeJS.ProcessEnv): void {
-  if (command.includes('\0')) throw new Error('spawn command contains a NUL byte');
-  args.forEach((arg, index) => { if (arg.includes('\0')) throw new Error(`spawn argument ${index} contains a NUL byte`); });
-  for (const name in env) {
-    if (name.includes('\0')) throw new Error('spawn env variable name contains a NUL byte');
-    if (env[name]?.includes('\0')) throw new Error(`spawn env variable ${name} contains a NUL byte`);
-  }
-}
-
-// 与 client util/spawn-input 的 spawnStartError 同语义，core 下次加公开面时合成一份 (#2043).
-function sanitizedSpawnError(error: unknown): Error {
-  const code = (error as NodeJS.ErrnoException | null)?.code;
-  return Object.assign(new Error(`spawn failed: ${code ?? 'unknown'}`), { code });
-}
-
 /** Owns the credential-to-spawn sequence; the client retains directory ownership. */
 export async function startPiProvider(
   profile: ModelProviderProfile,
@@ -692,7 +672,7 @@ export async function startPiProvider(
         ...(ipcLane === undefined ? {} : { serialization: 'json' as const }),
       });
     } catch (error) {
-      throw sanitizedSpawnError(error);
+      throw spawnStartError(error);
     }
     if (ipcLane !== undefined) {
       // Private launcher->host channel. stdio belongs exclusively to the blind daemon.
@@ -805,7 +785,7 @@ export async function runPiProviderLauncher(
     process.on('SIGTERM', onSigterm);
     try {
       return await new Promise<number>((resolve, reject) => {
-        child.once('error', error => reject(sanitizedSpawnError(error)));
+        child.once('error', error => reject(spawnStartError(error)));
         child.once('close', (code, signal) => {
           resolve(code ?? (signal ? 1 : 0));
         });

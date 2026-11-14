@@ -8,7 +8,11 @@ Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts m
 
 To inspect outstanding work, read `HostLedger.snapshot().outbox` on the ledger used by the core or Bot. Failed rows have `kind: 'schedule'` or `kind: 'cancel-wake'` and `lastError`; the core retries each row on a timer up to 10 times, with backoff capped at 60 seconds. After that, the row waits for another drain to retry it. Track the row's outbox key and wake key: a successful SDK schedule or cancel removes that unchanged row. A row can also be superseded by later work, so its disappearance alone does not prove that the wake fired. For a scheduled wake, `server.wakes.pending()` reports SDK-queued wakes; acceptance into that queue is not completion of the wake hook. An explicit `HostExecutionCore.drain()` or `BotCollaboration.drain()` that resolves confirms its drain did not report a dispatch failure; drains and wake hooks still reject `WakeDispatchError` when their only failures are wake calls.
 
-Other errors can still reject after commit. In particular, a drain that also encounters a Host job failure or `OutboxFullError` may reject after the cancellation or abort was committed; this remaining ambiguity is tracked in [#2072](https://github.com/Ancienttwo/byok-sdk/issues/2072).
+## Committed cancellation with a drain failure (#2072)
+
+`HostExecutionCore.cancel()`, `BotCollaboration.cancelTurn()` and `abortSwitch()` now also resolve when the drain after commit fails on a Host job, projection outbox capacity, or a mixture of failures. Their existing result object gains `drainError?: unknown`. Check `'drainError' in result`, since JavaScript can throw `undefined`. The value is the exact drain rejection: a standalone `OutboxFullError` retains its class for `instanceof`; an `AggregateError` stays whole, with the original Host-thrown values in `errors`. Nothing is flattened or wrapped. `cancelTurn` preserves the first non-wake failure even if a subsequent pass succeeds. Wake-only failures keep `wakePending: true` as described above.
+
+Treat the operation as committed, inspect/report the error, and retry remaining work through `drain()` or recovery. Do not retry cancellation or abort solely because `drainError` is present; the abort's original revision is already stale. The field reports a failed drain, not pending work or terminal completion: a job that fails retains its existing retry state, while a job already concluded by the drain stays concluded. Capacity-refused transactions still roll back and can proceed after projections are delivered. Explicit drains and wake hooks continue to reject on these failures. Validation and transaction failures before the operation commits still reject.
 
 ## OpenCode qualified version 2.3.0 (#1972)
 
@@ -34,7 +38,9 @@ The local bot-collaboration entry exports `inspectLedger(path, tenant)`, a prech
 
 ## cloud-do archived
 
-`@byok-sdk/cloud-do` leaves the release train. Remove the dependency, or pin it to exactly 0.42.0 if the Host still needs it. No later version or fixes will be published, and its npm versions will be deprecated. The upgrade train check no longer inspects this package, even if it remains installed.
+`@byok-sdk/cloud-do` leaves the release train. Remove the dependency, or pin it to exactly 0.42.0 if the Host still needs it. No later version or fixes will be published. At the next MINOR release, the owner deprecates its published npm versions (#1959). The upgrade train check no longer inspects this package, even if it remains installed.
+
+A Host retaining the 0.42.0 pin must not dispatch sealed tasks to cloud-do: it reads task content in plaintext and executes with platform keys. Route sealed tasks only to a device that supports the [sealed payload contract](../spec.md#hosted-sealed-payload-654).
 
 Restart requires a product that needs a cloud agent using platform keys with Pi’s durable harness in Cloudflare Durable Objects. Start from `archive/cloud-do` (the last main commit with the package; it differs from the last published version `v0.42.0` only in its README), qualify it again against the Pi version current at the time, and obtain the replay-safe tool list, provider profiles and binding names from the Host. See [ADR-036](../architecture/adr-2026-10-03-cloud-generic-agent.md).
 
@@ -223,6 +229,34 @@ version. If the stop or the lease fails too, `upgrade()` throws
 resolves the receipt from where `current` points, and a present `current`
 runs as it is, so read the receipt it returns and call `rollback()` to go
 back to the previous version.
+
+## Windows ACL hardening timeouts are hardening errors (#2116)
+
+On Windows, the `icacls` run that hardens a private directory has a 30 s bound
+(#1971). A run that outlives it is stopped and now rejects with the public
+hardening error instead of an internal, unexported timeout class:
+`SecureDirHardeningError` with `code: 'secure_dir_command_timeout'`, from
+`ensureSecureDir()` and from every public SDK operation that reports a
+directory hardening failure (for example pairing). Other hardening failures
+carry `code: 'secure_dir_hardening'`.
+
+**Breaking for a type-narrowing Host.** `SecureDirHardeningError` now has a
+`code` field. A Host that narrows `ServiceUnitError | SecureDirHardeningError`
+with `'code' in error` and then switches exhaustively over the service codes
+fails to compile, and routes the new codes wrongly. Test
+`error instanceof SecureDirHardeningError` first, then branch on `code`.
+
+A timeout means the ACL's state is unknown, never that it was not applied.
+`exitConfirmed` is set only with `secure_dir_command_timeout`, with the meaning
+it has on `ServiceUnitError`: `true`, the stopped `icacls` has exited, so run
+the operation again; `false`, it may still be running and still change the ACL,
+so a retry now can race it. `cause` is the timeout, for diagnostics only. A
+`ServiceInstallation` store lease still reports this timeout as
+`ServiceUnitError` `service_command_timeout`, as listed above.
+
+`exportDeviceSupportBundle` does not change: it catches a file hardening
+failure and rejects with `DeviceOperatorError` `operation-failed`, without
+`exitConfirmed` or the hardening error as `cause`.
 
 ## Upgrade resolves when an old snapshot cannot be pruned
 

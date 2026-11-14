@@ -5,7 +5,7 @@ import { __hostExitBackstopForTests } from '../adapters/process-tree';
 import { createOwnedTerminalSpawn } from '../runtime/owned-terminal-process';
 import { PiRpcClient } from '../adapters/pi/rpc-client';
 import { McpStdioClient } from '../mcp/client';
-import { spawnStartError } from '../util/spawn-input';
+import { spawnStartError } from '@byok-sdk/core/system-tool';
 import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/95c6547/runtimes/codex/app-server-client';
 
 // Pass-through spy: every spawn below, including MCP's direct one, is observable.

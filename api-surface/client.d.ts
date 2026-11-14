@@ -7107,8 +7107,16 @@ export interface LocalTaskJournal {
     markRecovered(taskId: string, outcome: RecoveryOutcome): Promise<void>;
     /** Physical journal/quarantine footprint and logical receipt counts; retention registry owns aggregate usage. */
     measureUsage(): Promise<LocalStorageUsage>;
-    /** Confirmed terminals older than cutoff, without recovery markers, oldest first. */
-    listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
+    /**
+     * Confirmed terminals older than cutoff, without recovery markers, oldest
+     * first by `(at, task_id)`. With `after`, only tasks strictly greater than
+     * that task's `(at, task_id)` are listed; when `after` is no longer listable
+     * the result is empty. Retention pages with `after` past a task whose prune
+     * failed, so a Host-supplied journal must implement it: a page that returns
+     * a task the pass already failed to prune fails the confirmed-journal sweep
+     * with `LocalStorageConfigError` (reported as `sweep_failed`).
+     */
+    listPrunableConfirmedTasks(cutoff: Date, limit: number, after?: string): Promise<string[]>;
     /**
      * Transactionally rechecks confirmation and recovery protection before
      * pruning. Inside its delete transaction, under the write lock, it returns
@@ -7317,7 +7325,7 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
     markRecovered(taskId: string, outcome: RecoveryOutcome): Promise<void>;
     /** Physical journal/quarantine footprint and confirmed-row inventory. */
     measureUsage(): Promise<LocalStorageUsage>;
-    listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
+    listPrunableConfirmedTasks(cutoff: Date, limit: number, after?: string): Promise<string[]>;
     pruneConfirmedJournalTask(taskId: string, cutoff: Date): Promise<boolean>;
     /**
      * WAL checkpoint plus a BOUNDED incremental vacuum. Maintenance only — it
@@ -11109,7 +11117,15 @@ export interface CreateServiceLifecycleOptions {
      * WinSW binaries obviously aren't present on the "wrong" OS).
      */
     platform?: NodeJS.Platform;
-    /** Platform-specific DI seams (mocked exec, mocked fs, mocked homedir/getuid) — only the fields matching the resolved platform are ever read. */
+    /**
+     * Platform-specific DI seams (mocked exec, mocked fs, mocked homedir/uid) —
+     * only the fields matching the resolved platform are ever read. On macOS
+     * `deps.getuid` picks the `gui/<uid>` domain and defaults to the real uid,
+     * the session user; the gate and file ownership checks use the effective
+     * uid, which owns what this process creates (#2031). Under `sudo` both are
+     * 0, so the default domain is `gui/0`; a root Host managing a user's session
+     * service passes `deps: { getuid: () => <user uid> }`.
+     */
     deps?: LaunchdDeps & SystemdDeps & WinswDeps & WindowsUserDeps;
     /**
      * An isolated root for the `service-lifecycle` gate that install, repair,
@@ -11234,7 +11250,18 @@ export interface LaunchdDeps {
     run?: Runner;
     fs?: ManagedLifecycleFs;
     homedir?: () => string;
-    /** Defaults to `process.getuid` — macOS/Linux only; this module is never constructed on `win32` (see `create-service-lifecycle.ts`). */
+    /**
+     * The uid of the `gui/<uid>` domain. Defaults to `process.getuid`, the real
+     * uid: the domain belongs to the logged-in session user, and a setuid Host
+     * (ruid 501, euid 0) still targets that user's `gui/501`; root has no GUI
+     * session. Ownership checks on files this process creates use
+     * `process.geteuid` instead, since the effective uid is who owns them
+     * (#2031). Under `sudo` both uids are 0 and the default is `gui/0`; a Host
+     * that manages a user's session service from a root process passes that
+     * user's uid here (`createServiceLifecycle(def, { deps: { getuid: () => 501 } })`).
+     * macOS/Linux only; this module is never constructed on `win32` (see
+     * `create-service-lifecycle.ts`).
+     */
     getuid?: () => number;
     /** Clock and wait for the unload deadline; tests drive them. */
     now?: () => number;
@@ -12171,7 +12198,8 @@ export declare class ServiceUnitError extends Error {
     });
 }
 /**
- * Throws `error`, with an internal `PlatformCommandTimeoutError` as the public
+ * Throws `error`, with an internal `PlatformCommandTimeoutError`, or the store
+ * lease's `secure_dir_command_timeout` (#2116), as the public
  * `service_command_timeout`. The lifecycle and installation boundaries call
  * it; inside them the internal error stays. A timeout whose gate release
  * failed too arrives as the `AggregateError` of the timeout and the release
@@ -15225,7 +15253,24 @@ export interface EnsureSecureDirOptions {
  */
 export declare class SecureDirHardeningError extends Error {
     readonly dir: string;
-    constructor(dir: string, reason: string);
+    /**
+     * `secure_dir_hardening`: `icacls` could not run or exited non-zero, so the
+     * restrictive ACL is not in place. `secure_dir_command_timeout` (#1971,
+     * #2116): `icacls` outlived its bound and was stopped; whether the ACL was
+     * applied is UNKNOWN, never "it was not". Read {@link exitConfirmed} before
+     * running the operation again.
+     */
+    readonly code: 'secure_dir_hardening' | 'secure_dir_command_timeout';
+    /**
+     * Set only with `secure_dir_command_timeout`. `true`: the timed-out `icacls`
+     * is proven to have exited. `false`: it may still be running and still
+     * change the ACL, so a retry now can race it. `cause` is the timeout, for
+     * diagnostics only.
+     */
+    readonly exitConfirmed?: boolean;
+    constructor(dir: string, reason: string, timeout?: Error & {
+        readonly exitConfirmed: boolean;
+    });
 }
 /** An owned directory whose mode is not 0700 and cannot be set to it; `cause` is the chmod error when chmod failed. */
 export declare class SecureDirModeError extends Error {
@@ -15233,9 +15278,14 @@ export declare class SecureDirModeError extends Error {
     readonly code = "secure_dir_mode";
     constructor(dir: string, cause?: unknown);
 }
+/** {@link SecureDirHardeningError} for one file, with the same `code` and `exitConfirmed` meanings. */
 export declare class SecureFileHardeningError extends Error {
     readonly filePath: string;
-    constructor(filePath: string, reason: string);
+    readonly code: 'secure_file_hardening' | 'secure_file_command_timeout';
+    readonly exitConfirmed?: boolean;
+    constructor(filePath: string, reason: string, timeout?: Error & {
+        readonly exitConfirmed: boolean;
+    });
 }
 /**
  * Creates (if needed) and secures `dir`: POSIX `{mode: 0o700}` plus a

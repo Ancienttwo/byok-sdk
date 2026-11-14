@@ -1,4 +1,4 @@
-import { BYOK_KEYS_ERROR_CODES, ByokKeysError, type ByokKeysErrorCode } from './errors.js';
+import { ByokKeysError, type ByokKeysErrorCode } from './errors.js';
 
 /**
  * What the failing entry holds. The fixed guidance names the recovery that
@@ -57,10 +57,43 @@ export function sanitizeSecretStoreError(error: unknown, subject: SecretStoreSub
   return new ByokKeysError('PROVIDER_SECRET_STORE_FAILED', STORE_FAILED_MESSAGE[subject]);
 }
 
-/** Whether `code` is one the boundary can produce. */
-export function isSecretStoreErrorCode(code: string): boolean {
-  return code === 'PROVIDER_SECRET_STORE_FAILED'
-    || (Object.hasOwn(BYOK_KEYS_ERROR_CODES, code) && /^(?:KEYCHAIN|CREDENTIAL_MANAGER|SECRET)_/u.test(code));
+/** The keychain, Credential Manager and secret-shape codes of the error-code table. */
+type StoreFamilyCode = Extract<ByokKeysErrorCode, `${'KEYCHAIN' | 'CREDENTIAL_MANAGER' | 'SECRET'}_${string}`>;
+
+/**
+ * The store codes the boundary keeps. A store's `ByokKeysError.code` is an
+ * unchecked string, so membership must be exact: a prefix test would let a
+ * store pass any text out through the code. A literal set rather than the full
+ * error-code table keeps that table out of the launcher; `satisfies` fails the
+ * build when the table gains or loses a code in these families.
+ */
+const STORE_FAMILY_CODES = {
+  CREDENTIAL_MANAGER_DELETE_FAILED: 1,
+  CREDENTIAL_MANAGER_READ_FAILED: 1,
+  CREDENTIAL_MANAGER_SECRET_INVALID: 1,
+  CREDENTIAL_MANAGER_UNAVAILABLE: 1,
+  CREDENTIAL_MANAGER_WRITE_FAILED: 1,
+  KEYCHAIN_ARGUMENT_INVALID: 1,
+  KEYCHAIN_DELETE_FAILED: 1,
+  KEYCHAIN_READ_FAILED: 1,
+  KEYCHAIN_SECRET_CORRUPTED: 1,
+  KEYCHAIN_SECRET_DECODE_FAILED: 1,
+  KEYCHAIN_SECRET_INVALID: 1,
+  KEYCHAIN_UNAVAILABLE: 1,
+  KEYCHAIN_WRITE_FAILED: 1,
+  SECRET_ENVELOPE_INVALID: 1,
+  SECRET_NAME_INVALID: 1,
+  SECRET_NAMESPACE_INVALID: 1,
+  SECRET_VALUE_INVALID: 1,
+} as const satisfies Record<StoreFamilyCode, 1>;
+
+/**
+ * Whether `code` is one the boundary can produce. `code` comes from a store's
+ * error and is not checked by `ByokKeysError`: an object whose primitive form
+ * is a known code would pass `Object.hasOwn`, so only a string qualifies.
+ */
+export function isSecretStoreErrorCode(code: unknown): code is string {
+  return typeof code === 'string' && (code === 'PROVIDER_SECRET_STORE_FAILED' || Object.hasOwn(STORE_FAMILY_CODES, code));
 }
 
 /**

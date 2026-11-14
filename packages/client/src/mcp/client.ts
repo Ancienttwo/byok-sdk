@@ -15,7 +15,7 @@ import {
 } from '@modelcontextprotocol/client';
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/client/validators/cf-worker';
 import { McpAuthorityError } from './authority-error.js';
-import { assertNoNulSpawnInput, spawnStartError } from '../util/spawn-input.js';
+import { assertNoNulSpawnInput, spawnStartError } from '@byok-sdk/core/system-tool';
 
 export { McpAuthorityError };
 

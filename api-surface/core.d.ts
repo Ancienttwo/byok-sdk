@@ -3508,6 +3508,22 @@ export declare function resolveSystemTool(tool: string, host?: SystemToolHost): 
  * system tool from its trusted location. A bare name never reaches `PATH`.
  */
 export declare function systemExecutable(command: string): string;
+/**
+ * Refuse a spawn input that holds a NUL byte, naming only its slot. Node's own
+ * rejection quotes the input escaped, which literal credential redaction
+ * misses (#2008). Env is walked with `for...in` because Node reads inherited
+ * enumerable keys too. The client and the keys launcher both use this rule
+ * (#2111).
+ */
+export declare function assertNoNulSpawnInput(command: string, args: readonly string[], env: Readonly<Record<string, string | undefined>> | undefined): void;
+/**
+ * The credential-free form of a failed spawn: Node's spawn error carries
+ * `spawnargs` and `path`, so an argument credential would ride any log or
+ * serialization of it; only the code crosses (#2065, #2111).
+ */
+export declare function spawnStartError(error: unknown): Error & {
+    code?: string;
+};
 // ==== @byok-sdk/core dist/tenant.d.ts ====
 /**
  * A validated tenant identifier.

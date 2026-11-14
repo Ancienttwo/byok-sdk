@@ -83,3 +83,29 @@ export function resolveSystemTool(tool: string, host: SystemToolHost = realHost(
 export function systemExecutable(command: string): string {
   return path.isAbsolute(command) ? command : resolveSystemTool(command);
 }
+
+/**
+ * Refuse a spawn input that holds a NUL byte, naming only its slot. Node's own
+ * rejection quotes the input escaped, which literal credential redaction
+ * misses (#2008). Env is walked with `for...in` because Node reads inherited
+ * enumerable keys too. The client and the keys launcher both use this rule
+ * (#2111).
+ */
+export function assertNoNulSpawnInput(command: string, args: readonly string[], env: Readonly<Record<string, string | undefined>> | undefined): void {
+  if (command.includes('\0')) throw new Error('spawn command contains a NUL byte');
+  args.forEach((arg, index) => { if (arg.includes('\0')) throw new Error(`spawn argument ${index} contains a NUL byte`); });
+  for (const name in env) {
+    if (name.includes('\0')) throw new Error('spawn env variable name contains a NUL byte');
+    if (env[name]?.includes('\0')) throw new Error(`spawn env variable ${name} contains a NUL byte`);
+  }
+}
+
+/**
+ * The credential-free form of a failed spawn: Node's spawn error carries
+ * `spawnargs` and `path`, so an argument credential would ride any log or
+ * serialization of it; only the code crosses (#2065, #2111).
+ */
+export function spawnStartError(error: unknown): Error & { code?: string } {
+  const code = (error as { code?: string } | null | undefined)?.code;
+  return Object.assign(new Error(`spawn failed: ${code ?? 'unknown'}`), { code });
+}

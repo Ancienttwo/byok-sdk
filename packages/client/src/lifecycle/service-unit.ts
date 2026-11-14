@@ -3,6 +3,7 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { acquirePathMutationGate, PathMutationGateBusyError, withGateReleaseFailures } from '../util/path-mutation-gate.js';
 import { PlatformCommandTimeoutError } from '../util/command-timeouts.js';
+import { SecureDirHardeningError } from '../util/secure-dir.js';
 import type { ServiceProgram } from './service-types.js';
 
 /**
@@ -84,7 +85,8 @@ export class ServiceUnitError extends Error {
 }
 
 /**
- * Throws `error`, with an internal `PlatformCommandTimeoutError` as the public
+ * Throws `error`, with an internal `PlatformCommandTimeoutError`, or the store
+ * lease's `secure_dir_command_timeout` (#2116), as the public
  * `service_command_timeout`. The lifecycle and installation boundaries call
  * it; inside them the internal error stays. A timeout whose gate release
  * failed too arrives as the `AggregateError` of the timeout and the release
@@ -95,7 +97,9 @@ export class ServiceUnitError extends Error {
  */
 export function throwPublicCommandTimeout(error: unknown): never {
   const timeout = error instanceof AggregateError ? error.errors[0] : error;
-  if (timeout instanceof PlatformCommandTimeoutError) throw new ServiceUnitError('service_command_timeout', { cause: error, exitConfirmed: timeout.exitConfirmed });
+  if (timeout instanceof PlatformCommandTimeoutError || (timeout instanceof SecureDirHardeningError && timeout.code === 'secure_dir_command_timeout')) {
+    throw new ServiceUnitError('service_command_timeout', { cause: error, exitConfirmed: timeout.exitConfirmed });
+  }
   throw error;
 }
 

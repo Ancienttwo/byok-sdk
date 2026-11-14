@@ -672,7 +672,9 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
       }
     }
   }
-  assert.deepEqual(reviewedScripts['scripts/api-surface/entry-closure.mjs'], { tests: ['scripts/api-surface/entry-closure.test.mjs'], install: true });
+  assert.deepEqual(reviewedScripts['scripts/api-surface/entry-closure.mjs'], { tests: ['scripts/api-surface/entry-closure.test.mjs'], install: true, families: ['npm-release-pack'] });
+  assert.deepEqual(selectImpact(['scripts/api-surface/entry-closure.mjs']).families, ['npm-release-pack']);
+  assert.deepEqual(selectImpact(['scripts/api-surface/entry-closure.test.mjs']).families, []);
   assert.deepEqual(reviewedScripts['scripts/api-surface/module-scan.mjs'], {
     tests: ['scripts/api-surface/check-api-surface.test.mjs', 'scripts/api-surface/entry-closure.test.mjs'], install: true, families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
   });

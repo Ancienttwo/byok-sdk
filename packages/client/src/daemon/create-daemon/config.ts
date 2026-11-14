@@ -229,7 +229,7 @@ export function hostJournal(journal: LocalTaskJournal): LocalTaskJournal {
     replaceRefusedTerminal: (taskId, refusedPayloadHash, record) => journal.replaceRefusedTerminal(taskId, refusedPayloadHash, record),
     markRecovered: (taskId, outcome) => journal.markRecovered(taskId, outcome),
     measureUsage: () => journal.measureUsage(),
-    listPrunableConfirmedTasks: (cutoff, limit) => journal.listPrunableConfirmedTasks(cutoff, limit),
+    listPrunableConfirmedTasks: (cutoff, limit, after) => journal.listPrunableConfirmedTasks(cutoff, limit, after),
     pruneConfirmedJournalTask: (taskId, cutoff) => journal.pruneConfirmedJournalTask(taskId, cutoff),
     compact: (options) => journal.compact(options),
     close: () => journal.close(),
