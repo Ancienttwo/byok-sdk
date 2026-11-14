@@ -344,9 +344,9 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-A version bump does not authorize publish. The current aligned release is `0.42.0`; publication requires separate
+A version bump does not authorize publish. The current aligned release is `0.43.0` (prepared candidate); publication requires separate
 release authorization and registry readback. The packed and published keys
-`@byok-sdk/core` edge must be the exact current release, `0.42.0`, proven from
+`@byok-sdk/core` edge must be the exact current candidate, `0.43.0`, proven from
 an isolated standard npm install rather than the workspace graph.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
@@ -356,6 +356,19 @@ version alignment, not a breaking change. The keys changes in this train are
 in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
+
+0.43.0 is the owner-approved MINOR candidate after 0.42.0. Its nine public
+packages exclude archived `@byok-sdk/cloud-do` (#1959). Wire stays v6. The
+upgrade manifest has 15 breaking and 3 additive entries; task HOME pinning
+(#2084) is an additional behavior-only breaking change, pending manifest
+support (#2117). Service receipts advance to version 2; Hosts must recover
+pending v1 receipts with SDK 0.42.0 and repair macOS units using the same
+current payload before their first upgrade. This cut adds no Postgres
+migration or embedded-server SQLite schema version. See the
+[0.43.0 candidate notes](releases/v0.43.0.md) and
+[Host upgrade checklist](releases/host-upgrade-0.43.0.md). Preparation is not
+publication authorization. Main remains frozen after prep merges until the
+publication-record PR merges; cut manifest entries are immutable.
 
 0.42.0 is a MINOR release under this policy. It keeps wire v6,
 removes the Hermes runtime adapter (#1876), introduces other breaking public

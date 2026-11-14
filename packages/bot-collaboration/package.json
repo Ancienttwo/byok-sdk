@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/bot-collaboration",
-  "version": "0.42.0",
+  "version": "0.43.0",
   "description": "K8 Bot collaboration for BYOK Hosts: the local Host, the modules a Host composes, the pure rules and shared test vectors, on the K4 execution core.",
   "type": "module",
   "license": "MIT",
