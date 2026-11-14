@@ -13,11 +13,29 @@ import {
   assertRecordedPiClosureIntegrity, piCertificateIdentityPattern, readLockedPiClosure,
 } from './pi-runtime-identity.mjs';
 import { assertNoStorePaths } from './published-store-paths.mjs';
+import { nodeNextConsumerProbe } from './node-next-consumer-probe.mjs';
 
 const releasePackSource = readFileSync(
   fileURLToPath(new URL('./pack-and-smoke.mjs', import.meta.url)),
   'utf8',
 );
+
+test('NodeNext probe accepts real declarations and rejects an any-typed consumer', t => {
+  for (const declaration of ['export declare function createDaemonWithAdapters(): void;', 'export declare const createDaemonWithAdapters: any;']) {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'byok-node-next-probe-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const pkg = path.join(root, 'node_modules/@byok-sdk/client');
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: '@byok-sdk/client', type: 'module', exports: { '.': { types: './index.d.ts' } } }));
+    writeFileSync(path.join(pkg, 'index.d.ts'), declaration);
+    const probe = () => nodeNextConsumerProbe(root, ['@byok-sdk/client']);
+    if (declaration.includes(': any')) assert.throws(probe, /expected exactly the deliberate TS2322/);
+    else assert.doesNotThrow(probe);
+    const options = JSON.parse(readFileSync(path.join(root, 'node-next-consumer-node/tsconfig.json'), 'utf8')).compilerOptions;
+    assert.equal(options.skipLibCheck, false);
+    assert.deepEqual(options.types, ['node']);
+  }
+});
 
 test('release pack includes keys and verifies its packed core edge', () => {
   assert.match(

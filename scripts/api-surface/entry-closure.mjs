@@ -58,20 +58,27 @@ export function manifestEntries(root) {
   return entries.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-// Project validated facts into the two existing release-smoke consumers.
-// Platform requirements determine the lane; package names never exempt entries.
+// Project validated facts into the Node release-smoke consumer.
+// A platform-specific entry needs a reviewed smoke before it can be released.
 export function runtimeSmokeImports(root) {
   const contract = readJson(path.join(root, 'api-surface', 'entries.json'));
-  const imports = { node: new Set(), worker: new Set() };
+  const imports = new Set();
   for (const entry of manifestEntries(root)) {
-    if (entry.kind !== 'exports' || !/\.(?:js|mjs|cjs)$/.test(entry.target)) continue;
+    if (entry.kind !== 'exports') continue;
+    if (entry.conditions.some(condition => !['node', 'import', 'require', 'default'].includes(condition))) {
+      throw new Error(`${entry.id}: non-Node export conditions require a reviewed runtime smoke`);
+    }
+    if (path.extname(entry.target) === '.json') continue;
     const facts = contract[entry.id]?.facts;
-    if (facts?.target !== posix(path.relative(root, entry.target)) || !Array.isArray(facts.bareImports)
-      || facts.bareImports.some(specifier => typeof specifier !== 'string')) throw new Error(`${entry.id}: validated entry facts are required for runtime smoke`);
-    const lane = facts.bareImports.some(specifier => specifier.startsWith('cloudflare:')) ? 'worker' : 'node';
-    imports[lane].add(entry.pkg.manifest.name + (entry.specifier === '.' ? '' : entry.specifier.slice(1)));
+    if (facts?.target !== posix(path.relative(root, entry.target))
+      || ['bareImports', 'lazyImports'].some(field => !Array.isArray(facts[field])
+        || facts[field].some(specifier => typeof specifier !== 'string'))) throw new Error(`${entry.id}: validated entry facts are required for runtime smoke`);
+    if ([...facts.bareImports, ...facts.lazyImports].some(specifier => specifier.startsWith('cloudflare:'))) {
+      throw new Error(`${entry.id}: Cloudflare entry requires a reviewed runtime smoke`);
+    }
+    imports.add(entry.pkg.manifest.name + (entry.specifier === '.' ? '' : entry.specifier.slice(1)));
   }
-  return { node: sorted(imports.node), worker: sorted(imports.worker) };
+  return { node: sorted(imports) };
 }
 
 function selectTarget(value, conditions) {
@@ -172,7 +179,7 @@ export function createWalker(root) {
       if (pkg.workspace) bytes += statSync(file).size;
       else third.push(pkg.manifest.name);
       if (file.endsWith('.json')) return;
-      if (!/\.(?:js|mjs|cjs)$/.test(file)) throw new Error(`unsupported runtime module ${file}`);
+      if (path.extname(file) && !/\.(?:js|mjs|cjs)$/.test(file)) throw new Error(`unsupported runtime module ${file}`);
       if (!tokenCache.has(file)) {
         let type = pkg.manifest.type;
         for (let directory = path.dirname(file); directory !== pkg.directory && inside(pkg.directory, directory); directory = path.dirname(directory)) {

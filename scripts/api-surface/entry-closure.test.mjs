@@ -3,8 +3,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { checkEntryClosure, createWalker, manifestEntries } from './entry-closure.mjs';
+import { checkEntryClosure, createWalker, manifestEntries, runtimeSmokeImports } from './entry-closure.mjs';
 import { scanModule } from './module-scan.mjs';
+import { typesBearingEntries } from '../release/node-next-consumer-probe.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(path.join(tmpdir(), 'byok-entry-closure-'));
@@ -36,6 +37,64 @@ function fixture(t) {
   }
   return { root, write, json, policies, loadZod, read: file => readFileSync(path.join(root, file), 'utf8') };
 }
+
+test('runtime smoke includes Node exports and refuses eager and lazy Cloudflare imports', t => {
+  const f = fixture(t);
+  f.policies();
+  for (const target of ['index.js', 'entry']) {
+    f.json('packages/client/package.json', { name: '@byok-sdk/client', type: 'module',
+      exports: { '.': { types: './dist/index.d.ts', import: `./dist/${target}` } } });
+    f.write(`packages/client/dist/${target}`, "export const data = 'cloudflare:workers'; export const load = () => import('./lazy.js');\n");
+    f.write('packages/client/dist/lazy.js', 'export const value = 1;');
+    assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
+    assert.deepEqual(runtimeSmokeImports(f.root).node, ['@byok-sdk/client', '@byok-sdk/core', '@byok-sdk/protocol']);
+    for (const source of ["import 'cloudflare:workers';", "export const load = () => import('cloudflare:workers');", "const worker = require('cloudflare:workers');"]) {
+      f.write(`packages/client/dist/${target}`, source);
+      assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
+      assert.throws(() => runtimeSmokeImports(f.root), /@byok-sdk\/client: Cloudflare entry requires a reviewed runtime smoke/);
+    }
+  }
+});
+
+test('runtime smoke refuses non-Node export conditions even without Cloudflare imports', t => {
+  const f = fixture(t);
+  for (const condition of ['node', 'import', 'require', 'default', 'workerd', 'worker', 'edge-light', 'browser', 'custom']) {
+    f.json('packages/client/package.json', { name: '@byok-sdk/client', type: 'module',
+      exports: { '.': { types: './dist/index.d.ts', [condition]: './dist/index.js' } } });
+    f.policies();
+    assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
+    if (['node', 'import', 'require', 'default'].includes(condition)) assert.ok(runtimeSmokeImports(f.root).node.includes('@byok-sdk/client'));
+    else assert.throws(() => runtimeSmokeImports(f.root), /non-Node export conditions require a reviewed runtime smoke/, condition);
+  }
+});
+
+test('runtime smoke requires valid static and lazy import facts', t => {
+  const f = fixture(t);
+  f.policies();
+  assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
+  const contract = JSON.parse(f.read('api-surface/entries.json'));
+  for (const field of ['bareImports', 'lazyImports']) {
+    for (const value of [undefined, 'cloudflare:workers', [42]]) {
+      const edited = structuredClone(contract);
+      edited['@byok-sdk/client'].facts[field] = value;
+      f.json('api-surface/entries.json', edited);
+      assert.throws(() => runtimeSmokeImports(f.root), /validated entry facts are required/);
+    }
+  }
+});
+
+test('NodeNext includes typed conditional Node exports and excludes untyped exports and JSON', t => {
+  const f = fixture(t);
+  f.json('packages/client/package.json', { name: '@byok-sdk/client', type: 'module', exports: {
+    '.': { types: './dist/index.d.ts', node: { import: './dist/index.js', require: './dist/index.js' } },
+    './package.json': './package.json',
+  } });
+  f.json('packages/core/package.json', { name: '@byok-sdk/core', type: 'module', exports: './dist/index.js' });
+  f.policies();
+  assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
+  assert.deepEqual(runtimeSmokeImports(f.root).node, ['@byok-sdk/client', '@byok-sdk/core', '@byok-sdk/protocol']);
+  assert.deepEqual(typesBearingEntries(f.root), ['@byok-sdk/client', '@byok-sdk/protocol']);
+});
 
 test('host-kit closure excludes filesystem and path builtins', () => {
   const entries = JSON.parse(readFileSync(new URL('../../api-surface/entries.json', import.meta.url), 'utf8'));

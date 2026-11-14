@@ -34,7 +34,9 @@ The local bot-collaboration entry exports `inspectLedger(path, tenant)`, a prech
 
 ## cloud-do archived
 
-`@byok-sdk/cloud-do` leaves the release train. Remove the dependency, or pin it to exactly 0.42.0 if the Host still needs it. No later version or fixes will be published, and its npm versions will be deprecated. The upgrade train check no longer inspects this package, even if it remains installed.
+`@byok-sdk/cloud-do` leaves the release train. Remove the dependency, or pin it to exactly 0.42.0 if the Host still needs it. No later version or fixes will be published. At the next MINOR release, the owner deprecates its published npm versions (#1959). The upgrade train check no longer inspects this package, even if it remains installed.
+
+A Host retaining the 0.42.0 pin must not dispatch sealed tasks to cloud-do: it reads task content in plaintext and executes with platform keys. Route sealed tasks only to a device that supports the [sealed payload contract](../spec.md#hosted-sealed-payload-654).
 
 Restart requires a product that needs a cloud agent using platform keys with Pi’s durable harness in Cloudflare Durable Objects. Start from `archive/cloud-do` (the last main commit with the package; it differs from the last published version `v0.42.0` only in its README), qualify it again against the Pi version current at the time, and obtain the replay-safe tool list, provider profiles and binding names from the Host. See [ADR-036](../architecture/adr-2026-10-03-cloud-generic-agent.md).
 

@@ -14,19 +14,13 @@ import { runtimeSmokeImports } from '../api-surface/entry-closure.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
-const LANES = {
-  node: {
-    skipLibCheck: false,
-    wrong: { from: '@byok-sdk/client', name: 'createDaemonWithAdapters' },
-  },
-};
-
-/** The runtime smoke lanes, kept to the exports entries that carry declarations. */
+/** The Node runtime smoke exports that carry declarations. */
 export function typesBearingEntries(root = repoRoot) {
   const entries = JSON.parse(readFileSync(path.join(root, 'api-surface', 'entries.json'), 'utf8'));
-  const lanes = runtimeSmokeImports(root);
-  const typed = specifier => entries[specifier]?.facts?.types?.length > 0;
-  return { node: lanes.node.filter(typed) };
+  const typed = new Set(Object.entries(entries)
+    .filter(([, entry]) => entry.facts?.types?.length > 0)
+    .map(([id]) => id.replace(/\[.*\]$/, '')));
+  return runtimeSmokeImports(root).node.filter(specifier => typed.has(specifier));
 }
 
 function probeSource(specifiers, wrong) {
@@ -45,47 +39,44 @@ function tscEntry() {
   return path.join(path.dirname(manifestPath), manifest.bin.tsc);
 }
 
-function compilerOptions(lane) {
-  const options = {
+function compilerOptions() {
+  // The cloud-dataplane declarations import 'pg' and the package ships no
+  // `@types/pg` dependency, so the consumer supplies it, as a Host must.
+  const dataplane = createRequire(path.join(repoRoot, 'packages/cloud-dataplane/package.json'));
+  const pgTypes = path.dirname(dataplane.resolve('@types/pg/package.json'));
+  return {
     target: 'ES2022',
     lib: ['ES2024'],
     module: 'NodeNext',
     moduleResolution: 'NodeNext',
     strict: true,
-    skipLibCheck: LANES[lane].skipLibCheck,
+    skipLibCheck: false,
     noEmit: true,
+    types: ['node'],
+    typeRoots: [path.join(repoRoot, 'node_modules', '@types')],
+    paths: { pg: [path.join(pgTypes, 'index.d.mts')] },
   };
-  if (lane === 'node') {
-    // The cloud-dataplane declarations import 'pg' and the package ships no
-    // `@types/pg` dependency, so the consumer supplies it, as a Host must.
-    const dataplane = createRequire(path.join(repoRoot, 'packages/cloud-dataplane/package.json'));
-    const pgTypes = path.dirname(dataplane.resolve('@types/pg/package.json'));
-    return { ...options, types: ['node'], typeRoots: [path.join(repoRoot, 'node_modules', '@types')], paths: { pg: [path.join(pgTypes, 'index.d.mts')] } };
-  }
-  return { ...options, types: [] };
 }
 
 export function nodeNextConsumerProbe(installRoot, entries = typesBearingEntries()) {
-  for (const lane of ['node']) {
-    const consumer = path.join(installRoot, `node-next-consumer-${lane}`);
-    mkdirSync(consumer);
-    const { source, wrongLine } = probeSource(entries[lane], LANES[lane].wrong);
-    writeFileSync(path.join(consumer, 'package.json'), `${JSON.stringify({ name: `node-next-consumer-${lane}`, private: true, type: 'module' })}\n`);
-    writeFileSync(path.join(consumer, 'probe.ts'), source);
-    writeFileSync(path.join(consumer, 'tsconfig.json'), `${JSON.stringify({
-      compilerOptions: compilerOptions(lane),
-      include: ['probe.ts'],
-    }, null, 2)}\n`);
-    const result = spawnSync(process.execPath, [tscEntry(), '--project', 'tsconfig.json', '--pretty', 'false'], {
-      cwd: consumer, encoding: 'utf8', timeout: 300_000,
-    });
-    if (result.error) throw result.error;
-    const output = `${result.stdout}${result.stderr}`;
-    const errors = output.split('\n').filter(line => /error TS\d+/.test(line));
-    assert.deepEqual(errors.map(line => line.match(/^(.*?)\((\d+),\d+\): error (TS\d+)/)?.slice(1)), [['probe.ts', String(wrongLine), 'TS2322']],
-      `[node-next-consumer] ${lane}: expected exactly the deliberate TS2322 at probe.ts:${wrongLine}\n${output}`);
-    console.log(`[node-next-consumer] ${lane}: ${entries[lane].length} entries compile under NodeNext (skipLibCheck ${LANES[lane].skipLibCheck}); the deliberate wrong assignment fails with TS2322`);
-  }
+  const consumer = path.join(installRoot, 'node-next-consumer-node');
+  mkdirSync(consumer);
+  const { source, wrongLine } = probeSource(entries, { from: '@byok-sdk/client', name: 'createDaemonWithAdapters' });
+  writeFileSync(path.join(consumer, 'package.json'), `${JSON.stringify({ name: 'node-next-consumer-node', private: true, type: 'module' })}\n`);
+  writeFileSync(path.join(consumer, 'probe.ts'), source);
+  writeFileSync(path.join(consumer, 'tsconfig.json'), `${JSON.stringify({
+    compilerOptions: compilerOptions(),
+    include: ['probe.ts'],
+  }, null, 2)}\n`);
+  const result = spawnSync(process.execPath, [tscEntry(), '--project', 'tsconfig.json', '--pretty', 'false'], {
+    cwd: consumer, encoding: 'utf8', timeout: 300_000,
+  });
+  if (result.error) throw result.error;
+  const output = `${result.stdout}${result.stderr}`;
+  const errors = output.split('\n').filter(line => /error TS\d+/.test(line));
+  assert.deepEqual(errors.map(line => line.match(/^(.*?)\((\d+),\d+\): error (TS\d+)/)?.slice(1)), [['probe.ts', String(wrongLine), 'TS2322']],
+    `[node-next-consumer] node: expected exactly the deliberate TS2322 at probe.ts:${wrongLine}\n${output}`);
+  console.log(`[node-next-consumer] node: ${entries.length} entries compile under NodeNext (skipLibCheck false); the deliberate wrong assignment fails with TS2322`);
 }
 
 if (import.meta.main) {
