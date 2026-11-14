@@ -5,6 +5,7 @@ import {
   type AgentHomeProjectionCompletionRequest,
   type AgentHomeProjectionReadback,
 } from '@byok-sdk/protocol';
+import { sameAgentRef } from '../agent-home.js';
 import type { AuthManager } from './auth-manager.js';
 import { authedFetch } from './http-client.js';
 import { toHttpBase } from './url.js';
@@ -14,13 +15,6 @@ export class AgentHomeProjectionCompletionError extends Error {
     super(message, options);
     this.name = 'AgentHomeProjectionCompletionError';
   }
-}
-
-function sameAgentRef(
-  left: AgentHomeProjectionReadback['agentRef'],
-  right: AgentHomeProjectionCompletionRequest['agentRef'],
-): boolean {
-  return left.agentId === right.agentId && left.profileRevision === right.profileRevision;
 }
 
 /**

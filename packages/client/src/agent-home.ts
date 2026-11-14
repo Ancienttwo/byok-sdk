@@ -220,6 +220,10 @@ export interface AgentHomeExecutionBinding {
   readonly lease: AgentHomeExecutionLease;
 }
 
+export function sameAgentRef(left: AgentRef, right: AgentRef): boolean {
+  return left.agentId === right.agentId && left.profileRevision === right.profileRevision;
+}
+
 export function validateAgentRef(value: unknown): AgentRef {
   let candidate: AgentRef;
   try {

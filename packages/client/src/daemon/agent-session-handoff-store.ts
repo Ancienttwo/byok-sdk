@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeResolutionError, agentHomeReaderRunDirectory, ensureDirectoryNoSymlink, validateAgentRef, type AgentRef } from '../agent-home.js';
+import { sameAgentRef, AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeResolutionError, agentHomeReaderRunDirectory, ensureDirectoryNoSymlink, validateAgentRef, type AgentRef } from '../agent-home.js';
 
 export type AgentTerminalCause = 'complete' | 'failed' | 'cancelled';
 
@@ -222,16 +222,12 @@ function parseEntry(value: unknown): AgentSessionHandoff {
   });
 }
 
-function sameRef(left: AgentRef, right: AgentRef): boolean {
-  return left.agentId === right.agentId && left.profileRevision === right.profileRevision;
-}
-
 function sameMatch(
   entry: AgentSessionHandoff,
   expected: Omit<AgentSessionHandoffMatch, 'home'>,
 ): boolean {
   return (
-    sameRef(entry.agentRef, expected.agentRef) &&
+    sameAgentRef(entry.agentRef, expected.agentRef) &&
     entry.sessionRef === expected.sessionRef &&
     entry.runtimeId === expected.runtimeId &&
     entry.cwd === path.resolve(expected.cwd) &&
@@ -244,7 +240,7 @@ function sameTaskTerminalMatch(
   expected: Omit<AgentTaskTerminalMatch, 'home'>,
 ): boolean {
   return (
-    sameRef(entry.agentRef, expected.agentRef) &&
+    sameAgentRef(entry.agentRef, expected.agentRef) &&
     entry.taskId === expected.taskId &&
     entry.runtimeId === expected.runtimeId &&
     entry.cwd === path.resolve(expected.cwd) &&

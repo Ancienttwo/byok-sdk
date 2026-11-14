@@ -5,7 +5,7 @@ import {
   AgentContentReceiptPayloadSchema,
   type AgentContentReceiptPayload,
 } from '@byok-sdk/protocol';
-import type { AgentRef } from '../agent-home.js';
+import { sameAgentRef, type AgentRef } from '../agent-home.js';
 import { DurableJsonlFile } from '../util/durable-jsonl.js';
 import { ensureSecureDir } from '../util/secure-dir.js';
 import { type AgentEgressPolicy, type AgentEgressDropReason, eventBytes } from './agent-egress-policy.js';
@@ -85,10 +85,6 @@ export class AgentReliableQuotaError extends AgentReliableSpoolError {
     super(message);
     this.name = 'AgentReliableQuotaError';
   }
-}
-
-function sameAgentRef(left: AgentRef, right: AgentRef): boolean {
-  return left.agentId === right.agentId && left.profileRevision === right.profileRevision;
 }
 
 function stableRecordJson(value: unknown): string {

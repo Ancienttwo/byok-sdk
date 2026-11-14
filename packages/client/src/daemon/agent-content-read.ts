@@ -3,6 +3,7 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import {
+  sameAgentRef,
   AgentHomeLayout,
   validateAgentRef,
   type AgentRef,
@@ -431,10 +432,6 @@ class RootPolicyError extends Error {
     this.name = 'RootPolicyError';
     this.reason = reason;
   }
-}
-
-function sameAgentRef(left: AgentRef, right: AgentRef): boolean {
-  return left.agentId === right.agentId && left.profileRevision === right.profileRevision;
 }
 
 function sameSessionIdentity(left: AgentContentSessionIdentity, right: AgentContentSessionIdentity): boolean {

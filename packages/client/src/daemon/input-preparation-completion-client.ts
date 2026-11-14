@@ -6,6 +6,7 @@ import {
   type InputPreparationCompletionRequest,
   type InputPreparationReadback,
 } from '@byok-sdk/protocol';
+import { sameAgentRef } from '../agent-home.js';
 import type { AuthManager } from './auth-manager.js';
 import { authedFetch } from './http-client.js';
 import { toHttpBase } from './url.js';
@@ -15,13 +16,6 @@ export class InputPreparationCompletionError extends Error {
     super(message, options);
     this.name = 'InputPreparationCompletionError';
   }
-}
-
-function sameAgentRef(
-  left: InputPreparationReadback['agentRef'],
-  right: InputPreparationCompletionRequest['agentRef'],
-): boolean {
-  return left.agentId === right.agentId && left.profileRevision === right.profileRevision;
 }
 
 /**

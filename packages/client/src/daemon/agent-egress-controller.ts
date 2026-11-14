@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { AgentEgressReliablePayloadSchema, type AgentEvent } from '@byok-sdk/protocol';
-import type { AgentRef } from '../agent-home.js';
+import { sameAgentRef, type AgentRef } from '../agent-home.js';
 import {
   type AgentEgressDropReason,
   type AgentEgressDropReceipt,
@@ -289,7 +289,7 @@ export class AgentEgressController {
     }
     const opened = (async () => {
       const spool = await AgentReliableSpool.open(homeDir);
-      if (spool.records().some((record) => !sameAgent(record.agentRef, agentRef))) {
+      if (spool.records().some((record) => !sameAgentRef(record.agentRef, agentRef))) {
         throw new Error('Agent-local reliable spool has a different AgentRef');
       }
       return spool;
@@ -345,8 +345,4 @@ export class AgentEgressController {
     }));
     if (this.drops.length > 256) this.drops.shift();
   }
-}
-
-function sameAgent(left: AgentRef, right: AgentRef): boolean {
-  return left.agentId === right.agentId && left.profileRevision === right.profileRevision;
 }
