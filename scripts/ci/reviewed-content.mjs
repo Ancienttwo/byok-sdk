@@ -441,6 +441,17 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
       after.scripts['test:scripts'] = after.scripts['test:scripts'].slice(ciPrefix.length);
       delete after.scripts[ciHelper];
     }
+    // repo-harness 0.33 renamed its CLI to rh; admit this one-time conversion.
+    for (const [name, oldValue, newValue] of [
+      ['check:context-files', 'repo-harness run check-context-files', 'rh run check-context-files'],
+      ['check:deploy-sql', 'repo-harness run check-deploy-sql-order', 'rh run check-deploy-sql-order'],
+      ['check:brain', 'repo-harness brain check', 'rh brain check'],
+      ['sync:brain', 'repo-harness brain sync', 'rh brain sync'],
+    ]) {
+      if (before.scripts?.[name] === oldValue && after.scripts?.[name] === newValue) {
+        delete before.scripts[name]; delete after.scripts[name];
+      }
+    }
     // Admit rh script changes when both values invoke rh; every other
     // script and field stays in the deep comparison below.
     const harnessScript = value => typeof value === 'string' && value.startsWith('rh ');

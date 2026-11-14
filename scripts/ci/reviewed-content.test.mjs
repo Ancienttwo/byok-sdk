@@ -95,6 +95,33 @@ test('root admits only rh script changes', t => {
     assert.throws(() => selectImpact(['package.json'], f), /more than the reviewed fields|Unreviewed|Only existing/);
   }
 });
+test('root admits only the four exact CLI rename pairs', t => {
+  const f = fixture(t);
+  const pairs = [
+    ['check:context-files', 'repo-harness run check-context-files', 'rh run check-context-files'],
+    ['check:deploy-sql', 'repo-harness run check-deploy-sql-order', 'rh run check-deploy-sql-order'],
+    ['check:brain', 'repo-harness brain check', 'rh brain check'],
+    ['sync:brain', 'repo-harness brain sync', 'rh brain sync'],
+  ];
+  const before = { ...f.rootManifest, scripts: { ...f.rootManifest.scripts, ...Object.fromEntries(pairs.map(([name, oldValue]) => [name, oldValue])) } };
+  const after = { ...f.rootManifest, scripts: { ...f.rootManifest.scripts, ...Object.fromEntries(pairs.map(([name, , newValue]) => [name, newValue])) } };
+  f.write('package.json', before); rebase(f, 'old CLI scripts');
+  f.write('package.json', after);
+  assert.equal(selectImpact(['package.json'], f).reason, 'root-ci-scripts');
+  for (const [name, oldValue, newValue] of pairs) {
+    f.write('package.json', { ...after, scripts: { ...after.scripts, [name]: newValue.slice(0, -1) + 'X' } });
+    assert.throws(() => selectImpact(['package.json'], f), /more than the reviewed fields/);
+    f.write('package.json', { ...before, scripts: { ...before.scripts, [name]: oldValue.slice(0, -1) + 'X' } });
+    rebase(f, `alter old ${name}`);
+    f.write('package.json', after);
+    assert.throws(() => selectImpact(['package.json'], f), /more than the reviewed fields/);
+    f.write('package.json', before); rebase(f, `restore old ${name}`);
+  }
+  f.write('package.json', { ...before, scripts: { ...before.scripts, 'check:other': 'repo-harness run other' } });
+  rebase(f, 'unregistered CLI script');
+  f.write('package.json', { ...after, scripts: { ...after.scripts, 'check:other': 'rh run other' } });
+  assert.throws(() => selectImpact(['package.json'], f), /more than the reviewed fields/);
+});
 // #1102: the gate script, its test in test:scripts, and the client files entry, each exactly.
 test('the upgrade-manifest gate admits only its exact script, test and client files entry', t => {
   const f = fixture(t), old = f.rootManifest.scripts['test:scripts'];
