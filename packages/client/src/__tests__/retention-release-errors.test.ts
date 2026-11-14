@@ -22,6 +22,33 @@ it('preserves maintenance failure and root gate release failure', async () => {
   expect(error.errors[1]).toBe(failure);
 });
 
+it('a failed maintenance gate release is reported and frees the home for the next acquire', async () => {
+  const home = new AgentHomeManager({ hostStorageRoot: testScratchRoot() });
+  const resolution = await home.layout.resolve({ agentId: 'agent', profileRevision: '1' });
+  await fs.mkdir(resolution.canonicalHome, { recursive: true });
+  const failure = new Error('release root');
+  const release = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(undefined);
+  vi.spyOn(gates, 'acquirePathMutationGate').mockResolvedValue({ release } as never);
+  const lease = await home.leaseManager.acquireMaintenance(resolution.agentsRoot, resolution.canonicalHome);
+  await expect(lease.release()).rejects.toBe(failure);
+  await (await home.leaseManager.acquireMaintenance(resolution.agentsRoot, resolution.canonicalHome)).release();
+});
+
+it('keeps lease marker removal failure behind the acquire failure', async () => {
+  const home = new AgentHomeManager({ hostStorageRoot: testScratchRoot() });
+  const resolution = await home.layout.resolve({ agentId: 'agent', profileRevision: '1' });
+  const failure = new Error('release root');
+  const removal = Object.assign(new Error('remove marker'), { code: 'EBUSY' });
+  vi.spyOn(gates, 'acquirePathMutationGate').mockResolvedValue({ release: vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(undefined) } as never);
+  const rm = fs.rm.bind(fs);
+  vi.spyOn(fs, 'rm').mockImplementation(async (file, options) => {
+    if (String(file).endsWith('agent-home.lease')) throw removal;
+    return rm(file, options);
+  });
+  const error = await home.leaseManager.acquire(resolution).catch(e => e);
+  expect(error.cause.errors).toEqual([failure, removal]);
+});
+
 it('retains the home busy type and both causes when release fails', async () => {
   const root = testScratchRoot();
   const home = path.join(root, 'agent');
@@ -105,6 +132,21 @@ it('preserves maintenance work and release failures', async () => {
   const error = await manager.withIdleHomeLease('agent', async () => { throw primary; }).catch(e => e);
   expect(error).toBeInstanceOf(AggregateError);
   expect(error.errors).toEqual([primary, failure]);
+});
+
+it('keeps owner record removal failure behind the publication gate failure', async () => {
+  const root = testScratchRoot();
+  const failure = new Error('release owner gate');
+  const removal = Object.assign(new Error('remove owner'), { code: 'EBUSY' });
+  vi.spyOn(gates, 'acquirePathMutationGate').mockResolvedValue({ release: vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(undefined) } as never);
+  const rm = fs.rm.bind(fs);
+  vi.spyOn(fs, 'rm').mockImplementation(async (file, options) => {
+    if (String(file).endsWith('daemon-owner.json')) throw removal;
+    return rm(file, options);
+  });
+  const error = await acquireDaemonOwner(root, 'daemon').catch(e => e);
+  expect(error).toBeInstanceOf(AggregateError);
+  expect(error.errors).toEqual([failure, removal]);
 });
 
 it('preserves owner publication failure and gate release failure', async () => {

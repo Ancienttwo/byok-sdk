@@ -5,7 +5,7 @@ import path from 'node:path';
 import { sameContent } from './file-state.js';
 import { ensureSecureStoreRoot } from './secure-dir.js';
 import { listenPrivateUnixSocket, privateSocketEndpoint, PrivateSocketInUseError, reclaimPrivateSocketFallbackDirectory } from './private-unix-socket.js';
-import { withRelease } from './with-release.js';
+import { releaseAfterFailure, withRelease } from './with-release.js';
 import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
@@ -417,8 +417,7 @@ export async function acquireDaemonOwner(
           await pathGate.release();
           pathGate = undefined;
         } catch (error) {
-          await fs.rm(ownerPath, { force: true }).catch(() => undefined);
-          throw error;
+          return await releaseAfterFailure(error, () => fs.rm(ownerPath, { force: true }), (primary, errors) => { failures.push(...errors); return primary; });
         }
         const ownedLiveness = liveness;
         const ownedMutex = mutex;
