@@ -59,6 +59,7 @@ async function ledgerSubject(): Promise<RoutineSubject> {
     cancelTurn: async turnId => {
       const result = await host.cancelTurn(turnId);
       if ('drainError' in result) {
+        // The cancel verb committed; other work failed in the same drain and remains pending for retry, so do not reject.
         console.error('Cancellation committed; drain failed. Failed jobs remain pending for retry on the next drain.', result.drainError);
       }
     },
@@ -86,7 +87,8 @@ it.each([new Error('Host job failed'), undefined])('reports a committed routine 
   const report = vi.spyOn(console, 'error').mockImplementation(() => {});
   try {
     await expect(subject.cancelTurn('cancelled-turn')).resolves.toBeUndefined();
-    expect(report).toHaveBeenCalledWith('Cancellation committed; drain failed. Failed jobs remain pending for retry on the next drain.', drainError);
+    expect(report).toHaveBeenCalledOnce();
+    expect(report.mock.calls[0]![1]).toBe(drainError);
   } finally { cancel.mockRestore(); report.mockRestore(); }
 });
 

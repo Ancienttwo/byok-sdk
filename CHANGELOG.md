@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Fixed (examples; #2142)** — The desktop conversation service and the local routine vector adapter log `drainError` after committed cancellation, including an undefined rejection value, and explain that failed jobs remain pending for retry on the next drain.
+- **Fixed (examples; #2142)** — The desktop conversation service and the local routine vector adapter log `drainError` after committed cancellation, including an undefined rejection value, and explain that failed jobs remain pending for retry on the next drain. The desktop bridge returns a fixed summary while keeping the original error and its details in local logs.
 
 - **Fixed (keys; #2031)** — Pi projection directory ownership is checked against the effective uid, which owns files created by the process. When real and effective uids differ, an effective-uid-owned directory is accepted and a directory owned only by the real uid is refused.
 

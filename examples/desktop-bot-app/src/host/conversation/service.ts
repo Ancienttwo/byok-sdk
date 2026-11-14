@@ -127,13 +127,18 @@ export class ConversationService {
     return null;
   }
 
-  async cancel(params: unknown): Promise<TurnCancelResult> {
+  async cancel(params: unknown): Promise<TurnCancelResult & { drainError?: { message: string } }> {
     const result = await this.#conversation.bot.cancelTurn(text(record(params, 'k8.cancel').turnId, 'turnId'));
     if ('drainError' in result) {
       console.error('Cancellation committed; drain failed. Failed jobs remain pending for retry on the next drain.', result.drainError);
     }
     this.changed();
-    return result;
+    // Only the cancellation outcome and a fixed summary cross the renderer boundary.
+    return {
+      turnId: result.turnId, result: result.result,
+      ...(result.conclusion === undefined ? {} : { conclusion: result.conclusion }),
+      ...('drainError' in result ? { drainError: { message: 'Cancellation completed. Some background work will be retried.' } } : {}),
+    };
   }
 
   async answer(params: unknown): Promise<null> {

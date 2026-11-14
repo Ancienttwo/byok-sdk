@@ -181,16 +181,40 @@ it('shows a failed Turn with the server\'s task reason, and marks a Pi backgroun
   service.close();
 }, 30_000);
 
-it.each([new Error('Host job failed'), undefined])('reports a committed cancellation drain error without rejecting (%s)', async drainError => {
+it.each([
+  Object.assign(new Error('Host job failed at /private/host/jobs', { cause: new Error('/private/host/cause') }), { path: '/private/host/jobs' }),
+  new AggregateError([new Error('/private/host/job')], 'Host jobs failed'),
+  { message: 'Host job failed', path: '/private/host/jobs', cause: { path: '/private/host/cause' } },
+  undefined,
+])('reports a committed cancellation drain error without rejecting (%s)', async drainError => {
   const fx = await open(), changed = vi.fn();
-  const result = { turnId: 'cancelled-turn', result: 'cancelled' as const, drainError };
+  const result = { turnId: 'cancelled-turn', result: 'cancelled' as const, conclusion: 'cancelled', wakePending: true as const, drainError };
   const cancel = vi.spyOn(fx.conversation.bot, 'cancelTurn').mockResolvedValueOnce(result);
   const report = vi.spyOn(console, 'error').mockImplementation(() => {});
   const service = new ConversationService({ conversation: fx.conversation, store: fx.store, server: fx.server,
     brand: { roles: [] }, models: () => [], changed });
   try {
-    await expect(service.cancel({ turnId: result.turnId })).resolves.toBe(result);
-    expect(report).toHaveBeenCalledWith('Cancellation committed; drain failed. Failed jobs remain pending for retry on the next drain.', drainError);
+    const reply = await service.cancel({ turnId: result.turnId });
+    expect(JSON.parse(JSON.stringify(reply))).toEqual({
+      turnId: result.turnId, result: 'cancelled', conclusion: 'cancelled',
+      drainError: { message: 'Cancellation completed. Some background work will be retried.' },
+    });
+    expect(report).toHaveBeenCalledOnce();
+    expect(report.mock.calls[0]![1]).toBe(drainError);
+    expect(changed).toHaveBeenCalledOnce();
+  } finally { service.close(); cancel.mockRestore(); report.mockRestore(); }
+});
+
+it('returns the cancellation outcome without a warning when the drain succeeds', async () => {
+  const fx = await open(), changed = vi.fn();
+  const result = { turnId: 'cancelled-turn', result: 'cancelled' as const };
+  const cancel = vi.spyOn(fx.conversation.bot, 'cancelTurn').mockResolvedValueOnce(result);
+  const report = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const service = new ConversationService({ conversation: fx.conversation, store: fx.store, server: fx.server,
+    brand: { roles: [] }, models: () => [], changed });
+  try {
+    expect(await service.cancel({ turnId: result.turnId })).toEqual(result);
+    expect(report).not.toHaveBeenCalled();
     expect(changed).toHaveBeenCalledOnce();
   } finally { service.close(); cancel.mockRestore(); report.mockRestore(); }
 });
