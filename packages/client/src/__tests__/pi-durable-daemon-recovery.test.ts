@@ -124,7 +124,8 @@ async function recoveryScenario(daemonOnly: boolean, interpreter = process.execP
     const child=spawn(interpreter,[path.resolve(import.meta.dirname,'fixtures/pi-durable-recovery-daemon.mjs'),configPath],{env:{...process.env},stdio:['pipe','pipe','pipe','ipc']});children.push(child);
     let stdout='';child.stdout!.on('data',chunk=>{stdout+=chunk;logs.push(String(chunk));});child.stderr!.on('data',chunk=>logs.push(String(chunk)));
     child.on('message',value=>{enrollment=(value as {record:unknown}).record;});child.send({record:enrollment});
-    await vi.waitFor(()=>{if(child.exitCode!==null) throw new Error(logs.join(''));expect(stdout).toContain('"ready":true');},PROCESS_WAIT);return child;
+    // The daemon fixture allows 10s for its connection to open; do not cut that startup budget to PROCESS_WAIT's 5s.
+    await vi.waitFor(()=>{if(child.exitCode!==null) throw new Error(logs.join(''));expect(stdout).toContain('"ready":true');},{ ...PROCESS_WAIT, timeout: 10_000 });return child;
   };
   const first=await start();
   const offer=(taskId:string,instruction:string)=>createEnvelope('task.offer',{instruction,runtime:'pi',agentRef:{agentId:'recovery-agent',profileRevision:'1'},...FRESH_OFFER,dispatchSelection:{lane:'byok',runtimeId:'pi',providerId:'probe',modelId:'probe'}},{taskId,seq:server!.nextSeq()});
