@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { checkEntryClosure, createWalker, manifestEntries } from './entry-closure.mjs';
+import { checkEntryClosure, createWalker, manifestEntries, runtimeSmokeImports } from './entry-closure.mjs';
 import { scanModule } from './module-scan.mjs';
 
 function fixture(t) {
@@ -36,6 +36,16 @@ function fixture(t) {
   }
   return { root, write, json, policies, loadZod, read: file => readFileSync(path.join(root, file), 'utf8') };
 }
+
+test('runtime smoke includes Node exports and refuses unreviewed Cloudflare entries', t => {
+  const f = fixture(t);
+  f.policies();
+  assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
+  assert.deepEqual(runtimeSmokeImports(f.root), { node: ['@byok-sdk/client', '@byok-sdk/core', '@byok-sdk/protocol'] });
+  f.write('packages/client/dist/index.js', "import 'cloudflare:workers';\n");
+  assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
+  assert.throws(() => runtimeSmokeImports(f.root), /@byok-sdk\/client: Cloudflare entry requires a reviewed runtime smoke/);
+});
 
 test('host-kit closure excludes filesystem and path builtins', () => {
   const entries = JSON.parse(readFileSync(new URL('../../api-surface/entries.json', import.meta.url), 'utf8'));
