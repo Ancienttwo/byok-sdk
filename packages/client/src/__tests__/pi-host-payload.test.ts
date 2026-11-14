@@ -52,7 +52,9 @@ describe('copyPiRuntimeAssets', () => {
     const outDir = path.join(await tempRoot('byok-pi-assets-'), 'pi');
     const files = await sdk.copyPiRuntimeAssets({ outDir, form });
     const subagentFiles = files.filter(file => /^pi-subagent(s|-extensions)\//u.test(file));
-    expect(files.filter(file => !subagentFiles.includes(file))).toEqual(expectedInventory(form));
+    const seedFiles = files.filter(file => file.startsWith('sdk-derived/pi-jiti-seed/'));
+    expect(files.filter(file => !subagentFiles.includes(file) && !seedFiles.includes(file))).toEqual(expectedInventory(form));
+    expect(seedFiles.filter(file => file.endsWith('/manifest.json'))).toHaveLength(1);
     // The client's pi-subagents with its runtime dependencies, and the SDK child extensions.
     const subagents = JSON.parse(await fs.readFile(path.join(outDir, 'pi-subagents/package.json'), 'utf8'));
     expect([subagents.name, subagents.version]).toEqual(['pi-subagents', '0.88.1']);
