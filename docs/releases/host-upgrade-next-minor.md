@@ -230,6 +230,34 @@ resolves the receipt from where `current` points, and a present `current`
 runs as it is, so read the receipt it returns and call `rollback()` to go
 back to the previous version.
 
+## Windows ACL hardening timeouts are hardening errors (#2116)
+
+On Windows, the `icacls` run that hardens a private directory has a 30 s bound
+(#1971). A run that outlives it is stopped and now rejects with the public
+hardening error instead of an internal, unexported timeout class:
+`SecureDirHardeningError` with `code: 'secure_dir_command_timeout'`, from
+`ensureSecureDir()` and from every public SDK operation that reports a
+directory hardening failure (for example pairing). Other hardening failures
+carry `code: 'secure_dir_hardening'`.
+
+**Breaking for a type-narrowing Host.** `SecureDirHardeningError` now has a
+`code` field. A Host that narrows `ServiceUnitError | SecureDirHardeningError`
+with `'code' in error` and then switches exhaustively over the service codes
+fails to compile, and routes the new codes wrongly. Test
+`error instanceof SecureDirHardeningError` first, then branch on `code`.
+
+A timeout means the ACL's state is unknown, never that it was not applied.
+`exitConfirmed` is set only with `secure_dir_command_timeout`, with the meaning
+it has on `ServiceUnitError`: `true`, the stopped `icacls` has exited, so run
+the operation again; `false`, it may still be running and still change the ACL,
+so a retry now can race it. `cause` is the timeout, for diagnostics only. A
+`ServiceInstallation` store lease still reports this timeout as
+`ServiceUnitError` `service_command_timeout`, as listed above.
+
+`exportDeviceSupportBundle` does not change: it catches a file hardening
+failure and rejects with `DeviceOperatorError` `operation-failed`, without
+`exitConfirmed` or the hardening error as `cause`.
+
 ## Upgrade resolves when an old snapshot cannot be pruned
 
 After a healthy switch, `upgrade()` removes the snapshots of earlier

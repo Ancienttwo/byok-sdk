@@ -125,6 +125,15 @@
       ]
     },
     {
+      "id": "secure-dir-command-timeout",
+      "impact": "breaking",
+      "summary": "SecureDirHardeningError gains a code (secure_dir_hardening, or secure_dir_command_timeout) and exitConfirmed (#2116). On Windows an icacls run that outlives its 30 s bound while ensureSecureDir() or another SDK operation hardens a directory now rejects with SecureDirHardeningError code secure_dir_command_timeout instead of an internal, unexported timeout class. The ACL's state is then unknown, never \"it was not applied\". exitConfirmed is set only with the timeout code: true when the stopped icacls has exited, so run the operation again; false when it may still run and change the ACL, so a retry can race it. A Host that narrows ServiceUnitError | SecureDirHardeningError with `code in error` and then exhausts the service codes no longer compiles or routes correctly: SecureDirHardeningError now carries code, so branch on instanceof SecureDirHardeningError first, then on code (secure_dir_command_timeout versus secure_dir_hardening) and exitConfirmed. A ServiceInstallation store lease still reports a timeout as ServiceUnitError service_command_timeout. The public support-bundle export is unchanged: exportDeviceSupportBundle still rejects with DeviceOperatorError operation-failed.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#windows-acl-hardening-timeouts-are-hardening-errors-2116",
+      "items": [
+        "export:@byok-sdk/client#SecureDirHardeningError"
+      ]
+    },
+    {
       "id": "enrollment-clear-store-scope",
       "impact": "breaking",
       "summary": "clearDeviceEnrollment and Daemon.unpair() no longer delete another store's credential or staged first pairing under the same productId: they hold a per-user productId lock from validation through deletion, and pairing takes it across its credential writes, each waiting up to 30 seconds. FirstPairingAttempt gains storeIdentity (DeviceStore.identity, the SHA-256 hex of the resolved storeDir); an injected DeviceCredentialBackend keeps every attempt field, or the store's own attempt is refused. A clear refuses another store's attempt as store_not_bound and an attempt that names no store (staged by 0.42.0) with the new DeviceEnrollmentClearErrorCode pairing_attempt_unattributed; clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }) deletes it. Pairing applies the same rule (#2033): it reuses only its own store's staged attempt and otherwise throws the new FirstPairingAttemptRefusedError (store_not_bound, which replaceOtherStore discards, or pairing_attempt_unattributed). A running daemon's token renewal takes the same lock around its write and writes only while the OS entry still holds its store's enrollment; otherwise the daemon halts as store_not_bound or re_pair_required (#2034). A renewal never holds the lock across a network request. A pairing is one critical section: it rereads the enrollment and staged attempt under the lock, never a cached record, refuses another store's or an unattributed attempt even beside its own enrollment, and holds the lock across its own request, because server registration has no fencing, and through its E2EE member entries. A running daemon's member resume and KEM rotation write the member entries only under the same lock while its enrollment still holds, otherwise they write nothing and the daemon halts the same way (#2055). BlobClient and InstallSkillPacksOptions change only through the types they reference (#1964).",
@@ -354,6 +363,11 @@
       "item": "export:@byok-sdk/client#LocalTaskJournal",
       "change": "changed",
       "entry": "journal-prune-cutoff"
+    },
+    {
+      "item": "export:@byok-sdk/client#SecureDirHardeningError",
+      "change": "changed",
+      "entry": "secure-dir-command-timeout"
     },
     {
       "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",

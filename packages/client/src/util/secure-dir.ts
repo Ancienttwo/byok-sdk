@@ -10,7 +10,9 @@ import { type Runner } from './exec-runner.js';
 /**
  * Runs `icacls` within the `platform` bound (#1971); past it the process is
  * killed and the run rejects with `PlatformCommandTimeoutError`, its exit
- * confirmed only when it exited within the `rootExit` bound. Not the lifecycle's
+ * confirmed only when it exited within the `rootExit` bound. The secure-dir
+ * entry points never let it out: they report it as the hardening error's
+ * `*_command_timeout` code (#2116). Not the lifecycle's
  * `defaultRunner` (`lifecycle/platform-command.ts`): `util` may not depend on
  * `lifecycle`, and this lazily loaded module would pull that runner's
  * process-tree graph into lazy initialisers. `icacls` starts no children, so
@@ -153,14 +155,33 @@ export interface EnsureSecureDirOptions {
  * `control-server.ts`'s `startControlServer`) reacts to this.
  */
 export class SecureDirHardeningError extends Error {
+  /**
+   * `secure_dir_hardening`: `icacls` could not run or exited non-zero, so the
+   * restrictive ACL is not in place. `secure_dir_command_timeout` (#1971,
+   * #2116): `icacls` outlived its bound and was stopped; whether the ACL was
+   * applied is UNKNOWN, never "it was not". Read {@link exitConfirmed} before
+   * running the operation again.
+   */
+  readonly code: 'secure_dir_hardening' | 'secure_dir_command_timeout';
+  /**
+   * Set only with `secure_dir_command_timeout`. `true`: the timed-out `icacls`
+   * is proven to have exited. `false`: it may still be running and still
+   * change the ACL, so a retry now can race it. `cause` is the timeout, for
+   * diagnostics only.
+   */
+  readonly exitConfirmed?: boolean;
   constructor(
     public readonly dir: string,
     reason: string,
+    timeout?: Error & { readonly exitConfirmed: boolean },
   ) {
     super(
       `failed to apply a restrictive Windows ACL to "${dir}": ${reason} — refusing to leave this directory unprotected (it holds device credentials and/or the control-socket token, otherwise readable by any other local user); see docs/security.md`,
+      timeout && { cause: timeout },
     );
     this.name = 'SecureDirHardeningError';
+    this.code = timeout ? 'secure_dir_command_timeout' : 'secure_dir_hardening';
+    if (timeout) this.exitConfirmed = timeout.exitConfirmed;
   }
 }
 
@@ -176,13 +197,19 @@ export class SecureDirModeError extends Error {
   }
 }
 
+/** {@link SecureDirHardeningError} for one file, with the same `code` and `exitConfirmed` meanings. */
 export class SecureFileHardeningError extends Error {
+  readonly code: 'secure_file_hardening' | 'secure_file_command_timeout';
+  readonly exitConfirmed?: boolean;
   constructor(
     public readonly filePath: string,
     reason: string,
+    timeout?: Error & { readonly exitConfirmed: boolean },
   ) {
-    super(`failed to apply a restrictive Windows ACL to "${filePath}": ${reason}`);
+    super(`failed to apply a restrictive Windows ACL to "${filePath}": ${reason}`, timeout && { cause: timeout });
     this.name = 'SecureFileHardeningError';
+    this.code = timeout ? 'secure_file_command_timeout' : 'secure_file_hardening';
+    if (timeout) this.exitConfirmed = timeout.exitConfirmed;
   }
 }
 
@@ -271,7 +298,7 @@ async function secureDir(dir: string, buildArgs: (dir: string, username: string)
   try {
     result = await run('icacls', buildArgs(dir, username));
   } catch (err) {
-    if (err instanceof PlatformCommandTimeoutError) throw err;
+    if (err instanceof PlatformCommandTimeoutError) throw new SecureDirHardeningError(dir, 'icacls did not finish in time and was stopped; whether the ACL was applied is unknown', err);
     throw new SecureDirHardeningError(dir, `could not run icacls: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (result.code !== 0) {
@@ -313,7 +340,7 @@ export async function ensureSecureFile(filePath: string, opts: EnsureSecureDirOp
   try {
     result = await run('icacls', buildIcaclsFileArgs(filePath, username));
   } catch (err) {
-    if (err instanceof PlatformCommandTimeoutError) throw err;
+    if (err instanceof PlatformCommandTimeoutError) throw new SecureFileHardeningError(filePath, 'icacls did not finish in time and was stopped; whether the ACL was applied is unknown', err);
     throw new SecureFileHardeningError(filePath, `could not run icacls: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (result.code !== 0) {
