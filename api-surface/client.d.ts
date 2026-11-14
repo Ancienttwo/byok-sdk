@@ -958,7 +958,7 @@ export interface PiRuntimeConfig {
     agentUserContext?: PiAdapterOptions['agentUserContext'];
     /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
-    /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+    /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /**
      * `PiAdapterOptions.packageDir`: the absolute Pi asset root of a product
@@ -984,7 +984,7 @@ export interface RuntimeAdaptersRuntimes {
         agentSessionPersistence?: ClaudeAdapterOptions['agentSessionPersistence'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
-        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */
         runtimeEnvironment?: RuntimeEnvironmentPolicy;
     };
     codex?: {
@@ -994,7 +994,7 @@ export interface RuntimeAdaptersRuntimes {
         agentUserContext?: CodexAdapterOptions['agentUserContext'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
-        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */
         runtimeEnvironment?: RuntimeEnvironmentPolicy;
     };
     /** Applies only when `runtimeAllowlist` lists `grok`. */
@@ -1005,7 +1005,7 @@ export interface RuntimeAdaptersRuntimes {
         agentUserMcpServers?: GrokAdapterOptions['agentUserMcpServers'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
-        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */
         runtimeEnvironment?: RuntimeEnvironmentPolicy;
     };
     /** Required when `runtimeAllowlist` lists `dsh`, and applies only then. dsh has no default model and runs on darwin and linux only. */
@@ -1018,7 +1018,7 @@ export interface RuntimeAdaptersRuntimes {
         sandbox?: DshAdapterOptions['sandbox'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
-        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */
         runtimeEnvironment?: RuntimeEnvironmentPolicy;
     };
     /** Required when runtimeAllowlist lists opencode. Native user configuration is inherited. */
@@ -1027,7 +1027,7 @@ export interface RuntimeAdaptersRuntimes {
         /** Absolute executable override, resolved before PATH. Never installs or migrates OpenCode. */
         executable?: string;
         versionPolicy?: RuntimeVersionPolicy;
-        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */
         runtimeEnvironment?: RuntimeEnvironmentPolicy;
     };
     /** Required when `runtimeAllowlist` lists `agy`, and applies only then. */
@@ -1038,7 +1038,7 @@ export interface RuntimeAdaptersRuntimes {
         model?: AgyAdapterOptions['model'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
-        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+        /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */
         runtimeEnvironment?: RuntimeEnvironmentPolicy;
     };
 }
@@ -1056,7 +1056,7 @@ export interface RuntimeAdaptersConfig {
     /** Runtimes to build: unset = pi, claude and codex; set = exactly the listed ids (unknown ids ignored). `grok`, `dsh` and `agy` are built only when listed. */
     runtimeAllowlist?: string[];
     runtimes?: RuntimeAdaptersRuntimes;
-    /** The environment a built runtime gives its children (#1095) when `runtimes.<id>.runtimeEnvironment` is unset; Pi's policy must not pass `PI_PACKAGE_DIR`. */
+    /** The environment a built runtime gives its children (#1095) when `runtimes.<id>.runtimeEnvironment` is unset; Pi's policy must not pass `PI_PACKAGE_DIR`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084). */
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /** Separate-process Pi BYOK credential boundary. */
     piByokLauncher?: PiByokLauncherConfig;
@@ -5115,7 +5115,11 @@ export interface DaemonConfig {
      * The default environment a runtime `createDaemon` builds gives its
      * children (#1095): by default the user's login-shell snapshot, so a
      * variable the Host sets in `process.env` reaches a runtime only when `pass`
-     * names it. `runtimes.<id>.runtimeEnvironment` overrides it for that runtime
+     * names it. One exception: after applying the snapshot, the default base
+     * sets `HOME` to the daemon's own live `HOME` (#2084); `PATH`, `XDG_*` and
+     * other values the rc derived from its `HOME` stay as the snapshot has them.
+     * A policy that passes `HOME` or uses `allowlist` is unchanged.
+     * `runtimes.<id>.runtimeEnvironment` overrides it for that runtime
      * (#1759): it replaces this policy and is not merged with this `pass`.
      * `createDaemonWithAdapters` refuses this field: each injected adapter
      * takes its own `runtimeEnvironment` option.
@@ -11344,10 +11348,10 @@ import { type ApplyLoginShellEnvironmentOptions, type ServiceEnvironmentStatus }
  *
  * `HOME` is the home the service manager gave the job (the launchd plist pins
  * the lifecycle's home, #2017), so an rc that resets it cannot move the daemon
- * to another home. Only the daemon's `HOME` and `BYOK_*` are pinned: `PATH`,
- * `XDG_*` and other values an rc derives from a different home stay as the rc
- * set them, and a default runtime environment gives tasks the snapshot's
- * `HOME` (#2084) unless its policy passes `HOME`.
+ * to another home; `pinLiveHome` is the same rule a default runtime
+ * environment applies to tasks (#2084). Only the daemon's `HOME` and `BYOK_*`
+ * are pinned: `PATH`, `XDG_*` and other values an rc derives from a different
+ * home stay as the rc set them.
  */
 /** The `byok-agent start` flag generated service definitions pass. */
 export declare const SERVICE_FLAG = "--service";
@@ -12621,6 +12625,18 @@ export declare function loginShellSnapshot(): Promise<LoginShellSnapshot>;
  */
 export declare function setLoginShellSnapshotSource(source: (() => Promise<LoginShellSnapshot>) | undefined): void;
 /**
+ * Sets `env.HOME` to this process's own `HOME` from `live`, the rule wherever
+ * the login-shell snapshot stands in for this process's environment: the
+ * daemon under `--service` (#2017) and the default runtime environment of
+ * its tasks (#2084). An rc that resets `HOME` cannot move either to another
+ * home. When `live` has no `HOME`, `env` keeps the snapshot's. Returns the
+ * names it wrote. Only `HOME` is pinned: `PATH`, `XDG_*` and other values an
+ * rc derived from its own `HOME` stay as the rc set them.
+ *
+ * @internal
+ */
+export declare function pinLiveHome(env: Record<string, string | undefined>, live: Readonly<Record<string, string | undefined>>): readonly string[];
+/**
  * Takes one snapshot without the once-per-process latch.
  *
  * @internal
@@ -13476,7 +13492,13 @@ import { type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from 
  * - `login-shell` (default): the user's login-shell snapshot
  *   (`../login-shell-environment.ts`), never the daemon's live
  *   environment, so a variable an embedding Host puts into `process.env` does
- *   not reach the runtime. A failed capture fails closed with
+ *   not reach the runtime. One exception: `HOME` is the daemon's own live
+ *   `HOME` (#2084), the rule the daemon applies to itself under `--service`
+ *   (#2017), so an rc that exports another `HOME` cannot move tasks out of a
+ *   scratch home the daemon runs under. `PATH`, `XDG_*` and other values the
+ *   rc derived from its `HOME` stay as the rc set them and may point at
+ *   another home than `HOME`; a Host that needs them consistent passes them
+ *   too (`pass: ['HOME', 'XDG_*', ...]`) or uses `allowlist`. A failed capture fails closed with
  *   {@link RuntimeEnvironmentUnavailableError}. On win32, which has no login
  *   shell, the base is {@link WINDOWS_SESSION_NAMES}: `PATH` and `PATHEXT`
  *   as logon builds them from the registry (see {@link WindowsLogonRegistry}),
@@ -13525,7 +13547,11 @@ export interface BuildAllowlistedEnvOptions {
  * Which environment a runtime adapter gives its children (see this module's
  * doc comment). `pass` names variables taken from the live `process.env` at
  * every build, for a Host that sets them after it starts. Names never match
- * `CLAUDECODE` or `BYOK_*`.
+ * `CLAUDECODE` or `BYOK_*`. A `login-shell` base takes `HOME` from the live
+ * `process.env`, not the snapshot (#2084); `PATH`, `XDG_*` and other values
+ * the user's rc derived from its own `HOME` stay as the snapshot has them, so
+ * a Host that needs them to agree with `HOME` passes them as well or uses
+ * `allowlist`.
  */
 export type RuntimeEnvironmentPolicy = {
     readonly base?: 'login-shell';
@@ -13544,8 +13570,9 @@ export type RuntimeEnvironmentConflictRule = (passed: ReadonlySet<string>) => re
 /**
  * Where a runtime environment name came from: the base (`login-shell`,
  * `windows-session` or `allowlist`), the policy's `pass`, or `sdk` for the
- * `NO_PROXY`/`no_proxy` this module writes and the `PI_PACKAGE_DIR` the Pi
- * adapter writes from `packageDir`.
+ * `NO_PROXY`/`no_proxy` this module writes, the live `HOME` it pins over a
+ * `login-shell` snapshot (#2084) and the `PI_PACKAGE_DIR` the Pi adapter
+ * writes from `packageDir`.
  */
 export type RuntimeEnvironmentSource = 'login-shell' | 'windows-session' | 'allowlist' | 'pass' | 'sdk';
 /** The rule that kept a name out: the hard deny (`CLAUDECODE`, `BYOK_*`) or the adapter's conflict rule. */

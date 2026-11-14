@@ -286,7 +286,11 @@ export interface DaemonConfig {
    * The default environment a runtime `createDaemon` builds gives its
    * children (#1095): by default the user's login-shell snapshot, so a
    * variable the Host sets in `process.env` reaches a runtime only when `pass`
-   * names it. `runtimes.<id>.runtimeEnvironment` overrides it for that runtime
+   * names it. One exception: after applying the snapshot, the default base
+   * sets `HOME` to the daemon's own live `HOME` (#2084); `PATH`, `XDG_*` and
+   * other values the rc derived from its `HOME` stay as the snapshot has them.
+   * A policy that passes `HOME` or uses `allowlist` is unchanged.
+   * `runtimes.<id>.runtimeEnvironment` overrides it for that runtime
    * (#1759): it replaces this policy and is not merged with this `pass`.
    * `createDaemonWithAdapters` refuses this field: each injected adapter
    * takes its own `runtimeEnvironment` option.

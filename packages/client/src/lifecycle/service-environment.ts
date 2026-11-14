@@ -1,4 +1,4 @@
-import { captureLoginShellSnapshot, loginShellSnapshot, type ApplyLoginShellEnvironmentOptions, type ServiceEnvironmentStatus } from '../login-shell-environment.js';
+import { captureLoginShellSnapshot, loginShellSnapshot, pinLiveHome, type ApplyLoginShellEnvironmentOptions, type ServiceEnvironmentStatus } from '../login-shell-environment.js';
 
 /**
  * Issue #392: `byok-agent start --service` runs under a service manager's
@@ -10,10 +10,10 @@ import { captureLoginShellSnapshot, loginShellSnapshot, type ApplyLoginShellEnvi
  *
  * `HOME` is the home the service manager gave the job (the launchd plist pins
  * the lifecycle's home, #2017), so an rc that resets it cannot move the daemon
- * to another home. Only the daemon's `HOME` and `BYOK_*` are pinned: `PATH`,
- * `XDG_*` and other values an rc derives from a different home stay as the rc
- * set them, and a default runtime environment gives tasks the snapshot's
- * `HOME` (#2084) unless its policy passes `HOME`.
+ * to another home; `pinLiveHome` is the same rule a default runtime
+ * environment applies to tasks (#2084). Only the daemon's `HOME` and `BYOK_*`
+ * are pinned: `PATH`, `XDG_*` and other values an rc derives from a different
+ * home stay as the rc set them.
  */
 
 /** The `byok-agent start` flag generated service definitions pass. */
@@ -50,14 +50,13 @@ export async function captureAndApply(options: ApplyLoginShellEnvironmentOptions
 
 
 function replaceEnvironment(env: NodeJS.ProcessEnv, snapshotEnv: Readonly<Record<string, string | undefined>>): void {
-  const own: Record<string, string> = {};
-  for (const [name, value] of Object.entries(env)) {
-    if (value !== undefined && (name === 'HOME' || name.startsWith('BYOK_'))) own[name] = value;
-  }
+  const live = { ...env };
   for (const name of Object.keys(env)) delete env[name];
   for (const [name, value] of Object.entries(snapshotEnv)) {
     if (value !== undefined) env[name] = value;
   }
-  Object.assign(env, own);
+  for (const [name, value] of Object.entries(live)) {
+    if (value !== undefined && name.startsWith('BYOK_')) env[name] = value;
+  }
+  pinLiveHome(env, live);
 }
-

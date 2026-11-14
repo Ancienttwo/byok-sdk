@@ -232,6 +232,18 @@ describe('composeRuntimeEnvironment (#1095)', () => {
     expect(compose({}, shell, live)).toEqual({ ...shell, ...LOOPBACK });
   });
 
+  it('login-shell: HOME is the daemon\'s live HOME, not the one the rc exported; values the rc derived from it stay (#2084)', () => {
+    const shell = { PATH: '/rc/elsewhere/bin:/usr/bin', HOME: '/rc/elsewhere', XDG_CONFIG_HOME: '/rc/elsewhere/.config' };
+    const live = { PATH: '/usr/bin', HOME: '/tmp/scratch' };
+    const build = (policy: RuntimeEnvironmentPolicy) => composeRuntimeEnvironment({ policy, snapshot: snapshot(shell), live, platform: 'darwin' });
+    const pinned = build({});
+    expect(pinned.env).toEqual({ ...shell, HOME: '/tmp/scratch', ...LOOPBACK });
+    expect(pinned.report.names).toContainEqual({ name: 'HOME', source: 'sdk' });
+    expect(build({ pass: ['HOME'] }).report.names).toContainEqual({ name: 'HOME', source: 'pass' });
+    expect(build({ base: 'allowlist' }).env).toEqual({ ...live, ...LOOPBACK });
+    expect(compose({}, shell, { PATH: '/usr/bin' })).toEqual({ ...shell, ...LOOPBACK });
+  });
+
   it('pass copies the named live variables at every build, Host writes after start included; the hard deny still wins', () => {
     const live: Record<string, string | undefined> = { PATH: '/usr/bin' };
     const policy = assertRuntimeEnvironmentPolicy({ pass: ['HOST_TOKEN_FILE', 'ACME_*'] }, 'policy');
