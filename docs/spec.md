@@ -336,7 +336,9 @@ breaking cut. Breaking changes ship only in a MINOR: there is no PATCH
 exception (Q8, owner 2026-10-29). Every Host-visible change since the last
 release is an entry in the upgrade manifest that `@byok-sdk/client` ships, and
 `bun run check:upgrade-manifest` fails a PATCH that carries a breaking entry
-([upgrade manifest](upgrade-manifest.md)). Before a Host switches versions,
+([upgrade manifest](upgrade-manifest.md)); behavior-only breaking changes use
+author-declared `behavior:<entry-id>` entries, whose omission the snapshot gate
+cannot detect. Before a Host switches versions,
 the candidate build checks the existing local stores read-only and reports
 each one as accepted, new-path-repair or rejected. Each package checks the
 store it owns: `inspectDaemonStores` in client (also

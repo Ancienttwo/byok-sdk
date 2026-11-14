@@ -54,8 +54,29 @@ The file is not a package export, so resolve it next to `package.json`.
   on a new path and pair or enroll again) or `reject` (refused at open, left
   unchanged; the operator resolves it). Every value except `accept` makes the
   entry breaking.
+- `behavior:<entry-id>` declares a behavior-only breaking change. The entry
+  has exactly this one item, whose lowercase slug equals `id`, and cannot
+  carry `acceptance`. Its nonempty `summary` names the public package
+  entrypoint and API/config field, the behavior that changed, and the Host
+  action. A valid `migration` is required. For example:
+
+  ```json
+  {
+    "id": "task-home-live",
+    "impact": "breaking",
+    "summary": "@byok-sdk/client DaemonConfig.runtimeEnvironment gives tasks the daemon's live HOME under login-shell; pass consistent derived paths explicitly.",
+    "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2084",
+    "items": ["behavior:task-home-live"]
+  }
+  ```
+
+  Behavior items are author declarations: they do not enter the snapshot,
+  digest or generated `changes`. The gate cannot detect an omitted behavior
+  declaration or judge whether its prose describes the right public contract;
+  authors and reviewers check both. A change with observable surface items
+  still lists those items in a separate ordinary entry.
 - `from`, `to`, `configFields` and `changes` are generated. `changes` lists
-  every changed item with the entry that covers it. Store, bin, example,
+  every changed snapshot item with the entry that covers it. Store, bin, example,
   config and interprocess items carry their `before` and `after` values;
   export digests and union markers do not, because they mean nothing to a
   reader.
@@ -95,7 +116,9 @@ authority breaks the gate rather than emptying a category.
 validation. It fails when:
 
 - an item changed since the baseline and no entry lists it;
-- an entry lists an item that did not change, or one another entry lists;
+- a snapshot item in an entry did not change, or any item is listed twice;
+- a behavior item does not match `behavior:<entry-id>`, is mixed with other
+  items, is additive, or carries `acceptance`;
 - a removed item is in an additive entry;
 - a changed store has no `acceptance`, or its acceptance is not `accept` and
   the entry is additive;
@@ -118,6 +141,12 @@ validation. It fails when:
    generated fields and lists each changed item that has no entry.
 2. Add or extend an entry for those items, with a Host-facing summary and a
    migration link, and run `--write` again until it passes.
+3. Review behavior changes even when `--write` reports no changed items:
+   - [ ] Every behavior-only breaking change has its own `behavior:<entry-id>` entry.
+   - [ ] Its summary identifies the public entrypoint/API or config field,
+     describes the behavior change and tells the Host what to do.
+   - [ ] Its migration link explains the upgrade action; observable surface
+     changes still have their own item coverage.
 
 `--snapshot` prints the snapshot of the tree.
 
@@ -158,8 +187,9 @@ const report = checkUpgradeFrom('0.32.0', { resolveFrom: hostDir }); // default:
 ```
 
 - Every `breaking` entry released after `--from`, up to and including the
-  installed client, is listed with its `id`, `release` and `migration` link.
-  Additive entries are only counted (`additiveCount`). A released manifest
+  installed client, is listed with its `id`, `release`, authored `summary`
+  and `migration` link, including behavior-only declarations. Additive
+  entries are only counted (`additiveCount`). A released manifest
   (`from < to`) ships its entries in `to`; the in-development one
   (`from == to`) in the client's own version.
 - The train check resolves the nine public `@byok-sdk/*` packages from
@@ -180,7 +210,7 @@ const report = checkUpgradeFrom('0.32.0', { resolveFrom: hostDir }); // default:
 
 ```jsonc
 { "from": "0.32.0", "to": "0.34.0",
-  "breaking": [{ "id": "wire-v5-durable-lane", "release": "0.34.0", "migration": "docs/migrations/wire-v5-durable-lane.md#drain-and-upgrade" }],
+  "breaking": [{ "id": "wire-v5-durable-lane", "release": "0.34.0", "summary": "Drain tasks and upgrade wire peers together.", "migration": "docs/migrations/wire-v5-durable-lane.md#drain-and-upgrade" }],
   "additiveCount": 7,
   "train": { "version": "0.34.0", "packages": [{ "name": "@byok-sdk/client", "version": "0.34.0" }, { "name": "@byok-sdk/cloud", "version": "absent" }] },
   "verdict": "refused" }

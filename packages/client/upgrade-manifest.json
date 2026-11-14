@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "59729f712f2348da58e2ce95ea1d1668e3e04b376614320624cab6029d5d66d7"
+    "snapshotSha256": "147f13fb5f9a89cf98746b281e24dc53731f1c1449f8425a9e16f5fed251245e"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,24 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "task-home-live",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client DaemonConfig.runtimeEnvironment and runtimes.<id>.runtimeEnvironment now give task children the daemon's live HOME under the default login-shell base (#2084), instead of the startup snapshot's HOME. A startup file that exports another HOME no longer redirects task HOME. PATH, XDG_* and other snapshot-derived paths are unchanged: pass consistent live values explicitly or use base: 'allowlist'. Policies already passing HOME or using allowlist keep their behavior.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#behavior-only-upgrade-notices-2117",
+      "items": [
+        "behavior:task-home-live"
+      ]
+    },
+    {
+      "id": "upgrade-breaking-summary",
+      "impact": "additive",
+      "summary": "@byok-sdk/client checkUpgradeFrom returns each breaking entry's authored summary, including behavior-only declarations, alongside its id, release and migration. Hosts can show the description directly; fixtures constructing UpgradeFromBreakingEntry supply summary as well.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#behavior-only-upgrade-notices-2117",
+      "items": [
+        "export:@byok-sdk/client#UpgradeFromBreakingEntry"
+      ]
+    },
     {
       "id": "committed-cancel-drain-error",
       "impact": "breaking",
@@ -404,6 +422,11 @@
       "item": "export:@byok-sdk/client#StoreCompatibility",
       "change": "added",
       "entry": "client-store-compatibility-type"
+    },
+    {
+      "item": "export:@byok-sdk/client#UpgradeFromBreakingEntry",
+      "change": "changed",
+      "entry": "upgrade-breaking-summary"
     },
     {
       "item": "export:@byok-sdk/client#clearDeviceEnrollment",

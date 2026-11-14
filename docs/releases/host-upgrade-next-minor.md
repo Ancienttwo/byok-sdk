@@ -2,6 +2,14 @@
 
 Draft checklist for a Host moving from 0.42.0 to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Behavior-only upgrade notices (#2117)
+
+`@byok-sdk/client`'s upgrade manifest now declares behavior-only breaking changes with `behavior:<entry-id>`. Read `entries` for all upgrade actions; generated `changes` describes only snapshot differences and does not include these declarations. The gate requires a matching entry id, `impact: 'breaking'`, a summary and a migration link. It cannot detect a behavior change an author forgot to declare.
+
+`checkUpgradeFrom()` and `byok-agent upgrade check --from <installed-version> --json` now return the authored `summary` on every breaking entry, including archived entries. Display it with `migration` in Host upgrade prompts. Test doubles that construct `UpgradeFromBreakingEntry` must also supply `summary`. A behavior-only entry causes the same `refused` verdict as other breaking entries when the candidate's release is newer than the supplied version.
+
+The first declaration is `task-home-live` (#2084): `DaemonConfig.runtimeEnvironment` and per-runtime `runtimes.<id>.runtimeEnvironment` give task children the daemon's live `HOME` under the default `login-shell` base. If a startup file sets another `HOME`, tasks now use a different home. `PATH`, `XDG_*` and other derived snapshot values do not change; explicitly pass consistent live values or select `base: 'allowlist'` and supply them. Existing policies that pass `HOME` or use `allowlist` keep their behavior. See the [HOME migration guidance](#launchd-jobs-run-with-the-installs-home-2017). This behavior now appears in the machine-readable upgrade report as well as the changelog and Host checklist.
+
 ## Committed cancellation with a pending wake (#2004)
 
 `HostExecutionCore.cancel()` now returns an object instead of `void`. Update callers and test doubles that require `Promise<void>` to accept its result. `BotCollaboration.cancelTurn()` and `abortSwitch()` keep their existing result fields. When only wake dispatch fails after one of these operations commits, it resolves with `wakePending: true` instead of rejecting. The failure can concern any wake in that drain, including one unrelated to the operation, and a concurrent retry may succeed before the result returns. Do not repeat the committed operation solely because the flag is present.

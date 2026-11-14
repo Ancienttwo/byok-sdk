@@ -4,7 +4,8 @@
 // The manifest (`packages/client/upgrade-manifest.json`, shipped in the
 // client tarball) has two halves:
 //
-// - authored `entries`: each groups changed items under one impact
+// - authored `entries`: each groups changed items (or declares one behavior
+//   item) under one impact
 //   (additive | breaking), a Host-facing summary and a migration anchor;
 // - generated `from`, `to` and `changes`: written by `--write` from the
 //   baseline snapshot and the current tree, and compared byte for byte by the
@@ -129,7 +130,9 @@ export const serialize = (manifest) => `${JSON.stringify(manifest, null, 2)}\n`;
 
 /**
  * Every rule of the gate. Returns `{ errors, notes }`; the manifest passes
- * when `errors` is empty.
+ * when `errors` is empty. A `behavior:<entry-id>` declares a breaking change
+ * outside the snapshot; its summary names the public entrypoint and behavior,
+ * and its migration tells the Host what to do. It must be the entry's only item.
  */
 export function checkManifest({ root, baseline, current, manifestText }) {
   const errors = [];
@@ -160,11 +163,24 @@ export function checkManifest({ root, baseline, current, manifestText }) {
     if (!IMPACTS.includes(entry.impact)) errors.push(`${label}: impact must be one of ${IMPACTS.join(' | ')}`);
     if (typeof entry.summary !== 'string' || entry.summary.trim() === '') errors.push(`${label}: summary (the migration note) is required`);
     errors.push(...checkMigration(root, label, entry.migration));
-    const items = Array.isArray(entry.items) ? entry.items : [];
-    if (items.length === 0) errors.push(`${label}: items must list at least one changed item`);
+    if (!Array.isArray(entry.items) || entry.items.some((item) => typeof item !== 'string')) {
+      errors.push(`${label}: items must be an array of strings`);
+      continue;
+    }
+    const items = entry.items;
+    const behavior = items.some((item) => category(item) === 'behavior');
+    if (items.length === 0) errors.push(`${label}: items must list at least one changed or behavior item`);
+    if (behavior) {
+      if (items.length !== 1) errors.push(`${label}: a behavior item must be the only item`);
+      if (entry.impact !== 'breaking') errors.push(`${label}: a behavior entry must be breaking`);
+    }
     for (const item of items) {
       if (owners.has(item)) errors.push(`${label}: ${item} is already covered by entry ${owners.get(item)}`);
       else owners.set(item, entry.id);
+      if (category(item) === 'behavior') {
+        if (item !== `behavior:${entry.id}`) errors.push(`${label}: behavior item must match behavior:${entry.id}`);
+        continue;
+      }
       const change = changeOf.get(item);
       if (change === undefined) {
         errors.push(`${label}: ${item} did not change since ${baseline.version}; remove it`);
@@ -173,7 +189,7 @@ export function checkManifest({ root, baseline, current, manifestText }) {
       if (change === 'removed' && entry.impact !== 'breaking') errors.push(`${label}: ${item} is removed, so the entry must be breaking`);
     }
     const stores = items.filter((item) => category(item) === 'store' && changeOf.get(item) !== 'added');
-    if (stores.length > 0) {
+    if (stores.length > 0 && !behavior) {
       if (!ACCEPTANCE.includes(entry.acceptance)) {
         errors.push(`${label}: a changed store needs acceptance (${ACCEPTANCE.join(' | ')}) for files the previous release wrote`);
       } else if (entry.acceptance !== 'accept' && entry.impact !== 'breaking') {
@@ -200,8 +216,7 @@ export function checkManifest({ root, baseline, current, manifestText }) {
     errors.push(error.message);
   }
 
-  const expected = serialize(renderManifest(baseline, current, entries));
-  if (errors.length === 0 && manifestText !== expected) {
+  if (errors.length === 0 && manifestText !== serialize(renderManifest(baseline, current, entries))) {
     errors.push(`${MANIFEST_PATH}: generated fields are stale; run node scripts/release/check-upgrade-manifest.mjs --write`);
   }
   return { errors, notes };
