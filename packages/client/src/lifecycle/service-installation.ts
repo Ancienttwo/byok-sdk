@@ -11,8 +11,8 @@ import { acquireDaemonOwner, DaemonOwnerActiveError, DaemonOwnerReclaimingError,
 import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger.js';
 import { ownedProcessGroupRecord, ownedProcessGroupRuns, type OwnedProcessGroupRecord } from '../adapters/process-tree.js';
 import { acquirePathMutationGate, acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate.js';
-import { resolveExistingAncestor } from '../util/existing-ancestor.js';
 import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle.js';
+import { canonical, checkRestoreTargets, checkStorePaths, directoryStorePath, mkdirReal, parseSnapshotRecord, SNAPSHOT_FORMAT, within, type SnapshotEntry, type SnapshotRecord, type StorePathRefusal } from './store-path-identity.js';
 import type { HeldServiceLifecycle, ManagedServiceLifecycle } from './managed-lifecycle.js';
 import {
   isJsonObject, isPayloadPath, listPayloadFiles, SERVICE_PAYLOAD_MANIFEST, sha256File, SHA256_HEX, VERSION_ID, type ServicePayloadManifest,
@@ -149,8 +149,11 @@ export interface ServiceInstallationOptions {
    * Every daemon store the service process owns, leased on a first install
    * and read after stopping the service on upgrade, rollback and recover
    * (#1328, #1983). Each `storeDir`
-   * is absolute and listed once; `productId` is not empty; an empty list is
-   * valid. An invalid list or a throw is `daemon_stores_invalid`. Default:
+   * is absolute and listed once, compared with its links resolved (#2161):
+   * a second spelling of one store would take a second lease on it and wait
+   * for its own first one until `store_busy`. `productId` is not empty; an
+   * empty list is valid. An invalid list or a throw is
+   * `daemon_stores_invalid`. Default:
    * `[{ storeDir: service.storeDir, productId }]`. Requires `healthCheck`,
    * since the default one reaches only `productId`'s daemon.
    */
@@ -428,8 +431,6 @@ const STORE_FILE_SUFFIXES = ['', '-wal', '-journal'] as const;
 const STORE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 const STORE_KINDS: ReadonlySet<unknown> = new Set([undefined, 'file', 'directory']);
 /** A directory store's tree is copied as it is: links stay links, nothing is overwritten, a clone where the file system has one. */
-/** `snapshot.json` format: 2 records each entry's canonical path, and a restore writes there (#2106). SDK 0.42 wrote none, and its snapshots are refused. */
-const SNAPSHOT_FORMAT = 2;
 const TREE_COPY = { recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false, preserveTimestamps: true, mode: fsConstants.COPYFILE_FICLONE } as const;
 /** How long a stale-token probe waits for the control endpoint to accept or refuse. */
 const CONTROL_PROBE_TIMEOUT_MS = 1_000;
@@ -485,6 +486,13 @@ function joinLater(error: unknown, later: readonly unknown[]): unknown {
 function unfinishedFailure(errors: readonly unknown[], note: string): ServiceInstallationError {
   const error = new ServiceInstallationError('upgrade_pending', undefined, { cause: new FailureList(errors.flatMap(failureParts), note) });
   error.message = `${note} Run recover() (CLI: byok-agent upgrade recover); if it reports store_busy, restart the Host process first.`;
+  return error;
+}
+
+/** The installation error for a refused store path, its message naming the path. */
+function storePathError(refusal: StorePathRefusal): ServiceInstallationError {
+  const error = new ServiceInstallationError(refusal.code);
+  error.message += refusal.detail;
   return error;
 }
 
@@ -627,23 +635,6 @@ export function createServiceInstallation(opts: ServiceInstallationOptions): Ser
   const program = opts.program(current);
   if (!runsFromCurrent(program, current, opts.lifecycle?.platform ?? process.platform)) throw new ServiceInstallationError('service_program_not_current');
   return serviceInstallationOver(opts, createManagedServiceLifecycle({ ...opts.service, program }, opts.lifecycle));
-}
-
-/**
- * Whether `child` is `parent` or lies under it, compared by path segment
- * (`current-old/x` is not under `current`) and, on darwin and win32, without
- * case (#2011). The one path containment rule of this module.
- */
-function within(child: string, parent: string, platform: NodeJS.Platform): boolean {
-  const fold = (value: string): string => platform === 'darwin' || platform === 'win32' ? value.toLowerCase() : value;
-  const relative = path.relative(fold(parent), fold(child));
-  return relative === '' || (relative.split(path.sep)[0] !== '..' && !path.isAbsolute(relative));
-}
-
-/** `at` with the symbolic links of its deepest existing ancestor resolved and the missing rest appended, so an alias compares as its target (#2011). */
-async function canonical(at: string): Promise<string> {
-  const found = await resolveExistingAncestor(at);
-  return found === undefined ? path.resolve(at) : path.join(found.canonical, ...found.tail);
 }
 
 /**
@@ -1046,15 +1037,18 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
     if (!Array.isArray(listed)) throw new ServiceInstallationError('daemon_stores_invalid');
     const seen = new Set<string>();
-    return listed.map((store: Partial<ServiceDaemonStore>) => {
+    const stores: ServiceDaemonStore[] = [];
+    for (const store of listed as Partial<ServiceDaemonStore>[]) {
       if (typeof store?.storeDir !== 'string' || !path.isAbsolute(store.storeDir) || typeof store.productId !== 'string' || store.productId === '') {
         throw new ServiceInstallationError('daemon_stores_invalid');
       }
-      const resolved = path.resolve(store.storeDir);
-      if (seen.has(resolved)) throw new ServiceInstallationError('daemon_stores_invalid');
-      seen.add(resolved);
-      return { storeDir: resolved, productId: store.productId };
-    });
+      // One store is one canonical path, the identity a snapshot restore uses too.
+      const identity = await canonical(store.storeDir);
+      if (seen.has(identity)) throw new ServiceInstallationError('daemon_stores_invalid');
+      seen.add(identity);
+      stores.push({ storeDir: path.resolve(store.storeDir), productId: store.productId });
+    }
+    return stores;
   }
 
   /**
@@ -1150,45 +1144,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       throw new ServiceInstallationError('precheck_failed');
     }
     if (!Array.isArray(stores) || !stores.every(isServiceStoreVerdict)) throw new ServiceInstallationError('precheck_failed');
-    const paths = await refuseServiceOverlap(stores.map((store) => store.path));
+    const checked = await checkStorePaths(stores.map((store) => store.path), [root, ...serviceDirs], platform);
+    if ('refusal' in checked) throw storePathError(checked.refusal);
     if (stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
-    return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path) } : store);
-  }
-
-  /**
-   * A store that is, holds or lies in the install root or a daemon store's
-   * service/ would have the versions, receipt, live leases or launcher
-   * replaced by a restore (#2011). Each is guarded both as its target and
-   * as the entry naming it, since a restore removes a link, not its target.
-   * A path with a `..` segment is `precheck_failed` first: `..` after a link
-   * resolves through the link's target, while `canonical` folds it away
-   * (`.` cannot do that, #1350). Takes the paths as written and returns
-   * them canonical. Both refusals name the path. Run at the precheck and,
-   * for a snapshot an earlier version took without these checks, before a
-   * restore changes any store (#2102).
-   */
-  async function refuseServiceOverlap(written: readonly string[]): Promise<string[]> {
-    const refuse = (code: ServiceInstallationErrorCode, at: string, note = ''): never => {
-      const error = new ServiceInstallationError(code);
-      error.message += `${note} (${at})`;
-      throw error;
-    };
-    const dotted = written.find((at) => at.split(platform === 'win32' ? /[\\/]/u : '/').includes('..'));
-    if (dotted !== undefined) refuse('precheck_failed', dotted, ' A store path must not contain .. segments; pass a normalized absolute path.');
-    const paths = await Promise.all(written.map(canonical));
-    // Stores that are or contain each other, as written or resolved, would
-    // make one store's restore change another's tree, or the links it
-    // resolves through, before that one is restored.
-    for (const spelled of [written.map((at) => path.resolve(at)), paths]) {
-      for (const [i, a] of spelled.entries()) {
-        const j = spelled.findIndex((b, at) => at !== i && within(b, a, platform));
-        if (j !== -1) refuse('precheck_failed', `${written[i]}, ${written[j]}`, ' Two stores must not be or contain each other.');
-      }
-    }
-    const guarded = (await Promise.all([root, ...serviceDirs].map(async (at) => [await canonical(at), path.join(await canonical(path.dirname(at)), path.basename(at))]))).flat();
-    const overlapping = paths.findIndex((a) => guarded.some((b) => within(a, b, platform) || within(b, a, platform)));
-    if (overlapping !== -1) refuse('store_overlaps_service_state', written[overlapping]!);
-    return paths;
+    return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path, platform) } : store);
   }
 
   /** One candidate store preparation sequence for install and upgrade, retaining the quiescent leases until the caller switches. */
@@ -1346,38 +1305,19 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   /**
-   * Checks every entry before any store changes, then restores each. A
-   * format 2 snapshot is written to the canonical paths it recorded, never
-   * through the listed path's links again (#2106). The start check proves
-   * both are safe: (a) the listed path resolves exactly to the recorded
-   * canonical path, which is a realpath, so no directory on that chain is a
-   * link now; (b) no two canonical paths contain each other, so the tree
-   * another entry's restore replaces holds neither this target nor an
-   * ancestor of it. A missing parent is created as real directories.
+   * Checks every entry ({@link checkRestoreTargets}) before any store
+   * changes, then restores each at the canonical path it recorded (#2106),
+   * creating a missing parent as real directories.
    */
   async function restoreSnapshot(to: string): Promise<void> {
     const dir = path.join(snapshotsDir, to);
-    const snapshot = JSON.parse(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8')) as { entries: SnapshotEntry[] };
-    // Older snapshots retain the Host's spelling. Check every directory root
-    // before changing any store, including links hidden by a trailing / or /.
-    const entries = snapshot.entries.map((entry) => entry.kind === 'directory' ? { ...entry, path: directoryStorePath(entry.path) } : entry);
-    await refuseServiceOverlap(entries.map((entry) => entry.path));
-    await Promise.all(entries.filter((entry) => entry.kind === 'directory').map(async (entry) => {
-      try {
-        if ((await fs.lstat(entry.path)).isSymbolicLink()) throw new ServiceInstallationError('precheck_failed');
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-    }));
-    for (const entry of entries) {
-      if (await resolvesTo(entry.path, entry.canonical)) continue;
-      const error = new ServiceInstallationError('precheck_failed');
-      error.message += ` A store path no longer resolves as it did at the snapshot. (${entry.path})`;
-      throw error;
-    }
+    const { entries } = await readSnapshot(to);
+    const refusal = await checkRestoreTargets(entries, [root, ...serviceDirs], platform);
+    if (refusal !== undefined) throw storePathError(refusal);
     for (const entry of entries) {
       const target = entry.canonical;
-      await mkdirReal(path.dirname(target));
+      const refused = await mkdirReal(path.dirname(target));
+      if (refused !== undefined) throw storePathError(refused);
       if (entry.kind === 'directory') {
         await fs.rm(target, { recursive: true, force: true });
         if (entry.files[''] !== undefined) await fs.cp(path.join(dir, entry.files['']), target, TREE_COPY);
@@ -1427,24 +1367,30 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   /**
-   * Checks `snapshots/<name>` and every copy in it a restore reads, before
-   * the operation's first side effect. A snapshot SDK 0.42 took (no
-   * `format`) is `snapshot_upgrade_required`, as a version 1 pending
-   * receipt is `receipt_upgrade_required`: it records no canonical paths,
-   * so this version cannot restore it safely.
+   * The one reader of `snapshots/<name>/snapshot.json`. A record
+   * {@link parseSnapshotRecord} refuses, such as one SDK 0.42 wrote, or one
+   * naming a copy that is not in the snapshot, is `snapshot_upgrade_required` naming the snapshot, as a
+   * version 1 pending receipt is `receipt_upgrade_required`: this version
+   * cannot restore it safely.
    */
+  async function readSnapshot(name: string): Promise<SnapshotRecord> {
+    const dir = path.join(snapshotsDir, name);
+    const record = parseSnapshotRecord(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8'));
+    const copies = record === undefined ? [] : record.entries.flatMap((entry) => Object.values(entry.files));
+    if (record !== undefined && (await Promise.all(copies.map((name) => exists(path.join(dir, name))))).every(Boolean)) return record;
+    const error = new ServiceInstallationError('snapshot_upgrade_required');
+    error.message = `${error.message} (${dir})`;
+    throw error;
+  }
+
+  /** Checks `snapshots/<name>` and every copy in it a restore reads, and reads its record, before the operation's first side effect. */
   async function refuseLinkedSnapshot(name: string): Promise<void> {
     const dir = path.join(snapshotsDir, name);
     const index = path.join(dir, 'snapshot.json');
     await refuseLinkedSnapshots(dir);
     await refuseLinkedSnapshots(index);
     if (!(await exists(index))) return;
-    const { format, entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { format?: unknown; entries: SnapshotEntry[] };
-    if (format !== SNAPSHOT_FORMAT) {
-      const error = new ServiceInstallationError('snapshot_upgrade_required');
-      error.message = `${error.message} (${dir})`;
-      throw error;
-    }
+    const { entries } = await readSnapshot(name);
     for (const entry of entries) {
       for (const file of Object.values(entry.files)) {
         let at = dir;
@@ -1757,16 +1703,6 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   return { lifecycle, install, upgrade, rollback, recover, uninstall, receipt: readReceipt, currentVersion };
 }
 
-interface SnapshotEntry {
-  store: string;
-  path: string;
-  /** Absent in a snapshot 0.34 wrote, and for every file store. */
-  kind?: 'directory';
-  /** `path` with its links resolved when the snapshot was taken (#2106). */
-  canonical: string;
-  /** Saved files by suffix (`''`, `-wal`, `-journal`; a directory's tree under `''`); empty when the store was absent. */
-  files: Record<string, string>;
-}
 
 /**
  * The suffixes of a store that exist now: a file store's regular files, or a
@@ -1789,21 +1725,6 @@ async function storeSources(store: ServiceStoreVerdict): Promise<string[]> {
     present.push(suffix);
   }
   return present;
-}
-
-/** Strip only terminal separators and dot components, exposing the root to lstat.
- * Do not resolve symlinks or collapse interior `..`: those can change the target. */
-function directoryStorePath(input: string): string {
-  const root = path.parse(input).root;
-  const separators = process.platform === 'win32' ? /[\\/]+$/u : /\/+$/u;
-  let value = input;
-  while (value.length > root.length) {
-    const trimmed = value.replace(separators, '');
-    if (trimmed.length < root.length) return root;
-    if (path.basename(trimmed) !== '.') return trimmed;
-    value = path.dirname(trimmed);
-  }
-  return value;
 }
 
 export async function readPayloadManifest(payloadDir: string): Promise<ServicePayloadManifest> {
@@ -1916,41 +1837,6 @@ function runProgram(program: ServiceProgram): Promise<{ code: number | null; std
       resolve({ code, stdout });
     });
   });
-}
-
-/**
- * Whether `listed` resolves now to `recorded`, the canonical path a snapshot
- * took of it (#2106). The existing part must match exactly: folding case
- * would accept a/ for A/ on a case-sensitive volume. A missing segment keeps
- * the listed spelling, so it may differ from the recorded one in case only
- * while the recorded spelling is missing too, as on a case-insensitive
- * volume after the store was removed.
- */
-async function resolvesTo(listed: string, recorded: string): Promise<boolean> {
-  const found = await resolveExistingAncestor(listed);
-  if (found === undefined) return false;
-  if (found.tail.length === 0) return found.canonical === recorded;
-  const prefix = found.canonical.endsWith(path.sep) ? found.canonical : `${found.canonical}${path.sep}`;
-  if (!recorded.startsWith(prefix)) return false;
-  const rest = recorded.slice(prefix.length).split(path.sep);
-  if (rest.length !== found.tail.length) return false;
-  for (const [index, part] of found.tail.entries()) {
-    if (rest[index] === part) continue;
-    if (rest[index]!.toLowerCase() !== part.toLowerCase() || await exists(path.join(found.canonical, ...rest.slice(0, index + 1)))) return false;
-  }
-  return true;
-}
-
-/** Creates `dir` and its missing ancestors as real directories; an existing one that is not a directory, a link included, is `precheck_failed`. */
-async function mkdirReal(dir: string): Promise<void> {
-  const parent = path.dirname(dir);
-  const stat = await fs.lstat(dir).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
-  if (stat !== undefined) {
-    if (!stat.isDirectory()) throw new ServiceInstallationError('precheck_failed');
-    return;
-  }
-  if (parent !== dir) await mkdirReal(parent);
-  await fs.mkdir(dir);
 }
 
 async function exists(file: string): Promise<boolean> {

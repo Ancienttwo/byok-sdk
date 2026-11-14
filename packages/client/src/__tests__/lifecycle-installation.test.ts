@@ -1883,6 +1883,73 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect([await tree(root), await installation.receipt(), events]).toEqual([before, receipt, []]);
     });
 
+    it('a snapshot record that is not format 2 is snapshot_upgrade_required where a restore reads it, and the restore writes nothing', async () => {
+      // A failed health check restores the upgrade's own snapshot without the rollback()/recover() link check first.
+      const index = path.join(installRoot, 'snapshots', '3.0.0', 'snapshot.json');
+      unhealthy.add('3.0.0');
+      onHealth = async (version) => {
+        if (version !== '3.0.0') return;
+        await fs.writeFile(db, 'v3 data');
+        const { entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+        await fs.writeFile(index, JSON.stringify({ entries }));
+      };
+      const error = await installation.upgrade(await payload('3.0.0')).catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'upgrade_pending' });
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'snapshot_upgrade_required', message: expect.stringContaining(path.dirname(index)) }));
+      expect([await fs.readFile(db, 'utf8'), (await installation.receipt())?.state]).toEqual(['v3 data', 'pending']);
+    });
+
+    it.each(['', '/', '/.'])('a directory store root swapped for a link while its realpath still matches, listed as tree%s, is refused before any store is restored', async (spelling) => {
+      const real = await fs.realpath(root);
+      const [a, b, alias] = [path.join(real, 'aa'), path.join(real, 'bb'), path.join(real, 'alias')];
+      await fs.mkdir(path.join(a, 'tree'), { recursive: true });
+      await fs.writeFile(path.join(a, 'tree', 'marker'), 'kept');
+      await fs.mkdir(b);
+      await fs.symlink(a, alias, 'dir');
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'tree', path: `${path.join(alias, 'tree')}${spelling}`, canonical: path.join(a, 'tree'), kind: 'directory', files: {} }] }));
+      // The migration repoints alias and links bb/tree back to aa/tree: alias/tree still resolves to aa/tree, but is a link.
+      await fs.rm(alias);
+      await fs.symlink(b, alias, 'dir');
+      await fs.symlink(path.join(a, 'tree'), path.join(b, 'tree'), 'dir');
+      const error = await installation.rollback().catch((caught: unknown) => caught);
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining('must not be a link') }));
+      expect([await fs.readFile(db, 'utf8'), await fs.readFile(path.join(a, 'tree', 'marker'), 'utf8')]).toEqual(['v2 data', 'kept']);
+    });
+
+    it.each(['', '/', '/.'])('a directory store root that became a dangling link, recorded as tree%s, is refused before any store is restored', async (spelling) => {
+      const tree = path.join(await fs.realpath(root), 'tree');
+      await fs.symlink(path.join(root, 'gone'), tree, 'dir');
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'tree', path: `${tree}${spelling}`, canonical: tree, kind: 'directory', files: {} }] }));
+      const error = await installation.rollback().catch((caught: unknown) => caught);
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining('must not be a link') }));
+      expect([await fs.readFile(db, 'utf8'), (await fs.lstat(tree)).isSymbolicLink()]).toEqual(['v2 data', true]);
+    });
+
+    it('a store whose parent directory became a file is precheck_failed before any store is restored', async () => {
+      const parent = path.join(await fs.realpath(root), 'parent');
+      await fs.writeFile(parent, 'a file now');
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
+      await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'nested', path: path.join(parent, 'db'), canonical: path.join(parent, 'db'), files: {} }] }));
+      const error = await installation.rollback().catch((caught: unknown) => caught);
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ name: 'ServiceInstallationError', code: 'precheck_failed' }));
+      expect([await fs.readFile(db, 'utf8'), await fs.readFile(parent, 'utf8')]).toEqual(['v2 data', 'a file now']);
+    });
+
+    it.each([['an array', []], ['an array of names', ['0']], ['an unknown suffix', { '-shm': '0' }], ['another name', { '': '9' }], ['naming a removed copy', undefined]])('snapshot files as %s are snapshot_upgrade_required before rollback() changes anything', async (_label, files) => {
+      const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: Array<{ files: Record<string, string> }> };
+      if (files === undefined) await fs.rm(path.join(path.dirname(index), Object.values(snapshot.entries[0]!.files)[0]!), { recursive: true });
+      else await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: snapshot.entries.map((entry, at) => at === 0 ? { ...entry, files } : entry) }));
+      const before = await tree(root);
+      await expect(installation.rollback()).rejects.toMatchObject({ code: 'snapshot_upgrade_required' });
+      expect(await tree(root)).toEqual(before);
+    });
+
     it('a snapshot entry with a .. segment after a link is refused by recover() before any store changes, every time (#2102)', async () => {
       const marker = path.join(storeDir, 'service', 'marker');
       await fs.writeFile(marker, 'live');
@@ -2664,6 +2731,17 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     it.each([
       ['a relative storeDir', async () => [{ storeDir: 'store', productId: 'svc' }]],
       ['a store listed twice', async () => [{ storeDir, productId: 'svc' }, { storeDir: `${storeDir}${path.sep}`, productId: 'other' }]],
+      // Two spellings of one store would lease it twice, the second waiting on the first until store_busy (#2161).
+      ['a store listed twice through a link', async () => {
+        await fs.symlink(storeDir, path.join(root, 'store-alias'), 'dir');
+        return [{ storeDir, productId: 'svc' }, { storeDir: path.join(root, 'store-alias'), productId: 'other' }];
+      }],
+      ['a store listed twice in another case where names ignore case', async () => {
+        // On a case-sensitive volume another case is another directory: the link spelling stands in.
+        const upper = path.join(path.dirname(storeDir), path.basename(storeDir).toUpperCase());
+        if (!existsSync(upper)) await fs.symlink(storeDir, upper, 'dir');
+        return [{ storeDir, productId: 'svc' }, { storeDir: upper, productId: 'other' }];
+      }],
       ['an empty productId', async () => [{ storeDir, productId: '' }]],
       ['a throw', async () => { throw new Error('no session'); }],
     ])('%s is daemon_stores_invalid and nothing is switched', async (_label, daemonStores) => {
