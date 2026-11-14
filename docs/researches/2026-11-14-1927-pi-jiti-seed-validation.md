@@ -142,6 +142,10 @@ The seed now has three groups: `parent` (43, materialized by every bundled Pi ho
 
 The client suite repeats the red/green on a copied asset root: zero transforms with the seed, every lookup transformed when a template changes or the seed directory is removed.
 
+### Windows cache key
+
+jiti names a cache file by `<parent dir>-<stem>.<md5 of the filename>.mjs`, where the filename comes from its own resolver, which normalizes Windows paths to forward slashes (`C:/Users/...`). The first Windows run of the packaged-host test (job 132337182269) had the seed key its files by the `realpathSync` spelling (`C:\Users\...`), so no runtime lookup hit them and Pi transformed cold: 54 cache files against 43 entries in the interpreter-bundle and SEA forms, 484 against 329 in the Bun compiled form, 68 against 43 with configured assets. A diagnostic run (job 132340787373) hashed each name against candidate spellings: every seed file matched the backslash path and every extra file the forward-slash path of a seed entry. No 8.3 short name or drive-letter case was involved. The seed now names each entry through `piJitiFilename`, jiti's own `resolve()` of the real path, and the zero-transform gate looks up through the same function, so a gate on Windows would have failed the old seed.
+
 ### Layout tests
 
 In `pi-host-payload.test.ts`:
