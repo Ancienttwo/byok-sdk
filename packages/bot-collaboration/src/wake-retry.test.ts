@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, expectTypeOf, it, vi } from 'vitest';
 import { createByokServer } from '@byok-sdk/server';
 import type { ExecutionServer } from '@byok-sdk/server/execution-core';
 import { createRoutine, hash, HostExecutionCore, HostLedger, nextIntervalOccurrence, OutboxFullError, project, recordOccurrence } from '@byok-sdk/server/execution-core';
@@ -133,7 +133,11 @@ it.each(['job', 'capacity', 'mixed'] as const)('reports committed Host-intent %s
   expect(result).toMatchObject({ key: 'host', result: 'cancelled' });
   await expect(drain.mock.results[0]!.value).rejects.toBe(result.drainError);
   const failures = result.drainError instanceof AggregateError ? result.drainError.errors : [result.drainError];
-  if (kind === 'capacity') expect(result.drainError).toBeInstanceOf(OutboxFullError);
+  if (kind === 'capacity') {
+    expect(result.drainError).toBeInstanceOf(OutboxFullError);
+    expect(result.conclusion).toBeUndefined();
+    expect(result).not.toHaveProperty('conclusion');
+  }
   else expect(failures).toContain(jobError);
   if (kind === 'mixed') expect(failures).toContainEqual(expect.objectContaining({ message: 'schedule unavailable' }));
   expect(ledger.snapshot().intents[hash('host')]).toMatchObject({ cancelReason: 'cancelled' });
@@ -148,10 +152,12 @@ it.each(['job', 'capacity', 'mixed'] as const)('reports committed Host-intent %s
   await bot.core.flushProjections(async () => {});
   await bot.drain();
   expect(ledger.snapshot().intents[hash('host')]!.conclusion).toBe('cancelled');
+  expect(await bot.cancelHostIntent('host')).toEqual({ key: 'host', result: 'already_settled', conclusion: 'cancelled' });
   if (kind !== 'capacity') expect(Object.values(ledger.snapshot().occurrences).find(row => row.routineId === 'watch')).toMatchObject({ conclusion: 'succeeded' });
 });
 
-it.each([undefined, new OutboxFullError(), new AggregateError([{ reason: 'Host failure' }])])('preserves a later Host-intent process failure: %j', async error => {
+it('preserves a later Host-intent process failure', async () => {
+  const error = new AggregateError([{ reason: 'Host failure' }]);
   await setup(server => server, { hostIntents: { research: () => {} } });
   await bot.enqueueHostIntent({ key: 'host', source: 'user', execution: template('device'), waitUntil: Date.now() + 60_000 }, 'research');
   const drain = vi.spyOn(HostExecutionCore.prototype, 'drain');
@@ -160,7 +166,9 @@ it.each([undefined, new OutboxFullError(), new AggregateError([{ reason: 'Host f
   const result = await bot.cancelHostIntent('host');
   expect(result).toHaveProperty('drainError');
   expect(result.drainError).toBe(error);
-  await expect(bot.cancelHostIntent('missing')).rejects.toMatchObject({ code: 'unknown_intent' });
+  expect(result).not.toHaveProperty('conclusion');
+  expectTypeOf(result.conclusion).toEqualTypeOf<import('@byok-sdk/server/execution-core').Conclusion | undefined>();
+  expectTypeOf<Extract<'drainError' | 'wakePending', keyof Awaited<ReturnType<BotCollaboration['cancelHostIntents']>>[number]>>().toEqualTypeOf<never>();
 });
 
 it('rejects a Host-intent transaction failure before cancel commits', async () => {

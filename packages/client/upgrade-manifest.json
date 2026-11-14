@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "1e908499c82d95a1de6f77116b324096aad45648e8cfbf5695cfd6e66dfe3ef3"
+    "snapshotSha256": "a59f94c757a401e7a5bf8a827a9a70bfbb320e156f25f610266647501ba7106d"
   },
   "configFields": {
     "status": "tracked",
@@ -18,7 +18,7 @@
     {
       "id": "committed-cancel-drain-error",
       "impact": "breaking",
-      "summary": "HostExecutionCore.cancel returns an object instead of void (#2004); update callers requiring Promise<void>. Its result and BotCollaboration.cancelTurn/cancelHostIntent/abortSwitch retain wakePending: true for wake-only failure and add drainError?: unknown for other post-commit failures (#2072, #2144). cancelHostIntent callers move post-commit failure handling from catch to the resolved HostIntentCancelResult, including later process failures. Check property presence, report the unchanged rejection (the whole AggregateError for mixed failures), and retry pending work through drain/recovery, not the committed operation. cancelTurn and cancelHostIntent retain the first non-wake failure even if a later pass succeeds. Explicit drains and pre-commit failures still reject; job/outbox retry state is unchanged. See committed-cancel-wake-pending for WakeDispatchError and bot-collaboration-cancel-host-intents for the additional BotCollaboration cancellation API.",
+      "summary": "HostExecutionCore.cancel returns an object instead of void (#2004); update callers requiring Promise<void>. Its result and BotCollaboration.cancelTurn/cancelHostIntent/abortSwitch retain wakePending: true for wake-only failure and add drainError?: unknown for other post-commit failures (#2072, #2144). cancelHostIntent callers move post-commit failure handling from catch to the resolved HostIntentCancelResult, including later process failures. Its cancelled result confirms a committed cancel; conclusion can be absent until a later successful drain settles it. Replay after drain/recovery to read already_settled with the conclusion, or cancel_pending while a submitted intent awaits its terminal. The coalesced drain can fail on other Host work. Check property presence, report the unchanged rejection (the whole AggregateError for mixed failures), and retry pending work through drain/recovery, not the committed operation. cancelTurn and cancelHostIntent retain the first non-wake failure even if a later pass succeeds. Explicit drains and pre-commit failures still reject; job/outbox retry state is unchanged. See committed-cancel-wake-pending for WakeDispatchError and bot-collaboration-cancel-host-intents for the additional BotCollaboration cancellation API.",
       "migration": "docs/releases/host-upgrade-next-minor.md#committed-cancellation-with-a-drain-failure-2072",
       "items": [
         "export:@byok-sdk/server/execution-core#HostExecutionCore",

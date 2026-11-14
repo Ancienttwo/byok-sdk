@@ -108,14 +108,22 @@ a compacted Host intent's record also removes its replies.
 
 Cancel a Host intent with the owner call `cancelHostIntent(key)` (#1320), not
 with `bot.core.cancel`. K4 records the cancel on the intent row, so a restart
-reads the same fact. An intent that was not submitted settles as `cancelled`
-inside the call, which returns `{ result: 'cancelled' }`: its handler does not
-run, and its FIFO moves on. A submitted or running intent gets an SDK cancel, and
+reads the same fact. For an intent that was not submitted, `{ result: 'cancelled' }`
+confirms that the cancel committed. Its `conclusion` is optional: if `drainError`
+or `wakePending` accompanies an unfinished settlement, the field is absent until
+a later successful drain settles it as `cancelled`. Its handler does not run,
+and settlement advances its FIFO. A submitted or running intent gets an SDK cancel, and
 the call returns `{ result: 'cancel_pending' }` at once. K4 then settles it: a
 cancelled terminal runs no handler, but a `task.complete` that arrived before the
 cancel still runs the handler once. Read the final conclusion with
 `bot.core.intent(key)`. A settled intent returns `{ result: 'already_settled' }`
-with its conclusion and sends nothing, so a replay does not fail. The call throws
+with its conclusion and sends nothing, so a replay does not fail. After retrying
+pending work with `drain()` or recovery, replay `cancelHostIntent(key)` to obtain
+`already_settled` with the conclusion, or `cancel_pending` while a submitted
+intent awaits its terminal. A queued intent whose settlement still fails can
+again return `cancelled` without a conclusion. Check `'drainError' in result`
+for post-commit failures; the coalesced drain may have failed on other Host work.
+The call throws
 `HostIntentError` with `unknown_intent` for a key that is not a Host intent and
 `not_host_intent` for a Bot Turn key; cancel a Bot Turn with `cancelTurn`. A
 cancel does not release a `handler_failed` intent, because K4 applies its

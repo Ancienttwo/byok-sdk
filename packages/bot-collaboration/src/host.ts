@@ -8,7 +8,7 @@ import { enqueue, HostExecutionCore, WakeDispatchError, settle, type ExecutionSe
 import type { HostJobHandler, Routine } from '@byok-sdk/server/execution-core';
 import { HostLedger, type Conclusion } from '@byok-sdk/server/execution-core';
 import { canonical, hash, isOccurrenceIntentKey, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/server/execution-core';
-import { json, stateOf, type CollaborationState, type Turn, type Verdict } from './model.js';
+import { stateOf, type CollaborationState, type Turn } from './model.js';
 import { contextTurns, DEFAULT_HANDOFF_BUDGETS, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema.js';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation.js';
@@ -167,7 +167,10 @@ export interface BotOptions {
 export type HostIntentHandler = (document: unknown, transaction: OutcomeTransaction) => void;
 /** Synchronous. A throw rolls the message transaction back, and a thenable or another result throws. */
 export type HostIntentMessageHandler = (input: AgentMessageInput, transaction: MessageTransaction) => MessageDisposition;
-/** The cancel answer of a Host intent (K8 `IntentCancelResult`). */
+/**
+ * The cancel answer of a Host intent (K8 `IntentCancelResult`). `conclusion` is optional: an in-flight intent awaits its
+ * terminal, and an unsubmitted intent may await a successful drain after a `drainError` or `wakePending` result.
+ */
 export type HostIntentCancelResult = IntentCancelResult<Conclusion> & { wakePending?: true; drainError?: unknown };
 function hostIntent(state: CollaborationState, key: string): { handler: string } | undefined {
   return state.hostIntents && Object.hasOwn(state.hostIntents, key) ? state.hostIntents[key] : undefined;
@@ -593,13 +596,16 @@ export class BotCollaboration {
   }
   /**
    * Owner API (#1320): cancels a Host intent through K4, which records the cancel on the intent row. A settled intent returns
-   * `already_settled` and sends nothing, so a replay does not fail. An unsubmitted intent settles as `cancelled` inside the
-   * call: no handler runs, and its FIFO moves on. A submitted intent gets an SDK cancel and returns `cancel_pending`; a
+   * `already_settled` and sends nothing, so a replay does not fail. An unsubmitted intent returns `cancelled` once its cancel
+   * commits; `conclusion` is absent if a failed drain or process pass leaves settlement unfinished. A later successful
+   * drain settles it without running its handler and advances its FIFO. Replay to read `already_settled` with its conclusion,
+   * or `cancel_pending` while a submitted intent awaits its terminal. A submitted intent gets an SDK cancel; a
    * `task.complete` that arrived before the cancel still runs the handler once. A `handler_failed` intent stays stuck,
    * because K4 applies its terminal again: `failStuckIntent` settles it. Refuses a Bot Turn key and an unknown key.
    *
    * After commit, a wake-only failure returns `wakePending: true`. Other failures return `drainError`, the unchanged
    * first drain or process rejection (the whole AggregateError for mixed failures), even if a later pass succeeds.
+   * A drain error comes from that same drain, which coalesces with an in-flight drain and may fail on other Host work.
    * Check `'drainError' in result`, report it and retry pending work with `drain()` or recovery. The cancellation
    * committed; reconciliation may be unfinished. Job/outbox retry state is unchanged; explicit drains and wake hooks
    * still reject. Pre-commit failures still reject.
@@ -617,14 +623,15 @@ export class BotCollaboration {
         else if (!('drainError' in dispatch)) dispatch.drainError = error;
       }
       if (intent!.phase === 'inflight') return { key, result: 'cancel_pending', ...dispatch };
-      return { key, result: 'cancelled', conclusion: this.core.intent(key)!.conclusion!, ...dispatch };
+      const conclusion = this.core.intent(key)?.conclusion;
+      return { key, result: 'cancelled', ...(conclusion === undefined ? {} : { conclusion }), ...dispatch };
     });
   }
   /**
    * Cancel selected Host intents atomically without a pass. A submitted intent refuses the whole set; after a successful
    * call, successors wait for the next pass, or the Host can call `drain()`. Results keep input order and are replayable.
    */
-  cancelHostIntents(keys: readonly string[], ...by: PrincipalArg): Promise<(HostIntentCancelResult & { result: 'cancelled' | 'already_settled'; conclusion: Conclusion })[]> {
+  cancelHostIntents(keys: readonly string[], ...by: PrincipalArg): Promise<(IntentCancelResult<Conclusion> & { result: 'cancelled' | 'already_settled'; conclusion: Conclusion })[]> {
     return this.exclusive(async () => {
       this.ownerOnly(by, 'cancelHostIntents', keys.join(' '));
       const seen = new Set<string>();
