@@ -156,6 +156,10 @@ and 2.3.0 on macOS arm64 and Windows x64; see the [qualification evidence](resea
 V2 `execute` calls remain opaque without a proven
 native tool identity; the SDK never derives MCP names from code. Child call IDs
 carry the native child session id to avoid merging their calls with root calls.
+On 2.3.0 the observed Host ID is `childSession:childSession:call`: OpenCode
+prefixes the native ID and the SDK adds the record's child session ID again.
+The ID remains opaque and unique, with the same value on use and result;
+consumers correlate those events by ID equality.
 Child-session text is excluded from root answer progress. The SDK's flat event
 schema has no parent-graph field; no spawning-tool edge is invented. On 2.3 and
 later, OAR declares OpenCode's child-session-updates capability, so a `task`
@@ -165,8 +169,14 @@ prompt's answer delivers no event on either channel: the standard channel stops
 sending the child then, and OAR records a `child_update` read then as
 `opencode/session/child_update/after_answer` with no events, which the adapter
 reports with a `console.warn` diagnostic (#2188). The turn stops reading at the
-root `turn_ended`, and the process tree is disposed. No SDK live run has started
-a subagent on this channel (#2182). OAR exposes a
+root `turn_ended`, and the process tree is disposed. The
+[SDK live child-update run](researches/2026-11-14-opencode-2.3.0-live-child-update.md)
+(#2182) drove the real OpenCode 2.3.0 binary through `OpenCodeAdapter` on macOS
+arm64 with the local loopback OpenAI Chat provider. It observed successful child
+tool use/result, excluded child text from progress, ended at the root turn end,
+and reaped the process tree while another child's shell tool was still running.
+It did not observe child frames after the root answer; the late-frame diagnostic
+and non-delivery remain fixture evidence only (research §5). OAR exposes a
 v2 `steer` through `_session/steering`; the adapter does not call it. Usage fields
 are emitted only when OAR supplies native counters.
 

@@ -135,7 +135,7 @@ export function openCodeChildCases(contract: ReturnType<typeof openCodeContract>
             const owned = new Set([...spawned, ...beforeDispose.map(row => row.pid)]);
             const afterDispose = await until(() => processTree(owned).length === 0 ? [] : undefined, 'owned process tree to exit');
             const updates = childUpdates();
-            console.info('OPENCODE_CHILD_EVIDENCE', JSON.stringify({ version: contract.target.expectedVersion, rootSession: session.sessionRef, stages, events, turns, warnings, beforeDispose, afterDispose, wire }));
+            console.info('OPENCODE_CHILD_EVIDENCE', JSON.stringify({ version: contract.target.expectedVersion, rootSession: session.sessionRef, stages, events, turns, warnings, beforeDispose, afterDispose, egressAttempts: recorder.attempts, wire }));
             const read = updates.find(params => params.update?.sessionUpdate === 'tool_call' && params.update?.kind === 'read')!;
             expect(read, 'actual child read frame').toBeDefined();
             // OpenCode prefixes its native id; the SDK adds the record's session identity.
@@ -150,7 +150,7 @@ export function openCodeChildCases(contract: ReturnType<typeof openCodeContract>
             expect(events.filter(event => event.type === 'progress').map(event => event.text).join('')).toBe(ROOT_TEXT);
             expect(events.filter(event => event.type === 'turn_end')).toHaveLength(1);
             expect(events.at(-1)?.type).toBe('turn_end');
-            expect(turns).toEqual([{ sessionId: session.sessionRef, agentPath: [] }]);
+            expect(turns.filter(turn => turn.sessionId === session!.sessionRef)).toEqual([{ sessionId: session.sessionRef, agentPath: [] }]);
             expect(events.some(event => event.type === 'tool_use' && event.tool === 'shell')).toBe(true);
             expect(events.some(event => event.type === 'tool_result' && event.tool === 'shell')).toBe(false);
             const prompt = wire.find(row => row.direction === 'out' && row.frame.method === 'session/prompt')!.frame;
@@ -158,6 +158,7 @@ export function openCodeChildCases(contract: ReturnType<typeof openCodeContract>
             expect(beforeDispose.some(row => row.pid === holdPid), 'background tool is alive before root answer').toBe(true);
             expect(beforeDispose.some(row => /opencode.*acp/.test(row.command))).toBe(true);
             expect(afterDispose).toEqual([]);
+            expect(recorder.attempts, 'no external requests through the refusing proxy, including the child run').toEqual([]);
           } finally {
             try { await session?.close(); }
             finally {
