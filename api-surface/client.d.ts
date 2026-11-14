@@ -7103,8 +7103,16 @@ export interface LocalTaskJournal {
     markRecovered(taskId: string, outcome: RecoveryOutcome): Promise<void>;
     /** Physical journal/quarantine footprint and logical receipt counts; retention registry owns aggregate usage. */
     measureUsage(): Promise<LocalStorageUsage>;
-    /** Confirmed terminals older than cutoff, without recovery markers, oldest first. */
-    listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
+    /**
+     * Confirmed terminals older than cutoff, without recovery markers, oldest
+     * first by `(at, task_id)`. With `after`, only tasks strictly greater than
+     * that task's `(at, task_id)` are listed; when `after` is no longer listable
+     * the result is empty. Retention pages with `after` past a task whose prune
+     * failed, so a Host-supplied journal must implement it: a page that returns
+     * a task the pass already failed to prune fails the confirmed-journal sweep
+     * with `LocalStorageConfigError` (reported as `sweep_failed`).
+     */
+    listPrunableConfirmedTasks(cutoff: Date, limit: number, after?: string): Promise<string[]>;
     /**
      * Transactionally rechecks confirmation and recovery protection before
      * pruning. Inside its delete transaction, under the write lock, it returns
@@ -7313,7 +7321,7 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
     markRecovered(taskId: string, outcome: RecoveryOutcome): Promise<void>;
     /** Physical journal/quarantine footprint and confirmed-row inventory. */
     measureUsage(): Promise<LocalStorageUsage>;
-    listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
+    listPrunableConfirmedTasks(cutoff: Date, limit: number, after?: string): Promise<string[]>;
     pruneConfirmedJournalTask(taskId: string, cutoff: Date): Promise<boolean>;
     /**
      * WAL checkpoint plus a BOUNDED incremental vacuum. Maintenance only — it
