@@ -974,6 +974,8 @@ describe('SqliteLocalTaskJournal', () => {
         ['enrollment', 'cancel-cancelled-3', undefined, "device_id = 'other'", 'enrollment identity mismatch'],
         ['withheld bytes', 'cancel-cancelled-3', undefined, 'withheld_bytes = length(bytes)', 'withheld offer row carries bytes'],
         ['withheld enrollment', 'cancel-cancelled-3', undefined, "withheld_bytes = length(bytes), bytes = '', tenant_id = 'other'", 'enrollment identity mismatch'],
+        // A parser error can quote stored bytes, so only the fixed reason reaches the message.
+        ['non-JSON bytes', 'offer-cancelled', undefined, `bytes = 'secret-text', bytes_hash = '${journalHash('secret-text')}'`, /^journal integrity check failed \(task "cancelled"\)$/],
       ] as const)('preserves all evidence for invalid %s', async (_kind, envelopeId, binding, mutation, error) => {
         const storeDir = await tmpStore();
         const journal = build(storeDir, { clock: at('2026-08-01T00:00:00.000Z') });

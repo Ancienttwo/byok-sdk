@@ -7201,7 +7201,8 @@ export declare class JournalUnknownTaskError extends Error {
 /**
  * A stored task row failed an integrity check, so the journal refused to read or prune it.
  * Not a package export: retention reads `taskId` to name the task in its `retention-failure`
- * event, and the message names it too. Neither carries stored bytes.
+ * event, and the message names it too. The message keeps only the journal's own fixed-text
+ * reasons; a parser error, whose text can quote stored bytes, stays in `cause` alone.
  */
 export declare class JournalIntegrityError extends Error {
     readonly taskId: string;

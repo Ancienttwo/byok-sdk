@@ -37,7 +37,7 @@ export interface RetentionSweeperOptions {
 function failureTaskIds(error: unknown): (string | undefined)[] {
   const errors = error instanceof AggregateError ? error.errors : [error];
   const ids = errors.flatMap(cause => cause instanceof JournalIntegrityError ? [cause.taskId] : []);
-  return ids.length === errors.length ? ids : [...ids, undefined];
+  return ids.length > 0 && ids.length === errors.length ? ids : [...ids, undefined];
 }
 
 const nextClass = new WeakMap<RetentionSweeper, number>();
