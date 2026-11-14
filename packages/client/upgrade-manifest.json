@@ -16,6 +16,24 @@
   },
   "entries": [
     {
+      "id": "sealed-provisioning-store-unavailable-retry",
+      "impact": "breaking",
+      "summary": "@byok-sdk/keys applySealedProviderProvisioning() no longer records secret_store_unavailable or consumes operationGeneration when available() is false before any credential write (#2132). Hosts must use readSealedProvisioningResult() before completing a providerProvisioning notice: for absent, throw without completing or acknowledging and retain the request and ciphertext for retry after store recovery; for completed, submit readback.result; for conflict or interrupted, apply the same request again and submit that result, propagating throws to leave the notice unacknowledged. Retries still pass all admission checks. Credential-write failures remain recorded and pending; if the Host already stored an unrecorded rejection as terminal, submit a new request at the same generation.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#sealed-provisioning-retries-an-unavailable-credential-store-2132",
+      "items": [
+        "behavior:sealed-provisioning-store-unavailable-retry"
+      ]
+    },
+    {
+      "id": "duplicate-injected-adapter-ids",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client createDaemonWithAdapters(config, adapters) now throws DaemonConfigInvalidError synchronously for duplicate descriptor.id values instead of accepting the array and selecting the first matching adapter (#2135). checkDaemonConfig(config, { source: 'embedded', adapters }) rejects the same input with ok: false and matching invalid_value issues at adapters[i].descriptor.id. Hosts must register one implementation per ID, or give distinct custom runtimes distinct IDs and update routing; correct the adapter list before retrying construction.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#unique-injected-adapter-ids-2135",
+      "items": [
+        "behavior:duplicate-injected-adapter-ids"
+      ]
+    },
+    {
       "id": "task-home-live",
       "impact": "breaking",
       "summary": "@byok-sdk/client DaemonConfig.runtimeEnvironment and runtimes.<id>.runtimeEnvironment now give task children the daemon's live HOME under the default login-shell base (#2084), instead of the startup snapshot's HOME. A startup file that exports another HOME no longer redirects task HOME. PATH, XDG_* and other snapshot-derived paths are unchanged: pass consistent live values explicitly or use base: 'allowlist'. Policies already passing HOME or using allowlist keep their behavior.",
