@@ -345,37 +345,47 @@ export class TestServer {
   /**
    * Resolves with the first received envelope matching `predicate`. It has no
    * deadline of its own: the test timeout is the only bound, so host load
-   * cannot fail a wait whose envelope is still on its way. If the test fails
-   * while this is still waiting, the predicate and what did arrive are printed.
+   * cannot fail a wait whose envelope is still on its way. On test timeout or
+   * cancellation, Vitest aborts its signal and this rejects with the predicate
+   * and received envelopes. A failed test also prints that diagnostic.
    */
   async waitFor(predicate: (envelope: Envelope) => boolean): Promise<Envelope> {
     const existing = this.received.find(predicate);
     if (existing) return existing;
-    let settled = false;
-    // What had arrived when the test timed out, before teardown sends more.
-    let arrived: string[] | undefined;
     const signal = TestRunner.getCurrentTest()!.context.signal;
-    const describeReceived = (): string[] => this.received.map((envelope) =>
-      envelope.task_id === undefined ? envelope.type : `${envelope.type}(${envelope.task_id})`);
-    signal.addEventListener('abort', () => { arrived ??= describeReceived(); }, { once: true });
+    const unmatched = (): string => {
+      const arrived = this.received.map((envelope) =>
+        envelope.task_id === undefined ? envelope.type : `${envelope.type}(${envelope.task_id})`);
+      return `TestServer.waitFor: no envelope matched ${predicate.toString()}; received: ${arrived.join(', ') || '(none)'}`;
+    };
+    if (signal.aborted) throw new Error(unmatched());
+    let settled = false;
+    // Capture before teardown can send more envelopes.
+    let failure: string | undefined;
     onTestFailed(() => {
-      if (settled) return;
-      const seen = arrived ?? describeReceived();
-      console.error(`TestServer.waitFor: no envelope matched ${predicate.toString()}; received: ${seen.join(', ') || '(none)'}`);
+      if (!settled) console.error(failure ?? unmatched());
     });
-    return new Promise((resolve) => {
-      this.waiters.push({
+    return new Promise((resolve, reject) => {
+      const waiter: Waiter = {
         predicate,
         resolve: (envelope) => {
           settled = true;
+          signal.removeEventListener('abort', onAbort);
           resolve(envelope);
         },
-      });
+      };
+      const onAbort = (): void => {
+        failure = unmatched();
+        this.waiters = this.waiters.filter(entry => entry !== waiter);
+        reject(new Error(failure));
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      this.waiters.push(waiter);
     });
   }
 
   async close(): Promise<void> {
-    // A wait abandoned by a failed test never resolves; drop it with the server.
+    // Drop any outstanding waits when the owning test closes its server.
     this.waiters = [];
     // A held response keeps its connection open, and http.Server#close waits for it.
     for (const release of this.messagesHoldReleases) release();

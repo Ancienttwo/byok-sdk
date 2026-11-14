@@ -17,6 +17,8 @@ import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import type { RuntimeAdapter, Session } from '../types';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { TestServer } from './fixtures/test-server';
+import { until } from './fixtures/until';
+import { readyGate } from './fixtures/start-ready';
 import { cancellationTiming } from './fixtures/task-runner-cancel-timing';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
@@ -26,7 +28,8 @@ const fixture = fileURLToPath(new URL('./fixtures/task-runner-cancel-runtime.mjs
 const cases: Array<{ dir: string; gate: string; runner: TaskRunner; sessions: Session[];
   resultGate: string; startSettled: ReturnType<typeof deferred>; hasStarted: () => boolean;
   releaseStartupReceipt: () => void;
-  restoreClock: () => void; stopTimers: () => void; saveEvidence: () => Promise<void> }> = [];
+  restoreClock: () => void; stopTimers: () => void; saveEvidence: () => Promise<void>;
+  cleanup?: () => Promise<void> }> = [];
 const releaseDisposalFixtures: (() => void)[] = [];
 
 /** A missing cleanup receipt is explicit, not inferred from a delayed init frame. */
@@ -187,6 +190,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
   const c = { runtime, dir, tree, gate, resultGate, adapter, runner, sent, sessions, startSettled, hasStarted: () => started,
     offer, cancel, terminals, events, trace, assertReaped, assertStartupReceiptRetained, releaseStartupReceipt,
     timing, synchronizeInterruptClock, restoreClock,
+    cleanup: undefined as (() => Promise<void>) | undefined,
     stopTimers: timing.stopTimers, waitForTerminal: () => terminalPublished.promise, waitForRuntimeRelease,
     saveEvidence: () => timing.save(dir, childTiming, expect.getState().currentTestName) };
   cases.push(c);
@@ -202,6 +206,8 @@ afterEach(async () => {
         c.releaseStartupReceipt();
         await fs.writeFile(c.gate, 'release');
         await fs.writeFile(c.resultGate, 'release');
+        // Daemon disposal can finish only after the native fixture gates open.
+        await c.cleanup?.();
         c.runner.stopAcceptingOffers();
         if (c.hasStarted()) await c.startSettled.promise;
         await new Promise<void>(resolve => setImmediate(resolve));
@@ -351,20 +357,19 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
       agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
       localAgentRelease: { version: '0.24.0-rc.1' },
     }, [c.adapter]);
-    try {
-      await daemon.pair('pairing-code'); await daemon.start();
-      server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'Host cancellation', runtime },
-        { taskId: 'host-task', seq: server.nextSeq() }));
-      await server.waitFor(event => event.type === 'task.progress' && event.task_id === 'host-task'
-        && event.payload.sealed === undefined && event.payload.events.some(event => event.type === 'tool_use'));
-      c.synchronizeInterruptClock();
-      server.send(createEnvelope('task.cancel', { reason: 'Host stop' }, { taskId: 'host-task', seq: server.nextSeq() }));
-      const terminal = await server.waitFor(event => event.type === 'task.cancelled' && event.task_id === 'host-task');
-      expect(terminal).toMatchObject({ type: 'task.cancelled', payload: { usage: { runtime, promptTokens: 456, completionTokens: 29 } } });
-      await daemon.stop();
-      expect(server.received.filter(event => event.task_id === 'host-task' && ['task.complete', 'task.fail', 'task.cancelled'].includes(event.type))).toHaveLength(1);
-      await c.assertReaped();
-    } finally { await daemon.stop(); await server.close(); }
+    c.cleanup = async () => { await daemon.stop(); await server.close(); };
+    await daemon.pair('pairing-code'); await daemon.start();
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'Host cancellation', runtime },
+      { taskId: 'host-task', seq: server.nextSeq() }));
+    await server.waitFor(event => event.type === 'task.progress' && event.task_id === 'host-task'
+      && event.payload.sealed === undefined && event.payload.events.some(event => event.type === 'tool_use'));
+    c.synchronizeInterruptClock();
+    server.send(createEnvelope('task.cancel', { reason: 'Host stop' }, { taskId: 'host-task', seq: server.nextSeq() }));
+    const terminal = await server.waitFor(event => event.type === 'task.cancelled' && event.task_id === 'host-task');
+    expect(terminal).toMatchObject({ type: 'task.cancelled', payload: { usage: { runtime, promptTokens: 456, completionTokens: 29 } } });
+    await daemon.stop();
+    expect(server.received.filter(event => event.task_id === 'host-task' && ['task.complete', 'task.fail', 'task.cancelled'].includes(event.type))).toHaveLength(1);
+    await c.assertReaped();
   });
 
   it.each(['stream', 'tool'])('cancels during %s, retains interrupt usage and deduplicates terminal work', async scenario => {
@@ -567,5 +572,45 @@ describe('Codex interrupt result/deadline ordering', () => {
     c.timing.record('clock.at-runner-deadline');
     await cancelled;
     expectUsage(c, 456, 29); expectNoErrors(c); await c.assertReaped();
+  });
+});
+
+// Real Vitest timeouts prove abort rejects the wait and permits async cleanup.
+// Keep this coverage beside the native daemon cleanup it protects.
+describe.each(['envelope', 'state', 'ready'] as const)('test wait cancellation: %s', { concurrent: false }, kind => {
+  const order: string[] = [];
+  let rejection: unknown;
+  let cleaned: Promise<void>;
+  let server: TestServer | undefined;
+  afterEach(async () => { await cleaned; order.push('teardown'); });
+
+  it.fails('rejects on the test timeout and finishes its cleanup', async () => {
+    let done!: () => void;
+    cleaned = new Promise<void>(resolve => { done = resolve; });
+    try {
+      if (kind === 'envelope') {
+        server = await TestServer.start();
+        await server.waitFor(envelope => envelope.type === 'task.started');
+      } else if (kind === 'state') {
+        await until(() => false, () => 'count=2');
+      } else {
+        await readyGate().ready(new Promise(() => {}));
+      }
+    } catch (error) {
+      rejection = error;
+      throw error;
+    } finally {
+      await new Promise<void>(resolve => setImmediate(resolve));
+      await server?.close();
+      order.push('cleanup');
+      done();
+    }
+  }, 300);
+
+  it('preserves the diagnostic and joins cleanup before teardown', async () => {
+    expect(String(rejection)).toContain(kind === 'envelope' ? 'TestServer.waitFor: no envelope matched'
+      : kind === 'state' ? 'until: still waiting; last observed count=2'
+        : 'readyGate: runStartCommand never called onReady');
+    expect(order).toEqual(['cleanup', 'teardown']);
   });
 });

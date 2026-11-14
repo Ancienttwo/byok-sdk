@@ -211,7 +211,10 @@ async function tempDir(prefix: string): Promise<string> {
   return dir;
 }
 
+// Stop test-owned daemons before removing the directories they use.
+const ownedCleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
+  for (const clean of ownedCleanups.splice(0)) await clean();
   await Promise.all(dirs.splice(0).map(
     (dir) => fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
   ));
@@ -2124,25 +2127,22 @@ it('the real daemon sends prepared Agent egress to the Host as the runtime produ
       },
     },
   }, [adapter]);
-  try {
-    const device = await daemon.pair('prepared-wire-pair');
-    expect(device.deviceId).toBe('device-1');
-    await daemon.start();
-    const taskId = 'prepared-wire-task';
-    server.send(preparedOffer(taskId, reference(built), server.nextSeq()));
-    await server.waitFor(e => e.type === 'task.started' && e.task_id === taskId);
-    // Each event is awaited on the wire before the next one: the latest-value
-    // lane keeps only the newest event of one batch.
-    const toolUse = { type: 'tool_use', tool: '/private/path/tool', input: { argv: ['--synthetic-secret=prepared'] } } as const;
-    adapter.sessions[0]!.emit(toolUse);
-    const progressed = await server.waitFor(e => e.type === 'task.progress' && e.task_id === taskId);
-    expect(progressed.payload).toMatchObject({ events: [toolUse] });
-    adapter.sessions[0]!.emit({ type: 'progress', text: 'private prepared reply' });
-    adapter.sessions[0]!.emit({ type: 'usage', inputTokens: 1200, outputTokens: 10 });
-    adapter.sessions[0]!.emit({ type: 'turn_end' });
-    const completed = await server.waitFor(e => e.type === 'task.complete' && e.task_id === taskId);
-    expect(completed.payload).toMatchObject({ summary: 'private prepared reply', preparedObservation: { requestDigest: REQUEST_DIGEST, initialPromptTokens: 1200, maxPromptTokens: 1200 } });
-  } finally {
-    await daemon.stop(); await server.close(); vi.restoreAllMocks();
-  }
+  ownedCleanups.push(async () => { await daemon.stop(); await server.close(); vi.restoreAllMocks(); });
+  const device = await daemon.pair('prepared-wire-pair');
+  expect(device.deviceId).toBe('device-1');
+  await daemon.start();
+  const taskId = 'prepared-wire-task';
+  server.send(preparedOffer(taskId, reference(built), server.nextSeq()));
+  await server.waitFor(e => e.type === 'task.started' && e.task_id === taskId);
+  // Each event is awaited on the wire before the next one: the latest-value
+  // lane keeps only the newest event of one batch.
+  const toolUse = { type: 'tool_use', tool: '/private/path/tool', input: { argv: ['--synthetic-secret=prepared'] } } as const;
+  adapter.sessions[0]!.emit(toolUse);
+  const progressed = await server.waitFor(e => e.type === 'task.progress' && e.task_id === taskId);
+  expect(progressed.payload).toMatchObject({ events: [toolUse] });
+  adapter.sessions[0]!.emit({ type: 'progress', text: 'private prepared reply' });
+  adapter.sessions[0]!.emit({ type: 'usage', inputTokens: 1200, outputTokens: 10 });
+  adapter.sessions[0]!.emit({ type: 'turn_end' });
+  const completed = await server.waitFor(e => e.type === 'task.complete' && e.task_id === taskId);
+  expect(completed.payload).toMatchObject({ summary: 'private prepared reply', preparedObservation: { requestDigest: REQUEST_DIGEST, initialPromptTokens: 1200, maxPromptTokens: 1200 } });
 });
