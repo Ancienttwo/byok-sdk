@@ -376,15 +376,15 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     expect(status.determinate).toBe(false);
   });
 
-  it('throws a clear error if getuid is unavailable (non-POSIX) and no override was given', async () => {
-    const originalGetuid = process.getuid;
-    delete process.getuid;
+  it('throws a clear error if geteuid is unavailable (non-POSIX) and no override was given', async () => {
+    const originalGeteuid = process.geteuid;
+    delete process.geteuid;
     try {
       const fs = installedFs();
       const lifecycle = createLaunchdLifecycle(def(), { run: vi.fn().mockResolvedValue(ok()), fs, homedir: () => '/h' });
-      await expect(lifecycle.status()).rejects.toThrow(/process\.getuid unavailable/);
+      await expect(lifecycle.status()).rejects.toThrow(/process\.geteuid unavailable/);
     } finally {
-      process.getuid = originalGetuid;
+      process.geteuid = originalGeteuid;
     }
   });
 });
