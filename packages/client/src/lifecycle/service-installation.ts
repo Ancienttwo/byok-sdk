@@ -1293,10 +1293,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * `<index><suffix>`, a directory store's tree as `<index>.d`. Every store
    * is checked with `lstat` first, so nothing is followed through a symlink.
    * `snapshot.json` is written last and marks a complete snapshot; a copy
-   * that fails removes the partial snapshot. Entries keep the listed paths,
-   * which a restore follows again. The migration is the Host's (trust model
-   * A): it must not change the link structure inside a store, and a restore
-   * after it did is the Host's responsibility (#2106).
+   * that fails removes the partial snapshot. Each entry keeps the listed
+   * path and its canonical form (#2106): a restore follows the path again
+   * and refuses it when it no longer resolves to the same place.
    */
   async function snapshot(to: string, stores: readonly ServiceStoreVerdict[]): Promise<void> {
     const sources = await Promise.all(stores.map(storeSources));
@@ -1313,7 +1312,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           else await fs.copyFile(`${store.path}${suffix}`, path.join(dir, name));
           files[suffix] = name;
         }
-        entries.push({ store: store.store, path: store.path, ...(store.kind === 'directory' ? { kind: 'directory' as const } : {}), files });
+        entries.push({ store: store.store, path: store.path, canonical: await canonical(store.path), ...(store.kind === 'directory' ? { kind: 'directory' as const } : {}), files });
       }
       await writeFileAtomic(path.join(dir, 'snapshot.json'), `${JSON.stringify({ entries }, null, 2)}\n`);
     } catch (error) {
@@ -1329,7 +1328,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     // Older snapshots retain the Host's spelling. Check every directory root
     // before changing any store, including links hidden by a trailing / or /.
     const entries = snapshot.entries.map((entry) => entry.kind === 'directory' ? { ...entry, path: directoryStorePath(entry.path) } : entry);
-    await refuseServiceOverlap(entries.map((entry) => entry.path));
+    const resolved = await refuseServiceOverlap(entries.map((entry) => entry.path));
     await Promise.all(entries.filter((entry) => entry.kind === 'directory').map(async (entry) => {
       try {
         if ((await fs.lstat(entry.path)).isSymbolicLink()) throw new ServiceInstallationError('precheck_failed');
@@ -1337,6 +1336,14 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
     }));
+    // A link that changed since the snapshot, for example in the candidate's
+    // migration, would send the restore elsewhere (#2106); the snapshot stays.
+    const moved = entries.find((entry, index) => entry.canonical !== undefined && !(within(resolved[index]!, entry.canonical, platform) && within(entry.canonical, resolved[index]!, platform)));
+    if (moved !== undefined) {
+      const error = new ServiceInstallationError('precheck_failed');
+      error.message += ` A store path no longer resolves as it did at the snapshot. (${moved.path})`;
+      throw error;
+    }
     for (const entry of entries) {
       if (entry.kind === 'directory') {
         await fs.rm(entry.path, { recursive: true, force: true });
@@ -1711,6 +1718,8 @@ interface SnapshotEntry {
   path: string;
   /** Absent in a snapshot 0.34 wrote, and for every file store. */
   kind?: 'directory';
+  /** `path` with its links resolved when the snapshot was taken (#2106); absent in a snapshot 0.42 wrote. */
+  canonical?: string;
   /** Saved files by suffix (`''`, `-wal`, `-journal`; a directory's tree under `''`); empty when the store was absent. */
   files: Record<string, string>;
 }

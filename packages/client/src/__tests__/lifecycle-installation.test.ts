@@ -1814,7 +1814,9 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       try {
         expect(error).toMatchObject({ code: 'upgrade_pending', message: expect.stringContaining(`process group ${migrate.pgid}`) });
         expect([await pointer('current'), await fs.readFile(db, 'utf8'), events.includes('start')]).toEqual([undefined, 'migrated data', false]);
+        // recover() leaves the stores alone while the recorded migration still runs (#2106).
         await expect(installation.recover()).rejects.toMatchObject({ code: 'upgrade_pending' });
+        expect([await pointer('current'), await fs.readFile(db, 'utf8'), events.includes('start')]).toEqual([undefined, 'migrated data', false]);
       } finally {
         process.kill(-migrate.pgid, 'SIGKILL');
       }
@@ -1889,6 +1891,21 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining(dotted) }));
         expect([await fs.readFile(marker, 'utf8'), await fs.readFile(db, 'utf8'), existsSync(index), await pointer('current'), (await installation.receipt())?.state]).toEqual(['live', 'v2 data', true, undefined, 'pending']);
       }
+    });
+
+    it('a store path whose link changed since the snapshot is refused before a restore changes any store (#2106)', async () => {
+      const [a, b, link] = [path.join(root, 'a'), path.join(root, 'b'), path.join(root, 'link')];
+      for (const dir of [a, b]) await fs.mkdir(path.join(dir, 'data'), { recursive: true });
+      await fs.symlink(a, link, 'dir');
+      await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([{ store: 'host', path: path.join(link, 'data'), verdict: 'accepted', reason: 'accepted', kind: 'directory' }]));
+      await installation.upgrade(await payload('3.0.0'));
+      await fs.writeFile(path.join(b, 'data', 'kept'), 'b');
+      await fs.rm(link);
+      await fs.symlink(b, link, 'dir');
+      const error = await installation.rollback().catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'upgrade_pending' });
+      expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ code: 'precheck_failed', message: expect.stringContaining('no longer resolves') }));
+      expect([await fs.readFile(path.join(b, 'data', 'kept'), 'utf8'), existsSync(path.join(installRoot, 'snapshots', '3.0.0', 'snapshot.json'))]).toEqual(['b', true]);
     });
 
     it('a linked snapshots/<version> is refused before it is probed or removed (#2061)', async () => {
