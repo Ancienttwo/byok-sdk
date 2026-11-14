@@ -13,9 +13,11 @@ export interface CodexRecord {
 }
 type CodexEvent = AgentEvent | MessageDraftDelta;
 interface StreamState {
-  readonly seen: Map<number, readonly CodexEvent[]>;
+  /** Highest seq projected; a record at or below it is projected and delivered only through `pending`. */
+  projected: number;
+  /** The projected record whose events are not all delivered: a failed consumer resumes at `next`. */
+  pending?: { readonly seq: number; readonly events: readonly CodexEvent[]; next: number };
   readonly active: Map<string, { tool: string; toolCallId: string; mcp?: { server: string; tool: string } }>;
-  readonly delivered: Set<string>;
   lastUsage?: Extract<AgentEvent, { type: 'usage' }>;
   activeTurnId?: string;
   baseline: Record<string, unknown> | null;
@@ -72,25 +74,26 @@ export class CodexProjection {
     let state = this.streams.get(stream);
     if (!state) {
       state = {
-        seen: new Map(),
+        projected: -1,
         active: new Map(),
-        delivered: new Set(),
         baseline: this.fresh ? {} : null,
         zeroBaseline: this.fresh,
       };
       this.streams.set(stream, state);
     }
-    let events = state.seen.get(input.seq);
-    if (events === undefined) {
-      events = this.project(state, input);
-      state.seen.set(input.seq, events);
+    // Records arrive in seq order, so only the newest projected record can still
+    // owe events; nothing else is kept, and the projection holds no text per record.
+    let pending = state.pending?.seq === input.seq ? state.pending : undefined;
+    if (pending === undefined) {
+      if (input.seq <= state.projected) return;
+      pending = { seq: input.seq, events: this.project(state, input), next: 0 };
+      state.projected = input.seq;
+      state.pending = pending;
     }
-    for (const [ordinal, event] of events.entries()) {
-      const key = `${input.seq}:${ordinal}`;
-      if (state.delivered.has(key)) continue;
-      emit(event); // a failed required consumer propagates; already-delivered ordinals are not replayed.
-      state.delivered.add(key);
+    for (; pending.next < pending.events.length; pending.next += 1) {
+      emit(pending.events[pending.next]!); // a failed required consumer propagates; already-delivered ordinals are not replayed.
     }
+    state.pending = undefined;
   }
 
   /** A transport close cannot invent a turn outcome, but must retain observed metering. */
