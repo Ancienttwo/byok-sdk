@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Fixed (client; #2056)** — The Codex adapter no longer keeps every projected event of a session, including each draft delta's text, until the session closes. It keeps only the record it is still delivering, so its memory no longer grows with a task's output. Delivery is unchanged: each event is delivered once, in order, and a consumer that throws resumes at the event that failed.
+- **Fixed (client; #2056)** — The Codex adapter no longer keeps every projected event of a session, including each draft delta's text, until the session closes. It keeps the highest projected seq and, by seq, only the records whose events are not all delivered yet, removing each once it is delivered, so its memory no longer grows with a task's output. Delivery is unchanged: each event is delivered once, in order, and a consumer that throws resumes at the event that failed.
 
 - **Fixed (keys; #2031)** — Pi projection directory ownership is checked against the effective uid, which owns files created by the process. When real and effective uids differ, an effective-uid-owned directory is accepted and a directory owned only by the real uid is refused.
 

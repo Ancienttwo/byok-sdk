@@ -15,7 +15,10 @@ type CodexEvent = AgentEvent | MessageDraftDelta;
 interface StreamState {
   /** Highest seq projected; a record at or below it is delivered only from `unfinished`. */
   projected: number;
-  /** Projected records whose events are not all delivered, by seq: a failed consumer resumes at `next`. */
+  /**
+   * Projected records whose events are not all delivered, by seq: a failed consumer resumes at `next`.
+   * Bounded in practice: a consumer failure halts the adapter (`CodexSession.record`), so no later record arrives to add an entry.
+   */
   readonly unfinished: Map<number, { readonly events: readonly CodexEvent[]; next: number }>;
   readonly active: Map<string, { tool: string; toolCallId: string; mcp?: { server: string; tool: string } }>;
   lastUsage?: Extract<AgentEvent, { type: 'usage' }>;
