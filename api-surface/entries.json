@@ -1906,7 +1906,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 247825,
+      "budgetBytes": 247994,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2881,7 +2881,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 187657,
+      "budgetBytes": 187678,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
