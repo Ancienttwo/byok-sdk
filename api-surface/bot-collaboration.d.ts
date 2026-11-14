@@ -1019,7 +1019,8 @@ export declare class BotCollaboration {
      *
      * The call can still reject after `core.cancel` has committed: it rethrows a `drainError`, and a later `process()` failure
      * also rejects. The cancel may already be in effect then, so do not treat a rejection as "not cancelled". Calling again is
-     * safe and returns `already_settled` or `cancel_pending`; replay to confirm the outcome. This differs from `cancelTurn`,
+     * safe: an intent that already concluded returns `already_settled`, a committed cancel returns `cancel_pending`, a replay whose
+     * drain settles it returns `cancelled`, and the same failure (for example a still-full outbox) rejects again. This differs from `cancelTurn`,
      * which handles `drainError` differently; aligning the two is tracked in #2144.
      */
     cancelHostIntent(key: string, ...by: PrincipalArg): Promise<HostIntentCancelResult>;
