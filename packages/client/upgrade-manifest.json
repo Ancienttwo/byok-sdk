@@ -63,7 +63,7 @@
     },
     {
       "id": "upgrade-breaking-summary",
-      "impact": "additive",
+      "impact": "breaking",
       "summary": "@byok-sdk/client checkUpgradeFrom returns each breaking entry's authored summary, including behavior-only declarations, alongside its id, release and migration. Hosts can show the description directly; fixtures constructing UpgradeFromBreakingEntry supply summary as well.",
       "migration": "docs/releases/host-upgrade-0.43.0.md#behavior-only-upgrade-notices-2117",
       "items": [

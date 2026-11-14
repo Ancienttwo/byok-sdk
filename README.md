@@ -8,8 +8,8 @@ composition over Postgres and R2.
 ## Release status
 
 The prepared candidate is **0.43.0** for all nine public packages, an owner-approved
-MINOR with 15 breaking upgrade-manifest entries and the task HOME behavior change
-(#2084). Wire remains v6; `@byok-sdk/cloud-do` is archived and excluded. See the
+MINOR with 21 breaking and 4 additive upgrade-manifest entries, including the task
+HOME behavior change (#2084). Wire remains v6; `@byok-sdk/cloud-do` is archived and excluded. See the
 [candidate release notes](docs/releases/v0.43.0.md) and
 [Host upgrade checklist](docs/releases/host-upgrade-0.43.0.md). Candidate validation,
 Host acceptance and publication authorization remain separate. After prep merges,
