@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,8 +18,14 @@ export const PI_JITI_SEED_FORMAT = 'byok.pi.jiti-seed';
 export const PI_JITI_SEED_VERSION = 1;
 /** Templates are generated against this root; only their own file URL literal names it. */
 export const PI_JITI_SEED_CANONICAL_ROOT = '/__byok_pi_jiti_seed__';
-/** Roots a manifest entry is relative to: the copied extension package, and the generated peer probe. */
-export const PI_JITI_SEED_BASES = Object.freeze(['pi-subagents', 'host-peers']);
+/**
+ * Seed groups. `parent`: the parent extension's bundle graph, loaded by every
+ * bundled Pi host. `runner`: the Bun background runner's graph, materialized
+ * only when a compiled product re-enters as that runner. `host-peers`: the
+ * generated peer probe of a Bun-compiled product. The first two are relative
+ * to the copied pi-subagents package, the last to the probe's directory.
+ */
+export const PI_JITI_SEED_GROUPS = Object.freeze(['parent', 'runner', 'host-peers']);
 
 export const PI_SUBAGENTS_PEERS_KEY = 'byok-sdk.pi-subagents.peers';
 export const PI_SUBAGENTS_HOST_KEY = 'byok-sdk.pi-subagents.host-sdk';
@@ -43,10 +49,14 @@ export function fileUrlLiteral(file) {
   return JSON.stringify(pathToFileURL(file).href);
 }
 
-export function canonicalSeedFile(base, relative) {
-  return path.posix.join(PI_JITI_SEED_CANONICAL_ROOT, base, relative);
+export function canonicalSeedFile(group, relative) {
+  return path.posix.join(PI_JITI_SEED_CANONICAL_ROOT, group === 'host-peers' ? 'host-peers' : 'pi-subagents', relative);
 }
 
+/**
+ * Refusal reasons name files and versions only; they reach the Host through a
+ * diagnostic frame and must carry no other local information.
+ */
 const refuse = reason => { throw new Error(`pi_jiti_seed_unavailable: ${reason}`); };
 
 /**
@@ -88,41 +98,51 @@ export function openPiJitiSeed(seedRoot, loaderUrl) {
   const jitiVersion = JSON.parse(readFileSync(path.join(jitiDir, 'package.json'), 'utf8')).version;
   if (jitiVersion !== manifest.jiti) refuse(`seed is for jiti ${manifest.jiti}, not ${jitiVersion}`);
   const cacheDir = executionCacheDir(loaderUrl);
-  if (existsSync(cacheDir) && readdirSync(cacheDir).length > 0) refuse(`${cacheDir} is not a fresh execution cache`);
+  try {
+    mkdirSync(cacheDir, { recursive: true });
+    accessSync(cacheDir, constants.W_OK);
+  } catch {
+    refuse(`${cacheDir} is not writable`);
+  }
   let body;
   const jiti = createRequire(path.join(jitiDir, 'package.json'))(path.join(jitiDir, 'lib', 'jiti.cjs')).createJiti(path.join(cacheDir, 'seed.cjs'), {
     fsCache: cacheDir, moduleCache: false,
     // Only verified templates reach jiti; it names and footers the cache files itself.
-    transform: () => ({ code: body }),
+    transform: () => { const code = body; body = undefined; return { code }; },
   });
   const templates = path.join(dir, digests[0]);
   return {
     digest: digests[0], cacheDir,
-    /** Write the private cache files of every `base` entry; `root` is that base's directory. */
-    materialize(base, root) {
-      const prepared = manifest.entries.filter(entry => entry.base === base).map(entry => {
+    /**
+     * Write this execution's cache file for every `group` entry; `root` is the
+     * group's directory. Every source, template and relocation site is checked
+     * before anything is written. An entry jiti already finds in this
+     * execution's cache, written earlier by the same execution, is kept.
+     */
+    materialize(group, root) {
+      const prepared = manifest.entries.filter(entry => entry.group === group).map(entry => {
         const file = realpathSync(path.join(root, entry.path));
         const source = readFileSync(file, 'utf8');
-        if (sha256(source) !== entry.sourceSha256) refuse(`source changed: ${base}/${entry.path}`);
+        if (sha256(source) !== entry.sourceSha256) refuse(`source changed: ${file}`);
         let code = readFileSync(path.join(templates, entry.template), 'utf8');
-        if (sha256(code) !== entry.templateSha256) refuse(`template changed: ${entry.template}`);
-        const canonical = fileUrlLiteral(canonicalSeedFile(base, entry.path)), actual = fileUrlLiteral(file);
+        if (sha256(code) !== entry.templateSha256) refuse(`template changed: ${path.join(templates, entry.template)}`);
+        const actual = fileUrlLiteral(file);
+        // The literal the build platform wrote for the canonical file, so a seed built on one OS relocates on another.
         for (const site of [...entry.sites].sort((a, b) => b - a)) {
-          if (code.slice(site, site + canonical.length) !== canonical) refuse(`relocation site mismatch: ${entry.template}@${site}`);
-          code = code.slice(0, site) + actual + code.slice(site + canonical.length);
+          if (code.slice(site, site + entry.siteLiteral.length) !== entry.siteLiteral) refuse(`relocation site mismatch: ${path.join(templates, entry.template)}`);
+          code = code.slice(0, site) + actual + code.slice(site + entry.siteLiteral.length);
         }
         return { file, source, code, entry };
       });
-      if (prepared.length === 0) refuse(`no seed entries for ${base}`);
-      const before = existsSync(cacheDir) ? readdirSync(cacheDir).length : 0;
+      if (prepared.length === 0) refuse(`no seed entries for ${group}`);
+      let written = 0;
       for (const { file, source, code, entry } of prepared) {
         body = code;
         jiti.transform({ filename: file, source, ts: entry.ts, async: entry.async, jsx: false });
+        if (body === undefined) written++;
+        body = undefined;
       }
-      body = undefined;
-      const written = readdirSync(cacheDir).length - before;
-      if (written !== prepared.length) refuse(`wrote ${written} of ${prepared.length} cache files for ${base}`);
-      return written;
+      return { written, kept: prepared.length - written };
     },
   };
 }

@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { createServer, type ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
@@ -15,6 +15,7 @@ import todoLayout from '../adapters/pi/todo-locale-layout.json';
 import { REQUIRE_BUN_ENV, resolveBunBin } from './support/test-bun-bin';
 import { writeKoffiAssetRoot } from '../../../../scripts/testing/sdk-koffi-asset-root.mjs';
 import { startLoopbackProvider } from './runtime-contract/loopback';
+import { openPiJitiSeed, piSubagentHostPeersSource, PI_JITI_SEED_DIR, type PiJitiSeedGroup } from '../adapters/pi/jiti-seed.mjs';
 
 const execFileAsync = promisify(execFile);
 const BUN_BIN = resolveBunBin();
@@ -96,6 +97,137 @@ describe('copyPiRuntimeAssets', () => {
   });
 });
 
+interface SeedManifest { readonly entries: { group: PiJitiSeedGroup; path: string; ts: boolean; async: boolean }[] }
+const SEED_GATE = fileURLToPath(new URL('../../scripts/build-pi-jiti-seed.mjs', import.meta.url));
+
+async function readSeedManifest(assets: string): Promise<{ dir: string; manifest: SeedManifest }> {
+  const [digest] = await fs.readdir(path.join(assets, PI_JITI_SEED_DIR));
+  const dir = path.join(assets, PI_JITI_SEED_DIR, digest!);
+  return { dir, manifest: JSON.parse(await fs.readFile(path.join(dir, 'manifest.json'), 'utf8')) as SeedManifest };
+}
+
+/** Write the generated peer probe, as a Bun-compiled product does, into `dir`. */
+async function writeHostPeers(assets: string, dir: string): Promise<void> {
+  const { HOST_PEER_ALIASES } = await import(pathToFileURL(path.join(assets, 'pi-subagents/src/runs/background/runner-aliases.js')).href) as
+    { HOST_PEER_ALIASES: { specifier: string; optional?: boolean }[] };
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, 'host-peers.ts'), piSubagentHostPeersSource(HOST_PEER_ALIASES.filter(alias => !alias.optional).map(alias => alias.specifier)));
+}
+
+/** Run `body` as an execution whose temporary directory is `tmp`. */
+function inExecution<T>(tmp: string, body: () => T): T {
+  const saved = { TMPDIR: process.env.TMPDIR, TEMP: process.env.TEMP, TMP: process.env.TMP };
+  Object.assign(process.env, { TMPDIR: tmp, TEMP: tmp, TMP: tmp });
+  try { return body(); } finally {
+    for (const [name, value] of Object.entries(saved)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
+  }
+}
+
+async function cacheFiles(dir: string): Promise<Map<string, string>> {
+  const names = (await fs.readdir(dir)).sort();
+  return new Map(await Promise.all(names.map(async name => [name, await fs.readFile(path.join(dir, name), 'utf8')] as const)));
+}
+
+describe('Pi jiti seed (#1927)', () => {
+  it('materializes, under a path with spaces and non-ASCII characters, exactly the cache files cold jiti writes there', { timeout: 300_000 }, async () => {
+    const sdk = await loadClient();
+    const root = path.join(await tempRoot('byok-pi-seed-'), 'install dir 安装');
+    const assets = path.join(root, 'pi');
+    await sdk.copyPiRuntimeAssets({ outDir: assets, form: 'compiled-executable' });
+    const peers = path.join(root, 'peer probe 探针');
+    await writeHostPeers(assets, peers);
+    const groupRoot = (group: PiJitiSeedGroup): string => group === 'host-peers' ? peers : path.join(assets, 'pi-subagents');
+    const seeded = path.join(root, 'seeded'), cold = path.join(root, 'cold');
+    await fs.mkdir(seeded); await fs.mkdir(cold);
+    inExecution(seeded, () => {
+      const seed = openPiJitiSeed(assets, undefined);
+      for (const group of ['parent', 'runner', 'host-peers'] as const) seed.materialize(group, groupRoot(group));
+    });
+    // The pinned jiti with its own Babel transform, asked for the same files at their installed paths.
+    const jitiDir = path.join(assets, 'pi-subagents/node_modules/jiti');
+    const { createJiti } = createRequire(path.join(jitiDir, 'package.json'))(path.join(jitiDir, 'lib/jiti.cjs')) as
+      { createJiti(file: string, options: Record<string, unknown>): { transform(options: Record<string, unknown>): string } };
+    const jiti = createJiti(path.join(cold, 'cold.cjs'), { fsCache: path.join(cold, 'jiti'), moduleCache: false });
+    const { manifest } = await readSeedManifest(assets);
+    for (const entry of manifest.entries) {
+      const file = await fs.realpath(path.join(groupRoot(entry.group), entry.path));
+      jiti.transform({ filename: file, source: await fs.readFile(file, 'utf8'), ts: entry.ts, async: entry.async, jsx: false });
+    }
+    const expected = await cacheFiles(path.join(cold, 'jiti'));
+    expect(expected.size).toBe(manifest.entries.length);
+    expect(await cacheFiles(path.join(seeded, 'jiti'))).toEqual(expected);
+  });
+
+  it('gives two executions independent regular files and leaves the seed unchanged when one is poisoned', { timeout: 120_000 }, async () => {
+    const sdk = await loadClient();
+    const root = await tempRoot('byok-pi-seed-isolation-');
+    const assets = path.join(root, 'pi');
+    await sdk.copyPiRuntimeAssets({ outDir: assets, form: 'interpreter+bundle' });
+    const pkg = path.join(assets, 'pi-subagents');
+    const run = (name: string): string => {
+      const tmp = path.join(root, name);
+      inExecution(tmp, () => openPiJitiSeed(assets, undefined).materialize('parent', pkg));
+      return path.join(tmp, 'jiti');
+    };
+    const { dir } = await readSeedManifest(assets);
+    const templates = await cacheFiles(path.join(dir, 'templates'));
+    await fs.mkdir(path.join(root, 'a')); await fs.mkdir(path.join(root, 'b'));
+    const a = run('a'), b = run('b');
+    const names = await fs.readdir(a);
+    expect(await fs.readdir(b)).toEqual(names);
+    for (const name of names) {
+      const [left, right] = await Promise.all([fs.lstat(path.join(a, name)), fs.lstat(path.join(b, name))]);
+      expect([left.isFile(), right.isFile(), left.nlink, right.nlink]).toEqual([true, true, 1, 1]);
+      expect(left.ino).not.toBe(right.ino);
+    }
+    const before = await cacheFiles(b);
+    for (const name of names) await fs.writeFile(path.join(a, name), 'throw new Error("poisoned");\n');
+    expect(await cacheFiles(b)).toEqual(before);
+    expect(await cacheFiles(path.join(dir, 'templates'))).toEqual(templates);
+    await fs.mkdir(path.join(root, 'c'));
+    expect(await cacheFiles(run('c'))).toEqual(before);
+  });
+
+  it('refuses a cache another execution could share and writes nothing', { timeout: 120_000 }, async () => {
+    const sdk = await loadClient();
+    const root = await tempRoot('byok-pi-seed-shared-');
+    const assets = path.join(root, 'pi');
+    await sdk.copyPiRuntimeAssets({ outDir: assets, form: 'interpreter+bundle' });
+    const tmp = path.join(root, 'tmp'); await fs.mkdir(tmp);
+    // jiti prefers `node_modules/.cache/jiti` beside the loader over TMPDIR.
+    const product = path.join(root, 'product'); await fs.mkdir(path.join(product, 'node_modules'), { recursive: true });
+    expect(() => inExecution(tmp, () => openPiJitiSeed(assets, pathToFileURL(path.join(product, 'host.js')).href)))
+      .toThrow('pi_jiti_seed_unavailable: the Pi loader would use an adjacent shared cache');
+    process.env.JITI_FS_CACHE = 'true';
+    try {
+      expect(() => inExecution(tmp, () => openPiJitiSeed(assets, undefined))).toThrow('pi_jiti_seed_unavailable: JITI_FS_CACHE changes the jiti cache contract');
+    } finally { delete process.env.JITI_FS_CACHE; }
+    // jiti ignores TMPDIR when it is the working directory; a worker cannot chdir, so a child process checks it.
+    const probe = `import { openPiJitiSeed } from ${JSON.stringify(pathToFileURL(fileURLToPath(new URL('../adapters/pi/jiti-seed.mjs', import.meta.url))).href)};
+try { openPiJitiSeed(${JSON.stringify(assets)}, undefined); } catch (error) { process.stdout.write(error.message); }`;
+    const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '-e', probe], { cwd: tmp, env: { ...process.env, TMPDIR: tmp } });
+    expect(stdout).toBe('pi_jiti_seed_unavailable: TMPDIR is the working directory');
+    expect(await fs.readdir(tmp)).toEqual([]);
+  });
+
+  it('release gate: zero transforms with the copied seed, a transform for every lookup when it is changed or missing', { timeout: 300_000 }, async () => {
+    const sdk = await loadClient();
+    const assets = path.join(await tempRoot('byok-pi-seed-gate-'), 'pi');
+    await sdk.copyPiRuntimeAssets({ outDir: assets, form: 'compiled-executable' });
+    const gate = async (): Promise<string> => (await execFileAsync(process.execPath, [SEED_GATE, '--gate', assets])).stdout;
+    expect(JSON.parse(await gate())).toMatchObject({ transforms: 0 });
+    const { dir, manifest } = await readSeedManifest(assets);
+    const entries = manifest.entries.length;
+    const template = path.join(dir, 'templates/000.js');
+    const original = await fs.readFile(template);
+    await fs.appendFile(template, '// changed\n');
+    await expect(gate()).rejects.toMatchObject({ stderr: expect.stringContaining(`gate failed: ${entries} of ${entries} lookups transformed (pi_jiti_seed_unavailable: template changed:`) });
+    await fs.writeFile(template, original);
+    await fs.rm(path.join(assets, 'sdk-derived'), { recursive: true });
+    await expect(gate()).rejects.toMatchObject({ stderr: expect.stringContaining(`gate failed: ${entries} of ${entries} lookups transformed (pi_jiti_seed_unavailable: expected one seed`) });
+  });
+});
+
 /**
  * A product host entry. It bundles the built SDK root, re-enters SDK helpers,
  * and otherwise runs one Pi task through the real adapter with `sdkHelperHost`.
@@ -160,6 +292,7 @@ if (process.argv[2] !== 'task') {
       .map(async file => JSON.parse(await fs.readFile(scratch.runtimeDir + '/' + file, 'utf8'))));
     report.runnerErrors = await Promise.all((await fs.readdir(scratch.runtimeDir, { recursive: true })).filter(file => file.endsWith('runner.stderr.log'))
       .map(file => fs.readFile(scratch.runtimeDir + '/' + file, 'utf8')));
+    report.jitiCaches = (await fs.readdir(scratch.runtimeDir, { recursive: true })).filter(file => /(^|[\\\\/])jiti[\\\\/][^\\\\/]+$/.test(file)).sort();
     report.stage = 'close'; await session.close();
     report.stage = 'done';
   } catch (error) { report.error = String(error); report.errorDetail = util.inspect(error, { depth: 8 }); }
@@ -191,6 +324,8 @@ interface HostReport {
   pathPreserved?: boolean; sameExecutable?: boolean; privateSubagentRuntime?: boolean; sdkDir?: string[];
   events?: AgentEvent[]; runnerErrors?: string[]; runnerStatuses?: { state?: string; steps?: { error?: string }[] }[];
   gateCalls?: { toolName: string; nativeAgentId?: string }[];
+  /** Files directly in any `jiti/` cache below the execution's runtime dir. */
+  jitiCaches?: string[];
 }
 
 function completion(res: ServerResponse, content: string, tool?: { name: string; arguments: string }, assistantText?: string): void {
@@ -381,6 +516,46 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       } finally { await provider.close(); }
     }
   });
+  // #1927: an unusable seed degrades availability only. Pi transforms at run
+  // time as it does without a seed, the task completes, and the Host warns once.
+  it.skipIf(BUN_BIN === undefined).for(['without its seed', 'beside a node_modules'] as const)('completes a Pi task cold from a product %s and warns once', { timeout: 180_000 }, async (layout, { skip }) => {
+    const release = path.join(await tempRoot('byok-host-cold-release-'), 'release'); await fs.mkdir(release);
+    const buildDir = await tempRoot('byok-host-cold-build-'), runDir = await tempRoot('byok-host-cold-run-');
+    const host = await buildHost('interpreter+bundle (bun)', release, buildDir, skip);
+    // Beside the bundle, jiti would cache in `node_modules/.cache/jiti`, which every task of this product shares.
+    if (layout === 'without its seed') await fs.rm(path.join(host.piPackageDir!, 'sdk-derived'), { recursive: true });
+    else await fs.mkdir(path.join(release, 'node_modules'));
+    const provider = createServer((request, response) => { request.resume(); request.on('end', () => completion(response, 'HOST_COLD_OK')); });
+    await new Promise<void>(resolve => provider.listen(0, '127.0.0.1', resolve));
+    try {
+      const providerUrl = `http://127.0.0.1:${(provider.address() as { port: number }).port}/v1`;
+      const agentDir = path.join(runDir, 'agent'), cwd = path.join(runDir, 'workspace'), home = path.join(runDir, 'home');
+      for (const dir of [agentDir, cwd, home]) await fs.mkdir(dir);
+      await fs.writeFile(path.join(agentDir, 'models.json'), JSON.stringify({ providers: { 'host-stub': { api: 'openai-completions', baseUrl: providerUrl,
+        apiKey: 'synthetic-host-cold', models: [{ id: 'host-cold-model', name: 'Cold', input: ['text'], reasoning: false, contextWindow: 8192, maxTokens: 64 }] } } }));
+      await fs.writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'host-stub', defaultModel: 'host-cold-model' }));
+      const env = { PATH: process.env.PATH ?? '', HOME: home, USER: os.userInfo().username, TMPDIR: runDir, PI_CODING_AGENT_DIR: agentDir,
+        npm_config_registry: 'http://127.0.0.1:9', BUN_CONFIG_DEFAULT_REGISTRY: 'http://127.0.0.1:9' };
+      const reportPath = path.join(runDir, 'report.json'), inputPath = path.join(runDir, 'input.json');
+      await fs.writeFile(inputPath, JSON.stringify({ piSpecifier: PI_SPECIFIER, instruction: 'Reply.', bundleEntry: true, piPackageDir: host.piPackageDir,
+        nativeAssetRoot: host.nativeAssetRoot, cwd, env, scratchRoot: testScratchRoot(), report: reportPath }));
+      const { stderr } = await execFileAsync(host.command, [...host.prefix, 'task', inputPath], { cwd: runDir, env, timeout: 60_000 });
+      const report = JSON.parse(await fs.readFile(reportPath, 'utf8')) as HostReport;
+      expect(report.error, `failed at ${report.stage}: ${report.errorDetail}`).toBeUndefined();
+      expect(report.stage).toBe('done');
+      expect(report.events!.filter(event => event.type === 'progress').map(event => event.text).join('')).toBe('HOST_COLD_OK');
+      const warnings = stderr.split('\n').filter(line => line.includes('pi_jiti_seed_unavailable'));
+      expect(warnings).toEqual([expect.stringMatching(layout === 'without its seed'
+        ? /^\[byok\/client\] pi_jiti_seed_unavailable: expected one seed in .+, found 0$/u
+        : /^\[byok\/client\] pi_jiti_seed_unavailable: the Pi loader would use an adjacent shared cache$/u)]);
+      // Cold: the private cache holds only what Pi transformed itself, beside the bundle when jiti prefers that.
+      if (layout === 'without its seed') expect(report.jitiCaches!.length).toBeGreaterThan(0);
+      else expect((await fs.readdir(path.join(release, 'node_modules/.cache/jiti'))).length).toBeGreaterThan(0);
+    } finally {
+      provider.closeAllConnections();
+      await new Promise<void>(resolve => provider.close(() => resolve()));
+    }
+  });
   it.skipIf(BUN_BIN === undefined).for(['interpreter+bundle (bun)', 'interpreter+bundle (node)', 'compiled-executable', 'compiled-executable (configured assets)', 'node-sea'] as const)('runs a Pi task from the %s host form with no package lookup', { timeout: 180_000 }, async (form, { skip }) => {
     // #1589: a foreign Pi installed above the product; pi-subagents must never load it.
     const outer = await tempRoot('byok-host-payload-release-');
@@ -468,12 +643,20 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       await fs.writeFile(inputPath, JSON.stringify({ piSpecifier: PI_SPECIFIER, instruction: 'Reply with the host payload marker.',
         bundleEntry: host.entry !== undefined, piPackageDir: host.piPackageDir, nativeAssetRoot: host.nativeAssetRoot, cwd, env, scratchRoot: testScratchRoot(), report: reportPath }));
 
-      await execFileAsync(host.command, [...host.prefix, 'task', inputPath], { cwd: runDir, env, timeout: 60_000 }).catch(async (error: unknown) => {
+      const { stderr } = await execFileAsync(host.command, [...host.prefix, 'task', inputPath], { cwd: runDir, env, timeout: 60_000 }).catch(async (error: unknown) => {
         throw new Error(`host task failed: ${String(error)}\nreport: ${await fs.readFile(reportPath, 'utf8').catch(() => 'none')}`);
       });
       const report = JSON.parse(await fs.readFile(reportPath, 'utf8')) as HostReport;
       expect(report.error, `failed at ${report.stage}: ${report.errorDetail}`).toBeUndefined();
       expect(report.stage).toBe('done');
+      // #1927: the parent graph, and in a Bun product the peer probe and every
+      // background runner's graph, came from the seed. A transform at run time
+      // would add a cache file; only the user's own extension is transformed.
+      const { manifest } = await readSeedManifest(host.piPackageDir ?? release);
+      const groups = new Set<PiJitiSeedGroup>(background ? ['parent', 'runner', 'host-peers'] : ['parent']);
+      expect(report.jitiCaches!.filter(file => !/[\\/]user-pi-package-index\./u.test(file)))
+        .toHaveLength(manifest.entries.filter(entry => groups.has(entry.group)).length);
+      expect(stderr).not.toContain('pi_jiti_seed_unavailable');
       // Package lookup is denied, and the default adapter reproduces the reported probe failure.
       // The only Pi package a lookup can find is the foreign one above the release.
       // A Node 25.7+ SEA main script's import() loads built-in modules only (#1741).

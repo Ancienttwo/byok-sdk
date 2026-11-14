@@ -1,5 +1,5 @@
 import { PI_MEMORY_LANE } from './memory-lane-contract.js';
-import { parsePiHostReadyEvent } from './host-ready.js';
+import { parsePiHostReadyEvent, warnPiHostDiagnostic } from './host-ready.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, sdkLaneReport, type RuntimeEnvironment, type RuntimeEnvironmentLaneReport, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { PI_DURABLE_RUNTIME_CAPABILITIES, PI_RUNTIME_CAPABILITIES } from './pi-capabilities.js';
 import { parsePiAgentResources, INHERITED_PI_AGENT_RESOURCES, type PiAgentResources } from './agent-resources.js';
@@ -747,6 +747,7 @@ export class PiAdapter implements RuntimeAdapter {
               nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
               ...(memoryLane ? { beforeDispose: abortMemoryLane } : {}),
               onFrame: frame => {
+                if (frame.type === 'byok_host_diagnostic') { warnPiHostDiagnostic(frame); return; }
                 if (!memoryLane || frame.type !== 'byok_host_ready') return;
                 // Only memory-lane admission consumes the pre-prompt receipt.
                 readiness = readiness.then(async () => {

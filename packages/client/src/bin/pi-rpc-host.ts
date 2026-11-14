@@ -28,6 +28,7 @@ import { PI_SUBAGENTS_ASSET_DIR } from '../adapters/pi/subagents.js';
 const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
 
 export { parsePiHostReadyEvent, type PiHostReadyEvent } from '../adapters/pi/host-ready.js';
+import { createPiHostDiagnostic } from '../adapters/pi/host-ready.js';
 import type { PiHostReadyEvent } from '../adapters/pi/host-ready.js';
 
 /** Readiness receipt consumed only by memory-lane admission. */
@@ -295,13 +296,17 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
       // #1927: a verified seed replaces this execution's cold transform of the
       // embedded extension graph; one that does not verify is reported and Pi
       // transforms cold, as without a seed.
+      let seedReported = false;
       const coldTransform = (error: unknown): void => {
-        process.stderr.write(`byok-pi-rpc: ${error instanceof Error ? error.message : String(error)}; Pi transforms its extensions cold\n`);
+        if (seedReported) return;
+        seedReported = true;
+        const reason = (error instanceof Error ? error.message : String(error)).replace(/^pi_jiti_seed_unavailable: /u, '').replace(/[\r\n]+/gu, ' ');
+        writeHostFrame(JSON.stringify(createPiHostDiagnostic(reason)) + '\n');
       };
       let jitiSeed: PiJitiSeed | undefined;
       try { jitiSeed = openPiJitiSeed(trustedBun?.root ?? assetRoot, import.meta.url); } catch (error) { coldTransform(error); }
-      const seed = (base: 'pi-subagents' | 'host-peers', root: string): void => {
-        try { jitiSeed?.materialize(base, root); } catch (error) { coldTransform(error); }
+      const seed = (group: 'parent' | 'host-peers', root: string): void => {
+        try { jitiSeed?.materialize(group, root); } catch (error) { coldTransform(error); }
       };
       if (trustedBun !== undefined) {
         const root = join(resolve(dirname(args.configPath)), BUNDLED_SUBAGENT_DIR);
@@ -311,7 +316,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
         extensionFactories.push(refuseBundledBackground);
       }
       const asset = await loadPiSubagentsAsset(subagentAssets, config.toolAuthorization, fileScoped);
-      seed('pi-subagents', join(subagentAssets, PI_SUBAGENTS_ASSET_DIR));
+      seed('parent', join(subagentAssets, PI_SUBAGENTS_ASSET_DIR));
       subagentExtensionPaths.push(asset.extensionPath);
       extensionFactories.push(...asset.factories);
     }

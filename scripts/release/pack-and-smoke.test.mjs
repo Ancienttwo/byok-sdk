@@ -57,6 +57,11 @@ test('release pack includes keys and verifies its packed core edge', () => {
 });
 
 
+// #1927: the zero-transform gate itself is red/green-tested in the client's pi-host-payload suite.
+test('release pack gates the Pi jiti seed of the isolated install', () => {
+  assert.match(releasePackSource, /'packages\/client\/scripts\/build-pi-jiti-seed\.mjs'\), '--verify-installed', smokeDir\]/);
+});
+
 test('a published file that names the install store fails the release pack', () => {
   const tarball = (body) => [
     ['package/README.md', Buffer.from('# client\n')],

@@ -593,6 +593,10 @@ try {
     }
     const lockedPiClosure = readLockedPiClosure(readFileSync(path.join(repoRoot, 'bun.lock'), 'utf8'), piRuntime);
     assertInstalledPiRuntime(smokeDir, piRuntime, lockedPiClosure, 'release-pack', npmInvocation);
+    // #1927: the packed client carries the jiti seed of exactly the installed
+    // pi-subagents and jiti, bound to bun.lock and the official Pi closure,
+    // and a fresh execution from its copied asset root transforms nothing.
+    console.log(run(nodeBin, [path.join(repoRoot, 'packages/client/scripts/build-pi-jiti-seed.mjs'), '--verify-installed', smokeDir]));
   } finally {
     rmSync(smokeDir, { recursive: true, force: true });
   }
