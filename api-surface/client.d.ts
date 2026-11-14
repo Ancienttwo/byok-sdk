@@ -1861,8 +1861,10 @@ export type { RequestDeviceAssertionResult } from '../daemon/assertion-client.js
 // ==== @byok-sdk/client dist/daemon-config-invalid-error.d.ts ====
 import type { DaemonConfigIssue } from './daemon/config-schema/validate.js';
 /**
- * `DaemonConfig` failed {@link validateDaemonConfig} at daemon construction:
- * a missing required field, or a value of the wrong JSON type or literal.
+ * Daemon construction rejected configuration or injected runtime adapters:
+ * a missing required field, an invalid value, or a duplicate adapter ID.
+ * Schema failures come from {@link validateDaemonConfig}; construction also
+ * checks invariants that the schema cannot express.
  * A removed field throws {@link DaemonConfigFieldRemovedError} instead.
  * `createRuntimeAdapters` throws it too, so this module stays free of the
  * schema and the validator that the `/adapters` entry must not load.
@@ -5729,6 +5731,12 @@ export interface AssertionIssueProbe {
         audience: string;
     }): void;
 }
+/**
+ * Construct a daemon with Host-supplied runtime adapters, one per `descriptor.id`.
+ * @throws {DaemonConfigInvalidError} If adapter IDs repeat; the message names
+ * the duplicate ID. Remove duplicate registrations or give distinct custom
+ * runtimes distinct IDs before constructing the daemon.
+ */
 export declare function createDaemonWithAdapters(config: DaemonConfig, adapters: RuntimeAdapter[], overrides?: DaemonOverrides): Daemon;
 /**
  * codex round-2 F3: the real builder. Exported from THIS module but NOT from
