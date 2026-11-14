@@ -810,8 +810,10 @@ export class AgentHomeLeaseManager {
       await rootGate.release();
       rootGate = undefined;
     } catch (error) {
-      if (ownsMarker && lockPath !== undefined) await fs.rm(lockPath, { force: true }).catch(() => {});
       const releaseFailures: unknown[] = [];
+      if (ownsMarker && lockPath !== undefined) {
+        try { await fs.rm(lockPath, { force: true }); } catch (removeError) { releaseFailures.push(removeError); }
+      }
       try { await rootGate?.release(); } catch (releaseError) { releaseFailures.push(releaseError); }
       dropBaseLease(canonicalHome, leaseId);
       if (error instanceof PathMutationGateBusyError) {
@@ -915,11 +917,16 @@ export class AgentHomeLeaseManager {
     }
     const heldGate = gate;
     let released = false;
-    return { release: async () => {
-      if (released) return;
-      await heldGate.release();
-      dropBaseLease(canonicalHome, leaseId);
-      released = true;
+    let releaseAttempt: Promise<void> | undefined;
+    return { release: () => {
+      if (released) return Promise.resolve();
+      // As with the writer lease, concurrent callers share one attempt, and a
+      // failed relinquish still leaves the process registry; otherwise this
+      // home stays busy until the process restarts.
+      releaseAttempt ??= (async () => {
+        try { await heldGate.release(); } finally { dropBaseLease(canonicalHome, leaseId); released = true; }
+      })();
+      return releaseAttempt;
     } };
   }
 
