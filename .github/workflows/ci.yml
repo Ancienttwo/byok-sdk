@@ -1837,6 +1837,28 @@ jobs:
           bun run --filter @byok-sdk/client test -- \
             src/__tests__/lifecycle-installation.test.ts \
             -t '#2153' --reporter=verbose
+          # Temporary regression evidence; removed before the final PR head.
+          product=packages/client/src/lifecycle/service-installation.ts
+          trap 'git restore -- "$product"' EXIT
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('packages/client/src/lifecycle/service-installation.ts')
+          body = source.read_text()
+          before = 'await prepareInstallRoot();'
+          assert body.count(before) == 1
+          replacement = 'await fs.mkdir(root, { recursive: true });'
+          source.write_text(body.replace(before, replacement))
+          PY
+          set +e
+          bun run --filter @byok-sdk/client test -- \
+            src/__tests__/lifecycle-installation.test.ts \
+            -t '#2153' --reporter=verbose \
+            > "$RUNNER_TEMP/two-user-revert.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/two-user-revert.log"
+          test "$result" -eq 1
+          grep -q 'promise resolved' "$RUNNER_TEMP/two-user-revert.log"
       - name: Provision systemd and Secret Service on the user bus
         if: runner.os == 'Linux'
         shell: bash
