@@ -369,8 +369,8 @@ migration or embedded-server SQLite schema version. See the
 [0.43.0 release notes](releases/v0.43.0.md) and
 [Host upgrade checklist](releases/host-upgrade-0.43.0.md). All nine packages were
 published on 2026-11-14 (UTC); registry readback reports `latest` 0.43.0 for all nine.
-The publication record archives the cut manifest unchanged and starts the current
-manifest empty from the release snapshot. Main remains frozen until that PR merges.
+The publication record archived the cut manifest unchanged and started the current
+manifest empty from the release snapshot.
 Publication does not establish Host acceptance or production rollout.
 
 0.42.0 is a MINOR release under this policy. It keeps wire v6,

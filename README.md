@@ -15,8 +15,7 @@ versions are deprecated and receive no further releases or fixes. Remove it or
 pin exactly 0.42.0, and never send it sealed tasks. See the
 [release notes](docs/releases/v0.43.0.md) and
 [Host upgrade checklist](docs/releases/host-upgrade-0.43.0.md). Publication does not
-establish platform or production acceptance. Main stays frozen until the
-publication-record PR merges.
+establish platform or production acceptance.
 
 The previous stable release is **0.42.0** for all ten packages, a MINOR
 with breaking changes and the first publication of `@byok-sdk/bot-collaboration`,

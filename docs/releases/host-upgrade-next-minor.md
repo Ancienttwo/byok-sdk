@@ -2,4 +2,4 @@
 
 Draft checklist for changes after 0.43.0. Earlier Hosts must first apply the [0.43.0 Host upgrade checklist](host-upgrade-0.43.0.md) and preceding checklists.
 
-No changes recorded yet. Add future Host-visible changes here after the 0.43.0 cut; do not amend the cut's upgrade-manifest entries. After publication, the release record archives that manifest and establishes the next baseline.
+No changes recorded yet. Add future Host-visible changes here after the 0.43.0 cut; do not amend the cut's upgrade-manifest entries. The 0.43.0 release record archived that manifest unchanged and established the 0.43.0 release snapshot as the next baseline.
