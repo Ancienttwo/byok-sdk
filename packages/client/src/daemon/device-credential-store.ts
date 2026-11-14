@@ -1,6 +1,6 @@
-import { systemExecutable } from '@byok-sdk/core/system-tool';
+import { assertNoNulSpawnInput, spawnStartError, systemExecutable } from '@byok-sdk/core/system-tool';
 import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import * as path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
 import {
@@ -65,15 +65,19 @@ interface ReplacementPairingAttempt {
 
 type DeviceCredentialAuthority = DeviceRecord | FirstPairingAttempt | ReplacementPairingAttempt;
 
+/** A real provider-command outcome; signal termination has null exitCode and carries signal. */
 export interface DeviceCommandResult {
-  readonly exitCode: number;
+  readonly exitCode: number | null;
+  readonly signal?: NodeJS.Signals;
   readonly stdout: string;
   readonly stderr: string;
 }
 
 /**
- * Runs one provider command. On `signal` abort the runner kills the child and
- * rejects at once, without waiting for its pipes to close.
+ * Runs one provider command. Start failures reject; returned exit codes are
+ * real child outcomes, with null exitCode and signal for signal termination.
+ * On `signal` abort the runner kills the child and rejects at once, without
+ * waiting for its pipes to close.
  */
 export type DeviceCommandRunner = (
   executable: string,
@@ -106,10 +110,13 @@ function windowsResult(code: number, stdout: string, missingIsAbsent: boolean): 
   return { exitCode: 1, stdout: '', stderr: `credential operation failed (win32=${code})` };
 }
 
-/** Typed unavailability; callers must surface re-pair/operational failure, never write a file fallback. */
+/**
+ * Typed unavailability; callers must surface re-pair/operational failure, never write a file fallback.
+ * Provider start failures retain only a sanitized error with a trusted string code as cause.
+ */
 export class DeviceCredentialStoreUnavailableError extends Error {
-  constructor(message = 'no supported operating-system credential provider is available') {
-    super(message);
+  constructor(message = 'no supported operating-system credential provider is available', options?: ErrorOptions) {
+    super(message, options);
     this.name = 'DeviceCredentialStoreUnavailableError';
   }
 }
@@ -383,7 +390,6 @@ export class OsCredentialEntry {
     const result = await this.#invoke('read', undefined, signal);
     this.#checkInteraction(result);
     if (this.#absent(result)) return undefined;
-    if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0) {
       throw new DeviceCredentialStoreError(
         `operating-system credential provider could not read ${this.#subject}${providerDiagnostic(result.stderr)}`,
@@ -395,7 +401,6 @@ export class OsCredentialEntry {
   async replace(value: string, signal?: AbortSignal): Promise<void> {
     const result = await this.#invoke('replace', value, signal);
     this.#checkInteraction(result);
-    if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0) {
       throw new DeviceCredentialStoreError(
         `operating-system credential provider could not replace ${this.#subject}${providerDiagnostic(result.stderr)}`,
@@ -407,7 +412,6 @@ export class OsCredentialEntry {
   async delete(signal?: AbortSignal): Promise<void> {
     const result = await this.#invoke('clear', undefined, signal);
     this.#checkInteraction(result);
-    if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0 && !this.#absent(result)) {
       throw new DeviceCredentialStoreError(
         `operating-system credential provider could not clear ${this.#subject}${providerDiagnostic(result.stderr)}`,
@@ -447,7 +451,12 @@ export class OsCredentialEntry {
   }
 
   #command(executable: string, args: readonly string[], stdin: string | undefined, signal: AbortSignal | undefined): Promise<DeviceCommandResult> {
-    return this.#bounded(signal, (bounded) => this.#run(executable, args, stdin, bounded));
+    return this.#bounded(signal, async bounded => {
+      // Invalid input is not provider unavailability; keep the slot-only preflight error.
+      assertNoNulSpawnInput(executable, args, process.env);
+      try { return await this.#run(executable, args, stdin, bounded); }
+      catch (error) { throw new DeviceCredentialStoreUnavailableError(undefined, { cause: spawnStartError(error) }); }
+    });
   }
 
   #checkInteraction(result: DeviceCommandResult): void {
@@ -562,6 +571,14 @@ export class DeviceCredentialStore implements DeviceCredentialBackend {
   }
 }
 
+/**
+ * Runs a trusted system tool or an absolute executable. NUL input is refused before spawn.
+ * Start failures reject with only a trusted string code and `spawn failed: <code>`;
+ * missing trusted tools use `SYSTEM_TOOL_UNAVAILABLE`. Original message, path,
+ * spawnargs, env, cwd and cause are discarded. Classify with code, not exitCode 127:
+ * exit codes, including 127, come only from children that actually started.
+ * Signal termination returns null exitCode and signal; abort still rejects with signal.reason.
+ */
 export async function runDeviceCommand(
   executable: string,
   args: readonly string[],
@@ -569,16 +586,18 @@ export async function runDeviceCommand(
   signal?: AbortSignal,
 ): Promise<DeviceCommandResult> {
   signal?.throwIfAborted();
+  assertNoNulSpawnInput(executable, args, process.env, undefined);
   return new Promise((resolve, reject) => {
-    // A system tool without its trusted location is as unavailable as one that cannot spawn (#1304).
     let file: string;
     try {
       file = systemExecutable(executable);
     } catch {
-      resolve({ exitCode: 127, stdout: '', stderr: 'command unavailable' });
+      reject(spawnStartError({ code: 'SYSTEM_TOOL_UNAVAILABLE' }));
       return;
     }
-    const child = spawn(file, [...args], { env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+    let child: ChildProcessWithoutNullStreams;
+    try { child = spawn(file, [...args], { env: process.env, stdio: ['pipe', 'pipe', 'pipe'] }); }
+    catch (error) { reject(spawnStartError(error)); return; }
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -601,8 +620,8 @@ export async function runDeviceCommand(
     child.stderr.on('data', (chunk: string) => { stderr += chunk; });
     // A killed child can no longer read stdin; its EPIPE is not a result.
     child.stdin.on('error', () => {});
-    child.once('error', () => settle(() => resolve({ exitCode: 127, stdout: '', stderr: 'command unavailable' })));
-    child.once('close', (code) => settle(() => resolve({ exitCode: code ?? 1, stdout, stderr })));
+    child.once('error', error => settle(() => reject(spawnStartError(error))));
+    child.once('close', (exitCode, signal) => settle(() => resolve({ exitCode, ...(signal === null ? {} : { signal }), stdout, stderr })));
     child.stdin.end(stdin);
   });
 }

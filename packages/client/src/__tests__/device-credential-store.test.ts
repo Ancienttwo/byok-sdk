@@ -1,3 +1,12 @@
+import { spawn as nodeSpawn } from 'node:child_process';
+import { inspect } from 'node:util';
+import { PassThrough } from 'node:stream';
+import { EventEmitter } from 'node:events';
+
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
 import { testScratchRoot } from './fixtures/execution-scratch';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -108,11 +117,32 @@ describe('DeviceCredentialStore', () => {
     expect(JSON.stringify(calls)).not.toContain(credentials.devicePrivateKeyPem);
   });
 
-  it('fails closed with a typed error when the OS provider is unavailable', async () => {
-    const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({ exitCode: 127, stdout: '', stderr: 'not found' });
-    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'linux', commandRunner: run });
-    await expect(store.read()).rejects.toBeInstanceOf(DeviceCredentialStoreUnavailableError);
-    await expect(store.replace(credentials)).rejects.toBeInstanceOf(DeviceCredentialStoreUnavailableError);
+  it('#2184 preserves NUL input errors across the provider boundary', async () => {
+    const run = vi.fn<DeviceCommandRunner>(runDeviceCommand);
+    const entry = new OsCredentialEntry({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'linux', commandRunner: run, account: 'private-spawn-canary\0', label: 'test', subject: 'test' });
+    for (const operation of [() => entry.read(), () => entry.replace('value'), () => entry.delete()]) {
+      const failure = await operation().catch((error: unknown) => error);
+      expect(failure).toHaveProperty('message', expect.stringMatching(/^spawn argument [45] contains a NUL byte$/));
+      expect(failure).not.toBeInstanceOf(DeviceCredentialStoreUnavailableError);
+      expect(inspect(failure, { showHidden: true, depth: null })).not.toContain('private-spawn-canary');
+    }
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it.each(['read', 'replace', 'delete'] as const)('#2184 maps provider %s start failures to typed unavailability with sanitized code', async operation => {
+    const canary = 'private-spawn-canary';
+    const raw = Object.assign(new Error(canary), { code: 'EACCES', path: canary, spawnargs: [canary], env: { SECRET: canary }, cwd: canary, cause: new Error(canary) });
+    expect(inspect(raw, { showHidden: true, depth: null })).toContain(canary);
+    const run = vi.fn<DeviceCommandRunner>().mockRejectedValue(raw);
+    const entry = new OsCredentialEntry({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'linux', commandRunner: run, account: 'test', label: 'test', subject: 'test' });
+    const failure = await (operation === 'replace' ? entry.replace('value') : entry[operation]()).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(DeviceCredentialStoreUnavailableError);
+    expect(failure).toMatchObject({ cause: { code: 'EACCES', message: 'spawn failed: EACCES' } });
+    expect(inspect(failure, { showHidden: true, depth: null })).not.toContain(canary);
+    run.mockResolvedValue({ exitCode: 127, stdout: '', stderr: '' });
+    const exited = await (operation === 'replace' ? entry.replace('value') : entry[operation]()).catch((error: unknown) => error);
+    expect(exited).toBeInstanceOf(DeviceCredentialStoreError);
+    expect(exited).not.toBeInstanceOf(DeviceCredentialStoreUnavailableError);
   });
 
   it('does not classify a Linux provider error as a missing credential', async () => {
@@ -230,6 +260,40 @@ describe('replacement pairing credential authority', () => {
 });
 
 describe('#1117 provider command deadline', () => {
+  it.runIf(process.platform !== 'win32')('#2184 preserves signal termination as a distinct outcome', async () => {
+    await expect(runDeviceCommand(process.execPath, ['-e', 'process.kill(process.pid, "SIGTERM")']))
+      .resolves.toEqual({ exitCode: null, signal: 'SIGTERM', stdout: '', stderr: '' });
+  });
+  it('#2184 returns a real exit 127 and rejects missing trusted tools with a fixed code', async () => {
+    await expect(runDeviceCommand(process.execPath, ['-e', 'process.exit(127)']))
+      .resolves.toEqual({ exitCode: 127, stdout: '', stderr: '' });
+    await expect(runDeviceCommand('private-spawn-canary', []))
+      .rejects.toMatchObject({ code: 'SYSTEM_TOOL_UNAVAILABLE', message: 'spawn failed: SYSTEM_TOOL_UNAVAILABLE' });
+  });
+  it('#2184 refuses NUL input before spawn with a slot-only diagnostic', async () => {
+    vi.mocked(nodeSpawn).mockClear();
+    await expect(runDeviceCommand(process.execPath, ['private-spawn-canary\0'])).rejects.toThrow('spawn argument 0 contains a NUL byte');
+    expect(nodeSpawn).not.toHaveBeenCalled();
+  });
+
+  it.each(['sync', 'async'])('#2184 sanitizes %s start failures and retains classification codes', async mode => {
+    for (const code of ['ENOENT', 'EACCES', undefined]) {
+      const canary = 'private-spawn-canary';
+      const raw = Object.assign(new Error(canary), { code, path: canary, spawnargs: [canary], env: { SECRET: canary }, cwd: canary, cause: new Error(canary) });
+      expect(inspect(raw, { showHidden: true, depth: null })).toContain(canary);
+      const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() });
+      vi.mocked(nodeSpawn).mockImplementationOnce(() => {
+        if (mode === 'sync') throw raw;
+        queueMicrotask(() => { child.emit('error', raw); child.emit('close', null); });
+        return child as unknown as ReturnType<typeof nodeSpawn>;
+      });
+      const failure = await runDeviceCommand(process.execPath, []).catch((error: unknown) => error);
+      expect(failure).toMatchObject({ message: `spawn failed: ${code ?? 'unknown'}`, code });
+      expect(inspect(failure, { showHidden: true, depth: null })).not.toContain(canary);
+      for (const key of ['path', 'spawnargs', 'env', 'cwd', 'cause']) expect(failure).not.toHaveProperty(key);
+    }
+  });
+
   it('kills a hung provider child on abort and rejects without waiting for it', async () => {
     const pidFile = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-hung-command-')), 'pid');
     const hung = runDeviceCommand(

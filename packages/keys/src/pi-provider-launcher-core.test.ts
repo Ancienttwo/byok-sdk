@@ -1,4 +1,5 @@
 import os from 'node:os';
+import { assertNoNulSpawnInput } from '@byok-sdk/core/system-tool';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { describe, expect, it, vi, afterEach } from 'vitest';
@@ -601,11 +602,30 @@ describe('Windows projection ACL verification', () => {
   }));
   it.each([
     ['icacls', 2, 'path_not_found'], ['icacls', 3, 'path_not_found'], ['icacls', 5, 'access_denied'],
-    ['icacls', 127, 'icacls_unavailable'], ['icacls', 1, 'unexpected'], ['whoami', 127, 'whoami_unavailable'], ['whoami', 1, 'unexpected'],
+    ['icacls', 127, 'unexpected'], ['icacls', 1, 'unexpected'], ['whoami', 127, 'unexpected'], ['whoami', 1, 'unexpected'],
   ] as const)('fails closed on %s exit %i with the closed cause %s and no host detail', async (step, exit, cause) => withDirectory(async directory => {
     const { run, saves } = fakeTools(good, step === 'icacls' ? { icacls: exit } : { whoami: exit });
     await expect(assertAcl(directory, run)).rejects.toThrow(new Error(queryFailure(cause, step, exit)));
     for (const file of saves) await expect(fs.access(path.dirname(file))).rejects.toMatchObject({ code: 'ENOENT' });
+  }));
+  it('#2184 preserves NUL env diagnostics before ACL tool availability mapping', async () => withDirectory(async directory => {
+    const run = vi.fn(async (executable: string, args: string[]) => {
+      assertNoNulSpawnInput(executable, args, process.env);
+      return { exitCode: 0, stdout: '', stderr: '' };
+    });
+    vi.stubGlobal('process', { ...process, env: { ...process.env, BYOK_NUL_TEST: 'private-spawn-canary\0' } });
+    try {
+      await expect(assertAcl(directory, run)).rejects.toThrow(new Error('spawn env variable BYOK_NUL_TEST contains a NUL byte'));
+      expect(run).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  }));
+  it.each(['start', 'signal', 'input'])('#2184 classifies Windows tool %s failure without host detail', async kind => withDirectory(async directory => {
+    const run = async () => {
+      if (kind === 'signal') return { exitCode: null, signal: 'SIGTERM' as const, stdout: '', stderr: 'private-spawn-canary' };
+      throw Object.assign(new Error('private-spawn-canary'), { code: kind === 'input' ? 'EPIPE' : 'ENOENT', name: kind === 'input' ? 'CommandInputError' : 'Error' });
+    };
+    const failure = await assertWindowsPiProjectionAcl(directory, { systemRoot: 'C:\\Windows', run }).catch((error: unknown) => error);
+    expect(failure).toEqual(new Error(queryFailure(kind === 'start' ? 'whoami_unavailable' : kind === 'signal' ? 'signal_terminated' : 'input_failed', 'whoami')));
   }));
   it('classifies a missing leaf and a missing parent from the parent listing, before any tool runs', async () => withDirectory(async directory => {
     const { run } = fakeTools(good);

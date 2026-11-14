@@ -150,8 +150,8 @@ it('delivers the same background child events on both OpenCode child channels an
     }
     expect(runs[1]).toEqual(runs[0]);
     expect(runs[0]).toEqual([
-      { type: 'tool_use', tool: 'read', toolCallId: 'ses_bg_child:in-call', input: { filePath: 'in-call.md' } },
-      { type: 'tool_result', tool: 'read', toolCallId: 'ses_bg_child:in-call', output: [{ type: 'text', text: 'in-call read' }] },
+      { type: 'tool_use', tool: 'read', toolCallId: 'ses_bg_child:ses_bg_child:in-call', input: { filePath: 'in-call.md' } },
+      { type: 'tool_result', tool: 'read', toolCallId: 'ses_bg_child:ses_bg_child:in-call', output: [{ type: 'text', text: 'in-call read' }] },
       { type: 'progress', text: 'done' },
       { type: 'turn_end' },
     ]);

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.42.0",
-    "snapshotSha256": "fc7f32f455e5dcad8292e6fe15440d1248fea519a2eaaafd7d214e226d5120e1"
+    "snapshotSha256": "c336b4bec1b8dc1371c2c396418ee6c1d7bc2da3d4a22d67174bcd3647794757"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,43 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "sealed-provisioning-store-unavailable-retry",
+      "impact": "breaking",
+      "summary": "@byok-sdk/keys applySealedProviderProvisioning() no longer records secret_store_unavailable or consumes operationGeneration when available() is false before any credential write (#2132). Hosts must use readSealedProvisioningResult() before completing a providerProvisioning notice: for absent, throw without completing or acknowledging and retain the request and ciphertext for retry after store recovery; for completed, submit readback.result; for conflict or interrupted, apply the same request again and submit that result, propagating throws to leave the notice unacknowledged. Retries still pass all admission checks. Credential-write failures remain recorded and pending; if the Host already stored an unrecorded rejection as terminal, submit a new request at the same generation.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#sealed-provisioning-retries-an-unavailable-credential-store-2132",
+      "items": [
+        "behavior:sealed-provisioning-store-unavailable-retry"
+      ]
+    },
+    {
+      "id": "duplicate-injected-adapter-ids",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client createDaemonWithAdapters(config, adapters) now throws DaemonConfigInvalidError synchronously for duplicate descriptor.id values instead of accepting the array and selecting the first matching adapter (#2135). checkDaemonConfig(config, { source: 'embedded', adapters }) rejects the same input with ok: false and matching invalid_value issues at adapters[i].descriptor.id. Hosts must register one implementation per ID, or give distinct custom runtimes distinct IDs and update routing; correct the adapter list before retrying construction.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#unique-injected-adapter-ids-2135",
+      "items": [
+        "behavior:duplicate-injected-adapter-ids"
+      ]
+    },
+    {
+      "id": "direct-command-start-errors",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client credential APIs now classify provider startup rejection as DeviceCredentialStoreUnavailableError with a sanitized code-bearing cause, and @byok-sdk/keys runCommand rejects startup failures instead of synthesizing exit 127. NUL input is refused before direct spawns, including cwd for durable Pi shell and lifecycle commands; startup errors discard original details while retaining string code. Hosts catch startup failures, inspect code/cause.code, handle keys CommandInputError separately, and let available() perform its own boolean mapping. Client device credentials, macOS keys and Windows Pi ACL queries distinguish real exit 127 from unavailable tooling. Linux keys distinguish signal/input failures but keep KEYCHAIN_UNAVAILABLE for non-absent nonzero exits, including 127. NUL preflight remains an input-validation rejection outside availability translation; boolean available() probes still catch failures (#2184).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#command-startup-failures-and-real-process-outcomes-2184",
+      "items": [
+        "behavior:direct-command-start-errors"
+      ]
+    },
+    {
+      "id": "command-process-outcomes",
+      "impact": "breaking",
+      "summary": "@byok-sdk/keys CommandResult uses number|null exitCode with optional signal for signal termination. Hosts check signal before numeric exit status and update injected runners. @byok-sdk/client DeviceCredentialStoreUnavailableError accepts ErrorOptions and exposes a sanitized code-bearing cause for provider start failures (#2184).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#command-startup-failures-and-real-process-outcomes-2184",
+      "items": [
+        "export:@byok-sdk/client#DeviceCredentialStoreUnavailableError",
+        "export:@byok-sdk/keys#CommandResult"
+      ]
+    },
     {
       "id": "task-home-live",
       "impact": "breaking",
@@ -354,6 +391,11 @@
       "entry": "enrollment-clear-store-scope"
     },
     {
+      "item": "export:@byok-sdk/client#DeviceCredentialStoreUnavailableError",
+      "change": "changed",
+      "entry": "command-process-outcomes"
+    },
+    {
       "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
       "change": "changed",
       "entry": "enrollment-clear-store-scope"
@@ -662,6 +704,11 @@
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
       "change": "changed",
       "entry": "keys-secret-corrupted-code"
+    },
+    {
+      "item": "export:@byok-sdk/keys#CommandResult",
+      "change": "changed",
+      "entry": "command-process-outcomes"
     },
     {
       "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",
