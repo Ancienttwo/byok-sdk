@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (keys; #2031)** — Pi projection directory ownership is checked against the effective uid, which owns files created by the process. When real and effective uids differ, an effective-uid-owned directory is accepted and a directory owned only by the real uid is refused.
+
 - **Security (client, cloud, server, bot-collaboration; #2118)** — Raise the declared dependency floors to `hono` `^4.13.16` and `@hono/node-server` `^2.1.6`, and update the lockfile to 4.13.18 and 2.1.8 respectively, fixing the seven Hono advisories reported by the security nightly. This includes bot-collaboration's optional node-server peer for its testing entry and the client and bot-collaboration development dependencies. Hosts that pin an older copy must update it; existing Host lockfiles and bundled distributions need to be refreshed and rebuilt.
 
 - **Breaking (client; #2084)** — With the default `runtimeEnvironment` base `login-shell`, task children get the daemon's own live `HOME` instead of the `HOME` in the login-shell snapshot, the rule the daemon applies to itself under `--service` (#2017). A startup file that exports another `HOME` no longer moves tasks out of a scratch home the daemon runs under; on such a device tasks see a different `HOME` than before. `PATH`, `XDG_*` and other values the startup file derived from its `HOME` are unchanged and may disagree with `HOME`; pass them with the policy's `pass` or use `base: 'allowlist'` to keep them consistent. Policies that list `HOME` in `pass` or use `allowlist` are unchanged. `doctor` reports the pinned `HOME` with source `sdk`. See the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#launchd-jobs-run-with-the-installs-home-2017).

@@ -1291,7 +1291,10 @@ export declare function assertWindowsPiProjectionAcl(directory: string, options?
     systemRoot?: string;
     run?: CommandRunner;
 }): Promise<void>;
-/** Validate the client-owned empty directory before any credential access. */
+/**
+ * Validate the client-owned empty directory before any credential access.
+ * POSIX ownership uses the effective uid, which owns files this process creates.
+ */
 export declare function assertPiProjectionDirectory(projectionDir: string): Promise<void>;
 export interface PiProviderLaunchDependencies {
     ambient: NodeJS.ProcessEnv;
