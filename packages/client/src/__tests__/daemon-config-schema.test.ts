@@ -240,17 +240,17 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     })]);
   });
 
-  it('rejects duplicate injected adapter ids at construction', async () => {
+  it('rejects duplicate injected adapter ids at construction and preflight', async () => {
     const config = await bundled({});
-    const build = () => createDaemonWithAdapters(config, [
-      new StubRuntimeAdapter('pi'), new StubRuntimeAdapter('pi'),
-    ]);
+    const adapters = [new StubRuntimeAdapter('pi'), new StubRuntimeAdapter('pi')];
+    const build = () => createDaemonWithAdapters(config, adapters);
     const issues = constructionIssues(build);
     expect(build).toThrow('duplicate adapter descriptor.id: pi');
     expect(issues).toEqual([{
       severity: 'error', code: 'invalid_value', path: 'adapters[1].descriptor.id',
       message: 'duplicate adapter descriptor.id: pi',
     }]);
+    expect(checkDaemonConfig(config, { source: 'embedded', adapters })).toEqual({ ok: false, issues });
   });
 
   it('reports the resolved mode of every injected runtime', async () => {

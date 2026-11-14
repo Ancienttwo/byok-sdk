@@ -2,6 +2,7 @@ import type { Envelope, RuntimeInfo, CapabilityFlag, RuntimeId, AgentEgressPolic
 import { type JournalIdentity, type ReceivedEnvelopeRecord, journalHash } from '../journal/journal.js';
 import { encodeEnvelope, PROVIDER_PROFILE_BINDING_CAPABILITY, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY, AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, PROVIDER_PROVISIONING_CAPABILITY, AGENT_MEMORY_INTENT_CAPABILITY, AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY } from '@byok-sdk/protocol';
 import type { RuntimeAdapter } from '../../types.js';
+import type { DaemonConfigIssue } from '../config-schema/validate.js';
 import { type HarnessInfo, HarnessIdSchema } from '@byok-sdk/protocol';
 import { type RuntimeObservation, observeRuntimeDetection, projectRuntimeObservation, isWireRuntimeId } from '../../runtime-detection.js';
 import { runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable.js';
@@ -317,6 +318,20 @@ export function injectedAdapterConfigConflicts(config: object): { readonly key: 
   return CREATE_DAEMON_ONLY_KEYS
     .filter(([key]) => Object.hasOwn(config, key))
     .map(([key, remedy]) => ({ key, message: `DaemonConfig.${key} is only supported by createDaemon; ${remedy}` }));
+}
+
+/** The first repeated adapter ID, shared by construction and configuration preflight. */
+export function duplicateAdapterIdIssues(adapters: readonly RuntimeAdapter[]): DaemonConfigIssue[] {
+  const ids = new Set<string>();
+  for (const [index, adapter] of adapters.entries()) {
+    const id = adapter.descriptor.id;
+    if (ids.has(id)) return [{
+      severity: 'error', code: 'invalid_value', path: `adapters[${index}].descriptor.id`,
+      message: `duplicate adapter descriptor.id: ${id}`,
+    }];
+    ids.add(id);
+  }
+  return [];
 }
 
 /** A live session ledger may name an agy session to resume, but only a daemon with an agy session store has one. */

@@ -78,7 +78,7 @@ import {
   type AgentContentReadRoot,
 } from './agent-content-read.js';
 import type { DaemonState } from './create-daemon/state.js';
-import { injectedAdapterConfigConflicts } from './create-daemon/support.js';
+import { duplicateAdapterIdIssues, injectedAdapterConfigConflicts } from './create-daemon/support.js';
 import { hostJournal, resolveDaemonConfig } from './create-daemon/config.js';
 import { composeDaemonStores } from './create-daemon/stores.js';
 import { composeDaemonWorkspaces } from './create-daemon/workspaces.js';
@@ -899,15 +899,8 @@ export function createDaemonWithAdapters(
 ): Daemon {
   const [conflict] = injectedAdapterConfigConflicts(config);
   if (conflict !== undefined) throw new TypeError(conflict.message);
-  const ids = new Set<string>();
-  for (const [index, adapter] of adapters.entries()) {
-    const id = adapter.descriptor.id;
-    if (ids.has(id)) throw new DaemonConfigInvalidError([{
-      severity: 'error', code: 'invalid_value', path: `adapters[${index}].descriptor.id`,
-      message: `duplicate adapter descriptor.id: ${id}`,
-    }]);
-    ids.add(id);
-  }
+  const issues = duplicateAdapterIdIssues(adapters);
+  if (issues.length > 0) throw new DaemonConfigInvalidError(issues);
   return buildDaemonWithAdapters(config, adapters, overrides);
 }
 

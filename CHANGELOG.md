@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Fixed (client; #2135)** — `createDaemonWithAdapters` now rejects duplicate injected `descriptor.id` values synchronously with `DaemonConfigInvalidError`, naming the duplicate ID. This is a breaking change from silently accepting the array and selecting its first matching adapter. Hosts must register one adapter per ID; see the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#unique-injected-adapter-ids-2135).
+- **Fixed (client; #2135)** — `createDaemonWithAdapters` now rejects duplicate injected `descriptor.id` values synchronously with `DaemonConfigInvalidError`, naming the duplicate ID. `checkDaemonConfig(config, { source: 'embedded', adapters })` also rejects them with `ok: false` and the same `invalid_value` issue at `adapters[i].descriptor.id`. This is a breaking change from silently accepting the array and selecting its first matching adapter. Hosts must register one adapter per ID; see the [Host upgrade note](docs/releases/host-upgrade-next-minor.md#unique-injected-adapter-ids-2135).
 
 - **Fixed (keys; #2031)** — Pi projection directory ownership is checked against the effective uid, which owns files created by the process. When real and effective uids differ, an effective-uid-owned directory is accepted and a directory owned only by the real uid is refused.
 

@@ -10,6 +10,12 @@ error has `code: 'daemon_config_invalid'` and names the duplicate ID in its
 message. Previously the array was accepted and lookup by ID silently selected
 the first matching adapter.
 
+`checkDaemonConfig(config, { source: 'embedded', adapters })` now returns
+`ok: false` for the same duplicate IDs. Its `issues` match the construction
+error's `issues`: `code: 'invalid_value'`, the path
+`adapters[i].descriptor.id` of the first repeated ID, and a message naming
+that ID. Preflight does not return an effective configuration for this input.
+
 Before constructing the daemon, remove duplicate registrations and choose one
 implementation for each ID. If two custom runtimes are distinct, give them
 distinct IDs and update the Host's runtime routing to match. Handle this error
