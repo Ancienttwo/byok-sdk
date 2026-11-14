@@ -11409,7 +11409,13 @@ import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, Servic
 export interface ServiceStoreVerdict {
     /** An SDK `LocalStoreId` or a Host store id: 1-64 of `a-z 0-9 -`, starting with a letter or digit. */
     readonly store: string;
-    /** Absolute. No two stores share a path, and no store lies inside a `directory` store. */
+    /**
+     * Absolute. No two stores share a path or lie inside each other, compared
+     * both as written and with links resolved (#2106): a store under another,
+     * also only through a link, is `precheck_failed`, and so is a snapshot
+     * entry an earlier version recorded that way, before a restore changes
+     * any store.
+     */
     readonly path: string;
     /**
      * `file` (the default): the file plus its `-wal` and `-journal`, each a
@@ -11695,7 +11701,8 @@ export interface ServiceInstallation {
      * switched to, under a `pending` receipt written first. Store writes since
      * that switch are discarded. It also resolves a `switch_unhealthy`
      * receipt. The unit must be the exact one this SDK writes, as on
-     * upgrade().
+     * upgrade(). A snapshot SDK 0.42 took is `snapshot_upgrade_required`
+     * before anything changes; roll it back with SDK 0.42, or keep `current`.
      *
      * The top-level code follows the outcome (#2010). A call that wrote its
      * final receipt throws its first failure's own class and code; later
@@ -11727,13 +11734,16 @@ export interface ServiceInstallation {
      * `receipt_state_inconsistent` and nothing changes. It does not check the
      * unit: a pending receipt is only written after upgrade() or rollback()
      * checked it. A final version 1 receipt is rewritten as version 2.
-     * Before a restore changes any store, every snapshot entry is checked as
-     * the precheck checks a store (#2102): one with a `..` segment is
-     * `precheck_failed`, one in the install root or a `service/` is
-     * `store_overlaps_service_state`, each naming the path. An earlier
-     * version could record either. The call then throws `upgrade_pending`
-     * with that refusal in its cause, and the receipt, `current`, the
-     * snapshot and every store stay as they were. Returns the receipt, or
+     * A snapshot SDK 0.42 took is `snapshot_upgrade_required` before
+     * anything changes: finish or abandon that upgrade with SDK 0.42 first.
+     * Before a restore changes any store, every snapshot entry is checked
+     * (#2102, #2106): a `..` segment, two stores inside each other, or a path
+     * that no longer resolves as it did at the snapshot is
+     * `precheck_failed`; a store in the install root or a `service/` is
+     * `store_overlaps_service_state`; each names the path. The call then
+     * throws `upgrade_pending` with that refusal in its cause, and the
+     * receipt, `current`, the snapshot and every store stay as they were.
+     * Returns the receipt, or
      * `undefined` when there is none. Release
      * failures follow the same rule as on `rollback()`.
      */
@@ -11768,6 +11778,7 @@ declare const ERROR_MESSAGES: {
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
     readonly install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.';
     readonly receipt_upgrade_required: 'Pending SDK 0.42 receipt: run recover() with SDK 0.42 first.';
+    readonly snapshot_upgrade_required: 'A snapshot SDK 0.42 took would be restored. Nothing was changed; with SDK 0.42, finish or abandon that upgrade (recover() or rollback()), then upgrade with this version.';
     readonly receipt_state_inconsistent: 'The receipt does not match the version pointers. Nothing was changed.';
     readonly switch_unhealthy: 'The new version stays current but is unhealthy. Call rollback(), or keep it.';
     readonly repair_interrupted: 'A same-version reinstall was interrupted. Run install() again.';

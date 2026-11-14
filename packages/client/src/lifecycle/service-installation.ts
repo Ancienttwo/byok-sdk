@@ -29,7 +29,13 @@ import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, Servic
 export interface ServiceStoreVerdict {
   /** An SDK `LocalStoreId` or a Host store id: 1-64 of `a-z 0-9 -`, starting with a letter or digit. */
   readonly store: string;
-  /** Absolute. No two stores share a path, and no store lies inside a `directory` store. */
+  /**
+   * Absolute. No two stores share a path or lie inside each other, compared
+   * both as written and with links resolved (#2106): a store under another,
+   * also only through a link, is `precheck_failed`, and so is a snapshot
+   * entry an earlier version recorded that way, before a restore changes
+   * any store.
+   */
   readonly path: string;
   /**
    * `file` (the default): the file plus its `-wal` and `-journal`, each a
@@ -319,7 +325,8 @@ export interface ServiceInstallation {
    * switched to, under a `pending` receipt written first. Store writes since
    * that switch are discarded. It also resolves a `switch_unhealthy`
    * receipt. The unit must be the exact one this SDK writes, as on
-   * upgrade().
+   * upgrade(). A snapshot SDK 0.42 took is `snapshot_upgrade_required`
+   * before anything changes; roll it back with SDK 0.42, or keep `current`.
    *
    * The top-level code follows the outcome (#2010). A call that wrote its
    * final receipt throws its first failure's own class and code; later
@@ -351,13 +358,16 @@ export interface ServiceInstallation {
    * `receipt_state_inconsistent` and nothing changes. It does not check the
    * unit: a pending receipt is only written after upgrade() or rollback()
    * checked it. A final version 1 receipt is rewritten as version 2.
-   * Before a restore changes any store, every snapshot entry is checked as
-   * the precheck checks a store (#2102): one with a `..` segment is
-   * `precheck_failed`, one in the install root or a `service/` is
-   * `store_overlaps_service_state`, each naming the path. An earlier
-   * version could record either. The call then throws `upgrade_pending`
-   * with that refusal in its cause, and the receipt, `current`, the
-   * snapshot and every store stay as they were. Returns the receipt, or
+   * A snapshot SDK 0.42 took is `snapshot_upgrade_required` before
+   * anything changes: finish or abandon that upgrade with SDK 0.42 first.
+   * Before a restore changes any store, every snapshot entry is checked
+   * (#2102, #2106): a `..` segment, two stores inside each other, or a path
+   * that no longer resolves as it did at the snapshot is
+   * `precheck_failed`; a store in the install root or a `service/` is
+   * `store_overlaps_service_state`; each names the path. The call then
+   * throws `upgrade_pending` with that refusal in its cause, and the
+   * receipt, `current`, the snapshot and every store stay as they were.
+   * Returns the receipt, or
    * `undefined` when there is none. Release
    * failures follow the same rule as on `rollback()`.
    */
@@ -393,6 +403,7 @@ const ERROR_MESSAGES = {
   no_rollback: 'There is no previous version with a store snapshot to roll back to.',
   install_snapshot_leftover: 'An install snapshot from an earlier call remains under snapshots/ and may hold the only copy of the stores. Nothing was installed or started; compare its snapshot.json with the stores, remove it, then retry.',
   receipt_upgrade_required: 'Pending SDK 0.42 receipt: run recover() with SDK 0.42 first.',
+  snapshot_upgrade_required: 'A snapshot SDK 0.42 took would be restored. Nothing was changed; with SDK 0.42, finish or abandon that upgrade (recover() or rollback()), then upgrade with this version.',
   receipt_state_inconsistent: 'The receipt does not match the version pointers. Nothing was changed.',
   switch_unhealthy: 'The new version stays current but is unhealthy. Call rollback(), or keep it.',
   repair_interrupted: 'A same-version reinstall was interrupted. Run install() again.',
@@ -417,6 +428,8 @@ const STORE_FILE_SUFFIXES = ['', '-wal', '-journal'] as const;
 const STORE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 const STORE_KINDS: ReadonlySet<unknown> = new Set([undefined, 'file', 'directory']);
 /** A directory store's tree is copied as it is: links stay links, nothing is overwritten, a clone where the file system has one. */
+/** `snapshot.json` format: 2 records each entry's canonical path, and a restore writes there (#2106). SDK 0.42 wrote none, and its snapshots are refused. */
+const SNAPSHOT_FORMAT = 2;
 const TREE_COPY = { recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false, preserveTimestamps: true, mode: fsConstants.COPYFILE_FICLONE } as const;
 /** How long a stale-token probe waits for the control endpoint to accept or refuse. */
 const CONTROL_PROBE_TIMEOUT_MS = 1_000;
@@ -1138,7 +1151,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
     if (!Array.isArray(stores) || !stores.every(isServiceStoreVerdict)) throw new ServiceInstallationError('precheck_failed');
     const paths = await refuseServiceOverlap(stores.map((store) => store.path));
-    if (overlaps(stores, paths, platform) || stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
+    if (stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
     return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path) } : store);
   }
 
@@ -1163,6 +1176,15 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     const dotted = written.find((at) => at.split(platform === 'win32' ? /[\\/]/u : '/').includes('..'));
     if (dotted !== undefined) refuse('precheck_failed', dotted, ' A store path must not contain .. segments; pass a normalized absolute path.');
     const paths = await Promise.all(written.map(canonical));
+    // Stores that are or contain each other, as written or resolved, would
+    // make one store's restore change another's tree, or the links it
+    // resolves through, before that one is restored.
+    for (const spelled of [written.map((at) => path.resolve(at)), paths]) {
+      for (const [i, a] of spelled.entries()) {
+        const j = spelled.findIndex((b, at) => at !== i && within(b, a, platform));
+        if (j !== -1) refuse('precheck_failed', `${written[i]}, ${written[j]}`, ' Two stores must not be or contain each other.');
+      }
+    }
     const guarded = (await Promise.all([root, ...serviceDirs].map(async (at) => [await canonical(at), path.join(await canonical(path.dirname(at)), path.basename(at))]))).flat();
     const overlapping = paths.findIndex((a) => guarded.some((b) => within(a, b, platform) || within(b, a, platform)));
     if (overlapping !== -1) refuse('store_overlaps_service_state', written[overlapping]!);
@@ -1293,10 +1315,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * `<index><suffix>`, a directory store's tree as `<index>.d`. Every store
    * is checked with `lstat` first, so nothing is followed through a symlink.
    * `snapshot.json` is written last and marks a complete snapshot; a copy
-   * that fails removes the partial snapshot. Entries keep the listed paths,
-   * which a restore follows again. The migration is the Host's (trust model
-   * A): it must not change the link structure inside a store, and a restore
-   * after it did is the Host's responsibility (#2106).
+   * that fails removes the partial snapshot. Each entry keeps the listed
+   * path and its canonical form (#2106), in `snapshot.json` format 2: a
+   * restore refuses a listed path that no longer resolves to that place,
+   * and writes to the canonical path.
    */
   async function snapshot(to: string, stores: readonly ServiceStoreVerdict[]): Promise<void> {
     const sources = await Promise.all(stores.map(storeSources));
@@ -1313,9 +1335,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           else await fs.copyFile(`${store.path}${suffix}`, path.join(dir, name));
           files[suffix] = name;
         }
-        entries.push({ store: store.store, path: store.path, ...(store.kind === 'directory' ? { kind: 'directory' as const } : {}), files });
+        entries.push({ store: store.store, path: store.path, canonical: await canonical(store.path), ...(store.kind === 'directory' ? { kind: 'directory' as const } : {}), files });
       }
-      await writeFileAtomic(path.join(dir, 'snapshot.json'), `${JSON.stringify({ entries }, null, 2)}\n`);
+      await writeFileAtomic(path.join(dir, 'snapshot.json'), `${JSON.stringify({ format: SNAPSHOT_FORMAT, entries }, null, 2)}\n`);
     } catch (error) {
       // The cleanup is best effort: the receipt must say snapshot_failed, with the copy error as its cause.
       await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
@@ -1323,6 +1345,16 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
   }
 
+  /**
+   * Checks every entry before any store changes, then restores each. A
+   * format 2 snapshot is written to the canonical paths it recorded, never
+   * through the listed path's links again (#2106). The start check proves
+   * both are safe: (a) the listed path resolves exactly to the recorded
+   * canonical path, which is a realpath, so no directory on that chain is a
+   * link now; (b) no two canonical paths contain each other, so the tree
+   * another entry's restore replaces holds neither this target nor an
+   * ancestor of it. A missing parent is created as real directories.
+   */
   async function restoreSnapshot(to: string): Promise<void> {
     const dir = path.join(snapshotsDir, to);
     const snapshot = JSON.parse(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8')) as { entries: SnapshotEntry[] };
@@ -1338,13 +1370,21 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       }
     }));
     for (const entry of entries) {
+      if (await resolvesTo(entry.path, entry.canonical)) continue;
+      const error = new ServiceInstallationError('precheck_failed');
+      error.message += ` A store path no longer resolves as it did at the snapshot. (${entry.path})`;
+      throw error;
+    }
+    for (const entry of entries) {
+      const target = entry.canonical;
+      await mkdirReal(path.dirname(target));
       if (entry.kind === 'directory') {
-        await fs.rm(entry.path, { recursive: true, force: true });
-        if (entry.files[''] !== undefined) await fs.cp(path.join(dir, entry.files['']), entry.path, TREE_COPY);
+        await fs.rm(target, { recursive: true, force: true });
+        if (entry.files[''] !== undefined) await fs.cp(path.join(dir, entry.files['']), target, TREE_COPY);
         continue;
       }
-      for (const suffix of [...STORE_FILE_SUFFIXES, '-shm']) await fs.rm(`${entry.path}${suffix}`, { force: true });
-      for (const [suffix, name] of Object.entries(entry.files)) await fs.copyFile(path.join(dir, name), `${entry.path}${suffix}`);
+      for (const suffix of [...STORE_FILE_SUFFIXES, '-shm']) await fs.rm(`${target}${suffix}`, { force: true });
+      for (const [suffix, name] of Object.entries(entry.files)) await fs.copyFile(path.join(dir, name), `${target}${suffix}`);
     }
   }
 
@@ -1386,14 +1426,25 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
   }
 
-  /** Checks `snapshots/<name>` and every copy in it a restore reads, before the operation's first side effect. */
+  /**
+   * Checks `snapshots/<name>` and every copy in it a restore reads, before
+   * the operation's first side effect. A snapshot SDK 0.42 took (no
+   * `format`) is `snapshot_upgrade_required`, as a version 1 pending
+   * receipt is `receipt_upgrade_required`: it records no canonical paths,
+   * so this version cannot restore it safely.
+   */
   async function refuseLinkedSnapshot(name: string): Promise<void> {
     const dir = path.join(snapshotsDir, name);
     const index = path.join(dir, 'snapshot.json');
     await refuseLinkedSnapshots(dir);
     await refuseLinkedSnapshots(index);
     if (!(await exists(index))) return;
-    const { entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: SnapshotEntry[] };
+    const { format, entries } = JSON.parse(await fs.readFile(index, 'utf8')) as { format?: unknown; entries: SnapshotEntry[] };
+    if (format !== SNAPSHOT_FORMAT) {
+      const error = new ServiceInstallationError('snapshot_upgrade_required');
+      error.message = `${error.message} (${dir})`;
+      throw error;
+    }
     for (const entry of entries) {
       for (const file of Object.values(entry.files)) {
         let at = dir;
@@ -1711,6 +1762,8 @@ interface SnapshotEntry {
   path: string;
   /** Absent in a snapshot 0.34 wrote, and for every file store. */
   kind?: 'directory';
+  /** `path` with its links resolved when the snapshot was taken (#2106). */
+  canonical: string;
   /** Saved files by suffix (`''`, `-wal`, `-journal`; a directory's tree under `''`); empty when the store was absent. */
   files: Record<string, string>;
 }
@@ -1812,10 +1865,6 @@ function isRefused(store: ServiceStoreVerdict): boolean {
 }
 
 /** Whether two stores (at their canonical `paths`) share a path or one lies inside a directory store. */
-function overlaps(stores: readonly ServiceStoreVerdict[], paths: readonly string[], platform: NodeJS.Platform): boolean {
-  return stores.some((store, index) => paths.some((other, at) => at !== index
-    && within(other, paths[index]!, platform) && (store.kind === 'directory' || within(paths[index]!, other, platform))));
-}
 
 /**
  * Takes an `installer` lease on a stopped daemon's store, retrying while its
@@ -1867,6 +1916,41 @@ function runProgram(program: ServiceProgram): Promise<{ code: number | null; std
       resolve({ code, stdout });
     });
   });
+}
+
+/**
+ * Whether `listed` resolves now to `recorded`, the canonical path a snapshot
+ * took of it (#2106). The existing part must match exactly: folding case
+ * would accept a/ for A/ on a case-sensitive volume. A missing segment keeps
+ * the listed spelling, so it may differ from the recorded one in case only
+ * while the recorded spelling is missing too, as on a case-insensitive
+ * volume after the store was removed.
+ */
+async function resolvesTo(listed: string, recorded: string): Promise<boolean> {
+  const found = await resolveExistingAncestor(listed);
+  if (found === undefined) return false;
+  if (found.tail.length === 0) return found.canonical === recorded;
+  const prefix = found.canonical.endsWith(path.sep) ? found.canonical : `${found.canonical}${path.sep}`;
+  if (!recorded.startsWith(prefix)) return false;
+  const rest = recorded.slice(prefix.length).split(path.sep);
+  if (rest.length !== found.tail.length) return false;
+  for (const [index, part] of found.tail.entries()) {
+    if (rest[index] === part) continue;
+    if (rest[index]!.toLowerCase() !== part.toLowerCase() || await exists(path.join(found.canonical, ...rest.slice(0, index + 1)))) return false;
+  }
+  return true;
+}
+
+/** Creates `dir` and its missing ancestors as real directories; an existing one that is not a directory, a link included, is `precheck_failed`. */
+async function mkdirReal(dir: string): Promise<void> {
+  const parent = path.dirname(dir);
+  const stat = await fs.lstat(dir).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+  if (stat !== undefined) {
+    if (!stat.isDirectory()) throw new ServiceInstallationError('precheck_failed');
+    return;
+  }
+  if (parent !== dir) await mkdirReal(parent);
+  await fs.mkdir(dir);
 }
 
 async function exists(file: string): Promise<boolean> {

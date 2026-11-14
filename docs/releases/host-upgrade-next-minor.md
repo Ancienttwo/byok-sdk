@@ -409,41 +409,42 @@ service that had already restarted.
   - The precheck after a migration: the snapshot is already taken. The
     refusal becomes the cause of `store_migration_failed`, the snapshot is
     restored, and an upgrade then returns to the previous version as above.
-- **Snapshots taken before this check (#2102):** 0.42.0 and earlier
-  builds of this train recorded store paths without these checks. Before a
-  restore (`rollback()`, a `recover()` restore, an install repair) changes
-  any store, every entry of the snapshot is now checked as the precheck
-  checks a store:
+- **Snapshots SDK 0.42 took are refused (#2106):** a snapshot now records
+  each store's resolved path (`snapshot.json` format 2). A snapshot 0.42.0
+  took has no such record, so `rollback()`, a `recover()` restore and an
+  install repair refuse it with the new code `snapshot_upgrade_required`,
+  naming the snapshot directory, before anything changes: the receipt,
+  `current`, the snapshot and every store stay as they were. This is the
+  same rule as a version 1 pending receipt (`receipt_upgrade_required`).
+  With SDK 0.42, finish or abandon that upgrade (`recover()`, or
+  `rollback()`), then upgrade with this version. A switched 0.42.0 upgrade
+  keeps its snapshot only for a 0.42 `rollback()`; the next upgrade with
+  this version replaces it.
+- **Restore checks (#2102, #2106):** before a restore changes any store,
+  every entry of the snapshot is checked:
   - an entry with a `..` segment is `precheck_failed`, because the file
     system follows a link before `..` and the check would not;
   - an entry that is, holds or lies in the install root or a `service/`
-    directory is `store_overlaps_service_state`.
+    directory is `store_overlaps_service_state`;
+  - two entries that are or lie inside each other, as written or with
+    links resolved (a file store under a directory store through a link
+    inside it, for example), are `precheck_failed`, naming both paths.
+    The precheck refuses such stores too: list the directory store alone,
+    or move the inner store out of it;
+  - a store path that no longer resolves to the recorded path, for example
+    after the candidate's migration repointed a link, is
+    `precheck_failed`.
 
-  The call throws `upgrade_pending` with that refusal in its `cause`; its
-  message names the entry's path. Nothing is restored: the receipt stays
-  `pending`, and `current`, the snapshot and every store stay as they were.
-  `recover()` refuses again until the snapshot is fixed. Keep the service
-  stopped, back up `<installRoot>/snapshots/<version>/` and then:
-  - **`..` entry:** in `snapshot.json`, replace that entry's `path` with
-    the path the file system reaches: resolve the part before the `..`
-    with its links (`realpath`), then apply the `..`. If the result is
-    in the install root or a `service/` directory, handle it as below;
-    otherwise call `recover()`.
-  - **Overlapping entry:** restore every entry by hand, in the order
-    listed, as a restore would:
-    - a directory entry (`"kind": "directory"`): remove the path, then copy
-      `files[""]` (`<index>.d`) back to it. With no `files[""]` the store
-      did not exist, so it stays removed. For the overlapping entry, skip
-      only what lies in the install root or a `service/` directory, and
-      restore the rest of its data;
-    - a file entry: remove the path and its `-wal`, `-journal` and `-shm`
-      files, then copy each `files` item back as `<path><suffix>` (an
-      SQLite file with the `-wal` and `-journal` the snapshot holds). A
-      suffix the snapshot lacks stays removed.
-
-    Only after every entry is restored, remove that snapshot directory,
-    then call `recover()`. When you cannot tell what an entry held, keep
-    the service stopped and the snapshot in place.
+  The restore then writes to the recorded paths, never through the listed
+  paths' links again. A refusal throws `upgrade_pending` with it in its
+  `cause`; its message names the path. Nothing is restored: from where the
+  restore starts, the receipt, `current`, the snapshot and every store stay
+  as they were (`rollback()` has already written its pending receipt and
+  removed `current`), and `recover()` refuses again. Keep the service
+  stopped, restore the links the migration changed, or restore the stores
+  by hand from `<installRoot>/snapshots/<version>/` (a directory entry's
+  tree is `<index>.d`, a file entry's files are `<index><suffix>`) and
+  remove that snapshot directory, then call `recover()`.
 - **Snapshot removal (#2062):** a snapshot that cannot be removed after the
   final receipt no longer fails the call; it stays.
 - On systemd, a start runs `systemctl --user reset-failed` first, since the
