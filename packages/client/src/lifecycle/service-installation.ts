@@ -752,11 +752,15 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   /**
-   * Checks the install root's lookup with {@link resolveTrusted} before
-   * anything is created (#2028), then creates each missing directory alone,
-   * never recursively, and checks again, so an existing one (EEXIST
-   * included) is never taken for one this call made. Windows has no such
-   * check (see {@link rootOwned}).
+   * Checks the install root's whole lookup with {@link resolveTrusted}
+   * before anything is created (#2028), then creates each missing directory
+   * alone, never recursively, and checks again, so an existing one (EEXIST
+   * included) is never taken for one this call made. A `..` in the install
+   * root, or one after a missing directory, is refused before anything is
+   * created. The root itself owned by another user is
+   * `install_root_foreign_owner`; any other refused entry is
+   * `install_root_ancestor_unsafe`. Windows has no such check (see
+   * {@link rootOwned}).
    */
   async function prepareInstallRoot(): Promise<void> {
     const euid = process.geteuid?.();
@@ -765,25 +769,30 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       return;
     }
     for (;;) {
-      const walked = await resolveTrusted(root, euid);
+      const walked = await resolveTrusted(opts.installRoot, euid);
       if ('untrusted' in walked) {
+        // The root itself under another owner keeps its own code: run as that user.
+        if (walked.final && walked.cause === 'owner') throw foreignOwnerError();
         const error = new ServiceInstallationError('install_root_ancestor_unsafe');
         error.message = `${error.message} ${walked.untrusted} (${walked.reason}).`;
         throw error;
       }
       if (walked.missing === undefined) return;
-      await fs.mkdir(walked.missing).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
+      // 0o755 at most: a directory this call made must pass the next walk under any umask.
+      await fs.mkdir(walked.missing, { mode: 0o755 }).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
     }
   }
 
   async function assertOwnInstallRoot(): Promise<void> {
     const euid = process.geteuid?.();
     if (euid === undefined) return;
-    if ((await fs.stat(root)).uid !== euid) {
-      const error = new ServiceInstallationError('install_root_foreign_owner');
-      error.message = `${error.message} (${root})`;
-      throw error;
-    }
+    if ((await fs.stat(root)).uid !== euid) throw foreignOwnerError();
+  }
+
+  function foreignOwnerError(): ServiceInstallationError {
+    const error = new ServiceInstallationError('install_root_foreign_owner');
+    error.message = `${error.message} (${root})`;
+    return error;
   }
 
   async function currentVersion(): Promise<string | undefined> {

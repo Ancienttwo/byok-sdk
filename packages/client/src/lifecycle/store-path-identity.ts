@@ -85,40 +85,53 @@ async function canonicalPath(at: string): Promise<string> {
   return found === undefined ? path.resolve(at) : path.join(found.canonical, ...found.tail);
 }
 
-/** {@link resolveExistingAncestor}, with a link loop (ELOOP) as a refused path. */
+/** {@link resolveExistingAncestor}, with a lookup error that refuses the path as a refusal. */
 async function existingAncestor(at: string): ReturnType<typeof resolveExistingAncestor> {
-  try {
-    return await resolveExistingAncestor(at);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ELOOP') throw new Refused({ code: 'precheck_failed', detail: ` A store path runs through a link loop. (${at})` });
-    throw error;
-  }
+  return resolveExistingAncestor(at).catch((error: unknown) => refuseLookup(error, at));
 }
 
 /** The most links {@link resolveTrusted} follows, as Linux's limit: past it the path is refused. */
 const MAX_LINKS = 40;
 
+/** Why {@link resolveTrusted} refused a path, and whether the refused entry is the resolved path itself. */
+export interface UntrustedLookup {
+  readonly untrusted: string;
+  readonly reason: string;
+  /** `owner`: another user owns the entry; `mode`: everyone may write it, without the sticky bit; `lookup`: anything else (a `..` segment, a missing or non-directory component with more after it, too many links). */
+  readonly cause: 'owner' | 'mode' | 'lookup';
+  /** The entry is the directory `at` resolves to, not a directory or link on the way. */
+  readonly final: boolean;
+}
+
 /**
  * Resolves `at` one component at a time, as the kernel does, and returns
- * its real path (with the first missing directory, when part is absent) or
- * the first entry another user could change (#2028). Invariant: every
+ * its real path (with the first missing directory, when the rest is absent)
+ * or the first entry another user could change (#2028). Invariant: every
  * directory read on the way belongs to `euid` or root and is not writable by
  * everyone unless it has the sticky bit, and every link on the way, checked
- * with `lstat`, belongs to `euid` or root. Then no other user can change
- * what `at` resolves to after the check, so the check cannot be raced. A
- * relative link target is followed from the link's directory; root's own
- * links (macOS `/tmp`, `/var`, `/etc`) pass by the same rule.
+ * with `lstat`, belongs to `euid` or root. Then, as long as `euid`, root and
+ * the members of a group that may write a directory on the way do not change
+ * it, no other user can change what `at` resolves to after the check, so the
+ * check cannot be raced. `at` must not contain `..`. A link target's `..`
+ * leaves the directory the walk has resolved to, as the kernel's does, and a
+ * relative target is followed from the link's directory; root's own links
+ * (macOS `/tmp`, `/var`, `/etc`) pass by the same rule. `missing` is returned
+ * only when every component after it is a plain name: the whole lookup is
+ * checked before a caller creates anything.
  */
-export async function resolveTrusted(at: string, euid: number): Promise<{ resolved: string; missing?: string } | { untrusted: string; reason: string }> {
-  const untrusted = (entry: string, stat: import('node:fs').Stats): string | undefined => {
-    if (stat.uid !== euid && stat.uid !== 0) return `owner uid ${stat.uid}`;
-    return stat.isDirectory() && (stat.mode & 0o002) !== 0 && (stat.mode & 0o1000) === 0 ? 'writable by everyone, no sticky bit' : undefined;
+export async function resolveTrusted(at: string, euid: number): Promise<{ resolved: string; missing?: string } | UntrustedLookup> {
+  const refusal = (entry: string, stat: import('node:fs').Stats, final: boolean): UntrustedLookup | undefined => {
+    if (stat.uid !== euid && stat.uid !== 0) return { untrusted: entry, reason: `owner uid ${stat.uid}`, cause: 'owner', final };
+    const open = stat.isDirectory() && (stat.mode & 0o002) !== 0 && (stat.mode & 0o1000) === 0;
+    return open ? { untrusted: entry, reason: 'writable by everyone, no sticky bit', cause: 'mode', final } : undefined;
   };
+  const lookup = (entry: string, reason: string): UntrustedLookup => ({ untrusted: entry, reason, cause: 'lookup', final: false });
+  if (at.split(path.sep).includes('..')) return lookup(at, 'a .. segment; pass a normalized absolute path');
   const absolute = path.resolve(at);
   let current = path.parse(absolute).root;
-  const top = untrusted(current, await fs.lstat(current));
-  if (top !== undefined) return { untrusted: current, reason: top };
   const pending = absolute.slice(current.length).split(path.sep).filter((part) => part !== '' && part !== '.');
+  const top = refusal(current, await fs.lstat(current), pending.length === 0);
+  if (top !== undefined) return top;
   let links = 0;
   while (pending.length > 0) {
     const name = pending.shift()!;
@@ -128,17 +141,21 @@ export async function resolveTrusted(at: string, euid: number): Promise<{ resolv
     }
     const next = path.join(current, name);
     const stat = await fs.lstat(next).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
-    if (stat === undefined) return { resolved: path.join(next, ...pending), missing: next };
-    const reason = untrusted(next, stat);
-    if (reason !== undefined) return { untrusted: next, reason };
+    if (stat === undefined) {
+      // The kernel fails here too: nothing below a missing entry can be checked.
+      if (pending.includes('..')) return lookup(next, 'missing, with .. after it');
+      return { resolved: path.join(next, ...pending), missing: next };
+    }
+    const refused = refusal(next, stat, stat.isDirectory() && pending.length === 0);
+    if (refused !== undefined) return refused;
     if (stat.isSymbolicLink()) {
-      if (++links > MAX_LINKS) return { untrusted: absolute, reason: `more than ${MAX_LINKS} links` };
+      if (++links > MAX_LINKS) return lookup(absolute, `more than ${MAX_LINKS} links`);
       const target = await fs.readlink(next);
       if (path.isAbsolute(target)) current = path.parse(target).root;
       pending.unshift(...target.split(path.sep).filter((part) => part !== '' && part !== '.'));
       continue;
     }
-    if (!stat.isDirectory() && pending.length > 0) return { untrusted: next, reason: 'not a directory' };
+    if (!stat.isDirectory() && pending.length > 0) return lookup(next, 'not a directory');
     current = next;
   }
   return { resolved: current };
@@ -281,14 +298,14 @@ async function returningRefusal<T>(check: () => Promise<T>): Promise<T | StorePa
   }
 }
 
-/** `lstat`, or `undefined` when nothing is there. A component that is not a directory (ENOTDIR) or a link loop (ELOOP) is a refused path. */
+/** `lstat`, or `undefined` when nothing is there; a lookup error that refuses the path is a refusal. */
 async function lstatOrUndefined(at: string): Promise<import('node:fs').Stats | undefined> {
-  try {
-    return await fs.lstat(at);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return undefined;
-    if (code === 'ENOTDIR' || code === 'ELOOP') throw new Refused({ code: 'precheck_failed', detail: ` A store path runs through a file or a link loop. (${at})` });
-    throw error;
-  }
+  return fs.lstat(at).catch((error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT' ? undefined : refuseLookup(error, at));
+}
+
+/** The one mapping of lookup errors, from `realpath` and `lstat` alike: a component that is not a directory (ENOTDIR) or a link loop (ELOOP) is a refused path. */
+function refuseLookup(error: unknown, at: string): never {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === 'ENOTDIR' || code === 'ELOOP') throw new Refused({ code: 'precheck_failed', detail: ` A store path runs through a file or a link loop. (${at})` });
+  throw error;
 }

@@ -3,7 +3,7 @@ import { ownedProcessGroupRecord } from '../adapters/process-tree';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { existsSync, promises as fs } from 'node:fs';
+import { existsSync, promises as fs, type Stats } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -996,17 +996,30 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       await installation.uninstall();
       await fs.rm(installRoot, { recursive: true, force: true });
       if (process.geteuid === undefined) return;
-      const realStat = fs.stat.bind(fs);
-      const foreign = vi.spyOn(fs, 'stat').mockImplementation((async (file: string, ...rest: []) => {
-        const stat = await realStat(file, ...rest);
-        return file === installRoot ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 }) : stat;
-      }) as typeof fs.stat);
+      const spellings = [installRoot, path.join(await fs.realpath(path.dirname(installRoot)), path.basename(installRoot))];
+      const owned = <F extends (at: string, ...rest: []) => Promise<Stats>>(real: F) => (async (at: string, ...rest: []) => {
+        const stat = await real(at, ...rest);
+        return spellings.includes(at) ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 }) : stat;
+      }) as F;
+      const [lstat, stat, mkdir] = [fs.lstat.bind(fs), fs.stat.bind(fs), fs.mkdir.bind(fs)];
+      const foreign: Array<{ mockRestore(): void }> = [vi.spyOn(fs, 'lstat').mockImplementation(owned(lstat)), vi.spyOn(fs, 'stat').mockImplementation(owned(stat))];
       try {
-        await expect(installation.install(three)).rejects.toMatchObject({ code: 'install_root_foreign_owner' });
+        for (const created of ['before', 'in the race'] as const) {
+          if (created === 'before') await fs.mkdir(installRoot);
+          else {
+            await fs.rm(installRoot, { recursive: true });
+            foreign.push(vi.spyOn(fs, 'mkdir').mockImplementation((async (at: string, ...rest: []) => {
+              const made = await mkdir(at, ...rest);
+              if (spellings.includes(at)) throw Object.assign(new Error('EEXIST'), { code: 'EEXIST' });
+              return made;
+            }) as typeof fs.mkdir));
+          }
+          await expect(installation.install(three)).rejects.toMatchObject({ code: 'install_root_foreign_owner' });
+          expect(await tree(installRoot)).toEqual({});
+        }
       } finally {
-        foreign.mockRestore();
+        for (const spy of foreign) spy.mockRestore();
       }
-      expect(await tree(installRoot)).toEqual({});
     });
 
     it.skipIf(process.platform === 'win32')('an install root another user could rename or replace is install_root_ancestor_unsafe before anything is written (#2028)', async () => {
@@ -1058,6 +1071,11 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       // More than 40 links is refused, not an ELOOP.
       for (let n = 0; n < 41; n += 1) await fs.symlink(n === 40 ? path.join(safe, 'real') : `l${n + 1}`, path.join(safe, `l${n}`));
       await expect(refused(path.join(safe, 'l0', 'app'))).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining('more than 40 links') });
+      // A .. in the install root, or after a missing directory in a link target, is refused before anything is created.
+      await expect(refused(`${safe}/real/../real/app`)).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining('a .. segment') });
+      await fs.symlink('new/../../shared', path.join(safe, 'via'));
+      await expect(refused(path.join(safe, 'via', 'app'))).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${path.join(safe, 'new')} (missing`) });
+      expect(existsSync(path.join(safe, 'new'))).toBe(false);
     });
 
 
@@ -1981,15 +1999,16 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect([await fs.readFile(db, 'utf8'), (await fs.lstat(tree)).isSymbolicLink()]).toEqual(['v2 data', true]);
     });
 
-    it.each(['file', 'directory'] as const)('a %s store whose parent directory became a file is precheck_failed before any store is restored', async (kind) => {
+    it.each([['file', 'a file'], ['directory', 'a file'], ['file', 'a link to itself'], ['directory', 'a link to itself']] as const)('a %s store whose parent directory became %s is precheck_failed before any store is restored', async (kind, became) => {
       const parent = path.join(await fs.realpath(root), 'parent');
-      await fs.writeFile(parent, 'a file now');
+      if (became === 'a file') await fs.writeFile(parent, 'a file now');
+      else await fs.symlink(parent, parent);
       const index = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
       const snapshot = JSON.parse(await fs.readFile(index, 'utf8')) as { entries: unknown[] };
       await fs.writeFile(index, JSON.stringify({ ...snapshot, entries: [...snapshot.entries, { store: 'nested', path: path.join(parent, 'db'), canonical: path.join(parent, 'db'), ...(kind === 'directory' ? { kind } : {}), files: {} }] }));
       const error = await installation.rollback().catch((caught: unknown) => caught);
       expect(((error as Error).cause as AggregateError).errors).toContainEqual(expect.objectContaining({ name: 'ServiceInstallationError', code: 'precheck_failed' }));
-      expect([await fs.readFile(db, 'utf8'), await fs.readFile(parent, 'utf8')]).toEqual(['v2 data', 'a file now']);
+      expect([await fs.readFile(db, 'utf8'), became === 'a file' ? await fs.readFile(parent, 'utf8') : await fs.readlink(parent)]).toEqual(['v2 data', became === 'a file' ? 'a file now' : parent]);
     });
 
     it.each([['an array', []], ['an array of names', ['0']], ['an unknown suffix', { '-shm': '0' }], ['another name', { '': '9' }], ['naming a removed copy', undefined]])('snapshot files as %s are snapshot_upgrade_required before rollback() changes anything', async (_label, files) => {
