@@ -233,7 +233,7 @@ the driver sends its public bundle, verifies the runner's code against the MAC-a
 sends `approve` (a mismatch sends `reject` and fails). Only the Host URL, pairing code, verification secret, public member
 bundle and synthetic canary content reach the device. It approves the registered member and installs scope keys from
 mini-cf, runs the sealed task and plaintext twin, then stops and removes its own hc terminal. Run each physical device
-separately and record its SDK source commit, overlay merge commit, OS identity and result independently.
+separately and record its SDK source commit, overlay window SHA, OS identity and result independently.
 
 After `started`, the driver sends this single canary trigger on stdin:
 
