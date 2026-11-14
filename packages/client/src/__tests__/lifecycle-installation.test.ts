@@ -1017,7 +1017,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       // A parent anyone can write without the sticky bit, then the root itself; a sticky parent like /tmp is accepted.
       for (const [dir, mode] of [[shared, 0o777], [app, 0o777]] as const) {
         await fs.chmod(dir, mode);
-        await expect(over.recover()).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`(${dir})`) });
+        await expect(over.recover()).rejects.toMatchObject({ code: 'install_root_ancestor_unsafe', message: expect.stringContaining(`${dir} (writable by everyone, no sticky bit)`) });
         expect(await tree(app)).toEqual({});
         await fs.chmod(dir, 0o755);
       }

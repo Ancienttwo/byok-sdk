@@ -412,7 +412,7 @@ const ERROR_MESSAGES = {
   repair_interrupted: 'A same-version reinstall was interrupted. Run install() again.',
   service_program_not_current: 'The service unit must be the one this SDK writes, running from <installRoot>/current. Reinstall the payload installed now (install() with the current version id) to rewrite the unit, then retry.',
   install_root_foreign_owner: 'The install root belongs to another user. Nothing was changed; run the operation as that user or choose an install root this user owns.',
-  install_root_ancestor_unsafe: 'Another user could rename or replace the install root: a directory its lookup passes through belongs to another user or is writable by everyone without the sticky bit. Nothing was changed; choose an install root whose every directory up to / belongs to this user or root.',
+  install_root_ancestor_unsafe: 'Another user could replace the install root. Nothing was changed; move it, or fix the owner or mode of',
   snapshots_symlinked: 'A path under the install root\'s snapshots/ is a symbolic link. Nothing changed; replace the link, then retry.',
   store_overlaps_service_state: 'A store overlaps the install root or a daemon store\'s service/ directory.',
 } as const;
@@ -759,15 +759,18 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   async function assertOwnInstallRoot(): Promise<void> {
     const euid = process.geteuid?.();
     if (euid === undefined) return;
-    const refuse = (at: string, code: ServiceInstallationErrorCode = 'install_root_ancestor_unsafe'): never => {
-      const error = new ServiceInstallationError(code);
-      error.message = `${error.message} (${at})`;
+    if ((await fs.stat(root)).uid !== euid) {
+      const error = new ServiceInstallationError('install_root_foreign_owner');
+      error.message = `${error.message} (${root})`;
       throw error;
-    };
-    if ((await fs.stat(root)).uid !== euid) refuse(root, 'install_root_foreign_owner');
+    }
     for (const dir of await lookupDirectories(root)) {
       const { uid, mode } = await fs.stat(dir);
-      if ((uid !== euid && uid !== 0) || ((mode & 0o002) !== 0 && (mode & 0o1000) === 0)) refuse(dir);
+      const unsafe = uid !== euid && uid !== 0 ? `owner uid ${uid}` : (mode & 0o002) !== 0 && (mode & 0o1000) === 0 ? 'writable by everyone, no sticky bit' : undefined;
+      if (unsafe === undefined) continue;
+      const error = new ServiceInstallationError('install_root_ancestor_unsafe');
+      error.message = `${error.message} ${dir} (${unsafe}).`;
+      throw error;
     }
   }
 
