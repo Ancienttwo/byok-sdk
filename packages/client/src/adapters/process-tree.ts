@@ -5,7 +5,7 @@ import { resolveSystemTool } from '@byok-sdk/core/system-tool';
 import { walkTaskkillPidSet } from './taskkill-pid-set.js';
 // OAR 0.37.0 `shared/executable/process-tree.ts`, vendored with upstream bytes.
 import { descendantsOf, killEntries, parseProcessPs, readProcessTable, type ProcessEntry, type ProcessTable } from '../runtime/oar-process-tree.js';
-import { processSignalState } from '../util/process-signal-state.js';
+import { killProcessGroupsUntilGone, processSignalState } from '../util/process-signal-state.js';
 
 const DEFAULT_TERM_GRACE_MS = 750;
 const DEFAULT_KILL_GRACE_MS = 2_000;
@@ -1019,7 +1019,11 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
     const more = isRunning(options.child) ? descendantsOf(table, pid) : [];
     await signalGroup(pid, 'SIGKILL', options.label, kill);
     killed.push(...killDescendants(options.child, () => table, more));
-    if (!(await waitUntil(() => groupExists(pid, options.label, kill), killGraceMs))) {
+    if (!(await killProcessGroupsUntilGone(
+      () => signalGroup(pid, 'SIGKILL', options.label, kill),
+      () => !groupExists(pid, options.label, kill),
+      Date.now() + killGraceMs,
+    ))) {
       throw new RuntimeDisposalFailure({
         stage: 'quiescence',
         reason: `${options.label} runtime process group remained live after SIGKILL`,

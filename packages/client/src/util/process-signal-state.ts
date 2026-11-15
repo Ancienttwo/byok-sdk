@@ -8,6 +8,21 @@ export function readProcessGroupRows(): string[][] {
   return result;
 }
 
+/** Only process-table readers treat zombies as already gone. */
+export function isLiveProcessState(state: string): boolean {
+  return !state.startsWith('Z');
+}
+
+/** Retry delivery to catch members forked during SIGKILL; the caller owns liveness and signal errors. */
+export async function killProcessGroupsUntilGone(signal: () => void | Promise<void>, gone: () => boolean, deadline: number, pollMs = 20): Promise<boolean> {
+  while (!gone()) {
+    if (Date.now() >= deadline) return false;
+    await signal();
+    await new Promise(resolve => setTimeout(resolve, pollMs));
+  }
+  return true;
+}
+
 /** Supply a group only when spawn/adoption established ownership; a single pid gets no EPERM exception. */
 export function processSignalState(error: unknown, ownedGroup?: number, snapshot = readProcessGroupRows): 'gone' | 'live' | 'unknown' {
   const code = (error as NodeJS.ErrnoException).code;
@@ -15,7 +30,7 @@ export function processSignalState(error: unknown, ownedGroup?: number, snapshot
   if (code !== 'EPERM') return 'unknown';
   if (ownedGroup === undefined) return 'live';
   try {
-    return snapshot().some(row => Number(row[2]) === ownedGroup && !row[3]!.startsWith('Z')) ? 'live' : 'gone';
+    return snapshot().some(row => Number(row[2]) === ownedGroup && isLiveProcessState(row[3]!)) ? 'live' : 'gone';
   } catch (cause) {
     throw new RuntimeDisposalFailure({ stage: 'quiescence', reason: `owned process group ${ownedGroup} snapshot unavailable after EPERM` }, { cause });
   }

@@ -19,6 +19,7 @@ import {
 } from '../service-payload-manifest.js';
 import { ServiceUnitError, throwPublicCommandTimeout } from './service-unit.js';
 import { readInstallPointer, readServiceInstallationRecord, serviceInstallationRecordPath, type InstallPointer, type ServiceInstallationRecord } from '../util/service-installation-record.js';
+import { killProcessGroupsUntilGone } from '../util/process-signal-state.js';
 import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types.js';
 
 /**
@@ -520,13 +521,18 @@ const migrateNote = (pgid: number): string => `Migrate process group ${pgid} may
  * proves it; any other answer is asked again (darwin answers EPERM while the
  * group's last process exits).
  */
+function migrateGroupGone(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true;
+  }
+  return false;
+}
+
 async function groupGone(pgid: number, timeoutMs = 5000): Promise<boolean> {
   for (const until = Date.now() + timeoutMs; Date.now() < until; await delay(50)) {
-    try {
-      process.kill(-pgid, 0);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true;
-    }
+    if (migrateGroupGone(pgid)) return true;
   }
   return false;
 }
@@ -1310,7 +1316,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           };
           signal('SIGTERM');
           if (!(await groupGone(pgid, 1000))) signal('SIGKILL');
-          if (!(await groupGone(pgid))) throw new MigrateRunning(migrateNote(pgid));
+          if (!(await killProcessGroupsUntilGone(() => signal('SIGKILL'), () => migrateGroupGone(pgid), Date.now() + 5000, 50))) throw new MigrateRunning(migrateNote(pgid));
         }
         await exit;
         throw error;

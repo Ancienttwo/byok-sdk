@@ -17,7 +17,7 @@ import {
   type OwnedProcessGroupRecord,
 } from '../adapters/process-tree';
 import { disposeDurableShellGroups } from '../adapters/pi-durable/process-groups';
-import { processSignalState, readProcessGroupRows } from '../util/process-signal-state';
+import { isLiveProcessState, processSignalState, readProcessGroupRows } from '../util/process-signal-state';
 import { OWNED_PROCESSES_DIRECTORY, OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
 import { readProcessTable } from '../runtime/oar-process-tree.js';
 import { execFileSync } from 'node:child_process';
@@ -45,7 +45,7 @@ afterEach(async () => {
       try { process.kill(-pgid, 'SIGKILL'); } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
       }
-      return readProcessGroupRows().some(row => Number(row[2]) === pgid && !row[3]!.startsWith('Z'));
+      return readProcessGroupRows().some(row => Number(row[2]) === pgid && isLiveProcessState(row[3]!));
     }, { timeout: 5000, interval: 20 }).toBe(false);
   }
   forkingGroups.clear();
@@ -209,7 +209,7 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
       const groups = new Set([pgid]);
       await disposeDurableShellGroups(groups);
       expect(groups.size).toBe(0);
-      expect(readProcessGroupRows().filter(row => Number(row[2]) === pgid && !row[3]!.startsWith('Z'))).toEqual([]);
+      expect(readProcessGroupRows().filter(row => Number(row[2]) === pgid && isLiveProcessState(row[3]!))).toEqual([]);
     }
   }, 30_000);
 
