@@ -102,11 +102,6 @@ export class Win32JobObjectFailure extends Error {
   }
 }
 
-/** Narrowing guard usable across the two independently bundled package entries. */
-export function isWin32JobObjectFailure(value: unknown): value is Win32JobObjectFailure {
-  return value instanceof Error && value.name === 'Win32JobObjectFailure';
-}
-
 /**
  * The kernel32 calls the backstop needs. An interface, not a hard-wired koffi
  * table, so the branch is exercisable from POSIX with a recording fake — the

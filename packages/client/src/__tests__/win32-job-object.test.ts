@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { adoptOwnedProcessTree, disposeOwnedProcessTree } from '../adapters/process-tree';
 import {
   assignOwnedProcessToJob,
-  isWin32JobObjectFailure,
+  Win32JobObjectFailure,
   type JobObjectBindings,
   type Win32Handle,
 } from '../adapters/win32-job-object';
@@ -178,7 +178,7 @@ describe('win32 kill-on-close job object', () => {
       (cause: unknown) => cause,
     );
 
-    expect(isWin32JobObjectFailure(error)).toBe(true);
+    expect(error).toBeInstanceOf(Win32JobObjectFailure);
     expect(error).toMatchObject({ name: 'Win32JobObjectFailure', step, win32Code });
   });
 

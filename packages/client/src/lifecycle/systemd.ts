@@ -7,6 +7,7 @@ import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLif
 import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log.js';
 import { sanitizeServiceName, type ServiceDefinition } from './service-types.js';
 import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath } from './service-unit.js';
+import { hasControlChar } from './control-chars.js';
 
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface SystemdDeps {
@@ -61,20 +62,6 @@ const SYSTEMD_NOT_LOADED: IdempotentAbsence = {
   patterns: [/not loaded/i, /does not exist/i],
   neverAbsence: SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE,
 };
-
-/**
- * True if `value` contains any C0 control character (newline, CR, NUL,
- * etc., code points below 32) or DEL (code point 127) - checked by
- * character code rather than a regex escape sequence for that range, so
- * there is no ambiguity about which literal bytes are being matched.
- */
-function hasControlChar(value: string): boolean {
-  for (let i = 0; i < value.length; i += 1) {
-    const code = value.charCodeAt(i);
-    if (code < 32 || code === 127) return true;
-  }
-  return false;
-}
 
 /**
  * Rejects (rather than silently mangling or truncating) a value about to be
