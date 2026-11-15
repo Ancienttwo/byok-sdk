@@ -70,14 +70,14 @@ test('root admits the exact reviewed esbuild and eslint-scope pins and refuses w
   }
 });
 
-test('root package.json admits only repo-harness script additions, removals and edits', t => {
+test('root admits only rh script changes', t => {
   const f = fixture(t), old = f.rootManifest.scripts['test:scripts'];
   const scripts = extra => ({ ...f.rootManifest, scripts: { ...f.rootManifest.scripts, ...extra } });
-  const base = scripts({ 'check:old': 'repo-harness run old', 'build:x': 'tsc' });
+  const base = scripts({ 'check:old': 'rh run old', 'build:x': 'tsc' });
   f.write('package.json', base);
   execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qam', 'harness scripts'], { cwd: f.cwd });
   f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
-  const admitted = { 'build:x': 'tsc', 'check:new': 'repo-harness brain check', 'check:old': 'repo-harness run changed' };
+  const admitted = { 'build:x': 'tsc', 'check:new': 'rh brain check', 'check:old': 'rh run changed' };
   f.write('package.json', { ...f.rootManifest, scripts: { 'test:scripts': old, ...admitted } });
   assert.deepEqual(selectImpact(['package.json'], f), { dirs: [], files: ['package.json'], families: [], reason: 'root-ci-scripts' });
   f.write('package.json', { ...f.rootManifest, scripts: { 'test:scripts': old + ' scripts/ci/new.test.mjs', 'build:x': 'tsc' } });
@@ -85,14 +85,42 @@ test('root package.json admits only repo-harness script additions, removals and 
   for (const changed of [
     { ...base, scripts: { ...base.scripts, 'build:x': 'tsc -b' } },
     { ...base, scripts: { ...base.scripts, 'check:old': 'echo pass' } },
-    { ...base, scripts: { ...base.scripts, 'build:x': 'repo-harness run x' } },
+    { ...base, scripts: { ...base.scripts, 'build:x': 'rh run x' } },
     { ...base, scripts: { ...base.scripts, 'check:add': 'echo pass' } },
-    { ...base, scripts: { ...base.scripts, 'check:old': 'xrepo-harness run old' } },
+    { ...base, scripts: { ...base.scripts, 'check:old': 'xrh run old' } },
+    { ...base, scripts: { ...base.scripts, 'check:old': 'repo-harness run old' } },
     { ...base, name: 'renamed' },
   ]) {
     f.write('package.json', changed);
     assert.throws(() => selectImpact(['package.json'], f), /more than the reviewed fields|Unreviewed|Only existing/);
   }
+});
+test('root admits only the four exact CLI rename pairs', t => {
+  const f = fixture(t);
+  const pairs = [
+    ['check:context-files', 'repo-harness run check-context-files', 'rh run check-context-files'],
+    ['check:deploy-sql', 'repo-harness run check-deploy-sql-order', 'rh run check-deploy-sql-order'],
+    ['check:brain', 'repo-harness brain check', 'rh brain check'],
+    ['sync:brain', 'repo-harness brain sync', 'rh brain sync'],
+  ];
+  const before = { ...f.rootManifest, scripts: { ...f.rootManifest.scripts, ...Object.fromEntries(pairs.map(([name, oldValue]) => [name, oldValue])) } };
+  const after = { ...f.rootManifest, scripts: { ...f.rootManifest.scripts, ...Object.fromEntries(pairs.map(([name, , newValue]) => [name, newValue])) } };
+  f.write('package.json', before); rebase(f, 'old CLI scripts');
+  f.write('package.json', after);
+  assert.equal(selectImpact(['package.json'], f).reason, 'root-ci-scripts');
+  for (const [name, oldValue, newValue] of pairs) {
+    f.write('package.json', { ...after, scripts: { ...after.scripts, [name]: newValue.slice(0, -1) + 'X' } });
+    assert.throws(() => selectImpact(['package.json'], f), /more than the reviewed fields/);
+    f.write('package.json', { ...before, scripts: { ...before.scripts, [name]: oldValue.slice(0, -1) + 'X' } });
+    rebase(f, `alter old ${name}`);
+    f.write('package.json', after);
+    assert.throws(() => selectImpact(['package.json'], f), /more than the reviewed fields/);
+    f.write('package.json', before); rebase(f, `restore old ${name}`);
+  }
+  f.write('package.json', { ...before, scripts: { ...before.scripts, 'check:other': 'repo-harness run other' } });
+  rebase(f, 'unregistered CLI script');
+  f.write('package.json', { ...after, scripts: { ...after.scripts, 'check:other': 'rh run other' } });
+  assert.throws(() => selectImpact(['package.json'], f), /more than the reviewed fields/);
 });
 // #1102: the gate script, its test in test:scripts, and the client files entry, each exactly.
 test('the upgrade-manifest gate admits only its exact script, test and client files entry', t => {
@@ -849,10 +877,10 @@ test('generic example manifest upgrades include the basic workspace', t => {
 });
 
 
-test('CI helper is reserved before repo-harness script normalization', t => {
+test('CI helper precedes rh normalization', t => {
   const f = fixture(t);
   const previous = f.rootManifest.scripts['test:scripts'];
-  for (const helper of ['repo-harness --help', 'repo-harness run no-such-check || true']) {
+  for (const helper of ['rh --help', 'rh run no-such-check || true']) {
     for (const command of [previous, 'bun run test:scripts:ci && ' + previous]) {
       f.write('package.json', { scripts: { 'test:scripts:ci': helper, 'test:scripts': command } });
       assert.throws(() => selectImpact(['package.json'], f), /Unreviewed CI test composition/);
