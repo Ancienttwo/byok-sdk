@@ -531,9 +531,10 @@ export function win32ProcessStart(pid: number, run: typeof spawnSync = spawnSync
  *   Otherwise SIGKILL them.
  *
  * Every signal goes through OAR `killEntries`, which re-checks each pid's
- * start time and never signals this process or its group. Then the table is
- * read until no killed process and no member of a found group remains, or
- * `killGraceMs` passes. win32 records nothing and reaps nothing. An
+ * start time and never signals this process or its group. Each round reads
+ * the table again and re-signals the members it still identifies, until no
+ * killed process and no member of a found group remains, or `killGraceMs`
+ * passes. win32 records nothing and reaps nothing. An
  * unreadable table or boot identity fails closed: nothing can be proved gone.
  *
  * Residual, stated: a recorded group that emptied, whose pgid then went to a
@@ -592,15 +593,23 @@ export async function reapOwnedProcessGroups(
     group.entries.some((entry) => current.get(entry.pid)?.start === entry.start) ||
     [...current.values()].some((entry) => entry.pgid === group.record.pgid && startedAtOrAfter(entry.start, group.record.rootStart));
   let live = found;
-  const deadline = Date.now() + killGraceMs;
-  while (live.length > 0) {
-    const current = readOwnedProcessTable();
-    if (readable(current)) live = live.filter((group) => held(group, current));
-    if (live.length === 0 || Date.now() >= deadline) break;
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, POLL_MS);
-    });
-  }
+  let current = table;
+  await killProcessGroupsUntilGone(
+    () => {
+      if (!readable(current)) return;
+      for (const group of live) {
+        const members = [...current.values()].filter((entry) => entry.pgid === group.record.pgid && startedAtOrAfter(entry.start, group.record.rootStart));
+        killEntries([...group.entries, ...members], current);
+      }
+    },
+    () => {
+      if (live.length === 0) return true;
+      current = readOwnedProcessTable();
+      if (readable(current)) live = live.filter((group) => held(group, current));
+      return live.length === 0;
+    },
+    Date.now() + killGraceMs, POLL_MS,
+  );
   for (const group of found) if (!live.includes(group)) ended.push(group.record);
   return {
     found: found.length, terminated: found.length - live.length, survived: live.length, liveWriter, ended,
