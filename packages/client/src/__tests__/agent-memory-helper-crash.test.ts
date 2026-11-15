@@ -82,7 +82,9 @@ import { resolveAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-
 import { createAgentMemoryIntentProcessor, helperAgentMemoryIntentBackend } from '../daemon/agent-memory-intent';
 
 const roots: string[] = [];
+const ownedCleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
+  for (const clean of ownedCleanups.splice(0)) await clean();
   control.mode = undefined;
   control.cas = 0;
   control.fired = false;
@@ -195,35 +197,35 @@ describe.skipIf(process.platform !== 'darwin' || !hasAgentMemoryHelperBuild())('
       if (options?.timeout !== undefined) await probeGate;
       return realOpen(input, options);
     });
-    try {
-      server.setPairingTenantId('pairing-code', 'tenant');
-      const record = await daemon.pair('pairing-code');
-      w = await world('replace', 'notes/topic.md', { root: hostStorageRoot, deviceId: record.deviceId });
-      await daemon.start();
-      const hello = await server.waitFor(event => event.type === 'conn.hello');
-      expect(hello.type === 'conn.hello' && hello.payload.capabilities).not.toContain('agent-memory-intent.v1');
+    ownedCleanups.push(async () => {
       releaseProbe();
-      const ready = await server.waitFor(event => event.type === 'conn.hello' && event.payload.capabilities?.includes('agent-memory-intent.v1') === true);
-      expect(ready.type === 'conn.hello' && ready.payload.capabilities).toContain('agent-memory-intent.v1');
-      control.mode = 'acked';
-      const envelope = createEnvelope('agent.memory.intent.available', w.notice, { seq: server.nextSeq() });
-      server.pushLongPollEvent(envelope);
-      await vi.waitFor(() => expect(errors.mock.calls.some(args => (args[1] as { reason?: string })?.reason === 'local_io_failed')).toBe(true), { timeout: 5_000 });
-      expect(control.fired).toBe(true);
-      expect(await new CursorStore(storeDir).load(server.url, record.deviceId)).toBe(0);
-      expect((await w.ledger()).ackedAt).toBeNull();
-      expect(w.completions).toHaveLength(1);
-      const before = await fs.stat(w.target, { bigint: true });
-      server.pushLongPollEvent(envelope);
-      await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, record.deviceId)).toBe(envelope.seq), { timeout: 5_000 });
-      expect((await fs.stat(w.target, { bigint: true })).ino).toBe(before.ino);
-      expect(control.cas).toBe(1);
-      expect((await w.ledger()).ackedAt).toEqual(expect.any(String));
-      expect(w.completions).toHaveLength(2);
-      expect(w.completions[1]).toEqual(w.completions[0]);
-    } finally {
-      await daemon.stop(); releaseProbe(); await server.close(); open.mockRestore(); errors.mockRestore();
-    }
+      await daemon.stop(); await server.close(); open.mockRestore(); errors.mockRestore();
+    });
+    server.setPairingTenantId('pairing-code', 'tenant');
+    const record = await daemon.pair('pairing-code');
+    w = await world('replace', 'notes/topic.md', { root: hostStorageRoot, deviceId: record.deviceId });
+    await daemon.start();
+    const hello = await server.waitFor(event => event.type === 'conn.hello');
+    expect(hello.type === 'conn.hello' && hello.payload.capabilities).not.toContain('agent-memory-intent.v1');
+    releaseProbe();
+    const ready = await server.waitFor(event => event.type === 'conn.hello' && event.payload.capabilities?.includes('agent-memory-intent.v1') === true);
+    expect(ready.type === 'conn.hello' && ready.payload.capabilities).toContain('agent-memory-intent.v1');
+    control.mode = 'acked';
+    const envelope = createEnvelope('agent.memory.intent.available', w.notice, { seq: server.nextSeq() });
+    server.pushLongPollEvent(envelope);
+    await vi.waitFor(() => expect(errors.mock.calls.some(args => (args[1] as { reason?: string })?.reason === 'local_io_failed')).toBe(true), { timeout: 5_000 });
+    expect(control.fired).toBe(true);
+    expect(await new CursorStore(storeDir).load(server.url, record.deviceId)).toBe(0);
+    expect((await w.ledger()).ackedAt).toBeNull();
+    expect(w.completions).toHaveLength(1);
+    const before = await fs.stat(w.target, { bigint: true });
+    server.pushLongPollEvent(envelope);
+    await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, record.deviceId)).toBe(envelope.seq), { timeout: 5_000 });
+    expect((await fs.stat(w.target, { bigint: true })).ino).toBe(before.ino);
+    expect(control.cas).toBe(1);
+    expect((await w.ledger()).ackedAt).toEqual(expect.any(String));
+    expect(w.completions).toHaveLength(2);
+    expect(w.completions[1]).toEqual(w.completions[0]);
   });
 
   it('holds the writer lease through timeout until the real stopped helper exits', async () => {
