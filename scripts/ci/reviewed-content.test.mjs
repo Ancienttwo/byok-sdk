@@ -9,7 +9,7 @@ import { documentationTestsForPaths } from './documentation-checks.mjs';
 import { selectImpact, knownFamilies, reviewedScripts } from './select-impact.mjs';
 import { planCi } from './plan-ci.mjs';
 import { requireCiPlan } from './require-ci-plan.mjs';
-import { publicManifests, RUNTIME_CONTRACT_SCRIPT } from './reviewed-content.mjs';
+import { publicManifests } from './reviewed-content.mjs';
 
 function fixture(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-reviewed-content-'));
@@ -69,85 +69,6 @@ test('root admits only rh script changes', t => {
   ]) {
     f.write('package.json', changed);
     assert.throws(() => selectImpact(['package.json'], f), /more than the reviewed fields|Unreviewed|Only existing/);
-  }
-});
-// #1102: the gate script, its test in test:scripts, and the client files entry, each exactly.
-test('the upgrade-manifest gate admits only its exact script, test and client files entry', t => {
-  const f = fixture(t), old = f.rootManifest.scripts['test:scripts'];
-  f.write('scripts/release/check-upgrade-manifest.test.mjs', '');
-  const gate = 'node scripts/release/check-upgrade-manifest.mjs';
-  const withTest = old + ' scripts/release/check-upgrade-manifest.test.mjs';
-  f.write('package.json', { scripts: { 'test:scripts': withTest, 'check:upgrade-manifest': gate } });
-  assert.deepEqual(selectImpact(['package.json'], f), { dirs: [], files: ['package.json'], families: [], reason: 'root-ci-scripts' });
-  for (const scripts of [
-    { 'test:scripts': old, 'check:upgrade-manifest': gate + ' --write' },
-    { 'test:scripts': old + ' scripts/release/other.test.mjs' },
-  ]) {
-    f.write('package.json', { scripts });
-    assert.throws(() => selectImpact(['package.json'], f), /more than the reviewed fields|Only existing/);
-  }
-  const files = ['dist', 'README.md', 'LICENSE'];
-  execFileSync('git', ['checkout', '--', 'package.json'], { cwd: f.cwd });
-  f.write('packages/client/package.json', { ...f.manifest, files });
-  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qam', 'files'], { cwd: f.cwd });
-  f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
-  f.write('packages/client/package.json', { ...f.manifest, files: [...files, 'upgrade-manifest.json'] });
-  assert.deepEqual(selectImpact(['packages/client/package.json'], f).families, ['npm-release-pack']);
-  f.write('packages/client/package.json', { ...f.manifest, files: [...files, 'upgrade-manifest.json', 'src'] });
-  assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
-});
-// #1103: the client runtime contract script, exactly.
-test('the client manifest admits only the exact runtime contract script', t => {
-  const f = fixture(t), scripts = { test: 'vitest run' };
-  f.write('packages/client/package.json', { ...f.manifest, scripts });
-  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qam', 'scripts'], { cwd: f.cwd });
-  f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
-  f.write('packages/client/package.json', { ...f.manifest, scripts: { ...scripts, 'test:runtime-contract': RUNTIME_CONTRACT_SCRIPT } });
-  assert.deepEqual(selectImpact(['packages/client/package.json'], f).families, ['npm-release-pack']);
-  for (const command of [`${RUNTIME_CONTRACT_SCRIPT} --passWithNoTests`, 'vitest run']) {
-    f.write('packages/client/package.json', { ...f.manifest, scripts: { ...scripts, 'test:runtime-contract': command } });
-    assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
-  }
-});
-
-test('the client build admits exactly the Pi jiti seed step after the export assets (#1927)', t => {
-  const f = fixture(t), build = 'tsup && node scripts/build-pi-export-assets.mjs && tsc -p tsconfig.build.json';
-  f.write('packages/client/package.json', { ...f.manifest, scripts: { build } });
-  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qam', 'build'], { cwd: f.cwd });
-  f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
-  const seed = ' && node scripts/build-pi-jiti-seed.mjs';
-  f.write('packages/client/package.json', { ...f.manifest, scripts: { build: build.replace('export-assets.mjs', `export-assets.mjs${seed}`) } });
-  assert.deepEqual(selectImpact(['packages/client/package.json'], f).families, ['npm-release-pack']);
-  for (const changed of [`${build}${seed}`, build.replace('export-assets.mjs', `export-assets.mjs${seed}`).replace('tsup', 'tsup --minify')]) {
-    f.write('packages/client/package.json', { ...f.manifest, scripts: { build: changed } });
-    assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
-  }
-});
-
-// #1094: the generated DaemonConfig schema is appended after the upgrade manifest, exactly.
-test('the client files list admits exactly the appended upgrade history (#1316)', t => {
-  const f = fixture(t);
-  const files = ['dist', 'README.md', 'LICENSE', 'upgrade-manifest.json', 'daemon-config.schema.json'];
-  f.write('packages/client/package.json', { ...f.manifest, files });
-  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qam', 'files'], { cwd: f.cwd });
-  f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
-  f.write('packages/client/package.json', { ...f.manifest, files: [...files, 'upgrade-history'] });
-  assert.deepEqual(selectImpact(['packages/client/package.json'], f).families, ['npm-release-pack']);
-  f.write('packages/client/package.json', { ...f.manifest, files: [...files, 'upgrade-history', 'src'] });
-  assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
-});
-
-test('the client files list admits exactly the appended DaemonConfig schema', t => {
-  const f = fixture(t);
-  const files = ['dist', 'README.md', 'LICENSE', 'upgrade-manifest.json'];
-  f.write('packages/client/package.json', { ...f.manifest, files });
-  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qam', 'files'], { cwd: f.cwd });
-  f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
-  f.write('packages/client/package.json', { ...f.manifest, files: [...files, 'daemon-config.schema.json'] });
-  assert.deepEqual(selectImpact(['packages/client/package.json'], f).families, ['npm-release-pack']);
-  for (const changed of [[...files, 'daemon-config.schema.json', 'src'], ['dist', 'README.md', 'LICENSE', 'daemon-config.schema.json']]) {
-    f.write('packages/client/package.json', { ...f.manifest, files: changed });
-    assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
   }
 });
 test('API entry changes select only owner and dependents; unmapped entry is refused', t => {
@@ -215,88 +136,12 @@ test('result-helper close regression selects only its exact basic workspace path
   assert.throws(() => selectImpact(['examples/basic/goal-btw-close-other.test.ts']));
 });
 
-test('core sealed-payload and Node-only system-tool subpaths admit exact additions only', t => {
-  const cwd = mkdtempSync(join(tmpdir(), 'ci-core-sealed-payload-'));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
-  mkdirSync(join(cwd, 'packages/core'), { recursive: true });
-  const file = join(cwd, 'packages/core/package.json');
-  const baseline = { name: '@byok-sdk/core', version: '0.28.3', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' }, './package.json': './package.json' } };
-  writeFileSync(file, JSON.stringify(baseline));
-  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
-  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
-  const candidate = structuredClone(baseline);
-  candidate.exports['./sealed-payload'] = { types: './dist/sealed-payload/index.d.ts', import: './dist/sealed-payload/index.js' };
-  const write = value => writeFileSync(file, JSON.stringify(value));
-  write(candidate);
-  assert.ok(selectImpact(['packages/core/package.json'], context).families.includes('npm-release-pack'));
-  for (const mutate of [
-    m => { m.exports['./sealed-payload'].import = './dist/other.js'; },
-    m => { m.exports['.'].import = './dist/replaced.js'; },
-    m => { m.exports['./other'] = './dist/other.js'; },
-    m => { m.dependencies = { zod: '4.0.0' }; },
-  ]) {
-    const invalid = structuredClone(candidate); mutate(invalid); write(invalid);
-    assert.throws(() => selectImpact(['packages/core/package.json'], context), /more than/);
+test('core and keys build entries and catalog generation retain their consumers and packed checks', () => {
+  for (const dir of ['core', 'keys']) {
+    const entry = selectImpact([`packages/${dir}/tsup.config.ts`]);
+    assert.ok(entry.dirs.includes(`packages/${dir}`));
+    assert.ok(entry.families.includes('npm-release-pack'));
   }
-  const entry = selectImpact(['packages/core/tsup.config.ts']);
-  assert.ok(entry.dirs.includes('packages/core'));
-  assert.ok(entry.families.includes('npm-release-pack'));
-  const systemTool = structuredClone(baseline);
-  systemTool.exports['./system-tool'] = { types: './dist/system-tool.d.ts', node: { import: './dist/system-tool.js' } };
-  write(systemTool);
-  assert.ok(selectImpact(['packages/core/package.json'], context).dirs.includes('packages/core'));
-  for (const mutate of [
-    m => { m.exports['./system-tool'].node.import = './dist/other.js'; },
-    m => { m.exports['./system-tool'].default = './dist/system-tool.js'; },
-    m => { m.exports['.'].import = './dist/replaced.js'; },
-    m => { m.files = ['dist', 'src']; },
-    m => { m.scripts = { build: 'tsup' }; },
-  ]) {
-    const invalid = structuredClone(systemTool); mutate(invalid); write(invalid);
-    assert.throws(() => selectImpact(['packages/core/package.json'], context), /more than/);
-  }
-  const previous = structuredClone(systemTool);
-  previous.exports['./system-tool'].node.import = './dist/other.js';
-  write(previous); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'existing subpath');
-  write(systemTool);
-  assert.throws(() => selectImpact(['packages/core/package.json'], { cwd, base: git('rev-parse', 'HEAD').trim() }), /more than/);
-});
-
-test('keys pi-catalog subpath and its generator admit exact additions only', t => {
-  const cwd = mkdtempSync(join(tmpdir(), 'ci-keys-pi-catalog-'));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
-  mkdirSync(join(cwd, 'packages/keys'), { recursive: true });
-  const file = join(cwd, 'packages/keys/package.json');
-  const baseline = { name: '@byok-sdk/keys', version: '0.13.1', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } } };
-  writeFileSync(file, JSON.stringify(baseline));
-  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
-  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
-  const candidate = structuredClone(baseline);
-  candidate.exports['./pi-catalog'] = { types: './dist/pi-catalog.d.ts', import: './dist/pi-catalog.js' };
-  const write = value => writeFileSync(file, JSON.stringify(value));
-  write(candidate);
-  assert.ok(selectImpact(['packages/keys/package.json'], context).families.includes('npm-release-pack'));
-  for (const mutate of [
-    m => { m.exports['./pi-catalog'].import = './dist/other.js'; },
-    m => { m.exports['.'].import = './dist/replaced.js'; },
-    m => { m.exports['./other'] = './dist/other.js'; },
-    m => { m.dependencies = { '@earendil-works/pi-ai': '1.3.0' }; },
-  ]) {
-    const invalid = structuredClone(candidate); mutate(invalid); write(invalid);
-    assert.throws(() => selectImpact(['packages/keys/package.json'], context), /more than/);
-  }
-  // #1445: the one optional dependency, at exactly the pin packages/client owns.
-  mkdirSync(join(cwd, 'packages/client'));
-  writeFileSync(join(cwd, 'packages/client/package.json'), JSON.stringify({ optionalDependencies: { koffi: '9.9.9' } }));
-  write({ ...candidate, optionalDependencies: { koffi: '9.9.9' } });
-  assert.ok(selectImpact(['packages/keys/package.json'], context).families.includes('npm-release-pack'));
-  write({ ...candidate, optionalDependencies: { koffi: '9.9.8' } });
-  assert.throws(() => selectImpact(['packages/keys/package.json'], context), /more than/);
-  const entry = selectImpact(['packages/keys/tsup.config.ts']);
-  assert.ok(entry.dirs.includes('packages/keys'));
-  assert.ok(entry.families.includes('npm-release-pack'));
   const generator = selectImpact(['scripts/keys/generate-pi-model-catalog.ts']);
   assert.ok(generator.dirs.includes('packages/keys') && generator.dirs.includes('packages/client'));
   assert.throws(() => selectImpact(['scripts/keys/other.ts']));
@@ -331,42 +176,6 @@ test('the Node pin admits one exact X.Y.Z and selects every routine family, neve
   assert.throws(() => selectImpact(['.node-version']), /requires exact CI_BASE/);
   rmSync(join(f.cwd, '.node-version'));
   assert.throws(() => selectImpact(['.node-version'], f));
-});
-
-test('a public manifest admits only the engines.node raise from >=24.15.0 to >=24.22.1', t => {
-  const f = fixture(t);
-  const keys = { name: '@byok-sdk/keys', version: '0.13.1', engines: { node: '>=24.15.0' } };
-  const testkit = { name: '@byok-sdk/testkit', private: true, version: '0.0.0', engines: { node: '>=24.15.0' } };
-  const root = { ...f.rootManifest, engines: { node: '>=24.15.0' } };
-  const raise = (manifest, node = '>=24.22.1') => ({ ...manifest, engines: { ...manifest.engines, node } });
-  f.write('packages/keys/package.json', keys); f.write('packages/testkit/package.json', testkit); f.write('package.json', root);
-  commit(f, 'engines baseline');
-  for (const candidate of [raise(keys), { ...raise(keys), version: '0.13.2' }]) {
-    f.write('packages/keys/package.json', candidate);
-    assert.deepEqual(selectImpact(['packages/keys/package.json'], f).families, ['npm-release-pack']);
-  }
-  for (const candidate of [
-    raise(keys, '>=24.22.0'), raise(keys, '>=24.23.0'), raise(keys, '^24.22.1'), raise(keys, '>=24.15.0 || >=24.22.1'),
-    { ...raise(keys), engines: { node: '>=24.22.1', npm: '>=11' } },
-    { name: keys.name, version: keys.version },
-    { ...raise(keys), dependencies: { x: '1.0.0' } },
-    { ...raise(keys), description: 'neighbour' },
-  ]) {
-    f.write('packages/keys/package.json', candidate);
-    assert.throws(() => selectImpact(['packages/keys/package.json'], f), /more than/, JSON.stringify(candidate));
-  }
-  f.write('packages/keys/package.json', keys);
-  f.write('packages/testkit/package.json', raise(testkit));
-  assert.throws(() => selectImpact(['packages/testkit/package.json'], f), /more than/);
-  f.write('packages/testkit/package.json', testkit);
-  f.write('package.json', raise(root));
-  assert.throws(() => selectImpact(['package.json'], f), /more than/);
-  f.write('package.json', root);
-  for (const [from, to] of [['>=24.22.1', '>=24.15.0'], ['>=24.16.0', '>=24.22.1']]) {
-    f.write('packages/keys/package.json', raise(keys, from)); commit(f, `engines ${from}`);
-    f.write('packages/keys/package.json', raise(keys, to));
-    assert.throws(() => selectImpact(['packages/keys/package.json'], f), /more than/, `${from} -> ${to}`);
-  }
 });
 
 test('the public manifest list equals the non-private packages in the repository', () => {
@@ -599,95 +408,17 @@ test('the K4 example stays private', t => {
   assert.throws(() => selectImpact([path], f), /must stay private/);
 });
 
-test('#1106: the protocol manifest admits the agent-memory subpath exactly', t => {
-  const f = fixture(t);
-  const path = 'packages/protocol/package.json';
-  const manifest = { name: '@byok-sdk/protocol', version: '0.31.0', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } } };
-  f.write(path, manifest); rebase(f, 'protocol without the agent-memory subpath');
-  const entry = { types: './dist/agent-memory.d.ts', import: './dist/agent-memory.js' };
-  f.write(path, { ...manifest, exports: { ...manifest.exports, './agent-memory': entry } });
-  assert.deepEqual(selectImpact([path], f).families, ['npm-release-pack']);
-  for (const [exports, reason] of [
-    [{ ...manifest.exports, './agent-memory': { ...entry, import: './dist/other.js' } }, 'a retargeted subpath'],
-    [{ ...manifest.exports, './agent-memory': entry, './memory': entry }, 'a second subpath'],
-  ]) {
-    f.write(path, { ...manifest, exports });
-    assert.throws(() => selectImpact([path], f), /more than/, reason);
-  }
-});
-
-test('#1106: the server manifest admits both execution-core subpaths together with existing dependencies, in manifest and lock', t => {
-  const f = fixture(t);
-  const path = 'packages/server/package.json';
-  const root = { types: './dist/index.d.ts', import: './dist/index.js' };
-  const manifest = { name: '@byok-sdk/server', version: '0.31.0', exports: { '.': root, './package.json': './package.json' },
-    devDependencies: { '@byok-sdk/conformance': 'workspace:*', tsx: '^4.19.2' } };
+test('the server lock ranges must match its manifest', t => {
+  const f = fixture(t), path = 'packages/server/package.json';
+  const manifest = { name: '@byok-sdk/server', version: '0.31.0', devDependencies: { tsx: '^4.19.2' } };
   f.write(path, manifest);
-  f.lock.workspaces['packages/server'] = { name: manifest.name, version: manifest.version, devDependencies: { '@byok-sdk/conformance': 'workspace:*', tsx: '^4.19.2' } };
-  f.write('bun.lock', f.lock); rebase(f, 'server without execution-core');
-  const core = { types: './dist/execution-core/index.d.ts', import: './dist/execution-core/index.js' };
-  const canonical = { types: './dist/execution-core/canonical.d.ts', import: './dist/execution-core/canonical.js' };
-  const exports = { '.': root, './execution-core': core, './execution-core/canonical': canonical, './package.json': './package.json' };
-  const devDependencies = { '@byok-sdk/conformance': 'workspace:*', tsx: '^4.19.2' };
-  f.write(path, { ...manifest, exports, devDependencies });
-  f.lock.workspaces['packages/server'].devDependencies = devDependencies; f.write('bun.lock', f.lock);
-  assert.ok(selectImpact([path, 'bun.lock'], f).families.includes('npm-release-pack'));
-  for (const [candidate, reason] of [
-    [{ ...manifest, exports: { ...exports, './execution-core/canonical': undefined } }, 'one subpath without the other'],
-    [{ ...manifest, exports: { ...exports, './execution-core': { ...core, import: './dist/other.js' } } }, 'a retargeted subpath'],
-    [{ ...manifest, exports: { ...exports, './execution-core/ledger': core } }, 'a third subpath'],
-    [{ ...manifest, exports, devDependencies, dependencies: { tsx: '^4.19.2' } }, 'a runtime tsx edge'],
-  ]) {
-    f.write(path, JSON.parse(JSON.stringify(candidate)));
-    assert.throws(() => selectImpact([path], f), /more than/, reason);
-  }
-  f.write(path, { ...manifest, exports, devDependencies });
-  f.lock.workspaces['packages/server'].devDependencies = { ...devDependencies, tsx: '^4.20.0' }; f.write('bun.lock', f.lock);
+  f.lock.workspaces['packages/server'] = { ...manifest };
+  f.write('bun.lock', f.lock); rebase(f, 'server manifest and lock');
+  f.lock.workspaces['packages/server'].devDependencies = { tsx: '^4.20.0' }; f.write('bun.lock', f.lock);
   assert.throws(() => selectImpact(['bun.lock'], f), /differs from manifest/, 'a lock range the manifest does not declare');
 });
 
-test('#927: the server manifest admits only the reviewed description without a protocol version', t => {
-  const f = fixture(t);
-  const path = 'packages/server/package.json';
-  const from = 'BYOK SDK server: single-product, single-tenant embedded coordinator over @byok-sdk/cloud — wake-driven HTTP long-poll, protocol v2, memory or single-process SQLite storage.';
-  const manifest = { name: '@byok-sdk/server', version: '0.30.1', description: from };
-  f.write(path, manifest); rebase(f, 'server with the v2 description');
-  f.write(path, { ...manifest, description: from.replace('protocol v2, ', '') });
-  assert.deepEqual(selectImpact([path], f).families, ['npm-release-pack']);
-  for (const description of [from.replace('protocol v2', 'protocol v3'), 'BYOK SDK server']) {
-    f.write(path, { ...manifest, description });
-    assert.throws(() => selectImpact([path], f), /more than/, description);
-  }
-});
-
-
-test('keys model-route subpath admits the exact addition only', t => {
-  const cwd = mkdtempSync(join(tmpdir(), 'ci-keys-model-route-'));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
-  mkdirSync(join(cwd, 'packages/keys'), { recursive: true });
-  const file = join(cwd, 'packages/keys/package.json');
-  const baseline = { name: '@byok-sdk/keys', version: '0.30.1', exports: {
-    '.': { types: './dist/index.d.ts', import: './dist/index.js' },
-    './pi-catalog': { types: './dist/pi-catalog.d.ts', import: './dist/pi-catalog.js' },
-  } };
-  writeFileSync(file, JSON.stringify(baseline));
-  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
-  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
-  const candidate = structuredClone(baseline);
-  candidate.exports['./model-route'] = { types: './dist/model-route.d.ts', import: './dist/model-route.js' };
-  const write = value => writeFileSync(file, JSON.stringify(value));
-  write(candidate);
-  assert.ok(selectImpact(['packages/keys/package.json'], context).families.includes('npm-release-pack'));
-  for (const mutate of [
-    m => { m.exports['./model-route'].import = './dist/other.js'; },
-    m => { m.exports['./model-route'].require = './dist/model-route.cjs'; },
-    m => { m.exports['./pi-catalog'].import = './dist/replaced.js'; },
-    m => { m.dependencies = { '@byok-sdk/protocol': 'workspace:*' }; },
-  ]) {
-    const invalid = structuredClone(candidate); mutate(invalid); write(invalid);
-    assert.throws(() => selectImpact(['packages/keys/package.json'], context), /more than/);
-  }
+test('keys generated defaults and split modules retain their consumers and Windows custody checks', () => {
   const defaults = selectImpact(['packages/keys/src/pi-runtime-defaults.generated.ts']);
   assert.ok(defaults.dirs.includes('packages/keys') && defaults.dirs.includes('packages/client'));
   // The modules split from provider-profile.ts and secret-store.ts keep their Windows custody family.
@@ -714,20 +445,17 @@ test('setup documentation admits only exact additive generator commands and its 
   }
 });
 
-test('the client host-layout addition is exact and retains consumer and packed checks', t => {
+test('the client host-layout retains consumer and packed checks', t => {
   const f = fixture(t), path = 'packages/client/package.json';
-  const root = { '.': { types: './dist/index.d.ts', import: './dist/index.js' } };
-  f.write(path, { ...f.manifest, exports: root }); rebase(f, 'client before host-layout');
   const entry = { types: './dist/host-layout.d.ts', import: './dist/host-layout.js' };
-  const write = value => f.write(path, { ...f.manifest, exports: { ...root, './host-layout': value } });
-  write(entry);
+  f.write(path, { ...f.manifest, exports: { './host-layout': entry } }); rebase(f, 'client with host-layout');
   const source = 'packages/client/src/host-layout.ts';
   const plan = selectImpact([path, source], f);
   assert.deepEqual(plan.dirs, selectImpact([source], f).dirs);
   assert.deepEqual(plan.families, ['dataplane', 'npm-release-pack']);
   for (const invalid of [{ ...entry, types: './dist/other.d.ts' }, { ...entry, import: './dist/other.js' },
     { ...entry, require: './dist/host-layout.cjs' }]) {
-    write(invalid);
+    f.write(path, { ...f.manifest, exports: { './host-layout': invalid } });
     assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
   }
 });

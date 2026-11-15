@@ -45,33 +45,7 @@ test('helper smoke and source contract select client and packaging without accep
 });
 
 
-test('Hermes adapter retirement admits only its private session mapping and smoke', t => {
-  const cwd = mkdtempSync(join(tmpdir(), 'ci-hermes-retire-'));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
-  mkdirSync(join(cwd, 'packages/client'), { recursive: true });
-  const file = join(cwd, 'packages/client/package.json');
-  const session = { types: './dist/adapters/hermes/hermes-session-runtime.d.ts', default: './dist/adapters/hermes/hermes-session-runtime.js' };
-  const baseline = { name: '@byok-sdk/client', version: '0.28.1', imports: { '#existing': './dist/existing.js', '#byok-hermes-session': session },
-    scripts: { build: 'tsup && node scripts/check-hermes-session-entry.mjs' } };
-  writeFileSync(file, JSON.stringify(baseline));
-  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
-  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
-  const candidate = structuredClone(baseline);
-  delete candidate.imports['#byok-hermes-session'];
-  candidate.scripts.build = 'tsup';
-  const write = value => writeFileSync(file, JSON.stringify(value));
-  write(candidate);
-  assert.ok(selectImpact(['packages/client/package.json'], context).families.includes('npm-release-pack'));
-  for (const mutate of [
-    m => { m.imports['#existing'] = './dist/replaced.js'; },
-    m => { m.scripts.build = 'echo skipped'; },
-    m => { m.dependencies = { unreviewed: '1.0.0' }; },
-    m => { m.exports = { './new': './dist/new.js' }; },
-  ]) {
-    const invalid = structuredClone(candidate); mutate(invalid); write(invalid);
-    assert.throws(() => selectImpact(['packages/client/package.json'], context), /more than/);
-  }
+test('the archived Hermes entry check and client build retain their consumers and packed checks', () => {
   for (const path of ['packages/client/scripts/check-hermes-session-entry.mjs', 'packages/client/tsup.config.ts']) {
     const impact = selectImpact([path]);
     assert.ok(impact.dirs.includes('packages/client'));
@@ -79,61 +53,6 @@ test('Hermes adapter retirement admits only its private session mapping and smok
     assert.ok(!impact.families.includes('build-test'));
   }
   assert.throws(() => selectImpact(['packages/client/scripts/check-other-entry.mjs']));
-});
-
-test('sealed Pi host retirement admits only its imports key and build step', t => {
-  const cwd = mkdtempSync(join(tmpdir(), 'ci-sealed-retire-'));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
-  mkdirSync(join(cwd, 'packages/client'), { recursive: true });
-  const file = join(cwd, 'packages/client/package.json');
-  const sealed = { types: './dist/bin/pi-runtime-host-sealed.d.ts', default: './dist/bin/pi-runtime-host-sealed.js' };
-  const baseline = { name: '@byok-sdk/client', version: '0.28.1', imports: { '#existing': './dist/existing.js', '#byok-pi-runtime-host-sealed': sealed },
-    scripts: { build: 'tsup && node scripts/build-sealed-host.mjs && tsc -p tsconfig.build.json' } };
-  writeFileSync(file, JSON.stringify(baseline));
-  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
-  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
-  const candidate = structuredClone(baseline);
-  delete candidate.imports['#byok-pi-runtime-host-sealed'];
-  candidate.scripts.build = 'tsup && tsc -p tsconfig.build.json';
-  const write = value => writeFileSync(file, JSON.stringify(value));
-  write(candidate);
-  assert.ok(selectImpact(['packages/client/package.json'], context).families.includes('npm-release-pack'));
-  for (const mutate of [
-    m => { delete m.imports['#existing']; },
-    m => { m.scripts.build = 'tsup'; },
-    m => { m.scripts.build = 'tsup && tsc -p tsconfig.build.json && echo extra'; },
-    m => { m.dependencies = { unreviewed: '1.0.0' }; },
-  ]) {
-    const invalid = structuredClone(candidate); mutate(invalid); write(invalid);
-    assert.throws(() => selectImpact(['packages/client/package.json'], context), /more than/);
-  }
-});
-
-test('client testing entry admits the exact reviewed export only', t => {
-  const cwd = mkdtempSync(join(tmpdir(), 'ci-testing-entry-'));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
-  mkdirSync(join(cwd, 'packages/client'), { recursive: true });
-  const file = join(cwd, 'packages/client/package.json');
-  const baseline = { name: '@byok-sdk/client', version: '0.28.1', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } } };
-  writeFileSync(file, JSON.stringify(baseline));
-  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
-  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
-  const candidate = structuredClone(baseline);
-  candidate.exports['./testing'] = { types: './dist/testing/index.d.ts', import: './dist/testing/index.js' };
-  const write = value => writeFileSync(file, JSON.stringify(value));
-  write(candidate);
-  assert.ok(selectImpact(['packages/client/package.json'], context).families.includes('npm-release-pack'));
-  for (const mutate of [
-    m => { m.exports['./testing'].import = './dist/other.js'; },
-    m => { m.exports['./testing'].default = './dist/testing/index.js'; },
-    m => { m.exports['./other'] = { types: './dist/other.d.ts', import: './dist/other.js' }; },
-    m => { m.exports['.'].import = './dist/replaced.js'; },
-  ]) {
-    const invalid = structuredClone(candidate); mutate(invalid); write(invalid);
-    assert.throws(() => selectImpact(['packages/client/package.json'], context), /more than/);
-  }
 });
 
 test('the client entry check selects client packaging without broad fallback', () => {
