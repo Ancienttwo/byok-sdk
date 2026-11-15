@@ -115,7 +115,7 @@ export function abandonTask(
   }
 }
 
-function envelopeTaskId(body: string): unknown {
+export function envelopeTaskId(body: string): unknown {
   try {
     const value = JSON.parse(body) as unknown;
     return value !== null && typeof value === 'object' ? (value as { readonly task_id?: unknown }).task_id : undefined;

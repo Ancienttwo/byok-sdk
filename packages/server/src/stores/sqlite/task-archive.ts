@@ -9,6 +9,7 @@ import type {
 } from '@byok-sdk/cloud';
 import type { DatabaseSync } from 'node:sqlite';
 import { removeActivityContent } from './activity.js';
+import { envelopeTaskId } from './task-retirement.js';
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['complete', 'failed', 'cancelled']);
 const TERMINAL_SQL = "('complete', 'failed', 'cancelled')";
@@ -194,13 +195,4 @@ function readMailbox(db: DatabaseSync, tenant: TenantId, taskId: string, task: T
       ORDER BY device_id, seq`,
   ).all(tenant, ...devices, `"task_id":${JSON.stringify(taskId)}`) as unknown as MailboxBodyRow[];
   return rows.filter((row) => envelopeTaskId(row.body) === taskId);
-}
-
-function envelopeTaskId(body: string): unknown {
-  try {
-    const value = JSON.parse(body) as unknown;
-    return value !== null && typeof value === 'object' ? (value as { readonly task_id?: unknown }).task_id : undefined;
-  } catch {
-    return undefined;
-  }
 }
