@@ -7,17 +7,17 @@ export function assertDurableShellOwner(pid: number, worker: number): void {
 }
 export async function disposeDurableShellGroups(groups: Set<number>): Promise<void> {
   const refused = new Map<number, unknown>();
-  const signal = (): void => {
+  const signal = (initialRefusals?: Map<number, unknown>): void => {
     for (const pid of groups) {
       try { process.kill(-pid, 'SIGKILL'); }
       catch (error) {
         const state = processSignalState(error);
         if (state === 'unknown') throw new RuntimeDisposalFailure({stage:'signal',reason:'durable shell group signal failed'});
-        if (state === 'live') refused.set(pid, error);
+        if (state === 'live') initialRefusals?.set(pid, error);
       }
     }
   };
-  signal();
+  signal(refused);
   const deadline = Date.now() + 2_000;
   const gone = (): boolean => {
     if (!groups.size) return true;

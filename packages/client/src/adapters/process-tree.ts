@@ -753,12 +753,12 @@ function processExists(pid: number, label: string, kill: KillFn): boolean {
   }
 }
 
-async function signalGroup(pid: number, signal: NodeJS.Signals, label: string, kill: KillFn): Promise<void> {
+async function signalGroup(pid: number, signal: NodeJS.Signals, label: string, kill: KillFn, retry = false): Promise<void> {
   try {
     kill(-pid, signal);
   } catch (cause) {
     const state = processSignalState(cause);
-    if (state === 'gone') return;
+    if (state === 'gone' || (state === 'live' && retry)) return;
     if (state === 'live' && await waitUntil(() => processSignalState(cause, pid) !== 'gone', DEFAULT_KILL_GRACE_MS)) return;
     const code = (cause as NodeJS.ErrnoException).code;
     throw new RuntimeDisposalFailure({
@@ -1020,7 +1020,7 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
     await signalGroup(pid, 'SIGKILL', options.label, kill);
     killed.push(...killDescendants(options.child, () => table, more));
     if (!(await killProcessGroupsUntilGone(
-      () => signalGroup(pid, 'SIGKILL', options.label, kill),
+      () => signalGroup(pid, 'SIGKILL', options.label, kill, true),
       () => !groupExists(pid, options.label, kill),
       Date.now() + killGraceMs,
     ))) {

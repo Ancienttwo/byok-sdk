@@ -300,6 +300,33 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
     expect([...readOwnedProcessTable().values()].filter(entry => entry.pgid === pgid)).toEqual([]);
   });
 
+  it('a resend EPERM retains the quiescence error at the original kill deadline', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], withOwnedProcessTree({ stdio: 'ignore' }));
+    forkingGroups.add(child.pid!);
+    await new Promise(resolve => child.once('spawn', resolve));
+    const killGraceMs = 80;
+    let deliveries = 0;
+    vi.useFakeTimers();
+    const started = Date.now();
+    try {
+      const outcome = disposeOwnedProcessTree({
+        child, label: 'EPERM fixture', waitClosed: () => new Promise(() => {}), isClosed: () => false,
+        termGraceMs: 0, killGraceMs,
+        killFn: (pid, signal) => {
+          if (pid === -child.pid! && signal === 'SIGKILL' && ++deliveries > 1) {
+            throw Object.assign(new Error('not permitted'), { code: 'EPERM' });
+          }
+        },
+      }).then(() => ({ error: undefined, elapsed: Date.now() - started }), error => ({ error, elapsed: Date.now() - started }));
+      await vi.advanceTimersByTimeAsync(2200);
+      const result = await outcome;
+      expect(deliveries).toBeGreaterThan(1);
+      expect(result).toMatchObject({ elapsed: killGraceMs, error: { name: 'RuntimeDisposalFailure', stage: 'quiescence', message: 'EPERM fixture runtime process group remained live after SIGKILL' } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('an unreadable process table fails the disposal typed, naming the read (#1298)', async () => {
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], withOwnedProcessTree({ stdio: 'ignore', env: {} }));
     await new Promise((resolve) => child.once('spawn', resolve));

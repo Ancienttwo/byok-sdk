@@ -12,8 +12,8 @@ SIGKILL while the caller's original gone predicate remains false.
 
 | Caller | Gone predicate | EPERM and unreadable-table behavior |
 | --- | --- | --- |
-| durable shell groups | Validated ps snapshot, no non-zombie group members | Signal EPERM is remembered; the same snapshot decides live versus gone. An unreadable snapshot throws `RuntimeDisposalFailure`, quiescence stage, `durable shell group snapshot unavailable`. A live refused group at the deadline retains the signal-stage refusal reason. |
-| owned process tree | `kill(-pgid, 0)` normally; `processSignalState` on errors | ESRCH is gone. Existing EPERM handling consults ps to distinguish live members from zombies and throws its existing typed snapshot-unavailable failure if ps fails. Successful kill(0) needs no process-table read. Existing `signalGroup` owns signal refusal errors and their reason text. |
+| durable shell groups | Validated ps snapshot, no non-zombie group members | First-delivery EPERM is remembered; the same snapshot decides live versus gone. Retry EPERM is left to that predicate and never changes the initial refusal record. An unreadable snapshot throws `RuntimeDisposalFailure`, quiescence stage, `durable shell group snapshot unavailable`. A live refused group at the deadline retains the signal-stage refusal reason. |
+| owned process tree | `kill(-pgid, 0)` normally; `processSignalState` on errors | ESRCH is gone. Existing EPERM handling consults ps to distinguish live members from zombies and throws its existing typed snapshot-unavailable failure if ps fails. Successful kill(0) needs no process-table read. The first `signalGroup` delivery owns the existing refusal wait/errors; retry ESRCH and EPERM return immediately so the original quiescence deadline and error decide. |
 | failed migrate-record write | Only ESRCH from `kill(-pgid, 0)` | EPERM and every other probe error continue waiting; no process-table read. Signal errors remain swallowed; an unproved group still throws `MigrateRunning` and retains the pending recovery state. |
 
 No caller switches predicate kind. Only the ps state check `!stat.startsWith('Z')`
@@ -48,8 +48,16 @@ bun run --filter @byok-sdk/client test -- src/__tests__/owned-process-group-reap
 bun run --filter @byok-sdk/client test -- src/__tests__/runtime-process-tree.test.ts -t 'members born while the group continuously forks' --reporter=verbose
 ```
 
-With the fix, both regression cases passed. Complete affected files passed:
-234 tests passed, 3 platform skips across owned-process-group-reap,
+The EPERM retry regression was also run before its correction, against production
+head `111442e2a`: a successful first delivery followed by EPERM on resends yielded
+`elapsed: 2000` and `stage: signal`, instead of the configured 80 ms and
+`stage: quiescence`. The existing killFn hook supplies these answers while a
+real owned child remains live. With the correction, the test asserts settlement
+at exactly 80 ms of fake time and the original `remained live after SIGKILL`
+reason. Its child is independently reaped in afterEach.
+
+With the fix, all regression cases passed. Complete affected files passed:
+235 tests passed, 3 platform skips across owned-process-group-reap,
 runtime-process-tree, and lifecycle-installation; pi-durable-launcher passed all
 25 tests. The forking groups are recorded at creation and independently killed
 repeatedly in afterEach, including when the product disposer under test fails.
@@ -82,13 +90,13 @@ new import therefore introduces no extra initialization wrapper in these entries
 
 | Entry | Old normalized budget | New measured budget | Increase |
 | --- | ---: | ---: | ---: |
-| @byok-sdk/client/adapters | 559137 | 559541 | 404 B |
-| @byok-sdk/client/testing | 521107 | 521511 | 404 B |
-| @byok-sdk/client#byok-pi-runtime-host | 586809 | 587167 | 358 B |
+| @byok-sdk/client/adapters | 559137 | 559610 | 473 B |
+| @byok-sdk/client/testing | 521107 | 521580 | 473 B |
+| @byok-sdk/client#byok-pi-runtime-host | 586809 | 587207 | 398 B |
 
-The other affected static closures grow by 565 B and fit their existing budgets:
+The other affected static closures grow by 634 B and fit their existing budgets:
 @byok-sdk/client, @byok-sdk/bot-collaboration, its testing entry, and bin:byok-agent.
-Raw and normalized growth agree. The maximum entry growth is 565 B.
+Raw and normalized growth agree. The maximum entry growth is 634 B.
 
 ## GitHub macOS stress evidence
 
@@ -111,4 +119,6 @@ The TEMP job used only contents: read, no user secrets, no artifact upload, and
 explicit cleanup of its own yes children. Its commit was dropped after the two
 jobs succeeded. The final ci.yml diff is zero. The temporary workflow's fixed
 job-inventory test rejected the extra TEMP job; this is not product acceptance.
-CI on the final head supplies merge evidence.
+CI on the final head supplies merge evidence. These stress runs precede the
+retry-EPERM correction, which has its own deterministic deadline/error regression
+and subsequent validation on the revised head.
