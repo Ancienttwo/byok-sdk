@@ -21,6 +21,7 @@ import {
   type SessionSelection,
   type TaskOfferPayload,
 } from '@byok-sdk/protocol';
+import { sameAgentRef } from '../agent-message-disposition.js';
 import { ByokCloudError, DeviceRetiredError, TaskOfferAppendRefusedError } from '../errors.js';
 import { taskOfferMessageId, uuidFromSha256 } from '../offer-identity.js';
 import { firstSealedPayload } from '../sealed-comparison.js';
@@ -36,10 +37,6 @@ import { tenantStoresFor, type CloudRootStores, type TenantStores } from '../ten
  */
 export function isTerminalAttemptStatus(status: TaskAttemptStatus): boolean {
   return status === 'complete' || status === 'failed' || status === 'cancelled';
-}
-
-export function sameAgentRef(expected: AgentRef, actual: AgentRef | undefined): boolean {
-  return actual?.agentId === expected.agentId && actual.profileRevision === expected.profileRevision;
 }
 
 /**
@@ -69,6 +66,15 @@ export function refuseSealedFields(payload: unknown, fields: readonly string[], 
   if (present.length > 0) {
     throw new ByokCloudError('coordination_input_invalid', `${present.join(', ')} belongs to the sealed lane; use ${sealedEntry}`);
   }
+}
+
+export async function materializeEnvelope(body: string, crypto: ByokCloudOptions['crypto']) {
+  const bytes = new TextEncoder().encode(body);
+  return {
+    body,
+    bodyHash: contentHash(await crypto.sha256(bytes)),
+    byteSize: BigInt(bytes.length),
+  };
 }
 
 interface Dependencies {
@@ -202,12 +208,7 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
         // allocation and insertion are still serialized per device.
         const envelope = build(taskId, seq, messageId);
         const body = encodeEnvelope(envelope);
-        const bytes = new TextEncoder().encode(body);
-        return {
-          body,
-          bodyHash: contentHash(await options.crypto.sha256(bytes)),
-          byteSize: BigInt(bytes.length),
-        };
+        return materializeEnvelope(body, options.crypto);
       },
     }).catch(async (refusal: unknown) => {
       // A retired device's stream refuses every retry of this offer, and the
@@ -290,12 +291,7 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
       messageId,
       materialize: async (seq) => {
         const body = encodeEnvelope(buildEnvelope(seq));
-        const bytes = new TextEncoder().encode(body);
-        return {
-          body,
-          bodyHash: contentHash(await options.crypto.sha256(bytes)),
-          byteSize: BigInt(bytes.length),
-        };
+        return materializeEnvelope(body, options.crypto);
       },
     });
     const envelope = decodeEnvelope(message.body);
@@ -339,12 +335,7 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
       messageId: record.receiptId,
       materialize: async (seq) => {
         const body = encodeEnvelope(createEnvelope('agent.egress.ack', payload, { id: record.receiptId, seq }));
-        const bytes = new TextEncoder().encode(body);
-        return {
-          body,
-          bodyHash: contentHash(await options.crypto.sha256(bytes)),
-          byteSize: BigInt(bytes.length),
-        };
+        return materializeEnvelope(body, options.crypto);
       },
     });
     const decoded = decodeEnvelope(message.body);
@@ -387,12 +378,7 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
       messageId: `agent-content-ack:${exactReceipt.requestId}`,
       materialize: async (seq) => {
         const body = encodeEnvelope(createEnvelope('agent.egress.ack', payload, { id: exactReceipt.requestId, seq }));
-        const bytes = new TextEncoder().encode(body);
-        return {
-          body,
-          bodyHash: contentHash(await options.crypto.sha256(bytes)),
-          byteSize: BigInt(bytes.length),
-        };
+        return materializeEnvelope(body, options.crypto);
       },
     });
     const decoded = decodeEnvelope(message.body);
@@ -424,8 +410,7 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
           taskId,
           seq,
         }));
-        const bytes = new TextEncoder().encode(body);
-        return { body, bodyHash: contentHash(await options.crypto.sha256(bytes)), byteSize: BigInt(bytes.length) };
+        return materializeEnvelope(body, options.crypto);
       },
     });
     const decoded = decodeEnvelope(message.body);

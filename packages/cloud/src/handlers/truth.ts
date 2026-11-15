@@ -7,13 +7,13 @@ import {
   isCoreConflictError,
   isCoreError,
   principalTenant,
-  type DevicePrincipal,
   type StorageErrorCode,
   type TruthManifestQuery,
   type TruthRecord,
   type TruthRecordKind,
 } from '@byok-sdk/core';
 import type { Context } from 'hono';
+import { parseJsonBytes } from '../json-bytes.js';
 import type { DeviceProofAuthDeps } from '../auth/device-proof.js';
 import {
   TRUTH_MANIFEST_MAX_LIMIT,
@@ -47,18 +47,9 @@ export interface TruthRouteDeps {
   readonly maxRequestBytes: number;
 }
 
-interface ProofContext {
-  readonly device: DevicePrincipal;
-  readonly requestId: string;
-  readonly operation: string;
-  readonly resource: string;
-  readonly bodySha256: string;
-  readonly bodySize: bigint;
-}
-
 export function truthManifestHandler(deps: TruthRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const authenticated = await authenticateTruthRequest(c, deps, {
+    const authenticated = await authenticateProofRequest(c, deps.proof, {
       body: EMPTY_BODY,
       operation: 'truth.list',
       resource: 'records',
@@ -75,7 +66,7 @@ export function truthManifestHandler(deps: TruthRouteDeps) {
 export function truthGetHandler(deps: TruthRouteDeps) {
   return async (c: Context): Promise<Response> => {
     const resource = rawRecordResource(c);
-    const authenticated = await authenticateTruthRequest(c, deps, {
+    const authenticated = await authenticateProofRequest(c, deps.proof, {
       body: EMPTY_BODY,
       operation: 'truth.read',
       resource,
@@ -106,7 +97,7 @@ export function truthPutHandler(deps: TruthRouteDeps) {
     if (body === 'too_large') return c.json({ error: 'truth request body too large' }, 413);
     if (body === undefined) return c.json({ error: 'invalid truth request body' }, 400);
 
-    const authenticated = await authenticateTruthRequest(c, deps, {
+    const authenticated = await authenticateProofRequest(c, deps.proof, {
       body,
       operation: 'truth.write',
       resource: rawRecordResource(c),
@@ -236,22 +227,6 @@ function prepareWrite(
     body,
     ...(label === undefined ? {} : { label }),
   };
-}
-
-function authenticateTruthRequest(
-  c: Context,
-  deps: TruthRouteDeps,
-  request: { readonly body: Uint8Array; readonly operation: string; readonly resource: string },
-): Promise<ProofContext | undefined> {
-  return authenticateProofRequest(c, deps.proof, request);
-}
-
-function parseJsonBytes(bytes: Uint8Array): unknown | undefined {
-  try {
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-  } catch {
-    return undefined;
-  }
 }
 
 function unauthorized(c: Context): Response {

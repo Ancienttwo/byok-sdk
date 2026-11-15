@@ -3,7 +3,8 @@ import { readTaskAgentMessageDraft } from '../agent-message-draft.js';
 import { readTaskAgentMessage } from '../task-agent-message.js';
 import { taskOfferMessageId } from '../offer-identity.js';
 import { type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
-import { AgentMessagePublishPayloadSchema, TaskOfferPayloadSchema, type AgentRef } from '@byok-sdk/protocol';
+import { AgentMessagePublishPayloadSchema, TaskOfferPayloadSchema } from '@byok-sdk/protocol';
+import { sameAgentRef } from '../agent-message-disposition.js';
 import { ByokCloudError } from '../errors.js';
 import { readAgentMessageDisposition, terminalReceiptKey } from '../inbound.js';
 import { projectTerminalResult, readDeviceTerminalReceipt } from '../terminal-result.js';
@@ -15,10 +16,9 @@ interface Dependencies {
   root: CloudRootStores;
   controlPlane: (tenant: TenantId) => ControlPlanePrincipal;
   options: ByokCloudOptions;
-  sameAgentRef: (expected: AgentRef, actual: AgentRef | undefined) => boolean;
 }
 
-export function createTaskReadsApi({ root, controlPlane, options, sameAgentRef }: Dependencies): Pick<ByokCloud,
+export function createTaskReadsApi({ root, controlPlane, options }: Dependencies): Pick<ByokCloud,
   | 'readTaskOffer'
   | 'readTaskAttempt'
   | 'listTaskAttempts'

@@ -9,7 +9,7 @@ import {
 import type { AgentMemoryProjectionSealing } from '../agent-memory-projection.js';
 import { ByokCloudError } from '../errors.js';
 import type { TenantStores } from '../tenant-stores.js';
-import { sameAgentRef } from './enqueue.js';
+import { sameAgentRef } from '../agent-message-disposition.js';
 
 interface Dependencies {
   options: ByokCloudOptions;

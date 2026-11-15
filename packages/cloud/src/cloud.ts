@@ -10,7 +10,7 @@ import { createMaintenanceApi } from './api/maintenance.js';
 import { createAgentExecutionsApi } from './api/agent-executions.js';
 import { createAgentMemoryApi } from './api/agent-memory.js';
 import { createApprovalsApi } from './api/approvals.js';
-import { createEnqueuePaths, sameAgentRef } from './api/enqueue.js';
+import { createEnqueuePaths } from './api/enqueue.js';
 import { createProjectionReceiptsApi } from './api/projection-receipts.js';
 import { createSteeringApi } from './api/steering.js';
 import { createTaskRedactionsApi } from './api/task-redactions.js';
@@ -961,7 +961,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     return { kind: 'control-plane', tenantId: tenant, operatorId };
   }
 
-  const taskReadsApi = createTaskReadsApi({ root, controlPlane, options, sameAgentRef });
+  const taskReadsApi = createTaskReadsApi({ root, controlPlane, options });
   const enqueue = createEnqueuePaths({ root, controlPlane, options, readTaskOffer: taskReadsApi.readTaskOffer });
 
   const maintenanceApi = createMaintenanceApi({ options, proofReceiptRetention });

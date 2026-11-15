@@ -20,6 +20,7 @@ import {
   E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION,
 } from '@byok-sdk/protocol';
 import type { Context } from 'hono';
+import { parseJsonBytes } from '../json-bytes.js';
 import type { DeviceProofAuthDeps } from '../auth/device-proof.js';
 import * as e2eeMember from '../e2ee-member.js';
 import { ByokCloudError, isCloudError, type CloudErrorCode } from '../errors.js';
@@ -63,12 +64,8 @@ function proofWriteHandler(deps: E2eeMemberRouteDeps, operation: string, resourc
     if (proven.requestId.length > TRUTH_REQUEST_ID_MAX_LENGTH) {
       return c.json({ error: 'proof_request_conflict' }, 409);
     }
-    let json: unknown;
-    try {
-      json = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body));
-    } catch {
-      return c.json({ error: 'invalid request body' }, 400);
-    }
+    const json = parseJsonBytes(body);
+    if (json === undefined) return c.json({ error: 'invalid request body' }, 400);
     const proof: e2eeMember.E2eeProvenWrite = {
       deviceId: proven.device.deviceId,
       request: {

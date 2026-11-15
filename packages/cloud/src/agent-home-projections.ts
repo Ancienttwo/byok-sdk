@@ -14,6 +14,7 @@ import {
   type AgentHomeProjectionReadback,
 } from '@byok-sdk/protocol';
 import type { TenantId } from '@byok-sdk/core';
+import { sameAgentRef } from './agent-message-disposition.js';
 import { agentReliabilityKey } from './agent-reliability.js';
 import { ByokCloudError } from './errors.js';
 import type { TenantBoundReceipts } from './tenant-stores.js';
@@ -46,8 +47,7 @@ export function sameAgentHomeProjectionRequest(
 ): boolean {
   return (
     expected.requestId === actual.requestId &&
-    expected.agentRef.agentId === actual.agentRef.agentId &&
-    expected.agentRef.profileRevision === actual.agentRef.profileRevision &&
+    sameAgentRef(expected.agentRef, actual.agentRef) &&
     expected.hostRevision === actual.hostRevision &&
     expected.projectionHash === actual.projectionHash &&
     JSON.stringify(expected.projection) === JSON.stringify(actual.projection)
@@ -60,8 +60,7 @@ export function receiptMatchesAgentHomeProjection(
 ): boolean {
   return (
     receipt.requestId === request.requestId &&
-    receipt.agentRef.agentId === request.agentRef.agentId &&
-    receipt.agentRef.profileRevision === request.agentRef.profileRevision &&
+    sameAgentRef(receipt.agentRef, request.agentRef) &&
     receipt.projectionHash === request.projectionHash
   );
 }
@@ -72,8 +71,7 @@ export function statusInputMatchesAgentHomeProjection(
 ): boolean {
   return (
     input.requestId === request.requestId &&
-    input.agentRef.agentId === request.agentRef.agentId &&
-    input.agentRef.profileRevision === request.agentRef.profileRevision &&
+    sameAgentRef(input.agentRef, request.agentRef) &&
     input.projectionHash === request.projectionHash
   );
 }

@@ -22,6 +22,7 @@ import {
   type InputPreparationReadback,
 } from '@byok-sdk/protocol';
 import type { TenantId } from '@byok-sdk/core';
+import { sameAgentRef } from './agent-message-disposition.js';
 import { agentReliabilityKey } from './agent-reliability.js';
 import { ByokCloudError } from './errors.js';
 import type { TenantBoundReceipts } from './tenant-stores.js';
@@ -76,8 +77,7 @@ export function receiptMatchesInputPreparation(
 ): boolean {
   return (
     receipt.requestId === request.requestId &&
-    receipt.agentRef.agentId === request.agentRef.agentId &&
-    receipt.agentRef.profileRevision === request.agentRef.profileRevision &&
+    sameAgentRef(receipt.agentRef, request.agentRef) &&
     receipt.profileId === request.profileId &&
     receipt.policyRevision === request.policyRevision
   );
@@ -89,8 +89,7 @@ export function statusInputMatchesInputPreparation(
 ): boolean {
   return (
     input.requestId === request.requestId &&
-    input.agentRef.agentId === request.agentRef.agentId &&
-    input.agentRef.profileRevision === request.agentRef.profileRevision
+    sameAgentRef(input.agentRef, request.agentRef)
   );
 }
 
