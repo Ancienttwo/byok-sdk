@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   adoptOwnedProcessTree,
   attachOwnedProcessGroupLedger,
@@ -39,6 +39,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   // Independent of the disposer under test: also clean up when old code leaks a fork.
   for (const pgid of forkingGroups) {
     await expect.poll(() => {
@@ -213,6 +214,40 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
     }
   }, 30_000);
 
+  it('startup reclaim reaps members born while the group continuously forks', async () => {
+    const marker = path.join(root, 'reclaim-forked');
+    const script = `process.on('SIGUSR2', () => require('node:child_process').spawn('/bin/sh', ['-c', 'sleep 600 & echo ready > "$1"; while :; do sleep 600 & sleep 0.01; done', 'forker', ${JSON.stringify(marker)}], { stdio: 'ignore' })); console.log('ready'); setInterval(() => {}, 1000);`;
+    const child = spawn(process.execPath, ['-e', script],
+      withOwnedProcessTree({ cwd: process.cwd(), stdio: ['ignore', 'pipe', 'ignore'] }));
+    const pgid = child.pid!;
+    forkingGroups.add(pgid);
+    await new Promise<void>((resolve, reject) => {
+      child.stdout!.once('data', () => resolve());
+      child.once('error', reject);
+    });
+    const record = recordFor(pgid);
+    const nativeKill = process.kill.bind(process);
+    let first = true;
+    let late: number[] = [];
+    const signals = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (Math.abs(pid) === pgid && signal === 'SIGKILL' && first) {
+        first = false;
+        // Real births after reclaim's first snapshot, missed by its first delivery.
+        nativeKill(pgid, 'SIGUSR2');
+        execFileSync('/bin/sh', ['-c', 'while ! test -f "$1"; do sleep 0.01; done', 'wait', marker], { timeout: 2000 });
+        late = [...readProcessTable().values()].filter(entry => entry.pgid === pgid && entry.pid !== pgid).map(entry => entry.pid);
+        expect(late.length).toBeGreaterThan(0);
+        return nativeKill(pgid, 'SIGKILL');
+      }
+      return nativeKill(pid, signal);
+    });
+    expect(await reapOwnedProcessGroups([record])).toEqual({ ...NOTHING, found: 1, terminated: 1, ended: [record] });
+    expect(first).toBe(false);
+    expect(late.every(pid => !processAlive(pid))).toBe(true);
+    expect(readProcessGroupRows().filter(row => Number(row[2]) === pgid && isLiveProcessState(row[3]!))).toEqual([]);
+    expect(signals.mock.calls.some(([pid, signal]) => late.includes(pid) && signal === 'SIGKILL')).toBe(true);
+  });
+
   it('an unreadable process table fails the adoption instead of skipping the record', async () => {
     attachRecorder();
     const tree = await spawnOwnedTree();
@@ -294,7 +329,9 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
     await expect.poll(() => readProcessTable().has(tree.pgid)).toBe(false);
     // The recorded root claims to have started after every process now in the group.
     const record = synthetic(tree.pgid, FUTURE_START);
+    const signals = vi.spyOn(process, 'kill');
     expect(await reapOwnedProcessGroups([record])).toEqual({ ...NOTHING, ended: [record] });
+    expect(signals.mock.calls.filter(([, signal]) => signal === 'SIGKILL')).toEqual([]);
     expect(processAlive(tree.toolPid)).toBe(true);
     expect(groupAlive(tree.pgid)).toBe(true);
   });
