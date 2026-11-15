@@ -48,15 +48,16 @@ function installed(fromDir, name) {
   throw new Error(`build-pi-jiti-seed: ${name} is not installed beside ${fromDir}`);
 }
 
-/** Literal import/require edges, including lazy imports, without matching comments. */
-function moduleEdges(source) {
+/** Literal edges with jiti's loading mode: static edges inherit, import() is async, require() is sync. */
+function moduleEdges(source, moduleAsync) {
   const edges = [];
   const visit = node => {
     if (node === null || typeof node !== 'object') return;
-    if (['ImportDeclaration', 'ExportNamedDeclaration', 'ExportAllDeclaration', 'ImportExpression'].includes(node.type)
-      && typeof node.source?.value === 'string') edges.push({ id: node.source.value, async: true });
-    if (node.type === 'CallExpression' && node.callee.type === 'Identifier' && node.callee.name === 'require'
-      && typeof node.arguments[0]?.value === 'string') edges.push({ id: node.arguments[0].value, async: false });
+    const isStatic = ['ImportDeclaration', 'ExportNamedDeclaration', 'ExportAllDeclaration'].includes(node.type);
+    const isDynamic = node.type === 'ImportExpression';
+    const isRequire = node.type === 'CallExpression' && node.callee.type === 'Identifier' && node.callee.name === 'require';
+    const id = isRequire ? node.arguments[0]?.value : node.source?.value;
+    if ((isStatic || isDynamic || isRequire) && typeof id === 'string') edges.push({ id, async: isDynamic || (isStatic && moduleAsync) });
     for (const value of Object.values(node)) {
       if (Array.isArray(value)) value.forEach(visit);
       else if (value !== null && typeof value === 'object') visit(value);
@@ -72,7 +73,7 @@ function moduleEdges(source) {
  * are included even when Node can normally load them without a transform.
  * Both async and CJS evaluations get their own cache entry, as jiti keys them.
  */
-function diskGraph(pkg, entry, peers) {
+export function diskGraph(pkg, entry, peers, createJiti) {
   const seen = new Set(), pending = [{ path: entry, file: path.join(pkg, entry), async: true }], inputs = [];
   for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
     const key = `${item.path}:${item.async}`;
@@ -80,12 +81,14 @@ function diskGraph(pkg, entry, peers) {
     seen.add(key);
     const source = readFileSync(item.file, 'utf8');
     inputs.push({ ...item, source, ts: false, root: 'pi-subagents' });
-    for (const edge of moduleEdges(source)) {
+    const resolver = createJiti(item.file, { fsCache: false, moduleCache: false });
+    for (const edge of moduleEdges(source, item.async)) {
       if (edge.id.startsWith('node:') || builtinModules.includes(edge.id) || peers.has(edge.id)) continue;
       // jiti 2.7.0 always loads its own loader and TypeScript natively.
       if (/^(?:jiti|typescript)(?:\/|$)/u.test(edge.id)) continue;
-      const resolver = createRequire(item.file);
-      const resolved = resolver.resolve(edge.id);
+      // These public APIs call jitiResolve with the edge's runtime async mode.
+      const parentURL = pathToFileURL(item.file).href;
+      const resolved = edge.async ? fileURLToPath(resolver.esmResolve(edge.id, { parentURL })) : resolver.resolve(edge.id, { parentURL });
       let relative;
       if (edge.id.startsWith('.')) relative = path.posix.join(path.posix.dirname(item.path), path.relative(path.dirname(item.file), resolved).split(path.sep).join('/'));
       else {
@@ -100,11 +103,11 @@ function diskGraph(pkg, entry, peers) {
 }
 
 /** All supported source roots, derived from package edges and SDK build outputs. */
-async function seedInputs(subagentsDir, extensionsDir, hostSdkSource) {
+async function seedInputs(subagentsDir, extensionsDir, hostSdkSource, createJiti) {
   const { HOST_PEER_ALIASES } = await import(pathToFileURL(path.join(subagentsDir, 'src/runs/background/runner-aliases.js')).href);
   const peers = new Set(HOST_PEER_ALIASES.map(alias => alias.specifier));
   const inputs = [
-    ...Object.entries(GRAPHS).flatMap(([group, entry]) => diskGraph(subagentsDir, entry, peers).map(input => ({ ...input, group }))),
+    ...Object.entries(GRAPHS).flatMap(([group, entry]) => diskGraph(subagentsDir, entry, peers, createJiti).map(input => ({ ...input, group }))),
     ...readdirSync(extensionsDir).filter(file => /^pi-subagent-.*\.js$/u.test(file)).sort().map(file => ({
       group: 'parent', root: 'pi-subagent-extensions', path: file, async: true, ts: false, source: readFileSync(path.join(extensionsDir, file), 'utf8'),
     })),
@@ -136,7 +139,7 @@ async function generate(subagentsDir, jitiDir, sdkBin) {
   const jiti = createJiti(path.join(client, 'package.json'), { fsCache: false, moduleCache: false });
   const officialPi = installed(sdkBin, '@earendil-works/pi-coding-agent');
   const pi = await import(pathToFileURL(path.join(officialPi.dir, officialPi.manifest.exports['.'].import)).href);
-  const inputs = await seedInputs(subagentsDir, sdkBin, piSubagentHostSdkSource(pi));
+  const inputs = await seedInputs(subagentsDir, sdkBin, piSubagentHostSdkSource(pi), createJiti);
   const templates = new Map();
   const entries = inputs.map((input, index) => {
     const canonical = canonicalSeedFile(input.root, input.path);
@@ -255,11 +258,12 @@ async function zeroTransform(assetRoot, materializer) {
   writeFileSync(path.join(hostSdk, 'index.js'), piSubagentHostSdkSource(pi));
   seed.materialize('parent', pkg, hostSdk); seed.materialize('runner', pkg); seed.materialize('host-peers', peers);
   // Derive the lookups from copied sources, independently of the manifest.
-  const lookups = await seedInputs(pkg, path.join(assetRoot, 'pi-subagent-extensions'), readFileSync(path.join(hostSdk, 'index.js'), 'utf8'));
-  let transforms = 0;
   const jitiDir = path.join(pkg, 'node_modules', 'jiti');
+  const { createJiti } = createRequire(path.join(jitiDir, 'package.json'))(path.join(jitiDir, 'lib', 'jiti.cjs'));
+  const lookups = await seedInputs(pkg, path.join(assetRoot, 'pi-subagent-extensions'), readFileSync(path.join(hostSdk, 'index.js'), 'utf8'), createJiti);
+  let transforms = 0;
   // jiti's own cache choice, after the seed decided JITI_FS_CACHE: a cold seed leaves no cache to hit.
-  const jiti = createRequire(path.join(jitiDir, 'package.json'))(path.join(jitiDir, 'lib', 'jiti.cjs')).createJiti(materializer, {
+  const jiti = createJiti(materializer, {
     moduleCache: false, transform: () => { transforms++; return { code: '' }; },
   });
   for (const entry of lookups) {
@@ -269,12 +273,14 @@ async function zeroTransform(assetRoot, materializer) {
   process.stdout.write(JSON.stringify({ entries: lookups.length, transforms, ...(unavailable === undefined ? {} : { unavailable }) }));
 }
 
-const [mode, target] = process.argv.slice(2);
-if (mode === undefined) await build();
-else if (mode === '--verify-installed' && target) await verifyInstalled(target);
-else if (mode === '--gate' && target) {
-  const scratch = mkdtempSync(path.join(os.tmpdir(), 'byok-pi-seed-gate-'));
-  const materializer = process.argv[4] === undefined ? SOURCE_MATERIALIZER : path.resolve(process.argv[4]);
-  try { console.log(JSON.stringify(zeroTransformRun(path.resolve(target), scratch, materializer))); } finally { rmSync(scratch, { recursive: true, force: true }); }
-} else if (mode === '--zero-transform' && target && process.argv[4]) await zeroTransform(target, process.argv[4]);
-else throw new Error('usage: build-pi-jiti-seed.mjs [--verify-installed <installRoot> | --gate <piAssetRoot> [<materializerModule>]]');
+if (import.meta.main) {
+  const [mode, target] = process.argv.slice(2);
+  if (mode === undefined) await build();
+  else if (mode === '--verify-installed' && target) await verifyInstalled(target);
+  else if (mode === '--gate' && target) {
+    const scratch = mkdtempSync(path.join(os.tmpdir(), 'byok-pi-seed-gate-'));
+    const materializer = process.argv[4] === undefined ? SOURCE_MATERIALIZER : path.resolve(process.argv[4]);
+    try { console.log(JSON.stringify(zeroTransformRun(path.resolve(target), scratch, materializer))); } finally { rmSync(scratch, { recursive: true, force: true }); }
+  } else if (mode === '--zero-transform' && target && process.argv[4]) await zeroTransform(target, process.argv[4]);
+  else throw new Error('usage: build-pi-jiti-seed.mjs [--verify-installed <installRoot> | --gate <piAssetRoot> [<materializerModule>]]');
+}
