@@ -338,29 +338,6 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   const qualify = [];
   const before = parse(beforeText), after = parse(afterText);
   if (path.startsWith('examples/') && (before.private !== true || after.private !== true)) throw new Error('Example workspaces must stay private');
-  // #2104: admit only the exact private-root manifest migration, before other admissions.
-  if (path === 'package.json' && before.private === true && before.devDependencies?.['eslint-scope'] === undefined
-    && isDeepStrictEqual(after, { ...before, devDependencies: { ...before.devDependencies, 'eslint-scope': '9.1.2' } })) {
-    delete after.devDependencies['eslint-scope'];
-  }
-  // #654 W3: keep the provider in the private root's peer context so cross-workspace helpers share Vitest.
-  if (path === 'package.json' && before.private === true && after.private === true
-    && after.devDependencies?.vitest === '5.1.0') {
-    const pins = { '@vitest/browser-playwright': '5.1.0', playwright: '1.64.1' };
-    if (Object.entries(pins).every(([name, pin]) => before.devDependencies?.[name] === undefined
-      && after.devDependencies?.[name] === pin)) {
-      for (const name of Object.keys(pins)) delete after.devDependencies[name];
-    }
-  }
-  // #2149: the graph probe reuses the client's exact esbuild development pin.
-  if (path === 'package.json' && before.private === true && after.private === true
-    && before.devDependencies?.esbuild === undefined && after.devDependencies?.esbuild !== undefined) {
-    const client = JSON.parse(readFileSync(resolve(cwd, 'packages/client/package.json'), 'utf8'));
-    const pin = client.devDependencies?.esbuild;
-    if (/^\d+\.\d+\.\d+$/.test(pin) && after.devDependencies.esbuild === pin) {
-      delete after.devDependencies.esbuild;
-    }
-  }
   if (path !== 'bun.lock') qualify.push(...normalizeDependencyVersions(before, after, path, cwd));
   if (path === 'bun.lock') {
     // Newly introduced hosted workspaces retain their shape/ownership gate.
@@ -370,15 +347,6 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     const { added, records } = admitRegisteredPrivateLock(before, after, { base, cwd, workspaceGraph });
     const impact = dependencyLockImpact(before, after, { cwd, admitted: records });
     return { ...impact, dirs: [...new Set([...added, ...impact.dirs])] };
-  } else if (path === `${HOSTED_WORKER.dir}/package.json`) {
-    // #654 W4: the browser member page imports core's sealed-payload entry directly.
-    if (before.dependencies?.['@byok-sdk/core'] === undefined && after.dependencies?.['@byok-sdk/core'] === 'workspace:*') {
-      delete after.dependencies['@byok-sdk/core'];
-    }
-    if (before.scripts?.['test:browser'] === undefined
-      && after.scripts?.['test:browser'] === 'vitest run --config src/browser/vitest.config.ts') {
-      delete after.scripts['test:browser'];
-    }
   } else if (path === 'examples/byok-mcp-server/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The MCP server example must stay private');
     // #1375: the routine calendar moved to protocol, so the core edge goes.
