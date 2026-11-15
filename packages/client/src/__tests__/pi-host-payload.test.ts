@@ -137,12 +137,14 @@ async function cacheFiles(dir: string): Promise<Map<string, string>> {
 }
 
 describe('Pi jiti seed (#1927)', () => {
-  it('derives split-export seed keys from the files and async modes jiti actually transforms (#2209)', async () => {
+  it.each(['import', 'require'] as const)('derives seed keys from jiti transforms when the parent loads via %s (#2209)', async mode => {
     const root = await tempRoot('byok-pi-seed-resolve-');
     await fs.mkdir(path.join(root, 'node_modules/split-edge'), { recursive: true });
     const sources = {
       'package.json': '{"type":"module"}',
-      'entry.js': 'import value from "split-edge"; export const result = [value, require("split-edge")];',
+      'entry.js': mode === 'import' ? 'export * from "./parent.js";' : 'module.exports = require("./parent.js");',
+      'parent.js': 'import value from "split-edge"; export { default as reexported } from "split-edge"; export const result = [value, require("split-edge")]; export const dynamic = () => import("./dynamic.js");',
+      'dynamic.js': 'module.exports = "dynamic";',
       'node_modules/split-edge/package.json': '{"type":"module","exports":{"import":"./import.js","require":"./require.js"}}',
       // Extensionless import makes native ESM fail, exercising jiti's fallback on Node 24 too.
       'node_modules/split-edge/import.js': 'import "./leaf"; export default "import";',
@@ -163,12 +165,13 @@ describe('Pi jiti seed (#1927)', () => {
     const options = { fsCache: false, moduleCache: false };
     const base = createJiti(path.join(root, 'entry.js'), options), runtimeKeys: string[] = [];
     const key = (file: string, async: boolean): string => `${path.relative(root, file).split(path.sep).join('/')}:${async}`;
-    const splitEntry = (file: string): boolean => /[\\/](import|require)\.js$/u.test(file);
+    const splitEntry = (file: string): boolean => /[\\/](import|require|dynamic)\.js$/u.test(file);
     const jiti = createJiti(path.join(root, 'entry.js'), { ...options, transform(input: TransformInput) {
       if (splitEntry(input.filename)) runtimeKeys.push(key(input.filename, input.async));
       return base.options.transform(input);
     } });
-    await jiti.import('./entry.js');
+    const parent = await jiti.import('./entry.js') as { dynamic(): Promise<unknown> };
+    await parent.dynamic();
     expect(diskGraph(root, 'entry.js', new Set(), createJiti).filter(input => splitEntry(input.file))
       .map(input => key(input.file, input.async)).sort()).toEqual(runtimeKeys.sort());
   });

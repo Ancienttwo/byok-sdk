@@ -48,15 +48,16 @@ function installed(fromDir, name) {
   throw new Error(`build-pi-jiti-seed: ${name} is not installed beside ${fromDir}`);
 }
 
-/** Literal import/require edges, including lazy imports, without matching comments. */
-function moduleEdges(source) {
+/** Literal edges with jiti's loading mode: static edges inherit, import() is async, require() is sync. */
+function moduleEdges(source, moduleAsync) {
   const edges = [];
   const visit = node => {
     if (node === null || typeof node !== 'object') return;
-    if (['ImportDeclaration', 'ExportNamedDeclaration', 'ExportAllDeclaration', 'ImportExpression'].includes(node.type)
-      && typeof node.source?.value === 'string') edges.push({ id: node.source.value, async: true });
-    if (node.type === 'CallExpression' && node.callee.type === 'Identifier' && node.callee.name === 'require'
-      && typeof node.arguments[0]?.value === 'string') edges.push({ id: node.arguments[0].value, async: false });
+    const isStatic = ['ImportDeclaration', 'ExportNamedDeclaration', 'ExportAllDeclaration'].includes(node.type);
+    const isDynamic = node.type === 'ImportExpression';
+    const isRequire = node.type === 'CallExpression' && node.callee.type === 'Identifier' && node.callee.name === 'require';
+    const id = isRequire ? node.arguments[0]?.value : node.source?.value;
+    if ((isStatic || isDynamic || isRequire) && typeof id === 'string') edges.push({ id, async: isDynamic || (isStatic && moduleAsync) });
     for (const value of Object.values(node)) {
       if (Array.isArray(value)) value.forEach(visit);
       else if (value !== null && typeof value === 'object') visit(value);
@@ -81,7 +82,7 @@ export function diskGraph(pkg, entry, peers, createJiti) {
     const source = readFileSync(item.file, 'utf8');
     inputs.push({ ...item, source, ts: false, root: 'pi-subagents' });
     const resolver = createJiti(item.file, { fsCache: false, moduleCache: false });
-    for (const edge of moduleEdges(source)) {
+    for (const edge of moduleEdges(source, item.async)) {
       if (edge.id.startsWith('node:') || builtinModules.includes(edge.id) || peers.has(edge.id)) continue;
       // jiti 2.7.0 always loads its own loader and TypeScript natively.
       if (/^(?:jiti|typescript)(?:\/|$)/u.test(edge.id)) continue;
