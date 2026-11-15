@@ -137,6 +137,21 @@ export function buildConfiguredProfile(
   });
 }
 
+function assertSecretAllowed(authMode: ProviderAuthMode, secret?: string): void {
+  if (authMode === 'none' && secret !== undefined) {
+    throw new ByokKeysError(
+      'PROVIDER_SECRET_NOT_ALLOWED',
+      'A provider without authentication cannot accept a secret',
+    );
+  }
+  if (secret !== undefined && secret.length === 0) {
+    throw new ByokKeysError(
+      'PROVIDER_SECRET_EMPTY',
+      'Provider secret cannot be empty',
+    );
+  }
+}
+
 function isChangeCommitted(error: unknown): boolean {
   return error instanceof ByokKeysError && error.code === 'PROVIDER_CHANGE_COMMITTED';
 }
@@ -256,18 +271,7 @@ export class ProviderRegistry {
       const profile = buildConfiguredProfile(previous, configuration, this.#now);
       const secretName = modelProviderSecretName(profileRef);
 
-      if (configuration.auth_mode === 'none' && secret !== undefined) {
-        throw new ByokKeysError(
-          'PROVIDER_SECRET_NOT_ALLOWED',
-          'A provider without authentication cannot accept a secret',
-        );
-      }
-      if (secret !== undefined && secret.length === 0) {
-        throw new ByokKeysError(
-          'PROVIDER_SECRET_EMPTY',
-          'Provider secret cannot be empty',
-        );
-      }
+      assertSecretAllowed(configuration.auth_mode, secret);
       const pendingBefore = await this.#profiles.getPending(profileRef);
       if (configuration.auth_mode !== 'none' && secret === undefined) {
         if (pendingBefore !== undefined) throw configurationPendingError();
@@ -316,15 +320,7 @@ export class ProviderRegistry {
     return this.#write(async (committed) => {
       const profile = await this.#profiles.get(profileRef);
       if (profile === undefined) throw providerNotConfigured(profileRef);
-      if (profile.auth_mode === 'none') {
-        throw new ByokKeysError(
-          'PROVIDER_SECRET_NOT_ALLOWED',
-          'A provider without authentication cannot accept a secret',
-        );
-      }
-      if (secret.length === 0) {
-        throw new ByokKeysError('PROVIDER_SECRET_EMPTY', 'Provider secret cannot be empty');
-      }
+      assertSecretAllowed(profile.auth_mode, secret);
       await this.#writeAndCommit(
         profileRef,
         'replace_secret',
