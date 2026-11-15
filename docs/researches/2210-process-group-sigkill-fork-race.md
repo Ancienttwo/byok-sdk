@@ -74,6 +74,8 @@ were `\b__esm\b` and `\binit_\w+` against the emitted entry files.
 | bin/pi-runtime-host.js | 6 / 14 | 6 / 14 |
 
 The process-signal-state section is direct function declarations on both sides.
+The process-tree module already imported processSignalState from this utility on
+base; the change adds an imported binding, not a new dependency edge.
 Head adds `isLiveProcessState` and `killProcessGroupsUntilGone` beside the existing
 functions, without wrapping them in `__esm` or adding an `init_` function. The
 new import therefore introduces no extra initialization wrapper in these entries.
@@ -87,3 +89,26 @@ new import therefore introduces no extra initialization wrapper in these entries
 The other affected static closures grow by 565 B and fit their existing budgets:
 @byok-sdk/client, @byok-sdk/bot-collaboration, its testing entry, and bin:byok-agent.
 Raw and normalized growth agree. The maximum entry growth is 565 B.
+
+## GitHub macOS stress evidence
+
+TEMP commit `5e042845eee371bb1f8ca0140b1d3436671f102d`,
+[workflow run 43660432809](https://github.com/Ancienttwo/byok-sdk/actions/runs/43660432809):
+
+| Runner | CPU-pressure processes | Rounds | Single-case passes / failures | Result |
+| --- | ---: | ---: | ---: | --- |
+| macos-latest | 3 yes | 50 | 150 / 0 | [success, job 132648316660](https://github.com/Ancienttwo/byok-sdk/actions/runs/43660432809/job/132648316660) |
+| macos-15-intel | 4 yes | 50 | 150 / 0 | [success, job 132648316393](https://github.com/Ancienttwo/byok-sdk/actions/runs/43660432809/job/132648316393) |
+
+Each round runs the native durable fork case, the deterministic process-tree
+fork case, and the original unreadable-process-table case separately. Thus each
+runner exercised 1000 native continuously forking durable groups in addition to
+the other cases. Both logs contain rounds 1 through 50, 150 one-test-pass
+summaries, and no failed-test summary or FAIL marker. There are no failure
+residual rows to report.
+
+The TEMP job used only contents: read, no user secrets, no artifact upload, and
+explicit cleanup of its own yes children. Its commit was dropped after the two
+jobs succeeded. The final ci.yml diff is zero. The temporary workflow's fixed
+job-inventory test rejected the extra TEMP job; this is not product acceptance.
+CI on the final head supplies merge evidence.
