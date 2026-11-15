@@ -1,3 +1,4 @@
+import { objectRecord as record } from '../shared-rules.js';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
@@ -29,10 +30,6 @@ interface StreamState {
   /** The agentMessage item whose non-blank delta last started a draft. */
   draftItem?: unknown;
 }
-const record = (value: unknown): Record<string, unknown> | undefined =>
-  value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
 const failure = (reason: string) =>
   new RuntimeExecutionFailure({
     phase: 'run',

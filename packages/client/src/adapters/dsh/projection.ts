@@ -1,3 +1,4 @@
+import { objectRecord as record } from '../shared-rules.js';
 import { BufferedToolUse } from '../buffered-tool-use.js';
 import type { AgentEvent, RuntimeFailureClass } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure.js';
@@ -11,10 +12,6 @@ export type DshTurnOutcome =
   | { readonly kind: 'aborted' }
   | { readonly kind: 'failed'; readonly failure: RuntimeFailureClass; readonly reason: string };
 
-const record = (value: unknown): Record<string, unknown> | undefined =>
-  value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
 const count = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 const authority = (reason: string) =>

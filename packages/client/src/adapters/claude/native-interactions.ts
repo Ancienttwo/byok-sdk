@@ -1,3 +1,4 @@
+import { record } from '../shared-rules.js';
 import {
   NativeInteractionController,
   NativeInteractionError,
@@ -15,9 +16,6 @@ export const CLAUDE_NATIVE_INTERACTION_CAPABILITIES = Object.freeze({
   structuredQuestions: true,
 });
 
-function record(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 function text(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }

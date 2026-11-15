@@ -1,3 +1,4 @@
+import { objectRecord as record } from '../shared-rules.js';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 import type { CodexOpenStepRequest } from '../../runtime/codex-session-runtime.js';
 
@@ -6,8 +7,6 @@ type JsonRecord = Record<string, unknown>;
 const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
 const PREFIX = 'codex Agent user MCP server exclusion refused';
 const UNREADABLE_STATUS = `${PREFIX}: mcpServerStatus/list returned a reply it cannot read`;
-const record = (value: unknown): JsonRecord | undefined =>
-  typeof value === 'object' && value !== null && !Array.isArray(value) ? value as JsonRecord : undefined;
 /** A cursor that never ends is a broken reply, not an inventory. */
 const MAX_STATUS_PAGES = 64;
 

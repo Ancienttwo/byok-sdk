@@ -1,11 +1,9 @@
+import { record } from '../shared-rules.js';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { formatToolAuthorizationDenial, type ToolAuthorizationGate, type ToolAuthorizationVerdict, type ToolCall } from '../../tool-authorization.js';
 import type { ClaudeStreamMessage } from './projection.js';
 
-function record(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 function text(value: unknown): value is string { return typeof value === 'string' && value.length > 0; }
 
 export function decodeClaudePreToolUse(value: unknown): ToolCall {

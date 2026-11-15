@@ -1,3 +1,4 @@
+import { objectRecord as record } from '../shared-rules.js';
 import { BufferedToolUse } from '../buffered-tool-use.js';
 import type { AgentEvent, RuntimeFailureClass } from '@byok-sdk/protocol';
 import type { McpEventIdentities, McpEventIdentity } from '../../mcp/event-identity.js';
@@ -11,10 +12,6 @@ export type AgyTurnOutcome =
   | { readonly kind: 'aborted' }
   | { readonly kind: 'failed'; readonly failure: RuntimeFailureClass; readonly reason: string; readonly fromText?: true };
 
-const record = (value: unknown): Record<string, unknown> | undefined =>
-  value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
 
 /**
  * Exact admitted agy names (`mcp_<server>_<tool>`, verbatim), never split from
