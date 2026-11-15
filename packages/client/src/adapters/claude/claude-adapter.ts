@@ -33,7 +33,7 @@ import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-execu
 import { ClaudeToolAuthorizationBridge } from './tool-authorization.js';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions.js';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions.js';
-import { AssistantMessageTracker, createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ClaudeStreamMessage, type ToolUseCorrelation } from './projection.js';
+import { AssistantMessageTracker, mapClaudeMessageToAgentEvents, type ClaudeStreamMessage, type ToolUseCorrelation } from './projection.js';
 import { ClaudeFailureEvidence } from './failure-evidence.js';
 import { ClaudeStreamSession } from './stream-session.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
@@ -605,7 +605,7 @@ class ClaudeSession implements Session {
     private readonly modelId?: string,
     private readonly native?: ClaudeNativeInteractionBridge,
     private readonly gate?: ClaudeToolAuthorizationBridge,
-  ) { this.correlation = createToolUseCorrelation(this.mcpIdentity.identities); if (native !== undefined) this.interactions = native.channel; }
+  ) { this.correlation = { toolNameByUseId: new Map(), mcpIdentities: this.mcpIdentity.identities }; if (native !== undefined) this.interactions = native.channel; }
 
   get events(): AsyncIterable<AgentEvent | MessageDraftDelta> {
     const stream = this.stream;

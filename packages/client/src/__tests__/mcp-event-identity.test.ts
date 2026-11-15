@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { AgentEventSchema, type AgentEvent } from '@byok-sdk/protocol';
 import type { MessageDraftDelta } from '../types';
 import { mcpEventIdentities } from '../mcp/event-identity';
-import { createToolUseCorrelation, mapClaudeMessageToAgentEvents } from '../adapters/claude/projection';
+import { mapClaudeMessageToAgentEvents, type ToolUseCorrelation } from '../adapters/claude/projection';
 import { mapPiMessageToAgentEvent } from '../adapters/pi/events';
 import { projectDurableEvent, withMcpIdentity } from '../adapters/pi-durable/events';
 import { GrokProjection } from '../adapters/grok/projection';
@@ -14,7 +14,7 @@ const name = 'mcp__market__feed__get__quote';
 const mcp = { server: 'market__feed', tool: 'get__quote' };
 
 it('retains exact observed Claude identity across tool use/result without delimiter guessing', () => {
-  const correlation = createToolUseCorrelation(identities);
+  const correlation: ToolUseCorrelation = { toolNameByUseId: new Map(), mcpIdentities: identities };
   const use = mapClaudeMessageToAgentEvents({ type: 'assistant', message: { content: [
     { type: 'tool_use', id: 'call', name, input: {} },
   ] } }, correlation, { workspaceDir: '/tmp' });
@@ -29,7 +29,7 @@ it('retains exact observed Claude identity across tool use/result without delimi
 it.each(['bash', 'mcp__unknown__quote', name])('does not infer Claude identity without observation: %s', tool => {
   const event = mapClaudeMessageToAgentEvents({ type: 'assistant', message: { content: [
     { type: 'tool_use', id: 'call', name: tool, input: {} },
-  ] } }, createToolUseCorrelation(), { workspaceDir: '/tmp' }).events[0];
+  ] } }, { toolNameByUseId: new Map() }, { workspaceDir: '/tmp' }).events[0];
   expect(event).not.toHaveProperty('mcp');
 });
 

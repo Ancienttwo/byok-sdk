@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AssistantMessageTracker,
-  createToolUseCorrelation,
+  type ToolUseCorrelation,
   mapClaudeMessageToAgentEvents,
   parseClaudeContextWindow,
   ROUTINE_CLAUDE_SYSTEM_SUBTYPES,
@@ -23,7 +23,7 @@ async function tmpWorkspace(): Promise<string> {
 
 describe('mapClaudeMessageToAgentEvents', () => {
   it('maps an assistant text block to a progress event', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = {
       type: 'assistant',
       message: { content: [{ type: 'text', text: 'Hello there' }] },
@@ -33,7 +33,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('ignores thinking and redacted_thinking blocks (never surfaced as progress)', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     for (const type of ['thinking', 'redacted_thinking']) {
       const msg: ClaudeStreamMessage = {
         type: 'assistant',
@@ -46,7 +46,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('maps a tool_use block to tool_use and records the correlation for later tool_result lookup', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = {
       type: 'assistant',
       message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } }] },
@@ -57,7 +57,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('flags an unrecognized assistant content-block type as unmapped, once, without dropping other blocks in the same frame', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = {
       type: 'assistant',
       message: {
@@ -73,7 +73,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('maps a tool_result block to tool_result, correlating the tool name from a prior tool_use', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     correlation.toolNameByUseId.set('toolu_1', 'Bash');
     const msg: ClaudeStreamMessage = {
       type: 'user',
@@ -84,7 +84,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('maps a denied tool_result (is_error:true) faithfully — the real headless auto-deny shape', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     correlation.toolNameByUseId.set('toolu_1', 'Write');
     const msg: ClaudeStreamMessage = {
       type: 'user',
@@ -112,7 +112,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('keeps a valid but locally unpaired native ID without deriving a tool match', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = {
       type: 'user',
       message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_never_seen', content: 'x' }] },
@@ -122,7 +122,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('keeps same-name concurrent tool calls distinct by their native IDs', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const uses = mapClaudeMessageToAgentEvents({
       type: 'assistant',
       message: {
@@ -146,14 +146,14 @@ describe('mapClaudeMessageToAgentEvents', () => {
     { type: 'assistant', message: { content: [{ type: 'tool_use', id: '  ', name: 'Bash' }] } },
     { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 42, content: 'x' }] } },
   ] satisfies ClaudeStreamMessage[])('fails closed when a bundled tool frame has no valid native ID: %j', (msg) => {
-    const result = mapClaudeMessageToAgentEvents(msg, createToolUseCorrelation(), { workspaceDir: '/tmp/ws' });
+    const result = mapClaudeMessageToAgentEvents(msg, { toolNameByUseId: new Map() }, { workspaceDir: '/tmp/ws' });
     expect(result.events).toEqual([]);
     expect(result.terminalFailure).toBeInstanceOf(RuntimeExecutionFailure);
     expect(result.terminalFailure).toMatchObject({ phase: 'run', retry: 'non-retryable' });
   });
 
   it('flags a non-tool_result user content block as unmapped', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = {
       type: 'user',
       message: { content: [{ type: 'some_new_user_block' }] },
@@ -164,13 +164,13 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('maps a successful result to turn_end', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = { type: 'result', subtype: 'success', is_error: false, result: 'done' };
     expect(mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' })).toEqual({ events: [{ type: 'turn_end' }] });
   });
 
   it('maps a successful result carrying usage to a usage AgentEvent followed by turn_end', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = {
       type: 'result',
       subtype: 'success',
@@ -187,13 +187,13 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('maps a successful result with an empty usage object to just turn_end (no content-free usage event)', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = { type: 'result', subtype: 'success', is_error: false, result: 'done', usage: {} };
     expect(mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' })).toEqual({ events: [{ type: 'turn_end' }] });
   });
 
   it('never maps cache_creation_input_tokens onto cachedInputTokens (a distinct, more-expensive-not-cheaper concept)', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = {
       type: 'result',
       subtype: 'success',
@@ -205,7 +205,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('maps a failed result (is_error:true) to an error event, preferring the errors array', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = {
       type: 'result',
       subtype: 'error_during_execution',
@@ -221,7 +221,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('maps a failed result that still carries partial usage to a usage AgentEvent followed by error', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = {
       type: 'result',
       subtype: 'error_during_execution',
@@ -238,7 +238,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('falls back to a generic error message when a failed result has neither errors nor a result string', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = { type: 'result', is_error: true };
     const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
     expect(result.events).toEqual([{ type: 'error', message: 'claude reported an error result' }]);
@@ -246,7 +246,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('cross-model review (Fix 3): a result with a MISSING is_error is never reported as success — fails closed rather than treating an absent flag as success', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = { type: 'result', subtype: 'success', result: 'done' }; // no is_error at all
     const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
     expect(result.events.some((e) => e.type === 'turn_end')).toBe(false);
@@ -256,7 +256,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('cross-model review (Fix 3): a result with a NON-BOOLEAN is_error is never reported as success — fails closed rather than coercing truthiness', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = { type: 'result', subtype: 'success', result: 'done', is_error: 'false' };
     const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
     expect(result.events.some((e) => e.type === 'turn_end')).toBe(false);
@@ -266,7 +266,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('M4 Fix 1: a MISSING is_error with a usable errors array still fails closed, but no longer silently drops that diagnostic content', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = {
       type: 'result',
       subtype: 'error_during_execution',
@@ -282,7 +282,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('M4 Fix 1: a non-boolean is_error with a usable result string still fails closed, but no longer silently drops that diagnostic content', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = {
       type: 'result',
       subtype: 'success',
@@ -299,7 +299,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('M4 Fix 1: a MISSING is_error with NEITHER errors nor result leaves the generic fail-closed message exactly as before (nothing to append)', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = { type: 'result', subtype: 'success' }; // no is_error, no errors, no result
     const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
     expect(result.events).toEqual([
@@ -311,7 +311,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('M4 Fix 1: an oversized diagnostic payload on a malformed result frame is truncated to a sane bound rather than appended verbatim', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const hugeResult = 'x'.repeat(5000);
     const msg: ClaudeStreamMessage = { type: 'result', subtype: 'success', result: hugeResult }; // is_error missing
     const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
@@ -322,7 +322,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('treats known-routine system subtypes as no-ops, never unmapped', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     for (const subtype of ROUTINE_CLAUDE_SYSTEM_SUBTYPES) {
       const result = mapClaudeMessageToAgentEvents({ type: 'system', subtype }, correlation, { workspaceDir: '/tmp/ws' });
       expect(result).toEqual({ events: [] });
@@ -330,7 +330,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('flags an unrecognized system subtype as unmapped (finer-grained than treating all system frames as routine)', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const result = mapClaudeMessageToAgentEvents({ type: 'system', subtype: 'some_future_subtype' }, correlation, {
       workspaceDir: '/tmp/ws',
     });
@@ -338,14 +338,14 @@ describe('mapClaudeMessageToAgentEvents', () => {
   });
 
   it('treats rate_limit_event as routine', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     expect(mapClaudeMessageToAgentEvents({ type: 'rate_limit_event' }, correlation, { workspaceDir: '/tmp/ws' })).toEqual({
       events: [],
     });
   });
 
   it('flags a genuinely unrecognized top-level frame type as unmapped', () => {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const result = mapClaudeMessageToAgentEvents({ type: 'some_future_top_level_type' }, correlation, { workspaceDir: '/tmp/ws' });
     expect(result).toEqual({ events: [], unmappedLabel: 'top-level:some_future_top_level_type' });
   });
@@ -353,7 +353,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
   describe('artifact detection from tool_use_result (M2-a: no native "artifact" message exists — this is derived)', () => {
     it('emits an artifact event for a successful Write inside the workspace, using a workspace-relative name', async () => {
       const workspaceDir = await tmpWorkspace();
-      const correlation = createToolUseCorrelation();
+      const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
       correlation.toolNameByUseId.set('toolu_1', 'Write');
       const filePath = path.join(workspaceDir, 'out.txt');
       const msg: ClaudeStreamMessage = {
@@ -371,7 +371,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
     it('never emits an artifact event for a file written outside the workspace (e.g. plan mode\'s own ~/.claude/plans/*.md side effect)', async () => {
       const workspaceDir = await tmpWorkspace();
       const outsideDir = await tmpWorkspace(); // a sibling tmp dir, NOT inside workspaceDir
-      const correlation = createToolUseCorrelation();
+      const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
       correlation.toolNameByUseId.set('toolu_1', 'Write');
       const filePath = path.join(outsideDir, 'plan.md');
       const msg: ClaudeStreamMessage = {
@@ -387,7 +387,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
 
     it('never emits an artifact event for a denied (is_error:true) Write', async () => {
       const workspaceDir = await tmpWorkspace();
-      const correlation = createToolUseCorrelation();
+      const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
       correlation.toolNameByUseId.set('toolu_1', 'Write');
       const filePath = path.join(workspaceDir, 'out.txt');
       const msg: ClaudeStreamMessage = {
@@ -419,7 +419,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
 
     it('guesses a content type from the file extension, defaulting to application/octet-stream', async () => {
       const workspaceDir = await tmpWorkspace();
-      const correlation = createToolUseCorrelation();
+      const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
       correlation.toolNameByUseId.set('toolu_1', 'Write');
       const filePath = path.join(workspaceDir, 'data.bin');
       const msg: ClaudeStreamMessage = {
@@ -447,7 +447,7 @@ describe('fixture path', () => {
 describe('AssistantMessageTracker', () => {
   /** Maps each frame and returns, per frame, whether each of its `progress` events starts a message. */
   function starts(frames: ClaudeStreamMessage[]): boolean[][] {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const tracker = new AssistantMessageTracker();
     return frames.map((frame) => {
       const { events } = mapClaudeMessageToAgentEvents(frame, correlation, { workspaceDir: '/tmp/ws' });
@@ -506,7 +506,7 @@ describe('stream_event draft deltas (--include-partial-messages)', () => {
 
   /** Per frame: the mapped events, with each progress event's boundary decision. */
   function run(frames: ClaudeStreamMessage[]) {
-    const correlation = createToolUseCorrelation();
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const tracker = new AssistantMessageTracker();
     return frames.flatMap((frame) => {
       const { events, unmappedLabel } = mapClaudeMessageToAgentEvents(frame, correlation, { workspaceDir: '/tmp/ws' });
@@ -634,7 +634,7 @@ describe('Claude context window reserved for S4', () => {
         usage: { input_tokens: 10, output_tokens: 2 },
         modelUsage: { init: { contextWindow: 1000000 } },
       },
-      createToolUseCorrelation(),
+      { toolNameByUseId: new Map() },
       { workspaceDir: '/workspace' },
     );
     expect(mapped.events).toEqual([
@@ -651,7 +651,7 @@ describe('Claude context window reserved for S4', () => {
         is_error: true,
         usage: {},
       },
-      createToolUseCorrelation(),
+      { toolNameByUseId: new Map() },
       { workspaceDir: '/workspace' },
     );
     expect(mapped.events).toEqual([{ type: 'turn_end' }]);
@@ -668,7 +668,7 @@ describe('Claude context window reserved for S4', () => {
         usage: { input_tokens: 2, output_tokens: 88, cache_creation_input_tokens: 71603, cache_read_input_tokens: 0 },
         errors: ['[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use'],
       },
-      createToolUseCorrelation(),
+      { toolNameByUseId: new Map() },
       { workspaceDir: '/workspace' },
     );
     expect(mapped.events.map((e) => e.type)).toEqual(['usage', 'turn_end']);
@@ -678,7 +678,7 @@ describe('Claude context window reserved for S4', () => {
   it('unknown terminal_reason on error_during_execution stays a failure', () => {
     const mapped = mapClaudeMessageToAgentEvents(
       { type: 'result', subtype: 'error_during_execution', terminal_reason: 'aborted_something_else', is_error: true },
-      createToolUseCorrelation(),
+      { toolNameByUseId: new Map() },
       { workspaceDir: '/workspace' },
     );
     expect(mapped.terminalFailure).toBeDefined();
@@ -694,7 +694,7 @@ describe('Claude context window reserved for S4', () => {
       },
     ])
       expect(
-        mapClaudeMessageToAgentEvents(message, createToolUseCorrelation(), {
+        mapClaudeMessageToAgentEvents(message, { toolNameByUseId: new Map() }, {
           workspaceDir: '/workspace',
         }).terminalFailure,
       ).toBeDefined();

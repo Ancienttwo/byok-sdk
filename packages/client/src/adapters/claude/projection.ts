@@ -73,10 +73,6 @@ export interface ToolUseCorrelation {
   readonly mcpIdentities?: McpEventIdentities;
 }
 
-export function createToolUseCorrelation(mcpIdentities?: McpEventIdentities): ToolUseCorrelation {
-  return { toolNameByUseId: new Map(), mcpIdentities };
-}
-
 export interface MapClaudeMessageOptions {
   /** `ctx.workspaceDir` for the task — used only to compute a workspace-relative `name` for a possible `artifact` AgentEvent (see `tryBuildArtifactEvent`'s doc comment). */
   workspaceDir: string;
