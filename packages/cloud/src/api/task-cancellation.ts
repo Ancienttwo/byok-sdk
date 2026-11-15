@@ -1,6 +1,7 @@
 import type { ByokCloud, ByokCloudOptions } from '../cloud.js';
-import { contentHash, type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
+import { type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import { createEnvelope, decodeEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
+import { materializeEnvelope } from './enqueue.js';
 import { ByokCloudError } from '../errors.js';
 import { isTaskRedactionTombstone } from '../task-redaction.js';
 import { tenantStoresFor, type CloudRootStores } from '../tenant-stores.js';
@@ -29,12 +30,7 @@ export function createTaskCancellationApi({ root, controlPlane, options }: Depen
             seq,
           });
           const body = encodeEnvelope(envelope);
-          const bytes = new TextEncoder().encode(body);
-          return {
-            body,
-            bodyHash: contentHash(await options.crypto.sha256(bytes)),
-            byteSize: BigInt(bytes.length),
-          };
+          return materializeEnvelope(body, options.crypto);
         },
       });
       if (mutation === undefined) {

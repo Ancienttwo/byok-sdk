@@ -71,6 +71,15 @@ export function refuseSealedFields(payload: unknown, fields: readonly string[], 
   }
 }
 
+export async function materializeEnvelope(body: string, crypto: ByokCloudOptions['crypto']) {
+  const bytes = new TextEncoder().encode(body);
+  return {
+    body,
+    bodyHash: contentHash(await crypto.sha256(bytes)),
+    byteSize: BigInt(bytes.length),
+  };
+}
+
 interface Dependencies {
   root: CloudRootStores;
   controlPlane: (tenant: TenantId) => ControlPlanePrincipal;
@@ -202,12 +211,7 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
         // allocation and insertion are still serialized per device.
         const envelope = build(taskId, seq, messageId);
         const body = encodeEnvelope(envelope);
-        const bytes = new TextEncoder().encode(body);
-        return {
-          body,
-          bodyHash: contentHash(await options.crypto.sha256(bytes)),
-          byteSize: BigInt(bytes.length),
-        };
+        return materializeEnvelope(body, options.crypto);
       },
     }).catch(async (refusal: unknown) => {
       // A retired device's stream refuses every retry of this offer, and the
@@ -290,12 +294,7 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
       messageId,
       materialize: async (seq) => {
         const body = encodeEnvelope(buildEnvelope(seq));
-        const bytes = new TextEncoder().encode(body);
-        return {
-          body,
-          bodyHash: contentHash(await options.crypto.sha256(bytes)),
-          byteSize: BigInt(bytes.length),
-        };
+        return materializeEnvelope(body, options.crypto);
       },
     });
     const envelope = decodeEnvelope(message.body);
@@ -339,12 +338,7 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
       messageId: record.receiptId,
       materialize: async (seq) => {
         const body = encodeEnvelope(createEnvelope('agent.egress.ack', payload, { id: record.receiptId, seq }));
-        const bytes = new TextEncoder().encode(body);
-        return {
-          body,
-          bodyHash: contentHash(await options.crypto.sha256(bytes)),
-          byteSize: BigInt(bytes.length),
-        };
+        return materializeEnvelope(body, options.crypto);
       },
     });
     const decoded = decodeEnvelope(message.body);
@@ -387,12 +381,7 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
       messageId: `agent-content-ack:${exactReceipt.requestId}`,
       materialize: async (seq) => {
         const body = encodeEnvelope(createEnvelope('agent.egress.ack', payload, { id: exactReceipt.requestId, seq }));
-        const bytes = new TextEncoder().encode(body);
-        return {
-          body,
-          bodyHash: contentHash(await options.crypto.sha256(bytes)),
-          byteSize: BigInt(bytes.length),
-        };
+        return materializeEnvelope(body, options.crypto);
       },
     });
     const decoded = decodeEnvelope(message.body);
@@ -424,8 +413,7 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
           taskId,
           seq,
         }));
-        const bytes = new TextEncoder().encode(body);
-        return { body, bodyHash: contentHash(await options.crypto.sha256(bytes)), byteSize: BigInt(bytes.length) };
+        return materializeEnvelope(body, options.crypto);
       },
     });
     const decoded = decodeEnvelope(message.body);
