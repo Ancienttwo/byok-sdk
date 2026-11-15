@@ -5,7 +5,8 @@ import {
   AgentContentReceiptPayloadSchema,
   type AgentContentReceiptPayload,
 } from '@byok-sdk/protocol';
-import { sameAgentRef, type AgentRef } from '../agent-home.js';
+import type { AgentRef } from '../agent-home.js';
+import { sameAgentRef } from './agent-ref-equality.js';
 import { DurableJsonlFile } from '../util/durable-jsonl.js';
 import { ensureSecureDir } from '../util/secure-dir.js';
 import { type AgentEgressPolicy, type AgentEgressDropReason, eventBytes } from './agent-egress-policy.js';

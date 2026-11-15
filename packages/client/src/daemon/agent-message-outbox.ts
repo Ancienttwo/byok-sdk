@@ -10,7 +10,8 @@ import {
   type AgentMessagePublishPayload,
   type AgentMessagePublishSealedPayload,
 } from '@byok-sdk/protocol';
-import { sameAgentRef, type AgentRef } from '../agent-home.js';
+import type { AgentRef } from '../agent-home.js';
+import { sameAgentRef } from './agent-ref-equality.js';
 import { atomicWriteFile } from '../util/atomic-write.js';
 import { DurableJsonlFile } from '../util/durable-jsonl.js';
 import { ensureSecureDir } from '../util/secure-dir.js';

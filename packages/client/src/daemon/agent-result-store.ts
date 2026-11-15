@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs, type Dirent } from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { sameAgentRef, type AgentRef } from '../agent-home.js';
+import type { AgentRef } from '../agent-home.js';
+import { sameAgentRef } from './agent-ref-equality.js';
 import { atomicWriteFile } from '../util/atomic-write.js';
 import { ensureSecureDir } from '../util/secure-dir.js';
 

@@ -24,7 +24,8 @@ import {
   type AgentRef,
 } from '@byok-sdk/protocol';
 
-import { sameAgentRef, AgentHomeBusyError, type AgentHomeBinding, type AgentHomeLease, type AgentHomeManager } from '../agent-home.js';
+import { AgentHomeBusyError, type AgentHomeBinding, type AgentHomeLease, type AgentHomeManager } from '../agent-home.js';
+import { sameAgentRef } from './agent-ref-equality.js';
 import {
   AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
   AgentMemoryRevisionConflictError,

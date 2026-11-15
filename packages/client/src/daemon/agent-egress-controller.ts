@@ -1,7 +1,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { AgentEgressReliablePayloadSchema, type AgentEvent } from '@byok-sdk/protocol';
-import { sameAgentRef, type AgentRef } from '../agent-home.js';
+import type { AgentRef } from '../agent-home.js';
+import { sameAgentRef } from './agent-ref-equality.js';
 import {
   type AgentEgressDropReason,
   type AgentEgressDropReceipt,

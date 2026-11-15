@@ -5,7 +5,7 @@ import {
   type AgentHomeProjectionCompletionRequest,
   type AgentHomeProjectionReadback,
 } from '@byok-sdk/protocol';
-import { sameAgentRef } from '../agent-home.js';
+import { sameAgentRef } from './agent-ref-equality.js';
 import type { AuthManager } from './auth-manager.js';
 import { authedFetch } from './http-client.js';
 import { toHttpBase } from './url.js';

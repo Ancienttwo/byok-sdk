@@ -3,11 +3,11 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import {
-  sameAgentRef,
   AgentHomeLayout,
   validateAgentRef,
   type AgentRef,
 } from '../agent-home.js';
+import { sameAgentRef } from './agent-ref-equality.js';
 import {
   AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
   AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY,
