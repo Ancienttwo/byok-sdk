@@ -961,22 +961,6 @@ function plainRecord(value: unknown): value is Record<string, unknown> {
   return isRecord(value) && !Array.isArray(value);
 }
 
-function stringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
-}
-
-/** A flat `Record<string, string>` with no prototype-polluting keys. */
-function stringMap(value: unknown): value is Record<string, string> {
-  if (!plainRecord(value)) return false;
-  return Object.keys(value).every((key) => key !== '__proto__' && typeof value[key] === 'string');
-}
-
-/** A flat `Record<string, string[]>` with no prototype-polluting keys. */
-function stringArrayMap(value: unknown): value is Record<string, string[]> {
-  if (!plainRecord(value)) return false;
-  return Object.keys(value).every((key) => key !== '__proto__' && stringArray(value[key]));
-}
-
 function finiteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }

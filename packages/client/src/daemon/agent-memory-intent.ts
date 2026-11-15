@@ -25,6 +25,7 @@ import {
 } from '@byok-sdk/protocol';
 
 import { AgentHomeBusyError, type AgentHomeBinding, type AgentHomeLease, type AgentHomeManager } from '../agent-home.js';
+import { sameAgentRef } from './agent-ref-equality.js';
 import {
   AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
   AgentMemoryRevisionConflictError,
@@ -457,10 +458,6 @@ function completionOf(agentId: string, record: AgentMemoryIntentLedgerRecord): A
     case 'applying':
       throw LEDGER_INVALID;
   }
-}
-
-function sameAgentRef(left: AgentRef, right: AgentRef): boolean {
-  return left.agentId === right.agentId && left.profileRevision === right.profileRevision;
 }
 
 function sha256Revision(content: string): string {

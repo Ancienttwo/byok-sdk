@@ -5,8 +5,8 @@
 //
 // S3 wired the offer/admission path; S4 wired claim/start/cancel; S5 wires
 // the approval path. Effects whose IO still lives in the staged offer
-// pipeline (and every S6 effect) are recorded as `legacy` and not executed
-// here; the phase adapter performs them exactly as before.
+// pipeline (and every S6 effect) are executed by the phase adapter exactly
+// as before when no handler is registered here.
 import type { Envelope } from '@byok-sdk/protocol';
 import {
   createRunnerState,
@@ -120,15 +120,6 @@ export type HostEffectHandler = (
   context: HostEffectContext,
 ) => void | HostEffectResult | Promise<void | HostEffectResult>;
 
-export interface HostAuditEntry {
-  readonly taskId: string | undefined;
-  readonly effectId: string;
-  readonly kind: EffectKind;
-  readonly mode: EffectEnvelope['mode'];
-  readonly outcome: 'executed' | 'legacy' | 'skipped' | 'completion';
-  readonly reason?: string;
-}
-
 interface QueuedEvent {
   readonly event: ReducerEvent;
   readonly resolve: (result: ReduceResult) => void;
@@ -147,7 +138,6 @@ interface AppliedEvent {
 
 const GLOBAL_MAILBOX = '\u0000runner';
 const MAX_ARCHIVED_TASKS = 128;
-const MAX_AUDIT_ENTRIES = 512;
 
 function isPromise<T>(value: T | Promise<T>): value is Promise<T> {
   return typeof (value as { then?: unknown } | undefined)?.then === 'function';
@@ -183,7 +173,6 @@ export class TaskRunnerHost {
   private readonly terminalIntents = new Map<string, HostTerminalIntent>();
   private readonly messageCompletions = new Map<string, HostMessageCompletion>();
   private readonly handlers = new Map<EffectKind, HostEffectHandler>();
-  private readonly audit: HostAuditEntry[] = [];
   private generation = 0;
   private approvalSequence = 0;
 
@@ -211,10 +200,6 @@ export class TaskRunnerHost {
 
   offerContext(taskId: string): HostOfferContext | undefined {
     return this.offers.get(taskId);
-  }
-
-  auditLog(): readonly HostAuditEntry[] {
-    return this.audit;
   }
 
   /** Registers an effect handler; returns the unregister function. */
@@ -426,10 +411,6 @@ export class TaskRunnerHost {
     this.messageCompletions.set(taskId, completion);
   }
 
-  messageCompletion(taskId: string): HostMessageCompletion | undefined {
-    return this.messageCompletions.get(taskId);
-  }
-
   clearMessageCompletion(taskId: string): HostMessageCompletion | undefined {
     const completion = this.messageCompletions.get(taskId);
     this.messageCompletions.delete(taskId);
@@ -630,10 +611,7 @@ export class TaskRunnerHost {
     snapshot: ReducerSnapshot,
   ): Promise<void | HostEffectResult> | undefined {
     for (const envelope of effects) {
-      if (!requiresAdmit(snapshot, envelope)) {
-        this.record(envelope, 'skipped', 'requires');
-        continue;
-      }
+      if (!requiresAdmit(snapshot, envelope)) continue;
       const pending = this.executeEffect(envelope, event, snapshot);
       if (pending !== undefined) return pending;
     }
@@ -661,7 +639,6 @@ export class TaskRunnerHost {
       const offer = taskId === undefined ? undefined : this.offers.get(taskId);
       if (offer?.sendDecline !== undefined) {
         offer.sendDecline(envelope, offer);
-        this.record(envelope, 'executed');
         return this.completeAtomically(envelope, taskId);
       }
     }
@@ -672,29 +649,16 @@ export class TaskRunnerHost {
         // the atomic `claim.sent` completion, and a throwing send leaves the
         // state journaled-but-unsent exactly like the legacy path did.
         offer.sendClaim(envelope, offer);
-        this.record(envelope, 'executed');
         return this.completeAtomically(envelope, taskId);
       }
-    }
-    if (envelope.effect.kind === 'audit' || envelope.effect.kind === 'log') {
-      this.record(envelope, 'executed');
-      return this.completeAtomically(envelope, taskId);
     }
     const handler = this.handlers.get(envelope.effect.kind);
     if (handler === undefined) {
       // S3 keeps the staged offer IO in the phase adapters. Anything not
       // registered here is executed by that adapter, in the original order.
-      this.record(envelope, 'legacy');
       return undefined;
     }
-    let outcome: void | HostEffectResult | Promise<void | HostEffectResult>;
-    try {
-      outcome = handler(envelope, context);
-    } catch (error) {
-      this.record(envelope, 'skipped', 'handler-threw');
-      throw error;
-    }
-    this.record(envelope, 'executed');
+    const outcome = handler(envelope, context);
     if (!isPromise(outcome)) {
       // A synchronous handler may supply its own completion (S5 mints the
       // next approvalId for `dispatch.next_approval` this way); the atomic
@@ -737,13 +701,6 @@ export class TaskRunnerHost {
       atMs: Date.now(),
     } as ReducerEvent);
     const applied = this.applyEvent(event);
-    this.audit.push({
-      taskId: envelope.effect.taskId,
-      effectId: envelope.id,
-      kind: envelope.effect.kind,
-      mode: envelope.mode,
-      outcome: 'completion',
-    });
     return applied.pending;
   }
 
@@ -769,22 +726,6 @@ export class TaskRunnerHost {
       const oldest = this.archived.keys().next().value;
       if (oldest !== undefined) this.archived.delete(oldest);
     }
-  }
-
-  private record(
-    envelope: EffectEnvelope,
-    outcome: HostAuditEntry['outcome'],
-    reason?: string,
-  ): void {
-    this.audit.push({
-      taskId: envelope.effect.taskId,
-      effectId: envelope.id,
-      kind: envelope.effect.kind,
-      mode: envelope.mode,
-      outcome,
-      ...(reason === undefined ? {} : { reason }),
-    });
-    if (this.audit.length > MAX_AUDIT_ENTRIES) this.audit.splice(0, this.audit.length - MAX_AUDIT_ENTRIES);
   }
 }
 

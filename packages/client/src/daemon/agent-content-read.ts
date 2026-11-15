@@ -7,6 +7,7 @@ import {
   validateAgentRef,
   type AgentRef,
 } from '../agent-home.js';
+import { sameAgentRef } from './agent-ref-equality.js';
 import {
   AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
   AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY,
@@ -431,10 +432,6 @@ class RootPolicyError extends Error {
     this.name = 'RootPolicyError';
     this.reason = reason;
   }
-}
-
-function sameAgentRef(left: AgentRef, right: AgentRef): boolean {
-  return left.agentId === right.agentId && left.profileRevision === right.profileRevision;
 }
 
 function sameSessionIdentity(left: AgentContentSessionIdentity, right: AgentContentSessionIdentity): boolean {

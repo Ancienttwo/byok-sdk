@@ -3,6 +3,7 @@ import { promises as fs, type Dirent } from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { AgentRef } from '../agent-home.js';
+import { sameAgentRef } from './agent-ref-equality.js';
 import { atomicWriteFile } from '../util/atomic-write.js';
 import { ensureSecureDir } from '../util/secure-dir.js';
 
@@ -62,10 +63,6 @@ export function agentResultDigest(value: unknown): string {
 
 function recordFileName(taskId: string): string {
   return `result-${createHash('sha256').update(taskId, 'utf8').digest('hex')}.json`;
-}
-
-function sameAgentRef(left: AgentRef, right: AgentRef): boolean {
-  return left.agentId === right.agentId && left.profileRevision === right.profileRevision;
 }
 
 function isString(value: unknown): value is string {

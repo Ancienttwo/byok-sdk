@@ -11,6 +11,7 @@ import {
   type EventsPollResponse,
   type OutboundRefusalReason,
 } from '@byok-sdk/protocol';
+import { abortableSleep } from '../util/timer-delay.js';
 import { AuthManager, DeviceRevokedError } from './auth-manager.js';
 import { authedFetch } from './http-client.js';
 import { ReplayCursorTooOldError } from './replay-cursor.js';
@@ -428,7 +429,7 @@ export class LongPollClient {
             console.warn('[byok/client] mailbox read-ahead window full; acknowledgement is stalled');
           }
           readCursor = ack;
-          await sleep(this.opts.retryDelayMs ?? 2000, signal);
+          await abortableSleep(this.opts.retryDelayMs ?? 2000, signal);
           continue;
         }
         const afterSeq = Math.max(ack, readCursor ?? ack);
@@ -524,7 +525,7 @@ export class LongPollClient {
           readCursor = this.opts.getCursor() ?? 0;
           retryAttempt = 0;
           this.opts.onOperationalOutcome?.('success');
-          await sleep(this.opts.idleDelayMs ?? 250, signal);
+          await abortableSleep(this.opts.idleDelayMs ?? 250, signal);
         } else if (!madeReadProgress && (
           this.opts.isStalled?.() ||
           hadValidationFailureThisBatch ||
@@ -538,7 +539,7 @@ export class LongPollClient {
           // HTTP attempt gets, instead of looping back immediately at RTT.
           this.opts.onOperationalOutcome?.('failure');
           const baseMs = this.opts.retryDelayMs ?? 2000;
-          await sleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs, signal);
+          await abortableSleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs, signal);
         } else {
           retryAttempt = 0;
           this.opts.onOperationalOutcome?.('success');
@@ -620,17 +621,4 @@ async function parseReplayCursorTooOld(res: Response): Promise<ReplayCursorTooOl
     return undefined;
   }
   return new ReplayCursorTooOldError(recoverableFrom);
-}
-
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) => {
-    const finish = () => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', finish);
-      resolve();
-    };
-    const timer = setTimeout(finish, ms);
-    signal.addEventListener('abort', finish, { once: true });
-  });
 }

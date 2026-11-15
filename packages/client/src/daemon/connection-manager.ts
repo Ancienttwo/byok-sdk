@@ -1,3 +1,4 @@
+import { abortableSleep } from '../util/timer-delay.js';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 import {
   type OutboundRefusalReason,
@@ -317,7 +318,7 @@ export class ConnectionManager {
           await this.opts.onOutboundSettled?.([settlementFor(hello, answer.outcomes[0]!)]);
         } catch {
           this.notify(() => this.opts.onOperationalOutcome?.('failure', 'reconnect'));
-          await sleep(this.nextReconnectDelayMs(), signal);
+          await abortableSleep(this.nextReconnectDelayMs(), signal);
           continue;
         }
       }
@@ -333,7 +334,7 @@ export class ConnectionManager {
         hello = undefined;
         if (this.isEnded()) return;
       }
-      await sleep(this.nextReconnectDelayMs(), signal);
+      await abortableSleep(this.nextReconnectDelayMs(), signal);
     }
   }
 
@@ -916,17 +917,4 @@ export class ConnectionManager {
       console.error('[byok/client] reporting the connection crash failed', reportError);
     }
   }
-}
-
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) => {
-    const finish = (): void => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', finish);
-      resolve();
-    };
-    const timer = setTimeout(finish, ms);
-    signal.addEventListener('abort', finish, { once: true });
-  });
 }
