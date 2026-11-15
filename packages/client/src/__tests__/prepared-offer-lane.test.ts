@@ -1175,7 +1175,7 @@ describe('a retained startup owner keeps its preparation pin until disposal and 
     await built.store.gc(afterRetention());
     const record = built.store.get(built.recordId);
     expect(record?.artifactBytes).toBeGreaterThan(0);
-    await expect(built.store.readArtifact(record!)).resolves.toBeDefined();
+    await expect(fs.readFile(built.store.artifactPathOf(record!), 'utf8')).resolves.toBeDefined();
   }
 
   async function expectReleased(built: Lane): Promise<void> {

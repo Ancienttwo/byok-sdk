@@ -223,26 +223,11 @@ describe('B-P2 store: restart roundtrip', () => {
     expect(record?.artifactBytes).toBe(bytes);
     expect(record?.binding.runtime.upstreamCommit).toBe('d981de1229ef899957bbe968bc8dcda02a21f477');
 
-    const readBack = await restarted.readArtifact(record!);
+    const readBack = JSON.parse(await fs.readFile(restarted.artifactPathOf(record!), 'utf8')) as InputPreparationArtifact;
     expect(readBack?.requestBody).toBe(REQUEST_BODY);
     expect(Buffer.from(readBack!.requestBody, 'utf8').equals(Buffer.from(REQUEST_BODY, 'utf8'))).toBe(true);
     expect(readBack?.projection).toEqual({ version: 3, kind: 'content_complete', digest: 'a'.repeat(64) });
     expect(readBack?.residual).toEqual([{ key: 'max_tokens', valueClass: 'bounded_integer' }]);
-  });
-
-  it('rejects an artifact whose stored identity drifted from its record binding', async () => {
-    const storeDir = await tmpStoreDir();
-    const store = await openStore(storeDir);
-    const created = await store.reserve(reserve());
-    const record = await store.commitCounterReservation(commit(created.record.recordId));
-
-    // Mutate the retained bytes behind the store's back. An artifact that no
-    // longer proves the identity its receipt published is not usable evidence.
-    const artifactPath = path.join(storeDir, 'input-preparation', 'artifacts', `${created.record.recordId}.json`);
-    const stored = JSON.parse(await fs.readFile(artifactPath, 'utf8')) as InputPreparationArtifact;
-    await fs.writeFile(artifactPath, JSON.stringify({ ...stored, requestDigest: 'tampered' }), 'utf8');
-
-    await expect(store.readArtifact(record)).rejects.toBeInstanceOf(InputPreparationIntegrityError);
   });
 
   it('refuses to replay a record log that is not intact', async () => {

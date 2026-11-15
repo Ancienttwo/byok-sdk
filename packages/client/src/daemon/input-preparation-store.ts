@@ -831,38 +831,6 @@ export class InputPreparationStore {
   }
 
   /**
-   * Read the artifact back and re-check the identity it claims.
-   *
-   * The digest comparison is integrity, not authorization: authority was
-   * already resolved before the caller reached this method.
-   */
-  async readArtifact(record: InputPreparationRecord): Promise<InputPreparationArtifact | undefined> {
-    this.assertOpen();
-    let raw: string;
-    try {
-      raw = await fs.readFile(this.artifactPath(record.recordId), 'utf8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-      throw error;
-    }
-    let parsed: InputPreparationArtifact;
-    try {
-      parsed = JSON.parse(raw) as InputPreparationArtifact;
-    } catch (cause) {
-      throw new InputPreparationIntegrityError(
-        `prepared artifact ${record.recordId} is not readable JSON: ${cause instanceof Error ? cause.message : String(cause)}`,
-      );
-    }
-    if (parsed.format !== INPUT_PREPARATION_ARTIFACT_FORMAT || parsed.version !== INPUT_PREPARATION_VERSION) {
-      throw new InputPreparationIntegrityError(`prepared artifact ${record.recordId} has an unknown format or version`);
-    }
-    if (parsed.recordId !== record.recordId || parsed.requestDigest !== record.artifact?.requestDigest) {
-      throw new InputPreparationIntegrityError(`prepared artifact ${record.recordId} does not match its record binding`);
-    }
-    return parsed;
-  }
-
-  /**
    * Drop expired artifacts and, one retry horizon later, expired records.
    *
    * A pinned record is never collected — not its artifact and not its
