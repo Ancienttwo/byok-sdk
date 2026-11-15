@@ -573,17 +573,14 @@ test('#2118: published K8 dependency updates keep package identity and a nondecr
   }
 });
 
-test('#1375: the MCP server example drops its core edge, and stays private', t => {
-  const f = fixture(t);
-  const path = 'examples/byok-mcp-server/package.json';
-  const manifest = { name: '@byok-sdk/example-byok-mcp-server', private: true, version: '0.0.1' };
-  f.write(path, { ...manifest, dependencies: { '@byok-sdk/core': 'workspace:*', '@byok-sdk/protocol': 'workspace:*' } });
-  rebase(f, 'MCP server with core');
-  f.write(path, { ...manifest, dependencies: { '@byok-sdk/protocol': 'workspace:*' } });
-  assert.ok(selectImpact([path], f).dirs.includes('examples/byok-mcp-server'));
-  f.write(path, { ...manifest, dependencies: { '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/keys': 'workspace:*' } });
+test('the MCP server example stays private', t => {
+  const f = fixture(t), path = 'examples/byok-mcp-server/package.json';
+  const manifest = { name: '@byok-sdk/example-byok-mcp-server', private: true, version: '0.0.1',
+    dependencies: { '@byok-sdk/protocol': 'workspace:*' } };
+  f.write(path, manifest); rebase(f, 'MCP server without core');
+  f.write(path, { ...manifest, dependencies: { ...manifest.dependencies, '@byok-sdk/keys': 'workspace:*' } });
   assert.throws(() => selectImpact([path], f), /more than/, 'another dependency edit');
-  f.write(path, { ...manifest, private: false, dependencies: { '@byok-sdk/protocol': 'workspace:*' } });
+  f.write(path, { ...manifest, private: false });
   assert.throws(() => selectImpact([path], f), /must stay private/);
 });
 
@@ -593,27 +590,12 @@ function rebase(f, message) {
   f.base = git('rev-parse', 'HEAD').trim();
 }
 
-test('#1106: the K4 manifest drops its core entries only with the demo description, and stays private', t => {
-  const f = fixture(t);
-  const path = 'examples/host-execution-core/package.json';
-  const exports = { '.': './src/index.ts', './canonical': './src/canonical.ts', './test-support': './src/test-support.ts' };
-  const description = 'Copy-and-own Host execution core with a durable FIFO, routine ledger and outbox';
-  const demo = 'Demo Host composing @byok-sdk/server/execution-core with a real daemon; integration qualification for the published execution core';
-  const manifest = { name: '@byok-sdk/example-host-execution-core', private: true, version: '0.0.1', description, exports };
-  f.write(path, manifest); rebase(f, 'K4 with its core entries');
-  const demoExports = { './test-support': './src/test-support.ts' };
-  f.write(path, { ...manifest, description: demo, exports: demoExports });
-  assert.ok(selectImpact([path], f).dirs.includes('examples/host-execution-core'));
-  for (const [candidate, reason] of [
-    [{ ...manifest, exports: demoExports }, 'the entries without the description'],
-    [{ ...manifest, description: demo }, 'the description without the entries'],
-    [{ ...manifest, description: demo, exports: { ...demoExports, './canonical': './src/canonical.ts' } }, 'an old entry kept'],
-    [{ ...manifest, description: demo, exports: demoExports, dependencies: { x: '1.0.0' } }, 'a dependency change'],
-  ]) {
-    f.write(path, candidate);
-    assert.throws(() => selectImpact([path], f), /more than/, reason);
-  }
-  f.write(path, { ...manifest, private: false, description: demo, exports: demoExports });
+test('the K4 example stays private', t => {
+  const f = fixture(t), path = 'examples/host-execution-core/package.json';
+  const manifest = { name: '@byok-sdk/example-host-execution-core', private: true, version: '0.0.1',
+    exports: { './test-support': './src/test-support.ts' } };
+  f.write(path, manifest); rebase(f, 'K4 demo');
+  f.write(path, { ...manifest, private: false });
   assert.throws(() => selectImpact([path], f), /must stay private/);
 });
 
@@ -750,41 +732,25 @@ test('the client host-layout addition is exact and retains consumer and packed c
   }
 });
 
-// #1104: the packaging example's bundle test (script, runner and lock row) and the client packaging entry.
-test('#1104: the packaging example admits only its bundle test, and the client only the ./packaging entry', t => {
-  const f = fixture(t);
-  const dir = 'examples/packaging';
-  const manifest = { name: '@byok-sdk/example-packaging', private: true, version: '0.0.1', scripts: { typecheck: 'tsc --noEmit' }, devDependencies: { esbuild: '^0.27.7', vitest: '^4.1.10' } };
+test('the packaging example stays private and its lock ranges match its manifest', t => {
+  const f = fixture(t), dir = 'examples/packaging';
+  const manifest = { name: '@byok-sdk/example-packaging', private: true, version: '0.0.1',
+    scripts: { typecheck: 'tsc --noEmit', test: 'vitest run' }, devDependencies: { esbuild: '^0.27.7', vitest: '^4.1.10' } };
   f.write(`${dir}/package.json`, manifest);
-  f.lock.workspaces[dir] = { name: manifest.name, version: manifest.version, devDependencies: { esbuild: '^0.27.7', vitest: '^4.1.10' } };
-  f.write('bun.lock', f.lock);
-  rebase(f, 'packaging example without a test');
-  const tested = { ...manifest, scripts: { ...manifest.scripts, test: 'vitest run' }, devDependencies: { ...manifest.devDependencies, vitest: '^4.1.10' } };
-  f.write(`${dir}/package.json`, tested);
-  f.lock.workspaces[dir].devDependencies.vitest = '^4.1.10'; f.write('bun.lock', f.lock);
-  const plan = selectImpact(['bun.lock', `${dir}/package.json`], f);
-  assert.ok(plan.dirs.includes(dir));
+  f.lock.workspaces[dir] = { name: manifest.name, version: manifest.version, devDependencies: manifest.devDependencies };
+  f.write('bun.lock', f.lock); rebase(f, 'packaging example with its bundle test');
   for (const [candidate, reason] of [
-    [{ ...tested, scripts: { ...tested.scripts, test: 'vitest run --passWithNoTests' } }, 'another test command'],
-    [{ ...tested, dependencies: { x: '1.0.0' } }, 'a dependency change'],
+    [{ ...manifest, scripts: { ...manifest.scripts, test: 'vitest run --passWithNoTests' } }, 'another test command'],
+    [{ ...manifest, dependencies: { x: '1.0.0' } }, 'a dependency change'],
   ]) {
     f.write(`${dir}/package.json`, candidate);
     assert.throws(() => selectImpact([`${dir}/package.json`], f), /more than/, reason);
   }
-  f.write(`${dir}/package.json`, { ...tested, private: false });
+  f.write(`${dir}/package.json`, { ...manifest, private: false });
   assert.throws(() => selectImpact([`${dir}/package.json`], f), /must stay private/);
-  f.write(`${dir}/package.json`, tested);
-  f.lock.workspaces[dir].devDependencies.vitest = '^5.0.0'; f.write('bun.lock', f.lock);
+  f.write(`${dir}/package.json`, manifest);
+  f.lock.workspaces[dir].devDependencies = { ...manifest.devDependencies, vitest: '^5.0.0' }; f.write('bun.lock', f.lock);
   assert.throws(() => selectImpact(['bun.lock'], f));
-
-  const client = 'packages/client/package.json';
-  const entry = { types: './dist/adapters/packaging.d.ts', import: './dist/adapters/packaging.js' };
-  const root = { '.': { types: './dist/index.d.ts', import: './dist/index.js' } };
-  f.write(client, { ...f.manifest, exports: root }); rebase(f, 'client without the packaging entry');
-  f.write(client, { ...f.manifest, exports: { ...root, './packaging': entry } });
-  assert.deepEqual(selectImpact([client], f).families, ['npm-release-pack']);
-  f.write(client, { ...f.manifest, exports: { ...root, './packaging': { ...entry, import: './dist/other.js' } } });
-  assert.throws(() => selectImpact([client], f), /more than/);
 });
 
 for (const name of ['capability-matrix', 'another-projection']) test(`manifest-owned documentation check: ${name}`, t => {

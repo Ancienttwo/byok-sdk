@@ -66,14 +66,6 @@ const K8_SCRIPTS = Object.freeze({ build: 'tsup && tsc -p tsconfig.build.json', 
 const K8_RUNTIME = Object.freeze({ '@byok-sdk/client': 'workspace:*', '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/server': 'workspace:*' });
 // `./testing` imports these; a Host that installs only `.` or `./rules` does not need them.
 const K8_OPTIONAL_PEERS = Object.freeze(['@hono/node-server', 'vitest']);
-// #1106: K4 moves into @byok-sdk/server/execution-core. The example keeps only
-// its daemon-backed test harness entry and a description that says so.
-const K4_EXPORTS = Object.freeze({ '.': './src/index.ts', './canonical': './src/canonical.ts', './test-support': './src/test-support.ts' });
-const K4_DEMO_EXPORTS = Object.freeze({ './test-support': './src/test-support.ts' });
-const K4_DESCRIPTION = Object.freeze({
-  from: 'Copy-and-own Host execution core with a durable FIFO, routine ledger and outbox',
-  to: 'Demo Host composing @byok-sdk/server/execution-core with a real daemon; integration qualification for the published execution core',
-});
 // #1106: the published K4 entries, and the loader the server's forked K4 crash fixtures run under.
 const SERVER_EXECUTION_CORE_EXPORTS = Object.freeze({
   './execution-core': { types: './dist/execution-core/index.d.ts', import: './dist/execution-core/index.js' },
@@ -349,21 +341,10 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     return { ...impact, dirs: [...new Set([...added, ...impact.dirs])] };
   } else if (path === 'examples/byok-mcp-server/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The MCP server example must stay private');
-    // #1375: the routine calendar moved to protocol, so the core edge goes.
-    if (before.dependencies?.['@byok-sdk/core'] === 'workspace:*' && after.dependencies && after.dependencies['@byok-sdk/core'] === undefined) {
-      after.dependencies['@byok-sdk/core'] = 'workspace:*';
-    }
   } else if (path === 'examples/packaging/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The packaging example must stay private');
-    // #1104: the bundle test command.
-    if (before.scripts?.test === undefined && after.scripts?.test === 'vitest run') delete after.scripts.test;
   } else if (path === 'examples/host-execution-core/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The host execution core example must stay private');
-    // #1106: the core entries leave together with the description, from exactly the old entries.
-    if (isDeepStrictEqual(before.exports, K4_EXPORTS) && isDeepStrictEqual(after.exports, K4_DEMO_EXPORTS)
-      && before.description === K4_DESCRIPTION.from && after.description === K4_DESCRIPTION.to) {
-      after.exports = before.exports; after.description = before.description;
-    }
   } else if (path === 'package.json') {
     // Reserve the CI helper before generic script normalization can erase it.
     // Only this exact composition may wrap the existing ordered test list.
