@@ -137,6 +137,17 @@ export function buildConfiguredProfile(
   });
 }
 
+function secretNotAllowedError(): ByokKeysError {
+  return new ByokKeysError(
+    'PROVIDER_SECRET_NOT_ALLOWED',
+    'A provider without authentication cannot accept a secret',
+  );
+}
+
+function secretEmptyError(): ByokKeysError {
+  return new ByokKeysError('PROVIDER_SECRET_EMPTY', 'Provider secret cannot be empty');
+}
+
 function isChangeCommitted(error: unknown): boolean {
   return error instanceof ByokKeysError && error.code === 'PROVIDER_CHANGE_COMMITTED';
 }
@@ -257,16 +268,10 @@ export class ProviderRegistry {
       const secretName = modelProviderSecretName(profileRef);
 
       if (configuration.auth_mode === 'none' && secret !== undefined) {
-        throw new ByokKeysError(
-          'PROVIDER_SECRET_NOT_ALLOWED',
-          'A provider without authentication cannot accept a secret',
-        );
+        throw secretNotAllowedError();
       }
       if (secret !== undefined && secret.length === 0) {
-        throw new ByokKeysError(
-          'PROVIDER_SECRET_EMPTY',
-          'Provider secret cannot be empty',
-        );
+        throw secretEmptyError();
       }
       const pendingBefore = await this.#profiles.getPending(profileRef);
       if (configuration.auth_mode !== 'none' && secret === undefined) {
@@ -317,13 +322,10 @@ export class ProviderRegistry {
       const profile = await this.#profiles.get(profileRef);
       if (profile === undefined) throw providerNotConfigured(profileRef);
       if (profile.auth_mode === 'none') {
-        throw new ByokKeysError(
-          'PROVIDER_SECRET_NOT_ALLOWED',
-          'A provider without authentication cannot accept a secret',
-        );
+        throw secretNotAllowedError();
       }
       if (secret.length === 0) {
-        throw new ByokKeysError('PROVIDER_SECRET_EMPTY', 'Provider secret cannot be empty');
+        throw secretEmptyError();
       }
       await this.#writeAndCommit(
         profileRef,

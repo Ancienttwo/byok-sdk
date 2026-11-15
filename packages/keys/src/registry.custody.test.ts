@@ -99,6 +99,11 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
   });
 
+  it('refuses an undefined replacement secret for an unauthenticated profile', async () => {
+    await registry().configure({ ...OPENAI, profile_ref: 'local', provider_kind: 'custom', auth_mode: 'none', base_url: 'http://127.0.0.1:11434/v1' });
+    await expect(registry().replaceSecret('local', undefined as never)).rejects.toMatchObject({ code: 'PROVIDER_SECRET_NOT_ALLOWED' });
+  });
+
   it('refuses a key no OS store accepts before marking the profile pending (#1946)', async () => {
     await registry().configure(OPENAI, OLD_KEY);
     for (const invalid of [`${NEW_KEY}\n`, 'k'.repeat(2561)]) {
