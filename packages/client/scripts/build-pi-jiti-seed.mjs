@@ -272,7 +272,7 @@ async function zeroTransform(assetRoot, materializer) {
   process.stdout.write(JSON.stringify({ entries: lookups.length, transforms, ...(unavailable === undefined ? {} : { unavailable }) }));
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   const [mode, target] = process.argv.slice(2);
   if (mode === undefined) await build();
   else if (mode === '--verify-installed' && target) await verifyInstalled(target);
