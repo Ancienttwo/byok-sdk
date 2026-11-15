@@ -1,3 +1,4 @@
+import { objectRecord as record } from '../shared-rules.js';
 import { spawn } from 'node:child_process';
 
 const INSPECT_TIMEOUT_MS = 5000;
@@ -10,8 +11,6 @@ export const GROK_USER_MCP_SERVERS_OFF = Object.freeze({
   GROK_CLAUDE_MCPS_ENABLED: '0', GROK_CURSOR_MCPS_ENABLED: '0', GROK_MANAGED_MCPS_ENABLED: '0',
 });
 
-const record = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 
 /**
  * Why `grok inspect --json` output leaves MCP servers outside the task, or

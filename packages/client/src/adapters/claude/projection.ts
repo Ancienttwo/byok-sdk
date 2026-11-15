@@ -1,3 +1,4 @@
+import { BASE_CONTENT_TYPES } from '../shared-rules.js';
 import type { McpEventIdentities } from '../../mcp/event-identity.js';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -70,10 +71,6 @@ export function parseClaudeContextWindow(modelUsage: unknown, initModel?: string
 export interface ToolUseCorrelation {
   readonly toolNameByUseId: Map<string, string>;
   readonly mcpIdentities?: McpEventIdentities;
-}
-
-export function createToolUseCorrelation(mcpIdentities?: McpEventIdentities): ToolUseCorrelation {
-  return { toolNameByUseId: new Map(), mcpIdentities };
 }
 
 export interface MapClaudeMessageOptions {
@@ -150,21 +147,9 @@ export const ROUTINE_CLAUDE_SYSTEM_SUBTYPES: ReadonlySet<string> = new Set([
 const FILE_WRITING_TOOLS: ReadonlySet<string> = new Set(['Write', 'Edit', 'NotebookEdit']);
 
 const EXTENSION_CONTENT_TYPES: Readonly<Record<string, string>> = {
-  '.txt': 'text/plain',
-  '.md': 'text/markdown',
-  '.json': 'application/json',
-  '.js': 'text/javascript',
-  '.mjs': 'text/javascript',
-  '.cjs': 'text/javascript',
-  '.ts': 'text/plain',
+  ...BASE_CONTENT_TYPES,
   '.tsx': 'text/plain',
   '.jsx': 'text/plain',
-  '.html': 'text/html',
-  '.css': 'text/css',
-  '.csv': 'text/csv',
-  '.py': 'text/x-python',
-  '.yaml': 'application/yaml',
-  '.yml': 'application/yaml',
 };
 
 /** Best-effort, extension-based content-type guess — deliberately not a full MIME sniffer (out of scope; `AgentEventSchema.artifact.contentType` just needs a non-empty string). */

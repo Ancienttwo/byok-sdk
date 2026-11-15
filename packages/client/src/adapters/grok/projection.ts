@@ -1,3 +1,4 @@
+import { accumulateUsage, objectRecord as record, projectProviderContext } from '../shared-rules.js';
 import { BufferedToolUse } from '../buffered-tool-use.js';
 import type { AgentEvent, RuntimeFailureClass } from '@byok-sdk/protocol';
 import { runtimeFailureClassOf } from '../../runtime-failure.js';
@@ -12,12 +13,6 @@ export type GrokTurnOutcome =
   | { readonly kind: 'aborted' }
   | { readonly kind: 'failed'; readonly failure: RuntimeFailureClass; readonly reason: string; readonly fromText?: true };
 
-const record = (value: unknown): Record<string, unknown> | undefined =>
-  value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-const count = (value: unknown): number | undefined =>
-  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 
 
 
@@ -221,20 +216,9 @@ export class GrokProjection {
     if (report === undefined) return;
     const next: Usage = { ...(this.pending ?? { type: 'usage' }) };
     const context = record(report.context);
-    const contextTokens = count(context?.tokens);
-    const contextWindow = count(context?.contextWindow);
-    if (contextTokens !== undefined) next.contextTokens = contextTokens;
-    if (contextWindow !== undefined && contextWindow > 0) next.contextWindow = contextWindow;
-    if (contextTokens !== undefined || next.contextWindow !== undefined) next.contextSource = 'provider';
-    const tokens = record(report.tokens) as Tokens | undefined;
-    if (tokens !== undefined && count(tokens.input) !== undefined && count(tokens.output) !== undefined) {
-      for (const [from, to] of [['input', 'inputTokens'], ['output', 'outputTokens'], ['cacheRead', 'cachedInputTokens'], ['reasoning', 'reasoningTokens']] as const) {
-        const value = count(tokens[from]);
-        const prior = count(this.billed[from]) ?? 0;
-        if (value !== undefined && value >= prior) next[to] = (next[to] ?? 0) + value - prior;
-      }
-      this.billed = tokens as typeof this.billed;
-    }
+    projectProviderContext(next, context);
+    const tokens = accumulateUsage(next, record(report.tokens), this.billed);
+    if (tokens !== undefined) this.billed = tokens as typeof this.billed;
     if (Object.keys(next).length > 1) this.pending = next;
   }
 }

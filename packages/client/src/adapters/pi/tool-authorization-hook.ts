@@ -1,3 +1,4 @@
+import { record } from '../shared-rules.js';
 import type { ExtensionFactory } from '@earendil-works/pi-coding-agent';
 import { formatToolAuthorizationDenial } from '../../tool-authorization.js';
 import { requestToolAuthorization, type ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc.js';
@@ -13,7 +14,6 @@ type FieldCheck = (value: unknown) => boolean;
 const text: FieldCheck = value => typeof value === 'string';
 const path: FieldCheck = value => typeof value === 'string' && value.length > 0;
 const flag: FieldCheck = value => typeof value === 'boolean';
-const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const env: FieldCheck = value => record(value) && Object.values(value).every(entry => typeof entry === 'string');
 // Own properties only on both sides: an inherited name such as `toString` is neither a field nor a validator.
 const exactObject = (required: Readonly<Record<string, FieldCheck>>, optional: Readonly<Record<string, FieldCheck>>): FieldCheck => value => record(value)

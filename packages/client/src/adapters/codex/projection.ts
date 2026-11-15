@@ -1,3 +1,4 @@
+import { BASE_CONTENT_TYPES as contentTypes, objectRecord as record } from '../shared-rules.js';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
@@ -29,10 +30,6 @@ interface StreamState {
   /** The agentMessage item whose non-blank delta last started a draft. */
   draftItem?: unknown;
 }
-const record = (value: unknown): Record<string, unknown> | undefined =>
-  value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
 const failure = (reason: string) =>
   new RuntimeExecutionFailure({
     phase: 'run',
@@ -43,21 +40,6 @@ const idOf = (item: Record<string, unknown>): string => {
   if (typeof item.id !== 'string' || item.id.trim().length === 0)
     throw failure('codex tool item had no authoritative tool call id');
   return item.id;
-};
-const contentTypes: Record<string, string> = {
-  '.txt': 'text/plain',
-  '.md': 'text/markdown',
-  '.json': 'application/json',
-  '.js': 'text/javascript',
-  '.mjs': 'text/javascript',
-  '.cjs': 'text/javascript',
-  '.ts': 'text/plain',
-  '.html': 'text/html',
-  '.css': 'text/css',
-  '.py': 'text/x-python',
-  '.yml': 'application/yaml',
-  '.yaml': 'application/yaml',
-  '.csv': 'text/csv',
 };
 
 /** Each stream object is a separate record identity; seq and derived ordinal are local to it. */

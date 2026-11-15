@@ -1,3 +1,4 @@
+import { record } from '../shared-rules.js';
 import {
   NativeInteractionController, NativeInteractionError, type NativeInteractionChannel, type NativeInteractionHostOptions,
   type NativeInteractionIdentity, type NativeQuestion,
@@ -10,7 +11,6 @@ export interface CodexNativeReply {
   cancelled(): void;
 }
 const key = (id: string | number) => JSON.stringify([typeof id, id]);
-const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 /**
  * Qualified against Codex rust-v0.160.0. Relays structured user input only:
