@@ -17,7 +17,7 @@ import {
   type OwnedProcessGroupRecord,
 } from '../adapters/process-tree';
 import { disposeDurableShellGroups } from '../adapters/pi-durable/process-groups';
-import { processSignalState } from '../util/process-signal-state';
+import { processSignalState, readProcessGroupRows } from '../util/process-signal-state';
 import { OWNED_PROCESSES_DIRECTORY, OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
 import { readProcessTable } from '../runtime/oar-process-tree.js';
 import { execFileSync } from 'node:child_process';
@@ -31,6 +31,7 @@ import { execFileSync } from 'node:child_process';
 const spawned: ChildProcess[] = [];
 const orphanGroups: number[] = [];
 const detachers: Array<() => void> = [];
+const forkingGroups = new Set<number>();
 let root: string;
 
 beforeEach(async () => {
@@ -38,6 +39,16 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // Independent of the disposer under test: also clean up when old code leaks a fork.
+  for (const pgid of forkingGroups) {
+    await expect.poll(() => {
+      try { process.kill(-pgid, 'SIGKILL'); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      }
+      return readProcessGroupRows().some(row => Number(row[2]) === pgid && !row[3]!.startsWith('Z'));
+    }, { timeout: 5000, interval: 20 }).toBe(false);
+  }
+  forkingGroups.clear();
   for (const detach of detachers.splice(0)) detach();
   await disposeDurableShellGroups(new Set([
     ...spawned.splice(0).flatMap(child => child.pid === undefined ? [] : [child.pid]),
@@ -184,6 +195,23 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
     expect(groupAlive(tree.pgid)).toBe(false);
     expect(seen.disposed).toEqual(seen.adopted);
   });
+
+  it('durable disposal reaps members born while the group continuously forks', async () => {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const child = spawn('/bin/sh', ['-c', 'echo ready; while :; do sleep 600 & done'],
+        withOwnedProcessTree({ cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }));
+      const pgid = child.pid!;
+      forkingGroups.add(pgid);
+      await new Promise<void>((resolve, reject) => {
+        child.stdout!.once('data', () => resolve());
+        child.once('error', reject);
+      });
+      const groups = new Set([pgid]);
+      await disposeDurableShellGroups(groups);
+      expect(groups.size).toBe(0);
+      expect(readProcessGroupRows().filter(row => Number(row[2]) === pgid && !row[3]!.startsWith('Z'))).toEqual([]);
+    }
+  }, 30_000);
 
   it('an unreadable process table fails the adoption instead of skipping the record', async () => {
     attachRecorder();

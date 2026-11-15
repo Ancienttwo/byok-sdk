@@ -1,10 +1,10 @@
 import type { RuntimeTaskInput } from '../types';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
@@ -16,6 +16,21 @@ const PI_FIXTURE = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.u
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 const CODEX_FIXTURE = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
 const DESCENDANT_FIXTURE = fileURLToPath(new URL('./fixtures/process-tree-descendant.mjs', import.meta.url));
+
+const forkingDirectories: string[] = [];
+const forkingGroups = new Set<number>();
+afterEach(async () => {
+  for (const pgid of forkingGroups) {
+    await expect.poll(() => {
+      try { process.kill(-pgid, 'SIGKILL'); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      }
+      return [...readOwnedProcessTable().values()].some(entry => entry.pgid === pgid);
+    }, { timeout: 5000, interval: 20 }).toBe(false);
+  }
+  forkingGroups.clear();
+  for (const directory of forkingDirectories.splice(0)) await fs.rm(directory, { recursive: true, force: true });
+});
 
 interface ProcessTreeReceipt {
   rootPid: number;
@@ -248,6 +263,41 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
       reapAll(pids);
       await fs.rm(workspaceDir, { recursive: true, force: true });
     }
+  });
+
+  it('disposal reaps members born while the group continuously forks', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-forking-tree-'));
+    forkingDirectories.push(directory);
+    const marker = path.join(directory, 'forked');
+    const script = `process.on('SIGTERM', () => {}); process.on('SIGUSR2', () => require('node:child_process').spawn('/bin/sh', ['-c', 'sleep 600 & echo ready > "$1"; while :; do sleep 600 & sleep 0.01; done', 'forker', ${JSON.stringify(marker)}], { stdio: 'ignore' })); console.log('ready'); setInterval(() => {}, 1000);`;
+    const child = spawn(process.execPath, ['-e', script],
+      withOwnedProcessTree({ cwd: directory, stdio: ['ignore', 'pipe', 'ignore'] }));
+    const pgid = child.pid!;
+    forkingGroups.add(pgid);
+    const closed = new Promise<void>(resolve => child.once('close', () => resolve()));
+    await new Promise<void>((resolve, reject) => {
+      child.stdout!.once('data', () => resolve());
+      child.once('error', reject);
+    });
+    let first = true;
+    let missed: number[] = [];
+    await disposeOwnedProcessTree({
+      child, waitClosed: () => closed, isClosed: () => child.signalCode !== null, label: 'forking fixture', termGraceMs: 0,
+      killFn: (pid, signal) => {
+        if (pid === -pgid && signal === 'SIGKILL' && first) {
+          first = false;
+          // Model the kernel's first delivery missing births after the pre-kill snapshot.
+          process.kill(pgid, 'SIGUSR2');
+          execFileSync('/bin/sh', ['-c', 'while ! test -f "$1"; do sleep 0.01; done', 'wait', marker], { timeout: 2000 });
+          missed = [...readOwnedProcessTable().values()].filter(entry => entry.pgid === pgid && entry.pid !== pgid).map(entry => entry.pid);
+          expect(missed.length).toBeGreaterThan(0);
+          process.kill(pgid, signal);
+        } else process.kill(pid, signal);
+      },
+    });
+    expect(first).toBe(false);
+    expect(missed.every(pid => !processExists(pid))).toBe(true);
+    expect([...readOwnedProcessTable().values()].filter(entry => entry.pgid === pgid)).toEqual([]);
   });
 
   it('an unreadable process table fails the disposal typed, naming the read (#1298)', async () => {
