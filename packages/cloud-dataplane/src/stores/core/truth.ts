@@ -27,7 +27,6 @@ import {
   type SnapshotWriteInput,
   type TenantId,
   type TerminalWriteInput,
-  type TruthBodyRef,
   type TruthManifestEntry,
   type TruthManifestQuery,
   type TruthRecord,
@@ -37,26 +36,9 @@ import {
 } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 import type { ByokPool } from '../../pool.js';
+import { RECORD_COLUMNS, bodyColumns, toRecord, type RecordRow } from '../../truth-row.js';
 
 const DEFAULT_MANIFEST_LIMIT = 100;
-
-const RECORD_COLUMNS =
-  'tenant_id, kind, subject_id, rev, content_hash, byte_size, body_kind, body_inline, body_object_hash, label, request_id, written_at';
-
-interface RecordRow {
-  readonly tenant_id: string;
-  readonly kind: string;
-  readonly subject_id: string;
-  readonly rev: number;
-  readonly content_hash: string;
-  readonly byte_size: bigint;
-  readonly body_kind: string;
-  readonly body_inline: string | null;
-  readonly body_object_hash: string | null;
-  readonly label: string | null;
-  readonly request_id: string | null;
-  readonly written_at: string;
-}
 
 interface ManifestRow {
   readonly kind: string;
@@ -66,34 +48,6 @@ interface ManifestRow {
   readonly byte_size: bigint;
   readonly label: string | null;
   readonly written_at: string;
-}
-
-function toBody(row: RecordRow): TruthBodyRef {
-  return row.body_kind === 'inline'
-    ? { kind: 'inline', body: row.body_inline ?? '' }
-    : { kind: 'object', hash: (row.body_object_hash ?? '') as ContentHash };
-}
-
-function toRecord(row: RecordRow): TruthRecord {
-  return {
-    tenantId: row.tenant_id as TenantId,
-    kind: row.kind as TruthRecordKind,
-    recordKey: row.subject_id,
-    rev: row.rev,
-    contentHash: row.content_hash as ContentHash,
-    byteSize: row.byte_size,
-    body: toBody(row),
-    ...(row.label === null ? {} : { label: row.label }),
-    ...(row.request_id === null ? {} : { requestId: row.request_id }),
-    writtenAt: row.written_at,
-  };
-}
-
-/** Splits the two-case `TruthBodyRef` union into the two nullable columns. */
-function bodyColumns(body: TruthBodyRef): readonly [string, string | null, string | null] {
-  return body.kind === 'inline'
-    ? ['inline', body.body, null]
-    : ['object', null, body.hash as string];
 }
 
 export class PostgresTruthStore implements TruthStore {
@@ -126,7 +80,7 @@ export class PostgresTruthStore implements TruthStore {
       ],
     );
     const row = inserted.rows[0];
-    if (row !== undefined) return toRecord(row);
+    if (row !== undefined) return toRecord(row.tenant_id as TenantId, row);
 
     const existing = await this.getRecord(tenant, {
       kind: 'task.terminal',
@@ -205,7 +159,7 @@ export class PostgresTruthStore implements TruthStore {
           );
 
     const row = written.rows[0];
-    if (row !== undefined) return toRecord(row);
+    if (row !== undefined) return toRecord(row.tenant_id as TenantId, row);
 
     const current = await this.getRecord(tenant, {
       kind: input.kind,
@@ -229,7 +183,7 @@ export class PostgresTruthStore implements TruthStore {
       [tenant, selector.kind, selector.recordKey],
     );
     const row = result.rows[0];
-    return row === undefined ? undefined : toRecord(row);
+    return row === undefined ? undefined : toRecord(row.tenant_id as TenantId, row);
   }
 
   async listManifest(

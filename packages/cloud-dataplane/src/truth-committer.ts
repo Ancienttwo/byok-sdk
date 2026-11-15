@@ -15,36 +15,17 @@ import {
   ByokCoreError,
   CoreConflictError,
   type Clock,
-  type ContentHash,
   type TenantId,
-  type TruthBodyRef,
   type TruthRecord,
-  type TruthRecordKind,
 } from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
 import type { ByokPool } from './pool.js';
 import { assertByokPool } from './pool-brand.js';
 import { PostgresTruthStore } from './stores/core/truth.js';
+import { RECORD_COLUMNS, bodyColumns, toRecord, type RecordRow } from './truth-row.js';
 
-const RECORD_COLUMNS =
-  'tenant_id, kind, subject_id, rev, content_hash, byte_size, body_kind, body_inline, body_object_hash, label, request_id, written_at';
 const RECEIPT_COLUMNS =
   'tenant_id, device_id, request_id, operation, resource, body_sha256, body_size, response_status, response_body, recorded_at';
-
-interface RecordRow {
-  readonly tenant_id: string;
-  readonly kind: string;
-  readonly subject_id: string;
-  readonly rev: number;
-  readonly content_hash: string;
-  readonly byte_size: bigint;
-  readonly body_kind: string;
-  readonly body_inline: string | null;
-  readonly body_object_hash: string | null;
-  readonly label: string | null;
-  readonly request_id: string | null;
-  readonly written_at: string;
-}
 
 interface ReceiptRow {
   readonly tenant_id: string;
@@ -96,27 +77,6 @@ export interface PostgresTruthCommitterOptions {
   readonly crypto: Pick<CloudCrypto, 'sha256'>;
 }
 
-function toBody(row: RecordRow): TruthBodyRef {
-  return row.body_kind === 'inline'
-    ? { kind: 'inline', body: row.body_inline ?? '' }
-    : { kind: 'object', hash: (row.body_object_hash ?? '') as ContentHash };
-}
-
-function toRecord(tenant: TenantId, row: RecordRow): TruthRecord {
-  return {
-    tenantId: tenant,
-    kind: row.kind as TruthRecordKind,
-    recordKey: row.subject_id,
-    rev: row.rev,
-    contentHash: row.content_hash as ContentHash,
-    byteSize: row.byte_size,
-    body: toBody(row),
-    ...(row.label === null ? {} : { label: row.label }),
-    ...(row.request_id === null ? {} : { requestId: row.request_id }),
-    writtenAt: row.written_at,
-  };
-}
-
 function toReceipt(tenant: TenantId, row: ReceiptRow): ProofRequestReceipt {
   return {
     tenantId: tenant,
@@ -139,12 +99,6 @@ function sameBinding(receipt: ProofRequestReceipt, input: TruthCommitInput): boo
     receipt.bodySha256 === input.proofBodySha256 &&
     receipt.bodySize === input.proofBodySize
   );
-}
-
-function bodyColumns(body: TruthBodyRef): readonly [string, string | null, string | null] {
-  return body.kind === 'inline'
-    ? ['inline', body.body, null]
-    : ['object', null, body.hash];
 }
 
 function writeKey(write: PreparedTruthWrite): string {
