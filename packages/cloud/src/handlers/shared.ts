@@ -7,6 +7,7 @@
  * `TenantStores` and a `DevicePrincipal` and never sees a `TenantId` again.
  */
 import type { Context } from 'hono';
+import { parseJsonBytes } from '../json-bytes.js';
 import type { DevicePrincipal } from '@byok-sdk/core';
 import { authenticateBearer, type BearerAuthDeps } from '../auth/bearer.js';
 import { tenantStoresFor, type CloudRootStores, type TenantStores } from '../tenant-stores.js';
@@ -110,14 +111,6 @@ function parseContentLength(value: string): bigint | undefined {
   if (!/^\d+$/u.test(normalized)) return undefined;
   try {
     return BigInt(normalized);
-  } catch {
-    return undefined;
-  }
-}
-
-function parseJsonBytes(bytes: Uint8Array): unknown | undefined {
-  try {
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
   } catch {
     return undefined;
   }

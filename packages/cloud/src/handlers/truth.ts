@@ -13,6 +13,7 @@ import {
   type TruthRecordKind,
 } from '@byok-sdk/core';
 import type { Context } from 'hono';
+import { parseJsonBytes } from '../json-bytes.js';
 import type { DeviceProofAuthDeps } from '../auth/device-proof.js';
 import {
   TRUTH_MANIFEST_MAX_LIMIT,
@@ -226,14 +227,6 @@ function prepareWrite(
     body,
     ...(label === undefined ? {} : { label }),
   };
-}
-
-function parseJsonBytes(bytes: Uint8Array): unknown | undefined {
-  try {
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-  } catch {
-    return undefined;
-  }
 }
 
 function unauthorized(c: Context): Response {

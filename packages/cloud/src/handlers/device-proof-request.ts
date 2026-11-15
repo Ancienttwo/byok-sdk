@@ -5,6 +5,7 @@
  */
 import { DEVICE_PROOF_HEADER } from '@byok-sdk/core';
 import type { Context } from 'hono';
+import { parseJsonBytes } from '../json-bytes.js';
 import {
   authenticateDeviceProof,
   type AuthenticatedDeviceProof,
@@ -66,7 +67,7 @@ function decodeProofHeader(value: string | undefined): unknown | undefined {
     const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (value.length % 4)) % 4);
     const binary = atob(padded);
     const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    return parseJsonBytes(bytes);
   } catch {
     return undefined;
   }
