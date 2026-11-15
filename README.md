@@ -7,22 +7,24 @@ composition over Postgres and R2.
 
 ## Release status
 
-The prepared candidate is **0.43.0** for all nine public packages, an owner-approved
-MINOR with 21 breaking and 4 additive upgrade-manifest entries, including the task
-HOME behavior change (#2084). Wire remains v6; `@byok-sdk/cloud-do` is archived and excluded. See the
-[candidate release notes](docs/releases/v0.43.0.md) and
-[Host upgrade checklist](docs/releases/host-upgrade-0.43.0.md). Candidate validation,
-Host acceptance and publication authorization remain separate. After prep merges,
-main is frozen until the publication-record PR merges.
+The current stable release is **0.43.0** for all nine public packages, an owner-approved
+MINOR published on 2026-11-14 (UTC), with 21 breaking and 4 additive upgrade-manifest
+entries, including the task HOME behavior change (#2084). Wire remains v6.
+`@byok-sdk/cloud-do` left the release train at 0.43.0 (#1959); its existing npm
+versions are deprecated and receive no further releases or fixes. Remove it or
+pin exactly 0.42.0, and never send it sealed tasks. See the
+[release notes](docs/releases/v0.43.0.md) and
+[Host upgrade checklist](docs/releases/host-upgrade-0.43.0.md). Publication does not
+establish platform or production acceptance.
 
-The current stable release is **0.42.0** for all ten packages, a MINOR
+The previous stable release is **0.42.0** for all ten packages, a MINOR
 with breaking changes and the first publication of `@byok-sdk/bot-collaboration`,
 published on 2026-11-13 (UTC). It keeps wire v6.
 See the [release notes](docs/releases/v0.42.0.md) and
 [Host upgrade checklist](docs/releases/host-upgrade-0.42.0.md). Publication does not establish
 platform or production acceptance.
 
-The previous stable release is **0.41.0** for all nine packages, a MINOR
+An earlier stable release is **0.41.0** for all nine packages, a MINOR
 with breaking changes, published on 2026-11-09, and the first wire v6 release: a v5 peer cannot read v6.
 See the [release notes](docs/releases/v0.41.0.md) and
 [Host upgrade checklist](docs/releases/host-upgrade-0.41.0.md). Publication does not establish
@@ -109,8 +111,9 @@ Another earlier stable release is **0.30.2** for all nine packages. See the
 notes do not say that 0.30.2, or a Host on it, is ready for production; the
 product loop gate (#977) moves to 0.34.0 with the Host upgrade checklist.
 
-A registry read on 2026-11-13 (UTC) shows `latest` **0.42.0** for all ten
-packages; `@byok-sdk/bot-collaboration` has no earlier version. The registry lists 0.41.0 (2026-11-09, UTC), 0.40.0 (2026-11-08, UTC), 0.39.0 (2026-11-06, UTC), 0.38.0 and 0.37.0 (2026-11-04, UTC), 0.36.0 (2026-11-03, UTC), 0.35.0 and 0.34.0 (2026-11-02, UTC), 0.33.0 and 0.32.0 (2026-11-01, UTC), 0.31.0 (2026-10-29,
+A registry read on 2026-11-14 (UTC) shows `latest` **0.43.0** for all nine
+packages in the release train. The registry lists 0.42.0 (2026-11-13, UTC), the first
+publication of `@byok-sdk/bot-collaboration`, and 0.41.0 (2026-11-09, UTC), 0.40.0 (2026-11-08, UTC), 0.39.0 (2026-11-06, UTC), 0.38.0 and 0.37.0 (2026-11-04, UTC), 0.36.0 (2026-11-03, UTC), 0.35.0 and 0.34.0 (2026-11-02, UTC), 0.33.0 and 0.32.0 (2026-11-01, UTC), 0.31.0 (2026-10-29,
 UTC), 0.30.2 (2026-10-26, UTC), 0.30.1 and 0.30.0 (2026-10-24, UTC), 0.29.0
 (2026-10-23, UTC), 0.28.3 and 0.28.2 (2026-10-22, UTC), 0.28.1 / keys 0.13.1
 (2026-10-21, UTC) and 0.28.0 / keys 0.13.0 (2026-10-20, UTC) as the earlier
@@ -129,9 +132,7 @@ changes server, cloud, client and keys APIs.
 [Release notes](docs/releases/v0.27.0.md) describe the changes since 0.26.1
 and the Host upgrade and migration steps.
 
-Versioned install examples below name the prepared 0.43.0 candidate. Until
-publication, use the accepted candidate tarballs for validation; npm stable
-installation remains on 0.42.0.
+Versioned install examples below name the published 0.43.0 release.
 The historical `rc` publication is **0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
 [publication record](docs/releases/v0.27.0-rc.2-publication.md).
 
