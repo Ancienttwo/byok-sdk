@@ -5,6 +5,7 @@ import {
   type TimelineEvent,
 } from '@byok-sdk/cloud';
 import { isKnownAgentEvent, type AgentEvent } from '@byok-sdk/protocol';
+import { canonicalTimestamp, structurallyEqual, validTaskId } from './timeline-rules.js';
 import {
   TimelineFoldError,
   type TaskTimelineSnapshot,
@@ -42,10 +43,6 @@ function fail(code: ConstructorParameters<typeof TimelineFoldError>[0], message:
   throw new TimelineFoldError(code, message, cause === undefined ? undefined : { cause });
 }
 
-function validTaskId(taskId: unknown): taskId is string {
-  return typeof taskId === 'string' && taskId.length > 0 && taskId.length <= 200;
-}
-
 function validateMetadata(metadata: TimelineMetadata): TimelineMetadata {
   if (!Number.isSafeInteger(metadata.dropped) || metadata.dropped < 0) {
     fail('timeline_input_invalid', 'Timeline metadata dropped must be a non-negative integer.');
@@ -53,11 +50,7 @@ function validateMetadata(metadata: TimelineMetadata): TimelineMetadata {
   if (metadata.capacity !== undefined && (!Number.isSafeInteger(metadata.capacity) || metadata.capacity <= 0)) {
     fail('timeline_input_invalid', 'Timeline metadata capacity must be a positive integer when present.');
   }
-  if (metadata.expiresAt !== undefined && (
-    typeof metadata.expiresAt !== 'string'
-    || !Number.isFinite(Date.parse(metadata.expiresAt))
-    || new Date(metadata.expiresAt).toISOString() !== metadata.expiresAt
-  )) {
+  if (metadata.expiresAt !== undefined && !canonicalTimestamp(metadata.expiresAt)) {
     fail('timeline_input_invalid', 'Timeline metadata expiresAt must be a canonical ISO timestamp when present.');
   }
   if (metadata.cursor !== undefined && (
@@ -115,24 +108,6 @@ function parseEvent(value: TimelineEvent): TimelineEvent {
   } catch (error) {
     fail('timeline_input_invalid', 'Timeline events must satisfy the typed cloud activity authority.', error);
   }
-}
-
-function structurallyEqual(left: unknown, right: unknown, seen = new WeakMap<object, object>()): boolean {
-  if (Object.is(left, right)) return true;
-  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return false;
-  if (Array.isArray(left) !== Array.isArray(right)) return false;
-  const prior = seen.get(left);
-  if (prior !== undefined) return prior === right;
-  seen.set(left, right);
-  if (Array.isArray(left) && Array.isArray(right)) {
-    return left.length === right.length && left.every((entry, index) => structurallyEqual(entry, right[index], seen));
-  }
-  const leftRecord = left as Record<string, unknown>;
-  const rightRecord = right as Record<string, unknown>;
-  const leftKeys = Object.keys(leftRecord).sort();
-  const rightKeys = Object.keys(rightRecord).sort();
-  return leftKeys.length === rightKeys.length
-    && leftKeys.every((key, index) => key === rightKeys[index] && structurallyEqual(leftRecord[key], rightRecord[key], seen));
 }
 
 function eventKey(event: TimelineEvent): TimelineEventKey {
