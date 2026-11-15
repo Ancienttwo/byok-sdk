@@ -567,6 +567,19 @@ describe('the prepared pi launch entry', () => {
     expect(endpoint.bodies).toHaveLength(0);
   }, 60_000);
 
+  it('refuses a retained artifact with a tampered envelopeDigest before any transport', async () => {
+    const endpoint = await providerEndpoint();
+    const prepared = await prepareOnThisDevice(endpoint, () => {}, { toolless: true });
+    const stored = JSON.parse(await fs.readFile(prepared.artifactPath, 'utf8'));
+    await fs.writeFile(prepared.artifactPath, JSON.stringify({ ...stored, envelopeDigest: 'tampered' }), 'utf8');
+
+    await expect(startPrepared(prepared)).rejects.toMatchObject({
+      phase: 'start', retry: 'non-retryable',
+      message: 'prepared pi operation read an artifact whose envelope digest is not the recorded one',
+    });
+    expect(endpoint.bodies).toHaveLength(0);
+  }, 60_000);
+
   // WP2 deviation 6: `verifyPreparedPiInput` checks the envelope digests
   // before it recompiles the transcript, so a bare edit is a digest mismatch.
   it('reports a tampered transcript as prepared_digest_mismatch, before any transport', async () => {
