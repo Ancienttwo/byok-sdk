@@ -5,6 +5,7 @@ import { acquirePathMutationGate, PathMutationGateBusyError, withGateReleaseFail
 import { PlatformCommandTimeoutError } from '../util/command-timeouts.js';
 import { SecureDirHardeningError } from '../util/secure-dir.js';
 import type { ServiceProgram } from './service-types.js';
+import { hasControlChar } from './control-chars.js';
 
 /**
  * Every unit this SDK generates carries this text (an XML comment in a
@@ -118,14 +119,6 @@ export function serviceStateDir(storeDir: string, platform: NodeJS.Platform = pr
 export function serviceLauncherPath(storeDir: string, serviceName: string, platform: NodeJS.Platform = process.platform): string {
   if (platform === 'win32') return path.win32.join(serviceStateDir(storeDir, platform), `${serviceName}.launcher.cmd`);
   return path.posix.join(serviceStateDir(storeDir, platform), `${serviceName}.launcher.sh`);
-}
-
-function hasControlChar(value: string): boolean {
-  for (let i = 0; i < value.length; i += 1) {
-    const code = value.charCodeAt(i);
-    if (code < 32 || code === 127) return true;
-  }
-  return false;
 }
 
 function shellQuote(value: string): string {
