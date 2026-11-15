@@ -119,12 +119,7 @@ function assertProviderProfileSchemaIsCurrent(
   database: DatabaseSync,
   path: string,
 ): void {
-  const row = database
-    .prepare(
-      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'provider_profile'",
-    )
-    .get() as { sql?: string | null } | undefined;
-  const stored = row?.sql;
+  const stored = storedTableDdl(database, 'provider_profile');
   if (typeof stored !== 'string') return;
   if (normalizeTableDdl(stored) === normalizeTableDdl(SCHEMA)) return;
   throw new ByokKeysError(
@@ -202,10 +197,7 @@ export function providerConfigurationLockPath(databasePath: string): string {
  */
 function assertCustodySchemaIsCurrent(database: DatabaseSync, path: string): void {
   for (const [name, ddl] of Object.entries(CUSTODY_TABLES)) {
-    const row = database
-      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
-      .get(name) as { sql?: string | null } | undefined;
-    const stored = row?.sql;
+    const stored = storedTableDdl(database, name);
     if (typeof stored === 'string' && normalizeTableDdl(stored) === normalizeTableDdl(ddl)) continue;
     throw new ByokKeysError(
       'PROVIDER_STORE_SCHEMA_STALE',
