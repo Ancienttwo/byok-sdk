@@ -286,7 +286,18 @@ beforeEach(async () => {
   installation = installationOver(fakeLifecycle());
 });
 
+const forkingMigrateGroups = new Set<number>();
 afterEach(async () => {
+  for (const pgid of forkingMigrateGroups) {
+    await expect.poll(() => {
+      try { process.kill(-pgid, 'SIGKILL'); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+        throw error;
+      }
+      return true;
+    }, { timeout: 5000, interval: 20 }).toBe(false);
+  }
+  forkingMigrateGroups.clear();
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -2416,15 +2427,16 @@ print(json.dumps(result))
       expect([events, await fs.readdir(elsewhere), await installation.receipt()]).toEqual([[], ['kept'], expect.objectContaining({ state: 'switched' })]);
     });
 
-    it.skipIf(process.platform === 'win32')('when the migrate record cannot be written, nothing restores until the whole group has ended', async () => {
+    it.skipIf(process.platform === 'win32').each([false, true])('when the migrate record cannot be written, nothing restores until the whole group has ended (continuous forks: %s)', async (forks) => {
       const pidFile = path.join(root, 'member.pid');
-      const member = `const fs = require('node:fs'); fs.writeFileSync(process.argv[3], String(process.pid)); setInterval(() => fs.writeFileSync(process.argv[2], 'member'), 20); process.on('SIGTERM', () => setTimeout(() => process.exit(0), 200));`;
+      const member = `const fs = require('node:fs'); ${forks ? `require('node:child_process').spawn('/bin/sh', ['-c', 'trap "" TERM; while :; do sleep 600 & sleep 0.01; done'], { stdio: 'ignore' });` : ''} fs.writeFileSync(process.argv[3], String(process.pid)); setInterval(() => fs.writeFileSync(process.argv[2], 'member'), 20); process.on('SIGTERM', () => setTimeout(() => process.exit(0), 200));`;
       const lingering = `${MIGRATE}\nrequire('node:child_process').spawn(process.execPath, [require('node:path').join(__dirname, 'member.cjs'), process.argv[3], ${JSON.stringify(pidFile)}], { stdio: 'ignore' }).unref();`;
       installation = installationOver(fakeLifecycle(), { migrate: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] }) });
       const original = fs.rename.bind(fs);
       // The record write fails once the root has exited and a group member still writes the store.
       const rename = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
         if (String(to) === receiptPath() && (await fs.readFile(from, 'utf8')).includes('"migrate"')) {
+          forkingMigrateGroups.add((JSON.parse(await fs.readFile(from, 'utf8')) as { migrate: { pgid: number } }).migrate.pgid);
           await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 5000 });
           await delay(200);
           throw Object.assign(new Error('no space left'), { code: 'ENOSPC' });
