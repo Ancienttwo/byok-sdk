@@ -21,6 +21,7 @@ import {
   type SessionSelection,
   type TaskOfferPayload,
 } from '@byok-sdk/protocol';
+import { sameAgentRef } from '../agent-message-disposition.js';
 import { ByokCloudError, DeviceRetiredError, TaskOfferAppendRefusedError } from '../errors.js';
 import { taskOfferMessageId, uuidFromSha256 } from '../offer-identity.js';
 import { firstSealedPayload } from '../sealed-comparison.js';
@@ -36,10 +37,6 @@ import { tenantStoresFor, type CloudRootStores, type TenantStores } from '../ten
  */
 export function isTerminalAttemptStatus(status: TaskAttemptStatus): boolean {
   return status === 'complete' || status === 'failed' || status === 'cancelled';
-}
-
-export function sameAgentRef(expected: AgentRef, actual: AgentRef | undefined): boolean {
-  return actual?.agentId === expected.agentId && actual.profileRevision === expected.profileRevision;
 }
 
 /**

@@ -4,7 +4,7 @@ import {
   type AgentRef, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentMessageDispositionPayload,
 } from '@byok-sdk/protocol';
 import type { TenantStores } from './tenant-stores.js';
-import { agentMessageWithinLimit, parseAgentMessageDisposition } from './agent-message-disposition.js';
+import { agentMessageWithinLimit, parseAgentMessageDisposition, sameAgentRef } from './agent-message-disposition.js';
 import { assertTaskContentPresent } from './task-redaction.js';
 
 /**
@@ -23,10 +23,6 @@ const FrozenMessageBinding = z.object({
   agentRef: AgentRefSchema, sessionRef: z.string().min(1).optional(),
   requirement: AgentMessageEgressRequirementSchema, context: AgentMessageServerContextSchema,
 }).strict();
-
-function sameRef(a: AgentRef, b: AgentRef): boolean {
-  return a.agentId === b.agentId && a.profileRevision === b.profileRevision;
-}
 
 /** Discover the one durable message without requiring the Host to have received its body. */
 export async function readTaskAgentMessage(
@@ -49,7 +45,7 @@ export async function readTaskAgentMessage(
   if (!parsed.success || !frozen.success) throw invalid();
   const payload = parsed.data;
   if (admission.messageId !== payload.messageId || JSON.stringify(payload) !== admission.payloadBody
-    || !sameRef(payload.agentRef, agentRef) || !sameRef(frozen.data.agentRef, agentRef)
+    || !sameAgentRef(payload.agentRef, agentRef) || !sameAgentRef(frozen.data.agentRef, agentRef)
     || payload.contract !== frozen.data.requirement.contract || payload.contentType !== frozen.data.requirement.contentType
     || (frozen.data.sessionRef !== undefined && payload.sessionRef !== frozen.data.sessionRef)
     || !agentMessageWithinLimit(payload, frozen.data.requirement.maxBytes)) throw invalid();
@@ -74,13 +70,13 @@ export async function readTaskAgentMessageBinding(
   try { value = JSON.parse(binding.body); } catch { throw new Error('Invalid persisted task Agent message.'); }
   const frozen = FrozenMessageBinding.safeParse(value);
   if (!frozen.success) throw new Error('Invalid persisted task Agent message.');
-  if (!sameRef(frozen.data.agentRef, agentRef)) return undefined;
+  if (!sameAgentRef(frozen.data.agentRef, agentRef)) return undefined;
   return { attempt, frozen: frozen.data };
 }
 
 async function readMessageAttempt(stores: TenantStores, deviceId: string, taskId: string, agentRef: AgentRef) {
   const attempt = await stores.tasks.get(taskId);
   if (!attempt || attempt.tenantId !== stores.tenant || attempt.taskId !== taskId || attempt.deviceId !== deviceId
-    || !sameRef(attempt.agentRef, agentRef)) return undefined;
+    || !sameAgentRef(attempt.agentRef, agentRef)) return undefined;
   return attempt;
 }
