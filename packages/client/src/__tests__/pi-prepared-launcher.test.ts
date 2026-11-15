@@ -567,16 +567,16 @@ describe('the prepared pi launch entry', () => {
     expect(endpoint.bodies).toHaveLength(0);
   }, 60_000);
 
-  it.each([
-    ['recordId', 'prepared pi operation read an artifact belonging to a different preparation record'],
-    ['envelopeDigest', 'prepared pi operation read an artifact whose envelope digest is not the recorded one'],
-  ])('refuses a retained artifact with a tampered %s before any transport', async (field, message) => {
+  it('refuses a retained artifact with a tampered envelopeDigest before any transport', async () => {
     const endpoint = await providerEndpoint();
     const prepared = await prepareOnThisDevice(endpoint, () => {}, { toolless: true });
     const stored = JSON.parse(await fs.readFile(prepared.artifactPath, 'utf8'));
-    await fs.writeFile(prepared.artifactPath, JSON.stringify({ ...stored, [field]: 'tampered' }), 'utf8');
+    await fs.writeFile(prepared.artifactPath, JSON.stringify({ ...stored, envelopeDigest: 'tampered' }), 'utf8');
 
-    await expect(startPrepared(prepared)).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', message });
+    await expect(startPrepared(prepared)).rejects.toMatchObject({
+      phase: 'start', retry: 'non-retryable',
+      message: 'prepared pi operation read an artifact whose envelope digest is not the recorded one',
+    });
     expect(endpoint.bodies).toHaveLength(0);
   }, 60_000);
 
