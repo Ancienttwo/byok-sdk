@@ -642,8 +642,6 @@ export function selectImpact(paths, context = {}) {
     }
     if (path === '.gitattributes') {
       verifyReviewedContent(path, context);
-      dirs.add('packages/client');
-      for (const id of ['npm-release-pack', 'agent-memory-helper', 'agent-memory-helper-non-darwin']) families.add(id);
       continue;
     }
     // #702: the Node pin is the runtime of every platform job, so a reviewed

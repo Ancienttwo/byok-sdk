@@ -12,20 +12,6 @@ export const publicManifests = Object.freeze([
   'bot-collaboration', 'client', 'cloud', 'cloud-dataplane', 'core', 'keys', 'protocol', 'server', 'ui-runtime',
 ].map(name => `packages/${name}/package.json`));
 
-// #1102: the upgrade-manifest gate, its test in test:scripts, and the client
-// files entry that ships the manifest.
-const UPGRADE_MANIFEST_GATE = 'node scripts/release/check-upgrade-manifest.mjs';
-const UPGRADE_MANIFEST_TEST = 'scripts/release/check-upgrade-manifest.test.mjs';
-const CLIENT_FILES = Object.freeze(['dist', 'README.md', 'LICENSE']);
-// #1103: the runtime contract suite's own run, exactly; the runtime-contract CI family invokes it.
-export const RUNTIME_CONTRACT_SCRIPT = 'vitest run --config src/__tests__/runtime-contract/vitest.config.ts';
-
-// #927 drops the protocol version from the server description.
-const SERVER_DESCRIPTION = Object.freeze({
-  from: 'BYOK SDK server: single-product, single-tenant embedded coordinator over @byok-sdk/cloud — wake-driven HTTP long-poll, protocol v2, memory or single-process SQLite storage.',
-  to: 'BYOK SDK server: single-product, single-tenant embedded coordinator over @byok-sdk/cloud — wake-driven HTTP long-poll, memory or single-process SQLite storage.',
-});
-
 const version = value => typeof value === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value);
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -66,21 +52,6 @@ const K8_SCRIPTS = Object.freeze({ build: 'tsup && tsc -p tsconfig.build.json', 
 const K8_RUNTIME = Object.freeze({ '@byok-sdk/client': 'workspace:*', '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/server': 'workspace:*' });
 // `./testing` imports these; a Host that installs only `.` or `./rules` does not need them.
 const K8_OPTIONAL_PEERS = Object.freeze(['@hono/node-server', 'vitest']);
-// #1106: K4 moves into @byok-sdk/server/execution-core. The example keeps only
-// its daemon-backed test harness entry and a description that says so.
-const K4_EXPORTS = Object.freeze({ '.': './src/index.ts', './canonical': './src/canonical.ts', './test-support': './src/test-support.ts' });
-const K4_DEMO_EXPORTS = Object.freeze({ './test-support': './src/test-support.ts' });
-const K4_DESCRIPTION = Object.freeze({
-  from: 'Copy-and-own Host execution core with a durable FIFO, routine ledger and outbox',
-  to: 'Demo Host composing @byok-sdk/server/execution-core with a real daemon; integration qualification for the published execution core',
-});
-// #1106: the published K4 entries, and the loader the server's forked K4 crash fixtures run under.
-const SERVER_EXECUTION_CORE_EXPORTS = Object.freeze({
-  './execution-core': { types: './dist/execution-core/index.d.ts', import: './dist/execution-core/index.js' },
-  './execution-core/canonical': { types: './dist/execution-core/canonical.d.ts', import: './dist/execution-core/canonical.js' },
-});
-// #1104: the single-file packaging entry.
-const CLIENT_PACKAGING_EXPORT = Object.freeze({ types: './dist/adapters/packaging.d.ts', import: './dist/adapters/packaging.js' });
 /** The other workspace manifests, each with its dir. */
 function otherWorkspaceManifests(cwd, self) {
   const manifests = [];
@@ -324,31 +295,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   const beforeText = execFileSync('git', ['show', `${base}:${path}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const afterText = readFileSync(resolve(cwd, path), 'utf8');
   if (path === '.gitattributes') {
-    // #603 pins both generated metadata and native build input bytes.
-    // Admit only the reviewed LF rules (additions and the exact daemon->util
-    // move), never unrelated attributes.
-    const rule = 'packages/client/src/util/agent-memory-helper-release-pin.ts text eol=lf\n';
-    const previousRule = 'packages/client/src/daemon/agent-memory-helper-release-pin.ts text eol=lf\n';
-    const before = beforeText.replace(/\r\n/g, '\n');
-    const after = afterText.replace(/\r\n/g, '\n');
-    const nativeRules = 'packages/client/native/agent-memory-fs/*.go text eol=lf\n'
-      + 'packages/client/native/agent-memory-fs/go.mod text eol=lf\n';
-    const additions = [rule, nativeRules, rule + nativeRules];
-    const additive = additions.some(addition => after === before + addition
-      && addition.trimEnd().split('\n').every(line => !before.split('\n').includes(line))
-      // #1099 moved the helper pin from daemon/ to util/. A helper-rule addition
-      // is only reviewed when the base did not already carry the old rule, so
-      // the move cannot be smuggled in as a duplicate.
-      && (!addition.includes(rule) || !before.includes(previousRule)));
-    // The move is the exact one-line replacement, with no other attribute edit.
-    const moved = !before.includes(rule)
-      && before.includes(previousRule)
-      && after === before.replace(previousRule, rule)
-      && !after.includes(previousRule);
-    if (!additive && !moved) {
-      throw new Error('Reviewed CI mapping required: only the reviewed helper LF attributes may be added or moved');
-    }
-    return { dirs: [] };
+    throw new Error('Reviewed CI mapping required: .gitattributes changes need a new reviewed mapping');
   }
   if (path === '.node-version') {
     // #702: every CI and release setup-node step reads this pin. Admit only one
@@ -362,29 +309,6 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   const qualify = [];
   const before = parse(beforeText), after = parse(afterText);
   if (path.startsWith('examples/') && (before.private !== true || after.private !== true)) throw new Error('Example workspaces must stay private');
-  // #2104: admit only the exact private-root manifest migration, before other admissions.
-  if (path === 'package.json' && before.private === true && before.devDependencies?.['eslint-scope'] === undefined
-    && isDeepStrictEqual(after, { ...before, devDependencies: { ...before.devDependencies, 'eslint-scope': '9.1.2' } })) {
-    delete after.devDependencies['eslint-scope'];
-  }
-  // #654 W3: keep the provider in the private root's peer context so cross-workspace helpers share Vitest.
-  if (path === 'package.json' && before.private === true && after.private === true
-    && after.devDependencies?.vitest === '5.1.0') {
-    const pins = { '@vitest/browser-playwright': '5.1.0', playwright: '1.64.1' };
-    if (Object.entries(pins).every(([name, pin]) => before.devDependencies?.[name] === undefined
-      && after.devDependencies?.[name] === pin)) {
-      for (const name of Object.keys(pins)) delete after.devDependencies[name];
-    }
-  }
-  // #2149: the graph probe reuses the client's exact esbuild development pin.
-  if (path === 'package.json' && before.private === true && after.private === true
-    && before.devDependencies?.esbuild === undefined && after.devDependencies?.esbuild !== undefined) {
-    const client = JSON.parse(readFileSync(resolve(cwd, 'packages/client/package.json'), 'utf8'));
-    const pin = client.devDependencies?.esbuild;
-    if (/^\d+\.\d+\.\d+$/.test(pin) && after.devDependencies.esbuild === pin) {
-      delete after.devDependencies.esbuild;
-    }
-  }
   if (path !== 'bun.lock') qualify.push(...normalizeDependencyVersions(before, after, path, cwd));
   if (path === 'bun.lock') {
     // Newly introduced hosted workspaces retain their shape/ownership gate.
@@ -394,32 +318,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     const { added, records } = admitRegisteredPrivateLock(before, after, { base, cwd, workspaceGraph });
     const impact = dependencyLockImpact(before, after, { cwd, admitted: records });
     return { ...impact, dirs: [...new Set([...added, ...impact.dirs])] };
-  } else if (path === `${HOSTED_WORKER.dir}/package.json`) {
-    // #654 W4: the browser member page imports core's sealed-payload entry directly.
-    if (before.dependencies?.['@byok-sdk/core'] === undefined && after.dependencies?.['@byok-sdk/core'] === 'workspace:*') {
-      delete after.dependencies['@byok-sdk/core'];
-    }
-    if (before.scripts?.['test:browser'] === undefined
-      && after.scripts?.['test:browser'] === 'vitest run --config src/browser/vitest.config.ts') {
-      delete after.scripts['test:browser'];
-    }
   } else if (path === 'examples/byok-mcp-server/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The MCP server example must stay private');
-    // #1375: the routine calendar moved to protocol, so the core edge goes.
-    if (before.dependencies?.['@byok-sdk/core'] === 'workspace:*' && after.dependencies && after.dependencies['@byok-sdk/core'] === undefined) {
-      after.dependencies['@byok-sdk/core'] = 'workspace:*';
-    }
   } else if (path === 'examples/packaging/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The packaging example must stay private');
-    // #1104: the bundle test command.
-    if (before.scripts?.test === undefined && after.scripts?.test === 'vitest run') delete after.scripts.test;
   } else if (path === 'examples/host-execution-core/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The host execution core example must stay private');
-    // #1106: the core entries leave together with the description, from exactly the old entries.
-    if (isDeepStrictEqual(before.exports, K4_EXPORTS) && isDeepStrictEqual(after.exports, K4_DEMO_EXPORTS)
-      && before.description === K4_DESCRIPTION.from && after.description === K4_DESCRIPTION.to) {
-      after.exports = before.exports; after.description = before.description;
-    }
   } else if (path === 'package.json') {
     // Reserve the CI helper before generic script normalization can erase it.
     // Only this exact composition may wrap the existing ordered test list.
@@ -441,17 +345,6 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
       after.scripts['test:scripts'] = after.scripts['test:scripts'].slice(ciPrefix.length);
       delete after.scripts[ciHelper];
     }
-    // repo-harness 0.33 renamed its CLI to rh; admit this one-time conversion.
-    for (const [name, oldValue, newValue] of [
-      ['check:context-files', 'repo-harness run check-context-files', 'rh run check-context-files'],
-      ['check:deploy-sql', 'repo-harness run check-deploy-sql-order', 'rh run check-deploy-sql-order'],
-      ['check:brain', 'repo-harness brain check', 'rh brain check'],
-      ['sync:brain', 'repo-harness brain sync', 'rh brain sync'],
-    ]) {
-      if (before.scripts?.[name] === oldValue && after.scripts?.[name] === newValue) {
-        delete before.scripts[name]; delete after.scripts[name];
-      }
-    }
     // Admit rh script changes when both values invoke rh; every other
     // script and field stays in the deep comparison below.
     const harnessScript = value => typeof value === 'string' && value.startsWith('rh ');
@@ -461,9 +354,6 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
         delete before.scripts?.[name]; delete after.scripts?.[name];
       }
     }
-    // #1102: the upgrade-manifest gate command, exactly.
-    if (before.scripts?.['check:upgrade-manifest'] === undefined
-      && after.scripts?.['check:upgrade-manifest'] === UPGRADE_MANIFEST_GATE) delete after.scripts['check:upgrade-manifest'];
     const documentationTests = admitDocumentationScripts(before, after, cwd);
     const oldCommand = before.scripts?.['test:scripts'], newCommand = after.scripts?.['test:scripts'];
     const prefix = 'node --test --test-concurrency=1 ';
@@ -472,124 +362,13 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     let index = 0;
     for (const test of newTests) {
       if (test === oldTests[index]) { index++; continue; }
-      if (!(/^scripts\/ci\/[a-z0-9-]+\.test\.mjs$/.test(test) || test === UPGRADE_MANIFEST_TEST || test === 'scripts/architecture/dependency-graph.test.mjs' || documentationTests.has(test))
+      if (!(/^scripts\/ci\/[a-z0-9-]+\.test\.mjs$/.test(test) || documentationTests.has(test))
         || oldTests.includes(test) || !existsSync(resolve(cwd, test))) throw new Error('Only existing CI contract tests may be added');
     }
     if (index !== oldTests.length || new Set(newTests).size !== newTests.length) throw new Error('Existing tests must remain in order without duplicates');
     delete before.scripts['test:scripts']; delete after.scripts['test:scripts'];
   } else {
     if (!version(before.version) || !version(after.version)) throw new Error('Invalid package version');
-    if (path === 'packages/client/package.json') {
-      // #1925: shells and installers load only this independent Host layout entry.
-      const hostLayout = {
-        types: './dist/host-layout.d.ts',
-        import: './dist/host-layout.js',
-      };
-      if (before.exports?.['./host-layout'] === undefined
-        && isDeepStrictEqual(after.exports?.['./host-layout'], hostLayout)) {
-        delete after.exports['./host-layout'];
-      }
-      if (before.exports?.['./packaging'] === undefined && isDeepStrictEqual(after.exports?.['./packaging'], CLIENT_PACKAGING_EXPORT)) delete after.exports['./packaging'];
-      // #1854 archives the Hermes adapter: exactly its private imports key and its build smoke go.
-      const key = '#byok-hermes-session';
-      const entry = { types: './dist/adapters/hermes/hermes-session-runtime.d.ts', default: './dist/adapters/hermes/hermes-session-runtime.js' };
-      if (isDeepStrictEqual(before.imports?.[key], entry) && after.imports?.[key] === undefined) after.imports[key] = entry;
-      const smoke = ' && node scripts/check-hermes-session-entry.mjs';
-      if (typeof before.scripts?.build === 'string' && typeof after.scripts?.build === 'string' && before.scripts.build === after.scripts.build + smoke) after.scripts.build = before.scripts.build;
-      // #1589 retires the sealed Pi host: exactly its private imports key and its build step go.
-      const sealedKey = '#byok-pi-runtime-host-sealed';
-      const sealedEntry = { types: './dist/bin/pi-runtime-host-sealed.d.ts', default: './dist/bin/pi-runtime-host-sealed.js' };
-      if (isDeepStrictEqual(before.imports?.[sealedKey], sealedEntry) && after.imports?.[sealedKey] === undefined) after.imports[sealedKey] = sealedEntry;
-      const sealedBuild = ' && node scripts/build-sealed-host.mjs';
-      if (typeof before.scripts?.build === 'string' && typeof after.scripts?.build === 'string'
-        && before.scripts.build === after.scripts.build.replace(' && tsc -p', sealedBuild + ' && tsc -p') && before.scripts.build.includes(sealedBuild + ' && tsc -p')) {
-        after.scripts.build = before.scripts.build;
-      }
-      // #1927 generates the Pi jiti seed: exactly one build step, right after the Pi export assets.
-      const exportAssets = ' && node scripts/build-pi-export-assets.mjs', seedBuild = ' && node scripts/build-pi-jiti-seed.mjs';
-      if (typeof before.scripts?.build === 'string' && typeof after.scripts?.build === 'string'
-        && before.scripts.build.includes(exportAssets) && !before.scripts.build.includes(seedBuild)
-        && after.scripts.build === before.scripts.build.replace(exportAssets, exportAssets + seedBuild)) {
-        after.scripts.build = before.scripts.build;
-      }
-      if (before.scripts?.['test:runtime-contract'] === undefined && after.scripts?.['test:runtime-contract'] === RUNTIME_CONTRACT_SCRIPT) {
-        delete after.scripts['test:runtime-contract'];
-      }
-      // #1102 ships the upgrade manifest in the client tarball: exactly one appended files entry.
-      if (isDeepStrictEqual(before.files, CLIENT_FILES) && isDeepStrictEqual(after.files, [...CLIENT_FILES, 'upgrade-manifest.json'])) {
-        after.files = before.files;
-      }
-      // #1094 ships the generated DaemonConfig schema beside the upgrade manifest: exactly one appended files entry.
-      if (isDeepStrictEqual(before.files, [...CLIENT_FILES, 'upgrade-manifest.json'])
-        && isDeepStrictEqual(after.files, [...CLIENT_FILES, 'upgrade-manifest.json', 'daemon-config.schema.json'])) {
-        after.files = before.files;
-      }
-      // #1316 ships the released upgrade manifests beside the current one: exactly one appended files entry.
-      if (isDeepStrictEqual(before.files, [...CLIENT_FILES, 'upgrade-manifest.json', 'daemon-config.schema.json'])
-        && isDeepStrictEqual(after.files, [...CLIENT_FILES, 'upgrade-manifest.json', 'daemon-config.schema.json', 'upgrade-history'])) {
-        after.files = before.files;
-      }
-      // #635 adds the public transport-free test-double entry; its bundle is checked by check-adapters-entry.mjs.
-      const testing = { types: './dist/testing/index.d.ts', import: './dist/testing/index.js' };
-      if (before.exports?.['./testing'] === undefined && isDeepStrictEqual(after.exports?.['./testing'], testing)) delete after.exports['./testing'];
-    }
-    if (path === 'packages/keys/package.json') {
-      // #636 adds one subpath for the generated pinned pi-ai catalog lookup.
-      const key = './pi-catalog';
-      const entry = { types: './dist/pi-catalog.d.ts', import: './dist/pi-catalog.js' };
-      if (before.exports?.[key] === undefined && isDeepStrictEqual(after.exports?.[key], entry)) delete after.exports[key];
-      // The browser-safe headless model-route subpath.
-      const route = { types: './dist/model-route.d.ts', import: './dist/model-route.js' };
-      if (before.exports?.['./model-route'] === undefined && isDeepStrictEqual(after.exports?.['./model-route'], route)) delete after.exports['./model-route'];
-      // #1445 adds one optional dependency: koffi at the pin packages/client owns.
-      if (before.optionalDependencies === undefined && after.optionalDependencies !== undefined) {
-        const client = JSON.parse(readFileSync(resolve(cwd, 'packages/client/package.json'), 'utf8'));
-        if (isDeepStrictEqual(after.optionalDependencies, { koffi: client.optionalDependencies?.koffi })) delete after.optionalDependencies;
-      }
-    }
-    if (path === 'packages/core/package.json') {
-      // #654 adds one subpath for sealed payload v1, so the root bundle does not grow.
-      const key = './sealed-payload';
-      const entry = { types: './dist/sealed-payload/index.d.ts', import: './dist/sealed-payload/index.js' };
-      if (before.exports?.[key] === undefined && isDeepStrictEqual(after.exports?.[key], entry)) delete after.exports[key];
-      // #1515 isolates trusted system-tool resolution in one Node-only entry.
-      const systemTool = { types: './dist/system-tool.d.ts', node: { import: './dist/system-tool.js' } };
-      if (before.exports?.['./system-tool'] === undefined && isDeepStrictEqual(after.exports?.['./system-tool'], systemTool)) {
-        delete after.exports['./system-tool'];
-        qualify.push('packages/core');
-      }
-    }
-    if (path === 'packages/server/package.json'
-      && before.description === SERVER_DESCRIPTION.from && after.description === SERVER_DESCRIPTION.to) {
-      after.description = before.description;
-    }
-    if (path === 'packages/protocol/package.json') {
-      // #1621: pin exactly the first published v6 decoder for compatibility tests.
-      const alias = 'byok-protocol-v6-baseline';
-      const tarball = 'https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.41.0.tgz';
-      if (before.devDependencies?.[alias] === undefined && after.devDependencies?.[alias] === tarball) {
-        delete after.devDependencies[alias];
-        qualify.push('packages/protocol');
-      }
-      // #1106: the zod-free Agent memory Host contract, one runtime definition shared by client and server.
-      const entry = { types: './dist/agent-memory.d.ts', import: './dist/agent-memory.js' };
-      if (before.exports?.['./agent-memory'] === undefined && isDeepStrictEqual(after.exports?.['./agent-memory'], entry)) delete after.exports['./agent-memory'];
-    }
-    if (path === 'packages/server/package.json') {
-      // #1106: the two K4 subpaths, added together.
-      if (Object.keys(SERVER_EXECUTION_CORE_EXPORTS).every(key => before.exports?.[key] === undefined
-        && isDeepStrictEqual(after.exports?.[key], SERVER_EXECUTION_CORE_EXPORTS[key]))) {
-        for (const key of Object.keys(SERVER_EXECUTION_CORE_EXPORTS)) delete after.exports[key];
-      }
-    }
-    // #702 raises the public Node floor with the Node 24.22.1 pin. Admit only
-    // this exact engines.node edit in a public manifest. Any other engines value
-    // or key, and any other field, still fails the comparison below.
-    if (publicManifests.includes(path)
-      && before.engines?.node === '>=24.15.0'
-      && after.engines?.node === '>=24.22.1') {
-      after.engines.node = before.engines.node;
-    }
     delete before.version; delete after.version;
   }
   // After every dedicated admission, so an edge a branch above already reviewed is not taken here.

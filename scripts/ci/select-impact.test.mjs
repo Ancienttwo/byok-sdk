@@ -11,31 +11,6 @@ import { isCwdRefusal } from '../qualification/opencode-native-canary.ts';
 const root = new URL('../../', import.meta.url);
 const sorted = values => [...values].sort();
 
-test('the published v6 decoder alias is the only admitted protocol manifest addition', t => {
-  const cwd = mkdtempSync(join(tmpdir(), 'ci-v6-alias-'));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
-  mkdirSync(join(cwd, 'packages/protocol'), { recursive: true });
-  const path = 'packages/protocol/package.json';
-  const original = { name: '@byok-sdk/protocol', version: '0.41.0', devDependencies: { previous: '1.0.0' } };
-  const write = value => writeFileSync(join(cwd, path), JSON.stringify(value));
-  const git = (...args) => spawnSync('git', args, { cwd, encoding: 'utf8' });
-  write(original);
-  assert.equal(git('init').status, 0);
-  assert.equal(git('add', path).status, 0);
-  assert.equal(git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline').status, 0);
-  const base = git('rev-parse', 'HEAD').stdout.trim();
-  const alias = 'byok-protocol-v6-baseline';
-  const tarball = 'https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.41.0.tgz';
-  const withAlias = spec => ({ ...original, devDependencies: { ...original.devDependencies, [alias]: spec } });
-  write(withAlias(tarball));
-  assert.ok(selectImpact([path], { cwd, base }).dirs.includes('packages/protocol'));
-  for (const invalid of [withAlias(tarball + '?other'), { ...withAlias(tarball), private: true },
-    { ...original, devDependencies: { ...original.devDependencies, other: tarball } }]) {
-    write(invalid);
-    assert.throws(() => selectImpact([path], { cwd, base }), /Reviewed CI mapping required/);
-  }
-});
-
 test('reviewed graph covers every workspace and all local dependency edges', () => {
   const actual = {};
   for (const prefix of ['packages', 'examples']) {
@@ -52,53 +27,8 @@ test('reviewed graph covers every workspace and all local dependency edges', () 
   assert.deepEqual(workspaceGraph, actual);
 });
 
-test('#654: browser tooling admits only private-root pins and the Worker command/core edge', t => {
-  const cwd = mkdtempSync(join(tmpdir(), 'ci-browser-vectors-'));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
-  const dir = 'examples/hosted-bot-collaboration-worker', path = `${dir}/package.json`;
-  const baseline = { name: workspaceGraph[dir].name, private: true, version: '0.0.1', scripts: {}, dependencies: {}, devDependencies: {} };
-  const pins = { '@vitest/browser-playwright': '5.1.0', playwright: '1.64.1' };
-  const scripts = { 'test:browser': 'vitest run --config src/browser/vitest.config.ts' };
-  const dependencies = { '@byok-sdk/core': 'workspace:*' };
-  mkdirSync(dirname(join(cwd, path)), { recursive: true });
-  const write = (value, target = path) => writeFileSync(join(cwd, target), JSON.stringify(value));
-  const git = (...args) => {
-    const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr); return result.stdout.trim();
-  };
-  const rootManifest = { private: true, scripts: { 'test:scripts': 'node --test --test-concurrency=1 scripts/old.test.mjs' }, devDependencies: { vitest: '^5.1.0' } };
-  write(rootManifest, 'package.json'); write(baseline); git('init'); git('add', '.');
-  git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
-  const context = { cwd, base: git('rev-parse', 'HEAD') };
-  const approved = { ...baseline, scripts, dependencies };
-  for (const value of [approved, { ...baseline, scripts }, { ...baseline, dependencies }]) {
-    write(value);
-    assert.deepEqual(selectImpact([path], context).dirs, [dir]);
-  }
-  for (const value of [
-    { ...approved, private: false },
-    { ...approved, devDependencies: pins },
-    { ...approved, scripts: { 'test:browser': 'echo pass' } },
-    { ...approved, dependencies: { '@byok-sdk/core': '^1.0.0' } },
-  ]) {
-    write(value); assert.throws(() => selectImpact([path], context), /private|reviewed fields/i);
-  }
-  write(approved);
-  const rootApproved = { ...rootManifest, devDependencies: { ...pins, vitest: '5.1.0' } };
-  write(rootApproved, 'package.json');
-  assert.deepEqual(selectImpact(['package.json'], context).dirs, [dir]);
-  for (const value of [
-    { ...rootApproved, private: false },
-    ...Object.keys(rootApproved.devDependencies).flatMap(name => [
-      { ...rootApproved, devDependencies: { ...rootApproved.devDependencies, [name]: `^${rootApproved.devDependencies[name]}` } },
-      { ...rootApproved, devDependencies: { ...rootApproved.devDependencies, [name]: '1.0.0' } },
-    ]),
-    ...Object.keys(pins).map(name => ({ ...rootApproved, devDependencies: { vitest: '5.1.0', [name]: pins[name] } })),
-    { ...rootApproved, dependencies: pins, devDependencies: { vitest: '5.1.0' } },
-    { ...rootApproved, devDependencies: { ...rootApproved.devDependencies, other: '1.0.0' } },
-  ]) {
-    write(value, 'package.json'); assert.throws(() => selectImpact(['package.json'], context), /reviewed fields/i);
-  }
+test('the Worker browser sources retain their workspace checks', () => {
+  const dir = 'examples/hosted-bot-collaboration-worker';
   for (const relative of ['src/browser/vitest.config.ts', 'src/browser/vectors.browser.ts']) {
     assert.deepEqual(selectImpact([`${dir}/${relative}`]).dirs, [dir]);
   }
