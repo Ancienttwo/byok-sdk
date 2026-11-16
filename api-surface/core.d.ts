@@ -386,6 +386,7 @@
 //   verifyMemberChainFromAnchor -> dist/sealed-payload/member-chain-walk.d.ts
 //   verifyMemberKem -> dist/sealed-payload/member-bundle.d.ts
 // entry @byok-sdk/core/sqlite-node
+//   SQLITE_USER_OBJECT -> dist/sqlite-node.d.ts
 //   SqliteReadOnlyOpenError -> dist/sqlite-node.d.ts
 //   readSqliteFileUnchanged -> dist/sqlite-node.d.ts
 //   sqliteFileUri -> dist/sqlite-node.d.ts
@@ -2067,6 +2068,7 @@ export interface SkillPackStore {
 }
 // ==== @byok-sdk/core dist/sqlite-node.d.ts ====
 import type { DatabaseSync } from 'node:sqlite';
+export declare const SQLITE_USER_OBJECT = "substr(name, 1, 7) <> 'sqlite_'";
 export declare class SqliteReadOnlyOpenError extends Error {
     readonly path: string;
     constructor(path: string, options: {

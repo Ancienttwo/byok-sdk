@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { readSqliteFileUnchanged, sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
+import { readSqliteFileUnchanged, SQLITE_USER_OBJECT, sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
 import type { BotProfile, BotRow, Roster, TranscriptEntry, TurnProjection, TurnRecord } from './types.ts';
 
 const SCHEMA_VERSION = 1;
@@ -33,7 +33,7 @@ export class StoreFormatError extends Error {
 
 /** The store's one format check: `'empty'` for a new file, otherwise the current schema version or a {@link StoreFormatError}. */
 function assertCurrentStore(db: DatabaseSync, file: string): 'empty' | 'current' {
-  const objects = db.prepare(`SELECT count(*) AS n FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'`).get() as { n: number };
+  const objects = db.prepare(`SELECT count(*) AS n FROM sqlite_master WHERE ${SQLITE_USER_OBJECT}`).get() as { n: number };
   if (objects.n === 0) return 'empty';
   const meta = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'meta'`).get();
   if (meta === undefined) throw new StoreFormatError(`Host store ${file} holds tables but no schema version; this Host reads ${SCHEMA_VERSION}`);
