@@ -12,7 +12,7 @@ import { parsePiMcpEnvironment, projectPiMcpEnvironment } from './mcp-environmen
 import { PI_PREPARED_ENV_ALLOW, piLaunchCommand, resolvePiRuntimeLaunch, type PiRuntimeLaunchResources } from './runtime-launch.js';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { execFile } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import path, { isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
 import type {
@@ -616,6 +616,16 @@ export class PiAdapter implements RuntimeAdapter {
             || startInput.memoryLane!.home.path !== startInput.manifest.lease?.canonicalHome
             || Object.keys(startInput.mcpServers ?? {}).length > 0 || startInput.toolAuthorization !== undefined)) {
             throw authorityFailure('invalid Pi memory-only launch');
+          }
+          // The host refuses a missing skill by exiting, which reads as a
+          // retryable runtime exit; a configuration fault must not be retried.
+          // The host keeps its own check at the digest-bound boundary.
+          if (!memoryLane) {
+            for (const skillPath of resources.skillPaths) {
+              await fs.access(skillPath, fsConstants.R_OK).catch((cause: unknown) => {
+                throw authorityFailure('Pi Agent skill path is missing or unreadable', cause);
+              });
+            }
           }
           const resumeSessionId = startInput.manifest.sessionRef;
           if (startInput.sessionLease !== undefined && (startInput.sessionLease !== sessionLease || sessionLease?.sessionRef !== resumeSessionId)) {

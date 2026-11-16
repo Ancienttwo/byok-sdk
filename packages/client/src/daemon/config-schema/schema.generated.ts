@@ -749,6 +749,12 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "inherit"
               ]
             },
+            "agentSkillPaths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "versionPolicy": {
               "type": "object",
               "properties": {

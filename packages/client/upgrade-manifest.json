@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "b45cb046e52dde2f307e80b8adf4cdca530e588efce845b8335cb8f2b5e3d46c"
+    "snapshotSha256": "5fcefaeb59129499a6a3de6f1c84bb65a89880fb7a9eb3556994b65cd47b9f05"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,15 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "pi-agent-skill-paths-config",
+      "impact": "additive",
+      "summary": "DaemonConfig.runtimes.pi.agentSkillPaths and PiRuntimeConfig.agentSkillPaths, default [], project to PiAdapterOptions.agentSkillPaths, so createDaemon and createRuntimeAdapters hand Pi the Host's skill files or directories without a hand-built PiAdapter. Config check refuses a relative, duplicated or NUL-carrying path, and a non-empty list with runtimes.pi.durableLane, as DaemonConfigInvalidError at runtimes.pi.agentSkillPaths. A skill path that is missing or unreadable when an Agent task starts now fails the start before Pi spawns as a non-retryable RuntimeExecutionFailure, for an embedded PiAdapter too; it used to surface as a retryable runtime_exited start failure. No Host action is required.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pi-agent-skills-from-daemonconfig-2169",
+      "items": [
+        "export:@byok-sdk/client/adapters#PiRuntimeConfig"
+      ]
+    },
     {
       "id": "dataplane-revoke-keeps-assertion-replay",
       "impact": "breaking",
@@ -203,7 +212,7 @@
       "item": "config:runtimes",
       "change": "changed",
       "before": "optional schema-sha256=733c24d0d48a4795",
-      "after": "optional schema-sha256=c31225db3310daa3",
+      "after": "optional schema-sha256=d0c93f4b002b16c5",
       "entry": "grok-agent-user-context"
     },
     {
@@ -297,6 +306,11 @@
       "item": "export:@byok-sdk/client/adapters#GrokAdapterOptions",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiRuntimeConfig",
+      "change": "changed",
+      "entry": "pi-agent-skill-paths-config"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",

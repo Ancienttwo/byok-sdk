@@ -1675,9 +1675,13 @@ versions are not accepted.
 `agentSkillPaths` and `agentExtensionPaths` explicitly load absolute local skill
 and trusted executable extension paths (default empty), including under excluded
 user context. They are copied and frozen at adapter construction and apply only
-to Agent RPC operations, including resume. Prepared/durable lanes reject explicit
-resource paths before spawning. Explicit skills must exist and be readable; Pi
-owns parsing and advisory diagnostics. Extensions may supply further resources;
+to Agent RPC operations, including resume. `DaemonConfig.runtimes.pi.agentSkillPaths`
+projects to `agentSkillPaths`; with `runtimes.pi.durableLane` it must be empty.
+Prepared/durable lanes reject explicit resource paths before spawning. Explicit
+skills must exist and be readable when an Agent task starts: a missing one fails
+the start before Pi spawns, without a retry. Pi owns parsing and advisory
+diagnostics. Under a file-scoped offer the model's `read` of a skill outside the
+granted roots is refused; `/skill:<name>` still expands it. Extensions may supply further resources;
 these options do not provide a filesystem or extension sandbox. The existing
 session-storage directory setting remains authoritative for continuity. Prepared execution launches
 no native tool. Observed MCP toolsets and reserved helpers on fresh offers

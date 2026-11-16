@@ -797,6 +797,13 @@
               ],
               "description": "`PiAdapterOptions.agentUserContext`: `excluded` keeps user Pi resources and settings out of an Agent task (model and auth stores stay). Default `inherit`."
             },
+            "agentSkillPaths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "`PiAdapterOptions.agentSkillPaths`: absolute skill files or directories\nthe Host authorizes for every Agent task on the ordinary RPC lane,\nincluding under `excluded`. Each must exist and be readable when a task\nstarts. The durable and prepared lanes run none. Default `[]`."
+            },
             "versionPolicy": {
               "type": "object",
               "properties": {

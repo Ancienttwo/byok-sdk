@@ -1233,6 +1233,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.pi` | advanced | object |
 | `runtimes.pi.durableLane` | advanced | boolean |
 | `runtimes.pi.agentUserContext` | advanced | "excluded" / "inherit" |
+| `runtimes.pi.agentSkillPaths` | advanced | array |
 | `runtimes.pi.versionPolicy` | advanced | object |
 | `runtimes.pi.versionPolicy.qualifiedVersion` | required when parent is set | string |
 | `runtimes.pi.versionPolicy.unqualified` | required when parent is set | "allow" / "block" / "warn" |

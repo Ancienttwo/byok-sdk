@@ -27,8 +27,11 @@ describe('Pi Agent resources', () => {
   ] satisfies PiAdapterOptions[])('seals explicit resources only for Agent operations: %j', async (options) => {
     const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'byok-pi-agent-policy-')));
     roots.push(root);
+    // A granted skill must exist before spawn; place it under this test's root.
+    const skillPaths = options.agentSkillPaths === undefined ? undefined : [path.join(root,'approved-skill')];
+    for (const skillPath of skillPaths ?? []) await fs.mkdir(skillPath);
     const configs: Record<string,unknown>[] = [];
-    const adapter = new PiAdapter({ ...options, resolveBin:()=>({command:FAKE_PI,source:'env'}),
+    const adapter = new PiAdapter({ ...options, ...(skillPaths === undefined ? {} : {agentSkillPaths:skillPaths}), resolveBin:()=>({command:FAKE_PI,source:'env'}),
       spawnFn: ((_command:string,args:string[],spawnOptions:Parameters<typeof realSpawn>[2])=>{
         const configPath = args[args.indexOf('--config')+1]!;
         // Capture the configuration while the process is being launched.
@@ -44,7 +47,7 @@ describe('Pi Agent resources', () => {
     }
     expect(configs.map(config=>config.version)).toEqual([11,11]);
     expect(configs[0]).toMatchObject({agentUserContext:'inherit',agentHome:null,agentSkillPaths:[],agentExtensionPaths:[],fileScope:null});
-    expect(configs[1]).toMatchObject({agentUserContext:options.agentUserContext,agentHome:options.agentUserContext==='excluded'?root:null,agentSkillPaths:options.agentSkillPaths ?? [],agentExtensionPaths:options.agentExtensionPaths ?? [],fileScope:null});
+    expect(configs[1]).toMatchObject({agentUserContext:options.agentUserContext,agentHome:options.agentUserContext==='excluded'?root:null,agentSkillPaths:skillPaths ?? [],agentExtensionPaths:options.agentExtensionPaths ?? [],fileScope:null});
     for (const config of configs) expect(config).not.toHaveProperty('agentToolPolicy');
   });
 
@@ -84,6 +87,27 @@ describe('Pi Agent resources', () => {
       });
       await expect(prepared.operation.start({kind:'instruction',scratch,runtimeLaunch,manifest,env:process.env,mcpEnv:projectPiMcpEnvironment(process.env),instruction:'hello'} as never))
         .rejects.toThrow('Pi Agent user-context exclusion requires a sealed canonical-home lease');
+      expect(spawned).toBe(false);
+    } finally { await scratch.release(); }
+  });
+
+  it('refuses a missing explicit skill on the RPC lane before spawning, without a retry', async () => {
+    const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'byok-pi-missing-skill-')));
+    roots.push(root);
+    let spawned = false;
+    const adapter = new PiAdapter({agentSkillPaths:[path.join(root,'missing')],resolveBin:()=>({command:FAKE_PI,source:'env'}),spawnFn:(()=>{spawned=true;throw new Error('unexpected spawn');}) as never});
+    const prepared = await adapter.prepare({offer:{instruction:'hello'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
+    if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
+    const scratch = await testExecutionScratch();
+    try {
+      const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch!({kind:'instruction',cwd:root,env:process.env,scratch});
+      const manifest = sealRuntimeOperationManifest({
+        taskId:'missing-skill',runtimeId:'pi',descriptor:adapter.descriptor,requiredToolsetIds:[],
+        cwd:root,agentRef:{agentId:'missing-skill',profileRevision:'r1'},lease:{leaseId:'lease',canonicalHome:root},
+        workspace:{workspaceDir:root},forwardedEnvironmentNames:[],
+      });
+      await expect(prepared.operation.start({kind:'instruction',scratch,runtimeLaunch,manifest,env:process.env,mcpEnv:projectPiMcpEnvironment(process.env),instruction:'hello'} as never))
+        .rejects.toMatchObject({name:'RuntimeExecutionFailure',phase:'start',retry:'non-retryable',message:'Pi Agent skill path is missing or unreadable'});
       expect(spawned).toBe(false);
     } finally { await scratch.release(); }
   });
