@@ -73,9 +73,12 @@ refused; recreate it with this version or move its rows yourself.
 
 Not handled: the format is read from the main file. A store created by an older
 version that crashed before its first checkpoint holds its schema only in its
-WAL; it is opened for writing, and WAL replay and pragmas change it before its
-format check refuses it. Such a store holds almost no data. New stores
-checkpoint right after creating their schema, which keeps that window short.
+WAL; its format is decided on a writable connection, and when that connection
+closes after the refusal SQLite checkpoints the WAL into the main file and
+removes the `-wal` and `-shm` files. The refused store keeps its logical content,
+but its file bytes change. This applies to every store above, the Host ledger and
+the keys store below. Such a store holds almost no data. New stores checkpoint
+right after creating their schema, which keeps that window short.
 
 ## Host ledgers record their format (#2286)
 
