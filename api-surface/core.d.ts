@@ -3552,8 +3552,9 @@ export type TenantId = string & {
     readonly __byokTenantId: unique symbol;
 };
 /**
- * Upper bound on tenant id length. Not a security boundary — a bound so a
- * pathological id cannot become an unbounded key prefix inside a store.
+ * Upper bound on tenant id length, in UTF-16 code units (`length`), the unit
+ * of `@byok-sdk/protocol`'s `isPairingText`. Not a security boundary — a bound
+ * so a pathological id cannot become an unbounded key prefix inside a store.
  */
 export declare const TENANT_ID_MAX_LENGTH = 200;
 /**

@@ -2906,20 +2906,23 @@ import { z } from 'zod';
  * long-poll mailbox lifecycle, not envelope types.
  */
 /**
- * Every field a device stores from a pairing has a bound, so the enrollment
- * fits one OS credential entry (#2045). 64 is the longest Linux hostname
- * (`HOST_NAME_MAX`) and holds the reference `dev_<uuid>` device id.
+ * Every field a device stores from a pairing has a bound (#2045). 64 is the
+ * longest Linux hostname (`HOST_NAME_MAX`) and holds the reference
+ * `dev_<uuid>` device id. Bounds count UTF-16 code units, checked only by
+ * {@link isPairingText}.
  */
 export declare const PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH = 64;
 export declare const PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH = 64;
 /**
- * Free text a pairing stores (`deviceName`, `deviceId`, `tenantId`) is
- * well-formed and has no control character: no C0/C1 control and no unpaired
- * surrogate. Each code unit then costs at most three UTF-8 bytes as JSON, so a
- * length bound is also a byte bound. Keep in step with `@byok-sdk/core`'s
- * tenant id mint point.
+ * The pairing text rule for every field a pairing stores (`deviceName`,
+ * `deviceId`, `tenantId`): 1 to `maxUnits` UTF-16 code units (`length`, not
+ * code points), well-formed (no unpaired surrogate) and with no control
+ * character (C0, DEL, C1). Each code unit then costs at most three UTF-8
+ * bytes as JSON. Every boundary that checks one of these fields calls this;
+ * `@byok-sdk/core`'s tenant id mint restates it, because core depends on no
+ * other package.
  */
-export declare function isPairingText(value: string): boolean;
+export declare function isPairingText(value: string, maxUnits: number): boolean;
 export declare const PairRequestSchema: z.ZodObject<{
     pairingCode: z.ZodString;
     deviceName: z.ZodString;

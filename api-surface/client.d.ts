@@ -3327,14 +3327,13 @@ export declare class AuthRequestAbortedError extends Error {
  * is not valid JSON or does not satisfy its protocol schema
  * (`ChallengeResponseSchema` / `TokenResponseSchema`, #386) — for example a
  * truncated body or a missing field such as `expiresIn` (#1114). The renewal or pairing fails and the prior credential
- * is kept unchanged; nothing is inferred from the malformed body. The JSON
- * `SyntaxError` or the schema failure rides in `cause`. Not a revocation.
+ * is kept unchanged; nothing is inferred from the malformed body. It has no
+ * `cause`, so no part of the body reaches the Host through it. Not a
+ * revocation.
  */
 export declare class AuthResponseInvalidError extends Error {
     readonly route: 'challenge' | 'token' | 'pair';
-    constructor(route: 'challenge' | 'token' | 'pair', options?: {
-        cause: unknown;
-    });
+    constructor(route: 'challenge' | 'token' | 'pair');
 }
 /**
  * One measurement of this device's clock against the server's HTTP `Date`
@@ -5960,10 +5959,9 @@ export declare class PairingBusyError extends Error {
 }
 /**
  * A pairing input is out of its wire bound, checked before anything is staged
- * or sent (#2045): `deviceName` is empty, longer than
- * `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` or not `isPairingText` (set
- * `deviceName` when the hostname is not), or `machineId` is not lowercase hex
- * SHA-256.
+ * or sent (#2045): `deviceName` is not `isPairingText` within
+ * `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` UTF-16 code units (set `deviceName`
+ * when the hostname is not), or `machineId` is not lowercase hex SHA-256.
  */
 export declare class PairingInputInvalidError extends Error {
     readonly field: 'deviceName' | 'machineId';
@@ -6385,7 +6383,7 @@ export interface PairingAttempt {
     readonly codeDigest: string;
     /** `DeviceStore.identity` of the store that staged the attempt. */
     readonly storeIdentity: string;
-    /** At most `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` characters. */
+    /** `isPairingText` within `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH`. */
     readonly deviceName: string;
     /** Lowercase hex SHA-256, as `PairRequest.machineId`. */
     readonly machineId?: string;
@@ -6466,6 +6464,13 @@ export interface DeviceCredentialConfig {
     /** Explicit macOS keychain file; omitted uses the operating system's default keychain. */
     readonly macosKeychainPath?: string;
 }
+/**
+ * The entry `replace(record)` writes: every field validated, encoded and
+ * within {@link OS_CREDENTIAL_ENTRY_MAX_BYTES}, or a
+ * {@link DeviceCredentialStoreError}. A pairing calls it before it writes
+ * anything, whichever backend holds the enrollment.
+ */
+export declare function encodeEnrollmentEntry(record: DeviceRecord): string;
 export interface OsCredentialEntryOptions extends DeviceCredentialConfig {
     readonly storeDir: string;
     readonly productId: string;

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "27ac4b26895cf5630fde0b104337612df5a3a35f44e40fd27110d171cb08ff2c"
+    "snapshotSha256": "a5090f53ab276e9cbb80ed2e56328d168ebe60366072082691c248c12b0e9898"
   },
   "configFields": {
     "status": "tracked",
@@ -863,7 +863,7 @@
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresDeviceDirectory",
       "change": "changed",
-      "entry": null
+      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresInboundDedupStore",
@@ -878,7 +878,7 @@
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresPairingCodeStore",
       "change": "changed",
-      "entry": null
+      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresPresenceStore",
@@ -888,7 +888,7 @@
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceDirectory",
       "change": "changed",
-      "entry": null
+      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresInboundDedupStore",
@@ -903,7 +903,7 @@
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPairingCodeStore",
       "change": "changed",
-      "entry": null
+      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPresenceStore",
