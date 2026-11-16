@@ -101,11 +101,13 @@ export const STORES = [
     id: 'bot-collaboration-ledger',
     source: 'packages/server/src/execution-core/ledger.ts',
     format: (root, file) => {
-      const ledger = read(root, file), model = read(root, 'packages/bot-collaboration/src/model.ts');
-      const schema = requireMatch(ledger, /this\.db\.exec\(`(PRAGMA journal_mode=WAL;[\s\S]*?)`\);/, file);
-      const version = requireMatch(ledger, /function empty\(\): LedgerState \{\s*return \{ version: (\d+)/, file);
-      const collaboration = requireMatch(model, /application\.collaboration = json\(\{\s*version: (\d+)/, 'packages/bot-collaboration/src/model.ts');
-      return `ledger=${version} collaboration=${collaboration} ddl-sha256=${sha256(schema).slice(0, 16)}`;
+      // #2286: host_store_format holds one row per layer, k4 and K8's k8.
+      const k8File = 'packages/bot-collaboration/src/compaction.ts';
+      const ledger = read(root, file);
+      const schema = requireMatch(ledger, /^const SCHEMA = `([\s\S]*?)`;$/m, file);
+      const k4 = requireMatch(ledger, /^const K4_FORMAT = (\d+);$/m, file);
+      const k8 = requireMatch(read(root, k8File), /^export const K8_FORMAT = (\d+);$/m, k8File);
+      return `k4=${k4} k8=${k8} ddl-sha256=${sha256(schema).slice(0, 16)}`;
     },
   },
   {

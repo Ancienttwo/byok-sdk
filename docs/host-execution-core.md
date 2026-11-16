@@ -54,6 +54,13 @@ core = new HostExecutionCore(server, ledger, {
 await core.recover();
 ```
 
+The ledger file records its format in a `host_store_format` table: one row per layer,
+`k4` for the ledger itself and one for each layer named in `expectedFormats` (K8 passes
+its own with `botLedgerOptions`). An existing file opens only when its rows are exactly
+those. A different version, a missing or unknown layer, or tables without
+`host_store_format` (a ledger written before format metadata) throw `HostStoreFormatError`
+before the file is opened for writing; keep that file and open a new ledger file.
+
 `enqueue` takes a stable intent key, source, complete execution template, waiting deadline and retry policy.
 `addRoutine` takes a definition mirror, and `updateRoutine` stages its next version
 (see [routine versions](#routine-versions)). A definition can select `hostJob` instead of
@@ -1219,7 +1226,7 @@ A topology switch moves a whole coordination domain, which is one ledger tenant 
 The ledger copies a tenant as stored. The switch preconditions (freeze, drain, no memory
 state) and the neutral switch format belong to the caller (K8).
 
-- `ledger.dumpForSwitch()` returns a `LedgerDump` read in one transaction:
+- `ledger.dumpForSwitch()` returns a `LedgerDump` (version 2) read in one transaction:
   - the ledger `body`;
   - `tombstones`: every `intent`, `application`, `slot` and `row` tombstone, each with its
     `expiresAt`, or `null` for one that never expires;

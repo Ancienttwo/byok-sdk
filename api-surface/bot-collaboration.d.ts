@@ -18,6 +18,7 @@
 //   TeamSnapshotBot -> dist/rules/team.d.ts
 //   TeamSnapshotRoom -> dist/rules/team.d.ts
 //   botCompactVeto -> dist/compaction.d.ts
+//   botLedgerOptions -> dist/compaction.d.ts
 //   createBotPersonaProjection -> dist/persona.d.ts
 //   inspectLedger -> dist/store-compatibility.d.ts
 //   teamSnapshot -> dist/rules/team.d.ts
@@ -531,8 +532,9 @@ export type { Command, CommandPorts } from './rules/commands.js';
 export declare function commitInLedger(ledger: HostLedger, request: CommitRequest<Command>, ports: (s: LedgerState) => CommandPorts): CommitResult;
 export declare function retainInLedger(ledger: HostLedger, input: RetentionInput, limits: RetentionLimits): RetentionResult;
 // ==== @byok-sdk/bot-collaboration dist/compaction.d.ts ====
-import { type CompactVeto } from '@byok-sdk/server/execution-core';
+import { type CompactVeto, type HostLedgerOptions } from '@byok-sdk/server/execution-core';
 export declare const botCompactVeto: CompactVeto;
+export declare const botLedgerOptions: Readonly<HostLedgerOptions>;
 // ==== @byok-sdk/bot-collaboration dist/delegation.d.ts ====
 export { BOT_REPLY_MAX_BYTES, DEFAULT_INSTRUCTION_MAX_BYTES, minimumInstructionBytes } from './rules/delegation.js';
 // ==== @byok-sdk/bot-collaboration dist/delivery-routing.d.ts ====
@@ -948,7 +950,7 @@ export declare class BotCollaboration {
 // ==== @byok-sdk/bot-collaboration dist/index.d.ts ====
 export { inspectLedger } from './store-compatibility.js';
 export { BotCollaboration } from './host.js';
-export { botCompactVeto } from './compaction.js';
+export { botCompactVeto, botLedgerOptions } from './compaction.js';
 export type { AgentMessageInput, BotOptions, HostIntentCancelResult, HostIntentHandler, HostIntentMessageHandler, MessageServer } from './host.js';
 export { TEAM_ROOM_LIMIT, TeamModeError, teamSnapshot, type TeamModeCode, type TeamSnapshot, type TeamSnapshotBot, type TeamSnapshotRoom } from './rules/team.js';
 export { createBotPersonaProjection } from './persona.js';
@@ -1019,7 +1021,7 @@ export type LTestHost = Awaited<ReturnType<typeof openLTestHost>>;
 // ==== @byok-sdk/bot-collaboration dist/migration.d.ts ====
 import { type Conclusion, type Intent, type Json, type Occurrence, type RetryPolicy, type Routine, type RoutineDefinition } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from './model.js';
-export declare const SWITCH_EXPORT_VERSION = 1;
+export declare const SWITCH_EXPORT_VERSION = 2;
 export declare const SWITCH_SECTIONS: readonly ['collaboration', 'archived', 'intents', 'routines', 'occurrences', 'outbox', 'tombstones'];
 export type SwitchSection = typeof SWITCH_SECTIONS[number];
 export interface SwitchDevice {
@@ -1180,7 +1182,6 @@ export type { Authority, InputBatch, SealReason, UserInput } from './rules/coale
 export type { Card, Question, Rejection, ReplyEntry, Turn } from './rules/turn.js';
 export type { Delegation } from './rules/delegation.js';
 export interface CollaborationState extends AutonomyState {
-    version: 3;
     team: TeamState;
     turns: Record<string, Turn>;
     budgets: Record<string, Budget>;

@@ -1,5 +1,4 @@
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
-import { existsSync } from 'node:fs';
 import { readSqliteFileUnchanged, sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
 import { loadSqliteModule } from '../sqlite-support.js';
 import type { MemoryIntentRow } from './memory.js';
@@ -231,15 +230,16 @@ export class HostLedger {
         // Not handled: an older ledger that crashed before its first checkpoint was already changed by WAL replay here.
         this.db.exec('BEGIN IMMEDIATE');
         try {
-          if (admitFormat(this.db, formats) === 'empty') {
+          const created = admitFormat(this.db, formats) === 'empty';
+          if (created) {
             this.db.exec(SCHEMA);
             const row = this.db.prepare('INSERT INTO host_store_format VALUES (?, ?)');
             for (const [owner, version] of Object.entries(formats)) row.run(owner, version);
           }
           this.db.exec('COMMIT');
-        } catch (error) { this.db.exec('ROLLBACK'); throw error; }
-        // The main file then holds the format, so the next open decides it before any write.
-        if (filename !== ':memory:' && existsSync(`${filename}-wal`)) this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+          // The main file then holds the format, so the next open decides it before any write.
+          if (created) this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+        } catch (error) { if (this.db.isTransaction) this.db.exec('ROLLBACK'); throw error; }
       }
       this.db.prepare('INSERT OR IGNORE INTO host_ledger VALUES (?, ?)').run(tenant, JSON.stringify(empty()));
     } catch (error) { this.db.close(); throw error; }

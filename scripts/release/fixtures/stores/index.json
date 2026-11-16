@@ -209,7 +209,7 @@
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "accepted",
-        "bot-collaboration-ledger": "accepted"
+        "bot-collaboration-ledger": "rejected"
       }
     },
     "0.43.0": {
@@ -228,7 +228,7 @@
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "accepted",
-        "bot-collaboration-ledger": "accepted"
+        "bot-collaboration-ledger": "rejected"
       }
     },
     "main": {

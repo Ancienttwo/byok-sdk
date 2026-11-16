@@ -77,6 +77,47 @@ WAL; it is opened for writing, and WAL replay and pragmas change it before its
 format check refuses it. Such a store holds almost no data. New stores
 checkpoint right after creating their schema, which keeps that window short.
 
+## Host ledgers record their format (#2286)
+
+`@byok-sdk/server/execution-core` `HostLedger` records the ledger's format in a
+`host_store_format(owner, version)` table, one row per layer: `k4` for the ledger
+itself and `k8` for a Bot collaboration ledger. It is the only format authority;
+the ledger body and the Bot collaboration state no longer carry a `version`. An
+existing ledger is decided on its unchanged main file, before the writable
+open, pragmas or DDL, and is refused with `HostStoreFormatError` (code
+`host_store_format_unsupported`) when a row's version differs, an expected layer
+is missing, an unknown layer is present, or it has tables but no
+`host_store_format`. A refused file is not migrated, repaired or deleted.
+
+Every ledger written by 0.43.0 or earlier has no `host_store_format` and is
+refused. Before you upgrade, finish or abandon in-flight Bot collaboration work
+(open turns, delegations, routines and any topology switch). After the upgrade,
+open a new ledger file at a new path; keep the old file if you need its history,
+since this build does not read it.
+
+- `HostLedgerOptions.expectedFormats` names each layer's row besides `k4`;
+  `ledger.formats` exposes the rows.
+- `@byok-sdk/bot-collaboration` exports `botLedgerOptions` (the compact veto and
+  the `k8` format). Open every Bot ledger with it, for example
+  `new HostLedger(file, tenant, { ...botLedgerOptions, projectionOutboxLimits })`.
+  `BotCollaboration` refuses a ledger opened without it, and `inspectLedger`
+  reports an older ledger as `rejected`.
+- `LedgerState.version` and `CollaborationState.version` are removed.
+  `LedgerDump` and `SWITCH_EXPORT_VERSION` are now 2, so a switch dump or switch
+  export written by an earlier release is refused; complete a topology switch
+  before upgrading.
+
+`@byok-sdk/keys` `SqliteProviderProfileStore` decides an existing store's format
+the same way, before `journal_mode` or DDL. A store with `provider_profile` but
+without one of its custody tables is refused with `PROVIDER_STORE_SCHEMA_STALE`
+instead of having the table created; a store the read-only check cannot open is
+refused with `PROVIDER_STORE_UNAVAILABLE`. Every released keys store is still
+accepted. Its configuration lock file is opened through `sqliteOpenPath` like
+the store.
+
+`sqliteOpenPath` from `@byok-sdk/core/sqlite-node` now returns `:memory:`
+unchanged on Windows too.
+
 ## Bot collaboration inbound conversation identity (#2250)
 
 `@byok-sdk/bot-collaboration` `inboundKey(message)` now hashes channel,
