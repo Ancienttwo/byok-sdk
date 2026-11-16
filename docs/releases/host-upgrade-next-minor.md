@@ -508,8 +508,20 @@ at most 64 capability flags.
   - `terminal_harness_mismatch` is now `terminal_executor_mismatch`;
   - `claim_harness_and_runtime_conflict` is removed: a claim can no longer
     express it.
-  - New: `steer_refusal_id_mismatch` (wire `payload_invalid`) and
-    `steer_refusal_unknown_steer` (wire `not_permitted`).
+  - New: `steer_refusal_id_mismatch` (wire `payload_invalid`),
+    `steer_refusal_unknown_steer` (wire `not_permitted`) and
+    `task_not_claimed` (wire `not_permitted`).
+- **Reports before a claim** (#2289). Before a task is claimed, the cloud
+  takes only `task.claim`, `task.decline`, `task.cancelled` and a
+  `task.fail` with `recovery` from the offered device. Every other task
+  report is rejected with `task_not_claimed` (wire `not_permitted`) and
+  changes nothing: `task.started`, `task.progress`, `task.artifact`,
+  `task.await_approval`, `task.approval_resolved`, `task.steer_refused`,
+  `task.complete`, and a `task.fail` without `recovery`. The previous
+  release took them, so an unclaimed task could become running, awaiting
+  approval or terminal with no owner. Reports from any other device were already rejected
+  (`task_not_found_for_device`). A device that claims before it reports
+  sees no change.
 - **Renamed fields.** `SteerRejectedError.executor` replaces `.runtime`, and
   `TerminalResult.executor` replaces `.harnessId`.
 - **Steer refusals.** Read them with
