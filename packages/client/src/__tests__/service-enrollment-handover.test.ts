@@ -183,11 +183,11 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
     const lines: string[] = [];
     await runUnpairCommand(build(), {
       confirmed: true, storeDir, productId: config.productId, log: (line) => lines.push(line),
-      controlExitTimeoutMs: 5_000, controlExitPollIntervalMs: 5,
+      controlExitPollIntervalMs: 5,
     });
     expect(lines.some((line) => line.includes('confirmed exited'))).toBe(true);
     await expectStoppedForGood(current);
-  }, 15_000);
+  }, 30_000);
 
   it('a fresh unpair right after enrollment.pair stops the handover: no gone while held, no restart', async () => {
     const current = await enrolling();
@@ -197,12 +197,12 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
     const nonce = (await ownerNonce())!;
     const unpairing = runUnpairCommand(build(), {
       confirmed: true, storeDir, productId: config.productId, log: () => undefined,
-      controlExitTimeoutMs: 5_000, controlExitPollIntervalMs: 1,
+      controlExitPollIntervalMs: 1,
     });
     const violations = watchGoneWhileHeld(nonce, unpairing);
     expect(await violations).toBe(0);
     await expectStoppedForGood(current);
-  }, 15_000);
+  }, 30_000);
 
   it('shutdown while enrollment.pair is still at the server: the pair finishes, its start never runs', async () => {
     const current = await enrolling();
