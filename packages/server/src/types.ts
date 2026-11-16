@@ -378,9 +378,9 @@ export interface TaskHandle {
   reject(reason?: string, opts?: { approvalId?: string }): Promise<void>;
   /**
    * Enqueue a `task.steer` and resolve with its envelope id, the id a
-   * `steer_refused` event names. Text over `TASK_STEER_TEXT_MAX_BYTES` UTF-8
-   * bytes is refused with `ByokCloudError` `coordination_input_invalid`
-   * before anything is enqueued.
+   * `steer_refused` event names. The kernel refuses text over
+   * `TASK_STEER_TEXT_MAX_BYTES` UTF-8 bytes with `ByokCloudError`
+   * `coordination_input_invalid` before anything is enqueued.
    */
   steer(text: string): Promise<{ readonly messageId: string }>;
   result(): Promise<TaskResult>;

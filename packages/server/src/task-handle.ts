@@ -1,5 +1,4 @@
 import {
-  ByokCloudError,
   SteerRejectedError as KernelSteerRejectedError,
   type ByokCloud,
   type SteerRejectionCode,
@@ -7,7 +6,7 @@ import {
   type TaskAttempt,
   type TenantId,
 } from '@byok-sdk/cloud';
-import { TASK_STEER_TEXT_MAX_BYTES, type ClaimedExecutor, type TaskState } from '@byok-sdk/protocol';
+import type { ClaimedExecutor, TaskState } from '@byok-sdk/protocol';
 import type { TaskEventRelay } from './relay.js';
 import { readTaskEvents, type TaskEventDeps } from './task-events.js';
 import type { ServerTaskEvent, TaskHandle, TaskResult } from './types.js';
@@ -197,9 +196,6 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
     },
 
     async steer(text: string): Promise<{ readonly messageId: string }> {
-      if (new TextEncoder().encode(text).length > TASK_STEER_TEXT_MAX_BYTES) {
-        throw new ByokCloudError('coordination_input_invalid', `steer text is over ${TASK_STEER_TEXT_MAX_BYTES} UTF-8 bytes`);
-      }
       try {
         const { envelope } = await deps.cloud.steerTask(deps.tenant, taskId, { text });
         return { messageId: envelope.id };
