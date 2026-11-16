@@ -382,6 +382,10 @@ messages route.
   Without one the offer declines with `native_sessions_selection_invalid`.
   `native_sessions_unsupported` no longer hides a selection violation: a
   device checks the selection rules first.
+- Bot collaboration dreams request `nativeSessions` only when the template's
+  `target` explicitly names Pi; `auto`, harness, Claude and Codex templates
+  still run dreams without native session input. Source: [#2321](https://github.com/Ancienttwo/byok-sdk/pull/2321);
+  entry `wire-v7-dream-native-sessions-pi-target`.
 - `task.claim` takes one required `executor`
   (`{ kind: 'runtime', runtimeId }` or `{ kind: 'harness', harnessId }`) in
   place of `runtime`, `harnessId` and `agentId`. `task.complete` requires it;
