@@ -8,12 +8,24 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { contentHash, createMutableClock, tenantId } from '@byok-sdk/core';
 import { createWebCrypto, type TaskArchiveStoreInput, type TaskRedactionCodec } from '@byok-sdk/cloud';
 import { isSqliteAvailable } from '../sqlite-support';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
+
+// Faults run as TEMP triggers on the store's own connection: a trigger written
+// into the file is an object schema 10 does not know, and the open refuses it.
+const faults = vi.hoisted((): string[] => []);
+afterEach(() => { faults.length = 0; });
+vi.mock('../sqlite-support.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../sqlite-support.js')>();
+  return { ...actual, openSqliteDatabase: (...args: Parameters<typeof actual.openSqliteDatabase>) => {
+    const db = actual.openSqliteDatabase(...args);
+    for (const fault of faults) db.exec(fault);
+    return db;
+  } };
+});
 
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const TENANT = tenantId('sqlite-archive-settle');
@@ -48,13 +60,11 @@ describeSqlite('SQLite terminal-task archive, its activity log and its in-memory
     const clock = createMutableClock(new Date('2026-10-27T00:00:00.000Z'));
     const crypto = createWebCrypto();
     await createSqliteEmbeddedStores({ path }, { clock, crypto }).close();
-    const raw = new DatabaseSync(path);
     // The store holds the file while open, so each trigger fails only one instant.
-    raw.exec(`CREATE TRIGGER archive_fail BEFORE UPDATE OF archived_at ON task_attempt WHEN NEW.archived_at = '${FAILING}'
+    faults.push(`CREATE TEMP TRIGGER archive_fail BEFORE UPDATE OF archived_at ON main.task_attempt WHEN NEW.archived_at = '${FAILING}'
       BEGIN SELECT RAISE(ABORT, 'archive update failed'); END;`);
-    raw.exec(`CREATE TRIGGER settle_fail BEFORE UPDATE OF archive_settled_at ON task_attempt WHEN NEW.archive_settled_at = '${FAILING}'
+    faults.push(`CREATE TEMP TRIGGER settle_fail BEFORE UPDATE OF archive_settled_at ON main.task_attempt WHEN NEW.archive_settled_at = '${FAILING}'
       BEGIN SELECT RAISE(ABORT, 'settle update failed'); END;`);
-    raw.close();
 
     const stores = createSqliteEmbeddedStores({ path }, { clock, crypto });
     const { tasks, receipts, activity, agentMessageDraft, taskArchive } = stores.cloud;

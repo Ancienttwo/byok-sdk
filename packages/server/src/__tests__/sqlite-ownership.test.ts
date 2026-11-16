@@ -30,7 +30,7 @@ async function ownInChild(path: string, then: 'hold' | 'exit-without-release' | 
     const { openSqliteDatabase } = await import(${JSON.stringify(SQLITE_SUPPORT)});
     // Held in a global: an unreachable lock handle may be finalized and closed by GC.
     globalThis.database = openSqliteDatabase(${JSON.stringify(path)});
-    globalThis.database.exec('CREATE TABLE durable_marker (value INTEGER); INSERT INTO durable_marker VALUES (42); BEGIN; INSERT INTO durable_marker VALUES (99);');
+    globalThis.database.exec("INSERT INTO byok_sqlite_meta VALUES ('durable_marker', '42'); BEGIN; INSERT INTO byok_sqlite_meta VALUES ('uncommitted_marker', '99');");
     process.stdout.write('owned\\n');
     ${then === 'hold' ? 'setInterval(() => {}, 1_000);' : then === 'exit-during-grace' ? 'setTimeout(() => process.exit(0), 600);' : "process.stdin.once('data', () => process.exit(0));"}
   `;
@@ -116,7 +116,7 @@ describeSqlite('SQLite single-process ownership', { timeout: 20_000 }, () => {
     const exited = once(owner, 'exit');
     const database = openSqliteDatabase(path);
     try {
-      expect(database.prepare('SELECT value FROM durable_marker').all()).toEqual([{ value: 42 }]);
+      expect(database.prepare("SELECT key, value FROM byok_sqlite_meta WHERE key LIKE '%_marker'").all()).toEqual([{ key: 'durable_marker', value: '42' }]);
       expect(database.prepare('PRAGMA locking_mode').get()).toEqual({ locking_mode: 'exclusive' });
     } finally { database.close(); }
     expect((await exited)[0]).toBe(0);
@@ -160,7 +160,7 @@ describeSqlite('SQLite single-process ownership', { timeout: 20_000 }, () => {
 
     const next = openSqliteDatabase(path);
     try {
-      expect(next.prepare('SELECT value FROM durable_marker').all()).toEqual([{ value: 42 }]);
+      expect(next.prepare("SELECT key, value FROM byok_sqlite_meta WHERE key LIKE '%_marker'").all()).toEqual([{ key: 'durable_marker', value: '42' }]);
       expect(next.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
     } finally { next.close(); }
     const server = open(path);
@@ -179,7 +179,7 @@ describeSqlite('SQLite single-process ownership', { timeout: 20_000 }, () => {
 
     const next = openSqliteDatabase(path);
     try {
-      expect(next.prepare('SELECT value FROM durable_marker').all()).toEqual([{ value: 42 }]);
+      expect(next.prepare("SELECT key, value FROM byok_sqlite_meta WHERE key LIKE '%_marker'").all()).toEqual([{ key: 'durable_marker', value: '42' }]);
     } finally { next.close(); }
     const server = open(path);
     await server.close();
