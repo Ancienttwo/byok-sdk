@@ -414,7 +414,8 @@ export function declarationGraph({ files, entryFiles }) {
         continue;
       }
       // `ns.Member` reaches that member only; a bare `ns` reaches the module.
-      for (const use of code.matchAll(new RegExp(`(?<![\\w$])${token.replace(/\$/g, '\\$')}(?:\\s*\\.\\s*([A-Za-z_$][\\w$]*))?(?![\\w$])`, 'g'))) {
+      // `x.ns` is a property named ns, not a use of the import.
+      for (const use of code.matchAll(new RegExp(`(?<![\\w$]|\\.\\s*)${token.replace(/\$/g, '\\$')}(?:\\s*\\.\\s*([A-Za-z_$][\\w$]*))?(?![\\w$])`, 'g'))) {
         const member = use[1] === undefined ? target : exportNames(target.key).has(use[1]) ? exportOf(target.key, use[1]) : null;
         if (member === null) throw new Error(`${ref.file}: ${token}.${use[1]} is not exported by ${target.key}`);
         found.set(member.key, member);

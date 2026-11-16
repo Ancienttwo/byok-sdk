@@ -124,13 +124,14 @@ test('renders only exported names and the declarations their signatures reach', 
   assert.match(drifted.stderr, /\+export type Hidden = 'H';/);
 });
 
-test('template interpolations and namespace members are references; a read module keeps its section', (t) => {
+test('template interpolations and namespace members are references, property names are not; a read module keeps its section', (t) => {
   const root = makeRoot(t);
   writePackage(root, 'core', {
     exports: singleEntry,
     dist: {
       'index.d.ts':
-        "import * as ns from './ns.js';\nexport * as Empty from './empty.js';\ntype Hidden = 'h';\nexport type Tag = `t-${Hidden}`;\nexport type Member = ns.Used;\n",
+        "import * as ns from './ns.js';\nimport { holder } from './holder.js';\nexport * as Empty from './empty.js';\ntype Hidden = 'h';\nexport type Tag = `t-${Hidden}`;\nexport type Member = ns.Used;\nexport type Prop = typeof holder.ns.Inner;\n",
+      'holder.d.ts': 'export declare const holder: { ns: { Inner: number } };\n',
       'ns.d.ts': "export type Used = 'u';\nexport type Unused = 'x';\n",
       'empty.d.ts': 'export {};\n',
     },
@@ -140,13 +141,18 @@ test('template interpolations and namespace members are references; a read modul
     sections(readFileSync(goldenPath(root, 'core'), 'utf8')),
     [
       '// ==== @byok-sdk/core dist/empty.d.ts ====',
+      '// ==== @byok-sdk/core dist/holder.d.ts ====',
+      '// support',
+      'export declare const holder: { ns: { Inner: number } };',
       '// ==== @byok-sdk/core dist/index.d.ts ====',
       "import * as ns from './ns.js';",
+      "import { holder } from './holder.js';",
       "export * as Empty from './empty.js';",
       '// support',
       "type Hidden = 'h';",
       'export type Tag = `t-${Hidden}`;',
       'export type Member = ns.Used;',
+      'export type Prop = typeof holder.ns.Inner;',
       '// ==== @byok-sdk/core dist/ns.d.ts ====',
       '// support',
       "export type Used = 'u';",
