@@ -47,11 +47,11 @@ export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch:
 
   const {
     sendEnvelope, replaceRefusedTerminal, refuseOverBoundEnvelope, withReplyTransition,
-    recordReplyState,
+    recordReplyState, awaitClaimSettlement, settleClaim,
   } = composeStartTerminals(daemonScope, { sealedRun, activeJournal, journalIdentity, opened, record });
   const { deps } = composeStartRunnerDeps(daemonScope, {
     capabilities,
-    record, sendEnvelope, withReplyTransition, activeJournal, journalIdentity, recordReplyState,
+    record, sendEnvelope, awaitClaimSettlement, withReplyTransition, activeJournal, journalIdentity, recordReplyState,
     blobClient, opened, activePressureEngine,
   });
   daemonState.runner = new TaskRunner(deps);
@@ -76,7 +76,7 @@ export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch:
     handleAgentMemoryIntentEnvelope, handleE2eeKeyPackageEnvelope, handleAgentEgressEnvelope,
     handleAgentContentReadEnvelope, activePressureEngine, journalIdentity, activeJournal,
     refuseOverBoundEnvelope, resultReplyRecoveryTasks, sendEnvelope, opened, replayRecoveryTerminals,
-    replaceRefusedTerminal, sealedRun,
+    replaceRefusedTerminal, sealedRun, settleClaim,
   });
   await replayRecoveryTerminals();
   startPresenceProducer();

@@ -750,6 +750,15 @@
       "items": [
         "behavior:wire-v7-client-selection-before-native-sessions"
       ]
+    },
+    {
+      "id": "claim-accepted-before-runtime-start",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client createDaemon starts a task's runtime and sends task.started only after the cloud accepts its task.claim; a refused claim declines the task (retryable false, reason 'claim refused: <refusal reason>', no code) and an unsettled claim fails at the offer's startup deadline. Hosts that treated task.started as the claim result read the decline instead.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:claim-accepted-before-runtime-start"
+      ]
     }
   ],
   "changes": [

@@ -18,7 +18,7 @@ import type { BlobResolver } from '../daemon/blob-client';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 const unusedBlobClient: BlobResolver = {
@@ -34,7 +34,7 @@ function makeRunner(
   const approvalRegistry = new ApprovalRegistry();
   const deps: TaskRunnerDeps = {
     ...freshOfferRunnerDeps(),
-    getIngressBudget: testIngressBudget,
+    getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement,
     scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),

@@ -207,6 +207,16 @@ export interface TaskRunnerDeps {
   awaitTerminalCommit?: (taskId: string) => Promise<void>;
   /** Fsync the execution commitment before claim/runtime side effects. */
   beforeClaim?: (taskId: string, runtime: string) => Promise<void>;
+  /**
+   * The cloud's outcome for the posted `task.claim` with this envelope id
+   * (#2294). Registered before the claim is sent; resolves `undefined` once
+   * `signal` aborts first. The runtime starts only after an accepted claim.
+   */
+  awaitClaimSettlement: (taskId: string, claimId: string, signal: AbortSignal) => Promise<
+    | { readonly outcome: 'accepted' | 'duplicate' }
+    | { readonly outcome: 'rejected'; readonly reason: string }
+    | undefined
+  >;
   blobClient: BlobResolver;
   batcherOptions?: ProgressBatcherOptions;
   /** Runtime ownership facts for `Daemon.whenTaskSettled`. */

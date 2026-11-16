@@ -331,6 +331,55 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === 'task-4')).toBe(false);
   });
 
+  describe('the runtime waits for the cloud to settle task.claim (#2294)', () => {
+    const offerTask = (taskId: string): void => server.send(createEnvelope('task.offer',
+      { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, { taskId, seq: server.nextSeq() }));
+    const wire = (taskId: string, type: string) => server.received.filter((e) => e.task_id === taskId && e.type === type);
+
+    it('starts the runtime only after the claim is accepted', async () => {
+      const adapter = new StubRuntimeAdapter();
+      await setupDaemon(adapter);
+      const release = server.holdNextMessagesResponse((e) => e.type === 'task.claim' && e.task_id === 'task-held-claim');
+      offerTask('task-held-claim');
+      await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-held-claim');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(adapter.startCalls).toHaveLength(0);
+      expect(wire('task-held-claim', 'task.started')).toHaveLength(0);
+      release();
+      await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-held-claim');
+      expect(adapter.startCalls).toHaveLength(1);
+    });
+
+    it('declines once, non-retryably, without starting the runtime when the claim is refused', async () => {
+      const adapter = new StubRuntimeAdapter();
+      const d = await setupDaemon(adapter);
+      server.setOutboundRefusal((e) => (e.type === 'task.claim' ? 'state_conflict' : undefined));
+      offerTask('task-refused-claim');
+      await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-refused-claim');
+      await expect(d.whenTaskSettled('task-refused-claim')).resolves.toEqual({ terminal: 'declined', delivery: 'accepted', disposal: 'none' });
+      const declines = wire('task-refused-claim', 'task.decline');
+      expect(declines).toHaveLength(1);
+      expect(declines[0]!.payload).toMatchObject({ reason: 'claim refused: state_conflict', retryable: false });
+      expect('code' in declines[0]!.payload).toBe(false);
+      expect('executor' in declines[0]!.payload).toBe(false);
+      expect(adapter.startCalls).toHaveLength(0);
+      expect(wire('task-refused-claim', 'task.started')).toHaveLength(0);
+    });
+
+    it('ends the task locally and never resends a decline the cloud also refuses', async () => {
+      const adapter = new StubRuntimeAdapter();
+      const d = await setupDaemon(adapter);
+      server.setOutboundRefusal((e) => (e.type === 'task.claim' ? 'state_conflict' : e.type === 'task.decline' ? 'not_permitted' : undefined));
+      offerTask('task-refused-decline');
+      await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-refused-decline');
+      await expect(d.whenTaskSettled('task-refused-decline')).resolves.toEqual({ terminal: 'declined', delivery: 'rejected', disposal: 'none' });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(wire('task-refused-decline', 'task.decline')).toHaveLength(1);
+      expect(adapter.startCalls).toHaveLength(0);
+      expect(daemon?.status().activeTaskCount).toBe(0);
+    });
+  });
+
   it('a typed authority failure from adapter.start() is reported non-retryable', async () => {
     const unsupportedAdapter = new StubRuntimeAdapter('pi');
     unsupportedAdapter.startError = new RuntimeExecutionFailure({

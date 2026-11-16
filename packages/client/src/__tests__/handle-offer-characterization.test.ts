@@ -14,7 +14,7 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferRunnerDeps, resumeSession } from './fixtures/fresh-offer';
 
 /**
@@ -76,7 +76,7 @@ async function agentRunner(
   const agentHome = new AgentHomeManager({ hostStorageRoot: await temporary('byok-offer-char-home-') });
   const sent: Envelope[] = [];
   // Held by reference: the runner re-reads `startupTimeoutMs` per offer.
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     agentHome,
     agentSessionHandoffs: new AgentSessionHandoffStore(),

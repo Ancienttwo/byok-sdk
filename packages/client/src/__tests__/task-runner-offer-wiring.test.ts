@@ -11,7 +11,7 @@ import { hostFor, forgetHost } from '../daemon/task-runner/host';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import type { BlobResolver } from '../daemon/blob-client';
 
@@ -23,7 +23,7 @@ const unusedBlobClient: BlobResolver = {
 function makeRunner(sent: Envelope[], overrides: Partial<TaskRunnerDeps> = {}): TaskRunner {
   return new TaskRunner({
     ...freshOfferRunnerDeps(),
-    getIngressBudget: testIngressBudget,
+    getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement,
     scratchRoot: testScratchOwner(),
     adapters: [new StubRuntimeAdapter()],
     ...testAgentHomeDeps(),

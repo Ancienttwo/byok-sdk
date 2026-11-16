@@ -630,6 +630,16 @@ at most 64 capability flags.
 - **Event cursors.** `tasks.events` cursors start with `te2.`; a `te1.`
   cursor is refused with `cursor_unknown`. Start a new read.
 
+### Daemon (`@byok-sdk/client`)
+
+- **Start after an accepted claim** (#2294). The daemon starts the runtime and
+  sends `task.started` only after the cloud accepts its `task.claim`. A refused
+  claim ends the attempt with one non-retryable `task.decline` whose `reason`
+  is `claim refused: <refusal reason>`, with no `code`. A claim still unsettled
+  at the offer's startup deadline fails with `runtime startup deadline exceeded`
+  (retryable). A Host that saw `task.started` refused after a lost claim now
+  sees that decline instead.
+
 ### Phase 1 and 2 items
 
 - Host APIs for steer refusals and their cursors (te2): phase 1.

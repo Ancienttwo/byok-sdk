@@ -17,6 +17,7 @@ const EVENT_TYPES: readonly ReducerEventType[] = [
   'claim.journaled',
   'claim.journal_failed',
   'claim.sent',
+  'claim.refused',
   'startup.registered',
   'startup.transferred',
   'startup.disposed',
