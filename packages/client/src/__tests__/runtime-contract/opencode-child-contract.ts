@@ -7,7 +7,7 @@ import type { MessageDraftDelta } from '../../types';
 import { object, OpenCodeProjection } from '../../adapters/opencode/projection';
 import { OpenCodeAdapter } from '../../adapters/opencode/opencode-adapter';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
-import { check, fileEgress, skip, type RuntimeCases } from './contract';
+import { egressCheck, fileEgress, skip, type RuntimeCases } from './contract';
 import type { openCodeContract } from './opencode-contract';
 import { startLoopbackProvider, type ProviderRequest } from './loopback';
 
@@ -56,7 +56,7 @@ export function openCodeChildCases(contract: ReturnType<typeof openCodeContract>
   return {
     'opencode.child': ['child_update tools retain session ids; root completion disposes a running background child',
       process.env.BYOK_RUNTIME_CONTRACT === 'qualified' && process.env.BYOK_CONTRACT_OPENCODE2_CHILD === '1' && process.platform === 'darwin'
-        ? check(async () => {
+        ? egressCheck(async () => {
           const recorder = await fileEgress();
           const wire: Array<{ direction: 'in' | 'out'; frame: Frame }> = [];
           const spawned = new Set<number>();
@@ -158,7 +158,6 @@ export function openCodeChildCases(contract: ReturnType<typeof openCodeContract>
             expect(beforeDispose.some(row => row.pid === holdPid), 'background tool is alive before root answer').toBe(true);
             expect(beforeDispose.some(row => /opencode.*acp/.test(row.command))).toBe(true);
             expect(afterDispose).toEqual([]);
-            expect(recorder.attempts, 'no external requests through the refusing proxy, including the child run').toEqual([]);
           } finally {
             try { await session?.close(); }
             finally {
@@ -167,7 +166,7 @@ export function openCodeChildCases(contract: ReturnType<typeof openCodeContract>
               await provider.close();
             }
           }
-        }, 120_000)
+        }, contract.declaredHosts)
         : skip('opt in on macOS with qualified mode and BYOK_CONTRACT_OPENCODE2_CHILD=1; real 2.3 binary, local scripted provider')],
   };
 }
