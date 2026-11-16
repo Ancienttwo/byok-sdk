@@ -285,10 +285,8 @@ import { z } from 'zod';
 /**
  * Persist this validated input before dispatch; the Host owns Turn/generation and outbox.
  *
- * `terminalProjection` is always required (#470). Execution targets either a built-in
- * `runtime` or a device-advertised `harnessId` (not both; harnessId also excludes
- * `dispatchSelection`), so corpus hosted entries that carry only `harnessId` stay
- * expressible through `submitAgentExecution`.
+ * `terminalProjection` is always required (#470). The execution target is the
+ * offer's required `target` (wire v7), validated by the protocol schema.
  */
 export declare const AgentExecutionInputSchema: z.ZodObject<{
     taskId: z.ZodString;
@@ -1560,7 +1558,7 @@ import type { AgentMessageConsumers } from './agent-message-disposition.js';
 import { type AgentHomeProjectionReceiptInput } from './agent-home-projections.js';
 import { type InputPreparationReceiptInput } from './input-preparations.js';
 import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from './agent-memory-projection.js';
-import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, TaskAbandonCause, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports.js';
+import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, SteerRefusalRecord, TaskAbandonCause, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports.js';
 import { type DeviceTerminal, type TerminalResult } from './terminal-result.js';
 import type { MailboxWake } from './mailbox-wake.js';
 import { type TaskRedactionResult, type TaskRedactionStore } from './task-redaction.js';
@@ -2111,6 +2109,8 @@ export interface ByokCloud {
      * in full before a mailbox row is allocated, so a refused call has
      * zero side effects:
      *
+     *   0. a text over `TASK_STEER_TEXT_MAX_BYTES` (65,536) UTF-8 bytes ->
+     *      `coordination_input_invalid` ({@link ByokCloudError});
      *   1. no such task for this tenant -> `task_not_found` ({@link ByokCloudError});
      *   2. terminal attempt -> {@link SteerRejectedError} `task_terminal`,
      *      checked BEFORE the running check so a steer racing a terminal
@@ -2122,8 +2122,9 @@ export interface ByokCloud {
      *      there is no snapshot at all.
      *
      * Delivery is the same best-effort notification every control message has:
-     * the enqueued envelope is durable, and whether the runtime acted on it is
-     * observable only through that task's own later messages.
+     * the enqueued envelope is durable. A device that does not deliver it to the
+     * runtime reports `task.steer_refused`; read that with
+     * {@link ByokCloud.readSteerRefusal} by the returned envelope's id.
      */
     steerTask(tenant: TenantId, taskId: string, payload: {
         readonly text: string;
@@ -2135,6 +2136,18 @@ export interface ByokCloud {
      * `sealed` and `steerId`.
      */
     steerSealedTask(tenant: TenantId, taskId: string, payload: TaskSteerSealedPayload): Promise<EnqueuedAgentControl>;
+    /**
+     * The device's refusal of one steer (wire v7, #2009), by the steer's
+     * envelope id, or `undefined` while none is recorded. The first refusal
+     * recorded wins; its `reason` reads through `readSteerRefusalReason`.
+     */
+    readSteerRefusal(tenant: TenantId, taskId: string, steerMessageId: string): Promise<SteerRefusalRecord | undefined>;
+    /** The task's steer refusals with `revision > afterRevision`, ascending, at most `limit`. */
+    listSteerRefusals(tenant: TenantId, query: {
+        readonly taskId: string;
+        readonly afterRevision: number;
+        readonly limit: number;
+    }): Promise<readonly SteerRefusalRecord[]>;
     readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
     /** Read the original executable offer; missing/corrupt authority never becomes a guessed payload. */
     readTaskOffer(tenant: TenantId, taskId: string): Promise<TaskOfferReadback | undefined>;
@@ -3248,7 +3261,7 @@ export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected';
  * exhaustively to coarse wire codes; the internal names never reach the wire
  * and may be refined without a protocol revision.
  */
-export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'sealed_payload_unsupported', 'sealed_output_required', 'sealed_ciphertext_invalid', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'task_settled_by_cloud', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid', 'terminal_receipt_not_canonical'];
+export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'sealed_payload_unsupported', 'sealed_output_required', 'sealed_ciphertext_invalid', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_executor_mismatch', 'claim_device_mismatch', 'claim_executor_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'task_settled_by_cloud', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid', 'terminal_receipt_not_canonical', 'steer_refusal_id_mismatch', 'steer_refusal_unknown_steer'];
 export type InboundRefusalReason = (typeof INBOUND_REFUSAL_REASONS)[number];
 /** The only way to build a rejection: the reason is required and closed. */
 interface Refused {
@@ -3678,7 +3691,7 @@ export declare class CloudRouteRegistry {
  * it was claimed. Same pin the reference server holds in
  * `packages/server/src/__tests__/steer-runtime-capability-gate.test.ts`.
  */
-import type { RuntimeId } from '@byok-sdk/protocol';
+import type { ClaimedExecutor } from '@byok-sdk/protocol';
 import type { TaskAttemptStatus } from './stores/ports.js';
 /**
  * Stable strings a caller switches on (an operator UI, an HTTP surface mapping
@@ -3704,7 +3717,7 @@ export type SteerRejectionCode = 'steer_unsupported_runtime' | 'task_not_running
  * typed-error idiom as `StaleApprovalError` (`approval-control.ts`).
  *
  * A distinct class rather than a `CloudErrorCode`, for the same reason as
- * `StaleApprovalError`: it carries the state and the runtime the caller needs to
+ * `StaleApprovalError`: it carries the state and the executor the caller needs to
  * explain the refusal, and a code alone cannot.
  *
  * Thrown before any mailbox row is allocated — a refused steer is a NON-EVENT,
@@ -3715,13 +3728,13 @@ export declare class SteerRejectedError extends Error {
     readonly code: SteerRejectionCode;
     /** The attempt's status at the moment the steer was refused. */
     readonly status: TaskAttemptStatus;
-    /** {@link TaskAttempt.claimedRuntime} — `undefined` when nothing was ever recorded, which is itself a reason `steer_unsupported_runtime` can fire. */
-    readonly runtime: RuntimeId | undefined;
+    /** {@link TaskAttempt.claimedExecutor} — `undefined` before a claim wins. */
+    readonly executor: ClaimedExecutor | undefined;
     constructor(taskId: string, code: SteerRejectionCode, 
     /** The attempt's status at the moment the steer was refused. */
     status: TaskAttemptStatus, 
-    /** {@link TaskAttempt.claimedRuntime} — `undefined` when nothing was ever recorded, which is itself a reason `steer_unsupported_runtime` can fire. */
-    runtime: RuntimeId | undefined);
+    /** {@link TaskAttempt.claimedExecutor} — `undefined` before a claim wins. */
+    executor: ClaimedExecutor | undefined);
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/activity.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult, type Clock, type TenantId } from '@byok-sdk/core';
@@ -4050,7 +4063,7 @@ export interface InMemoryCloudComposition {
     readonly blobContentProxy: BlobContentProxy;
     /** The owner of the used proof `requestId`s in `stores.proofReceipts`, for `proofReceiptRetention`. */
     readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
-    /** Hints after every write to a task's state, activity log or approval timeline in these stores (#1113 A4). */
+    /** Hints after every write to a task's state, activity log, approval timeline or steer refusals in these stores (#1113 A4). */
     readonly taskEventsWake: TaskEventsWake;
 }
 /** Deletes a task's ephemeral rows from the in-memory stores that `createInMemoryCloudStores` built; each returns the rows removed. */
@@ -4229,7 +4242,7 @@ export declare class InMemoryRequestReceiptStore implements RequestReceiptStore 
  * unfalsifiable.
  */
 import { type Clock, type TenantId } from '@byok-sdk/core';
-import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { ClaimedExecutor, RuntimeCapabilities } from '@byok-sdk/protocol';
 import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptCounts, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '../ports.js';
 import { type TaskChanged } from './task-change-map.js';
 interface StoredAgentMessageAdmission extends AgentMessageAdmission {
@@ -4280,8 +4293,7 @@ export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
     claim(tenant: TenantId, input: {
         taskId: string;
         deviceId: string;
-        runtime?: RuntimeId;
-        harnessId?: string;
+        executor: ClaimedExecutor;
         capabilities?: RuntimeCapabilities;
     }): Promise<TaskAttempt | undefined>;
     recordStatus(tenant: TenantId, input: {
@@ -5518,17 +5530,22 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  * device-facing handler must not be able to reach them.
  */
 import { type BoardClaimInput, type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type BoardStatusUpdateInput, type BoardUnclaimInput, type ContentHash, type CoreStores, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type ObjectManifestEntry, type ObjectReferenceInput, type Principal, type PresenceHint, type PresenceHintInput, type TenantReadiness, type StorageFinalizeInput, type StorageFinalizeResult, type StorageReservation, type StorageReservationInput, type TenantId } from '@byok-sdk/core';
-import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { AgentRef, ClaimedExecutor, RuntimeCapabilities } from '@byok-sdk/protocol';
 import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake.js';
 import type { ActivityAppendInput, ActivityTail, ActivityReadOptions } from './activity.js';
 import type { ApprovalTimelineAppendInput, ApprovalTimelineTail } from './approval-timeline.js';
-import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, RateLimitDecision, RateLimitUnit, RequestReceipt, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports.js';
+import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, SteerRefusalRecord, TaskSteerRefusalStore, RateLimitDecision, RateLimitUnit, RequestReceipt, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports.js';
 export interface TenantBoundMailbox {
     /** Subscribe before reading; hints never replace durable mailbox reads. */
     watch(deviceId: string, signal: AbortSignal): MailboxWakeSubscription;
     append(input: MailboxAppendInput): Promise<MailboxMessage>;
     /** Pure read. Never advances the cursor — the daemon's next poll is the only ack. */
     readAfter(query: MailboxReadQuery): Promise<MailboxPage>;
+    /** Pure read of one retained row on this device's stream (wire v7, #2009). */
+    readMessage(input: {
+        readonly deviceId: string;
+        readonly messageId: string;
+    }): Promise<MailboxMessage | undefined>;
     recordDelivery(input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
     advanceCursor(input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
     readCursor(deviceId: string): Promise<MailboxCursorState>;
@@ -5609,8 +5626,7 @@ export interface TenantBoundTaskAttempts {
     claim(input: {
         readonly taskId: string;
         readonly deviceId: string;
-        readonly runtime?: RuntimeId;
-        readonly harnessId?: string;
+        readonly executor: ClaimedExecutor;
         readonly capabilities?: RuntimeCapabilities;
     }): Promise<TaskAttempt | undefined>;
     recordStatus(input: {
@@ -5639,6 +5655,11 @@ export interface TenantBoundReceipts {
         readonly created: boolean;
     }>;
     get(key: string): Promise<RequestReceipt | undefined>;
+}
+export interface TenantBoundSteerRefusals {
+    record(input: Parameters<TaskSteerRefusalStore['record']>[1]): ReturnType<TaskSteerRefusalStore['record']>;
+    get(taskId: string, steerMessageId: string): Promise<SteerRefusalRecord | undefined>;
+    list(query: Parameters<TaskSteerRefusalStore['list']>[1]): Promise<readonly SteerRefusalRecord[]>;
 }
 export interface TenantBoundAgentEgress {
     record(input: Omit<AgentEgressRecord, 'tenantId' | 'recordedAt'>): Promise<{
@@ -5689,6 +5710,7 @@ export interface TenantStores {
     readonly dedup: TenantBoundDedup;
     readonly receipts: TenantBoundReceipts;
     readonly egress: TenantBoundAgentEgress;
+    readonly steerRefusals: TenantBoundSteerRefusals;
     readonly blobs: TenantBoundBlobs;
     readonly objects: TenantBoundObjects;
     readonly quota: TenantBoundQuota;
@@ -5702,7 +5724,7 @@ export interface CloudRootStores {
 }
 export declare function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores;
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
-import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TaskFailPayload, type TaskFailureReading, type TaskDeclineCodeReading } from '@byok-sdk/protocol';
+import { type AgentRef, type BlobRef, type ClaimedExecutor, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TaskFailPayload, type TaskFailureReading, type TaskDeclineCodeReading } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports.js';
 declare const DEVICE_TERMINAL_TYPES: readonly ['task.complete', 'task.fail', 'task.decline', 'task.cancelled'];
 /**
@@ -5725,7 +5747,8 @@ export declare function readDeviceTerminalReceipt(taskId: string, receipt: Reque
  */
 export interface TerminalResult {
     readonly taskId: string;
-    readonly harnessId?: string;
+    /** The executor the terminal echoed (wire v7); absent on a decline and an unclaimed cancel or interruption. */
+    readonly executor?: ClaimedExecutor;
     /** Local interruption observation; claimed ownership remains on TaskAttempt. */
     readonly recovery?: TaskFailPayload['recovery'];
     readonly state: 'complete' | 'failed' | 'cancelled';

@@ -491,6 +491,42 @@ A plaintext `task.steer` text is at most 65,536 UTF-8 bytes
 enqueues. A sealed steer is not checked on the device. `conn.hello` carries
 at most 64 capability flags.
 
+### Cloud (`@byok-sdk/cloud`)
+
+- **Claim and terminal executor.** The cloud records the winning claim's
+  `executor` as `TaskAttempt.claimedExecutor`. A replayed claim must name the
+  same executor. A harness claim needs a `harness` or `auto` target, and a
+  `harness` target needs a claim of that harness. After a claim, every
+  terminal must echo exactly that executor. Before a claim, a terminal carries
+  none: a cancel or an unclaimed `daemon_interrupted` recovery. A
+  `task.complete` with no claim is rejected. An unclaimed recovery is no
+  longer checked against the offer's target.
+- **Renamed inbound refusal reasons** (`INBOUND_REFUSAL_REASONS`, as an
+  observer reports them; the wire codes are unchanged). Rename these strings
+  if your observer matches them:
+  - `claim_harness_mismatch` is now `claim_executor_mismatch`;
+  - `terminal_harness_mismatch` is now `terminal_executor_mismatch`;
+  - `claim_harness_and_runtime_conflict` is removed: a claim can no longer
+    express it.
+  - New: `steer_refusal_id_mismatch` (wire `payload_invalid`) and
+    `steer_refusal_unknown_steer` (wire `not_permitted`).
+- **Renamed fields.** `SteerRejectedError.executor` replaces `.runtime`, and
+  `TerminalResult.executor` replaces `.harnessId`.
+- **Steer refusals.** Read them with
+  `ByokCloud.readSteerRefusal(tenant, taskId, steerMessageId)`, using the id
+  of the envelope `steerTask` returned. Or page them with
+  `ByokCloud.listSteerRefusals(tenant, { taskId, afterRevision, limit })`.
+  The cloud records a refusal only for a `task.steer` it sent that device for
+  that task. It takes the refusal in every task state and never changes the
+  task's state. Task archive and redaction keep refusal rows, as they keep
+  the terminal receipt; a row carries no content.
+- **Steer text bound.** `steerTask` rejects a plaintext text over 65,536 UTF-8
+  bytes with `coordination_input_invalid`, before any mailbox row exists.
+- **`POST /byok/messages`** answers an entry of another wire major with
+  `rejected` and `protocol_version_unsupported`, and an unknown type with
+  `rejected` and `type_unsupported`, each with HTTP 200. The handshake answer
+  carries `ingress` and no `capabilities`.
+
 ### Phase 1 and 2 items
 
 - Host APIs for steer refusals and their cursors (te2): phase 1.
