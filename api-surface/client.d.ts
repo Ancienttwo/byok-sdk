@@ -10043,8 +10043,8 @@ export { checkUpgradeFrom } from './lifecycle/upgrade-from.js';
 export type { UpgradeFromBreakingEntry, UpgradeFromRefusalCode, UpgradeFromReport, UpgradeTrainPackage, } from './lifecycle/upgrade-from.js';
 export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes.js';
 export type { ExitCode, ServiceExitDisposition } from './lifecycle/exit-codes.js';
-export { DAEMON_LOG_LIMITS, inspectServiceLogs, openDaemonLog, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log.js';
-export type { DaemonLog, DaemonLogOptions, ServiceLogReport } from './lifecycle/service-log.js';
+export { DAEMON_LOG_LIMITS, inspectServiceLogs, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log.js';
+export type { DaemonLogOptions, ServiceLogReport } from './lifecycle/service-log.js';
 export { applyLoginShellEnvironment } from './lifecycle/service-environment.js';
 export { serviceEnvironmentStatus } from './login-shell-environment.js';
 export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from './runtime/environment.js';
@@ -11873,19 +11873,6 @@ export interface DaemonLogOptions {
     maxBytes?: number;
     maxFiles?: number;
 }
-export interface DaemonLog {
-    /** The active file. */
-    readonly path: string;
-    /** Appends one line (a trailing newline is added). Rotates first when the line would cross `maxBytes`. */
-    write(line: string): void;
-    close(): void;
-}
-/**
- * Opens the daemon log in `logDir`. Writes are synchronous so lines keep
- * their order and survive a crash right after them. A single line longer
- * than `maxBytes` is still written whole, into a fresh file.
- */
-export declare function openDaemonLog(options: DaemonLogOptions): DaemonLog;
 /**
  * Routes everything this process writes to `process.stdout` and
  * `process.stderr` (every `console.*` call included) into the daemon log

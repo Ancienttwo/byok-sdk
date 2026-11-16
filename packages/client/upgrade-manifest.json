@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "915a7e63352cd180029813eb2df6de6750faabecb6498c78e81cfb75ef6274ce"
+    "snapshotSha256": "269c8eace40ac7a615fd6bcae01d029d53a1e7dc4c89dab20d2bbe7e6aae1da4"
   },
   "configFields": {
     "status": "tracked",
@@ -69,6 +69,16 @@
       "items": [
         "export:@byok-sdk/client#AgentEgressDropReceipt"
       ]
+    },
+    {
+      "id": "remove-standalone-daemon-log",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes openDaemonLog() and DaemonLog. Embedding Hosts that write individual log lines must own their sink and rotation; daemon-wide stdout/stderr routing is not a standalone line-writer replacement.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#standalone-daemon-log-writer",
+      "items": [
+        "export:@byok-sdk/client#openDaemonLog",
+        "export:@byok-sdk/client#DaemonLog"
+      ]
     }
   ],
   "changes": [
@@ -83,6 +93,11 @@
       "entry": "remove-task-terminal-read"
     },
     {
+      "item": "export:@byok-sdk/client#DaemonLog",
+      "change": "removed",
+      "entry": "remove-standalone-daemon-log"
+    },
+    {
       "item": "export:@byok-sdk/client#LocalTeamWorkspace",
       "change": "changed",
       "entry": "remove-unused-team-workspace-methods"
@@ -91,6 +106,11 @@
       "item": "export:@byok-sdk/client#LocalTeamWorkspaceService",
       "change": "changed",
       "entry": "remove-unused-team-workspace-methods"
+    },
+    {
+      "item": "export:@byok-sdk/client#openDaemonLog",
+      "change": "removed",
+      "entry": "remove-standalone-daemon-log"
     }
   ]
 }

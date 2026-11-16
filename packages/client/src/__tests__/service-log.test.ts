@@ -8,7 +8,7 @@ import {
   boundServiceRedirectLogs,
   DAEMON_LOG_FILENAME,
   inspectServiceLogs,
-  openDaemonLog,
+  routeProcessOutputToDaemonLog,
   SERVICE_REDIRECT_LIMITS,
   SERVICE_REDIRECT_STDERR_FILENAME,
   SERVICE_REDIRECT_STDOUT_FILENAME,
@@ -30,9 +30,10 @@ async function sizes(): Promise<Record<string, number>> {
 
 describe('lifecycle/service-log (#1097): daemon log rotation', () => {
   it('rotates by size and keeps at most maxFiles files, newest copy first', async () => {
-    const log = openDaemonLog({ logDir, maxBytes: 20, maxFiles: 3 });
-    for (let index = 0; index < 10; index += 1) log.write(`line-${index}-xxxx`); // 12 bytes each
-    log.close();
+    const log = routeProcessOutputToDaemonLog({ logDir, maxBytes: 20, maxFiles: 3 });
+    try {
+      for (let index = 0; index < 10; index += 1) process.stdout.write(`line-${index}-xxxx\n`); // 12 bytes each
+    } finally { log.close(); }
 
     expect(Object.keys(await sizes())).toEqual([DAEMON_LOG_FILENAME, `${DAEMON_LOG_FILENAME}.1`, `${DAEMON_LOG_FILENAME}.2`]);
     for (const size of Object.values(await sizes())) expect(size).toBeLessThanOrEqual(20);
@@ -43,24 +44,24 @@ describe('lifecycle/service-log (#1097): daemon log rotation', () => {
   it('appends to an existing log and counts its size before rotating', async () => {
     await fs.mkdir(logDir, { recursive: true });
     await fs.writeFile(path.join(logDir, DAEMON_LOG_FILENAME), '0123456789012345\n');
-    const log = openDaemonLog({ logDir, maxBytes: 20, maxFiles: 2 });
-    log.write('next');
-    log.close();
+    const log = routeProcessOutputToDaemonLog({ logDir, maxBytes: 20, maxFiles: 2 });
+    try { process.stdout.write('next\n'); } finally { log.close(); }
     expect(await fs.readFile(path.join(logDir, DAEMON_LOG_FILENAME), 'utf8')).toBe('next\n');
     expect(await fs.readFile(path.join(logDir, `${DAEMON_LOG_FILENAME}.1`), 'utf8')).toBe('0123456789012345\n');
   });
 
   it('maxFiles 1 truncates instead of keeping a copy', async () => {
-    const log = openDaemonLog({ logDir, maxBytes: 10, maxFiles: 1 });
-    log.write('aaaaaaaa');
-    log.write('bbbbbbbb');
-    log.close();
+    const log = routeProcessOutputToDaemonLog({ logDir, maxBytes: 10, maxFiles: 1 });
+    try {
+      process.stdout.write('aaaaaaaa\n');
+      process.stdout.write('bbbbbbbb\n');
+    } finally { log.close(); }
     expect(await sizes()).toEqual({ [DAEMON_LOG_FILENAME]: 9 });
   });
 
   it('rejects a non-positive limit', () => {
-    expect(() => openDaemonLog({ logDir, maxBytes: 0 })).toThrow(RangeError);
-    expect(() => openDaemonLog({ logDir, maxFiles: 0 })).toThrow(RangeError);
+    expect(() => routeProcessOutputToDaemonLog({ logDir, maxBytes: 0 })).toThrow(RangeError);
+    expect(() => routeProcessOutputToDaemonLog({ logDir, maxFiles: 0 })).toThrow(RangeError);
   });
 });
 
@@ -133,9 +134,8 @@ describe('lifecycle/service-log (#1097): service manager redirect bound', () => 
 describe('lifecycle/service-log (#1097): inspectServiceLogs', () => {
   it('reports location, total size and each file kind', async () => {
     expect(await inspectServiceLogs(logDir)).toEqual({ dir: logDir, status: 'missing', totalBytes: 0, files: [], truncated: false });
-    const log = openDaemonLog({ logDir });
-    log.write('hello');
-    log.close();
+    await fs.mkdir(logDir, { recursive: true });
+    await fs.writeFile(path.join(logDir, DAEMON_LOG_FILENAME), 'hello\n');
     await fs.writeFile(path.join(logDir, SERVICE_REDIRECT_STDERR_FILENAME), 'boot crash\n');
     await fs.writeFile(path.join(logDir, 'unrelated.txt'), 'ignored');
 

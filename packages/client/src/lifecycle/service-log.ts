@@ -27,14 +27,6 @@ export interface DaemonLogOptions {
   maxFiles?: number;
 }
 
-export interface DaemonLog {
-  /** The active file. */
-  readonly path: string;
-  /** Appends one line (a trailing newline is added). Rotates first when the line would cross `maxBytes`. */
-  write(line: string): void;
-  close(): void;
-}
-
 function rotate(file: string, maxFiles: number): void {
   rmSync(`${file}.${maxFiles - 1}`, { force: true });
   for (let index = maxFiles - 2; index >= 1; index -= 1) {
@@ -73,20 +65,6 @@ function openRotatingFile(options: DaemonLogOptions): { path: string; append(byt
     close(): void {
       closeSync(fd);
     },
-  };
-}
-
-/**
- * Opens the daemon log in `logDir`. Writes are synchronous so lines keep
- * their order and survive a crash right after them. A single line longer
- * than `maxBytes` is still written whole, into a fresh file.
- */
-export function openDaemonLog(options: DaemonLogOptions): DaemonLog {
-  const file = openRotatingFile(options);
-  return {
-    path: file.path,
-    write: (line: string): void => file.append(Buffer.from(`${line}\n`, 'utf8')),
-    close: file.close,
   };
 }
 

@@ -61,3 +61,12 @@ workspace with the desired definition and issue its member leases instead.
 including the unused in-memory receipt buffer. Use `status()` for each lane's
 `dropped`, `replaced` and `lastDropReason`. Per-drop history is no longer retained;
 Hosts needing an audit history must collect it at their own transport boundary.
+
+### Standalone daemon log writer
+
+`openDaemonLog()` and `DaemonLog` are removed. An embedding Host that writes its
+own individual log lines must own its log sink, append complete lines and apply
+its own retention/rotation policy. `DaemonLogOptions` remains because the daemon's
+internal process-output router still uses it. That router captures all stdout
+and stderr for the daemon process; it is not a same-semantics replacement for a
+Host's standalone line writer and is not exported from the package entrypoint.
