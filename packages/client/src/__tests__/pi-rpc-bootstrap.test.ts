@@ -24,14 +24,21 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 /**
  * Extension source that sets `promptSeen` once Pi has taken the task prompt.
  * Pi's stdin reader is the first `data` listener; this one is attached right
- * after it, so Pi has already deferred or queued the prompt synchronously by
- * the time `promptSeen` is set.
+ * after it and, like Pi's, acts only on complete lines. When it sees the
+ * prompt line, Pi has already deferred or queued that prompt synchronously.
  */
-const PROMPT_WATCH = `let promptSeen = false;
+const PROMPT_WATCH = `import { StringDecoder } from 'node:string_decoder';
+let promptSeen = false;
 process.stdin.on('newListener', function watch(event) {
   if (event !== 'data') return;
   process.stdin.off('newListener', watch);
-  queueMicrotask(() => process.stdin.on('data', chunk => { if (String(chunk).includes('"type":"prompt"')) promptSeen = true; }));
+  const decoder = new StringDecoder('utf8');
+  let pending = '';
+  queueMicrotask(() => process.stdin.on('data', chunk => {
+    const lines = (pending + (typeof chunk === 'string' ? chunk : decoder.write(chunk))).split('\\n');
+    pending = lines.pop();
+    if (lines.some(line => line.trim() !== '' && JSON.parse(line).type === 'prompt')) promptSeen = true;
+  }));
 });
 `;
 
