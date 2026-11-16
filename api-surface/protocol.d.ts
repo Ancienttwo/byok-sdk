@@ -2916,7 +2916,8 @@ export type PairRequest = z.infer<typeof PairRequestSchema>;
 /**
  * The typed rejections of `POST /byok/pair` (§6.1). Each body carries a fixed
  * `error` text and its `code`, and nothing else the server knows, except the
- * one field the `409` carries.
+ * one field the `409` carries. The texts are literals so no server can tell
+ * one cause of a rejection from another, or leak a detail, through them.
  */
 export declare const PAIRING_CODE_INVALID_CODE = "pairing_code_invalid";
 export declare const PAIRING_SUPERSEDED_CODE = "pairing_superseded";
@@ -2925,7 +2926,7 @@ export declare const PAIRING_SUPERSEDED_CODE = "pairing_superseded";
  * this one body, so a code holder learns nothing more than that it failed.
  */
 export declare const PairingCodeInvalidResponseSchema: z.ZodObject<{
-    error: z.ZodString;
+    error: z.ZodLiteral<"invalid pairing code">;
     code: z.ZodLiteral<"pairing_code_invalid">;
 }, z.core.$strip>;
 export type PairingCodeInvalidResponse = z.infer<typeof PairingCodeInvalidResponseSchema>;
@@ -2937,7 +2938,7 @@ export type PairingCodeInvalidResponse = z.infer<typeof PairingCodeInvalidRespon
  * it (§6.1).
  */
 export declare const PairSupersededResponseSchema: z.ZodObject<{
-    error: z.ZodString;
+    error: z.ZodLiteral<"pairing superseded">;
     code: z.ZodLiteral<"pairing_superseded">;
     currentDeviceDigest: z.ZodNullable<z.ZodString>;
 }, z.core.$strip>;

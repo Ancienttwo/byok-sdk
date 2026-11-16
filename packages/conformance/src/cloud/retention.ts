@@ -62,7 +62,8 @@ export function runCloudRetentionConformance(name: string, factory: CloudComposi
         await handle.advanceTime(1);
         expect(await stores.pairingCodes.collectExpired(TENANT_A, { now: handle.now(), limit: 1 })).toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: true });
         expect(await stores.pairingCodes.collectExpired(TENANT_A, { now: handle.now(), limit: 1 })).toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: false });
-        expect(await stores.pairing.redeemAndRegister(input)).toEqual(enrolled);
+        // A retry mints a fresh device id; the completion replays all the same.
+        expect(await stores.pairing.redeemAndRegister({ ...input, deviceId: 'paired-retry' })).toEqual(enrolled);
       });
     });
     for (const kind of ['activity', 'approvals'] as const) it(`bounds expired ${kind} tails and protects another tenant`, async () => {

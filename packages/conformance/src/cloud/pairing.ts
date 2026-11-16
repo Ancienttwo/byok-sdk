@@ -30,7 +30,7 @@ const MACHINE = 'c'.repeat(64);
 function enrollment(
   pairingCode: string,
   deviceId: string,
-  fence: { readonly machineId?: string; readonly expectedDeviceDigest?: string | null } = {},
+  overrides: { readonly machineId?: string; readonly expectedDeviceDigest?: string | null; readonly deviceName?: string; readonly devicePublicKey?: string } = {},
 ) {
   return {
     pairingCode,
@@ -40,7 +40,7 @@ function enrollment(
     proofKeyId: 'identity',
     proofKeyEpoch: 0,
     expectedDeviceDigest: null,
-    ...fence,
+    ...overrides,
   };
 }
 
@@ -285,10 +285,13 @@ export function runPairingConformance(factory: CloudCompositionFactory): void {
         const first = await stores.pairing.redeemAndRegister(enrollment('replay-1', 'device-1', { machineId: MACHINE }));
         expect(first).toMatchObject({ outcome: 'registered', device: { deviceId: 'device-1' } });
 
-        // The machine's current device is now device-1, so a fence read would
-        // answer conflict to both retries; the replay answers first.
-        for (const expectedDeviceDigest of [null, await deviceDigest(TENANT_A, 'device-1')]) {
-          expect(await stores.pairing.redeemAndRegister(enrollment('replay-1', 'device-1', { machineId: MACHINE, expectedDeviceDigest })))
+        // A retry mints a fresh device id at the route, as the real entry
+        // does, so the id is not part of the binding. The machine's current
+        // device is now device-1, so a fence read would answer conflict to
+        // the null retry; the replay answers first.
+        const binding = { machineId: MACHINE, deviceName: 'name-device-1', devicePublicKey: 'pk-device-1' };
+        for (const [retryId, expectedDeviceDigest] of [['device-1-retry-a', null], ['device-1-retry-b', await deviceDigest(TENANT_A, 'device-1')]] as const) {
+          expect(await stores.pairing.redeemAndRegister(enrollment('replay-1', retryId, { ...binding, expectedDeviceDigest })))
             .toEqual(first);
         }
         expect(await ids(handle)).toEqual(['device-1']);
@@ -313,23 +316,30 @@ export function runPairingConformance(factory: CloudCompositionFactory): void {
       });
     });
 
-    it('lets exactly one of two concurrent pairings of one machine pass the same fence', async () => {
-      await withCloudComposition(factory, async (handle) => {
-        const { stores } = handle;
-        await issue(handle, 'race-a');
-        await issue(handle, 'race-b');
+    for (const current of [null, 'race-current'] as const) {
+      it(`lets exactly one of two concurrent pairings of one machine pass the same fence (current device: ${current ?? 'none'})`, async () => {
+        // Both cases: a fence read outside the atomic section lets both
+        // pairings match a current device, while one with none can still
+        // serialize on the insert.
+        await withCloudComposition(factory, async (handle) => {
+          const { stores } = handle;
+          if (current !== null) await stores.devices.register(TENANT_A, registration(current, { machineId: MACHINE }));
+          await issue(handle, 'race-a');
+          await issue(handle, 'race-b');
+          const expectedDeviceDigest = current === null ? null : await deviceDigest(TENANT_A, current);
 
-        const results = await Promise.all([
-          stores.pairing.redeemAndRegister(enrollment('race-a', 'device-a', { machineId: MACHINE })),
-          stores.pairing.redeemAndRegister(enrollment('race-b', 'device-b', { machineId: MACHINE })),
-        ]);
-        const winners = results.flatMap((result) => (result.outcome === 'registered' ? [result.device.deviceId] : []));
-        expect(winners).toHaveLength(1);
-        const loser = results.find((result) => result.outcome !== 'registered');
-        expect(loser).toEqual(await conflictWith(TENANT_A, winners[0]!));
-        expect(await ids(handle)).toEqual(winners);
+          const results = await Promise.all([
+            stores.pairing.redeemAndRegister(enrollment('race-a', 'device-a', { machineId: MACHINE, expectedDeviceDigest })),
+            stores.pairing.redeemAndRegister(enrollment('race-b', 'device-b', { machineId: MACHINE, expectedDeviceDigest })),
+          ]);
+          const winners = results.flatMap((result) => (result.outcome === 'registered' ? [result.device.deviceId] : []));
+          expect(winners).toHaveLength(1);
+          const loser = results.find((result) => result.outcome !== 'registered');
+          expect(loser).toEqual(await conflictWith(TENANT_A, winners[0]!));
+          expect(await ids(handle)).toEqual(winners);
+        });
       });
-    });
+    }
 
     it('scopes the fence to tenant and product', async () => {
       // The same machine pairs into another tenant or product without seeing,

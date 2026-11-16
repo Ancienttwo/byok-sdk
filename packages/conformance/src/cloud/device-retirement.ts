@@ -248,6 +248,46 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
       });
     });
 
+    it('a fence conflict retires nothing: the current device keeps its row, tasks, mailbox and device-scoped state (#2045)', async () => {
+      // A conflict must be decided before any retirement work. A composition
+      // that cleans up the current device first and then refuses the
+      // registration passes a device-id check, and fails here.
+      await withCloudComposition(factory, async (handle) => {
+        const { stores, mailbox } = handle;
+        await mailbox.limit(TENANT, 1_000_000n);
+        await stores.devices.register(TENANT, registration('fenced-current', { machineId: MACHINE }));
+        const tasksBefore = await seedDevice(handle, 'fenced-current');
+        const [nonce] = await seedDeviceState(handle, 'fenced-current');
+        const rowBefore = await stores.devices.get(TENANT, 'fenced-current');
+        const mailboxBefore = await mailbox.inspect(TENANT, 'fenced-current');
+        const currentDeviceDigest = await deviceDigest(TENANT, 'fenced-current');
+        const expiresAt = new Date(Date.parse(handle.now()) + CODE_TTL_MS).toISOString();
+        await stores.pairingCodes.issue(TENANT, { code: 'fenced-code', productId: 'product-1', expiresAt });
+
+        const stale = await deviceDigest(TENANT, 'fenced-gone');
+        await expect(stores.devices.register(TENANT, registration('fenced-direct', { machineId: MACHINE, expectedDeviceDigest: stale })))
+          .resolves.toEqual({ outcome: 'conflict', currentDeviceDigest });
+        await expect(stores.pairing.redeemAndRegister({
+          pairingCode: 'fenced-code',
+          deviceId: 'fenced-paired',
+          deviceName: 'name-fenced-paired',
+          devicePublicKey: 'pk-fenced-paired',
+          proofKeyId: 'identity',
+          proofKeyEpoch: 0,
+          machineId: MACHINE,
+          expectedDeviceDigest: null,
+        })).resolves.toEqual({ outcome: 'conflict', currentDeviceDigest });
+
+        await expect(stores.devices.get(TENANT, 'fenced-current')).resolves.toEqual(rowBefore);
+        expect((await stores.devices.list(TENANT)).map((device) => device.deviceId)).toEqual(['fenced-current']);
+        for (const position of [...UNFINISHED, 'complete'] as const) {
+          await expect(stores.tasks.get(TENANT, `fenced-current-${position}`), position).resolves.toEqual(tasksBefore[position]);
+        }
+        await expect(mailbox.inspect(TENANT, 'fenced-current')).resolves.toEqual(mailboxBefore);
+        await expectDeviceStateKept(handle, 'fenced-current', nonce);
+      });
+    });
+
     it('re-registering a revoked device id keeps the dead-letter floor and never revives an expired row', async () => {
       await withCloudComposition(factory, async (handle) => {
         const { stores, mailbox } = handle;

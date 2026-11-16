@@ -82,6 +82,8 @@ describe('pairing registration fence (#2045)', () => {
     expect(PairSupersededResponseSchema.parse({ ...conflict, currentDeviceDigest: null }).currentDeviceDigest).toBeNull();
     const { currentDeviceDigest: _absent, ...untyped } = conflict;
     expect(PairSupersededResponseSchema.safeParse(untyped).success).toBe(false);
+    expect(PairSupersededResponseSchema.safeParse({ ...conflict, error: 'device dev_1 replaced' }).success).toBe(false);
+    expect(PairingCodeInvalidResponseSchema.safeParse({ error: 'pairing code expired', code: 'pairing_code_invalid' }).success).toBe(false);
   });
 });
 

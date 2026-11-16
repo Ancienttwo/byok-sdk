@@ -3146,9 +3146,12 @@ longer match. Only the owning invocation can learn the new digest.
 
 *Residual risks*, accepted and documented:
 
-- **Orphans.** A stale pairing without `machineId`, or one into another
-  tenant, can still register an orphan device row. It retires nothing; the
-  Host revokes it.
+- **Orphans.** A stale pairing without `machineId` can still register an
+  orphan device row; it retires nothing. A stale pairing whose code belongs
+  to another tenant than its successor's is fenced only within its own
+  tenant: when the device it names is still current there, it supersedes
+  that device (the enrollment the slot held before) and registers an orphan.
+  The successor's tenant is untouched. The Host revokes orphans.
 - **Keychain restore (CE-1).** A user who restores a keychain backup holding
   the stale attempt within the seconds a pairing is in flight lets that
   invocation adopt and supersede its successor. Only server state could tell
