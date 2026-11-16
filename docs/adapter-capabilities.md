@@ -1210,7 +1210,7 @@ included; `dsh.sigkill` runs in CI. The design and probes are in
 
 `AgyAdapter` (id `agy`, #1469) runs the Antigravity CLI over its native ACP:
 one `agy acp --dangerously-skip-permissions --process-per-session
---disable-telemetry` process per Attempt, driven by the vendored OAR Antigravity
+--gemini-dir <home>/.gemini --disable-telemetry` process per Attempt, driven by the vendored OAR Antigravity
 profile, which loads lazily through the private `#byok-acp-runtime` entry. It
 runs on the custom-harness path (`harnessId: 'agy'`). It takes no dispatch
 selection. `createDaemon` and `createRuntimeAdapters` build it when

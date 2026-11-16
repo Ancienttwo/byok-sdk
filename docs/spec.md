@@ -1223,7 +1223,7 @@ root ran ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
 ### agy runtime (#1469)
 
 The agy adapter runs `agy acp --dangerously-skip-permissions
---process-per-session --disable-telemetry` in an OS home the SDK owns: `HOME`,
+--process-per-session --gemini-dir <home>/.gemini --disable-telemetry` in an OS home the SDK owns: `HOME`,
 `USERPROFILE`, `APPDATA`, `LOCALAPPDATA` and `GEMINI_HOME` point into
 `DaemonConfig.runtimes.agy.home`, and `AGY_CLI_DISABLE_AUTO_UPDATE=1` is always
 set. It drops every inherited `GEMINI_*`, `GOOGLE_*`, `AGY_*` and
