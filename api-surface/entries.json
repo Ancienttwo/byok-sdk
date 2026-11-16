@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2820393,
+      "budgetBytes": 2803623,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -131,7 +131,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 modules a Host adapter composes; Worker-loadable, no @byok-sdk/client",
-      "budgetBytes": 611911,
+      "budgetBytes": 609595,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -230,7 +230,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 pure rules; Worker-safe, no node:sqlite",
-      "budgetBytes": 246617,
+      "budgetBytes": 246585,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -289,7 +289,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3269773,
+      "budgetBytes": 3250516,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -465,7 +465,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2487225,
+      "budgetBytes": 2474682,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -654,7 +654,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 84620,
+      "budgetBytes": 84606,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1795,7 +1795,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1680,
+      "budgetBytes": 1655,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1947,7 +1947,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 250133,
+      "budgetBytes": 240928,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2293,7 +2293,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 717344,
+      "budgetBytes": 701810,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2498,7 +2498,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 582833,
+      "budgetBytes": 567362,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2702,7 +2702,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent memory MCP helper",
-      "budgetBytes": 46417,
+      "budgetBytes": 46403,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2743,7 +2743,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent message MCP helper",
-      "budgetBytes": 46421,
+      "budgetBytes": 46407,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2784,7 +2784,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Task-bound structured outcome MCP helper",
-      "budgetBytes": 46417,
+      "budgetBytes": 46403,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2825,7 +2825,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent team MCP helper",
-      "budgetBytes": 46387,
+      "budgetBytes": 46373,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
