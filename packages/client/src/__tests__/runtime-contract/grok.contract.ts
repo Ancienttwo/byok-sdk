@@ -57,7 +57,11 @@ async function loopbackGrokHome(home: string, baseUrl: string): Promise<string> 
  * in Grok's Claude-compatible `~/.claude.json`, which `agentUserMcpServers`
  * switches off, and user instructions in `$GROK_HOME/AGENTS.md`,
  * `$GROK_HOME/rules/` and `~/.claude/CLAUDE.md`, which `agentUserContext`
- * keeps out. An empty `auth.json` stands in for the login the SDK home links.
+ * keeps out. An empty `auth.json` in the synthetic home stands in for the login
+ * the SDK home links. Never satisfy a login precondition with an API key
+ * placeholder (`XAI_API_KEY` or any other): Grok 1.0.77 then calls api.x.ai with
+ * it, which is undeclared egress. The case must make no request outside the
+ * loopback provider and the declared hosts.
  */
 async function turn(mode: 'inherit' | 'excluded') {
   const box = await createSandbox(`grok-${mode}`);
