@@ -100,6 +100,20 @@ it('does not acquire a fresh reply slot after its root has settled', () => {
   });
 });
 
+it('clears the reply token once a replacement is accepted and the root concludes', () => {
+  ledger().transaction(s => {
+    const state = stateOf(s.application), turn = state.turns.root!;
+    rememberInbound(state, incoming(), turn.root);
+    const old = queueDelivery(s, state, turn, 'task', 'message', 'answer', 100)!;
+    old.state = 'unknown'; old.attempts = 1;
+    const replacement = resendUnknown(state, old.id, 100);
+    replacement.state = 'accepted'; turn.conclusion = 'succeeded';
+    cleanReplyTokens(s, state, 150);
+    expect(old.state).toBe('unknown');
+    expect(state.channel!.inbounds[inboundKey(incoming())]!.reply?.token).toBeUndefined();
+  });
+});
+
 it('expires pending credentials and uses a separately opted-in push route with a different delivery id', () => {
   const db = ledger();
   db.transaction(s => {
@@ -145,6 +159,9 @@ it('revokes pending work immediately, preserves unknown evidence and uses a new 
     expect(resend).toMatchObject({ resendOf: unknown.id, state: 'pending', attempts: 0, route: { kind: 'push', pushRouteId: next.id } });
     expect(resend.id).not.toBe(unknown.id);
     expect(unknown.state).toBe('unknown');
+    expect(() => resendUnknown(state, unknown.id, 102)).toThrow('already been resent');
+    resend.state = 'unknown';
+    expect(resendUnknown(state, resend.id, 102).resendOf).toBe(resend.id);
   });
 });
 

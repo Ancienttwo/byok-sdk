@@ -187,6 +187,15 @@
         "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
         "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSES"
       ]
+    },
+    {
+      "id": "bot-delivery-supersession",
+      "impact": "additive",
+      "summary": "@byok-sdk/bot-collaboration/host-kit exports supersededDeliveryIds so Host delivery adapters can identify manual-resend predecessors from resendOf and exclude them from active delivery work and retention protection.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2248",
+      "items": [
+        "export:@byok-sdk/bot-collaboration/host-kit#supersededDeliveryIds"
+      ]
     }
   ],
   "changes": [

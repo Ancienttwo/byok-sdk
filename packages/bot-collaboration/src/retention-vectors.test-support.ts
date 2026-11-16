@@ -88,6 +88,19 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
       expect(await retain(subject, ['r1'])).toMatchObject({ archivedRoots: 0, alreadyArchivedRoots: 1 });
     });
 
+    it('archives a replaced unknown delivery with its settled root', async () => {
+      const subject = await opened();
+      await subject.change(state => {
+        delivery(state, 'unknown');
+        const old = state.channel!.deliveries.x!;
+        state.channel!.deliveries.replacement = { ...old, id: 'replacement', state: 'accepted', resendOf: old.id };
+      });
+      expect(await retain(subject, ['r1'])).toMatchObject({ archivedRoots: 1 });
+      expect((await subject.state()).channel?.deliveries).toEqual({});
+      expect(await subject.archived('deliveries', 'x')).toMatchObject({ state: 'unknown' });
+      expect(await subject.archived('deliveries', 'replacement')).toMatchObject({ state: 'accepted', resendOf: 'x' });
+    });
+
     it('refuses a short retention, an unknown root and a room seat, and changes nothing', async () => {
       const subject = await opened();
       await refused(subject, () => retain(subject, ['r1'], { retentionMs: MIN_TOMBSTONE_RETENTION_MS - 1 }),

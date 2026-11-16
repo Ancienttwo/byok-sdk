@@ -3,6 +3,7 @@ import { hash, MIN_TOMBSTONE_RETENTION_MS, time, type Json } from '@byok-sdk/ser
 import { DEFAULT_CONTEXT_TURN_LIMIT, handoffFrameBytes, handoffTurn } from './rules/context.js';
 import type { CollaborationState, Turn } from './model.js';
 import { refuseUnmigratedWouldDo } from './rules/autonomy.js';
+import { supersededDeliveryIds } from './delivery.js';
 
 /**
  * Explicit retention (#798). The Host acknowledges settled roots. One call moves every row of each root out of the
@@ -113,7 +114,7 @@ function members(state: CollaborationState, root: string): Members {
   };
 }
 /** The first reason that the root is still in use, or `undefined`. */
-function protection(state: CollaborationState, m: Members, facts: RetentionFacts, window: Set<string>, now: number): string | undefined {
+function protection(state: CollaborationState, m: Members, facts: RetentionFacts, window: Set<string>, superseded: ReadonlySet<string>, now: number): string | undefined {
   for (const turn of m.turns) {
     if (!turn.conclusion) return 'A Turn of the root is not concluded';
     if (facts.hasIntent(turn.id) && !turn.reported) return 'A Turn of the root is not reported';
@@ -136,7 +137,7 @@ function protection(state: CollaborationState, m: Members, facts: RetentionFacts
   if (batch && (batch.state === 'open' || batch.revision !== 2)) return 'The input batch of the root is not settled';
   if (m.rounds.some(id => !state.team.rounds[id]!.closed)) return 'A round of the root is open';
   if (m.seats.some(id => !state.team.seats[id]?.released)) return 'A room seat of the root is not released';
-  if (m.deliveries.some(id => OPEN_DELIVERY.has(state.channel!.deliveries[id]!.state))) return 'A delivery of the root is not settled';
+  if (m.deliveries.some(id => !superseded.has(id) && OPEN_DELIVERY.has(state.channel!.deliveries[id]!.state))) return 'A delivery of the root is not settled';
   if (m.inbounds.some(id => { const reply = state.channel!.inbounds[id]!.reply; return !!reply?.token && reply.expiresAt > now; })) {
     return 'An inbound reply route of the root is live';
   }
@@ -166,6 +167,7 @@ export function retainRoots(state: CollaborationState, input: RetentionInput, li
     expiredCommands: store.expire('commands', now), beforeBytes: bytes(state), afterBytes: 0 };
   // Decide every root on the state before this call, then move. A refusal throws before any move.
   const window = contextWindow(state, limits.contextTurnLimit, limits.handoff), selected: Members[] = [];
+  const superseded = supersededDeliveryIds(state.channel?.deliveries ?? {});
   for (const root of roots) {
     const seat = own(state.team.seats, root);
     if (seat) {
@@ -177,7 +179,7 @@ export function retainRoots(state: CollaborationState, input: RetentionInput, li
       if (!store.isRetired('root', root)) throw new Error('Acknowledged root not found');
       result.alreadyArchivedRoots++; continue;
     }
-    const reason = protection(state, m, facts, window, now);
+    const reason = protection(state, m, facts, window, superseded, now);
     if (reason) throw new RetentionRefused('protected_root', root, reason);
     selected.push(m);
   }

@@ -2072,8 +2072,12 @@ A push target is a non-secret platform target, never a reply credential.
 Only the owner can enable, revoke or resend. As with the other owner APIs,
 an omitted principal means that the Host already authenticated the owner.
 A manual resend requires a usable reply route or an active push route. It
-creates a new id and preserves the old unknown row. It can show a duplicate
-message if the original send arrived.
+creates a new id and preserves the old row in `unknown` as history. That row
+cannot be resent again or read back, and does not reserve a reply token or
+block retention. Consumers counting unknown deliveries must use `resendOf`
+on the replacement rows to exclude their predecessors. A new unknown
+replacement can itself be resent. A resend can show a duplicate message if
+the original send arrived.
 
 `consumeMessage` records first acceptance and its pending Delivery in the
 same SQLite transaction. Exact redelivery creates no second row. Applied

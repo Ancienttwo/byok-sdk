@@ -110,6 +110,7 @@ The Host never resends an `unknown` delivery automatically.
 Readback `absent` proves that the message did not arrive. The next send of the same delivery is then a retry.
 The Host UI shows an `unknown` delivery as possibly not delivered.
 The owner can resend it. A resend is a new delivery with a new id. The old record stays for audit.
+The old row stays `unknown` only as history: `resendOf` on its replacement excludes it from readback, further resend, reply-token reservation and retention protection; consumers counting unknown deliveries must exclude these predecessors too.
 This is an owner ruling of 2026-10-19.
 
 Retry only an explicit retryable rejection, such as HTTP 429 with `Retry-After`.

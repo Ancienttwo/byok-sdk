@@ -10,7 +10,7 @@ import { acceptDeliveryEcho, admitUserInput, applyHomeTerminal, applyManagement,
   readbackDelivery, reconcileDreamRoutines, recordDream, recoverDelivery, refuseRoute, rememberInbound, type ReplyRoute, resealDefinition,
   resendUnknown, type RetentionInput, type RetentionLimits, type RetentionResult, revisionOf, revokePush, routineTurn, sealedDefinition,
   type SealedRoutineAction, sealedTemplate, sealSwitchExport, settleDelivery, startDelivery, stateOf, type SwitchExport, SwitchExportedError,
-  SwitchExportError, type SwitchExportMark, SwitchImportedError, type SwitchReceipt, syncHead, syncTail, type Turn, type TurnCancelResult,
+  SwitchExportError, type SwitchExportMark, SwitchImportedError, type SwitchReceipt, supersededDeliveryIds, syncHead, syncTail, type Turn, type TurnCancelResult,
   unknownDelivery, updateBot, updateDefinition, verified, verifySwitchExport, writeSnapshotBot } from '@byok-sdk/bot-collaboration/host-kit';
 import { addTurn, admitBotToolsets, advanceRoomSeats, cardCallDue, checkReply, coalescePolicy, type CoalescePolicy, collaborationDue, commandBots,
   CONNECTOR_OUTCOME_UNKNOWN, delegationCancelAnswer, type DelegationTimers, hostIntentCancelAnswer, inactive, type InputFields,
@@ -1402,6 +1402,7 @@ export class HostedCollaborationStore {
           return done({ kind: 'moved' });
         }
         if (row.state === 'unknown') {
+          if (supersededDeliveryIds(deliveries!).has(id)) return done({ kind: 'none' });
           // Another sender's readback holds the row until its lease passes, and a row that waits is not due yet.
           if (Number(index.next_at) > now) return done({ kind: 'none' });
           if (times.readback) {
@@ -1447,7 +1448,8 @@ export class HostedCollaborationStore {
    */
   readDelivery(scope: string, id: string, attempt: number, lease: number, result: ReadbackResult | undefined, clock: () => number,
     readbackMs: number): Promise<void> {
-    return this.deliveryStep(scope, id, clock, async (row, _state, _client, now) => {
+    return this.deliveryStep(scope, id, clock, async (row, state, _client, now) => {
+      if (supersededDeliveryIds(state.channel!.deliveries).has(id)) return;
       if (result !== undefined) readbackDelivery(row, attempt, result, now);
       return row.state === 'unknown' && row.attempts === attempt ? now + readbackMs : undefined;
     }, lease);
@@ -1627,7 +1629,7 @@ export class HostedCollaborationStore {
   /**
    * The delivery outbox index (#793 D2b-out-2). It is the only writer of a delivery's outbox row: the K8 delivery entity is
    * the authority, and this projects it. For each delivery entity that is new, or whose `state` or `nextAttemptAt` changed in
-   * this transaction, it inserts the row, sets `settled_at` once the entity is `accepted` or `rejected`, and sets `next_at`
+   * this transaction, it inserts the row, sets `settled_at` once the entity is `accepted`, `rejected` or replaced, and sets `next_at`
    * for a `pending` entity. It does not touch `next_at` of a `sending` or `unknown` entity: the sender owns that value.
    * So every queued, refused, revoked, resent, echoed or sent delivery gets its row, also the push fallback that
    * `refuseRoute` inserts with no outbox intent. A `staged` entity gets its row only when its outcome promotes it, and a
@@ -1651,6 +1653,12 @@ export class HostedCollaborationStore {
       } else if (row.state === 'pending') {
         await client.query('UPDATE outbox SET next_at = $3 WHERE scope = $1 AND key = $2', [scopeKey, key, row.nextAttemptAt ?? 0]);
       }
+    }
+    const superseded = supersededDeliveryIds(Object.fromEntries([...next ?? []].map(([key, body]) => [key, JSON.parse(body) as Delivery])));
+    if (superseded.size) {
+      if (now === undefined) throw new Error('A settled delivery needs the clock of its writer');
+      await client.query("UPDATE outbox SET settled_at = $3 WHERE scope = $1 AND kind = 'delivery' AND key = ANY($2::text[]) AND settled_at IS NULL",
+        [scopeKey, [...superseded].map(storedKey), now]);
     }
   }
 
