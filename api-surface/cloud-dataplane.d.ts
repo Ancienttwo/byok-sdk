@@ -592,14 +592,14 @@ export declare class PostgresDeviceAssertionReplayAuthority implements DeviceAss
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/devices.d.ts ====
-import type { HarnessInfo } from '@byok-sdk/protocol';
+import { type HarnessInfo } from '@byok-sdk/protocol';
 import { type Clock, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
-import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
+import type { DeviceDirectory, DeviceRecord, DeviceRegistration, DeviceRegistrationResult } from '@byok-sdk/cloud';
 import type { ByokPool } from '../pool.js';
 export declare class PostgresDeviceDirectory implements DeviceDirectory {
     #private;
     constructor(pool: ByokPool, clock: Clock);
-    register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
+    register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRegistrationResult>;
     get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
     revoke(tenant: TenantId, deviceId: string): Promise<void>;
     recordCapabilities(tenant: TenantId, input: {
@@ -714,22 +714,14 @@ export declare class PostgresNonceStore implements NonceStore {
 // ==== @byok-sdk/cloud-dataplane dist/stores/pairing-codes.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { DeviceRecord, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore } from '@byok-sdk/cloud';
+import type { PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollmentInput, PairingEnrollmentResult } from '@byok-sdk/cloud';
 import type { ByokPool } from '../pool.js';
 export declare class PostgresPairingCodeStore implements PairingCodeStore {
     #private;
     constructor(pool: ByokPool, clock: Clock);
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     issue(tenant: TenantId, input: PairingCodeIssueInput): Promise<PairingCodeInfo>;
-    redeemAndRegister(input: {
-        readonly pairingCode: string;
-        readonly deviceId: string;
-        readonly deviceName: string;
-        readonly devicePublicKey: string;
-        readonly proofKeyId: string;
-        readonly proofKeyEpoch: number;
-        readonly machineId?: string;
-    }): Promise<DeviceRecord | undefined>;
+    redeemAndRegister(input: PairingEnrollmentInput): Promise<PairingEnrollmentResult>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/proof-receipts.d.ts ====
 import type { ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore } from '@byok-sdk/cloud';

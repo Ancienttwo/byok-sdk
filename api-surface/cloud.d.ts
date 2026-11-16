@@ -137,6 +137,7 @@
 //   DeviceProofRequestBinding -> dist/auth/device-proof.d.ts
 //   DeviceRecord -> dist/stores/ports.d.ts
 //   DeviceRegistration -> dist/stores/ports.d.ts
+//   DeviceRegistrationResult -> dist/stores/ports.d.ts
 //   DeviceRetiredError -> dist/errors.d.ts
 //   DeviceScopedStores -> dist/stores/ports.d.ts
 //   DeviceTerminal -> dist/terminal-result.d.ts
@@ -212,6 +213,7 @@
 //   NONCE_SIGNING_DOMAIN -> @byok-sdk/core#NONCE_SIGNING_DOMAIN
 //   NONCE_TTL_MS -> dist/stores/in-memory/nonces.d.ts
 //   NonceStore -> dist/stores/ports.d.ts
+//   PAIRING_CODE_PRODUCT_ID_MAX_LENGTH -> dist/auth/plane.d.ts
 //   PAIRING_CODE_TTL_MS -> dist/auth/plane.d.ts
 //   PROOF_RECEIPT_RETENTION_FLOOR_MS -> dist/maintenance.d.ts
 //   PairInput -> dist/auth/plane.d.ts
@@ -221,6 +223,7 @@
 //   PairingCodeStore -> dist/stores/ports.d.ts
 //   PairingEnrollment -> dist/stores/ports.d.ts
 //   PairingEnrollmentInput -> dist/stores/ports.d.ts
+//   PairingEnrollmentResult -> dist/stores/ports.d.ts
 //   PendingApproval -> dist/approval-control.d.ts
 //   PreparedTruthWrite -> dist/truth/contract.d.ts
 //   ProofReceiptCollectExpiredInput -> dist/maintenance.d.ts
@@ -1329,9 +1332,10 @@ export declare function authenticateDeviceProof(input: unknown, request: DeviceP
 // ==== @byok-sdk/cloud dist/auth/plane.d.ts ====
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { CloudCrypto } from '../crypto/port.js';
-import type { CloudStores, DeviceRecord, PairingCodeInfo } from '../stores/ports.js';
+import type { CloudStores, DeviceRecord, PairingCodeInfo, PairingEnrollmentResult } from '../stores/ports.js';
 import { type TokenSigner } from './tokens.js';
 export declare const PAIRING_CODE_TTL_MS: number;
+export declare const PAIRING_CODE_PRODUCT_ID_MAX_LENGTH = 64;
 export declare const DEVICE_IDENTITY_PROOF_KEY_ID = "identity";
 export declare const DEVICE_IDENTITY_PROOF_KEY_EPOCH = 0;
 export interface PairInput {
@@ -1339,6 +1343,7 @@ export interface PairInput {
     readonly deviceName: string;
     readonly devicePublicKey: string;
     readonly machineId?: string;
+    readonly expectedDeviceDigest: string | null;
 }
 export interface MintedAccessToken {
     readonly accessToken: string;
@@ -1349,7 +1354,7 @@ export interface AuthPlane {
         readonly productId: string;
         readonly ttlMs?: number;
     }): Promise<PairingCodeInfo>;
-    redeemAndRegister(input: PairInput): Promise<DeviceRecord | undefined>;
+    redeemAndRegister(input: PairInput): Promise<PairingEnrollmentResult>;
     resolveDevice(deviceId: string): Promise<DeviceRecord | undefined>;
     issueNonce(device: DeviceRecord): Promise<string>;
     consumeNonceIfValid(device: DeviceRecord, nonce: string): Promise<boolean>;
@@ -2059,6 +2064,7 @@ export declare const CLOUD_ERROR_CODES: {
     readonly maintenance_invalid_input: 'maintenance_invalid_input';
     readonly maintenance_result_invalid: 'maintenance_result_invalid';
     readonly pairing_code_invalid: 'pairing_code_invalid';
+    readonly pairing_product_id_invalid: 'pairing_product_id_invalid';
     readonly device_tenant_invalid: 'device_tenant_invalid';
     readonly mailbox_seq_mismatch: 'mailbox_seq_mismatch';
     readonly capability_declaration_invalid: 'capability_declaration_invalid';
@@ -2224,7 +2230,7 @@ export { DEFAULT_DEVICE_PROOF_CLOCK_SKEW_MS, DEFAULT_DEVICE_PROOF_MAX_LIFETIME_M
 export type { AuthenticatedDeviceProof, DeviceProofAuthDeps, DeviceProofRequestBinding, } from './auth/device-proof.js';
 export { authenticateHostedDeviceAssertion, authenticateHostedTaskAssertion } from './auth/device-assertion.js';
 export type { HostedDeviceAssertionAuthDeps, HostedTaskAssertionAuthDeps } from './auth/device-assertion.js';
-export { DEVICE_IDENTITY_PROOF_KEY_EPOCH, DEVICE_IDENTITY_PROOF_KEY_ID, PAIRING_CODE_TTL_MS, createAuthPlane, } from './auth/plane.js';
+export { DEVICE_IDENTITY_PROOF_KEY_EPOCH, DEVICE_IDENTITY_PROOF_KEY_ID, PAIRING_CODE_PRODUCT_ID_MAX_LENGTH, PAIRING_CODE_TTL_MS, createAuthPlane, } from './auth/plane.js';
 export type { AuthPlane, AuthPlaneDeps, MintedAccessToken, PairInput } from './auth/plane.js';
 export { createWebCrypto } from './crypto/web-crypto.js';
 export type { CloudCrypto } from './crypto/port.js';
@@ -2253,7 +2259,7 @@ export { TruthCommitError, isTruthCommitError } from './truth/errors.js';
 export type { TruthCommitErrorCode } from './truth/errors.js';
 export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ABANDON_CAUSES, TASK_ATTEMPT_STATUSES, TASK_ATTEMPT_ACTIVE_STATUSES, TASK_ATTEMPT_UNFINISHED_STATUSES, } from './stores/ports.js';
 export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract.js';
-export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, DeviceScopedStores, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, SteerRefusalRecord, TaskSteerRefusalStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskAbandonCause, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports.js';
+export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, DeviceRegistrationResult, InboundDedupStore, DeviceScopedStores, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, PairingEnrollmentResult, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, SteerRefusalRecord, TaskSteerRefusalStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskAbandonCause, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports.js';
 export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index.js';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index.js';
 export type { DeviceTerminal } from './terminal-result.js';
@@ -2534,14 +2540,14 @@ export declare class InMemoryInboundDedupStore implements InboundDedupStore {
     deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/device-directory.d.ts ====
-import type { HarnessInfo } from '@byok-sdk/protocol';
+import { type HarnessInfo } from '@byok-sdk/protocol';
 import { type MailboxStore, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
-import type { DeviceDirectory, DeviceRecord, DeviceRegistration, DeviceScopedStores } from '../ports.js';
+import type { DeviceDirectory, DeviceRecord, DeviceRegistration, DeviceRegistrationResult, DeviceScopedStores } from '../ports.js';
 import type { InMemoryTaskAttemptState } from './task-attempts.js';
 export declare class InMemoryDeviceDirectory implements DeviceDirectory {
     #private;
     constructor(tasks: InMemoryTaskAttemptState, mailbox: MailboxStore, state: DeviceScopedStores);
-    register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
+    register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRegistrationResult>;
     get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
     revoke(tenant: TenantId, deviceId: string): Promise<void>;
     recordCapabilities(tenant: TenantId, input: {
@@ -2622,13 +2628,13 @@ export declare class InMemoryNonceStore implements NonceStore {
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/pairing-codes.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult, type Clock, type TenantId } from '@byok-sdk/core';
-import type { DeviceDirectory, DeviceRecord, PairingEnrollment, PairingEnrollmentInput, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore } from '../ports.js';
+import type { DeviceDirectory, PairingEnrollment, PairingEnrollmentInput, PairingEnrollmentResult, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore } from '../ports.js';
 export declare class InMemoryPairingCodeStore implements PairingCodeStore, PairingEnrollment {
     #private;
     constructor(clock: Clock, devices: DeviceDirectory);
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     issue(tenant: TenantId, input: PairingCodeIssueInput): Promise<PairingCodeInfo>;
-    redeemAndRegister(input: PairingEnrollmentInput): Promise<DeviceRecord | undefined>;
+    redeemAndRegister(input: PairingEnrollmentInput): Promise<PairingEnrollmentResult>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/proof-receipts.d.ts ====
 import { type Clock, type TenantId } from '@byok-sdk/core';
@@ -2791,9 +2797,17 @@ export interface DeviceRegistration {
     readonly proofKeyId: string;
     readonly proofKeyEpoch: number;
     readonly machineId?: string;
+    readonly expectedDeviceDigest: string | null;
 }
+export type DeviceRegistrationResult = {
+    readonly outcome: 'registered';
+    readonly device: DeviceRecord;
+} | {
+    readonly outcome: 'conflict';
+    readonly currentDeviceDigest: string | null;
+};
 export interface DeviceDirectory {
-    register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
+    register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRegistrationResult>;
     get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
     revoke(tenant: TenantId, deviceId: string): Promise<void>;
     list(tenant: TenantId): Promise<readonly DeviceRecord[]>;
@@ -2830,9 +2844,19 @@ export interface PairingEnrollmentInput {
     readonly proofKeyId: string;
     readonly proofKeyEpoch: number;
     readonly machineId?: string;
+    readonly expectedDeviceDigest: string | null;
 }
+export type PairingEnrollmentResult = {
+    readonly outcome: 'registered';
+    readonly device: DeviceRecord;
+} | {
+    readonly outcome: 'conflict';
+    readonly currentDeviceDigest: string | null;
+} | {
+    readonly outcome: 'code_invalid';
+};
 export interface PairingEnrollment {
-    redeemAndRegister(input: PairingEnrollmentInput): Promise<DeviceRecord | undefined>;
+    redeemAndRegister(input: PairingEnrollmentInput): Promise<PairingEnrollmentResult>;
 }
 export interface NonceStore {
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;

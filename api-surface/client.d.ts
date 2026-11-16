@@ -197,7 +197,6 @@
 //   ExpiringClassId -> dist/daemon/retention/registry.d.ts
 //   ExportDeviceSupportBundleInput -> dist/diagnostics/operator-actions.d.ts
 //   FileScopePolicyError -> dist/tool-authorization.d.ts
-//   FirstPairingAttemptRefusedError -> dist/daemon/daemon-errors.d.ts
 //   GrokAdapter -> dist/adapters/grok/grok-adapter.d.ts
 //   GrokAdapterOptions -> dist/adapters/grok/grok-adapter.d.ts
 //   HostDeviceProofSigner -> dist/daemon/device-proof-signer.d.ts
@@ -322,6 +321,11 @@
 //   OutboundStatus -> dist/daemon/outbound-settlement.d.ts
 //   PI_PACKAGE_NAME -> dist/adapters/pi/resolve-bin.d.ts
 //   PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS -> dist/daemon/provider-provisioning.d.ts
+//   PairingAttemptRefusedError -> dist/daemon/daemon-errors.d.ts
+//   PairingBusyError -> dist/daemon/daemon-errors.d.ts
+//   PairingCodeRejectedError -> dist/daemon/daemon-errors.d.ts
+//   PairingInputInvalidError -> dist/daemon/daemon-errors.d.ts
+//   PairingSupersededError -> dist/daemon/daemon-errors.d.ts
 //   PiAdapter -> dist/adapters/pi/pi-adapter.d.ts
 //   PiAdapterOptions -> dist/adapters/pi/pi-adapter.d.ts
 //   PiByokLauncherConfig -> dist/adapters/pi/pi-adapter.d.ts
@@ -1912,12 +1916,10 @@ export type RequestTaskAssertionResult = {
 export declare function requestTaskAssertion(options: RequestTaskAssertionOptions): Promise<RequestTaskAssertionResult>;
 // ==== @byok-sdk/client dist/daemon/auth-manager.d.ts ====
 import { DeviceStore, type DeviceRecord } from './store.js';
-import type { DeviceCredentialBackend } from './device-credential-store.js';
+import { type DeviceCredentialBackend } from './device-credential-store.js';
 export declare class AuthResponseInvalidError extends Error {
     readonly route: 'challenge' | 'token' | 'pair';
-    constructor(route: 'challenge' | 'token' | 'pair', options: {
-        cause: unknown;
-    });
+    constructor(route: 'challenge' | 'token' | 'pair');
 }
 // support
 export interface ClockSkewObservation {
@@ -1940,6 +1942,7 @@ export interface AuthManagerOptions {
 export declare class AuthManager {
     private readonly opts;
     private record;
+    private token;
     private renewing;
     private proactiveTimer;
     private revoked;
@@ -1961,8 +1964,8 @@ export declare class AuthManager {
     loadExisting(): Promise<DeviceRecord | undefined>;
     pair(pairingCode: string, options?: {
         readonly replaceOtherStore?: boolean;
-        readonly custody?: (record: DeviceRecord) => Promise<void>;
     }): Promise<DeviceRecord>;
+    private sendPairRequest;
     getValidAccessToken(): Promise<string>;
     handleUnauthorized(): Promise<string>;
     stop(): Promise<void>;
@@ -1973,7 +1976,9 @@ export declare class AuthManager {
     private backOff;
     private loseBinding;
     private underEnrollmentGate;
-    private pairingKey;
+    private stagePairingAttempt;
+    private assertOwnsAttempt;
+    private deleteLegacyEntry;
     private pairingAuthority;
     private markRevoked;
     private scheduleProactiveRenewal;
@@ -2478,14 +2483,22 @@ export declare class DeviceStoreBindingMismatchError extends Error {
     } | undefined;
     constructor(stored: DeviceMetadata, bound: DeviceMetadata | undefined);
 }
-// support
-declare const PAIRING_ATTEMPT_MESSAGES: {
-    readonly store_not_bound: 'another storeDir staged the first-pairing attempt of this productId; nothing was written. Pair with replaceOtherStore (--replace-other-store) to discard it';
-    readonly pairing_attempt_unattributed: 'the first-pairing attempt of this productId names no storeDir; nothing was written. Clear it with clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }), then pair';
-};
-export declare class FirstPairingAttemptRefusedError extends Error {
-    readonly code: keyof typeof PAIRING_ATTEMPT_MESSAGES;
-    constructor(code: keyof typeof PAIRING_ATTEMPT_MESSAGES);
+export declare class PairingAttemptRefusedError extends Error {
+    constructor();
+}
+export declare class PairingSupersededError extends Error {
+    constructor();
+}
+export declare class PairingCodeRejectedError extends Error {
+    constructor();
+}
+export declare class PairingBusyError extends Error {
+    readonly retryable = true;
+    constructor();
+}
+export declare class PairingInputInvalidError extends Error {
+    readonly field: 'deviceName' | 'machineId';
+    constructor(field: 'deviceName' | 'machineId');
 }
 export declare class EmbeddedPairingError extends Error {
     readonly reason: 'enrollment_missing' | 'device_unknown' | 're_pair_required' | 'store_not_bound';
@@ -2724,8 +2737,6 @@ export declare function createDaemonRecordProjector(): DaemonRecordProjector;
 // ==== @byok-sdk/client dist/daemon/device-credential-store.d.ts ====
 // support
 export interface DeviceCredentials {
-    readonly accessToken: string;
-    readonly expiresAt: string;
     readonly devicePrivateKeyPem: string;
 }
 // support
@@ -2737,13 +2748,15 @@ export interface DeviceMetadata {
 // support
 export type DeviceRecord = DeviceMetadata & DeviceCredentials;
 // support
-export interface FirstPairingAttempt {
-    readonly kind: 'first-pairing-attempt-v1';
+export interface PairingAttempt {
+    readonly kind: 'pairing-attempt-v2';
+    readonly attemptId: string;
+    readonly codeDigest: string;
+    readonly storeIdentity: string;
     readonly deviceName: string;
-    readonly devicePublicKey: string;
-    readonly devicePrivateKeyPem: string;
     readonly machineId?: string;
-    readonly storeIdentity?: string;
+    readonly devicePrivateKeyPem: string;
+    readonly expectedDeviceDigest: string | null;
 }
 export declare class DeviceCredentialStoreUnavailableError extends Error {
     constructor(message?: string, options?: ErrorOptions);
@@ -2760,8 +2773,8 @@ export declare class DeviceCredentialCommandAbortedError extends DeviceCredentia
 }
 export interface DeviceCredentialBackend {
     read(signal?: AbortSignal): Promise<DeviceRecord | undefined>;
-    readFirstPairingAttempt(signal?: AbortSignal): Promise<FirstPairingAttempt | undefined>;
-    saveFirstPairingAttempt(attempt: FirstPairingAttempt, signal?: AbortSignal): Promise<void>;
+    readPairingAttempt(signal?: AbortSignal): Promise<PairingAttempt | undefined>;
+    savePairingAttempt(attempt: PairingAttempt, signal?: AbortSignal): Promise<void>;
     replace(record: DeviceRecord, signal?: AbortSignal): Promise<void>;
     clear(signal?: AbortSignal): Promise<boolean>;
 }
@@ -2816,12 +2829,11 @@ export interface HostDeviceProofSigner extends DeviceProofSigner {
 export declare function createStoredDeviceProofSigner(options: CreateStoredDeviceProofSignerOptions): HostDeviceProofSigner;
 // ==== @byok-sdk/client dist/daemon/enrollment-clear.d.ts ====
 import { type DeviceEnrollmentStatusOptions } from './store.js';
-import type { DeviceCredentialBackend } from './device-credential-store.js';
+import { type DeviceCredentialBackend } from './device-credential-store.js';
 // support
 declare const CLEAR_MESSAGES: {
     readonly store_owned: 'another process holds this store\'s owner lease (a daemon, doctor or installer); the enrollment is unchanged';
     readonly store_not_bound: 'the OS credential entry for this productId holds an enrollment or pairing attempt of another storeDir; nothing was cleared';
-    readonly pairing_attempt_unattributed: 'the OS credential entry for this productId holds a first-pairing attempt that names no storeDir; nothing was cleared. If no other store of this productId is pairing, clear it with clearDeviceEnrollment({ ..., clearUnattributedAttempt: true })';
     readonly clear_failed: 'the device enrollment could not be cleared; see the cause';
 };
 export type DeviceEnrollmentClearErrorCode = keyof typeof CLEAR_MESSAGES;
@@ -2831,7 +2843,6 @@ export declare class DeviceEnrollmentClearError extends Error {
 }
 export declare function clearDeviceEnrollment(options: DeviceEnrollmentStatusOptions & {
     readonly storeDir: string;
-    readonly clearUnattributedAttempt?: boolean;
 }, overrides?: {
     readonly deviceCredentials?: DeviceCredentialBackend;
 }): Promise<void>;
@@ -4271,7 +4282,7 @@ export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartu
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure.js';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon.js';
 export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema/index.js';
-export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, FirstPairingAttemptRefusedError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
+export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, PairingAttemptRefusedError, PairingBusyError, PairingInputInvalidError, PairingCodeRejectedError, PairingSupersededError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals.js';
 export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals.js';
 export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner/result-reason-prefixes.js';
@@ -5657,12 +5668,12 @@ export declare function writeServicePayloadManifest(dir: string, options: {
     meta?: JsonObject;
 }): Promise<Uint8Array>;
 // ==== @byok-sdk/client dist/testing/device-credentials.d.ts ====
-import type { DeviceCredentialBackend, DeviceRecord, FirstPairingAttempt } from '../daemon/device-credential-store.js';
+import type { DeviceCredentialBackend, DeviceRecord, PairingAttempt } from '../daemon/device-credential-store.js';
 export declare class InMemoryDeviceCredentialBackend implements DeviceCredentialBackend {
     #private;
     read(): Promise<DeviceRecord | undefined>;
-    readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined>;
-    saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void>;
+    readPairingAttempt(): Promise<PairingAttempt | undefined>;
+    savePairingAttempt(attempt: PairingAttempt): Promise<void>;
     replace(record: DeviceRecord): Promise<void>;
     clear(): Promise<boolean>;
 }
