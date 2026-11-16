@@ -309,19 +309,21 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
         }>>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        runtime: z.ZodOptional<z.ZodEnum<{
-            claude: "claude";
-            codex: "codex";
-            pi: "pi";
-        }>>;
-        harnessId: z.ZodOptional<z.ZodString>;
-        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        target: z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"auto">;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"runtime">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>;
+        }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
                 claude: "claude";
                 codex: "codex";
             }>;
-            providerId: z.ZodNull;
             modelId: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"byok">;
@@ -340,7 +342,10 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
                     "image-input": "image-input";
                 }>>;
             }, z.core.$strict>;
-        }, z.core.$strict>], "lane">>;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"harness">;
+            harnessId: z.ZodString;
+        }, z.core.$strict>], "lane">;
         terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             mode: z.ZodLiteral<"none">;
         }, z.core.$strict>, z.ZodObject<{
@@ -350,7 +355,6 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
         }, z.core.$strict>], "mode">>>;
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
-            maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strict>>;
         egressPolicy: z.ZodOptional<z.ZodObject<{
             policyRevision: z.ZodString;
@@ -436,19 +440,21 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
         }>>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        runtime: z.ZodOptional<z.ZodEnum<{
-            claude: "claude";
-            codex: "codex";
-            pi: "pi";
-        }>>;
-        harnessId: z.ZodOptional<z.ZodString>;
-        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        target: z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"auto">;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"runtime">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>;
+        }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
                 claude: "claude";
                 codex: "codex";
             }>;
-            providerId: z.ZodNull;
             modelId: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"byok">;
@@ -467,7 +473,10 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
                     "image-input": "image-input";
                 }>>;
             }, z.core.$strict>;
-        }, z.core.$strict>], "lane">>;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"harness">;
+            harnessId: z.ZodString;
+        }, z.core.$strict>], "lane">;
         terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             mode: z.ZodLiteral<"none">;
         }, z.core.$strict>, z.ZodObject<{
@@ -477,7 +486,6 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
         }, z.core.$strict>], "mode">>>;
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
-            maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strict>>;
         egressPolicy: z.ZodOptional<z.ZodObject<{
             policyRevision: z.ZodString;
@@ -3363,7 +3371,7 @@ export { TruthCommitError, isTruthCommitError } from './truth/errors.js';
 export type { TruthCommitErrorCode } from './truth/errors.js';
 export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ABANDON_CAUSES, TASK_ATTEMPT_STATUSES, TASK_ATTEMPT_ACTIVE_STATUSES, TASK_ATTEMPT_UNFINISHED_STATUSES, } from './stores/ports.js';
 export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract.js';
-export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskAbandonCause, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports.js';
+export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, SteerRefusalRecord, TaskSteerRefusalStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskAbandonCause, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports.js';
 export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryE2eeMemberStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index.js';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index.js';
 export type { DeviceTerminal } from './terminal-result.js';
@@ -4413,7 +4421,7 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  * bytes (see the blobs section below).
  */
 import type { MailboxBody, MailboxMessage, PresenceStore, StorageReservation, TenantId, TenantReadiness } from '@byok-sdk/core';
-import type { AgentEgressReliablePayload, AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { AgentEgressReliablePayload, AgentRef, ClaimedExecutor, RuntimeCapabilities } from '@byok-sdk/protocol';
 export type { AgentEgressReliablePayload, AgentRef } from '@byok-sdk/protocol';
 import type { ActivityStore } from '../activity.js';
 import type { ApprovalTimelineStore } from '../approval-timeline.js';
@@ -4650,8 +4658,8 @@ export interface TaskAttempt {
     readonly ownerDeviceId?: string;
     readonly status: TaskAttemptStatus;
     /**
-     * The runtime the CLAIMING daemon reported for itself on its own
-     * `task.claim` (`TaskClaimPayload.runtime`), snapshotted at the
+     * The executor the CLAIMING daemon reported for itself on its own
+     * `task.claim` (`TaskClaimPayload.executor`, wire v7), snapshotted at the
      * `offered -> claimed` transition and never written again — a redelivered or
      * losing claim leaves it exactly as the winning claim left it.
      *
@@ -4660,16 +4668,17 @@ export interface TaskAttempt {
      * changing while an attempt runs. This is not one: it is written once, at
      * the moment ownership is decided, and is an attribution fact about the
      * attempt. Byte-for-byte the same semantics as the reference server's
-     * `TaskSnapshot.claimedRuntime` (`packages/server/src/types.ts`).
+     * `TaskSnapshot.claimedExecutor` (`packages/server/src/types.ts`). A
+     * durable store may keep it in two columns, one of them null; it reads back
+     * as this one union.
      *
-     * Absent for a daemon whose `task.claim` carried no `runtime` at all.
+     * Absent until a claim wins.
      */
-    readonly claimedRuntime?: RuntimeId;
-    readonly claimedHarnessId?: string;
+    readonly claimedExecutor?: ClaimedExecutor;
     /**
      * The capability block the CLAIMING adapter reported for ITSELF on that same
      * `task.claim` (`TaskClaimPayload.capabilities`), snapshotted under exactly
-     * the same write-once rule as {@link TaskAttempt.claimedRuntime}.
+     * the same write-once rule as {@link TaskAttempt.claimedExecutor}.
      *
      * This is the ONLY input to the steer gate (`steer-control.ts`,
      * `ByokCloud.steerTask`). The connection-level snapshot cloud keeps —
@@ -4696,7 +4705,7 @@ export interface TaskAttempt {
      * below are written once, by the store operation that makes the transition,
      * from the same clock and in the same format as `updatedAt`, and never again.
      *
-     * Like {@link TaskAttempt.claimedRuntime}, they are attribution facts, not
+     * Like {@link TaskAttempt.claimedExecutor}, they are attribution facts, not
      * the EXECUTION state ADR-028 keeps out of cloud: each stops changing at the
      * transition that sets it. Each is absent until its transition happens, and
      * on attempts stored before the field existed, which are never backfilled.
@@ -4839,7 +4848,7 @@ export interface TaskAttemptStore {
      * idempotent. No-op (returns `undefined`) for a task this tenant never
      * offered.
      *
-     * `runtime`/`capabilities` are the claiming daemon's self-report, written
+     * `executor`/`capabilities` are the claiming daemon's self-report, written
      * ONLY by the claim that actually wins the ownership CAS — an idempotent
      * re-claim (and a losing one) must leave the recorded snapshot untouched,
      * including when it carries a different or absent value.
@@ -4847,8 +4856,7 @@ export interface TaskAttemptStore {
     claim(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;
-        readonly runtime?: RuntimeId;
-        readonly harnessId?: string;
+        readonly executor: ClaimedExecutor;
         readonly capabilities?: RuntimeCapabilities;
     }): Promise<TaskAttempt | undefined>;
     /** Record a lifecycle transition. No-op (returns `undefined`) for an unknown task — same shape as the reference server's per-type handlers. */
@@ -4918,6 +4926,46 @@ export interface RequestReceiptStore {
         readonly created: boolean;
     }>;
     get(tenant: TenantId, key: string): Promise<RequestReceipt | undefined>;
+}
+/**
+ * A device's `task.steer_refused` for one steer (wire v7, #2009), as the
+ * cloud recorded it. `reason` is the reported token, possibly one this
+ * version does not know (`readSteerRefusalReason`).
+ */
+export interface SteerRefusalRecord {
+    readonly taskId: string;
+    /** Envelope id of the refused `task.steer`. */
+    readonly steerMessageId: string;
+    readonly reason: string;
+    readonly deviceId: string;
+    readonly recordedAt: string;
+    /** Per task, gapless from 1 in commit order: the feed resumes by it. */
+    readonly revision: number;
+}
+/**
+ * The one authority for steer refusals. First write wins on
+ * (tenant, taskId, steerMessageId): a replay, with any reason, returns the
+ * recorded refusal unchanged and `created: false`. A new refusal takes the
+ * next revision of its task under the same per-task serialization as its
+ * insert, so a committed revision never overtakes an uncommitted lower one.
+ */
+export interface TaskSteerRefusalStore {
+    record(tenant: TenantId, input: {
+        readonly taskId: string;
+        readonly steerMessageId: string;
+        readonly reason: string;
+        readonly deviceId: string;
+    }): Promise<{
+        readonly refusal: SteerRefusalRecord;
+        readonly created: boolean;
+    }>;
+    get(tenant: TenantId, taskId: string, steerMessageId: string): Promise<SteerRefusalRecord | undefined>;
+    /** The task's refusals with `revision > afterRevision`, ascending, at most `limit`. */
+    list(tenant: TenantId, query: {
+        readonly taskId: string;
+        readonly afterRevision: number;
+        readonly limit: number;
+    }): Promise<readonly SteerRefusalRecord[]>;
 }
 export interface AgentEgressRecord {
     readonly tenantId: TenantId;
@@ -5122,6 +5170,7 @@ export interface CloudStores {
     readonly tasks: TaskAttemptStore;
     readonly cancellations: TaskCancellationStore;
     readonly receipts: RequestReceiptStore;
+    readonly steerRefusals: TaskSteerRefusalStore;
     readonly egress: AgentEgressStore;
     readonly proofReceipts: ProofRequestReceiptStore;
     readonly blobs: CloudBlobStore;
@@ -5129,7 +5178,7 @@ export interface CloudStores {
     readonly taskArchive: TaskArchiveStore;
 }
 /** Names of every port in {@link CloudStores}, in contract order. */
-export declare const CLOUD_STORE_NAMES: readonly ['activity', 'approvals', 'agentMessageDraft', 'devices', 'pairingCodes', 'pairing', 'nonces', 'dedup', 'tasks', 'cancellations', 'receipts', 'egress', 'proofReceipts', 'blobs', 'rateLimiter', 'taskArchive'];
+export declare const CLOUD_STORE_NAMES: readonly ['activity', 'approvals', 'agentMessageDraft', 'devices', 'pairingCodes', 'pairing', 'nonces', 'dedup', 'tasks', 'cancellations', 'receipts', 'steerRefusals', 'egress', 'proofReceipts', 'blobs', 'rateLimiter', 'taskArchive'];
 export type CloudStoreName = (typeof CLOUD_STORE_NAMES)[number];
 export interface ReceiptCollectExpiredInput extends CollectExpiredInput {
     readonly requestBefore: string;
