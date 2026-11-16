@@ -9,14 +9,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  SKILL_PACK_DESCRIPTION_MAX_LENGTH,
   SKILL_PACK_ENTRY_PATH,
   SKILL_PACK_FILE_MAX_BYTES,
   SKILL_PACK_FORBIDDEN_FIELDS,
   SKILL_PACK_MANIFEST_SCHEMA_ID,
-  SKILL_PACK_MAX_FILES,
-  SKILL_PACK_NAME_MAX_LENGTH,
-  SkillPackManifestSchema,
   checkSkillPackEntry,
   checkSkillPackFileContent,
   checkSkillPackManifest,
@@ -29,6 +25,12 @@ import {
   type SkillPackFile,
   type SkillPackManifest,
 } from '../index';
+import {
+  SKILL_PACK_DESCRIPTION_MAX_LENGTH,
+  SKILL_PACK_MAX_FILES,
+  SKILL_PACK_NAME_MAX_LENGTH,
+  SkillPackManifestSchema,
+} from '../skill-pack';
 import { InMemorySkillPackStore } from '../in-memory/index';
 
 const TENANT = tenantId('tenant-skill-packs');

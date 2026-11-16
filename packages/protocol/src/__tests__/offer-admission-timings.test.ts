@@ -1,7 +1,8 @@
 // #1014: device-measured admission phase durations on the message that ends admission.
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { OFFER_ADMISSION_MAX_DURATION_MS, OfferAdmissionTimingsSchema, TaskClaimPayloadSchema, TaskDeclinePayloadSchema } from '../index';
+import { OFFER_ADMISSION_MAX_DURATION_MS, TaskClaimPayloadSchema } from '../index';
+import { OfferAdmissionTimingsSchema, TaskDeclinePayloadSchema } from '../messages';
 
 const ALL_PHASES = {
   totalMs: 812,

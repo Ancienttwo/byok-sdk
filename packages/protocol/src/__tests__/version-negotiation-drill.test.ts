@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  ConnHelloPayloadSchema,
-  createEnvelope,
-  decodeEnvelope,
-  MESSAGE_PAYLOAD_SCHEMAS,
-  RuntimeInfoSchema,
-} from '../index';
+import { createEnvelope, decodeEnvelope, MESSAGE_PAYLOAD_SCHEMAS } from '../index';
+import { ConnHelloPayloadSchema, RuntimeInfoSchema } from '../messages';
 
 /**
  * M4 Phase 4: the version-negotiation compat-matrix drill. A self-contained

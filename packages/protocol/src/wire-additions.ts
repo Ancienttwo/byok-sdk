@@ -13,37 +13,16 @@
  *   message of that type. Only server-to-daemon surfaces are gated, each by a
  *   device flag: the server advertises nothing (wire v7).
  *
- * v3 baseline: every v3 decoder reads every surface v2 had, so the v2
- * strip-safe rows and the v2 `result-document` gate are gone. The device
- * gates kept below name capabilities a daemon advertises only when it is
- * configured for them (Agent home, egress, input preparation, provisioning,
- * memory intents and so on): they gate on the receiver's configuration.
- *
- * v4 baseline: every v4 server reads `task.approval_resolved`, so its
- * `approval_resolved` gate is gone. One `task.offer` replaces the Agent offer
- * types and sealed is a payload branch, so a gate that a v3 type carried is a
- * field or value row here. The offer is strict, so a daemon that does not know
- * one of its fields stops instead of stripping it. The daemon also refuses an offer whose rows name a flag it did not advertise. No
- * v4 release has been published yet, so no published decoder proves these rows
- * across releases.
- *
- * v6 baseline: every v6 server reads every daemon-to-server surface and every
- * v6 daemon reads every offer field that v5 gated on a flag both sides always
- * advertised, so the server-flag rows, the `custom-harness` and
- * `terminal-projection-selection` offer rows and every strip-safe row are
- * gone. The rows left name device flags that a daemon advertises only when it
- * is configured for them.
- *
- * v7 baseline: the server capability channel is gone, so every row is a
- * device-gated server-to-daemon surface. The offer's model lanes
- * (`target.lane` subscription, byok, byok-profile) take the
- * `dispatch-selection` row the old `dispatchSelection` field had.
+ * Every row gates a server-to-daemon surface on a configured device facility.
+ * The server advertises no capability flags. Offers are strict: unknown fields
+ * are refused, and a sender must check every applicable row before enqueue.
  *
  * Senders derive their admission flags from {@link requiredReceiverCapabilities}
  * and nowhere else, so a gate cannot exist in one place and be missing in
  * another. This module imports no runtime code except the plain-data split
  * table, so it stays free of zod.
  */
+import { AGENT_INPUT_PREPARATION_CAPABILITY, SEALED_PAYLOAD_CAPABILITY, SEALED_PAYLOAD_V2_CAPABILITY } from './capability-constants.js';
 import type { MessageType } from './messages.js';
 import { SEALED_CATEGORY_CAPABILITY, SEALED_SPLIT_TABLE, type SealableMessageType, type SealedSplitEntry } from './sealed-split-table.js';
 import type { CapabilityFlag } from './version.js';
@@ -84,9 +63,9 @@ function sealedRows(): WireAddition[] {
  * which names it by `contentMac`. Both go to a device.
  */
 const SEALED_V2_ROWS: readonly WireAddition[] = [
-  offerRow('sealing.categories', 'sealed-payload-v2', 'agent-message'),
-  offerRow('sealing.categories', 'sealed-payload-v2', 'memory-projection'),
-  { surface: 'agent.message.disposition', field: 'contentMac', capability: 'sealed-payload-v2' },
+  offerRow('sealing.categories', SEALED_PAYLOAD_V2_CAPABILITY, 'agent-message'),
+  offerRow('sealing.categories', SEALED_PAYLOAD_V2_CAPABILITY, 'memory-projection'),
+  { surface: 'agent.message.disposition', field: 'contentMac', capability: SEALED_PAYLOAD_V2_CAPABILITY },
 ];
 
 const PLAIN_ROWS: readonly WireAddition[] = [
@@ -108,7 +87,7 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   offerRow('egressPolicy', 'agent-egress-reliable-ack'),
   offerRow('messageEgress', 'agent-message-egress'),
   offerRow('session.mode', 'agent-egress-fresh-session', 'fresh'),
-  offerRow('preparation', 'agent-input-preparation-v9'),
+  offerRow('preparation', AGENT_INPUT_PREPARATION_CAPABILITY),
   // Server to daemon: Agent control messages.
   { surface: 'agent.content.read', capability: 'agent-home-contract' },
   { surface: 'agent.content.read', capability: 'agent-egress-policy' },
@@ -120,10 +99,10 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   { surface: 'agent.home.projection', capability: 'agent-home-projection' },
   { surface: 'agent.home.projection', field: 'hostRevision', capability: 'agent-home-projection-host-revision' },
   { surface: 'agent.input.preparation', capability: 'agent-home-contract' },
-  { surface: 'agent.input.preparation', capability: 'agent-input-preparation-v9' },
+  { surface: 'agent.input.preparation', capability: AGENT_INPUT_PREPARATION_CAPABILITY },
   { surface: 'provider.provisioning.available', capability: 'provider-provisioning.v1' },
   { surface: 'agent.memory.intent.available', capability: 'agent-memory-intent.v1' },
-  { surface: 'e2ee.key_package.available', capability: 'sealed-payload-v1' },
+  { surface: 'e2ee.key_package.available', capability: SEALED_PAYLOAD_CAPABILITY },
 ];
 
 export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([

@@ -3,13 +3,8 @@ import {
   CAPABILITY_FLAGS,
   EnvelopeSchema,
   PROVIDER_PROVISIONING_CAPABILITY,
-  PROVIDER_PROVISIONING_HOST_TERMINAL_CODES,
-  PROVIDER_PROVISIONING_KEY_CHECK_RESULTS,
-  PROVIDER_PROVISIONING_REJECTION_CODES,
   PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION,
   ProviderProvisioningAvailablePayloadSchema,
-  ProviderProvisioningCompletionSchema,
-  ProviderProvisioningOperationGenerationSchema,
   ProviderProvisioningReadbackSchema,
   SERVER_TO_DAEMON_TYPES,
   createEnvelope,
@@ -18,6 +13,13 @@ import {
   type ProviderProvisioningCompletion,
   type ProviderProvisioningReadback,
 } from '../index';
+import {
+  PROVIDER_PROVISIONING_HOST_TERMINAL_CODES,
+  PROVIDER_PROVISIONING_KEY_CHECK_RESULTS,
+  PROVIDER_PROVISIONING_REJECTION_CODES,
+  ProviderProvisioningCompletionSchema,
+  ProviderProvisioningOperationGenerationSchema,
+} from '../provider-provisioning';
 
 const REQUEST_ID = '20000000-0000-4000-8000-000000000001';
 const DIGEST = `sha256:${'d'.repeat(64)}`;

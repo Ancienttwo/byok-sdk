@@ -160,7 +160,7 @@ describe('SQLite custom-harness claim authority', () => {
     // The executor CHECK names the column, so it cannot be dropped; renamed, it is just as missing.
     db.exec('ALTER TABLE task_attempt RENAME COLUMN claimed_harness_id TO claimed_harness_removed');
     db.close();
-    expect(() => open()).toThrow('claimed_harness_id');
+    expect(() => open()).toThrow('BYOK SQLite table task_attempt does not match schema 10');
     const check = new DatabaseSync(path, { readOnly: true });
     try {
       expect(check.prepare('PRAGMA table_info(task_attempt)').all().map(column => column.name)).not.toContain('claimed_harness_id');

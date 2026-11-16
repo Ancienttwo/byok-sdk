@@ -6,7 +6,8 @@ import {
   BOT_TURN_OUTCOME_CONTRACT,
   type NonEmptyIds,
 } from '../bot-turn-outcome';
-import type { BotTurnOutcome, BotTurnOutcomeKind, CancelDelegationAction } from '../index';
+import type { BotTurnOutcome } from '../index';
+import type { BotTurnOutcomeKind, CancelDelegationAction } from '../bot-turn-outcome';
 import { worstCaseInstance } from './bot-outcome-fixtures';
 // The witnesses repeat option ids, so their cases check the schema bound under a contract with no rules.
 const SCHEMA_ONLY = 'example.schema-only.v1';

@@ -6,7 +6,7 @@ const DEADLINE = (at: string, ttlMs: string) => `strftime('%Y-%m-%dT%H:%M:%fZ', 
 const APPROVAL_TTL = String(DEFAULT_APPROVAL_TIMELINE_TTL_MS);
 const EMPTY_APPROVALS = `'[]', 1, 0, ${DEFAULT_APPROVAL_TIMELINE_CAPACITY}`;
 
-export const OUTPUT_CLOSURE_TRIGGER_NAME = 'task_output_closed';
+const OUTPUT_CLOSURE_TRIGGER_NAME = 'task_output_closed';
 
 /**
  * Whichever store writes it, the attempt update that first closes a task's

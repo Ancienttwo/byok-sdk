@@ -7,7 +7,6 @@ import {
   TASK_STEER_TEXT_MAX_BYTES,
   TaskArtifactPayloadSchema,
   TaskOfferPayloadSchema,
-  TaskSteerPayloadSchema,
   readSteerRefusalReason,
   steerRefusalEnvelopeId,
   uuidFromSha256,
@@ -17,6 +16,7 @@ import {
   encodeEnvelope,
   parseMessage,
 } from '../index';
+import { TaskSteerPayloadSchema } from '../messages';
 
 describe('malformed payload rejection', () => {
   it.each([0, -1, 1, 2, 3, 4, 5, 6, 99])('rejects unsupported wire major %i at decode; the batch frame admits only a positive major', (v) => {
