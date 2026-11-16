@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "4b5fb739e2dc3b6f09251be7c06d486fac2bed4ba9721726b96c1c3999e8972d"
+    "snapshotSha256": "f93c5694c771919c1cfdec7abf6b90c9af631617c5de591f2a4d97969f618ec3"
   },
   "configFields": {
     "status": "tracked",
@@ -719,6 +719,11 @@
       "entry": "daemon-config-unknown-fields-fail-closed"
     },
     {
+      "item": "entry:@byok-sdk/core/sqlite-node",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
       "change": "changed",
       "entry": "k4-settlement-notice"
@@ -1154,6 +1159,26 @@
       "entry": "device-state-delete-ports"
     },
     {
+      "item": "export:@byok-sdk/core/sqlite-node#SqliteReadOnlyOpenError",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#readSqliteFileUnchanged",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#sqliteFileUri",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#sqliteOpenPath",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
       "change": "changed",
       "entry": "retire-compatibility-apis"
@@ -1197,26 +1222,6 @@
       "item": "export:@byok-sdk/keys/model-route#listPiCatalogModels",
       "change": "removed",
       "entry": "retire-compatibility-apis"
-    },
-    {
-      "item": "export:@byok-sdk/core/sqlite-node#SqliteReadOnlyOpenError",
-      "change": "added",
-      "entry": "core-sqlite-node-entry"
-    },
-    {
-      "item": "export:@byok-sdk/core/sqlite-node#readSqliteFileUnchanged",
-      "change": "added",
-      "entry": "core-sqlite-node-entry"
-    },
-    {
-      "item": "export:@byok-sdk/core/sqlite-node#sqliteFileUri",
-      "change": "added",
-      "entry": "core-sqlite-node-entry"
-    },
-    {
-      "item": "export:@byok-sdk/core/sqlite-node#sqliteOpenPath",
-      "change": "added",
-      "entry": "core-sqlite-node-entry"
     },
     {
       "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
