@@ -16,6 +16,7 @@ import {
   type DeviceDirectory,
   type DeviceRecord,
   type DeviceRegistration,
+  type DeviceRegistrationResult,
   type InboundDedupStore,
   type ReceiptCollectExpiredInput,
   type RequestReceipt,
@@ -24,7 +25,7 @@ import {
 import { InMemoryPairingCodeStore } from '../../../../cloud/src/stores/in-memory/pairing-codes';
 import { createSqliteEmbeddedStores } from '../../../../server/src/stores/sqlite/index';
 import { assertCanonicalTimestamp, assertCollectExpiredInput, PRESENCE_LEVELS, type CollectExpiredResult, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
-import { AGENT_EGRESS_FRESH_SESSION_CAPABILITY, type AgentRef } from '@byok-sdk/protocol';
+import { AGENT_EGRESS_FRESH_SESSION_CAPABILITY, pairDeviceDigest, type AgentRef } from '@byok-sdk/protocol';
 
 interface Config {
   readonly dbPath: string;
@@ -144,10 +145,24 @@ function deviceFromRow(row: Record<string, unknown> | undefined): DeviceRecord |
 }
 
 class SqliteFixtureDevices implements DeviceDirectory {
-  async register(owner: TenantId, input: DeviceRegistration): Promise<DeviceRecord> {
+  async register(owner: TenantId, input: DeviceRegistration): Promise<DeviceRegistrationResult> {
+    // The registration fence (#2045). The digest is async, so the transaction
+    // below re-reads the machine's device and fails loudly if it moved: the
+    // fixture never pairs one machine concurrently.
+    const currentOf = () => input.machineId === undefined ? undefined : (db.prepare(
+      'SELECT device_id FROM fixture_device WHERE tenant_id = ? AND product_id = ? AND machine_id = ?',
+    ).get(owner, input.productId, input.machineId) as { device_id: string } | undefined)?.device_id;
+    const current = await ownerWrite(currentOf);
+    if (input.machineId !== undefined) {
+      const currentDeviceDigest = current === undefined
+        ? null
+        : await pairDeviceDigest({ tenantId: owner, productId: input.productId, deviceId: current });
+      if (currentDeviceDigest !== input.expectedDeviceDigest) return { outcome: 'conflict', currentDeviceDigest };
+    }
     await ownerWrite(() => {
       db.exec('BEGIN IMMEDIATE');
       try {
+        if (currentOf() !== current) throw new Error('fixture: a concurrent registration moved the machine');
         if (input.machineId !== undefined) {
           db.prepare(
             'DELETE FROM fixture_device WHERE tenant_id = ? AND product_id = ? AND machine_id = ? AND device_id <> ?',
@@ -178,7 +193,7 @@ class SqliteFixtureDevices implements DeviceDirectory {
         throw error;
       }
     });
-    return (await this.get(owner, input.deviceId))!;
+    return { outcome: 'registered', device: (await this.get(owner, input.deviceId))! };
   }
 
   async get(owner: TenantId, deviceId: string): Promise<DeviceRecord | undefined> {

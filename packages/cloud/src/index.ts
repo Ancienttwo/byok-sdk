@@ -171,6 +171,7 @@ export type { HostedDeviceAssertionAuthDeps, HostedTaskAssertionAuthDeps } from 
 export {
   DEVICE_IDENTITY_PROOF_KEY_EPOCH,
   DEVICE_IDENTITY_PROOF_KEY_ID,
+  PAIRING_CODE_PRODUCT_ID_MAX_LENGTH,
   PAIRING_CODE_TTL_MS,
   createAuthPlane,
 } from './auth/plane.js';
@@ -346,6 +347,7 @@ export type {
   DeviceDirectory,
   DeviceRecord,
   DeviceRegistration,
+  DeviceRegistrationResult,
   InboundDedupStore,
   DeviceScopedStores,
   InboundRateLimiter,
@@ -356,6 +358,7 @@ export type {
   PairingCodeStore,
   PairingEnrollment,
   PairingEnrollmentInput,
+  PairingEnrollmentResult,
   ProofRequestReceipt,
   ProofRequestReceiptInput,
   ProofRequestReceiptStore,

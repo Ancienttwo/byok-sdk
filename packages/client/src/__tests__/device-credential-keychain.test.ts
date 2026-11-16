@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DeviceCredentialStore, DeviceCredentialStoreError } from '../daemon/device-credential-store';
+import { DeviceCredentialStore, DeviceCredentialStoreError, encodeEnrollmentEntry } from '../daemon/device-credential-store';
+import { exportPrivateKeyPem, generateDeviceKeyPair } from '../daemon/device-keys';
 import { readDeviceEnrollmentStatus } from '../daemon/store';
 import { DeviceStore } from '../daemon/store';
 
+const keys = generateDeviceKeyPair();
 const record = {
-  deviceId: 'isolated-device', tenantId: 'isolated-tenant', devicePublicKey: 'public',
-  accessToken: 'synthetic-token', expiresAt: '2030-01-01T00:00:00.000Z', devicePrivateKeyPem: 'private',
+  deviceId: 'isolated-device', tenantId: 'isolated-tenant',
+  devicePublicKey: keys.publicKeyBase64Url, devicePrivateKeyPem: exportPrivateKeyPem(keys.privateKey),
 };
-const encoded = `byok-device-credential-v1:${Buffer.from(JSON.stringify(record)).toString('base64')}`;
+const encoded = encodeEnrollmentEntry(record);
 const keychain = '/tmp/keychain with "quotes"\\and spaces.keychain-db';
 
 describe('explicit macOS device credential custody', () => {
@@ -41,7 +43,7 @@ describe('explicit macOS device credential custody', () => {
     const add = run.mock.calls.find(([, args]) => args[0] === '-i')!;
     expect(add[1]).toEqual(['-i']);
     expect(add[2]).toContain('"/tmp/keychain with \\"quotes\\"\\\\and spaces.keychain-db"');
-    expect(add[1].join(' ')).not.toContain('synthetic-token');
+    expect(add[1].join(' ')).not.toContain(encoded);
   });
 
   it.each(['read', 'replace', 'clear'] as const)('types interaction-required on %s without leaking provider output', async (operation) => {

@@ -20,6 +20,7 @@ async function pair(
       pairingCode,
       deviceName: 'projection-test-device',
       devicePublicKey: identity.publicKeyBase64Url,
+      expectedDeviceDigest: null,
       ...(requestTenant === undefined ? {} : { tenantId: requestTenant }),
     }),
   });

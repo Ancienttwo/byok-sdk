@@ -93,6 +93,7 @@ export async function assertPairingCodeSingleUse(
       pairingCode: redeemedPairingCode,
       deviceName,
       devicePublicKey: simulator.identity.publicKeyBase64Url,
+      expectedDeviceDigest: null,
     },
   });
   return result(

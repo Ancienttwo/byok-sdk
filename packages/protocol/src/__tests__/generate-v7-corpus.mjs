@@ -155,6 +155,8 @@ function dropped(envelope) {
 function transformHttpBody(surface, body) {
   const next = { ...body };
   if (surface === 'EventsPollResponse' || surface === 'MessagesSendResponse') delete next.capabilities;
+  // v7 requires the registration fence (#2045); a v6 pairing knew no current device.
+  if (surface === 'PairRequest') next.expectedDeviceDigest = null;
   if (Array.isArray(next.events)) next.events = next.events.map(transformEnvelope);
   if (Array.isArray(next.messages)) next.messages = next.messages.map(transformEnvelope);
   if (Array.isArray(next.protocolVersions)) next.protocolVersions = next.protocolVersions.map((version) => (version === 6 ? V7 : version));
@@ -270,6 +272,13 @@ const AGENT_USER_CONTEXT_ENVELOPES = [
   { v: V7, id: '00000000-0000-4000-8000-0000002241a3', ts: '2026-11-16T00:00:02.000Z', type: 'conn.hello', payload: { protocolVersions: [V7], capabilities: ['runtime-unavailable-cause'], deviceId: 'device-golden-1', productId: 'acme-agent', clientVersion: '0.31.0', runtimeUnavailable: [{ id: 'codex', cause: 'agent_user_context_unavailable', retryable: true }] } },
 ];
 
+const GOLDEN_MACHINE_ID = 'a'.repeat(64);
+
+/** `pairDeviceDigest` of `src/pair-device-digest.ts`, restated on node:crypto; compat.test.ts recomputes it. */
+function pairDeviceDigest(tenantId, productId, deviceId) {
+  return createHash('sha256').update(JSON.stringify(['byok-pair-device-v1', tenantId, productId, deviceId])).digest('base64url');
+}
+
 function httpAdditions(v6HelloLine, v7HelloLine) {
   const helloV7 = { ...v7HelloLine, id: '00000000-0000-4000-8000-0000007006a1' };
   return [
@@ -279,6 +288,11 @@ function httpAdditions(v6HelloLine, v7HelloLine) {
     httpLine('MessagesSendResponse', { accepted: 1, rejected: 1, outcomes: [{ id: '00000000-0000-4000-8000-0000007006b2', outcome: 'accepted' }, { id: '00000000-0000-4000-8000-0000007006b3', outcome: 'rejected', reason: 'type_unsupported' }] }, 2),
     // The frame carries an entry of another major; the server answers that entry on its own.
     httpLine('MessagesSendRequest', { messages: [helloV7, v6HelloLine] }),
+    // #2045 registration fence: a pairing that names the machine's current device, and the typed rejections.
+    httpLine('PairRequest', { pairingCode: 'PAIR-GOLDEN-2', deviceName: 'golden-device', devicePublicKey: 'golden-public-key', machineId: GOLDEN_MACHINE_ID, expectedDeviceDigest: pairDeviceDigest('tenant-golden', 'acme-agent', 'dev_00000000-0000-4000-8000-000000002045') }),
+    httpLine('PairSupersededResponse', { error: 'pairing superseded', code: 'pairing_superseded', currentDeviceDigest: pairDeviceDigest('tenant-golden', 'acme-agent', 'dev_00000000-0000-4000-8000-000000002046') }),
+    httpLine('PairSupersededResponse', { error: 'pairing superseded', code: 'pairing_superseded', currentDeviceDigest: null }),
+    httpLine('PairingCodeInvalidResponse', { error: 'invalid pairing code', code: 'pairing_code_invalid' }),
   ];
 }
 

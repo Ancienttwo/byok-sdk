@@ -92,15 +92,17 @@ async function pairingProbe(connectionString: string) {
       productId: 'byok-worker-smoke',
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
-    const device = await store.redeemAndRegister({
+    const enrolled = await store.redeemAndRegister({
       pairingCode: code,
       deviceId: `device-${globalThis.crypto.randomUUID()}`,
       deviceName: 'worker pairing probe',
       devicePublicKey: 'worker-pairing-probe-key',
       proofKeyId: 'identity',
       proofKeyEpoch: 0,
+      expectedDeviceDigest: null,
     });
-    if (device === undefined) throw new Error('pairing enrollment returned no device');
+    if (enrolled.outcome !== 'registered') throw new Error(`pairing enrollment answered ${enrolled.outcome}`);
+    const { device } = enrolled;
     if ((await devices.get(who, device.deviceId)) === undefined) {
       throw new Error('pairing enrollment did not persist its device');
     }

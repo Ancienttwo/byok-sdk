@@ -191,7 +191,8 @@ describe.skipIf(SKIP_DATAPLANE)(`hosted plaintext inventory — ${SKIP_REASON}`,
       const sim = await createDeviceSimulator({
         baseUrl: ORIGIN,
         fetch: async (input, init) => cloud.fetch(new Request(input, init)),
-        deviceName: `device ${CANARY}`,
+        // PairRequest.deviceName is at most 64 characters; the core alone is a needle.
+        deviceName: `device ${CANARY_CORE}`,
       });
       const { code } = await cloud.createPairingCode(TENANT, { productId: PRODUCT_ID });
       const { deviceId, accessToken } = await sim.pair(code);

@@ -228,6 +228,15 @@ test('the control-plane SQL invariants select the cloud-dataplane suites that ru
   assert.throws(() => selectImpact(['tests/sql/other.sql']), /reviewed CI mapping required/i);
 });
 
+test('the worker-smoke fixture selects cloud-dataplane and the dataplane job that runs the workerd E2E', () => {
+  for (const path of ['packages/cloud-dataplane/worker-smoke/src.ts', 'packages/cloud-dataplane/worker-smoke/wrangler.jsonc']) {
+    const impact = selectImpact([path]);
+    assert.ok(impact.dirs.includes('packages/cloud-dataplane'), path);
+    assert.deepEqual(impact.families, ['dataplane'], path);
+  }
+  assert.throws(() => selectImpact(['packages/cloud-dataplane/worker-smoke/other.ts']), /reviewed CI mapping required/i);
+});
+
 test('client source/deleted tests select reverse dependents and only the dataplane family', () => {
   for (const path of [
     'packages/client/src/daemon/task-runner.ts', 'packages/client/src/__tests__/deleted.test.ts', 'api-surface/client.d.ts',

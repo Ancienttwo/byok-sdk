@@ -148,6 +148,20 @@ Machine supersession retires each superseded device the same way, with `terminal
 transaction of the new registration. The SQLite and in-memory directories retire the device in the same way
 (`DeviceDirectory` in `packages/cloud/src/stores/ports.ts`); a custom store must too.
 
+**Registration fence (#2045).** A registration that carries a `machineId` names the machine's current device in
+`expectedDeviceDigest`: `pairDeviceDigest` (`@byok-sdk/protocol`) of `(tenantId, productId, deviceId)` of the device
+registered for that machine in that tenant and product, or `null` when there is none. The store compares it with the
+current device and, only when they match, supersedes and inserts; the read, the comparison and the writes are one
+atomic section per machine (in-memory: the directory's serialized section; SQLite: one `BEGIN IMMEDIATE` transaction;
+Postgres: a `pg_advisory_xact_lock` on the namespaced machine key, then a READ COMMITTED read). A mismatch returns
+`conflict` with the current digest, writes nothing and consumes no pairing code; the pair route answers `409
+pairing_superseded`. A consumed code with the same binding replays before the fence is read.
+
+The digest names a device id, not a key. A custom Host's pair route must therefore mint a new `deviceId` for every
+registration and never reuse one: re-registering the same id with a new key leaves the digest unchanged, so a stale
+pairing that read the old digest would still pass the fence. The reference `AuthPlane` mints `dev_<uuid>` per pairing
+(`redeemAndRegister` in `packages/cloud/src/auth/plane.ts`).
+
 After the revoke, the bearer token of the device fails (`packages/cloud/src/auth/bearer.ts:62-63`).
 So the device cannot send a terminal for its tasks.
 `readTaskResult` returns a retired task as `state: 'cancelled'` with that `terminalCause` and the attempt's

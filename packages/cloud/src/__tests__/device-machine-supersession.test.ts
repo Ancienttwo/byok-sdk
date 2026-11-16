@@ -128,6 +128,7 @@ describe('device machine supersession (protocol §6.1 `machineId`)', () => {
         deviceName: 'test-device',
         devicePublicKey: 'not-a-real-key',
         machineId: 'NOT-A-SHA256',
+        expectedDeviceDigest: null,
       }),
     });
 

@@ -6,8 +6,14 @@ import {
   type TenantReadiness,
   type TenantReadinessDevice,
 } from '@byok-sdk/core';
-import type { DeviceDirectory, DeviceRecord, DeviceRegistration, DeviceScopedStores } from '@byok-sdk/cloud';
-import { HarnessInventorySchema, type HarnessInfo } from '@byok-sdk/protocol';
+import type {
+  DeviceDirectory,
+  DeviceRecord,
+  DeviceRegistration,
+  DeviceRegistrationResult,
+  DeviceScopedStores,
+} from '@byok-sdk/cloud';
+import { HarnessInventorySchema, pairDeviceDigest, type HarnessInfo } from '@byok-sdk/protocol';
 import type { DatabaseSync } from 'node:sqlite';
 import { reopenMailboxStream, retireDevice } from './task-retirement.js';
 
@@ -31,7 +37,7 @@ CREATE UNIQUE INDEX device_directory_machine
 
 interface Coordinator {
   run<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T>;
-  transaction<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T>;
+  transaction<T>(operation: (db: DatabaseSync) => T | Promise<T>, afterCommit?: (result: T) => void | Promise<void>): Promise<T>;
   transactionSync<T>(body: (db: DatabaseSync) => T, afterCommit: (result: T) => void | Promise<void>): Promise<T>;
 }
 
@@ -71,6 +77,17 @@ function fromRow(row: Row): DeviceRecord {
   };
 }
 
+type RegisterOutcome =
+  | { readonly kind: 'conflict'; readonly currentDeviceDigest: string | null }
+  | { readonly kind: 'registered'; readonly record: DeviceRecord; readonly superseded: readonly string[] };
+
+/** The machine's current device id in (tenant, product); `device_directory_machine` keeps it to at most one. */
+function currentMachineDevice(db: DatabaseSync, tenant: TenantId, productId: string, machineId: string): string | null {
+  const row = db.prepare('SELECT device_id FROM device_directory WHERE tenant_id = ? AND product_id = ? AND machine_id = ?')
+    .get(tenant, productId, machineId);
+  return row === undefined ? null : requiredString(row, 'device_id');
+}
+
 /**
  * Enrollment, capability admission and pre-tenant auth read the same durable
  * row. The task and mailbox tables live in the same database, so retiring a
@@ -87,17 +104,29 @@ export class SqliteDeviceDirectory implements DeviceDirectory {
     private readonly state: DeviceScopedStores,
   ) {}
 
-  register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord> {
-    return this.coordinator.transactionSync(db => {
+  /**
+   * One IMMEDIATE transaction holds the write lock from the fence read to the
+   * insert, so the fence compares against the device it supersedes (#2045).
+   * The WebCrypto digest is awaited inside it; the coordinator queue keeps
+   * every other operation of this process out until it settles.
+   */
+  async register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRegistrationResult> {
+    const machineId = input.machineId;
+    const outcome = await this.coordinator.transaction(async (db): Promise<RegisterOutcome> => {
       // Global device IDs resolve a tenant before authentication. A collision must
       // fail rather than replacing another tenant's authentication authority.
       const owner = db.prepare('SELECT tenant_id FROM device_directory WHERE device_id = ?').get(input.deviceId);
       if (owner !== undefined && owner.tenant_id !== tenant) throw new Error('Device ID already belongs to another tenant');
       let superseded: readonly { device_id: string }[] = [];
-      if (input.machineId !== undefined) {
+      if (machineId !== undefined) {
+        const current = currentMachineDevice(db, tenant, input.productId, machineId);
+        const currentDeviceDigest = current === null
+          ? null
+          : await pairDeviceDigest({ tenantId: tenant, productId: input.productId, deviceId: current });
+        if (currentDeviceDigest !== input.expectedDeviceDigest) return { kind: 'conflict', currentDeviceDigest };
         superseded = db.prepare(
           'DELETE FROM device_directory WHERE tenant_id = ? AND product_id = ? AND machine_id = ? AND device_id <> ? RETURNING device_id',
-        ).all(tenant, input.productId, input.machineId, input.deviceId) as unknown as { device_id: string }[];
+        ).all(tenant, input.productId, machineId, input.deviceId) as unknown as { device_id: string }[];
         const now = this.clock.now().toISOString();
         for (const row of superseded) retireDevice(db, tenant, row.device_id, 'device_superseded', now);
       }
@@ -109,16 +138,20 @@ export class SqliteDeviceDirectory implements DeviceDirectory {
           device_name = excluded.device_name, device_public_key = excluded.device_public_key,
           proof_key_id = excluded.proof_key_id, proof_key_epoch = excluded.proof_key_epoch,
           capabilities_json = NULL, harnesses_json = NULL`)
-        .run(tenant, input.deviceId, input.productId, input.machineId ?? null,
+        .run(tenant, input.deviceId, input.productId, machineId ?? null,
           input.deviceName, input.devicePublicKey, input.proofKeyId, input.proofKeyEpoch);
       reopenMailboxStream(db, tenant, input.deviceId);
       return {
+        kind: 'registered',
         record: fromRow(db.prepare('SELECT * FROM device_directory WHERE tenant_id = ? AND device_id = ?').get(tenant, input.deviceId)!),
         superseded: superseded.map(row => row.device_id),
       };
-    }, async ({ superseded }) => {
-      for (const deviceId of superseded) await this.#deleteDeviceState(tenant, deviceId);
-    }).then(({ record }) => record);
+    }, async (result) => {
+      if (result.kind !== 'registered') return;
+      for (const deviceId of result.superseded) await this.#deleteDeviceState(tenant, deviceId);
+    });
+    if (outcome.kind === 'conflict') return { outcome: 'conflict', currentDeviceDigest: outcome.currentDeviceDigest };
+    return { outcome: 'registered', device: outcome.record };
   }
 
   get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined> {

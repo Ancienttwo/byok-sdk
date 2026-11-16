@@ -121,7 +121,7 @@ describe('a sealed frozen input on the cloud (#953)', () => {
     const { code } = await cloud.createPairingCode(tenant, { productId: 'k4-sealed' });
     const publicKey = (generateKeyPairSync('ed25519').publicKey.export({ format: 'jwk' }) as { x: string }).x;
     const paired = await cloud.fetch(new Request('http://cloud.test/byok/pair', { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ pairingCode: code, deviceName: 'k4-device', devicePublicKey: publicKey }) }));
+      body: JSON.stringify({ pairingCode: code, deviceName: 'k4-device', devicePublicKey: publicKey, expectedDeviceDigest: null }) }));
     const { deviceId } = await paired.json() as { deviceId: string };
     const probe = await sealedInput('probe', deviceId);
     await stores.devices.recordCapabilities(tenant, { deviceId,
