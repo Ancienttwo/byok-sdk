@@ -234,7 +234,7 @@ describe('the failure class of a sealed task (#869)', () => {
     const tasks = await sealedTasks(keyless, 'complete-unsealable');
     keyless.sealingKey = async () => undefined;
     const complete = createEnvelope('task.complete', { summary: 'done', sessionRef: 'session', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'complete-unsealable' });
-    expect((await tasks.sealOutbound(complete))?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' } });
+    expect((await tasks.sealOutbound(complete))?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' }, executor: { kind: 'runtime', runtimeId: 'pi' } });
   });
 });
 
@@ -284,7 +284,7 @@ describe('sealed payload v2 on the device (#1045 S2)', () => {
     const tasks = sealedTasks(keyring);
     const agentRef = freshTestAgentRef();
     expect((await tasks.openOffer(createEnvelope('task.offer', {
-      agentRef, ...FRESH_OFFER, instruction: 'plain instruction', sealing: MESSAGE,
+      target: { lane: 'auto' }, agentRef, ...FRESH_OFFER, instruction: 'plain instruction', sealing: MESSAGE,
     } as never, { taskId, seq: 1 }))).ok).toBe(true);
     return { tasks, agentRef };
   }

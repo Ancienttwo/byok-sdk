@@ -134,7 +134,8 @@ describe('task.offer self-check: a daemon declines an offer whose gates name a f
     if (decline.type !== 'task.decline' || decline.payload.sealed !== undefined) throw new Error('expected a plaintext task.decline');
     expect(decline.payload.retryable).toBe(false);
     if (gap.sealedCode === undefined) {
-      expect(decline.payload.reason).toMatch(/^offer_capability_missing: /u);
+      expect(decline.payload.code).toBe('offer_capability_missing');
+      expect(decline.payload.reason).toMatch(/^this daemon does not advertise /u);
       expect(decline.payload.reason).toContain(gap.missing);
     } else {
       expect(decline.payload).toMatchObject({ code: gap.sealedCode, reason: gap.sealedCode });
