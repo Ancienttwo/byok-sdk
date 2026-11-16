@@ -50,7 +50,7 @@ it('SIGKILL during wake delivery recovers the frozen input and only one executio
   try {
     const ready = await processHost.message('ready');
     const adapter = new BotStubAdapter();
-    daemon = createDaemonWithAdapters({ productId: 'k4-crash-test', productName: 'Crash test',
+    daemon = createDaemonWithAdapters({ productId: 'k4-crash-test', productName: 'Crash test', deviceName: 'ci-smoke',
       localAgentRelease: { version: '0.0.0-test' }, serverUrl: `http://127.0.0.1:${ready.port}`,
       storeDir: path.join(root, 'sdk'),
       agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy },

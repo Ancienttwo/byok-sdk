@@ -125,6 +125,7 @@ try {
     configPath,
     JSON.stringify({
       productName: 'Control Socket Check',
+      deviceName: 'ci-smoke',
       productId,
       serverUrl,
       storeDir,

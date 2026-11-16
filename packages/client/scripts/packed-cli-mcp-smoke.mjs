@@ -57,7 +57,7 @@ try {
     const keychain = process.platform === 'darwin' ? await createTestKeychain() : undefined;
     const storeDir = path.join(root, entry);
     const audit = path.join(root, `${entry}-mcp.jsonl`);
-    const config = { productId: `packed-${entry}-${randomUUID()}`, productName: 'Packed MCP', serverUrl, storeDir,
+    const config = { productId: `packed-${entry}-${randomUUID()}`, productName: 'Packed MCP', deviceName: 'ci-smoke', serverUrl, storeDir,
       ...(keychain === undefined ? {} : { deviceCredentials: { macosKeychainPath: keychain.path } }),
       agentHome: { hostStorageRoot: path.join(storeDir, 'homes') }, agentEgress: { policy },
       runtimeAllowlist: ['codex'], serviceEnrollment: { enabled: true },

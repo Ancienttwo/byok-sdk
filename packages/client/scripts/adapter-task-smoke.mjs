@@ -348,6 +348,7 @@ try {
     {
       localAgentRelease: { version: '0.0.0-adapter-smoke' },
       productName: 'Adapter Task Smoke',
+      deviceName: 'ci-smoke',
       productId,
       serverUrl,
       storeDir,

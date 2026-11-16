@@ -60,7 +60,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     });
     closeHttp = listening.close;
     adapter = new BotStubAdapter();
-    daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-example-stub' }, productName: 'Example Bot',
+    daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-example-stub' }, productName: 'Example Bot', deviceName: 'ci-smoke',
       productId: 'goal-btw-test', serverUrl: listening.url, storeDir: path.join(root, 'sdk'),
       agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy },
     }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialBackend(), longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });

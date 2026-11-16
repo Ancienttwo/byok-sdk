@@ -38,7 +38,7 @@ afterEach(async () => {
 /** The daemon's own ready fact: the server accepted this run's hello. */
 const ready = (daemon: Daemon) => daemon.whenOpen({ signal: AbortSignal.timeout(5000) });
 function newDaemon(fx: Pick<Fixture, 'root' | 'listener' | 'adapter' | 'deviceCredentials'>): Daemon {
-  return createDaemonWithAdapters({ productId, productName: 'Desktop K8 Test', localAgentRelease: { version: '0.0.0-test' },
+  return createDaemonWithAdapters({ productId, productName: 'Desktop K8 Test', deviceName: 'ci-smoke', localAgentRelease: { version: '0.0.0-test' },
     serverUrl: fx.listener.serverUrl, storeDir: path.join(fx.root, 'sdk'),
     agentHome: { hostStorageRoot: fx.root, projection: createBotPersonaProjection() }, agentEgress: { policy },
   }, [fx.adapter], { deviceCredentials: fx.deviceCredentials });

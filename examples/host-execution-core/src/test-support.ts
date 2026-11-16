@@ -67,7 +67,7 @@ export async function openHost(options: HostOptions & {
   if (!address || typeof address === 'string') throw new Error('Missing HTTP address');
   const adapter = options.adapter ?? new BotStubAdapter();
   const credentials = new InMemoryDeviceCredentialBackend();
-  const config = { productId, productName: 'Host Core', localAgentRelease: { version: '0.0.0-test' },
+  const config = { productId, productName: 'Host Core', deviceName: 'ci-smoke', localAgentRelease: { version: '0.0.0-test' },
     serverUrl: `http://127.0.0.1:${address.port}`, storeDir: path.join(root, 'sdk'),
     agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy },
   };

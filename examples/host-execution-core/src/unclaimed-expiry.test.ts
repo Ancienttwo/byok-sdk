@@ -28,7 +28,7 @@ it('distinguishes pre-claim cancellation from claimed cancellation through attem
   const adapter = new BotStubAdapter();
   const deviceCredentials = new InMemoryDeviceCredentialBackend();
   const config = {
-    productId, productName: 'K4 probe', localAgentRelease: { version: '0.0.0-probe' },
+    productId, productName: 'K4 probe', deviceName: 'ci-smoke', localAgentRelease: { version: '0.0.0-probe' },
     serverUrl: `http://127.0.0.1:${address.port}`,
     storeDir: path.join(root, 'sdk'), agentHome: { hostStorageRoot: path.join(root, 'homes') },
     agentEgress: { policy },

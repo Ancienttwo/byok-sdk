@@ -270,7 +270,7 @@ try {
 
   await fs.writeFile(
     configPath,
-    JSON.stringify({ productName: 'IPC Smoke', productId, serverUrl, storeDir }, null, 2),
+    JSON.stringify({ productName: 'IPC Smoke', deviceName: 'ci-smoke', productId, serverUrl, storeDir }, null, 2),
     'utf8',
   );
 
