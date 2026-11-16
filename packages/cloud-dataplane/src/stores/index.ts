@@ -66,6 +66,7 @@ export {
 export type { PostgresAgentMemoryProjectionStoreOptions } from './agent-memory-projection.js';
 export { PostgresTaskRedactionStore, createPostgresTaskRedactionStore } from './task-redaction.js';
 export { PostgresE2eeMemberStore } from './e2ee-member.js';
+import { PostgresE2eeMemberStore } from './e2ee-member.js';
 export type { PostgresTaskRedactionStoreOptions } from './task-redaction.js';
 export { PostgresDeviceAssertionReplayAuthority } from './device-assertion-replay.js';
 export {
@@ -116,6 +117,12 @@ export interface PostgresCloudStoreOptions {
    * spends one token. Required — there is no unlimited composition.
    */
   readonly rateLimit: PostgresRateLimitOptions;
+  /**
+   * Adds `e2eeMember`, a `PostgresE2eeMemberStore` on the same pool, for a
+   * deployment that declares `e2ee.member`. Device retirement deletes its rows
+   * in the retirement transaction.
+   */
+  readonly e2eeMember?: boolean;
 }
 
 /**
@@ -168,5 +175,6 @@ export async function createPostgresCloudStores(
     }),
     rateLimiter: new TokenBucketRateLimiter(options.rateLimit, clock),
     taskArchive: new PostgresTaskArchiveStore(pool, clock),
+    ...(options.e2eeMember === true ? { e2eeMember: new PostgresE2eeMemberStore(pool, clock) } : {}),
   };
 }

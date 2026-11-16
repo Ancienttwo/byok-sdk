@@ -1,6 +1,5 @@
 import { InMemoryAgentMessageDraftStore, deleteAgentMessageDraft } from './agent-message-draft.js';
 export { InMemoryAgentMessageDraftStore } from './agent-message-draft.js';
-export { InMemoryE2eeMemberStore } from './e2ee-member.js';
 /**
  * The in-memory reference implementation of every cloud-local port.
  *
@@ -21,6 +20,7 @@ import { InMemoryInboundDedupStore } from './dedup.js';
 import { InMemoryNonceStore } from './nonces.js';
 import { InMemoryPairingCodeStore } from './pairing-codes.js';
 import { InMemoryRequestReceiptStore } from './receipts.js';
+import { InMemoryE2eeMemberStore } from './e2ee-member.js';
 import { InMemoryProofReceiptRetentionAuthority, InMemoryProofRequestReceiptStore } from './proof-receipts.js';
 import { InMemoryTaskArchiveStore } from './task-archive.js';
 import { archiveAccessOf, type InMemoryMailboxArchiveAccess, type InMemoryObjectArchiveAccess } from './core-access.js';
@@ -87,6 +87,9 @@ export type InMemoryTaskArchiveFactory = (rows: InMemoryEphemeralTaskRows) => Ta
  * @param taskArchive Absent, the archive rewrites the in-memory core `mailbox`
  *   and `objects`, and construction throws when they are another core's. A
  *   host with another core supplies the archive that owns its rows.
+ * @param options `e2eeMember: true` adds `stores.e2eeMember`, for a deployment
+ *   that declares `e2ee.member`. The device directory retires the same
+ *   instance.
  */
 export function createInMemoryCloudStores(
   clock: Clock,
@@ -96,6 +99,7 @@ export function createInMemoryCloudStores(
   presence: PresenceStore,
   objectBytes: InMemoryBlobBytes,
   taskArchive?: InMemoryTaskArchiveFactory,
+  options: { readonly e2eeMember?: boolean } = {},
 ): InMemoryCloudComposition {
   const blobs = objectBytes.bind(objects);
   const taskEventsWake = createInProcessTaskEventsWake();
@@ -108,10 +112,11 @@ export function createInMemoryCloudStores(
   const tasks = new InMemoryTaskAttemptStore(clock, taskState);
   const nonces = new InMemoryNonceStore(clock, crypto);
   const dedup = new InMemoryInboundDedupStore();
-  const devices = new InMemoryDeviceDirectory(taskState, mailbox, { presence, nonces, dedup });
+  const receipts = new InMemoryRequestReceiptStore(clock);
+  const e2eeMember = options.e2eeMember === true ? { e2eeMember: new InMemoryE2eeMemberStore(receipts) } : {};
+  const devices = new InMemoryDeviceDirectory(taskState, mailbox, { presence, nonces, dedup, ...e2eeMember });
   const pairing = new InMemoryPairingCodeStore(clock, devices);
   const agentMessageDraft = new InMemoryAgentMessageDraftStore(clock);
-  const receipts = new InMemoryRequestReceiptStore(clock);
   const proofReceipts = new InMemoryProofRequestReceiptStore(clock);
   return {
     stores: {
@@ -147,6 +152,7 @@ export function createInMemoryCloudStores(
             deleteApprovals: (tenant, taskId) => deleteApprovalTimelineTail(approvals, tenant, taskId),
             deleteAgentMessageDraft: (tenant, taskId) => deleteAgentMessageDraft(agentMessageDraft, tenant, taskId),
           }),
+      ...e2eeMember,
     },
     blobContentProxy: blobs.contentProxy,
     proofReceiptAuthority: new InMemoryProofReceiptRetentionAuthority(proofReceipts),

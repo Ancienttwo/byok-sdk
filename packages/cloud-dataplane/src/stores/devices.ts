@@ -38,6 +38,7 @@ import { BEGIN_OUTBOX_WRITE, reopenDeviceStream } from './core/outbox-writer.js'
 import { retireDevices } from './task-retirement.js';
 import { DELETE_DEVICE_PRESENCE } from './core/presence.js';
 import { DELETE_DEVICE_DEDUP } from './dedup.js';
+import { E2EE_MEMBER_STATE_DELETES } from './e2ee-member.js';
 import { DELETE_DEVICE_NONCES } from './nonces.js';
 
 interface DeviceRow {
@@ -113,26 +114,6 @@ const SELECT_COLUMNS =
  * through its `(tenant_id, recipient)` index.
  */
 const DEVICE_STATE_DELETES = [DELETE_DEVICE_PRESENCE, DELETE_DEVICE_NONCES, DELETE_DEVICE_DEDUP] as const;
-
-/**
- * #654 E2c: the device's member state, deleted only with a row this
- * transaction removed. Packages go first, while the registration still names
- * the device's member. Security does not rest on this cleanup: the remaining
- * members rotate (design §7.6). The package rows are locked in the order a put
- * locks them, (scope_id, epoch, recipient) in code point order, so a racing
- * put cannot deadlock.
- */
-const E2EE_MEMBER_STATE_DELETES = [
-  `DELETE FROM e2ee_scope_key_package p USING (
-     SELECT scope_id, epoch, recipient FROM e2ee_scope_key_package
-      WHERE tenant_id = $1 AND recipient IN (
-        SELECT member_id FROM e2ee_member_key WHERE tenant_id = $1 AND device_id = ANY($2::text[]))
-      ORDER BY scope_id COLLATE "C", epoch, recipient COLLATE "C"
-      FOR UPDATE) locked
-    WHERE p.tenant_id = $1 AND p.scope_id = locked.scope_id AND p.epoch = locked.epoch AND p.recipient = locked.recipient`,
-  'DELETE FROM e2ee_pairing_mac WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
-  'DELETE FROM e2ee_member_key WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
-] as const;
 
 async function runDeletes(
   client: PoolClient,
@@ -303,7 +284,7 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
       // Whether or not a row went: a repeated revoke recovers a failed one and
       // clears state a racing write recreated (see `DeviceDirectory.revoke`).
       await runDeletes(client, DEVICE_STATE_DELETES, tenant, [deviceId]);
-      await runDeletes(client, E2EE_MEMBER_STATE_DELETES, tenant, removedIds);
+      await runDeletes(client, E2EE_MEMBER_STATE_DELETES, tenant, [deviceId]);
       await retireDevices(client, tenant, removedIds, 'device_revoked', this.#clock.now().toISOString());
       await client.query('COMMIT');
     } catch (cause) {

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "e04376db7aa21e8bfd4d39df1db6382328626654af4c2c3182b0272fafffd356"
+    "snapshotSha256": "70836ce1529e3560f503aaeedef4313c4a69b4cc489c0fafcc81d7b510a18d25"
   },
   "configFields": {
     "status": "tracked",
@@ -280,6 +280,65 @@
       "items": [
         "behavior:grok-task-autoupdate-off"
       ]
+    },
+    {
+      "id": "e2ee-member-store-in-cloud-stores",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud ByokCloudOptions.e2eeMemberStore is removed; the E2EE member store is CloudStores.e2eeMember, so the routes and the device directory that retires it use one instance. Hosts drop the option and take the store from the composition's opt-in: createPostgresCloudStores({ ..., e2eeMember: true }), createInMemoryCloudStores(..., undefined, { e2eeMember: true }) or createInMemoryByokCloud({ e2eeMember: true }), then pass the stores as cloud.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#e2ee-member-store-moves-into-cloudstores",
+      "items": [
+        "export:@byok-sdk/cloud#ByokCloudOptions",
+        "export:@byok-sdk/cloud#CloudStores"
+      ]
+    },
+    {
+      "id": "e2ee-capability-port-in-cloud-stores",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud binds e2ee.member to cloud.e2eeMember: CapabilityPorts loses e2eeMemberStore and gains cloud?: Pick<CloudStores, 'e2eeMember'>. Declaring the capability without the store, or passing the store without declaring it, is still refused. Callers of capabilityDeclarationForPorts pass cloud: stores instead of e2eeMemberStore.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#capability-ports-read-cloude2eemember",
+      "items": [
+        "export:@byok-sdk/cloud#CapabilityPorts"
+      ]
+    },
+    {
+      "id": "remove-in-memory-e2ee-member-store",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud no longer exports InMemoryE2eeMemberStore. Hosts take the in-memory store from createInMemoryCloudStores(..., undefined, { e2eeMember: true }).stores.e2eeMember or createInMemoryByokCloud({ e2eeMember: true }), whose device directory retires it.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#inmemorye2eememberstore-is-no-longer-exported",
+      "items": [
+        "export:@byok-sdk/cloud#InMemoryE2eeMemberStore"
+      ]
+    },
+    {
+      "id": "e2ee-member-store-delete-device",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud E2eeMemberStore gains a required deleteDevice(tenant, deviceId): Promise<void> that deletes the packages addressed to the device's member, its registration and both pairing MACs, and keeps the chain, epochs, keyIds, shred records, KEM floor and proof requests. Hosts with their own E2eeMemberStore implement it.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#e2eememberstore-gains-deletedevice",
+      "items": [
+        "export:@byok-sdk/cloud#E2eeMemberStore"
+      ]
+    },
+    {
+      "id": "device-retirement-clears-e2ee-member-state",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud device revoke and machine supersession delete the retired device's E2EE member state through CloudStores.e2eeMember once the registration change is durable, and revoke does so on every call. The Host scope read omits the retired member's packages and the member id is free for another device in every composition; Postgres revoke now deletes those rows even when no device row is left. A Host with its own DeviceDirectory and E2EE store calls deleteDevice on both paths.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retirement-deletes-e2ee-member-state",
+      "items": [
+        "behavior:device-retirement-clears-e2ee-member-state"
+      ]
+    },
+    {
+      "id": "e2ee-composition-opt-ins",
+      "impact": "additive",
+      "summary": "CloudStores.e2eeMember and DeviceScopedStores.e2eeMember are new optional members; createInMemoryCloudStores, createInMemoryByokCloud and createPostgresCloudStores take an e2eeMember: true opt-in that builds one store for both stores and directory; PostgresE2eeMemberStore implements deleteDevice.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#e2ee-composition-opt-ins",
+      "items": [
+        "export:@byok-sdk/cloud#InMemoryByokCloudOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresCloudStoreOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresE2eeMemberStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresE2eeMemberStore"
+      ]
     }
   ],
   "changes": [
@@ -398,14 +457,44 @@
       "entry": "agent-user-context-unavailable-cause"
     },
     {
+      "item": "export:@byok-sdk/cloud#ByokCloudOptions",
+      "change": "changed",
+      "entry": "e2ee-member-store-in-cloud-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CapabilityPorts",
+      "change": "changed",
+      "entry": "e2ee-capability-port-in-cloud-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CloudStores",
+      "change": "changed",
+      "entry": "e2ee-member-store-in-cloud-stores"
+    },
+    {
       "item": "export:@byok-sdk/cloud#DeviceScopedStores",
       "change": "added",
       "entry": "in-memory-directory-device-state"
     },
     {
+      "item": "export:@byok-sdk/cloud#E2eeMemberStore",
+      "change": "changed",
+      "entry": "e2ee-member-store-delete-device"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryByokCloudOptions",
+      "change": "changed",
+      "entry": "e2ee-composition-opt-ins"
+    },
+    {
       "item": "export:@byok-sdk/cloud#InMemoryDeviceDirectory",
       "change": "changed",
       "entry": "in-memory-directory-device-state"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryE2eeMemberStore",
+      "change": "removed",
+      "entry": "remove-in-memory-e2ee-member-store"
     },
     {
       "item": "export:@byok-sdk/cloud#InMemoryInboundDedupStore",
@@ -438,6 +527,16 @@
       "entry": "in-memory-directory-device-state"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudStoreOptions",
+      "change": "changed",
+      "entry": "e2ee-composition-opt-ins"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresE2eeMemberStore",
+      "change": "changed",
+      "entry": "e2ee-composition-opt-ins"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresInboundDedupStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
@@ -451,6 +550,16 @@
       "item": "export:@byok-sdk/cloud-dataplane#PostgresPresenceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
+      "change": "changed",
+      "entry": "e2ee-composition-opt-ins"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresE2eeMemberStore",
+      "change": "changed",
+      "entry": "e2ee-composition-opt-ins"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresInboundDedupStore",

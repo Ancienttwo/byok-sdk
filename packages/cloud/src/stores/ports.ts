@@ -1,5 +1,6 @@
 import type { AgentMessageDraftStore } from '../agent-message-draft.js';
 import type { TaskArchiveStore } from '../task-archive.js';
+import type { E2eeMemberStore } from '../e2ee-member.js';
 import { MAILBOX_STREAM_CLOSE_CAUSES, type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
@@ -139,6 +140,9 @@ export interface DeviceRegistration {
  *    never loses its dedup ledger. When the call resolves, `PresenceStore`
  *    reads omit the device, `NonceStore.consumeIfValid` is `false` for every
  *    nonce issued to it before, and every earlier envelope id reads as unseen.
+ *    When the composition has an E2EE member store (`CloudStores.e2eeMember`),
+ *    the device's member state goes in the same step
+ *    (`E2eeMemberStore.deleteDevice`).
  *
  * Neither the task history nor the mailbox rows go away: what the device did
  * and what it was sent stay readable after its grant is gone.
@@ -304,6 +308,8 @@ export interface DeviceScopedStores {
   readonly presence: Pick<PresenceStore, 'deleteDevice'>;
   readonly nonces: Pick<NonceStore, 'deleteDevice'>;
   readonly dedup: Pick<InboundDedupStore, 'deleteDevice'>;
+  /** The composition's `CloudStores.e2eeMember`, the same instance; absent when it has none. */
+  readonly e2eeMember?: Pick<E2eeMemberStore, 'deleteDevice'>;
 }
 
 // ---------------------------------------------------------------------------
@@ -892,6 +898,11 @@ export interface InboundRateLimiter {
  * composition. {@link BlobContentProxy} is deliberately absent — it is an
  * optional input to `createByokCloud`, not a port, precisely so that the
  * bundle can stay all-or-nothing while byte proxying stays optional.
+ *
+ * `e2eeMember` is the one optional store: it is present exactly when the
+ * deployment declares `e2ee.member`. It lives here, not in the
+ * `createByokCloud` options, so the device directory that retires a device's
+ * member state and the routes that serve it use the same store (#2267).
  */
 export interface CloudStores {
   readonly activity: ActivityStore;
@@ -910,9 +921,10 @@ export interface CloudStores {
   readonly blobs: CloudBlobStore;
   readonly rateLimiter: InboundRateLimiter;
   readonly taskArchive: TaskArchiveStore;
+  readonly e2eeMember?: E2eeMemberStore;
 }
 
-/** Names of every port in {@link CloudStores}, in contract order. */
+/** Names of every required port in {@link CloudStores}, in contract order. */
 export const CLOUD_STORE_NAMES = [
   'activity',
   'approvals',

@@ -268,9 +268,95 @@ idempotency across re-registration if it needs it.
 `@byok-sdk/cloud-dataplane` `PostgresPresenceStore`, `PostgresNonceStore` and
 `PostgresInboundDedupStore` implement `deleteDevice`. Postgres `revoke()` now
 deletes the presence, nonce and dedup rows of the id even when no device row
-was left, so a repeated revoke clears rows a racing write recreated. Its E2EE
-member state is still deleted only with a row the call removed (#2267). No
-schema change.
+was left, so a repeated revoke clears rows a racing write recreated. The same
+now holds for its E2EE member state (see below). No schema change.
+
+## E2EE member state on retirement (#2267)
+
+Revoke and machine supersession now delete the retired device's E2EE member
+state in every composition that has an E2EE member store: its member key
+registration, both pairing MACs, and the scope key packages addressed to its
+member. Before, only Postgres deleted it; the in-memory store kept it, so
+`ByokCloud.readScopeKeyPackages()` still returned the retired member's
+packages. The member chain, scope epochs and their `keyId`s, shred records,
+the member's KEM floor and recorded proof requests stay.
+
+The store is now one field of the composition, `CloudStores.e2eeMember`, so
+the routes and the device directory that retires it always use the same one.
+
+### E2EE member store moves into CloudStores
+
+`ByokCloudOptions.e2eeMemberStore` is removed. Get the store from the
+composition factory's opt-in and pass the stores as `cloud`:
+
+```ts
+// Postgres
+const stores = await createPostgresCloudStores({ pool, clock, crypto, objectStorage, rateLimit, e2eeMember: true });
+const cloud = createByokCloud({
+  cloud: stores, // stores.e2eeMember is a PostgresE2eeMemberStore
+  capabilities: fullCapabilityDeclaration(1, { includeE2eeMember: true }),
+  // ...the rest of the options, without e2eeMemberStore
+});
+
+// In memory
+const composition = createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, core.presence, objectBytes, undefined, { e2eeMember: true });
+// or: createInMemoryByokCloud({ e2eeMember: true }), which also declares e2ee.member
+```
+
+A Host that builds `CloudStores` itself sets `e2eeMember` on it and gives the
+same instance to its device directory (see the retirement contract below).
+
+### Capability ports read cloud.e2eeMember
+
+`e2ee.member` is still bound both ways: declaring it without
+`cloud.e2eeMember`, or passing `cloud.e2eeMember` without declaring it, is
+refused at construction (`capability_over_declared`,
+`capability_port_undeclared`), and the error names the port
+`cloud.e2eeMember`. `CapabilityPorts` loses `e2eeMemberStore` and gains
+`cloud?: Pick<CloudStores, 'e2eeMember'>`. A caller of
+`capabilityDeclarationForPorts()` passes `cloud: stores` instead of
+`e2eeMemberStore`.
+
+### InMemoryE2eeMemberStore is no longer exported
+
+Use the in-memory composition's opt-in (`stores.e2eeMember` above). A
+standalone instance would not be retired with the directory's devices.
+
+### E2eeMemberStore gains deleteDevice
+
+`E2eeMemberStore` gains a required `deleteDevice(tenant, deviceId): Promise<void>`.
+It deletes the scope key packages addressed to the member the device
+registered, then that registration with its device pairing MAC, then the
+client pairing MAC. It keeps the chain, epochs, `keyId`s, shred records, the
+member's KEM floor and recorded proof requests; a device with no state is a
+no-op. A Host with its own store implements it.
+
+### Retirement deletes E2EE member state
+
+A Host with its own `DeviceDirectory` and an E2EE member store deletes the
+member state on both retirement paths, under the same rules as presence,
+nonces and dedup: only once the registration change is durable (or in the
+same transaction when the store shares its database), and on every `revoke`,
+whether or not a row was removed. `DeviceScopedStores` takes it as optional
+`e2eeMember`.
+
+What a Host sees:
+
+- After a revoke or supersession, `readScopeKeyPackages()` omits the retired
+  member's packages in every composition.
+- The retired member id can be registered by another device. In memory this
+  used to fail with `e2ee_member_key_conflict`. The id keeps its KEM floor.
+- Postgres `revoke()` now deletes E2EE member rows of the id even when no
+  device row was left.
+- A package put to the retired member id after the retirement is not removed:
+  cleanup finds packages through the device's registration, which is gone.
+
+### E2EE composition opt-ins
+
+Additive: `CloudStores.e2eeMember`, `DeviceScopedStores.e2eeMember`, the
+`{ e2eeMember: true }` options of `createInMemoryCloudStores()`,
+`createInMemoryByokCloud()` and `createPostgresCloudStores()`, and
+`PostgresE2eeMemberStore.deleteDevice()`.
 
 ## Service uninstall stops before it removes `current` (#2274)
 
