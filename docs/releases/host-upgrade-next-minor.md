@@ -802,6 +802,14 @@ at most 64 capability flags.
   `SqliteSchemaError` `SQLITE_SCHEMA_UNSUPPORTED`, and `inspectSqliteStore`
   reports `new-path-repair`. Point `storage.path` at a new file, keep the old
   one for the history export, and pair the devices again.
+- **SQLite format check before any write** (#2286). The store decides a
+  file's format through `@byok-sdk/core/sqlite-node`'s read-only check before
+  it opens the file for writing, so a refused file keeps its bytes, its WAL
+  and its directory as they were. A current file missing a table, column,
+  trigger or index is refused with `SQLITE_SCHEMA_INVALID` instead of having it
+  recreated. The `migration` option is no longer checked; the store has none.
+  Receipt maintenance deletes no request receipt, as before: every SDK receipt
+  is an identity fence.
 - **Dispatch.** `DispatchInput` takes one required `target` in place of
   `runtime`, `harnessId` and `dispatchSelection`. Pass `{ lane: 'auto' }` to
   keep the device's own runtime choice. An execution-core intent names a

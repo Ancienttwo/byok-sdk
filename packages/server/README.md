@@ -448,13 +448,16 @@ starts on a new store: export the history you need from the old file, point
 `storage.path` at a new file and pair the devices again. `inspectSqliteStore`
 reports an older file as `new-path-repair`.
 
-The schema is decided before anything writes to the file. The store first
-reads the file's metadata through a read-only, immutable connection, which
-takes no lock, writes nothing and creates no journal, WAL or SHM file, and
-refuses an older, newer or foreign file there. Only then does it open the file
-for writing (exclusive locking and WAL). The same check inside the schema
-transaction stays the authority for a file that changes in between. A refused
-file is not read for business data, deleted or rewritten.
+The format is decided before anything writes to the file. The store first
+checks the file through `@byok-sdk/core/sqlite-node`'s read-only, immutable
+connection, which takes no lock, writes nothing and creates no journal, WAL or
+SHM file. It refuses an older, newer or foreign file there, and a current file
+missing any table, column, trigger or index it needs; nothing is recreated.
+Only then does it open the file for writing (exclusive locking and WAL). The
+same check inside the schema transaction stays the authority for a file that
+changes in between. A new store checkpoints its metadata into the main file as
+soon as it is created. A refused file is not read for business data, deleted
+or rewritten.
 
 One residual is accepted ([#2286](https://github.com/Ancienttwo/byok-sdk/issues/2286)):
 the immutable read sees the main file only. An older-version store that
