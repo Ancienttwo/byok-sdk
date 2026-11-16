@@ -13,6 +13,8 @@ import {
 } from './contract';
 import { CONTRACT_REPLY_CHUNKS, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
 
+const OPENCODE_TARGET = { lane: 'harness', harnessId: 'opencode' } as const;
+
 const MODEL = 'fake';
 /** The shell tool is `bash` on the 1.x line and `shell` on 2.x. */
 const SHELL_TOOLS: ReadonlySet<string> = new Set(['bash', 'shell']);
@@ -77,7 +79,7 @@ export function openCodeContract(
       const receipt = path.join(box.root, 'host-receipt');
       const server = await writeSubmitResultServer(box.root, receipt);
       const resources = { workspaceDir: box.workspace, env: { ...env, ...recorder.env } };
-      const first = await startPreparedOperation(adapter(), { instruction: 'Call the Host tool and return its result.' }, { ...resources, mcpServers: { host: server } });
+      const first = await startPreparedOperation(adapter(), { target: OPENCODE_TARGET, instruction: 'Call the Host tool and return its result.' }, { ...resources, mcpServers: { host: server } });
       const events = [];
       try { for await (const event of first.events) events.push(event); } finally { await first.close(); }
       expect(events, JSON.stringify(provider.requests.filter(request => request.model).map(request => ({ tools: request.tools, toolResults: request.toolResults })))).toContainEqual({ type: 'progress', text: marker });
@@ -85,7 +87,7 @@ export function openCodeContract(
       const firstEnd = provider.requests.length;
       await runTurn(adapter(), 'Say hello without tools.', resources);
       const secondEnd = provider.requests.length;
-      const resumed = await startPreparedOperation(adapter(), { instruction: 'PROBE_RESUME_ACCESS', sessionRef: first.sessionRef }, resources);
+      const resumed = await startPreparedOperation(adapter(), { target: OPENCODE_TARGET, instruction: 'PROBE_RESUME_ACCESS', sessionRef: first.sessionRef }, resources);
       try { for await (const _event of resumed.events) { /* drain the turn */ } } finally { await resumed.close(); }
       expect(await readReceipt(receipt), 'resumed tool call receipt').toHaveLength(1);
       for (const request of provider.requests.slice(firstEnd, secondEnd).filter(item => item.model)) {
@@ -217,12 +219,12 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
       const { box, env } = await openCodeEnv(`${runtime}-resume`, provider.baseUrl);
       const other = await createSandbox(`${runtime}-resume-other`);
       const resources = { workspaceDir: box.workspace, agentHome: box.workspace, env: { ...env, ...recorder.env } };
-      const first = await startPreparedOperation(adapter(), { instruction: `Remember ${HELD}.` }, resources);
+      const first = await startPreparedOperation(adapter(), { target: OPENCODE_TARGET, instruction: `Remember ${HELD}.` }, resources);
       for await (const event of first.events) if (event.type === 'turn_end') break;
       const sessionRef = first.sessionRef;
       await first.close();
       const before = provider.requests.length;
-      const second = await startPreparedOperation(adapter(), { instruction: 'Continue.', sessionRef }, resources);
+      const second = await startPreparedOperation(adapter(), { target: OPENCODE_TARGET, instruction: 'Continue.', sessionRef }, resources);
       const events: string[] = [];
       for await (const event of second.events) { events.push(event.type); if (event.type === 'turn_end') break; }
       const resumedRef = second.sessionRef;
@@ -230,7 +232,7 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
       const history = provider.requests.slice(before).filter(request => request.model).some(request => request.text.includes(HELD));
       let refusal: unknown;
       try {
-        const third = await startPreparedOperation(adapter(), { instruction: 'Continue.', sessionRef },
+        const third = await startPreparedOperation(adapter(), { target: OPENCODE_TARGET, instruction: 'Continue.', sessionRef },
           { workspaceDir: other.workspace, agentHome: other.workspace, env: { ...env, ...recorder.env } });
         try { for await (const event of third.events) if (event.type === 'turn_end') break; } finally { await third.close(); }
       } catch (error) { refusal = error; }
@@ -278,7 +280,7 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
     const provider = await startLoopbackProvider('openai-chat', script, MODEL);
     try {
       const { env } = await openCodeEnv(`${runtime}-cancel-env`, provider.baseUrl);
-      const session = await startPreparedOperation(adapter(), { instruction: 'Run the shell command.' }, { workspaceDir: box.workspace, agentHome: box.workspace, env: { ...env, ...recorder.env } });
+      const session = await startPreparedOperation(adapter(), { target: OPENCODE_TARGET, instruction: 'Run the shell command.' }, { workspaceDir: box.workspace, agentHome: box.workspace, env: { ...env, ...recorder.env } });
       const events: string[] = [];
       const log: string[] = [];
       const drained = (async () => { for await (const event of session.events) { events.push(event.type); log.push(JSON.stringify(event).slice(0, 300)); if (event.type === 'turn_end') break; } })();

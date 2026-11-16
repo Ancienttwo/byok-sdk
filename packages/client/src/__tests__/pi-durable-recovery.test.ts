@@ -47,7 +47,7 @@ describe('durable parent recovery authority', () => {
     // Real prepare, sealed Agent manifest and runtime-launch resources. The
     // lane restriction must reject before the custody launcher can be invoked.
     await expect(startPreparedOperation(adapter, {
-      instruction: 'unused', dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'unused' },
+      instruction: 'unused', target: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'unused' },
     }, { workspaceDir: home, agentHome: home, env: {} }))
       .rejects.toThrow('Pi Agent resources are supported only by the ordinary RPC lane');
     expect(spawnFn).not.toHaveBeenCalled();

@@ -22,6 +22,8 @@ import { AgyAdapter, type AgyAdapterOptions } from '../adapters/antigravity/agy-
 import { agyAdapterWithEndpoint } from '../adapters/antigravity/agy-endpoint';
 import { agyMcpEventIdentities } from '../adapters/antigravity/projection';
 
+const GROK_TARGET = { lane: 'harness', harnessId: 'grok' } as const;
+
 const fixture = fileURLToPath(new URL('./fixtures/fake-acp-agent.mjs', import.meta.url));
 const sessions: Session[] = [];
 const dirs: string[] = [];
@@ -132,7 +134,7 @@ describe('GrokAdapter sessions', () => {
   it('runs one owned ACP agent with the exact env and closes the reply with the turn', async () => {
     vi.stubEnv('BYOK_GROK_AMBIENT_SECRET', 'must not inherit');
     const resources = await ctx();
-    const s = await open(adapter(), { instruction: 'hello' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'hello' }, resources);
     expect(s.sessionRef).toBe('fake-grok-session');
     expect(await turn(s)).toEqual([{ type: 'progress', text: 'echo:hello' }, usage, { type: 'turn_end' }]);
     const [started] = facts(resources.log).filter(fact => fact.kind === 'start');
@@ -144,7 +146,7 @@ describe('GrokAdapter sessions', () => {
   });
 
   it('closes a text run at each tool call and reports tool results', async () => {
-    const s = await open(adapter(), { instruction: 'tool' }, await ctx());
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'tool' }, await ctx());
     expect(await turn(s)).toEqual([
       { type: 'progress', text: 'Let me look. ' },
       { type: 'tool_use', tool: 'run_terminal_command', toolCallId: 'call-1', input: { command: 'ls' } },
@@ -153,7 +155,7 @@ describe('GrokAdapter sessions', () => {
       usage,
       { type: 'turn_end' },
     ]);
-    await s.followUp({ instruction: 'tool-failed' });
+    await s.followUp({ target: GROK_TARGET, instruction: 'tool-failed' });
     expect(await turn(s)).toEqual([
       { type: 'tool_use', tool: 'read_file', toolCallId: 'call-2', input: { target_file: 'missing' } },
       { type: 'tool_result', tool: 'read_file', toolCallId: 'call-2', output: { content: [{ type: 'text', text: 'not found' }] }, isError: true },
@@ -164,7 +166,7 @@ describe('GrokAdapter sessions', () => {
   });
 
   it('keeps a tool input past OAR\'s text cap whole and leaves a non-object input unknown', async () => {
-    const s = await open(adapter(), { instruction: 'tool-inputs' }, await ctx());
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'tool-inputs' }, await ctx());
     expect((await turn(s)).slice(0, 2)).toEqual([
       { type: 'tool_use', tool: 'run_terminal_command', toolCallId: 'call-long', input: { command: `echo ${'a'.repeat(12_000)}; git push origin main` } },
       { type: 'tool_use', tool: 'run_terminal_command', toolCallId: 'call-text' },
@@ -172,14 +174,14 @@ describe('GrokAdapter sessions', () => {
   });
 
   it('keeps sub-agent text and tools out of the parent reply', async () => {
-    const s = await open(adapter(), { instruction: 'child' }, await ctx());
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'child' }, await ctx());
     expect(await turn(s)).toEqual([{ type: 'progress', text: 'parent-answer' }, usage, { type: 'turn_end' }]);
   });
 
   it('runs a hosted terminal command and attaches task MCP servers on open', async () => {
     const resources = await ctx();
     const server = { command: process.execPath, args: ['mcp.js'], env: { MCP_TOKEN: 'mcp-fixture-secret-value' } };
-    const s = await open(adapter(), { instruction: 'terminal' }, { ...resources, mcpServers: { 'aiphabee-bot-chat': server } });
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'terminal' }, { ...resources, mcpServers: { 'aiphabee-bot-chat': server } });
     expect(await turn(s)).toEqual([{ type: 'progress', text: 'terminal:terminal-ok' }, usage, { type: 'turn_end' }]);
     expect(facts(resources.log).find(fact => fact.kind === 'open')?.params.mcpServers).toEqual([
       { name: 'aiphabee-bot-chat', command: process.execPath, args: ['mcp.js'], env: [{ name: 'MCP_TOKEN', value: 'mcp-fixture-secret-value' }] },
@@ -190,11 +192,11 @@ describe('GrokAdapter sessions', () => {
     expect(() => adapter({ compatInstructions: 'off' as never })).toThrow(TypeError);
     for (const options of [{}, { compatInstructions: 'inherit' as const }]) {
       const plain = await ctx();
-      await turn(await open(adapter(options), { instruction: 'hello' }, plain));
+      await turn(await open(adapter(options), { target: GROK_TARGET, instruction: 'hello' }, plain));
       expect(Object.keys(facts(plain.log).find(fact => fact.kind === 'start')!.env).filter(name => name.startsWith('GROK_'))).toEqual([]);
     }
     const resources = await ctx();
-    const s = await open(adapter({ compatInstructions: 'disabled' }), { instruction: 'terminal-compat' }, resources);
+    const s = await open(adapter({ compatInstructions: 'disabled' }), { target: GROK_TARGET, instruction: 'terminal-compat' }, resources);
     // The hosted terminal command keeps the task env: none of the four variables reaches it.
     expect(await turn(s)).toEqual([{ type: 'progress', text: 'terminal:unset,unset,unset,unset' }, usage, { type: 'turn_end' }]);
     expect(facts(resources.log).find(fact => fact.kind === 'start')!.env).toMatchObject({
@@ -204,37 +206,37 @@ describe('GrokAdapter sessions', () => {
 
   it('resumes the exact native session and fails closed on a missing one', async () => {
     const resources = await ctx();
-    const s = await open(adapter(), { instruction: 'again', sessionRef: 'fake-grok-session' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'again', sessionRef: 'fake-grok-session' }, resources);
     expect(s.sessionRef).toBe('fake-grok-session');
     await turn(s);
     expect(facts(resources.log).find(fact => fact.kind === 'open')).toMatchObject({ method: 'session/resume', params: { sessionId: 'fake-grok-session' } });
-    const missing = await startPreparedOperation(adapter(), { instruction: 'again', sessionRef: 'gone' }, await ctx()).catch(error => error);
+    const missing = await startPreparedOperation(adapter(), { target: GROK_TARGET, instruction: 'again', sessionRef: 'gone' }, await ctx()).catch(error => error);
     expect(missing).toBeInstanceOf(RuntimeExecutionFailure);
     expect(missing).toMatchObject({ phase: 'start', retry: 'non-retryable' });
   });
 
   it('selects the adapter model and fails closed on a refused model or login', async () => {
     const resources = await ctx();
-    const s = await open(adapter({ model: 'grok-fixture' }), { instruction: 'hello' }, resources);
+    const s = await open(adapter({ model: 'grok-fixture' }), { target: GROK_TARGET, instruction: 'hello' }, resources);
     await turn(s);
     expect(facts(resources.log).find(fact => fact.kind === 'model')?.params).toMatchObject({ sessionId: 'fake-grok-session', modelId: 'grok-fixture' });
-    const refusedModel = await startPreparedOperation(adapter({ model: 'no-such-model' }), { instruction: 'x' }, await ctx()).catch(error => error);
+    const refusedModel = await startPreparedOperation(adapter({ model: 'no-such-model' }), { target: GROK_TARGET, instruction: 'x' }, await ctx()).catch(error => error);
     expect(refusedModel).toMatchObject({ phase: 'start', retry: 'non-retryable' });
-    const refusedLogin = await startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_AUTH: 'refuse' })).catch(error => error);
+    const refusedLogin = await startPreparedOperation(adapter(), { target: GROK_TARGET, instruction: 'x' }, await ctx({ FAKE_ACP_AUTH: 'refuse' })).catch(error => error);
     expect(refusedLogin).toMatchObject({ phase: 'start', retry: 'non-retryable' });
   });
 
   it('rejects steer with the typed error and a follow-up that names a selection', async () => {
-    const s = await open(adapter(), { instruction: 'hello' }, await ctx());
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'hello' }, await ctx());
     await turn(s);
     await expect(s.steer('x')).rejects.toBeInstanceOf(SteerUnsupportedError);
-    await expect(s.followUp({ instruction: 'x', dispatchSelection: { lane: 'subscription', runtimeId: 'codex', providerId: null, modelId: 'm' } }))
+    await expect(s.followUp({ instruction: 'x', target: { lane: 'subscription', runtimeId: 'codex', modelId: 'm' } }))
       .rejects.toThrow('takes no dispatch selection');
   });
 
   it('interrupts through session/cancel and ends the turn with the cancelled answer', async () => {
     const resources = await ctx();
-    const s = await open(adapter(), { instruction: 'hold' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'hold' }, resources);
     await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'prompt')).toBe(true));
     await s.interrupt();
     expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(true);
@@ -250,10 +252,10 @@ describe('GrokAdapter sessions', () => {
   it('holds a follow-up while Grok runs its own turn and runs it as the task turn when that turn closes', async () => {
     const gate = path.join(await tempDir(), 'gate');
     const resources = await ctx({ FAKE_ACP_OWN_TURN_GATE: gate });
-    const s = await open(adapter(), { instruction: 'own-turn' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'own-turn' }, resources);
     expect((await turn(s)).at(-1)).toEqual({ type: 'turn_end' });
     await ownTurnStarted(s);
-    await s.followUp({ instruction: 'hello' });
+    await s.followUp({ target: GROK_TARGET, instruction: 'hello' });
     expect(prompts(resources.log)).toEqual(['own-turn']);
     await fs.writeFile(gate, '');
     // Grok's turn end is no task turn end; the drained prompt's turn_active has no input id and is the task's.
@@ -265,15 +267,15 @@ describe('GrokAdapter sessions', () => {
   it('takes a held follow-up back on interrupt, so Grok never receives it', async () => {
     const gate = path.join(await tempDir(), 'gate');
     const resources = await ctx({ FAKE_ACP_OWN_TURN_GATE: gate });
-    const s = await open(adapter(), { instruction: 'own-turn' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'own-turn' }, resources);
     await turn(s);
     await ownTurnStarted(s);
-    await s.followUp({ instruction: 'never-sent' });
+    await s.followUp({ target: GROK_TARGET, instruction: 'never-sent' });
     await s.interrupt();
     expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(false);
     expect(await turn(s)).toEqual([{ type: 'turn_end' }]);
     await fs.writeFile(gate, '');
-    await s.followUp({ instruction: 'hello' });
+    await s.followUp({ target: GROK_TARGET, instruction: 'hello' });
     expect((await turn(s)).at(-1)).toEqual({ type: 'turn_end' });
     expect(prompts(resources.log)).toEqual(['own-turn', 'hello']);
   });
@@ -281,10 +283,10 @@ describe('GrokAdapter sessions', () => {
   it('takes back a follow-up interrupted in the same tick, while its prompt is still in flight', async () => {
     const gate = path.join(await tempDir(), 'gate');
     const resources = await ctx({ FAKE_ACP_OWN_TURN_GATE: gate });
-    const s = await open(adapter(), { instruction: 'own-turn' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'own-turn' }, resources);
     await turn(s);
     await ownTurnStarted(s);
-    const f = s.followUp({ instruction: 'never-sent' });
+    const f = s.followUp({ target: GROK_TARGET, instruction: 'never-sent' });
     await s.interrupt();
     await f;
     expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(false);
@@ -297,9 +299,9 @@ describe('GrokAdapter sessions', () => {
   it('holds a follow-up behind a Grok turn that OAR reports after the task turn closes', async () => {
     const gate = path.join(await tempDir(), 'gate');
     const resources = await ctx({ FAKE_ACP_OWN_TURN_GATE: gate });
-    const s = await open(adapter(), { instruction: 'own-turn-deferred' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'own-turn-deferred' }, resources);
     expect((await turn(s)).at(-1)).toEqual({ type: 'turn_end' });
-    await s.followUp({ instruction: 'hello' });
+    await s.followUp({ target: GROK_TARGET, instruction: 'hello' });
     expect(prompts(resources.log)).toEqual(['own-turn-deferred']);
     await fs.writeFile(gate, '');
     expect(await turn(s)).toEqual([{ type: 'progress', text: 'echo:hello' }, { ...usage, contextTokens: 1002 }, { type: 'turn_end' }]);
@@ -308,7 +310,7 @@ describe('GrokAdapter sessions', () => {
   it('sends no cancel once Grok runs another prompt, and ends the task turn with its own answer (#1942)', async () => {
     const gate = path.join(await tempDir(), 'gate');
     const resources = await ctx({ FAKE_ACP_OWN_TURN_GATE: gate });
-    const s = await open(adapter(), { instruction: 'own-turn-switch' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'own-turn-switch' }, resources);
     const projection = (s as unknown as { projection: { sdkPromptSuperseded: boolean } }).projection;
     await vi.waitFor(() => expect(projection.sdkPromptSuperseded).toBe(true));
     const interrupted = s.interrupt();
@@ -320,7 +322,7 @@ describe('GrokAdapter sessions', () => {
 
   it('a replayed queue report naming another prompt does not stop the interrupt cancel (#1942)', async () => {
     const resources = await ctx();
-    const s = await open(adapter(), { instruction: 'replayed-queue' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'replayed-queue' }, resources);
     const projection = (s as unknown as { projection: { sdkPromptSuperseded: boolean; text: string } }).projection;
     // The text frame follows the replayed report, so the projection has read the report.
     await vi.waitFor(() => expect(projection.text).toContain('first'));
@@ -331,10 +333,10 @@ describe('GrokAdapter sessions', () => {
   it('cancels a held follow-up that the drain already sent', async () => {
     const gate = path.join(await tempDir(), 'gate');
     const resources = await ctx({ FAKE_ACP_OWN_TURN_GATE: gate });
-    const s = await open(adapter(), { instruction: 'own-turn' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'own-turn' }, resources);
     await turn(s);
     await ownTurnStarted(s);
-    await s.followUp({ instruction: 'hold' });
+    await s.followUp({ target: GROK_TARGET, instruction: 'hold' });
     await fs.writeFile(gate, '');
     await vi.waitFor(() => expect(prompts(resources.log)).toEqual(['own-turn', 'hold']));
     await s.interrupt();
@@ -343,7 +345,7 @@ describe('GrokAdapter sessions', () => {
   });
 
   it('fails the session on a Grok turn end while no turn is open', async () => {
-    const s = await open(adapter(), { instruction: 'stray-end' }, await ctx());
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'stray-end' }, await ctx());
     await turn(s);
     expect(await failureOf(s)).toMatchObject({ message: 'grok reported a turn end with no turn open' });
   });
@@ -360,7 +362,7 @@ describe('GrokAdapter sessions', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const resources = await ctx();
     const treeFile = path.join(resources.workspaceDir, 'tool-tree.json');
-    const s = await open(adapter(), { instruction: 'orphan-tool' }, { ...resources, env: { ...resources.env, FAKE_ACP_TOOL_TREE: treeFile } });
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'orphan-tool' }, { ...resources, env: { ...resources.env, FAKE_ACP_TOOL_TREE: treeFile } });
     await until(() => { try { return JSON.parse(readFileSync(treeFile, 'utf8')).grandchildPid > 0; } catch { return false; } });
     const { descendantPid: parent, grandchildPid: tool } = JSON.parse(readFileSync(treeFile, 'utf8')) as { descendantPid: number; grandchildPid: number };
     try {
@@ -378,7 +380,7 @@ describe('GrokAdapter sessions', () => {
   it('refuses the interrupt and sends no native cancel when the agent\'s descendants cannot be read first', async () => {
     vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(() => { throw new Error('Process table ps: timeout after 5000 ms'); });
     const resources = await ctx();
-    const s = await open(adapter(), { instruction: 'hold' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'hold' }, resources);
     await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'prompt')).toBe(true));
     await expect(s.interrupt()).rejects.toMatchObject({ message: 'grok interrupt refused: Process table ps: timeout after 5000 ms' });
     expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(false);
@@ -386,22 +388,22 @@ describe('GrokAdapter sessions', () => {
 
   it('fails the session when the cancel is not answered within the interrupt bound', async () => {
     const resources = await ctx();
-    const s = await open(adapter({ interruptTimeoutMs: 200 }), { instruction: 'hold-silent' }, resources);
+    const s = await open(adapter({ interruptTimeoutMs: 200 }), { target: GROK_TARGET, instruction: 'hold-silent' }, resources);
     await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'prompt')).toBe(true));
     await expect(s.interrupt()).rejects.toThrow('grok interrupt timed out');
     expect(await failureOf(s)).toMatchObject({ phase: 'run', retry: 'non-retryable' });
   });
 
   it('maps prompt errors to semantic failures, retryable only when rate limited', async () => {
-    const failed = await failureOf(await open(adapter(), { instruction: 'fail' }, await ctx()));
+    const failed = await failureOf(await open(adapter(), { target: GROK_TARGET, instruction: 'fail' }, await ctx()));
     expect(failed).toMatchObject({ phase: 'run', retry: 'non-retryable', message: 'Internal error' });
-    const limited = await failureOf(await open(adapter(), { instruction: 'rate-limited' }, await ctx()));
+    const limited = await failureOf(await open(adapter(), { target: GROK_TARGET, instruction: 'rate-limited' }, await ctx()));
     expect(limited).toMatchObject({ phase: 'run', retry: 'retryable' });
   });
 
   it('passes the vendored OAR failure class through, with the reason unchanged (#869)', async () => {
     const classOf = async (instruction: string) => {
-      const failed = await failureOf(await open(adapter(), { instruction }, await ctx()));
+      const failed = await failureOf(await open(adapter(), { target: GROK_TARGET, instruction }, await ctx()));
       return { failure: (failed as RuntimeExecutionFailure).failure, message: (failed as RuntimeExecutionFailure).message };
     };
     // -32003 covers every 429, a usage limit included: Grok cannot show quota.
@@ -413,25 +415,25 @@ describe('GrokAdapter sessions', () => {
     // which is not structured evidence.
     expect(await classOf('fail')).toEqual({ failure: { class: 'unknown' }, message: 'Internal error' });
     expect(await classOf('retry-failed:network')).toEqual({ failure: { class: 'unknown' }, message: 'Internal error' });
-    expect((await failureOf(await open(adapter(), { instruction: 'exit' }, await ctx())) as RuntimeExecutionFailure).failure).toEqual({ class: 'runtime_exited' });
-    const refusedLogin = await startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_AUTH: 'refuse' })).catch(error => error);
+    expect((await failureOf(await open(adapter(), { target: GROK_TARGET, instruction: 'exit' }, await ctx())) as RuntimeExecutionFailure).failure).toEqual({ class: 'runtime_exited' });
+    const refusedLogin = await startPreparedOperation(adapter(), { target: GROK_TARGET, instruction: 'x' }, await ctx({ FAKE_ACP_AUTH: 'refuse' })).catch(error => error);
     expect(refusedLogin).toMatchObject({ phase: 'start', failure: { class: 'auth' } });
-    const refusedModel = await startPreparedOperation(adapter({ model: 'no-such-model' }), { instruction: 'x' }, await ctx()).catch(error => error);
+    const refusedModel = await startPreparedOperation(adapter({ model: 'no-such-model' }), { target: GROK_TARGET, instruction: 'x' }, await ctx()).catch(error => error);
     expect(refusedModel).toMatchObject({ phase: 'start', failure: { class: 'model_unavailable' } });
   });
 
   it('marks an agent exit during the open runtime_exited, and an open it did not end unknown (#869)', async () => {
-    await expect(startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_INITIALIZE: 'exit' }))).rejects.toMatchObject({
+    await expect(startPreparedOperation(adapter(), { target: GROK_TARGET, instruction: 'x' }, await ctx({ FAKE_ACP_INITIALIZE: 'exit' }))).rejects.toMatchObject({
       phase: 'start', failure: { class: 'runtime_exited' },
     });
     // The kernel kills the agent itself after the refused initialize.
-    await expect(startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_INITIALIZE: 'error' }))).rejects.toMatchObject({
+    await expect(startPreparedOperation(adapter(), { target: GROK_TARGET, instruction: 'x' }, await ctx({ FAKE_ACP_INITIALIZE: 'error' }))).rejects.toMatchObject({
       phase: 'start', message: 'Internal error', failure: { class: 'unknown' },
     });
   });
 
   it('sends unknown for a class OAR took from error text, keeping the retry it derives (#869)', async () => {
-    const failed = await failureOf(await open(adapter(), { instruction: 'fail-text:429 rate limit' }, await ctx()));
+    const failed = await failureOf(await open(adapter(), { target: GROK_TARGET, instruction: 'fail-text:429 rate limit' }, await ctx()));
     expect(failed).toBeInstanceOf(RuntimeExecutionFailure);
     expect(failed).toMatchObject({ phase: 'run', retry: 'retryable', message: 'Internal error: 429 rate limit' });
     expect((failed as RuntimeExecutionFailure).failure).toEqual({ class: 'unknown' });
@@ -440,7 +442,7 @@ describe('GrokAdapter sessions', () => {
   it('elides the oldest native payloads past the retention limit and completes the turn (#1932)', async () => {
     const resources = await ctx();
     // 'huge' streams 256 KiB of text: the open fits the limit, the turn does not.
-    const s = await open(adapter({ maxRetainedBytes: 64 * 1024 }), { instruction: 'huge' }, resources);
+    const s = await open(adapter({ maxRetainedBytes: 64 * 1024 }), { target: GROK_TARGET, instruction: 'huge' }, resources);
     const events = await turn(s);
     expect(events.at(-1)).toEqual({ type: 'turn_end' });
     expect(events.some(e => e.type === 'progress' && e.text.length === 256 * 1024)).toBe(true);
@@ -450,7 +452,7 @@ describe('GrokAdapter sessions', () => {
 
   it('a failing record consumer fails the session although the kernel swallows observer errors', async () => {
     const resources = await ctx();
-    const s = await open(adapter(), { instruction: 'hold-silent' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'hold-silent' }, resources);
     await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'prompt')).toBe(true));
     vi.spyOn(GrokProjection.prototype, 'consume').mockImplementation(() => { throw new Error('projection failed'); });
     // The cancel request is the next record: the failing consumer sees it.
@@ -462,13 +464,13 @@ describe('GrokAdapter sessions', () => {
   });
 
   it('fails as infrastructure when the agent exits on its own', async () => {
-    const failure = await failureOf(await open(adapter(), { instruction: 'exit' }, await ctx()));
+    const failure = await failureOf(await open(adapter(), { target: GROK_TARGET, instruction: 'exit' }, await ctx()));
     expect(failure).toMatchObject({ message: 'grok agent exited' });
   });
 
   it('reports a failed terminal reap from close, even after the agent failed, and retries it', async () => {
     const resources = await ctx();
-    const s = await open(adapter(), { instruction: 'terminal-hang' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'terminal-hang' }, resources);
     await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'terminal')).toBe(true));
     const real = processTree.disposeOwnedProcessTree;
     let failed = false;
@@ -488,7 +490,7 @@ describe('GrokAdapter sessions', () => {
 
   it('closes idempotently during an active turn and ends the agent process', async () => {
     const resources = await ctx();
-    const s = await open(adapter(), { instruction: 'hold-silent' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'hold-silent' }, resources);
     await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'prompt')).toBe(true));
     await Promise.all([s.close(), s.close()]);
     await s.close();
@@ -513,7 +515,7 @@ describe('GrokAdapter agentUserMcpServers (#935)', () => {
 
   it('inspects with the agent cwd and env, then starts the agent with the three variables', async () => {
     const resources = await agentCtx();
-    const s = await open(adapter({ agentUserMcpServers: 'excluded', compatInstructions: 'disabled' }), { instruction: 'hello' }, resources);
+    const s = await open(adapter({ agentUserMcpServers: 'excluded', compatInstructions: 'disabled' }), { target: GROK_TARGET, instruction: 'hello' }, resources);
     expect(await turn(s)).toEqual([{ type: 'progress', text: 'echo:hello' }, usage, { type: 'turn_end' }]);
     expect(kinds(resources.log)).toEqual(['inspect', 'start']);
     const [inspect, started] = [facts(resources.log).find(fact => fact.kind === 'inspect')!, facts(resources.log).find(fact => fact.kind === 'start')!];
@@ -531,7 +533,7 @@ describe('GrokAdapter agentUserMcpServers (#935)', () => {
       calls.push({ command, args, cwd: options.cwd, env: options.env });
       return spawn(command, args, options);
     }) as typeof spawn;
-    await turn(await open(adapter({ agentUserMcpServers: 'excluded', spawnFn }), { instruction: 'hello' }, resources));
+    await turn(await open(adapter({ agentUserMcpServers: 'excluded', spawnFn }), { target: GROK_TARGET, instruction: 'hello' }, resources));
     const [inspect, agent] = [calls.find(call => call.args[0] === 'inspect')!, calls.find(call => call.args[0] === 'agent')!];
     expect(calls.indexOf(inspect)).toBeLessThan(calls.indexOf(agent));
     expect(inspect).toEqual({ command: agent.command, args: ['inspect', '--json'], cwd: agent.cwd, env: agent.env });
@@ -551,7 +553,7 @@ describe('GrokAdapter agentUserMcpServers (#935)', () => {
       ['fail', 'grok Agent user MCP server exclusion refused: grok inspect failed'],
     ] as const) {
       const resources = await agentCtx({ FAKE_ACP_INSPECT: inspect });
-      const error = await startPreparedOperation(adapter({ agentUserMcpServers: 'excluded' }), { instruction: 'hello' }, resources).catch(e => e);
+      const error = await startPreparedOperation(adapter({ agentUserMcpServers: 'excluded' }), { target: GROK_TARGET, instruction: 'hello' }, resources).catch(e => e);
       expect(error).toBeInstanceOf(RuntimeExecutionFailure);
       expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable', message: reason, failure: { class: 'unknown' } });
       expect(kinds(resources.log)).toEqual(['inspect']);
@@ -561,7 +563,7 @@ describe('GrokAdapter agentUserMcpServers (#935)', () => {
   it('changes nothing under inherit or for a task that is not an Agent task', async () => {
     for (const [options, agent] of [[{}, true], [{ agentUserMcpServers: 'inherit' as const, agentUserContext: 'inherit' as const }, true], [{ agentUserMcpServers: 'excluded' as const, agentUserContext: 'excluded' as const }, false]] as const) {
       const resources = agent ? await agentCtx() : await ctx();
-      await turn(await open(adapter(options), { instruction: 'hello' }, resources));
+      await turn(await open(adapter(options), { target: GROK_TARGET, instruction: 'hello' }, resources));
       expect(kinds(resources.log)).toEqual(['start']);
       expect(Object.keys(facts(resources.log).find(fact => fact.kind === 'start')!.env).filter(name => name.startsWith('GROK_'))).toEqual([]);
     }
@@ -597,7 +599,7 @@ describe('GrokAdapter agentUserContext (#2239)', () => {
       if (args[0] === 'agent') seen = readdirSync(String(options.env!.GROK_HOME)).sort().map(name => `${name}->${readlinkSync(path.join(String(options.env!.GROK_HOME), name))}`);
       return spawn(command, args, options);
     }) as typeof spawn;
-    await turn(await open(adapter({ agentUserContext: 'excluded', spawnFn }), { instruction: 'hello' }, resources));
+    await turn(await open(adapter({ agentUserContext: 'excluded', spawnFn }), { target: GROK_TARGET, instruction: 'hello' }, resources));
     const user = await fs.realpath(resources.user);
     expect(seen).toEqual([
       `auth.json->${path.join(user, 'auth.json')}`, `config.toml->${path.join(user, 'config.toml')}`,
@@ -617,7 +619,7 @@ describe('GrokAdapter agentUserContext (#2239)', () => {
     ['the user GROK_HOME has no login and no API key', {}, false, 'the user GROK_HOME has no auth.json and XAI_API_KEY is not set'],
   ] as const)('fails before the agent starts when %s', async (_, env, login, reason) => {
     const resources = await agentCtx(env, login);
-    const error = await startPreparedOperation(adapter({ agentUserContext: 'excluded' }), { instruction: 'hello' }, resources).catch(e => e);
+    const error = await startPreparedOperation(adapter({ agentUserContext: 'excluded' }), { target: GROK_TARGET, instruction: 'hello' }, resources).catch(e => e);
     expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable', message: `${PREFIX}: ${reason}` });
     expect(existsSync(resources.log) && facts(resources.log).some(fact => fact.kind === 'start')).toBe(false);
   });
@@ -646,7 +648,7 @@ describe('GrokAdapter agentUserContext (#2239)', () => {
 
   it('keeps a login Grok wrote over the link in the execution scratch, and refuses every Grok start until it is gone', async () => {
     const resources = await agentCtx(), owner = testScratchOwner(), first = await owner.create();
-    const s = await open(adapter({ agentUserContext: 'excluded' }), { instruction: 'hello' }, { ...resources, scratch: first });
+    const s = await open(adapter({ agentUserContext: 'excluded' }), { target: GROK_TARGET, instruction: 'hello' }, { ...resources, scratch: first });
     await turn(s);
     // A refresh written by rename leaves a regular file where the link was.
     const auth = path.join(first.sdkDir, 'grok-home', 'auth.json');
@@ -658,10 +660,10 @@ describe('GrokAdapter agentUserContext (#2239)', () => {
     expect((await fs.stat(path.dirname(auth))).mode & 0o777).toBe(0o700);
     expect(await fs.readFile(path.join(resources.user, 'auth.json'), 'utf8')).toBe('{}');
     // Any Grok task on the device refuses, here one that inherits the user context.
-    const refused = await startPreparedOperation(adapter(), { instruction: 'hello' }, { ...resources, scratch: await owner.create() }).catch(e => e);
+    const refused = await startPreparedOperation(adapter(), { target: GROK_TARGET, instruction: 'hello' }, { ...resources, scratch: await owner.create() }).catch(e => e);
     expect(refused).toMatchObject({ phase: 'start', retry: 'non-retryable', message: `grok start refused: a login Grok wrote over the linked auth.json is held at ${auth}; ${HELD_LOGIN_RESOLUTION}; until then every Grok task on this device refuses` });
     await fs.rm(auth);
-    await turn(await open(adapter(), { instruction: 'hello' }, { ...resources, scratch: await owner.create() }));
+    await turn(await open(adapter(), { target: GROK_TARGET, instruction: 'hello' }, { ...resources, scratch: await owner.create() }));
     await expect(s.close()).resolves.toBeUndefined();
     expect(existsSync(first.sdkDir)).toBe(false);
   });
@@ -670,7 +672,7 @@ describe('GrokAdapter agentUserContext (#2239)', () => {
     const resources = await agentCtx();
     await fs.mkdir(path.join(resources.agentHome, '.byok'), { recursive: true });
     await fs.symlink(resources.user, path.join(resources.agentHome, '.byok', 'grok'), 'dir');
-    const error = await startPreparedOperation(adapter({ agentUserContext: 'excluded' }), { instruction: 'hello' }, resources).catch(e => e);
+    const error = await startPreparedOperation(adapter({ agentUserContext: 'excluded' }), { target: GROK_TARGET, instruction: 'hello' }, resources).catch(e => e);
     expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable', message: `${PREFIX}: the Agent home session store is not a real directory inside the Agent home` });
   });
 });
@@ -705,7 +707,7 @@ describe('AgyAdapter', () => {
     vi.stubEnv('GOOGLE_GEMINI_BASE_URL', 'https://elsewhere.test');
     vi.stubEnv('AGY_ADC_AUTH', '1');
     const resources = await agyCtx({ GEMINI_HOME: '/user/.gemini', XDG_CONFIG_HOME: '/user/.config', XDG_RUNTIME_DIR: '/run/user/1', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1/bus', APPDATA: '/user/roaming' });
-    const s = await open(agy(home, { model: 'gemini-3.8-flash' }), { instruction: 'hello' }, resources);
+    const s = await open(agy(home, { model: 'gemini-3.8-flash' }), { target: GROK_TARGET, instruction: 'hello' }, resources);
     expect(await turn(s)).toEqual([{ type: 'progress', text: 'echo:hello' }, { type: 'turn_end' }]);
     const start = facts(resources.log).find(fact => fact.kind === 'start')!;
     expect(start.argv).toEqual(['acp', '--dangerously-skip-permissions', '--process-per-session', '--gemini-dir', path.join(home, '.gemini'), '--disable-telemetry']);
@@ -727,7 +729,7 @@ describe('AgyAdapter', () => {
 
   it('projects native tool names, the classified command and path keys, and an exact MCP identity', async () => {
     const home = await agyVersion('1.5.1');
-    const s = await open(agy(home), { instruction: 'agy-tools' }, { ...await agyCtx(), mcpToolsetTools: { 'market.feed': mcpServer('market.feed', 'quote') } });
+    const s = await open(agy(home), { target: GROK_TARGET, instruction: 'agy-tools' }, { ...await agyCtx(), mcpToolsetTools: { 'market.feed': mcpServer('market.feed', 'quote') } });
     const events = await turn(s);
     expect(events.find(event => event.type === 'tool_use' && event.tool === 'run_command')).toMatchObject({ input: { command: 'rm -rf build', CommandLine: 'rm -rf build' } });
     const tool = (id: string) => events.find(event => event.type === 'tool_use' && event.toolCallId === id) as Extract<AgentEvent, { type: 'tool_use' }>;
@@ -749,17 +751,17 @@ describe('AgyAdapter', () => {
 
   it('refuses an MCP entry carrying env as a non-retryable authority failure', async () => {
     const home = await agyVersion('1.5.1');
-    const failure = await open(agy(home), { instruction: 'hello' }, { ...await agyCtx(), mcpServers: { host: { command: 'server', env: { TOKEN: 'x' } } } }).catch(error => error);
+    const failure = await open(agy(home), { target: GROK_TARGET, instruction: 'hello' }, { ...await agyCtx(), mcpServers: { host: { command: 'server', env: { TOKEN: 'x' } } } }).catch(error => error);
     expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable' });
     expect(String(failure.message)).toContain('it attaches no entry with env or headers');
   });
 
   it('resumes only on a listed saved cwd', async () => {
     const home = await agyVersion('1.5.1');
-    const unlisted = await open(agy(home), { instruction: 'again', sessionRef: 'fake-grok-session' }, await agyCtx()).catch(error => error);
+    const unlisted = await open(agy(home), { target: GROK_TARGET, instruction: 'again', sessionRef: 'fake-grok-session' }, await agyCtx()).catch(error => error);
     expect(unlisted).toMatchObject({ phase: 'start', retry: 'non-retryable' });
     const resources = await agyCtx();
-    const s = await open(agy(home), { instruction: 'again', sessionRef: 'fake-grok-session' }, { ...resources, env: { ...resources.env, FAKE_ACP_LISTED_CWD: resources.workspaceDir } });
+    const s = await open(agy(home), { target: GROK_TARGET, instruction: 'again', sessionRef: 'fake-grok-session' }, { ...resources, env: { ...resources.env, FAKE_ACP_LISTED_CWD: resources.workspaceDir } });
     expect(s.sessionRef).toBe('fake-grok-session');
     expect(facts(resources.log).find(fact => fact.kind === 'open')).toMatchObject({ method: 'session/resume' });
   });
@@ -771,32 +773,32 @@ describe('AgyAdapter', () => {
     const run = path.join(agentHome, '.byok', 'runs', 'run-1');
     await fs.mkdir(run, { recursive: true });
     const reader = await agyCtx();
-    await turn(await open(agy(home), { instruction: 'again', sessionRef: 'fake-grok-session' }, {
+    await turn(await open(agy(home), { target: GROK_TARGET, instruction: 'again', sessionRef: 'fake-grok-session' }, {
       ...reader, workspaceDir: run, reader: { canonicalHome: agentHome }, env: { ...reader.env, FAKE_ACP_LISTED_CWD: run },
     }));
     expect(facts(reader.log).find(fact => fact.kind === 'open')?.params._meta).toEqual({ antigravity: { systemPrompt: { append: 'Persona rules' } } });
     const writer = await agyCtx();
-    await turn(await open(agy(home), { instruction: 'hello' }, { ...writer, workspaceDir: agentHome, agentHome }));
+    await turn(await open(agy(home), { target: GROK_TARGET, instruction: 'hello' }, { ...writer, workspaceDir: agentHome, agentHome }));
     expect(facts(writer.log).find(fact => fact.kind === 'open')?.params._meta).toBeUndefined();
   });
 
   it('fails a task without a key as authority, and one whose proxy cannot start as retryable, before agy runs', async () => {
     const home = await agyVersion('1.5.1');
     const resources = await ctx();
-    expect(await open(agy(home), { instruction: 'hello' }, resources).catch(error => error)).toMatchObject({ phase: 'start', retry: 'non-retryable' });
+    expect(await open(agy(home), { target: GROK_TARGET, instruction: 'hello' }, resources).catch(error => error)).toMatchObject({ phase: 'start', retry: 'non-retryable' });
     const refused = await agyCtx();
     const listen = vi.spyOn(Server.prototype, 'listen').mockImplementationOnce(function (this: Server) {
       process.nextTick(() => this.emit('error', new Error('no port')));
       return this;
     });
-    expect(await open(agy(home), { instruction: 'hello' }, refused).catch(error => error)).toMatchObject({ phase: 'start', retry: 'retryable' });
+    expect(await open(agy(home), { target: GROK_TARGET, instruction: 'hello' }, refused).catch(error => error)).toMatchObject({ phase: 'start', retry: 'retryable' });
     listen.mockRestore();
     expect(existsSync(resources.log) || existsSync(refused.log)).toBe(false);
   });
 
   it('closes the proxy when agy exits', async () => {
     const resources = await agyCtx();
-    await turn(await open(agy(await agyVersion('1.5.1')), { instruction: 'hello' }, resources));
+    await turn(await open(agy(await agyVersion('1.5.1')), { target: GROK_TARGET, instruction: 'hello' }, resources));
     const start = facts(resources.log).find(fact => fact.kind === 'start')!;
     await expect(fetch(start.env.GOOGLE_GEMINI_BASE_URL)).rejects.toThrow();
   });
@@ -805,7 +807,7 @@ describe('AgyAdapter', () => {
     const home = await agyVersion('1.5.1');
     const observe = vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(() => { throw new Error('Process table ps: timeout after 5000 ms'); });
     const resources = await agyCtx();
-    const s = await open(agy(home), { instruction: 'hello' }, resources);
+    const s = await open(agy(home), { target: GROK_TARGET, instruction: 'hello' }, resources);
     expect(await failureOf(s)).toMatchObject({ message: 'Process table ps: timeout after 5000 ms' });
     expect(facts(resources.log).some(fact => fact.kind === 'close')).toBe(true);
     const start = facts(resources.log).find(fact => fact.kind === 'start')!;
@@ -830,28 +832,28 @@ describe('AgyAdapter', () => {
     const home = await agyVersion('1.5.1');
     const resources = await agyCtx();
     const pidFile = path.join(resources.workspaceDir, 'daemon.pid');
-    const s = await open(agy(home), { instruction: `agy-daemon:${pidFile}` }, resources);
+    const s = await open(agy(home), { target: GROK_TARGET, instruction: `agy-daemon:${pidFile}` }, resources);
     for await (const event of s.events) if (event.type === 'turn_end') break;
     const pid = Number(readFileSync(pidFile, 'utf8'));
     await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
-    await expect(s.followUp({ instruction: 'x' })).rejects.toBeInstanceOf(PolicyUnsupportedError);
+    await expect(s.followUp({ target: GROK_TARGET, instruction: 'x' })).rejects.toBeInstanceOf(PolicyUnsupportedError);
   });
 
   it('answers a writer with allow_once, and fails a reader the model never answered after a reject_once', async () => {
     const home = await agyVersion('1.5.1');
     const outside = path.join(os.tmpdir(), 'byok-agy-outside.txt');
     const writer = await agyCtx();
-    await turn(await open(agy(home), { instruction: `agy-ask:edit:${outside}` }, writer));
+    await turn(await open(agy(home), { target: GROK_TARGET, instruction: `agy-ask:edit:${outside}` }, writer));
     expect(facts(writer.log).find(fact => fact.kind === 'permission')?.answer).toEqual({ outcome: { outcome: 'selected', optionId: 'allow' } });
     const agentHome = await fs.realpath(await tempDir('byok-agy-home-'));
     const run = path.join(agentHome, '.byok', 'runs', 'adapter-unit-test');
     await fs.mkdir(run, { recursive: true });
     const reader = (resources: Awaited<ReturnType<typeof ctx>>) => ({ ...resources, workspaceDir: run, reader: { canonicalHome: agentHome } });
     const read = await agyCtx();
-    await turn(await open(agy(home), { instruction: `agy-ask:read:${path.join(agentHome, 'MEMORY.md')}` }, reader(read)));
+    await turn(await open(agy(home), { target: GROK_TARGET, instruction: `agy-ask:read:${path.join(agentHome, 'MEMORY.md')}` }, reader(read)));
     expect(facts(read.log).find(fact => fact.kind === 'permission')?.answer).toEqual({ outcome: { outcome: 'selected', optionId: 'allow' } });
     const write = await agyCtx();
-    const failure = await failureOf(await open(agy(home), { instruction: `agy-ask:edit:${path.join(agentHome, 'MEMORY.md')}` }, reader(write)));
+    const failure = await failureOf(await open(agy(home), { target: GROK_TARGET, instruction: `agy-ask:edit:${path.join(agentHome, 'MEMORY.md')}` }, reader(write)));
     expect(failure).toMatchObject({ retry: 'non-retryable', message: expect.stringContaining('refused write') });
     expect(facts(write.log).find(fact => fact.kind === 'permission')?.answer).toEqual({ outcome: { outcome: 'selected', optionId: 'deny' } });
   });
@@ -859,7 +861,7 @@ describe('AgyAdapter', () => {
   it('steers the active turn through ACP', async () => {
     const home = await agyVersion('1.5.1');
     const resources = await agyCtx();
-    const s = await open(agy(home), { instruction: 'steer-first' }, resources);
+    const s = await open(agy(home), { target: GROK_TARGET, instruction: 'steer-first' }, resources);
     await s.steer('steer-second');
     await turn(s);
     expect(facts(resources.log).filter(fact => fact.kind === 'prompt').map(fact => fact.text)).toContain('steer-second');
@@ -868,7 +870,7 @@ describe('AgyAdapter', () => {
   it('refuses an input past agy\'s 185,000-byte bound before the call, with OAR\'s input_too_large class', async () => {
     const resources = await agyCtx();
     const instruction = 'x'.repeat(185_001);
-    await expect(startPreparedOperation(agy(await agyVersion('1.5.1')), { instruction }, resources)).rejects.toMatchObject({
+    await expect(startPreparedOperation(agy(await agyVersion('1.5.1')), { target: GROK_TARGET, instruction }, resources)).rejects.toMatchObject({
       phase: 'start', retry: 'non-retryable', failure: { class: 'input_too_large' },
       message: "input is 185001 bytes, over OAR's 185000-byte bound for one input to this runtime, which cuts a longer one without saying so",
     });
@@ -876,7 +878,7 @@ describe('AgyAdapter', () => {
   });
 
   it('refuses a steer after the turn ends as an infrastructure failure', async () => {
-    const s = await open(agy(await agyVersion('1.5.1')), { instruction: 'hello' }, await agyCtx());
+    const s = await open(agy(await agyVersion('1.5.1')), { target: GROK_TARGET, instruction: 'hello' }, await agyCtx());
     await turn(s);
     await expect(s.steer('late')).rejects.toMatchObject({ message: 'runtime exited' });
   });

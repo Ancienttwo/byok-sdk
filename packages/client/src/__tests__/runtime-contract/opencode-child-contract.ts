@@ -11,6 +11,8 @@ import { egressCheck, fileEgress, skip, type RuntimeCases } from './contract';
 import type { openCodeContract } from './opencode-contract';
 import { startLoopbackProvider, type ProviderRequest } from './loopback';
 
+const OPENCODE_TARGET = { lane: 'harness', harnessId: 'opencode' } as const;
+
 const CHILD_TEXT = 'BYOK_CHILD_TEXT_2182';
 const ROOT_TEXT = 'BYOK_ROOT_DONE_2182';
 const READ_PROMPT = 'BYOK_CHILD_READ_2182';
@@ -129,7 +131,7 @@ export function openCodeChildCases(contract: ReturnType<typeof openCodeContract>
               return child;
             }) as typeof spawn;
             const adapter = new OpenCodeAdapter({ resolveBin: () => ({ command: contract.target.bin, source: 'env' }), models: ['loopback/fake'], spawnFn });
-            session = await startPreparedOperation(adapter, { instruction: 'BYOK_ROOT_2182' }, { workspaceDir: workspace, agentHome: workspace, env: { ...env, ...recorder.env } });
+            session = await startPreparedOperation(adapter, { target: OPENCODE_TARGET, instruction: 'BYOK_ROOT_2182' }, { workspaceDir: workspace, agentHome: workspace, env: { ...env, ...recorder.env } });
             for await (const event of session.events) events.push(event);
             await session.close();
             const owned = new Set([...spawned, ...beforeDispose.map(row => row.pid)]);

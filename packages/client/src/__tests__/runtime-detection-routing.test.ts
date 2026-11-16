@@ -76,7 +76,7 @@ it.each(['explicit', 'automatic'] as const)('real TaskRunner %s selection declin
   const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },  storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter]); daemons.push(daemon);
   await daemon.pair('pairing-code'); await daemon.start();
   const before = vi.mocked(adapter.detect).mock.calls.length;
-  server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', ...(mode === 'explicit' ? { runtime: 'codex' as const } : {}) },
+  server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', target: mode === 'explicit' ? { lane: 'runtime', runtimeId: 'codex' } : { lane: 'auto' } },
     { taskId: `refuse-${mode}`, seq: server.nextSeq() }));
   const declined = await server.waitFor(e => e.type === 'task.decline');
   expect(declined.payload).toMatchObject({
@@ -106,7 +106,7 @@ it('maps every explicit detection failure to its typed cause and retryable defau
   for (const [detection, cause, retryable] of cases) {
     adapter.detect = async () => detection;
     const taskId = `cause-${cause}`;
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', runtime: 'codex' }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', target: { lane: 'runtime', runtimeId: 'codex' } }, { taskId, seq: server.nextSeq() }));
     const declined = await server.waitFor(e => e.type === 'task.decline' && e.task_id === taskId);
     expect(declined.payload).toMatchObject({ code: 'runtime_unavailable', retryable, runtimeUnavailable: { cause } });
     if (cause === 'environment_unavailable') {
@@ -131,7 +131,7 @@ it('types allowlist and unknown-runtime declines without changing their text or 
   ] as const;
   for (const [requested, cause, text] of cases) {
     const taskId = `policy-${cause}`;
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', runtime: requested }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', target: { lane: 'runtime', runtimeId: requested } }, { taskId, seq: server.nextSeq() }));
     const declined = await server.waitFor(e => e.type === 'task.decline' && e.task_id === taskId);
     expect(declined.payload).toMatchObject({ code: 'runtime_unavailable', retryable: false, runtimeUnavailable: { cause } });
     expect((declined.payload as { reason?: string }).reason).toContain(text);
@@ -144,7 +144,7 @@ it('reports none_available when automatic selection exhausts every candidate', a
   const adapter = new StubRuntimeAdapter('codex', { kind: 'not-found' });
   const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },  storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter]); daemons.push(daemon);
   await daemon.pair('pairing-code'); await daemon.start();
-  server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start' }, { taskId: 'auto-none', seq: server.nextSeq() }));
+  server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', target: { lane: 'auto' } }, { taskId: 'auto-none', seq: server.nextSeq() }));
   const declined = await server.waitFor(e => e.type === 'task.decline' && e.task_id === 'auto-none');
   expect(declined.payload).toMatchObject({ code: 'runtime_unavailable', retryable: true, runtimeUnavailable: { cause: 'none_available' } });
   expect(adapter.startCalls).toHaveLength(0);

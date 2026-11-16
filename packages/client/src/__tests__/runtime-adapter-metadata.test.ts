@@ -228,7 +228,7 @@ describe('daemon detection authority', () => {
     expect(detected.runtimes[0]).toMatchObject({ id: 'claude', outcome: 'refused', reason: 'platform_unsupported' });
     expect(detected.runtimes[1]).toMatchObject({ id: 'codex', version: 'codex-cli 9.9.9', qualifiedVersion: '0.160.0', authPresent: true });
 
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'no start', runtime: 'claude', ...FRESH_OFFER }, { taskId: 'platform-refused', seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'no start', target: { lane: 'runtime', runtimeId: 'claude' }, ...FRESH_OFFER }, { taskId: 'platform-refused', seq: server.nextSeq() }));
     const declined = await server.waitFor(e => e.type === 'task.decline');
     if (declined.type !== 'task.decline' || declined.payload.sealed !== undefined) throw new Error('wrong envelope');
     expect(declined.payload.reason).toBe(`platform_unsupported: runtime "claude" does not support ${process.platform}`);

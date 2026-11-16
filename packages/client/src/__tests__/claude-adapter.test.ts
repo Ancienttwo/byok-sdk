@@ -18,6 +18,8 @@ import { testExecutionScratch } from './fixtures/execution-scratch';
 import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
 import type { RawEvent } from '../../vendor/oar/4eb5919/contracts/session';
 
+const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
+
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
 function fakeClaudeAdapter(): ClaudeAdapter {
@@ -48,7 +50,7 @@ async function startAdapter(adapter: ClaudeAdapter, task: RuntimeTaskInput, reso
   return startPreparedOperation(adapter, task, resources);
 }
 
-const baseTask: RuntimeTaskInput = {
+const baseTask: RuntimeTaskInput = { target: CLAUDE_TARGET,
   instruction: 'say hi',
 };
 
@@ -180,10 +182,9 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const session = await startAdapter(adapter,
       {
         ...baseTask,
-        dispatchSelection: {
+        target: {
           lane: 'subscription',
           runtimeId: 'claude',
-          providerId: null,
           modelId: 'opus',
         },
       },
@@ -194,10 +195,9 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(calls[0]?.args[calls[0].args.indexOf('--model') + 1]).toBe('opus');
     await expect(session.followUp({
       instruction: 'switch model',
-      dispatchSelection: {
+      target: {
         lane: 'subscription',
         runtimeId: 'claude',
-        providerId: null,
         modelId: 'sonnet',
       },
     })).rejects.toThrow(/persistent session cannot change model/);
@@ -471,7 +471,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(firstTurn[3]).toEqual({ type: 'usage', inputTokens: 15, cachedInputTokens: 0, outputTokens: 20 });
     expect(firstTurn[4]).toEqual({ type: 'turn_end' });
 
-    await session.followUp({ instruction: 'say bye' });
+    await session.followUp({ target: CLAUDE_TARGET, instruction: 'say bye' });
 
     const secondTurn = await takeEvents(session, 5);
     expect(secondTurn).toEqual([
@@ -507,7 +507,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       written();
     });
     let settled = false;
-    const followUp = session.followUp({ instruction: 'next' });
+    const followUp = session.followUp({ target: CLAUDE_TARGET, instruction: 'next' });
     void followUp.then(() => { settled = true; }, () => { settled = true; });
     await writing;
     await new Promise<void>(resolve => setImmediate(resolve));
@@ -619,7 +619,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(first).toBeInstanceOf(RuntimeExecutionFailure);
     expect(first).toMatchObject({ message: 'claude reported terminal task failure', failure: { class: 'quota', resetsAt: new Date(resetsAt * 1000).toISOString() } });
 
-    await session.followUp({ instruction: 'again' });
+    await session.followUp({ target: CLAUDE_TARGET, instruction: 'again' });
     const second = await failedTurn();
     expect((second as RuntimeExecutionFailure).failure).toEqual({ class: 'model_unavailable' });
   });
@@ -648,7 +648,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await takeTurn(session);
     // Claude's own turn has started: its system/init is the second one.
     await vi.waitFor(() => expect(records().filter(record => record.kind === 'frame' && (record.body.native as { subtype?: unknown } | null)?.subtype === 'init')).toHaveLength(2));
-    await expect(session.followUp({ instruction: 'next' })).resolves.toBeUndefined();
+    await expect(session.followUp({ target: CLAUDE_TARGET, instruction: 'next' })).resolves.toBeUndefined();
     expect(records().filter(record => record.kind === 'request' && record.body.kind === 'queue')).toHaveLength(1);
     await fs.writeFile(gate, '');
     expect((await takeTurn(session)).filter(event => event.type === 'progress')).toEqual([{ type: 'progress', text: 'own turn' }]);
@@ -666,7 +666,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     openSessions.push(session);
     await takeTurn(session);
     await new Promise(resolve => setTimeout(resolve, 100));
-    await session.followUp({ instruction: 'next' });
+    await session.followUp({ target: CLAUDE_TARGET, instruction: 'next' });
     await session.interrupt();
     await new Promise(resolve => setTimeout(resolve, 500));
     expect((await fs.readFile(receipt, 'utf8')).split('\n')).not.toContain('next');
@@ -680,7 +680,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await takeEvents(session, 5); // drain the full turn, including the trailing usage + turn_end
 
     await expect(
-      session.followUp({ instruction: { blobRef: { blobId: 'b', contentHash: 'sha256:x', size: 1, contentType: 'text/plain' } } }),
+      session.followUp({ target: CLAUDE_TARGET, instruction: { blobRef: { blobId: 'b', contentHash: 'sha256:x', size: 1, contentType: 'text/plain' } } }),
     ).rejects.toThrow(/only supports string instructions/);
   });
 
@@ -975,7 +975,7 @@ describe('ClaudeAdapter agentSessionPersistence', () => {
 
   async function runTwoTurns(session: Session): Promise<void> {
     await takeTurn(session);
-    await session.followUp({ instruction: 'say bye' });
+    await session.followUp({ target: CLAUDE_TARGET, instruction: 'say bye' });
     await takeTurn(session);
     await session.close();
   }

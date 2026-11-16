@@ -9,6 +9,8 @@ import { PiAdapter } from '../pi-adapter';
 import { startPreparedOperation } from '../../../__tests__/fixtures/prepared-operation';
 import type { Session } from '../../../types';
 
+const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
+
 const snapshot = (active: boolean) => ({ asyncSnapshot: {
   kind: 'pi-subagents.async-status-snapshot', version: 1, omitted: { runs: 0, byteLimitExceeded: false },
   runs: active ? [{ id: 'run', kind: 'subagent', state: 'running' }] : [],
@@ -219,7 +221,7 @@ it('soft interrupt stops and awaits a background child, then preserves the paren
   let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
     const adapter = new PiAdapter({ resolveBin: () => ({ command: path.resolve(import.meta.dirname, '../../../../dist/bin/byok-pi-rpc.js'), source: 'package' }) });
-    session = await startPreparedOperation(adapter, { instruction: 'Delegate a background child, then finish the parent response.' }, {
+    session = await startPreparedOperation(adapter, { target: PI_TARGET, instruction: 'Delegate a background child, then finish the parent response.' }, {
       workspaceDir: cwd, agentHome: cwd,
       env: { HOME: root, PATH: process.env.PATH!, PI_CODING_AGENT_DIR: agentDir, PI_SUBAGENTS_TEMP_ROOT: path.join(root, 'subagents') },
     });
@@ -245,7 +247,7 @@ it('soft interrupt stops and awaits a background child, then preserves the paren
     expect(childClosed).toBe(true);
     expect(childRequests).toBe(1);
     await expect(events).resolves.toMatchObject({ message: 'pi run aborted before completion' });
-    await session.followUp({ instruction: 'Complete a normal parent response after the interrupt.' });
+    await session.followUp({ target: PI_TARGET, instruction: 'Complete a normal parent response after the interrupt.' });
     const types: string[] = [];
     for await (const event of session.events) { types.push(event.type); if (event.type === 'turn_end') break; }
     expect(types.at(-1)).toBe('turn_end');

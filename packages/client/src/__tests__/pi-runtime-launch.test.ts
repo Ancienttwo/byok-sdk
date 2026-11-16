@@ -9,6 +9,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { piLaunchCommand, resolvePiRuntimeLaunch, type PiRuntimeLaunchResources } from '../adapters/pi/runtime-launch';
 
+const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
+
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map((root) => fs.rm(root,{recursive:true,force:true}))); });
 async function fixture() {
@@ -32,7 +34,7 @@ describe('client runtime launch resources', () => {
     const f = await fixture();
     const resolveBin = vi.fn(() => ({ command: process.execPath, source: 'env' as const }));
     const adapter = new PiAdapter({resolveBin});
-    const prepared = await adapter.prepare({offer:{instruction:'Never sent'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
+    const prepared = await adapter.prepare({offer:{ target: PI_TARGET, instruction:'Never sent'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
     expect(prepared.kind).toBe('prepared');
     expect(resolveBin).not.toHaveBeenCalled();
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
@@ -153,7 +155,7 @@ describe('single-file re-entry (sdkHelperHost)', () => {
     const resolveBin = vi.fn(() => ({ command: process.execPath, source: 'env' as const }));
     const assets = fileURLToPath(new URL('../../dist/assets/', import.meta.url));
     const adapter = new PiAdapter({ resolveBin, sdkHelperHost: { mode: 'self-executable' }, packageDir: assets });
-    const prepared = await adapter.prepare({offer:{instruction:'Never sent'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
+    const prepared = await adapter.prepare({offer:{ target: PI_TARGET, instruction:'Never sent'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
     const resources = await prepared.operation.resolveRuntimeLaunch!({kind,cwd:f.options.sessionCwd,env:{},scratch:f.options.scratch}) as PiRuntimeLaunchResources;
     try {

@@ -14,6 +14,8 @@ import {
 } from './loopback';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 
+const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
+
 const target = contractTarget('claude', QUALIFIED_CLAUDE_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const adapter = (options: ClaudeAdapterOptions = {}) => new ClaudeAdapter({ resolveBin, ...options });
@@ -237,7 +239,7 @@ const ownTurn = once(async () => {
   try {
     const config = path.join(box.home, '.claude');
     await fs.mkdir(config);
-    const session = await startPreparedOperation(adapter(), { instruction: 'Start the background command, then finish.' }, {
+    const session = await startPreparedOperation(adapter(), { target: CLAUDE_TARGET, instruction: 'Start the background command, then finish.' }, {
       workspaceDir: box.workspace, agentHome: box.workspace, env: runtimeEnv(box.home, config, provider.origin, recorder.env),
     });
     const events: TurnEvent[] = [];
@@ -253,7 +255,7 @@ const ownTurn = once(async () => {
           // Claude's own turn is running its blocking command: the task turn already ended.
           if (followUp === undefined && event.type === 'tool_use' && JSON.stringify(event.input).includes('own-turn-done')) {
             followUpAt = events.length;
-            followUp = session.followUp({ instruction: `${FOLLOW_UP}: reply.` });
+            followUp = session.followUp({ target: CLAUDE_TARGET, instruction: `${FOLLOW_UP}: reply.` });
           }
         }
       }

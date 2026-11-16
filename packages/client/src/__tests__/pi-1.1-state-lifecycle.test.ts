@@ -8,6 +8,8 @@ import { RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import type { Session } from '../types';
 
+const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
+
 const roots: string[] = [];
 const sessions: Session[] = [];
 afterEach(async () => {
@@ -17,7 +19,7 @@ afterEach(async () => {
 async function start(instruction: string) {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'byok-pi-state-')); roots.push(workspaceDir);
   const adapter = new PiAdapter({ resolveBin: () => ({ command: path.resolve(import.meta.dirname, 'fixtures/fake-pi.mjs'), source: 'package' }) });
-  const session = await startPreparedOperation(adapter, { instruction }, { workspaceDir, env: process.env });
+  const session = await startPreparedOperation(adapter, { target: PI_TARGET, instruction }, { workspaceDir, env: process.env });
   sessions.push(session); return session;
 }
 describe('Pi 1.1 settlement control', () => {
