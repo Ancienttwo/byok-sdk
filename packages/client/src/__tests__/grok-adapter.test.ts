@@ -10,7 +10,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
-import { grokUserInstructionsRefusal } from '../adapters/grok/agent-user-context';
+import { createGrokAgentHome, grokUserInstructionsRefusal } from '../adapters/grok/agent-user-context';
 import { PolicyUnsupportedError, SteerUnsupportedError, type McpToolsetToolObservation, type RuntimeAdapter, type Session } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import * as processTree from '../adapters/process-tree';
@@ -629,6 +629,14 @@ describe('GrokAdapter agentUserContext (#2239)', () => {
     expect(await grokUserInstructionsRefusal(output(true), '/Users/u', 'darwin')).toBe(`${PREFIX}: Grok still loads 2 user instruction files outside the task, such as [paths] extra_rule_dirs`);
     expect(await grokUserInstructionsRefusal(output(false), '/users/u', 'linux')).toBe(`${PREFIX}: Grok still loads 2 user instruction files outside the task, such as [paths] extra_rule_dirs`);
     expect(await grokUserInstructionsRefusal('{"projectInstructions":[]}', '/Users/u', 'darwin')).toBe(`${PREFIX}: grok inspect failed`);
+  });
+
+  it('refuses on Windows before it creates the home or any link', async () => {
+    const resources = await agentCtx();
+    const dir = await tempDir('byok-grok-sdk-');
+    await expect(createGrokAgentHome({ GROK_HOME: resources.user }, dir, resources.agentHome, 'win32')).rejects.toMatchObject({
+      phase: 'start', retry: 'non-retryable', message: `${PREFIX}: the SDK-owned GROK_HOME is not supported on Windows` });
+    expect(await fs.readdir(dir)).toEqual([]);
   });
 
   it('refuses a session store that is not a real directory inside the Agent home', async () => {

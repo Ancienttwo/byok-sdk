@@ -726,6 +726,7 @@ boundary. The start fails as a non-retryable `authority` failure, class
 - `grok Agent user context exclusion refused: the Agent home session store is not a real directory inside the Agent home`
 - `grok Agent user context exclusion refused: the user GROK_HOME has no auth.json and XAI_API_KEY is not set`
 - `grok Agent user context exclusion refused: the user GROK_HOME does not exist`
+- `grok Agent user context exclusion refused: the SDK-owned GROK_HOME is not supported on Windows`, before any link is tried, until #2241 settles how a Windows account without symbolic-link privilege links the login
 
 Whether a login refresh through the linked `auth.json` reaches the user's file
 is being verified (#2239).

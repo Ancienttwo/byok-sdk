@@ -30,10 +30,12 @@ function userGrokHome(env: Readonly<Record<string, string | undefined>>): string
  * The session store links to the Agent's own store, `<agentHome>/.byok/grok/sessions`,
  * so a later task of the same Agent resumes its session. Without an API key in
  * the environment, a user home without `auth.json` refuses: a login written
- * into the SDK home would be lost at cleanup.
+ * into the SDK home would be lost at cleanup. Windows refuses.
  */
-export function createGrokAgentHome(env: Readonly<Record<string, string | undefined>>, dir: string, agentHome: string | undefined): Promise<string> {
-  return createOwnedRuntimeHome({
+export async function createGrokAgentHome(env: Readonly<Record<string, string | undefined>>, dir: string, agentHome: string | undefined, platform: NodeJS.Platform = process.platform): Promise<string> {
+  // Until #2241 settles how a Windows account without symlink privilege links the login, refuse before any link is tried.
+  if (platform === 'win32') throw refuse('the SDK-owned GROK_HOME is not supported on Windows');
+  return await createOwnedRuntimeHome({
     refusalPrefix: PREFIX,
     name: 'grok-home',
     userHome: () => userGrokHome(env),
@@ -41,7 +43,7 @@ export function createGrokAgentHome(env: Readonly<Record<string, string | undefi
     linked: LINKED,
     required: env.XAI_API_KEY ? [] : [{ entry: 'auth.json', reason: 'the user GROK_HOME has no auth.json and XAI_API_KEY is not set' }],
     agentStore: { agentHome, root: path.join('.byok', 'grok'), entries: ['sessions'], label: 'session store' },
-  }, dir);
+  }, dir, platform);
 }
 
 /**
