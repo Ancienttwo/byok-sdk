@@ -118,7 +118,7 @@ async function receive(msg) {
     const respond = data => send({ type: 'response', command: msg.type, id: msg.id, success: true, data });
     if (msg.type === 'get_state') { await gate(); respond({ sessionId, model: { id: 'fixture-model' }, isStreaming: false }); }
     if (msg.type === 'get_session_stats') respond({ contextUsage: { tokens: 123, contextWindow: 10000 } });
-    if (msg.type === 'prompt') { respond(); run(); }
+    if (msg.type === 'prompt') { respond({ disposition: 'started' }); run(); }
     if (msg.type === 'abort') {
       trace('interrupt');
       if (scenario === 'no-ack') return;
