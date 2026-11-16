@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "4b5fb739e2dc3b6f09251be7c06d486fac2bed4ba9721726b96c1c3999e8972d"
+    "snapshotSha256": "f93c5694c771919c1cfdec7abf6b90c9af631617c5de591f2a4d97969f618ec3"
   },
   "configFields": {
     "status": "tracked",
@@ -81,6 +81,38 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
       "items": [
         "behavior:reject-hosted-old-would-do-row"
+      ]
+    },
+    {
+      "id": "core-sqlite-node-entry",
+      "impact": "additive",
+      "summary": "@byok-sdk/core/sqlite-node is a new Node-only entry exporting readSqliteFileUnchanged(path, readMetadata). It opens an existing, non-empty SQLite file read-only and immutable, runs readMetadata on its main file and closes it, so a store can decide its format before any writable open, pragma or DDL; it returns undefined for :memory:, a missing path or a zero-length file, and throws SqliteReadOnlyOpenError when the file exists but cannot be stat'ed or opened read-only. sqliteOpenPath(path) and sqliteFileUri(path) name a store file for SQLite under one rule, with the Windows extended-length prefix past MAX_PATH; the client journal's writable open uses sqliteOpenPath, and the read-only check opens sqliteFileUri. The core root does not export it. No Host action is required.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
+      "items": [
+        "entry:@byok-sdk/core/sqlite-node",
+        "export:@byok-sdk/core/sqlite-node#SqliteReadOnlyOpenError",
+        "export:@byok-sdk/core/sqlite-node#readSqliteFileUnchanged",
+        "export:@byok-sdk/core/sqlite-node#sqliteFileUri",
+        "export:@byok-sdk/core/sqlite-node#sqliteOpenPath"
+      ]
+    },
+    {
+      "id": "sqlite-stores-refuse-before-write",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client decides the format of an existing durable replica and replica lock file before any write. A durable replica in a pi-durable schema version other than the pinned one is refused with DurableReplicaFormatError instead of migrated forward, and a replica lock path that holds another database, such as the replica of a task whose id ends in .sqlite.lock, is refused instead of written. Both files stay unchanged. Released replicas are already current; preserve a refused replica and resolve it before starting this build.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
+      "items": [
+        "behavior:sqlite-stores-refuse-before-write"
+      ]
+    },
+    {
+      "id": "client-journal-exact-format",
+      "impact": "breaking",
+      "acceptance": "reject",
+      "summary": "@byok-sdk/client SqliteLocalTaskJournal decides an existing journal's format on its unchanged main file before the writable open and its auto_vacuum and WAL pragmas. A journal is current only when its tables and columns are exactly this build's; any other, including one that still holds the retired local_artifact_ref, local_cleanup_candidate or local_storage_usage table, is refused with JournalUnavailableError, left unchanged and no longer moved to quarantine. Startup no longer drops those tables. A journal the read-only check cannot open is refused with JournalUnavailableError and left in place rather than quarantined; a file SQLite cannot read is still quarantined. Released journals are already current; preserve or export a refused journal and resolve it before starting this build.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
+      "items": [
+        "store:client-journal"
       ]
     },
     {
@@ -696,6 +728,11 @@
       "entry": "daemon-config-unknown-fields-fail-closed"
     },
     {
+      "item": "entry:@byok-sdk/core/sqlite-node",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
       "change": "changed",
       "entry": "k4-settlement-notice"
@@ -1131,6 +1168,26 @@
       "entry": "device-state-delete-ports"
     },
     {
+      "item": "export:@byok-sdk/core/sqlite-node#SqliteReadOnlyOpenError",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#readSqliteFileUnchanged",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#sqliteFileUri",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#sqliteOpenPath",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
       "change": "changed",
       "entry": "retire-compatibility-apis"
@@ -1219,6 +1276,13 @@
       "item": "export:@byok-sdk/server/execution-core#HostOptions",
       "change": "changed",
       "entry": "k4-settlement-notice"
+    },
+    {
+      "item": "store:client-journal",
+      "change": "changed",
+      "before": "ddl-sha256=dc9f3290dd91055a",
+      "after": "ddl-sha256=e8335dbafcb630c4",
+      "entry": "client-journal-exact-format"
     }
   ]
 }

@@ -26,6 +26,57 @@ member endpoint. Hosts using the TruthStore adapter must configure a supported
 profile store. Local Host switch export remains available and is to be evaluated
 separately; there is no local import path for its peer's exported document.
 
+## SQLite stores decide their format before any write (#2286)
+
+A store that refuses an older file now refuses it before it opens the file for
+writing, sets a pragma such as `journal_mode = WAL` or `auto_vacuum`, or runs
+DDL. The refused file keeps its bytes, and no `-wal`, `-shm` or `-journal` file
+appears next to it.
+
+The new Node-only entry `@byok-sdk/core/sqlite-node` exports
+`readSqliteFileUnchanged(path, readMetadata)`. It opens an existing, non-empty
+file read-only and immutable, runs `readMetadata` on the main file and closes
+it; it returns `undefined` for `:memory:`, a missing path or a zero-length
+file. A copy-and-own Host store can call it with its own format check before
+its writable open. The core root does not export it, so Worker and rules
+entries never load it.
+
+`@byok-sdk/client`:
+
+- The local task journal has no version row. It is current when its tables and
+  columns are exactly this build's. Any other journal, including one that still
+  holds the retired `local_artifact_ref`, `local_cleanup_candidate` or
+  `local_storage_usage` table, is refused with `JournalUnavailableError` and
+  stays in place; startup no longer drops those tables, and a format refusal is
+  no longer moved to `quarantine/`. A file that SQLite cannot read is still
+  quarantined.
+- A journal that the read-only check cannot open is refused with
+  `JournalUnavailableError` and stays in place; it is not quarantined. Other
+  stores that call `readSqliteFileUnchanged` get `SqliteReadOnlyOpenError` in
+  the same case. On Windows the check opens a path past `MAX_PATH` in the
+  same `\\?\` extended-length form as the writable open: both name the file
+  through `sqliteOpenPath` / `sqliteFileUri` from `@byok-sdk/core/sqlite-node`.
+- A durable replica written in another pi-durable schema version than the
+  pinned one is refused instead of migrated forward.
+- A replica lock path that holds another database, such as the replica of a
+  task whose id ends in `.sqlite.lock`, is refused instead of written.
+
+Every released journal and replica is already current. Preserve or export a
+refused store and resolve it before starting this build.
+
+The copy-and-own examples follow the same order: the Desktop example
+`HostStore`, the basic example's Clarification and goal/btw stores and the MCP
+example `BetaLedger`. The basic example's two stores now record their format in
+a `host_format` table, one row per store, so they can share one Host database.
+A Host database with their tables but without `host_format` predates it and is
+refused; recreate it with this version or move its rows yourself.
+
+Not handled: the format is read from the main file. A store created by an older
+version that crashed before its first checkpoint holds its schema only in its
+WAL; it is opened for writing, and WAL replay and pragmas change it before its
+format check refuses it. Such a store holds almost no data. New stores
+checkpoint right after creating their schema, which keeps that window short.
+
 ## Bot collaboration inbound conversation identity (#2250)
 
 `@byok-sdk/bot-collaboration` `inboundKey(message)` now hashes channel,

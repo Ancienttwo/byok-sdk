@@ -101,6 +101,7 @@ export const workspaceGraph = {
     "name": "@byok-sdk/example-basic",
     "dependencies": [
       "@byok-sdk/client",
+      "@byok-sdk/core",
       "@byok-sdk/protocol",
       "@byok-sdk/server"
     ]
@@ -109,6 +110,7 @@ export const workspaceGraph = {
     "name": "@byok-sdk/example-byok-mcp-server",
     "dependencies": [
       "@byok-sdk/client",
+      "@byok-sdk/core",
       "@byok-sdk/example-host-execution-core",
       "@byok-sdk/protocol",
       "@byok-sdk/server",
@@ -126,6 +128,7 @@ export const workspaceGraph = {
     "dependencies": [
       "@byok-sdk/bot-collaboration",
       "@byok-sdk/client",
+      "@byok-sdk/core",
       "@byok-sdk/keys",
       "@byok-sdk/server",
       "@byok-sdk/ui-runtime"
@@ -332,6 +335,8 @@ export const familyOwners = Object.freeze({
     /^packages\/keys\/src\/(?:windows-credential-custody[^/]*|(?:windows-credential-manager|device-sealing-key|sealed-provisioning|pi-provider-launcher-core|provider-profile|provider-profile-binding|secret-store|secret-value|sqlite-profile-store|command-runner)\.ts)$/,
   ],
   'windows-client': [
+    // #2286: an existing journal past MAX_PATH reopened through the read-only check and the writable open.
+    /^packages\/(?:client\/src\/(?:__tests__\/journal-sqlite-path\.test\.ts|util\/sqlite-support\.ts|daemon\/journal\/sqlite-journal\.ts)|core\/src\/sqlite-node\.ts)$/,
     // Runtime PATH detection is exercised on Windows, including native and batch candidates.
     /^packages\/client\/src\/(?:adapters\/(?:runtime-invocation\.ts|antigravity\/resolve-bin\.ts|opencode\/resolve-bin\.ts)|__tests__\/runtime-executable-detection\.test\.ts)$/,
     /^packages\/client\/src\/daemon\/(?:auth-manager|daemon-lifecycle|daemon-record)\.ts$/,
@@ -704,6 +709,7 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     if (path === 'examples/basic/clarification.ts' || path === 'examples/basic/clarification.test.ts'
+      || path === 'examples/basic/clarification-store.ts' || path === 'examples/basic/goal-btw-store.ts'
       || path === 'examples/basic/goal-btw.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-close.test.ts'
       || path === 'examples/basic/quickstart-smoke.test.ts' || path === 'examples/basic/server.ts'
       || path === 'examples/basic/task-events-route.ts' || path === 'examples/basic/task-events-route.test.ts') {

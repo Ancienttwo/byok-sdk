@@ -22,6 +22,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@byok-sdk/client": "workspace:*",
+        "@byok-sdk/core": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
         "@byok-sdk/server": "workspace:*",
         "@hono/node-server": "^2.1.3",
@@ -40,6 +41,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@byok-sdk/client": "workspace:*",
+        "@byok-sdk/core": "workspace:*",
         "@byok-sdk/example-host-execution-core": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
         "@byok-sdk/server": "workspace:*",
@@ -72,6 +74,7 @@
       "dependencies": {
         "@byok-sdk/bot-collaboration": "workspace:*",
         "@byok-sdk/client": "workspace:*",
+        "@byok-sdk/core": "workspace:*",
         "@byok-sdk/keys": "workspace:*",
         "@byok-sdk/server": "workspace:*",
         "@byok-sdk/ui-runtime": "workspace:*",

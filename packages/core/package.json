@@ -30,6 +30,12 @@
       "import": "./dist/sealed-payload/index.js"
     },
     "./package.json": "./package.json",
+    "./sqlite-node": {
+      "types": "./dist/sqlite-node.d.ts",
+      "node": {
+        "import": "./dist/sqlite-node.js"
+      }
+    },
     "./system-tool": {
       "types": "./dist/system-tool.d.ts",
       "node": {
