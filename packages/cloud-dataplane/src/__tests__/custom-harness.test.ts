@@ -26,9 +26,9 @@ describe.skipIf(SKIP_DATAPLANE)(`custom harness claim CAS — ${SKIP_REASON}`, (
       // can reject the losing identity without trusting its earlier read.
       for (const outcome of outcomes) expect(outcome).toEqual(winner);
       expect(winner?.ownerDeviceId).toBe('device-a');
-      // The two executor columns stay exclusive (0021), and an owned attempt names one (0040).
+      // An owned attempt names exactly one executor: neither both columns (0021, 0040) nor none (0040).
       await expect(scope.pool.query(`UPDATE task SET claimed_runtime = 'pi' WHERE tenant_id = $1 AND task_id = 't'`, [tenant]))
-        .rejects.toThrow('task_claimed_identity_exclusive');
+        .rejects.toThrow(/task_claimed_(identity_exclusive|executor_present)/u);
       await expect(scope.pool.query(`UPDATE task SET claimed_harness_id = NULL WHERE tenant_id = $1 AND task_id = 't'`, [tenant]))
         .rejects.toThrow('task_claimed_executor_present');
     } finally { await scope.dispose(); }

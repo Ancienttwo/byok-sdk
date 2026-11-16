@@ -172,6 +172,11 @@ async function seedEveryTenantTable(pool: Pool, tenant: TenantId, suffix: string
     [tenant, device, now],
   );
   await pool.query(
+    `INSERT INTO task_steer_refusal (tenant_id, task_id, steer_message_id, reason, device_id, recorded_at, revision)
+     VALUES ($1, 'task', 'steer', 'steer_unsupported', $2, $3, 1)`,
+    [tenant, device, now],
+  );
+  await pool.query(
     `INSERT INTO agent_message_admission
        (tenant_id, device_id, task_id, message_id, payload_body)
      VALUES ($1, $2, 'task', 'message-admission', '{}')`,
