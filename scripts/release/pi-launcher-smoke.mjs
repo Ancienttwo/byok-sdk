@@ -280,7 +280,7 @@ await runtime.dispose();
   for (const provider of Object.values(directModels.providers)) delete provider.apiKey;
   await writeFile(path.join(directEnv.PI_CODING_AGENT_DIR,'models.json'),JSON.stringify(directModels));
   await writeFile(path.join(directEnv.PI_CODING_AGENT_DIR,'settings.json'),JSON.stringify({defaultProvider:'byok-sdk-packed-zai',defaultModel:profile.model}));
-  const prepared = await adapter.prepare({offer:{instruction:'Never sent'},descriptor:adapter.descriptor,requiredToolsetIds:[],
+  const prepared = await adapter.prepare({offer:{instruction:'Never sent',target:{lane:'runtime',runtimeId:'pi'}},descriptor:adapter.descriptor,requiredToolsetIds:[],
     mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation});
   assert.equal(prepared.kind,'prepared');
   assert.equal(typeof prepared.operation.resolveRuntimeLaunch,'function');
@@ -408,14 +408,14 @@ await runtime.dispose();
       },
     });
     const selection={lane:'byok-profile',runtimeId:'pi',providerProfile:binding};
-    const keysPrepared=await keysAdapter.prepare({offer:{instruction:'Never sent',dispatchSelection:selection},
+    const keysPrepared=await keysAdapter.prepare({offer:{instruction:'Never sent',target:selection},
       descriptor:keysAdapter.descriptor,requiredToolsetIds:[],mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation});
     assert.equal(keysPrepared.kind,'prepared');
     const keysScratch=await createExecutionScratch({root:scratchRoot});
     const keysRuntime=await keysPrepared.operation.resolveRuntimeLaunch({kind:'instruction',cwd:dir,env,scratch:keysScratch});
     try {
       const manifest=sealRuntimeOperationManifest({taskId:'packed-keys-capture',runtimeId:'pi',descriptor:keysAdapter.descriptor,
-        dispatchSelection:selection,requiredToolsetIds:[],workspace:{workspaceDir:dir},forwardedEnvironmentNames:Object.keys(keysRuntime.env).sort()});
+        modelTarget:selection,requiredToolsetIds:[],workspace:{workspaceDir:dir},forwardedEnvironmentNames:Object.keys(keysRuntime.env).sort()});
       await assert.rejects(keysPrepared.operation.start({kind:'instruction',mcpEnv:mcpTaskConfig.mcpEnv,manifest,instruction:'Never sent',env:keysRuntime.env,runtimeLaunch:keysRuntime,scratch:keysScratch,
         mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation}),/pi runtime process could not be spawned/);
       const option=(name)=>keysInvocation.args[keysInvocation.args.indexOf(name)+1];

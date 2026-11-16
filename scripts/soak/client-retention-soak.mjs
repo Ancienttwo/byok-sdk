@@ -74,7 +74,7 @@ const K4_TOMBSTONE_RETENTION_MS = Math.max(30 * DAY_MS, MIN_TOMBSTONE_RETENTION_
 function k4SettleTask(ledger, agentRef, egressPolicy, key, failed, now) {
   ledger.transaction(state => {
     const intent = enqueue(state, ledger.tenant, { key, source: 'user', waitUntil: now + DAY_MS, execution: { deviceId: 'soak-device', payload: {
-      session: { mode: 'fresh' }, instruction: 'retention soak task', runtime: 'pi', agentRef, egressPolicy,
+      session: { mode: 'fresh' }, instruction: 'retention soak task', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, egressPolicy,
       terminalProjection: { mode: 'result-document', contract: RESULT_CONTRACT, schema: RESULT_SCHEMA },
     } } });
     if (!failed) {
@@ -424,7 +424,7 @@ async function main() {
       const shouldFail = options.failEvery > 0 && taskNumber > 0 && taskNumber % options.failEvery === 0;
       adapter.startError = shouldFail ? new Error('soak deterministic runtime start failure') : undefined;
       const payload = {
-        agentRef, instruction: 'retention soak task', runtime: 'pi',
+        agentRef, instruction: 'retention soak task', target: { lane: 'runtime', runtimeId: 'pi' },
         session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         ...(shouldFail ? {} : { terminalProjection: { mode: 'result-document', contract: RESULT_CONTRACT, schema: RESULT_SCHEMA } }),
       };

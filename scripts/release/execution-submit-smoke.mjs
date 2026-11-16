@@ -139,7 +139,7 @@ async function pairCapableDevice(composition, tenant, deviceName) {
   const response = await composition.cloud.fetch(new Request(`${CLOUD_ORIGIN}/byok/pair`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ pairingCode: pairing.code, deviceName, devicePublicKey }),
+    body: JSON.stringify({ pairingCode: pairing.code, deviceName, devicePublicKey, expectedDeviceDigest: null }),
   }));
   assert.equal(response.status, 200, `pairing failed: HTTP ${response.status}`);
   const paired = await response.json();
@@ -152,7 +152,7 @@ async function pairCapableDevice(composition, tenant, deviceName) {
 function recurringInput(taskId, deviceId, instruction, agentRef = { agentId: 'packed-agent', profileRevision: 'profile' }) {
   return AgentExecutionInputSchema.parse({
     taskId, deviceId,
-    payload: { instruction, runtime: 'codex', session: { mode: 'fresh' },
+    payload: { instruction, target: { lane: 'runtime', runtimeId: 'codex' }, session: { mode: 'fresh' },
       agentRef,
       egressPolicy: { policyRevision: 'policy', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
         reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
@@ -571,7 +571,7 @@ console.log('[release-pack] recurring public imports, strict submission and inde
     const embeddedPairResponse = await embedded.hono.fetch(new Request(`${CLOUD_ORIGIN}/byok/pair`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ pairingCode: embeddedPairing.code, deviceName: 'packed-embedded-device', devicePublicKey }),
+      body: JSON.stringify({ pairingCode: embeddedPairing.code, deviceName: 'packed-embedded-device', devicePublicKey, expectedDeviceDigest: null }),
     }));
     assert.equal(embeddedPairResponse.status, 200, `embedded pairing failed: HTTP ${embeddedPairResponse.status}`);
     const embeddedPaired = await embeddedPairResponse.json();
