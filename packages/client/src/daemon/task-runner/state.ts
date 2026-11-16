@@ -567,6 +567,15 @@ export function terminalTokenFor(taskId: string, revision: number): string {
   return taskId + ':' + String(revision);
 }
 
+/**
+ * The offer dedup rule: a task that finished, or was declined strictly, never
+ * starts again from a redelivered offer. O1 applies it; the runner's guard
+ * before `beginOffer` asks the same question through this function.
+ */
+export function offerSettled(runner: RunnerStateV1, taskId: string): boolean {
+  return runner.finished.includes(taskId) || runner.strictDeclined.includes(taskId);
+}
+
 export function createRunnerState(): RunnerStateV1 {
   return taskRunnerReducerDeepFreeze({
     v: 1 as const,
@@ -942,8 +951,7 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
     when: (snapshot, event) => {
       const taskId = event.taskId;
       if (taskId === undefined) return false;
-      if (snapshot.runner.finished.includes(taskId)) return false;
-      if (snapshot.runner.strictDeclined.includes(taskId)) return false;
+      if (offerSettled(snapshot.runner, taskId)) return false;
       return event.offer !== undefined && event.offer.digest.length > 0;
     },
     apply: (snapshot, event) => {

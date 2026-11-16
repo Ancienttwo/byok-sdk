@@ -120,9 +120,9 @@ export async function handleOffer(
     generation: offerContext.generation,
     offer: offerFactsFor(taskId, payload),
   });
-  // The legacy redelivery guard above is the effective dedup authority in S3;
-  // O1 only records the new per-task lifecycle. If it still dropped, let the
-  // existing path decide exactly as before.
+  // The guard above already applied the reducer's dedup rule and the
+  // ownership registries; O1 drops only an offer with no digest, and then
+  // the offer ends here.
   if (received.disposition !== 'applied' && received.task === undefined) {
     host.endOffer(taskId);
     return;
