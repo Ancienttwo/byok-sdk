@@ -263,9 +263,12 @@ describe('TaskRunner claim/start/cancel host wiring (S4)', () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
     const gate = claimGate();
-    const { runner } = makeRunner(sent, { adapters: [adapter], startupTimeoutMs: 200, ...gate.deps });
+    const { runner } = makeRunner(sent, { adapters: [adapter], startupTimeoutMs: 2_000, ...gate.deps });
     const taskId = 'task-2294-deadline';
-    await runner.handleEnvelope(offerEnvelope(taskId));
+    const handled = runner.handleEnvelope(offerEnvelope(taskId));
+    // The deadline must find the claim sent and still unsettled.
+    await vi.waitFor(() => expect(wireTypes(sent, taskId)).toEqual(['task.claim']));
+    await handled;
     gate.settle({ outcome: 'accepted' });
     await new Promise(resolve => setTimeout(resolve, 50));
 
