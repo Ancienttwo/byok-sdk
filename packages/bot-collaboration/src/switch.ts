@@ -4,8 +4,8 @@ import { stateOf, type CollaborationState } from './model.js';
 import { exportMarkOf, sealSwitchExport, switchAttempts, SwitchExportedError, SwitchExportError, SwitchImportedError, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type OutboxRecord,
   type RoutineRecord, type SwitchContent, type SwitchExport, type SwitchExportRefusal, type SwitchHeader } from './migration.js';
 
-// The L side of the #975 state move. `switchContent` reads an L ledger into the neutral form, both for the old owner's export
-// and checks the exported ledger. Each value either moves, is derived from values that move (the checks below), or is a
+// The L side of the #975 state move. `switchContent` reads and checks an L ledger for the old owner's export.
+// Each value either moves, is derived from values that move (the checks below), or is a
 // named scheduler value of a concluded row or of the SDK's wakes, which a target writes for itself.
 
 /** The import record of a new L owner: from the load until the commit toward L. */
@@ -14,10 +14,7 @@ export interface SwitchImport { digest: string; devices: string[]; discarding?: 
 export function refuseExported(state: CollaborationState): void {
   if (state.switchExport) throw new SwitchExportedError(state.switchExport.digest);
 }
-/**
- * Throws while the ledger holds a switch import, which is not committed toward L yet: no K8 work runs on it. The switch
- * steps `commitImport` and `discardImport` write it themselves.
- */
+/** Refuse work on a ledger that still holds an uncommitted switch import. */
 export function refuseImported(state: CollaborationState): void {
   if (state.switchImport) throw new SwitchImportedError(state.switchImport.digest);
 }
@@ -184,9 +181,6 @@ export function switchContent(dump: LedgerDump, tenant: string, header: SwitchHe
   };
 }
 
-/** The header of a document, which a read-back copies as it is. */
-const headerOf = (document: SwitchContent): SwitchHeader =>
-  ({ source: document.source, domain: document.domain, devices: document.devices, exportedAt: document.exportedAt });
 /** Seals the content that a ledger holds now, under a given header. */
 export function sealLedger(ledger: HostLedger, header: SwitchHeader): SwitchExport {
   return sealSwitchExport(switchContent(ledger.dumpForSwitch(), ledger.tenant, header));
