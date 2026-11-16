@@ -862,7 +862,6 @@ export declare class PiRpcClient {
      * swallowing it here loses nothing.
      */
     kill(): void;
-    waitClosed(): Promise<void>;
     dispose(): Promise<void>;
     private processTreeOptions;
     /**

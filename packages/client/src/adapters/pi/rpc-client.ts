@@ -224,10 +224,6 @@ export class PiRpcClient {
     void requestOwnedProcessTreeTermination(this.processTreeOptions()).catch(() => {});
   }
 
-  waitClosed(): Promise<void> {
-    return this.closedPromise;
-  }
-
   dispose(): Promise<void> {
     if (!this.disposalAttempt) {
       const attempt = (async () => {

@@ -89,6 +89,15 @@
         "export:@byok-sdk/client#serviceExitDisposition",
         "export:@byok-sdk/client#ServiceExitDisposition"
       ]
+    },
+    {
+      "id": "remove-pi-rpc-close-wait",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes PiRpcClient.waitClosed() from its declaration closure. Observe the owned child close event via an injected spawnFn for passive closure; dispose() initiates process-tree cleanup and is not a passive wait.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pi-rpc-close-wait",
+      "items": [
+        "behavior:remove-pi-rpc-close-wait"
+      ]
     }
   ],
   "changes": [

@@ -41,12 +41,18 @@ async function temporaryDirectory(): Promise<string> {
 
 /** Replays a synthetic RPC record through the real client; see `pi-trajectory-replay.mjs`. */
 async function replay(record: string, ending: 'exit' | 'killed'): Promise<{ client: PiRpcClient; frames: PiRpcMessage[] }> {
-  const client = new PiRpcClient({ command: process.execPath, args: [REPLAY, record, ending], cwd: import.meta.dirname, env: {} });
+  let closed!: Promise<void>;
+  const spawnFn = ((command: string, args: readonly string[], options: SpawnOptions) => {
+    const child = realSpawn(command, args, options);
+    closed = new Promise<void>(resolve => child.once('close', () => resolve()));
+    return child;
+  }) as SpawnFn;
+  const client = new PiRpcClient({ command: process.execPath, args: [REPLAY, record, ending], cwd: import.meta.dirname, env: {}, spawnFn });
   clients.push(client);
   expect(await client.send({ type: 'replay_synthetic' })).toMatchObject({ success: true });
   const frames: PiRpcMessage[] = [];
   for await (const frame of client.events) frames.push(frame);
-  await client.waitClosed();
+  await closed;
   return { client, frames };
 }
 

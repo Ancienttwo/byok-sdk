@@ -122,8 +122,9 @@ describe('BYOK owned line process', () => {
     const child = checkedSpawn(command, args, { env: {} }); live.push(child);
     const exited = child.exited.catch(error => error); const onExit = vi.fn(); child.onExit(onExit);
     const pi = new PiRpcClient({ command, args, cwd: '.', env: {} });
+    const piClosed = new Promise<void>(resolve => vi.mocked(spawn).mock.results.at(-1)!.value.once('close', () => resolve()));
     const errors = [await child.spawned.catch(error => error), await exited, await createOwnedTerminalSpawn()(command, args, { cwd: '.', env: {}, shell: false }).spawned.catch(error => error),
-      await pi.waitClosed().then(() => pi.terminalError), await new McpStdioClient({ command, args }, { env: {} }).connect().catch(error => error)];
+      await piClosed.then(() => pi.terminalError), await new McpStdioClient({ command, args }, { env: {} }).connect().catch(error => error)];
     // Node's own error carries the arguments in `spawnargs`; nothing nested may.
     expect(errors.filter(error => carriesSecret(error))).toEqual([]);
     expect(errors.slice(0, 4)).toEqual(Array(4).fill(expect.objectContaining({ message: 'spawn failed: ENOENT', code: 'ENOENT' })));

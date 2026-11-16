@@ -78,3 +78,13 @@ Host's standalone line writer and is not exported from the package entrypoint.
 with their own service supervision must configure stop on exit 0 and restart on
 failure in that supervisor. The SDK-generated launchd, systemd and WinSW units
 already enforce that policy; `daemonExitCode()` remains unchanged.
+
+### Pi RPC close wait
+
+`PiRpcClient.waitClosed()` is removed from the published declaration closure.
+Hosts that inject a `spawnFn` and need to observe child transport closure must
+subscribe to their owned child's `close` event. Consumers can drain `events` and
+inspect `terminalError` / `processExited` for RPC termination. `dispose()` remains
+the explicit process-tree cleanup receipt; calling it initiates termination and
+is not a passive close wait. Internal process-tree cleanup still waits for the
+client's private close promise.
