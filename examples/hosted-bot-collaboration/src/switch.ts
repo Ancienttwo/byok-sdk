@@ -2,7 +2,8 @@ import type { PoolClient } from 'pg';
 import { agentKey, occurrenceIntentKey, taskId, type FrozenExecutionInput, type Intent, type Json, type RetryPolicy, type Routine,
   type RoutineDefinition } from '@byok-sdk/server/execution-core';
 import { type ArchivedRecord, type CollaborationState, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type OutboxRecord,
-  type RoutineRecord, type SwitchContent, SwitchExportError, type SwitchExportRefusal, type SwitchHeader, type TombstoneRecord } from '@byok-sdk/bot-collaboration/host-kit';
+  type RoutineRecord, SWITCH_EXPORT_VERSION, type SwitchContent, SwitchExportError, type SwitchExportRefusal, type SwitchHeader, type TombstoneRecord,
+} from '@byok-sdk/bot-collaboration/host-kit';
 import { storedKey } from './layout';
 import { hostJobRowKey } from './routines';
 
@@ -145,7 +146,7 @@ export async function hostedSwitchContent(client: PoolClient, scope: string, sta
     'SELECT kind, identity, expires_at::text FROM retired_identity WHERE scope = $1'))
     .map(row => defined({ kind: row.kind, digest: row.identity, expiresAt: optionalTime(row.expires_at) }) as TombstoneRecord);
 
-  return { version: 1, ...header, collaboration: structuredClone(state), archived, intents, routines, occurrences, outbox, tombstones };
+  return { version: SWITCH_EXPORT_VERSION, ...header, collaboration: structuredClone(state), archived, intents, routines, occurrences, outbox, tombstones };
 }
 
 /**

@@ -1,8 +1,7 @@
 import { readFileSync } from 'node:fs';
 import type { DaemonConfig } from '../daemon/create-daemon.js';
 import { DeviceStore } from '../daemon/store.js';
-import { validateDaemonConfig, type DaemonConfigIssue } from '../daemon/config-schema/validate.js';
-import { removedFieldError } from '../daemon/config-schema/errors.js';
+import { validateDaemonConfig } from '../daemon/config-schema/validate.js';
 import { OFFICIAL_LOCAL_AGENT_RELEASE } from './official-release.js';
 
 /**
@@ -50,11 +49,6 @@ export function readConfigFile(configPath: string | undefined): Record<string, u
   }
 }
 
-/** One line per issue, with the migration note of a removed field. */
-export function formatConfigIssue(issue: DaemonConfigIssue): string {
-  return issue.migration === undefined ? issue.message : `${issue.message} (migration: ${issue.migration})`;
-}
-
 /**
  * Loads a `DaemonConfig` from a JSON file, if given, merged with explicit
  * overrides (e.g. `pair`'s `--server`). Every subcommand in this bin —
@@ -64,18 +58,13 @@ export function formatConfigIssue(issue: DaemonConfigIssue): string {
  * ever one config shape to reason about.
  *
  * Validated by the shared {@link validateDaemonConfig} as a `cli` config:
- * removed fields throw `DaemonConfigFieldRemovedError`; other errors throw
- * a {@link ConfigError}. Unknown fields pass (Q4'); the
- * daemon logs them, and `byok-agent config check --strict` fails on them.
+ * any issue, an unknown field included, throws a {@link ConfigError}.
  */
 export function loadConfig(configPath: string | undefined, overrides: Partial<CliConfigInput> = {}): DaemonConfig {
   const { $schema: _schema, ...base } = readConfigFile(configPath);
   const merged: Record<string, unknown> = { ...base, ...overrides };
   const { issues } = validateDaemonConfig(merged, { source: 'cli' });
-  const removed = issues.find((issue) => issue.code === 'removed_field');
-  if (removed !== undefined) throw removedFieldError(removed.path);
-  const errors = issues.filter((issue) => issue.severity === 'error');
-  if (errors.length > 0) throw new ConfigError(errors.map(formatConfigIssue).join('; '));
+  if (issues.length > 0) throw new ConfigError(issues.map((issue) => issue.message).join('; '));
   return { ...merged, localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE } as DaemonConfig;
 }
 

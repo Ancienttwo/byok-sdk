@@ -182,7 +182,6 @@ export interface AgentHomeProjection {
   apply?(input: AgentHomeProjectionApplyInput): void | Promise<void>;
 }
 
-export type AgentHomeProjectionFunction = (input: AgentHomeProjectionInput) => void | Promise<void>;
 export type AgentHomeProjectionApplyFunction = (input: AgentHomeProjectionApplyInput) => void | Promise<void>;
 
 export interface AgentHomeLease {
@@ -1671,10 +1670,6 @@ export class AgentHomeManager {
     // Release failure is ack-critical: do not acknowledge while ownership is uncertain.
     }, () => binding.lease.release(), withHomeReleaseFailures);
   }
-}
-
-export function createAgentHomeProjection(prepare: AgentHomeProjectionFunction): AgentHomeProjection {
-  return Object.freeze({ prepare });
 }
 
 /**

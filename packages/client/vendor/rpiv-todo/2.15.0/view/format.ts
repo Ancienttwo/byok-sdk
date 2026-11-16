@@ -6,10 +6,6 @@ import type { TaskState } from "../state/state.ts";
 import { sanitizeTerminalText } from "../tool/sanitize.ts";
 import type { Task, TaskAction, TaskDetails, TaskMutationParams, TaskStatus } from "../tool/types.ts";
 
-// Re-export so legacy import paths (todo.ts, tests) continue to resolve;
-// the canonical definition lives in the i18n bridge.
-export { formatStatusLabel };
-
 // ---------------------------------------------------------------------------
 // Status presentation tables — the single source of truth for glyph/color.
 // ---------------------------------------------------------------------------

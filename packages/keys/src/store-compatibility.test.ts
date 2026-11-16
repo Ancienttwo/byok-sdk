@@ -88,7 +88,7 @@ describeSqlite('inspectProviderProfileStore', () => {
     expect(await inspectProviderProfileStore(file)).toMatchObject({ verdict: 'new-path-repair', code: 'PROVIDER_STORE_SCHEMA_STALE' });
   });
 
-  it('reports a store with an earlier provider_kind CHECK set as migration-required, and leaves it unchanged', async () => {
+  it('refuses a store with an earlier provider_kind CHECK set and leaves it unchanged', async () => {
     const directory = tempDir();
     const file = join(directory, 'profiles.db');
     await new SqliteProviderProfileStore({ path: file }).close();
@@ -101,7 +101,7 @@ describeSqlite('inspectProviderProfileStore', () => {
     database.exec('CREATE UNIQUE INDEX provider_profile_one_enabled ON provider_profile(kind) WHERE enabled = 1;');
     database.close();
     const before = directoryState(directory);
-    expect(await inspectProviderProfileStore(file)).toMatchObject({ verdict: 'migration-required' });
+    expect(await inspectProviderProfileStore(file)).toMatchObject({ verdict: 'new-path-repair', code: 'PROVIDER_STORE_SCHEMA_STALE' });
     expect(directoryState(directory)).toEqual(before);
   });
 

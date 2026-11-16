@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
@@ -104,18 +104,14 @@ describe('desktop Host composition', () => {
     await server.close();
   });
 
-  it('migrates a 0.41.0 keys store before any store opens', async () => {
+  it('refuses an old keys store before any store opens', async () => {
     await makeRoot();
     await mkdir(path.dirname(keysDb()), { recursive: true });
     await createKeysStore041(keysDb());
-    expect((await inspectProviderProfileStore(keysDb())).verdict).toBe('migration-required');
-
-    await precheckHostStores({ storeDir: path.join(root, 'store'), serverDb: path.join(root, 'home', 'host', 'server.sqlite'), keysDb: keysDb() });
-
-    expect((await inspectProviderProfileStore(keysDb())).verdict).toBe('accepted');
-    const store = new SqliteProviderProfileStore({ path: keysDb(), readOnly: true });
-    expect((await store.getEnabled())?.profile_ref).toBe('local');
-    await store.close();
+    const before = await readFile(keysDb());
+    await expect(precheckHostStores({ storeDir: path.join(root, 'store'), serverDb: path.join(root, 'home', 'host', 'server.sqlite'), keysDb: keysDb() }))
+      .rejects.toMatchObject({ store: { verdict: 'new-path-repair', code: 'PROVIDER_STORE_SCHEMA_STALE' } });
+    expect(await readFile(keysDb())).toEqual(before);
   });
 
   it('stops with the refused store and its reason, migrating and opening nothing', async () => {
@@ -140,7 +136,7 @@ describe('desktop Host composition', () => {
     input.write(encodeMessage({ id: 1, method: 'hello', params: { bridgeVersion: BRIDGE_VERSION } }));
     await stopped;
     expect(states.at(-1)).toMatchObject({ state: 'stopped', storeRefused: true, reason: expect.stringMatching(/^Store server-sqlite at .* is rejected/) });
-    expect((await inspectProviderProfileStore(keysDb())).verdict).toBe('migration-required');
+    expect((await inspectProviderProfileStore(keysDb())).verdict).toBe('new-path-repair');
     await expect(stat(path.join(root, 'store'))).rejects.toMatchObject({ code: 'ENOENT' });
 
     // The stopped Host still writes the SDK support bundle.

@@ -3,7 +3,6 @@ import { checkRoutineSchedule, nextRoutineOccurrence, HostOfferSealedPayloadSche
 import { canonical, concludeOccurrence, hash, occurrenceIntentKey, occurrenceOfIntentKey, type ExecutionTemplate, type HostOccurrenceRoutineDefinition, type HostOccurrenceRun, type LedgerState,
   type NextOccurrence, type Routine } from '@byok-sdk/server/execution-core';
 import { addTurn, json, type Authority, type CollaborationState, type Turn } from './model.js';
-import { SYSTEM_PROMPT } from './rules/schema.js';
 import type { SealedRoutineTemplate } from './rules/sync.js';
 import type { SealedRoutineRef } from './rules/turn.js';
 import type { DreamState } from './dream.js';
@@ -121,13 +120,6 @@ export function updateDefinition(routines: readonly Routine[], owner: string, ac
   return definition(prior.id, prior.version + 1, action.schedule ?? prior.rule as unknown as RoutineScheduleFields,
     { ...input, prompt: action.prompt ?? input.prompt });
 }
-
-/**
- * The member side of a sealed Bot routine: the whole Turn instruction it seals. It is the K8 Bot Turn frame with every
- * action and no ContextPack, because v1 has no plaintext field for Host content next to a sealed instruction. The Turn's
- * frozen outcome schema stays the authority on which actions the Bot may take.
- */
-export function sealedRoutineInstruction(prompt: string): string { return `${SYSTEM_PROMPT}\n\nRequest:\n${prompt}`; }
 
 /**
  * Checks one sealed template for routine `id` version `version` of a Bot with execution template `execution`: the

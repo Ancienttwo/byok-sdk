@@ -18,6 +18,8 @@ createInterface({ input: process.stdin }).on('line', line => {
   // Opt-in: the worker ends on its own before its start receipt, or refuses the start.
   if (plan.exitBeforeReceipt) process.exit(74);
   if (plan.refuseStart) { send({ type: 'response', id: command.id, success: false }); return; }
+  // Opt-in: the worker never answers its start (#2308).
+  if (plan.holdStart) return;
   if (!command.resume) appendFileSync(path.join(root, 'model-calls'), 'synthetic-model-call\n');
   send({ type: 'response', id: command.id, success: true, workerPid: process.pid,
     projectionDigest: plan.projectionDigest ?? 'a'.repeat(64) });

@@ -17,7 +17,6 @@ export type {
   GmailCorrespondence,
   GmailProviderSearchInput,
   GmailReadProvider,
-  GmailSearchInput,
   GmailSearchResult,
   OAuthAccessTokenSource,
 } from './broker';

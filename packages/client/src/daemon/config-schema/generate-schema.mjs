@@ -31,13 +31,14 @@
 //   an error. (No `DaemonConfig` field has such a union today.)
 // - `localAgentRelease` is `x-byok-surface: "distribution-owned"`: the
 //   distribution (the `byok-agent` bin) supplies it, a config file must not.
-// - Objects are open in the schema (no `additionalProperties: false`): an
-//   unknown field is a warning at runtime and an error only under
-//   `byok-agent config check --strict` (Q4').
+// - An object without a string index signature is closed
+//   (`additionalProperties: false`), as the runtime validator (`validate.ts`)
+//   refuses every unknown field. The root declares `$schema`, so a config
+//   file may name this schema for editors.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { API, SymbolFlags, TypeFlags } from 'typescript/unstable/sync';
 
 /** Bump when the shape of the generated schema (not of DaemonConfig) changes. */
@@ -53,8 +54,6 @@ export const SCHEMA_TS_PATH = path.join(here, 'schema.generated.ts');
 export const RUNTIME_IDS_TS_PATH = path.join(clientRoot, 'src/daemon-config-runtime-ids.generated.ts');
 
 async function generate() {
-  // Node strips the types of this import-free module (engines >= 24).
-  const { REMOVED_DAEMON_CONFIG_FIELDS } = await import(pathToFileURL(path.join(here, 'removed-fields.ts')).href);
   const api = new API({ cwd: clientRoot });
   try {
     const snapshot = api.updateSnapshot({ openProject: tsconfig });
@@ -75,7 +74,6 @@ async function generate() {
       description: 'Configuration of one @byok-sdk/client daemon (byok-agent config file or createDaemon argument). Generated from the DaemonConfig TypeScript interface; do not edit.',
       'x-byok-schemaVersion': DAEMON_CONFIG_SCHEMA_VERSION,
       ...root,
-      'x-byok-removedFields': REMOVED_DAEMON_CONFIG_FIELDS.map(({ path: field, migration }) => ({ path: field, migration })),
     };
   } finally {
     api.close();
@@ -206,11 +204,12 @@ class SchemaBuilder {
     const callable = checker.getSignaturesOfType(type, 0).length > 0 || checker.getSignaturesOfType(type, 1).length > 0;
     if (!root && (callable || requiresEmbedded || (symbols.length > 0 && dataMembers === 0))) return undefined;
     const hasProperties = Object.keys(properties).length > 0;
+    const declared = root ? { $schema: { type: 'string', description: 'The JSON schema this config file names for editors.' }, ...properties } : properties;
     return {
       type: 'object',
-      ...(hasProperties || additionalProperties === undefined ? { properties } : {}),
+      ...(hasProperties || additionalProperties === undefined ? { properties: declared } : {}),
       ...(required.length === 0 ? {} : { required }),
-      ...(additionalProperties === undefined ? {} : { additionalProperties }),
+      additionalProperties: additionalProperties ?? false,
     };
   }
 }
@@ -223,12 +222,19 @@ function normalizeDoc(text) {
   return text.split('\n').map((line) => line.trimEnd()).join('\n').trim();
 }
 
-function stripDescriptions(value) {
-  if (Array.isArray(value)) return value.map(stripDescriptions);
-  if (value === null || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value)
-    .filter(([key]) => key !== 'description' && key !== '$schema' && key !== 'title')
-    .map(([key, child]) => [key, stripDescriptions(child)]));
+/**
+ * Documentation removed: each schema's `description` annotation, and the root's
+ * `$schema` and `title`. Keys of `properties` are field names, not annotations,
+ * so a field named `description` keeps its schema.
+ */
+function stripDescriptions(schema, root = true) {
+  if (Array.isArray(schema)) return schema.map((child) => stripDescriptions(child, false));
+  if (schema === null || typeof schema !== 'object') return schema;
+  return Object.fromEntries(Object.entries(schema)
+    .filter(([key]) => key !== 'description' && !(root && (key === '$schema' || key === 'title')))
+    .map(([key, child]) => [key, key === 'properties'
+      ? Object.fromEntries(Object.entries(child).map(([name, property]) => [name, stripDescriptions(property, false)]))
+      : stripDescriptions(child, false)]));
 }
 
 export function renderSchemaFiles(schema) {

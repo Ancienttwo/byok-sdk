@@ -103,7 +103,7 @@ export type RuntimeDetectResult =
   | {
     readonly kind: 'available'; readonly version?: string;
     /** Verbatim local version probe output; never an admission token. */
-    readonly rawVersion?: string; readonly authPresent?: boolean; readonly advisory?: RuntimeDetectionAdvisory; readonly versionVerdict?: RuntimeVersionVerdict;
+    readonly rawVersion?: string; readonly authPresent?: boolean; readonly versionVerdict?: RuntimeVersionVerdict;
     /** The absolute executable this probe ran (#1103 O10). Local-only and user-path sensitive: never on the wire, in audit or in a support bundle. */
     readonly executablePath?: string;
     /** Who chose that executable; present whenever `executablePath` is. */
@@ -112,15 +112,6 @@ export type RuntimeDetectResult =
   | { readonly kind: Exclude<typeof RUNTIME_DETECTION_FAILURE_KINDS[number], 'refused'> }
   | { readonly kind: 'refused'; readonly reason: Exclude<RuntimeDetectionRefusalReason, 'runtime_environment_unavailable'> }
   | { readonly kind: 'refused'; readonly reason: 'runtime_environment_unavailable'; readonly code: ServiceEnvironmentUnavailableCode };
-
-/**
- * A local agent updates itself, so a version the SDK was not qualified against
- * is a warning, not a refusal. `version` on the result carries what was found.
- */
-export interface RuntimeDetectionAdvisory {
-  readonly reason: 'runtime_version_unqualified';
-  readonly qualifiedVersion: string;
-}
 
 /**
  * `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode.

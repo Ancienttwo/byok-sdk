@@ -52,8 +52,8 @@ import {
   SKILL_PACK_RESPONSE_MAX_BYTES,
   SkillPackInstallError,
   installSkillPacks,
-  listInstalledSkillPacks,
   projectSkillPack,
+  readInstalledSkillPack,
   skillPacksRoot,
 } from '../daemon/skill-pack-installer';
 
@@ -300,9 +300,9 @@ describe('install -> list -> project', () => {
     );
     expect(await fs.readFile(path.join(revision, SKILL_PACK_ENTRY_PATH), 'utf8')).toBe(entryText);
 
-    const listed = await listInstalledSkillPacks(dataDir);
-    expect(listed.map((installed) => installed.name)).toEqual([PACK_NAME]);
-    expect(listed[0]!.lock.content_hash).toBe(pack.manifest.contentHash as string);
+    const installedPack = await readInstalledSkillPack(dataDir, PACK_NAME);
+    expect(installedPack?.name).toBe(PACK_NAME);
+    expect(installedPack?.lock.content_hash).toBe(pack.manifest.contentHash as string);
 
     const targetDir = await tmpDir('byok-skill-pack-target-');
     const projected = await projectSkillPack(dataDir, PACK_NAME, targetDir);
@@ -341,7 +341,7 @@ describe('rejection paths', () => {
 
   /** No lock written means nothing downstream can be told a pack is installed. */
   async function expectNothingInstalled(dataDir: string): Promise<void> {
-    expect(await listInstalledSkillPacks(dataDir)).toEqual([]);
+    expect(await readInstalledSkillPack(dataDir, PACK_NAME)).toBeUndefined();
   }
 
   it('refuses a file whose bytes do not match the declared hash', async () => {
@@ -521,7 +521,7 @@ describe('the capability gate', () => {
       }),
     ).rejects.toThrowError(expect.objectContaining({ code: 'capability_unavailable' }));
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(await listInstalledSkillPacks(dataDir)).toEqual([]);
+    expect(await readInstalledSkillPack(dataDir, PACK_NAME)).toBeUndefined();
   }, HEAVY_TEST_TIMEOUT_MS);
 
   it('refuses when a deployment withholds the capability', async () => {
@@ -637,13 +637,13 @@ describe('the local store is not trusted blindly either', () => {
     );
     expect(await fs.readdir(targetDir)).toEqual([]);
     // A lock this build cannot read is absent, so the poisoned directory never
-    // reaches a caller listing what is installed either.
-    expect(await listInstalledSkillPacks(dataDir)).toEqual([]);
+    // reaches a caller reading what is installed either.
+    expect(await readInstalledSkillPack(dataDir, PACK_NAME)).toBeUndefined();
   }, HEAVY_TEST_TIMEOUT_MS);
 
   it('reports no installed pack for a name that was never installed', async () => {
     const dataDir = await tmpDir('byok-skill-pack-data-');
-    expect(await listInstalledSkillPacks(dataDir)).toEqual([]);
+    expect(await readInstalledSkillPack(dataDir, PACK_NAME)).toBeUndefined();
     await expect(projectSkillPack(dataDir, PACK_NAME, dataDir)).rejects.toThrowError(
       expect.objectContaining({ code: 'store_unsafe' }),
     );

@@ -82,17 +82,18 @@ describe('dependency isolation', () => {
     expect(offenders.map((file) => file.path)).toEqual([]);
   });
 
-  it('isolates Node builtins in the Node-only system-tool entry', () => {
+  it('isolates Node builtins in the Node-only sqlite-node and system-tool entries', () => {
+    const nodeOnly = ['sqlite-node.ts', 'system-tool.ts'];
     const offenders = SHIPPED_SOURCES.filter((file) =>
       /from\s+'node:|require\('node:|import\('node:/.test(stripComments(file.text)),
     );
-    expect(offenders.map((file) => file.path)).toEqual(['system-tool.ts']);
-    expect(SHIPPED_SOURCES.filter((file) => file.path !== 'system-tool.ts'
-      && /system-tool/.test(stripComments(file.text))).map((file) => file.path)).toEqual([]);
+    expect(offenders.map((file) => file.path).sort()).toEqual(nodeOnly);
+    expect(SHIPPED_SOURCES.filter((file) => !nodeOnly.includes(file.path)
+      && /sqlite-node|system-tool/.test(stripComments(file.text))).map((file) => file.path)).toEqual([]);
     const manifest = JSON.parse(readFileSync(new URL('../package.json', SRC_URL), 'utf8'));
-    expect(manifest.exports['./system-tool']).toEqual({
-      types: './dist/system-tool.d.ts', node: { import: './dist/system-tool.js' },
-    });
+    expect(manifest.exports['./system-tool']).toEqual({ types: './dist/system-tool.d.ts', node: { import: './dist/system-tool.js' } });
+    // #2286: a Worker bundle reaches HostLedger, so it resolves this entry too; its builtins load only when it is called.
+    expect(manifest.exports['./sqlite-node']).toEqual({ types: './dist/sqlite-node.d.ts', default: './dist/sqlite-node.js' });
     const builtins = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `
       import { createWalker, manifestEntries } from './scripts/api-surface/entry-closure.mjs';
       const root = process.cwd();

@@ -2,6 +2,8 @@ import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 
+import { sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
+
 import { ByokKeysError } from './errors.js';
 
 export type SqliteOpenStep = 'after-open' | 'after-wal' | 'after-synchronous';
@@ -101,7 +103,10 @@ export function isSqliteAvailable(): boolean {
 export function openSqliteDatabase(
   path: string,
   options?: DatabaseSyncOptions & {
-    /** Validate existing authority before persistent pragmas or caller DDL. */
+    /**
+     * Decide the opened database's format before the persistent pragmas run;
+     * a throw closes the handle and leaves the journal mode as it was.
+     */
     validateSchema?: (database: DatabaseSync) => void;
   },
   faults?: SqliteOpenFaultSeam,
@@ -112,7 +117,7 @@ export function openSqliteDatabase(
     mkdirSync(dirname(path), { mode: SECURE_DIR_MODE, recursive: true });
   }
   const { validateSchema, ...databaseOptions } = options ?? {};
-  const database = new DatabaseSync(path, {
+  const database = new DatabaseSync(path === ':memory:' ? path : sqliteOpenPath(path), {
     timeout: DEFAULT_BUSY_TIMEOUT_MS,
     ...databaseOptions,
   });

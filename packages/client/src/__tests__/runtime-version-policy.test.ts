@@ -127,12 +127,6 @@ describe('default policies preserve today behavior verbatim (#1103 D3)', () => {
   ] as const)('%s: qualified allow, unqualified %s', (_id, value, qualified, other, unqualified) => {
     expect(runtimeVersionVerdict(value, qualified)).toMatchObject({ state: 'allow' });
     const fields = runtimeVersionDetectionFields(value, other);
-    expect(fields.versionVerdict).toMatchObject({ state: unqualified });
-    // A warning verdict and the legacy advisory are one fact, never two.
-    if (unqualified === 'warn') {
-      expect(fields.advisory).toEqual({ reason: 'runtime_version_unqualified', qualifiedVersion: value.qualifiedVersion });
-    } else {
-      expect(fields).not.toHaveProperty('advisory');
-    }
+    expect(fields).toEqual({ versionVerdict: expect.objectContaining({ state: unqualified, qualifiedVersion: value.qualifiedVersion }) });
   });
 });

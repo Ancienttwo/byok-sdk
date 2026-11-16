@@ -18,12 +18,12 @@ const DEVICE_KEY_REPLACED = '. Unfinished provisioning requests sealed to the ol
 const SECRET_STORE_GUIDANCE: Record<SecretStoreSubject, Partial<Record<ByokKeysErrorCode, string>>> = {
   provider: {
     KEYCHAIN_SECRET_CORRUPTED: 'The OS keychain entry for this provider cannot be decoded; supply a new key to replace it',
-    KEYCHAIN_SECRET_DECODE_FAILED: "The OS keychain holds an entry with this provider key's name that the SDK did not write; delete or rename it, or use another profile",
+    KEYCHAIN_SECRET_DECODE_FAILED: "The OS keychain holds an entry with this provider key's name that the SDK did not write; delete it in the OS keychain, then configure the provider again",
     CREDENTIAL_MANAGER_READ_FAILED: 'Windows Credential Manager could not read this secret; if the entry is damaged, delete it in Credential Manager and supply the key again',
   },
   device_sealing_key: {
     KEYCHAIN_SECRET_CORRUPTED: `The OS keychain entry for the device sealing key cannot be decoded; delete it so the device generates a new key, then register that key again${DEVICE_KEY_REPLACED}`,
-    KEYCHAIN_SECRET_DECODE_FAILED: `The OS keychain holds an entry with the device sealing key's name that the SDK did not write; delete or rename it so the device generates a new key, then register that key again${DEVICE_KEY_REPLACED}`,
+    KEYCHAIN_SECRET_DECODE_FAILED: `The OS keychain holds an entry with the device sealing key's name that the SDK did not write; delete it in the OS keychain so the device generates a new key, then register that key again${DEVICE_KEY_REPLACED}`,
     CREDENTIAL_MANAGER_READ_FAILED: `Windows Credential Manager could not read the device sealing key; if the entry is damaged, delete it in Credential Manager so the device generates a new key, then register that key again${DEVICE_KEY_REPLACED}`,
   },
 };

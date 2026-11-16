@@ -16,6 +16,150 @@
   },
   "entries": [
     {
+      "id": "retire-compatibility-apis",
+      "impact": "breaking",
+      "summary": "The keys and bot-collaboration Host APIs remove compatibility migrators, unused helpers, the TruthStore provider adapter and its PROVIDER_TRUTH_INVALID error code, and local Host switch import. Remove their calls and use a supported provider store; local Host export remains available.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "export:@byok-sdk/keys#scopeSecretStore",
+        "export:@byok-sdk/keys/model-route#listPiCatalogModels",
+        "export:@byok-sdk/keys#migrateProviderProfileStore",
+        "export:@byok-sdk/keys#ProviderProfileStoreMigration",
+        "export:@byok-sdk/keys#TruthStoreProviderProfileStore",
+        "export:@byok-sdk/keys#TruthStoreProviderProfileStoreOptions",
+        "export:@byok-sdk/keys#PROVIDER_PROFILE_TRUTH_RECORD_KEY",
+        "export:@byok-sdk/keys#MacOsKeychainSecretStoreOptions",
+        "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
+        "export:@byok-sdk/bot-collaboration/host-kit#migrateWouldDo",
+        "export:@byok-sdk/bot-collaboration/host-kit#WouldDoMigration",
+        "export:@byok-sdk/bot-collaboration/host-kit#sealedRoutineInstruction",
+        "export:@byok-sdk/bot-collaboration/host-kit#importForSwitch",
+        "export:@byok-sdk/bot-collaboration/host-kit#commitImport",
+        "export:@byok-sdk/bot-collaboration/host-kit#discardImport"
+      ]
+    },
+    {
+      "id": "reject-hosted-old-entity-constraint",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example refuses an older entity kind constraint with hosted_schema_unsupported_old before DDL; preserve the old store and provision a separate current store.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "behavior:reject-hosted-old-entity-constraint"
+      ]
+    },
+    {
+      "id": "reject-older-provider-kind-store",
+      "impact": "breaking",
+      "summary": "@byok-sdk/keys SqliteProviderProfileStore and inspectProviderProfileStore refuse an earlier provider-kind schema with PROVIDER_STORE_SCHEMA_STALE instead of offering migration; preserve the old store and explicitly configure a separate current store.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "behavior:reject-older-provider-kind-store"
+      ]
+    },
+    {
+      "id": "reject-local-old-would-do",
+      "impact": "breaking",
+      "summary": "@byok-sdk/bot-collaboration Host opening, direct ledger writes and inspectLedger refuse local would-do rows lacking turnId with would_do_unsupported_old. Preserve the old ledger and use a separate current ledger.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "behavior:reject-local-old-would-do"
+      ]
+    },
+    {
+      "id": "reject-hosted-frame-would-do",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example refuses would-do rows held in an old scope frame with would_do_unsupported_old rather than relocating them; preserve the old hosted store and provision separately.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "behavior:reject-hosted-frame-would-do"
+      ]
+    },
+    {
+      "id": "reject-hosted-old-would-do-row",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example refuses would-do entity rows without turnId with would_do_unsupported_old rather than backfilling or archiving them; preserve the old hosted store and provision separately.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "behavior:reject-hosted-old-would-do-row"
+      ]
+    },
+    {
+      "id": "core-sqlite-node-entry",
+      "impact": "additive",
+      "summary": "@byok-sdk/core/sqlite-node is a new entry, whose functions need Node, exporting readSqliteFileUnchanged(path, readMetadata). It opens an existing, non-empty SQLite file read-only and immutable, runs readMetadata on its main file and closes it, so a store can decide its format before any writable open, pragma or DDL; it returns undefined for :memory:, a missing path or a zero-length file, and throws SqliteReadOnlyOpenError when the file exists but cannot be stat'ed or opened read-only. sqliteOpenPath(path) and sqliteFileUri(path) name a store file for SQLite under one rule, with the Windows extended-length prefix past MAX_PATH; the client journal's writable open uses sqliteOpenPath, and the read-only check opens sqliteFileUri. The core root does not export it. No Host action is required.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
+      "items": [
+        "entry:@byok-sdk/core/sqlite-node",
+        "export:@byok-sdk/core/sqlite-node#SqliteReadOnlyOpenError",
+        "export:@byok-sdk/core/sqlite-node#readSqliteFileUnchanged",
+        "export:@byok-sdk/core/sqlite-node#sqliteFileUri",
+        "export:@byok-sdk/core/sqlite-node#sqliteOpenPath"
+      ]
+    },
+    {
+      "id": "sqlite-stores-refuse-before-write",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client decides the format of an existing durable replica and replica lock file before any write. A durable replica in a pi-durable schema version other than the pinned one is refused with DurableReplicaFormatError instead of migrated forward, and a replica lock path that holds another database, such as the replica of a task whose id ends in .sqlite.lock, is refused instead of written. Both files stay unchanged. Released replicas are already current; preserve a refused replica and resolve it before starting this build.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
+      "items": [
+        "behavior:sqlite-stores-refuse-before-write"
+      ]
+    },
+    {
+      "id": "client-journal-exact-format",
+      "impact": "breaking",
+      "acceptance": "reject",
+      "summary": "@byok-sdk/client SqliteLocalTaskJournal decides an existing journal's format on its unchanged main file before the writable open and its auto_vacuum and WAL pragmas. A journal is current only when its tables and columns are exactly this build's; any other, including one that still holds the retired local_artifact_ref, local_cleanup_candidate or local_storage_usage table, is refused with JournalUnavailableError, left unchanged and no longer moved to quarantine. Startup no longer drops those tables. A journal the read-only check cannot open is refused with JournalUnavailableError and left in place rather than quarantined; a file SQLite cannot read is still quarantined. Released journals are already current; preserve or export a refused journal and resolve it before starting this build.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
+      "items": [
+        "store:client-journal"
+      ]
+    },
+    {
+      "id": "host-ledger-format-table",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server/execution-core HostLedger records its format in a host_store_format table, one row per layer (k4, and k8 for Bot collaboration ledgers), and decides an existing ledger's format on its unchanged main file before the writable open, pragmas or DDL. A ledger written by 0.43.0 or earlier has tables but no host_store_format and is refused with HostStoreFormatError (code host_store_format_unsupported); it is not migrated, repaired or deleted. Finish or abandon in-flight Bot collaboration work before upgrading, then open a new ledger file at a new path.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledgers-record-their-format-2286",
+      "acceptance": "reject",
+      "items": [
+        "store:bot-collaboration-ledger"
+      ]
+    },
+    {
+      "id": "host-ledger-format-api",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server/execution-core: HostLedgerOptions gains expectedFormats, HostLedger exposes formats, and HostStoreFormatError is new. LedgerState loses its version field, and LedgerDump moves to version 2, so a switch dump written by an earlier release is refused. @byok-sdk/bot-collaboration: open every Bot ledger with the new botLedgerOptions (compactVeto plus the k8 format) instead of { compactVeto: botCompactVeto }; BotCollaboration refuses a ledger opened without it. CollaborationState loses its version field and SWITCH_EXPORT_VERSION is 2, so an earlier switch export is refused.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledgers-record-their-format-2286",
+      "items": [
+        "export:@byok-sdk/server/execution-core#HostLedger",
+        "export:@byok-sdk/server/execution-core#HostLedgerOptions",
+        "export:@byok-sdk/server/execution-core#HostStoreFormatError",
+        "export:@byok-sdk/server/execution-core#LedgerState",
+        "export:@byok-sdk/server/execution-core#LedgerDump",
+        "export:@byok-sdk/bot-collaboration#botLedgerOptions",
+        "export:@byok-sdk/bot-collaboration/host-kit#CollaborationState",
+        "export:@byok-sdk/bot-collaboration/host-kit#SWITCH_EXPORT_VERSION"
+      ]
+    },
+    {
+      "id": "keys-store-refuse-before-write",
+      "impact": "breaking",
+      "summary": "@byok-sdk/keys SqliteProviderProfileStore decides an existing store's format on its unchanged main file before the writable open, journal_mode or DDL. A store that has provider_profile but lacks a custody table is refused with PROVIDER_STORE_SCHEMA_STALE instead of having the table created, and a store the read-only check cannot open is refused with PROVIDER_STORE_UNAVAILABLE. Every released store is still accepted; preserve a refused store and resolve it before starting this build.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledgers-record-their-format-2286",
+      "items": [
+        "behavior:keys-store-refuse-before-write"
+      ]
+    },
+    {
+      "id": "reject-hosted-store-version-2",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example's Postgres store moves to STORE_VERSION 3 because the collaboration state no longer carries a version field; a scope written by version 2 is refused at open with HostedStoreVersionError, under the scope lock and before any write, and the schedulers skip it. Finish or abandon in-flight collaboration work before upgrading, then provision a new hosted store.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledgers-record-their-format-2286",
+      "items": [
+        "behavior:reject-hosted-store-version-2"
+      ]
+    },
+    {
       "id": "pi-agent-skill-paths-config",
       "impact": "additive",
       "summary": "DaemonConfig.runtimes.pi.agentSkillPaths and PiRuntimeConfig.agentSkillPaths, default [], project to PiAdapterOptions.agentSkillPaths, so createDaemon and createRuntimeAdapters hand Pi the Host's skill files or directories without a hand-built PiAdapter. Config check refuses a relative, duplicated or NUL-carrying path, and a non-empty list with runtimes.pi.durableLane, as DaemonConfigInvalidError at runtimes.pi.agentSkillPaths. A skill path that is missing or unreadable when an Agent task starts now fails the start before Pi spawns as a non-retryable RuntimeExecutionFailure, for an embedded PiAdapter too; it used to surface as a retryable runtime_exited start failure. No Host action is required.",
@@ -63,7 +207,7 @@
     {
       "id": "agy-model-confirmation-deadline",
       "impact": "breaking",
-      "summary": "@byok-sdk/client agy starts that request a model may now wait up to the 30 s request deadline (packages/client/vendor/oar/4eb5919/runtimes/antigravity/session.ts:42) before failing a model mismatch; a matching update still confirms the switch immediately. A conflicting config_option_update followed by the requested model now starts the task instead of failing, and a real mismatch reaches task.fail about 30 s after the switch instead of immediately. A Host start timeout shorter than 30 s now fires first and never receives the ModelConfirmationError failure; allow at least the 30 s deadline for agy starts that request a model.",
+      "summary": "@byok-sdk/client agy starts that request a model may now wait up to the 30 s request deadline (packages/client/vendor/oar/552a4f9/runtimes/antigravity/session.ts:42) before failing a model mismatch; a matching update still confirms the switch immediately. A conflicting config_option_update followed by the requested model now starts the task instead of failing, and a real mismatch reaches task.fail about 30 s after the switch instead of immediately. A Host start timeout shorter than 30 s now fires first and never receives the ModelConfirmationError failure; allow at least the 30 s deadline for agy starts that request a model.",
       "migration": "docs/releases/host-upgrade-next-minor.md#agy-model-mismatches-wait-up-to-the-request-deadline",
       "items": [
         "behavior:agy-model-confirmation-deadline"
@@ -76,6 +220,15 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#claude-queued-follow-up-write-failures",
       "items": [
         "behavior:claude-queued-write-failure"
+      ]
+    },
+    {
+      "id": "pi-turn-own-run",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client Pi tasks on the pi-rpc lane send their first prompt with streamingBehavior 'followUp' and end a turn only when the run their own prompt joined settles. A task that starts while a Pi extension's own run is active (a user extension under the default agentUserContext 'inherit', a workspace .pi extension, or agentExtensionPaths) no longer fails non-retryable with 'Agent is already processing': its input joins that run, the turn ends when that run settles, and the turn's events carry the rest of that run's output. Frames written before the task's prompt was accepted or between turns, such as an extension run's settlement, progress, usage and tool events, are no longer reported as the task's events and no longer end its turn; a tool result whose call started before the task joined the run is not reported either. Every extension_error is still reported. A first prompt Pi handles without a run (an extension command) now ends the turn at once instead of waiting for the next settlement. An extension run that is still in its agent_settled hook and starts compaction can leave the first prompt without any response; that start stays pending until the Host's own start deadline (#2300). No Host action is required; a Host that needs task output free of extension runs uses agentUserContext 'excluded' and lists only Host-owned agentExtensionPaths.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pi-tasks-and-extension-runs-2299",
+      "items": [
+        "behavior:pi-turn-own-run"
       ]
     },
     {
@@ -491,6 +644,157 @@
         "export:@byok-sdk/cloud-dataplane#PostgresE2eeMemberStore",
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresE2eeMemberStore"
+      ]
+    },
+    {
+      "id": "remove-unused-client-aliases",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes AGENT_CONTENT_READ_CAPABILITY_WORKSPACE/_TRANSCRIPT/_ARTIFACT (use AGENT_CONTENT_READ_CAPABILITIES), TOOL_AUTHORIZATION_MODES and TOOL_FILE_ACCESS (the types remain), DaemonEventKind (use DaemonEvent['kind']), and createAgentHomeProjection with AgentHomeProjectionFunction (pass agentHome.projection: { prepare } directly).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#aliases-and-convenience-factories",
+      "items": [
+        "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_ARTIFACT",
+        "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT",
+        "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_WORKSPACE",
+        "export:@byok-sdk/client#TOOL_AUTHORIZATION_MODES",
+        "export:@byok-sdk/client#TOOL_FILE_ACCESS",
+        "export:@byok-sdk/client#DaemonEventKind",
+        "export:@byok-sdk/client#createAgentHomeProjection",
+        "export:@byok-sdk/client#AgentHomeProjectionFunction"
+      ]
+    },
+    {
+      "id": "remove-list-installed-skill-packs",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes listInstalledSkillPacks(); installSkillPacks() reports what it installed and projectSkillPack() copies one pack by name.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#installed-skill-pack-listing",
+      "items": [
+        "export:@byok-sdk/client#listInstalledSkillPacks"
+      ]
+    },
+    {
+      "id": "remove-truth-memory-client",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes TruthMemoryClient, TruthMemoryClientError and their option, input and result types. The cloud truth routes and createStoredDeviceProofSigner() are unchanged.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#truth-memory-client",
+      "items": [
+        "export:@byok-sdk/client#TruthMemoryClient",
+        "export:@byok-sdk/client#TruthMemoryClientError",
+        "export:@byok-sdk/client#TruthMemoryClientErrorCode",
+        "export:@byok-sdk/client#TruthMemoryClientOptions",
+        "export:@byok-sdk/client#TruthMemoryMetric",
+        "export:@byok-sdk/client#TruthManifestQueryInput",
+        "export:@byok-sdk/client#TruthManifestRecord",
+        "export:@byok-sdk/client#TruthSnapshotCandidateInput",
+        "export:@byok-sdk/client#TruthSnapshotWriteInput",
+        "export:@byok-sdk/client#TruthTerminalWriteInput",
+        "export:@byok-sdk/client#TruthWriteBody",
+        "export:@byok-sdk/client#TruthWriteResult",
+        "export:@byok-sdk/client#VerifiedTruthRecord",
+        "export:@byok-sdk/client#LocalMemoryFilter",
+        "export:@byok-sdk/client#MemorySelector"
+      ]
+    },
+    {
+      "id": "runtime-status-inline",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client control status carries versionVerdict, versionChange and the executable inside runtimes[]; the runtimeVersionVerdicts, runtimeVersionChanges and runtimeExecutables side arrays are removed, which changes DiagnosticsSnapshot's control status type. Run status and doctor from the daemon's release.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#runtime-status-carries-every-observation-field-inline",
+      "items": [
+        "export:@byok-sdk/client#DiagnosticsSnapshot"
+      ]
+    },
+    {
+      "id": "runtime-status-side-arrays-refused",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client byok-agent status and doctor refuse a control status from an earlier daemon that still sends runtimeVersionVerdicts, runtimeVersionChanges or runtimeExecutables beside runtimes[]: status reports the live status unavailable with ControlStatusShapeUnsupportedError, and doctor reports the daemon status request failed and probes runtimes locally. Upgrade the CLI and the daemon together.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#runtime-status-carries-every-observation-field-inline",
+      "items": [
+        "behavior:runtime-status-side-arrays-refused"
+      ]
+    },
+    {
+      "id": "runtime-version-verdict-only",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client and /adapters remove RuntimeDetectResult.advisory and RuntimeDetectionAdvisory; versionVerdict { state: 'warn' } is the one unqualified-version warning and validateRuntimeDetectResult() refuses a detect result that still carries advisory. Custom adapters return versionVerdict; Hosts read availability.versionVerdict.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#version-verdict-is-the-one-runtime-version-warning",
+      "items": [
+        "export:@byok-sdk/client#RuntimeDetectResult",
+        "export:@byok-sdk/client#RuntimeDetectionAdvisory",
+        "export:@byok-sdk/client/adapters#RuntimeDetectResult",
+        "export:@byok-sdk/client/adapters#RuntimeDetectionAdvisory"
+      ]
+    },
+    {
+      "id": "daemon-config-unknown-fields-fail-closed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes DaemonConfigFieldRemovedError, the removed_field issue code, DaemonConfigIssue.severity and .migration, DaemonEffectiveConfig.warnings and byok-agent config check --strict; every DaemonConfig issue is an error. The generated daemon-config.schema.json closes every object (additionalProperties: false) and declares the root $schema, so editors refuse the unknown fields the daemon refuses.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#daemonconfig-rejects-unknown-fields",
+      "items": [
+        "export:@byok-sdk/client#DaemonConfigFieldRemovedError",
+        "export:@byok-sdk/client#DaemonConfigIssue",
+        "export:@byok-sdk/client#DaemonConfigIssueCode",
+        "export:@byok-sdk/client#DaemonEffectiveConfig",
+        "config:$schema",
+        "config:agentEgress",
+        "config:agentHome",
+        "config:agentMemory",
+        "config:artifactLimits",
+        "config:branding",
+        "config:deviceAssertion",
+        "config:deviceCredentials",
+        "config:mcpToolsets",
+        "config:piByokLauncher",
+        "config:presence",
+        "config:progressBatch",
+        "config:runtimeEnvironment",
+        "config:sdkHelperHost",
+        "config:serviceEnrollment",
+        "config:toolAuthorization"
+      ]
+    },
+    {
+      "id": "daemon-config-unknown-field-rejected",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client DaemonConfig: an unknown field, including one an earlier release removed (workspaceRoot, gitWorkspace, strictAgentOnly, hostedJournal and the rest), is an unknown_field error from config files and embedded createDaemon (DaemonConfigInvalidError) instead of a warning or DaemonConfigFieldRemovedError. Delete every field byok-agent config check reports.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#daemonconfig-rejects-unknown-fields",
+      "items": [
+        "behavior:daemon-config-unknown-field-rejected"
+      ]
+    },
+    {
+      "id": "agent-memory-outbox-version-error",
+      "impact": "additive",
+      "summary": "@byok-sdk/client adds AgentMemoryOutboxVersionUnsupportedError, the typed refusal of an Agent memory outbox state this build does not read.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-outbox-version-2-is-refused",
+      "items": [
+        "export:@byok-sdk/client#AgentMemoryOutboxVersionUnsupportedError"
+      ]
+    },
+    {
+      "id": "agent-memory-outbox-v2-rejected",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client Agent memory projection refuses a .byok/agent-memory-redacted-outbox-v2.json still in the 0.32.0 version 2 state with AgentMemoryOutboxVersionUnsupportedError instead of upgrading it; the file is not rewritten or deleted. Remove or archive it to resume projection.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-outbox-version-2-is-refused",
+      "items": [
+        "behavior:agent-memory-outbox-v2-rejected"
+      ]
+    },
+    {
+      "id": "todo-config-legacy-location-refused",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client bundled Pi todo extension reads only $XDG_CONFIG_HOME/rpiv-todo/config.json. When XDG_CONFIG_HOME points elsewhere and that file is absent while ~/.config/rpiv-todo/config.json exists, it throws TodoConfigLegacyLocationError naming both paths instead of reading the old file or running on defaults. Move the file under XDG_CONFIG_HOME.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#todo-extension-reads-one-config-location",
+      "items": [
+        "behavior:todo-config-legacy-location-refused"
+      ]
+    },
+    {
+      "id": "mcp-frame-ceiling-single-authority",
+      "impact": "additive",
+      "summary": "@byok-sdk/client/mcp-server MCP_SERVER_MAX_FRAME_BYTES keeps its 1 MiB value and now re-exports the constant the SDK MCP client and HTTP server share.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#mcp-frame-ceiling-has-one-authority",
+      "items": [
+        "export:@byok-sdk/client/mcp-server#MCP_SERVER_MAX_FRAME_BYTES"
       ]
     },
     {

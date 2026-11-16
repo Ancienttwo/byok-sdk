@@ -3,13 +3,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  appendAuditRecord,
   AUDIT_LOG_TRIM_TARGET_LINES,
   auditLogPath,
   MAX_AUDIT_LOG_BYTES,
   MAX_LIVE_TASK_ANCHORS,
   readAuditRecords,
 } from '../daemon/audit-log';
+import { appendAuditRecord } from './fixtures/audit-records';
 import { deriveTasksFromRecords } from '../diagnostics/tasks-view';
 
 const stores: string[] = [];

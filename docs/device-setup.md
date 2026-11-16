@@ -40,7 +40,7 @@ same sequence:
    install or run a user-scoped daemon as `root` or `SYSTEM`.
 3. Choose one configuration path below: the CLI path owns a JSON file, the
    embedded path owns a `DaemonConfig` assembled in code.
-4. Validate before starting: `byok-agent config check --strict` for the CLI
+4. Validate before starting: `byok-agent config check` for the CLI
    path, `checkDaemonConfig(config, { source: 'embedded' })` for the embedded
    path. A Host-owned config file carries the required `productName`,
    `productId` and `serverUrl` (and normally a `storeDir`); runtime isolation,
@@ -69,7 +69,7 @@ for a Unix local demo, not a production storage location.
 ```
 
 ```sh
-byok-agent config check --strict --json --config device.json
+byok-agent config check --json --config device.json
 byok-agent pair <code> --server http://localhost:8787 --config device.json
 byok-agent start --config device.json
 ```
@@ -221,7 +221,7 @@ the Host sets does not reach an agent.
 
 ## Configuration
 
-`byok-agent config check --strict --json --config device.json` validates the
+`byok-agent config check --json --config device.json` validates the
 same input boundary as startup, checks construction constraints and reports
 effective values. It reads filesystem state but does not start a daemon,
 pair a device, write state or prove runtime credentials/server acceptance.
@@ -237,12 +237,11 @@ configured `runtimes` value, else the adapter default); and `toolAuthorization`
 for the mode (`all`, or `static` with each runtime's resolved mode in
 `byRuntime`) and local approval policy.
 
-Missing required fields, invalid types/values, removed fields and CLI-forbidden
-values are errors. Unknown fields are warnings under the Q4' rollback contract;
-they do not stop startup, but `--strict` fails on them. Correct warnings before
-shipping an installer config. The generated schema marks embedded-only and
-distribution-owned fields with `not: {}`; range and cross-field constraints are
-also checked by `config check`. Removed fields fail with a migration reference.
+Missing required fields, invalid types/values, unknown fields and CLI-forbidden
+values are errors, both in `config check` and at startup; a field an older
+release accepted and this one no longer has is an unknown field. The generated
+schema marks embedded-only and distribution-owned fields with `not: {}`; range
+and cross-field constraints are also checked by `config check`.
 
 ### Runtime isolation and tool authorization
 
@@ -845,7 +844,7 @@ rejected. Follow the reported migration instead of switching on that result.
 See [store compatibility](upgrade-manifest.md#store-compatibility-precheck) for
 the separate embedded-server and provider-key inspectors. Install the chosen
 distribution through your Host's installer or package manager, run
-`config check --strict`, and start it again. Confirm the authenticated
+`config check`, and start it again. Confirm the authenticated
 connection and first task before declaring adoption complete.
 
 ## Unpair
@@ -1120,6 +1119,7 @@ linked JSON schema for full array/union shapes and descriptions.
 <!-- generated:fields:start -->
 | Field | Tier | Shape |
 |-------|------|-------|
+| `$schema` | advanced | string |
 | `nativeSessions` | advanced | boolean |
 | `nativeAssetRoot` | advanced | string |
 | `toolAuthorization` | advanced | object |
@@ -1360,15 +1360,13 @@ Coverage checks compare it with `DaemonConfigIssueCode`, `DAEMON_HALT_REASONS`
 and coded errors in `daemon-errors.ts` / `config-schema/errors.ts`, including
 the layout helper's input validation before daemon construction.
 “Retryable unchanged” means repeating the same operation without changing its
-input or environment. A warning does not require a startup retry; strict checks
-still need correction. Codes do not replace the reported field/path or cause.
+input or environment. Codes do not replace the reported field/path or cause.
 
 <!-- generated:errors:start -->
 | Code / halt reason | Retryable unchanged | Next step | Guide |
 |--------------------|---------------------|-----------|-------|
 | `config_invalid` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
 | `cursor_unreadable` | no | Run doctor --repair reset-cursor --yes, then start again. | [guide](#reset-cursor) |
-| `daemon_config_field_removed` | no | Remove the field and follow its migration; do not rename it to an unknown field. | [guide](#removed-fields) |
 | `daemon_config_invalid` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
 | `daemon_journal_protocol_unsupported` | no | Drain the journal with the release that wrote it before upgrading. | [guide](#upgrade) |
 | `device_revoked` | no | Obtain a fresh pairing code from the Host, pair this device, then start. | [guide](#reset) |
@@ -1385,11 +1383,10 @@ still need correction. Codes do not replace the reported field/path or cause.
 | `not_an_object` | no | Supply a JSON object. | [guide](#configuration) |
 | `protocol_negotiation_failed` | no | Read the HTTP status in the halt. On 404, check the server base URL and that the Host mounts the messages route; otherwise upgrade the server side and the daemons to the same wire protocol major. | [guide](#troubleshooting) |
 | `re_pair_required` | no | Obtain a fresh pairing code from the Host, pair this device, then start. | [guide](#reset) |
-| `removed_field` | no | Remove the field and follow its migration; do not rename it to an unknown field. | [guide](#removed-fields) |
 | `replay_cursor_too_old` | no | Pair again or use the Host operator recovery procedure for expired history. | [guide](#reset) |
 | `store_not_bound` | no | If this store owns the enrollment, run doctor --repair restore-enrollment-metadata with the expected device and tenant ids; otherwise pair this store under its own productId, or pair --replace-other-store to replace the other store's enrollment. | [guide](#troubleshooting) |
 | `store_owned` | no | Stop the daemon that owns this store before starting another. | [guide](#troubleshooting) |
-| `unknown_field` | no | Remove or correct the unknown field; startup warns, while --strict rejects warnings. | [guide](#configuration) |
+| `unknown_field` | no | Remove or correct the unknown field; config check and startup reject it. | [guide](#configuration) |
 | `unpaired` | no | Obtain a fresh pairing code from the Host, pair this device, then start. | [guide](#reset) |
 <!-- generated:errors:end -->
 
@@ -1436,29 +1433,8 @@ Manifest transition: **0.43.0 → 0.43.0**. Versions and entries below come from
 |-------|--------|----------------------|
 | grok-agent-user-context | additive | GrokAdapterOptions.agentUserContext and runtimes.grok.agentUserContext, default inherit, which changes nothing. Under excluded, a Grok Agent task runs with GROK_HOME set to an SDK-owned directory that links the user's auth.json, config.toml, trusted_folders.toml and hooks/, keeps AGENTS.md, rules/, skills, memory, plugins and the user's sessions out, keeps the Agent's sessions in <Agent home>/.byok/grok/sessions, and sets the four Claude and Cursor agents and rules variables. The start fails as a non-retryable authority failure while grok inspect still lists a user instruction file (such as an [paths] extra_rule_dirs file), when inspect fails, without a sealed Agent home, or when the user GROK_HOME has no auth.json and XAI_API_KEY is not set. A login Grok writes over the auth.json link stays in the execution scratch: the release fails with a cleanup RuntimeDisposalFailure naming its path, retention skips that execution and reports a grok_login_preserved retention-failure event with the path on every pass, and every Grok task of the daemon refuses to start until the user moves the file back to ~/.grok/auth.json or deletes it, then logs in again. The SDK never restores or deletes it. The Grok descriptor then declares isolation.userInstructions. A Bot switched from inherit cannot resume sessions it made in the user's store. [Migration](../docs/adapter-capabilities.md#agentusercontext-grok) |
 | grok-session-store | additive | The new expiring retention class grok-session-store covers the sessions a Grok Agent task keeps under <Agent home>/.byok/grok/sessions when agentUserContext is excluded. A session folder, sessions/<encoded cwd>/<session id>/, is deleted once its newest write is older than the new DaemonConfig.storage.retention.ttlMs['grok-session-store'] (default 31 days, or the session-ledger TTL plus one day if longer; an explicit value must be at least the session-ledger TTL plus one day), unless a live session ledger still names the session or its Agent home is running a task. Grok's own index, sessions/session_search.sqlite, is never touched. A Host that switches exhaustively over retention class ids (ExpiringClassId or EXPIRING_CLASS_IDS) must add a branch for grok-session-store. No data migration: the store exists only for Grok Agent tasks under agentUserContext excluded, and resuming a pruned session fails through the existing missing-session path. [Migration](../docs/host-local-storage-layout.md#retention-bounds) |
+| daemon-config-unknown-fields-fail-closed | breaking | @byok-sdk/client removes DaemonConfigFieldRemovedError, the removed_field issue code, DaemonConfigIssue.severity and .migration, DaemonEffectiveConfig.warnings and byok-agent config check --strict; every DaemonConfig issue is an error. The generated daemon-config.schema.json closes every object (additionalProperties: false) and declares the root $schema, so editors refuse the unknown fields the daemon refuses. [Migration](../docs/releases/host-upgrade-next-minor.md#daemonconfig-rejects-unknown-fields) |
 <!-- generated:migrations:end -->
-
-## Removed fields
-
-Generated from `REMOVED_DAEMON_CONFIG_FIELDS`; remove the old inputs in the same
-Host change that adopts the new contract. No alias or dual configuration path.
-
-<!-- generated:removed:start -->
-| Removed field | Migration |
-|---------------|-----------|
-| `permissionDefaults` | DaemonConfig.permissionDefaults was removed: the local agent's own permission settings apply |
-| `agentEgress.sanitizer` | DaemonConfig.agentEgress.sanitizer was removed: Agent egress goes to the Host as is |
-| `mcpLaunchCwd` | DaemonConfig.mcpLaunchCwd was removed: MCP servers start in the session cwd, as the agent runtime does |
-| `toolImplementationAuthority` | DaemonConfig.toolImplementationAuthority was removed: the SDK does not attest tool or runtime executables |
-| `hostedJournal` | DaemonConfig.hostedJournal was removed: every daemon journals; tune it under storage.journal and inject a journal as overrides.journal |
-| `strictAgentOnly` | DaemonConfig.strictAgentOnly was removed: since wire v4 every offer is an Agent offer, so every daemon runs Agent offers only |
-| `gitWorkspace` | DaemonConfig.gitWorkspace was removed: since wire v4 every offer is an Agent offer and runs in its SDK-owned Agent home, so there are no Git task workspaces (overrides.gitWorkspace is gone too); configure agentHome |
-| `workspaceRoot` | DaemonConfig.workspaceRoot was removed: since wire v4 every offer runs in its SDK-owned Agent home, never in a workspaceRoot/<taskId> directory; configure agentHome |
-| `resultDocument` | DaemonConfig.resultDocument was removed: a result-document offer carries its frozen schema and the runtime submits the outcome through the SDK-reserved submit_result tool |
-| `maxConcurrentMutableSessionsPerAgentHome` | DaemonConfig.maxConcurrentMutableSessionsPerAgentHome was removed. A home has one writer Attempt; send concurrent tasks as homeAccess: 'memory-reader' offers and set maxConcurrentReaderAttemptsPerAgentHome to limit them. |
-| `durablePi` | DaemonConfig.durablePi was removed: set runtimes.pi.durableLane, or with createDaemonWithAdapters construct PiAdapter({ durableLane: true }); the daemon wires the durable journal from the adapter's durableLane capability |
-| `agentMemoryFilesystem` | DaemonConfig.agentMemoryFilesystem is removed; an arbitrary helper is not admitted on this platform. Use the SDK release artifact. |
-<!-- generated:removed:end -->
 
 ## Maintaining this guide
 

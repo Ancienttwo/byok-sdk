@@ -16,7 +16,7 @@ import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { observationOf } from './fixtures/mcp-observation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
-import type { RawEvent } from '../../vendor/oar/4eb5919/contracts/session';
+import type { RawEvent } from '../../vendor/oar/552a4f9/contracts/session';
 
 const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
 

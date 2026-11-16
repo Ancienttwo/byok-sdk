@@ -12,7 +12,7 @@ import { botRoutines, createDefinition, endable, owned, ownerRoutineUpdate, rout
 import { DAILY, deliverRoutine, routineOf, routineRow, seedRoutine } from './routines.test-support';
 import { settleOutsideK8 } from './__tests__/team.test-support';
 import { outcomeSchema } from './schema';
-import { botCompactVeto } from './compaction';
+import { botLedgerOptions } from './compaction';
 
 const action = (prompt: string, schedule = DAILY) => ({ localId: 'new_routine_1', schedule, prompt });
 const hostJob = (id: string, schedule = DAILY): HostJobRoutineDefinition => ({ id, version: 1, timeZone: schedule.tz, rule: json(schedule),
@@ -27,7 +27,7 @@ afterEach(async () => { await bot?.close(); await fixture?.close(); bot = undefi
 const schedule: RoutineScheduleFields = { minute: 0, hour: (new Date().getUTCHours() + 12) % 24, tz: 'UTC' };
 async function setup(rest: Partial<BotOptions> = {}): Promise<BotCollaboration> {
   clock = Date.now();
-  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
+  fixture = await openHost({ externalCore: true, ledgerOptions: botLedgerOptions, consume: (wake, signal) => bot!.consume(wake, signal) });
   bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', execution: template(fixture.deviceId), connector: async () => null,
     now: () => clock, ...rest });
   return bot;
@@ -300,17 +300,6 @@ it('refuses an execution routine on the Bot Host core and writes no routine row,
   expect(fixture!.ledger.snapshot().routines).toEqual({});
 });
 
-it('refuses a version 1 ledger with a clear error and leaves it unchanged', async () => {
-  const options = { botId: 'main', execution: template('device'), connector: async () => null };
-  await setup();
-  await bot!.close();
-  const saved = json({ version: 1, routines: { old: { owner: 'main' } }, occurrences: {}, operations: [] });
-  fixture!.ledger.transaction(s => { s.application.collaboration = saved; });
-  expect(() => new BotCollaboration(fixture!.server, fixture!.ledger, options))
-    .toThrow('Bot collaboration state version 1 is not supported. Bot routines moved to K4 routines.');
-  expect(fixture!.ledger.snapshot().application.collaboration).toEqual(saved);
-});
-
 it('fails a promoted routine Turn whose intent a writer without the veto compacted, after the tombstone expired', async () => {
   await setup();
   const id = await seedRoutine(bot!, 'task-1', 'report', schedule);
@@ -319,7 +308,7 @@ it('fails a promoted routine Turn whose intent a writer without the veto compact
   expect(fixture!.ledger.snapshot().intents[hash(turn!.id)]).toBeDefined();
   await settleOutsideK8(bot!, turn!.id);
   await bot!.core.flushProjections(async () => {});
-  const other = new HostLedger(join(fixture!.root, 'host.sqlite'), fixture!.ledger.tenant);
+  const other = new HostLedger(join(fixture!.root, 'host.sqlite'), fixture!.ledger.tenant, { expectedFormats: botLedgerOptions.expectedFormats });
   try {
     expect(other.compact({ acknowledgedIntentKeys: [turn!.id], now: clock, tombstoneRetentionMs: MIN_TOMBSTONE_RETENTION_MS }))
       .toMatchObject({ compactedIntents: 1 });

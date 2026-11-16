@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { PassThrough, Writable } from 'node:stream';
 import { classifyJsonRpcMessage, isUsableRequestId, SeenRequestIds } from './dispatch.js';
+import { MCP_MAX_FRAME_BYTES } from '../mcp/frame-limit.js';
 import { MCP_SERVER_MAX_PENDING_BYTES } from './framing.js';
 import { MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS, McpServerToolError, serveMcpOverStdio, type McpServerHandle, type McpServerOptions } from './index.js';
 
@@ -78,7 +79,7 @@ export function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServe
   const maxSessions = positiveInteger(options.maxSessions ?? 64, 'maxSessions');
   const idleTimeoutMs = positiveInteger(options.idleTimeoutMs ?? 15 * 60_000, 'idleTimeoutMs');
   const maxInFlight = positiveInteger(options.maxInFlight ?? 64, 'maxInFlight');
-  positiveInteger(options.maxOutboundFrameBytes ?? 1_048_576, 'maxOutboundFrameBytes');
+  positiveInteger(options.maxOutboundFrameBytes ?? MCP_MAX_FRAME_BYTES, 'maxOutboundFrameBytes');
   if (options.tools.length === 0 || new Set(options.tools.map(tool => tool.name)).size !== options.tools.length) {
     throw new TypeError('HTTP MCP requires a nonempty list of uniquely named tools');
   }

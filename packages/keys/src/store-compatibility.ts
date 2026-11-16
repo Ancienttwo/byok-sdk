@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import type { StoreCompatibility } from '@byok-sdk/core';
 import { ByokKeysError } from './errors.js';
-import { migrateProviderProfileStore, SqliteProviderProfileStore, type ProviderProfileStoreMigration } from './sqlite-profile-store.js';
+import { SqliteProviderProfileStore } from './sqlite-profile-store.js';
 import { loadSqliteModule } from './sqlite-support.js';
 
 /** A SQLite store is its main file plus a WAL or a hot rollback journal. `-shm` is rebuilt from the WAL. */
@@ -19,12 +19,7 @@ const SQLITE_FILE_SUFFIXES = ['', '-wal', '-journal'] as const;
  * process that writes the store first: a file that changes while it is copied
  * fails the check rather than yielding a verdict about a torn copy.
  *
- * When the open refuses the store as stale (`PROVIDER_STORE_SCHEMA_STALE`),
- * {@link migrateProviderProfileStore} runs on the same copy. A migration that
- * leaves a store this build opens is `migration-required`: the Host runs the
- * migration before it opens the store. A store the migration refuses as stale
- * is `new-path-repair`, carrying the migration's code and reason: provision a
- * separate current-schema store. Any other refusal is `rejected`.
+ * Unsupported schemas are refused without migration.
  */
 export async function inspectProviderProfileStore(path: string): Promise<StoreCompatibility> {
   const file = resolve(path);
@@ -37,22 +32,7 @@ export async function inspectProviderProfileStore(path: string): Promise<StoreCo
     const copy = copyStoreFiles(file, directory);
     const refusal = await openRefusal(copy);
     if (refusal === undefined) return { store: 'keys-profile-store', path: file, verdict: 'accepted', reason: 'This build opens the store' };
-    if (!isSchemaStale(refusal)) return refused(file, refusal);
-    let migration: ProviderProfileStoreMigration;
-    try {
-      migration = migrateProviderProfileStore(copy);
-    } catch (error) {
-      return refused(file, error);
-    }
-    if (migration === 'unchanged') return refused(file, refusal);
-    const migratedRefusal = await openRefusal(copy);
-    if (migratedRefusal !== undefined) return refused(file, migratedRefusal);
-    return {
-      store: 'keys-profile-store',
-      path: file,
-      verdict: 'migration-required',
-      reason: 'This build opens the store after migrateProviderProfileStore migrates it',
-    };
+    return refused(file, refusal);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

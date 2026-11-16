@@ -8,6 +8,9 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
   "x-byok-schemaVersion": 1,
   "type": "object",
   "properties": {
+    "$schema": {
+      "type": "string"
+    },
     "nativeSessions": {
       "type": "boolean"
     },
@@ -43,39 +46,7 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                   "id": {
                     "type": "string"
                   },
-                  "match": {
-                    "type": "object",
-                    "properties": {
-                      "toolName": {
-                        "type": "string"
-                      },
-                      "commandGlob": {
-                        "type": "string"
-                      },
-                      "pathGlob": {
-                        "type": "string"
-                      },
-                      "mcpServer": {
-                        "type": "string"
-                      },
-                      "mcpTool": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                },
-                "required": [
-                  "id",
-                  "match"
-                ]
-              }
-            },
-            "allowWithoutAsking": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
+                  "description": {
                     "type": "string"
                   },
                   "match": {
@@ -96,16 +67,59 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                       "mcpTool": {
                         "type": "string"
                       }
-                    }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "required": [
                   "id",
                   "match"
-                ]
+                ],
+                "additionalProperties": false
+              }
+            },
+            "allowWithoutAsking": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "match": {
+                    "type": "object",
+                    "properties": {
+                      "toolName": {
+                        "type": "string"
+                      },
+                      "commandGlob": {
+                        "type": "string"
+                      },
+                      "pathGlob": {
+                        "type": "string"
+                      },
+                      "mcpServer": {
+                        "type": "string"
+                      },
+                      "mcpTool": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "match"
+                ],
+                "additionalProperties": false
               }
             }
-          }
+          },
+          "additionalProperties": false
         },
         "fileScope": {
           "type": "object",
@@ -138,18 +152,21 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                   "id",
                   "path",
                   "access"
-                ]
+                ],
+                "additionalProperties": false
               }
             }
           },
           "required": [
             "mode"
-          ]
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
         "default"
-      ]
+      ],
+      "additionalProperties": false
     },
     "localToolApproval": {
       "const": "allow"
@@ -160,7 +177,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
         "macosKeychainPath": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "storage": {
       "type": "object",
@@ -193,7 +211,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
           "required": [
             "maxStoreBytes",
             "minFreeBytes"
-          ]
+          ],
+          "additionalProperties": false
         },
         "skillPackDataDirs": {
           "type": "array",
@@ -267,9 +286,11 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "terminal-evidence": {
                   "type": "number"
                 }
-              }
+              },
+              "additionalProperties": false
             }
-          }
+          },
+          "additionalProperties": false
         },
         "journal": {
           "type": "object",
@@ -280,9 +301,11 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
             "maxRecordBytes": {
               "type": "number"
             }
-          }
+          },
+          "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false
     },
     "localAgentRelease": {
       "x-byok-surface": "distribution-owned",
@@ -320,7 +343,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
       },
       "required": [
         "hostStorageRoot"
-      ]
+      ],
+      "additionalProperties": false
     },
     "agentMemoryMcp": {
       "enum": [
@@ -359,14 +383,16 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               "required": [
                 "scopeId",
                 "epoch"
-              ]
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
             "grantRef",
             "writerEpoch",
             "policyRevision"
-          ]
+          ],
+          "additionalProperties": false
         },
         "redactor": {
           "x-byok-surface": "embedded-only",
@@ -376,7 +402,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
           "x-byok-surface": "embedded-only",
           "not": {}
         }
-      }
+      },
+      "additionalProperties": false
     },
     "agentMemoryExport": {
       "const": true
@@ -399,7 +426,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
       },
       "required": [
         "mode"
-      ]
+      ],
+      "additionalProperties": false
     },
     "maxConcurrentReaderAttemptsPerAgentHome": {
       "type": "number"
@@ -436,7 +464,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "delivery",
                 "maxCoalesceMs",
                 "maxEventBytes"
-              ]
+              ],
+              "additionalProperties": false
             },
             "reliable": {
               "type": "object",
@@ -455,7 +484,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "maxPendingEventsPerAgent",
                 "maxPendingBytesPerAgent",
                 "maxPendingBytesPerTenant"
-              ]
+              ],
+              "additionalProperties": false
             },
             "transfers": {
               "type": "object",
@@ -481,7 +511,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                       "required": [
                         "maxBytes",
                         "allowedMimeTypes"
-                      ]
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 },
@@ -506,7 +537,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                       "required": [
                         "maxBytes",
                         "allowedMimeTypes"
-                      ]
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 },
@@ -531,7 +563,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                       "required": [
                         "maxBytes",
                         "allowedMimeTypes"
-                      ]
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 }
@@ -540,7 +573,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "workspace",
                 "transcript",
                 "artifact"
-              ]
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -548,7 +582,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
             "activity",
             "reliable",
             "transfers"
-          ]
+          ],
+          "additionalProperties": false
         },
         "contentRead": {
           "type": "object",
@@ -567,7 +602,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                       },
                       "required": [
                         "kind"
-                      ]
+                      ],
+                      "additionalProperties": false
                     },
                     {
                       "type": "object",
@@ -582,7 +618,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                       "required": [
                         "kind",
                         "root"
-                      ]
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 },
@@ -606,7 +643,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "root",
                 "maxTextBytes",
                 "textMimeTypes"
-              ]
+              ],
+              "additionalProperties": false
             },
             "transcript": {
               "type": "object",
@@ -622,7 +660,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                       },
                       "required": [
                         "kind"
-                      ]
+                      ],
+                      "additionalProperties": false
                     },
                     {
                       "type": "object",
@@ -637,7 +676,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                       "required": [
                         "kind",
                         "root"
-                      ]
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 },
@@ -661,7 +701,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "root",
                 "maxTextBytes",
                 "textMimeTypes"
-              ]
+              ],
+              "additionalProperties": false
             },
             "artifact": {
               "type": "object",
@@ -677,7 +718,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                       },
                       "required": [
                         "kind"
-                      ]
+                      ],
+                      "additionalProperties": false
                     },
                     {
                       "type": "object",
@@ -692,7 +734,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                       "required": [
                         "kind",
                         "root"
-                      ]
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 },
@@ -716,7 +759,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "root",
                 "maxTextBytes",
                 "textMimeTypes"
-              ]
+              ],
+              "additionalProperties": false
             },
             "runtimeAllowlistedRoots": {
               "type": "array",
@@ -724,9 +768,11 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "type": "string"
               }
             }
-          }
+          },
+          "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false
     },
     "runtimeAllowlist": {
       "type": "array",
@@ -785,7 +831,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -800,7 +847,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -822,7 +870,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -837,7 +886,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -859,7 +909,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -874,7 +925,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -883,7 +935,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               "required": [
                 "qualifiedVersion",
                 "unqualified"
-              ]
+              ],
+              "additionalProperties": false
             },
             "runtimeEnvironment": {
               "anyOf": [
@@ -899,7 +952,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -922,14 +976,16 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                   },
                   "required": [
                     "base"
-                  ]
+                  ],
+                  "additionalProperties": false
                 }
               ]
             },
             "packageDir": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         },
         "claude": {
           "type": "object",
@@ -976,7 +1032,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -991,7 +1048,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1013,7 +1071,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1028,7 +1087,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1050,7 +1110,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1065,7 +1126,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1074,7 +1136,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               "required": [
                 "qualifiedVersion",
                 "unqualified"
-              ]
+              ],
+              "additionalProperties": false
             },
             "runtimeEnvironment": {
               "anyOf": [
@@ -1090,7 +1153,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -1113,11 +1177,13 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                   },
                   "required": [
                     "base"
-                  ]
+                  ],
+                  "additionalProperties": false
                 }
               ]
             }
-          }
+          },
+          "additionalProperties": false
         },
         "codex": {
           "type": "object",
@@ -1164,7 +1230,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1179,7 +1246,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1201,7 +1269,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1216,7 +1285,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1238,7 +1308,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1253,7 +1324,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1262,7 +1334,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               "required": [
                 "qualifiedVersion",
                 "unqualified"
-              ]
+              ],
+              "additionalProperties": false
             },
             "runtimeEnvironment": {
               "anyOf": [
@@ -1278,7 +1351,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -1301,11 +1375,13 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                   },
                   "required": [
                     "base"
-                  ]
+                  ],
+                  "additionalProperties": false
                 }
               ]
             }
-          }
+          },
+          "additionalProperties": false
         },
         "grok": {
           "type": "object",
@@ -1358,7 +1434,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1373,7 +1450,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1395,7 +1473,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1410,7 +1489,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1432,7 +1512,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1447,7 +1528,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1456,7 +1538,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               "required": [
                 "qualifiedVersion",
                 "unqualified"
-              ]
+              ],
+              "additionalProperties": false
             },
             "runtimeEnvironment": {
               "anyOf": [
@@ -1472,7 +1555,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -1495,11 +1579,13 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                   },
                   "required": [
                     "base"
-                  ]
+                  ],
+                  "additionalProperties": false
                 }
               ]
             }
-          }
+          },
+          "additionalProperties": false
         },
         "dsh": {
           "type": "object",
@@ -1527,7 +1613,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "provider",
                 "model",
                 "keyEnv"
-              ]
+              ],
+              "additionalProperties": false
             },
             "sandbox": {
               "enum": [
@@ -1566,7 +1653,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1581,7 +1669,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1603,7 +1692,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1618,7 +1708,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1640,7 +1731,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1655,7 +1747,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1664,7 +1757,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               "required": [
                 "qualifiedVersion",
                 "unqualified"
-              ]
+              ],
+              "additionalProperties": false
             },
             "runtimeEnvironment": {
               "anyOf": [
@@ -1680,7 +1774,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -1703,7 +1798,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                   },
                   "required": [
                     "base"
-                  ]
+                  ],
+                  "additionalProperties": false
                 }
               ]
             }
@@ -1711,7 +1807,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
           "required": [
             "home",
             "model"
-          ]
+          ],
+          "additionalProperties": false
         },
         "opencode": {
           "type": "object",
@@ -1755,7 +1852,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1770,7 +1868,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1792,7 +1891,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1807,7 +1907,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1829,7 +1930,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1844,7 +1946,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1853,7 +1956,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               "required": [
                 "qualifiedVersion",
                 "unqualified"
-              ]
+              ],
+              "additionalProperties": false
             },
             "runtimeEnvironment": {
               "anyOf": [
@@ -1869,7 +1973,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -1892,14 +1997,16 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                   },
                   "required": [
                     "base"
-                  ]
+                  ],
+                  "additionalProperties": false
                 }
               ]
             }
           },
           "required": [
             "models"
-          ]
+          ],
+          "additionalProperties": false
         },
         "agy": {
           "type": "object",
@@ -1940,7 +2047,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1955,7 +2063,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1977,7 +2086,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1992,7 +2102,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -2014,7 +2125,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -2029,7 +2141,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -2038,7 +2151,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               "required": [
                 "qualifiedVersion",
                 "unqualified"
-              ]
+              ],
+              "additionalProperties": false
             },
             "runtimeEnvironment": {
               "anyOf": [
@@ -2054,7 +2168,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -2077,16 +2192,19 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                   },
                   "required": [
                     "base"
-                  ]
+                  ],
+                  "additionalProperties": false
                 }
               ]
             }
           },
           "required": [
             "home"
-          ]
+          ],
+          "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false
     },
     "runtimeEnvironment": {
       "anyOf": [
@@ -2102,7 +2220,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "type": "string"
               }
             }
-          }
+          },
+          "additionalProperties": false
         },
         {
           "type": "object",
@@ -2125,7 +2244,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
           },
           "required": [
             "base"
-          ]
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -2158,7 +2278,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
         "command",
         "profileDbPath",
         "sessionDir"
-      ]
+      ],
+      "additionalProperties": false
     },
     "runtimePreference": {
       "type": "array",
@@ -2182,7 +2303,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
       },
       "required": [
         "enabled"
-      ]
+      ],
+      "additionalProperties": false
     },
     "branding": {
       "type": "object",
@@ -2196,7 +2318,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
         "accent": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "codexSandbox": {
       "enum": [
@@ -2240,13 +2363,15 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               },
               "required": [
                 "command"
-              ]
+              ],
+              "additionalProperties": false
             }
           }
         },
         "required": [
           "mcpServers"
-        ]
+        ],
+        "additionalProperties": false
       }
     },
     "dangerouslyAllowInsecureRemote": {
@@ -2268,7 +2393,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
       "required": [
         "maxFileBytes",
         "maxTaskBytes"
-      ]
+      ],
+      "additionalProperties": false
     },
     "startupTimeoutMs": {
       "type": "number"
@@ -2285,7 +2411,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
         "flushIntervalMs": {
           "type": "number"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "shutdownGraceMs": {
       "type": "number"
@@ -2302,7 +2429,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
         "minimumIntervalMs": {
           "type": "number"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "deviceAssertion": {
       "type": "object",
@@ -2319,7 +2447,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
       },
       "required": [
         "audiences"
-      ]
+      ],
+      "additionalProperties": false
     },
     "inputPreparation": {
       "x-byok-surface": "embedded-only",
@@ -2339,54 +2468,5 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
     "productId",
     "serverUrl"
   ],
-  "x-byok-removedFields": [
-    {
-      "path": "permissionDefaults",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "agentEgress.sanitizer",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "mcpLaunchCwd",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "toolImplementationAuthority",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "hostedJournal",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "strictAgentOnly",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "gitWorkspace",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "workspaceRoot",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "resultDocument",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "maxConcurrentMutableSessionsPerAgentHome",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "durablePi",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "agentMemoryFilesystem",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    }
-  ]
+  "additionalProperties": false
 };

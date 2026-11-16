@@ -181,10 +181,10 @@ describe('Agent memory guidance', () => {
     } as const;
 
     if (process.platform === 'darwin') {
-      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')])).toThrow('agentMemoryFilesystem is removed');
+      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')])).toThrow('DaemonConfig.agentMemoryFilesystem is not a known field');
       expect(resolveAgentMemoryMcpBin(true)).toBeDefined();
     } else {
-      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')])).toThrow('agentMemoryFilesystem is removed');
+      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')])).toThrow('DaemonConfig.agentMemoryFilesystem is not a known field');
       expect(resolveAgentMemoryMcpBin(true)).toBeUndefined();
     }
   });

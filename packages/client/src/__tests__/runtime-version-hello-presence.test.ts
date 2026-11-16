@@ -61,10 +61,7 @@ describe('conn.hello / presence version-policy and runtime-unavailable projectio
         new StubRuntimeAdapter('pi', { kind: 'available', version: '1.4.0', versionVerdict: ALLOW }),
         new StubRuntimeAdapter('claude', { kind: 'not-found' }),
         new StubRuntimeAdapter('codex', { kind: 'available', version: '0.160.0', versionVerdict: BLOCK }),
-        new StubRuntimeAdapter('grok', {
-          kind: 'available', version: '1.0.62', versionVerdict: WARN,
-          advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '1.0.52' },
-        }),
+        new StubRuntimeAdapter('grok', { kind: 'available', version: '1.0.62', versionVerdict: WARN }),
         new StubRuntimeAdapter('dsh', { kind: 'refused', reason: 'acp_unavailable' }),
         // No policy: the projection must omit the field instead of inventing allow.
         new StubRuntimeAdapter('zeta', { kind: 'available', version: '2.0.0' }),

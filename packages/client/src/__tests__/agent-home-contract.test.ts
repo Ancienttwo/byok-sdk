@@ -13,7 +13,6 @@ import {
   AgentHomeResolutionError,
   AgentHomeLeaseManager,
   AgentHomeManager,
-  createAgentHomeProjection,
   validateAgentRef,
 } from '../agent-home';
 import { AgentSessionHandoffStore, AgentSessionHandoffMismatchError } from '../daemon/agent-session-handoff-store';
@@ -148,14 +147,14 @@ describe('SDK-owned Agent home contract', () => {
     const projectedHomes: string[] = [];
     const manager = new AgentHomeManager({
       hostStorageRoot: root,
-      projection: createAgentHomeProjection(async ({ cwd, agentRef }) => {
+      projection: { prepare: async ({ cwd, agentRef }) => {
         projectedHomes.push(cwd);
         await fs.writeFile(
           path.join(cwd, 'profile.json'),
           JSON.stringify({ profileRevision: agentRef.profileRevision }),
           'utf8',
         );
-      }),
+      } },
     });
     const first = await manager.prepare(ref('one'));
     const home = first.resolution.canonicalHome;
@@ -897,7 +896,7 @@ describe('SDK-owned Agent home contract', () => {
     let projectionCalls = 0;
     const manager = new AgentHomeManager({
       hostStorageRoot,
-      projection: createAgentHomeProjection(() => { projectionCalls += 1; }),
+      projection: { prepare: () => { projectionCalls += 1; } },
     });
     const original = await manager.prepare(ref('one', 'profile-1'));
     const handoffs = new AgentSessionHandoffStore();
