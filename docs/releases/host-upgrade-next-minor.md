@@ -363,25 +363,39 @@ Additive: `CloudStores.e2eeMember`, `DeviceScopedStores.e2eeMember`, the
 
 ## Service uninstall stops before it removes `current` (#2274)
 
-This corrects a 0.43.0 regression by restoring the 0.42.0 order.
-`@byok-sdk/client` `ServiceInstallation.uninstall()` runs the lifecycle's
-uninstall, which stops the service, while `current` still points at the
-installed payload, and only then removes `current`, `previous`, `versions/`,
-`snapshots/` and the receipt. 0.43.0 removed `current` first (#2011), so a
-Windows stop program under `current` was gone when the stop ran, and every
-uninstall failed with `service_stop_failed`.
+This corrects a 0.43.0 regression. `@byok-sdk/client`
+`ServiceInstallation.uninstall()` now stops and unregisters the service while
+`current` still points at the installed payload, then removes `current`, then
+the unit and launcher, then `previous`, `versions/`, `snapshots/` and the
+receipt. 0.43.0 removed `current` before the stop (#2011), so a Windows stop
+program under `current` was gone when the stop ran, and every uninstall failed
+with `service_stop_failed`.
 
 - A stop that fails, times out or is refused (a stop program that exits
-  non-zero, a refused or timed-out `launchctl bootout`) throws as is and
-  removes nothing: the unit and `current` both stay, so the service can start
-  again, for example at the next login, and `uninstall()` can be retried.
-- The cost narrows the 0.43.0 guarantee that a unit an uninstall leaves
-  behind starts no payload (#2011). When the stop succeeds and the unit's
-  removal then fails, the unit stays with `current`, as in 0.42.0, so a boot
-  or login can start the installed payload until `uninstall()` is retried.
-  Retry `uninstall()` after any failure.
+  non-zero, a refused or timed-out `launchctl bootout`) throws as is, without
+  a retry, and removes nothing: the unit and `current` both stay, so the
+  service can start again, for example at the next login, until `uninstall()`
+  is retried.
+- A unit whose removal fails after the stop stays without `current`, so a
+  boot or login starts no payload, as in 0.43.0 (#2011, #2279). A timed-out
+  `daemon-reload` after the unit files are removed is thrown the same way.
+- A Windows `user` scope lifecycle's `stop()`, and the stop inside
+  `uninstall()`, now run the Host's `stop` program only while a launcher
+  runs. With none running they write the stop marker and return. A retried
+  `uninstall()` therefore finishes after `current` is gone, instead of
+  failing with `service_stop_failed` because a stop program under `current`
+  no longer exists (#2279).
+- A first install that fails to activate, start or pass its health check
+  cleans up in the same order: stop and unregister, remove `current`, then
+  the unit and launcher. A leftover unit can no longer start the payload that
+  failed its health check. When the unit cannot be removed, the
+  `install_health_check_failed` message lists `service unit and launcher`
+  first among the remaining artifacts; when the stop fails, it lists
+  `service registration, current pointer` before it.
 
-No Host change is needed for a stop program that runs from under `current`.
+Retry `uninstall()` after any failure; a retry finishes once the cause is
+fixed. No Host change is needed for a stop program that runs from under
+`current`.
 
 ## Wire v7
 
@@ -547,6 +561,40 @@ at most 64 capability flags.
   erasure deletes them (`TENANT_ERASURE_TABLES`).
 - **Claims.** A claimed task stores exactly one executor, in
   `claimed_runtime` or `claimed_harness_id` (a new CHECK).
+- **One schema.** The migrations and the preflight act on the first schema of
+  the connecting role's `search_path` in that database. Run the migrations and
+  the cloud with the same role, database and `search_path`; changing the
+  `search_path` between them points the cloud at another schema.
+- **Cut over at once.** Per-task locks (steer refusals, approval timeline) use
+  new keys, which a v6 process does not take. Do not run v6 and v7 cloud
+  processes against one database; v7 starts on a new one.
+
+### Embedded server (`@byok-sdk/server`)
+
+- **SQLite store.** The schema is version 10 and no older file is upgraded in
+  place. Opening a file from a v6 build (schema 6 to 9) fails with
+  `SqliteSchemaError` `SQLITE_SCHEMA_UNSUPPORTED`, and `inspectSqliteStore`
+  reports `new-path-repair`. Point `storage.path` at a new file, keep the old
+  one for the history export, and pair the devices again.
+- **Dispatch.** `DispatchInput` takes one required `target` in place of
+  `runtime`, `harnessId` and `dispatchSelection`. Pass `{ lane: 'auto' }` to
+  keep the device's own runtime choice. An execution-core intent names a
+  concrete target; `auto` is refused there.
+- **Claimed executor.** `TaskSnapshot.claimedExecutor` and the `task.state`
+  server event's `claimedExecutor` replace `claimedRuntime` and
+  `claimedHarnessId`; `SteerRejectedError.executor` replaces `runtime`.
+- **Steer.** `TaskHandle.steer` resolves `{ messageId }`. Text over 65,536
+  UTF-8 bytes is refused with `ByokCloudError` `coordination_input_invalid`
+  before anything is enqueued.
+- **Steer refusals.** A task's event feed yields
+  `{ kind: 'steer_refused', messageId, reason, at }` for each refusal
+  recorded before its terminal; add the arm to exhaustive switches over
+  `ServerTaskEvent`. `tasks.readSteerRefusal(taskId, messageId)` and
+  `tasks.listSteerRefusals(taskId, { afterRevision, limit })` read every
+  refusal, including one recorded after the feed ended. A refusal is kept for
+  the life of the store, archived task included.
+- **Event cursors.** `tasks.events` cursors start with `te2.`; a `te1.`
+  cursor is refused with `cursor_unknown`. Start a new read.
 
 ### Phase 1 and 2 items
 

@@ -11,6 +11,7 @@ import {
   type FakeLongPollDaemon,
   TEST_AGENT_DISPATCH,
   TEST_AGENT_REF,
+  TEST_CLAIMED_EXECUTOR,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -19,7 +20,7 @@ const SHORT_HOLD_MS = 150;
 
 /** Offered -> Claimed -> Running over the long-poll send path. */
 async function claimAndStart(daemon: FakeLongPollDaemon, handle: TaskHandle): Promise<void> {
-  await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+  await daemon.send(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
   await daemon.send(createEnvelope('task.started', {}, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 }
@@ -108,7 +109,7 @@ describe('task.approval_resolved handling', () => {
 
     // The daemon follows up with task.fail (as it would after a local reject) —
     // proving the task was left in a state that legally accepts it.
-    await daemon.send(createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'rejected locally' }, { taskId: handle.taskId }));
+    await daemon.send(createEnvelope('task.fail', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, reason: 'rejected locally' }, { taskId: handle.taskId }));
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Failed');
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Failed');
   });
@@ -143,7 +144,7 @@ describe('task.approval_resolved handling', () => {
     // reports the terminal that decision produced, BEFORE the daemon's own
     // local-resolution report ever arrives.
     await handle.reject('SaaS decided first');
-    await daemon.send(createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'SaaS decided first' }, { taskId: handle.taskId }));
+    await daemon.send(createEnvelope('task.fail', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, reason: 'SaaS decided first' }, { taskId: handle.taskId }));
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Failed');
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Failed');
 
@@ -156,7 +157,7 @@ describe('task.approval_resolved handling', () => {
     const { byok: instance, daemon } = await start();
 
     const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'x' });
-    await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+    await daemon.send(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
 
     await daemon.send(approvalResolved(handle.taskId, 'appr-5'));

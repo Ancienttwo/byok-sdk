@@ -76,9 +76,11 @@ function launcherQuery(launcherPath: string): string {
  *
  * - `start()` removes the stop marker and runs the unit, unless a launcher
  *   is already running.
- * - `stop()` writes the stop marker, runs the Host's `stop` program (a
- *   non-zero exit is `service_stop_failed` and the marker stays), then
- *   waits for the launcher to exit (`service_unload_timeout`).
+ * - `stop()` writes the stop marker; while a launcher runs, it runs the
+ *   Host's `stop` program (a non-zero exit is `service_stop_failed` and the
+ *   marker stays), then waits for the launcher to exit
+ *   (`service_unload_timeout`). With no launcher running it runs nothing
+ *   more, so `stop()` and `uninstall()` work without the program (#2279).
  * - `status()` reports the launcher process, found by its command line.
  */
 export function createWindowsUserLifecycle(def: ServiceDefinition, deps: WindowsUserDeps = {}, gateRoot?: string): ManagedServiceLifecycle {
@@ -126,6 +128,11 @@ export function createWindowsUserLifecycle(def: ServiceDefinition, deps: Windows
   async function stop(): Promise<void> {
     await fs.mkdir(stateDir, { recursive: true });
     await fs.writeFile(stopMarker, '', 'utf8');
+    // With the marker written no launcher starts the program again, so with
+    // none running the service is stopped. The Host's stop program is not run
+    // then: it may live under a `current` an earlier uninstall removed, and a
+    // retried uninstall must still finish (#2279).
+    if (!(await launcherRunning())) return;
     if ((await stopProgram(hostStop)) !== 0) throw new ServiceUnitError('service_stop_failed');
     const deadline = now() + WINDOWS_USER_STOP_TIMEOUT_MS;
     while (await launcherRunning()) {

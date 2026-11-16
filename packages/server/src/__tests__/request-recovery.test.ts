@@ -6,6 +6,9 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { createByokServer, createHmacTokenSigner } from '../index';
 import { connectFakeDaemonLongPoll, startServer, stopServer, claimAndStart, sendOne, TEST_AGENT_DISPATCH, TEST_AGENT_REF } from './test-support';
 
+/** What a device claims for the dispatch's claude target. */
+const CLAUDE = { kind: 'runtime', runtimeId: 'claude' } as const;
+
 describe('public facade request recovery', () => {
   it('reads the original offer/result and cancels by pre-persisted identity after reopen', async () => {
     const root = mkdtempSync(join(tmpdir(), 'byok-request-recovery-'));
@@ -14,7 +17,7 @@ describe('public facade request recovery', () => {
     let byok = createByokServer(options); let http = await startServer(byok);
     try {
       const daemon = await connectFakeDaemonLongPoll(http.baseUrl, byok, { productId: options.productId });
-      const input = { taskId: 'host-persisted-a', deviceId: daemon.deviceId, instruction: 'original', runtime: 'claude' as const, ...TEST_AGENT_DISPATCH };
+      const input = { ...TEST_AGENT_DISPATCH, taskId: 'host-persisted-a', deviceId: daemon.deviceId, instruction: 'original', target: { lane: 'runtime', runtimeId: 'claude' } as const };
       await expect(byok.dispatch({ ...TEST_AGENT_DISPATCH, ...input, deviceId: undefined } as never)).rejects.toThrow('explicit deviceId');
       await expect(byok.dispatch({ ...TEST_AGENT_DISPATCH, ...input, taskId: '' })).rejects.toThrow('non-empty');
       const mutable = { ...input, taskId: 'captured-before-await' };
@@ -25,12 +28,12 @@ describe('public facade request recovery', () => {
       expect(handle.taskId).toBe(input.taskId);
       const original = await byok.tasks.offer(input.taskId);
       expect(original).toMatchObject({ taskId: input.taskId, deviceId: daemon.deviceId, delivered: true,
-        type: 'task.offer', payload: { instruction: 'original', runtime: 'claude' } });
+        type: 'task.offer', payload: { instruction: 'original', target: { lane: 'runtime', runtimeId: 'claude' } } });
       for (const retry of [input, { ...input, instruction: 'changed' }]) {
         await expect(byok.dispatch(retry)).rejects.toMatchObject({ code: 'agent_task_already_exists' });
       }
-      await claimAndStart(byok, daemon, handle);
-      expect(await sendOne(daemon, createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'first', sessionRef: 'session-first' }, { taskId: handle.taskId }))).toMatchObject({ status: 200, body: { accepted: 1 } });
+      await claimAndStart(byok, daemon, handle, CLAUDE);
+      expect(await sendOne(daemon, createEnvelope('task.complete', { executor: CLAUDE, agentRef: TEST_AGENT_REF, summary: 'first', sessionRef: 'session-first' }, { taskId: handle.taskId }))).toMatchObject({ status: 200, body: { accepted: 1 } });
       const result = (await byok.tasks.get(handle.taskId))?.result;
       const cancellable = await byok.dispatch({ ...TEST_AGENT_DISPATCH, ...input, taskId: 'host-persisted-b' });
       const concurrent = await Promise.allSettled([byok.dispatch({ ...TEST_AGENT_DISPATCH, ...input, taskId: 'concurrent' }), byok.dispatch({ ...TEST_AGENT_DISPATCH, ...input, taskId: 'concurrent' })]);

@@ -24,6 +24,7 @@ import {
   type FakeLongPollDaemon,
   TEST_AGENT_DISPATCH,
   TEST_AGENT_REF,
+  TEST_CLAIMED_EXECUTOR,
 } from './test-support';
 
 const PRODUCT_ID = 'server-reliability';
@@ -64,6 +65,7 @@ async function cloudWithFirstMailboxAppendFailure() {
     },
     readUsage: (tenant) => base.mailbox.readUsage(tenant),
     readAfter: (tenant, input) => base.mailbox.readAfter(tenant, input),
+    readMessage: (tenant, input) => base.mailbox.readMessage(tenant, input),
     recordDelivery: (tenant, input) => base.mailbox.recordDelivery(tenant, input),
     advanceCursor: (tenant, input) => base.mailbox.advanceCursor(tenant, input),
     readCursor: (tenant, deviceId) => base.mailbox.readCursor(tenant, deviceId),
@@ -113,7 +115,7 @@ describe('issues #141-#144 server reliability regressions', () => {
     const taskId = 'task-legacy-retry';
     const input = {
       taskId,
-      payload: { agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_AGENT_DISPATCH.sessionRef } as const, instruction: 'first body' },
+      payload: { agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_AGENT_DISPATCH.sessionRef } as const, instruction: 'first body', target: TEST_AGENT_DISPATCH.target },
     };
 
     await expect(cloud.enqueueAgentOffer(TENANT, 'device-a', input)).rejects.toMatchObject({
@@ -147,7 +149,7 @@ describe('issues #141-#144 server reliability regressions', () => {
       tenant: TENANT,
       cloud: {} as ByokCloud,
       relay,
-      sources: { readFacts: async () => undefined, readActivity: async () => undefined },
+      sources: { readFacts: async () => undefined, readActivity: async () => undefined, readSteerRefusals: async () => [] },
       wake: createInProcessTaskEventsWake(),
       shutdown: new AbortController().signal,
       readState: async () => ({ state: 'Complete', at: '2026-09-05T00:00:00.000Z' }),
@@ -173,7 +175,7 @@ describe('issues #141-#144 server reliability regressions', () => {
       deviceId: 'device-a',
       envelope: createEnvelope(
         'task.complete',
-        { agentRef: TEST_AGENT_REF, summary: 'completed before enqueue returned', sessionRef: 'session-provisional' },
+        { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'completed before enqueue returned', sessionRef: 'session-provisional' },
         { taskId },
       ),
       outcome: 'accepted',
