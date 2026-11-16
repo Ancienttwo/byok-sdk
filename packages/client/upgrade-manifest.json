@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "061e0097ee09d792461eeb5df8f1c1a17181e35287921a602160b08b3574d1e8"
+    "snapshotSha256": "8ac6deddbdaa17512854b92668ba40551c9950eecbc4a1e049aa59cf51f62886"
   },
   "configFields": {
     "status": "tracked",
@@ -68,7 +68,7 @@
     {
       "id": "reject-local-old-would-do",
       "impact": "breaking",
-      "summary": "@byok-sdk/bot-collaboration stateOf and inspectLedger refuse local would-do rows lacking turnId with would_do_unsupported_old. Preserve the old ledger and use a separate current ledger.",
+      "summary": "@byok-sdk/bot-collaboration Host opening, direct ledger writes and inspectLedger refuse local would-do rows lacking turnId with would_do_unsupported_old. Preserve the old ledger and use a separate current ledger.",
       "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
       "items": [
         "behavior:reject-local-old-would-do"

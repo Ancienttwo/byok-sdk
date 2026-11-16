@@ -1174,7 +1174,7 @@ import type { CommandRecord } from './rules/commit.js';
 import type { DeviceTopology } from './topology.js';
 import type { SwitchExportMark } from './migration.js';
 import type { SwitchImport } from './switch.js';
-import { type AutonomyState, type WouldDo } from './rules/autonomy.js';
+import type { AutonomyState, WouldDo } from './rules/autonomy.js';
 import type { DreamState } from './dream.js';
 export type { Authority, InputBatch, SealReason, UserInput } from './rules/coalesce.js';
 export type { Card, Question, Rejection, ReplyEntry, Turn } from './rules/turn.js';
