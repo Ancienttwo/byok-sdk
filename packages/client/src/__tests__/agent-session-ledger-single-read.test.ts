@@ -58,7 +58,8 @@ it('uses record kind rather than filename for terminal evidence and preserves te
   const read = vi.spyOn(fs, 'readFile');
   expect(await f.store.readerRunReferences(f.home)).toEqual(new Map());
   expect(read.mock.calls.filter(([file]) => file === f.file)).toHaveLength(1);
-  expect(await new AgentSessionHandoffStore().recordTaskTerminal({ ...f.input, taskId: 'failed-reader', terminalReason: terminal.terminalReason })).toMatchObject({ ...terminal, updatedAt: expect.any(String) });
+  const lastLine = (await fs.readFile(path.join(f.directory, terminalFile), 'utf8')).trimEnd().split('\n').at(-1)!;
+  expect(JSON.parse(lastLine)).toEqual({ version: 1, kind: 'task-terminal', ...terminal });
   await fs.appendFile(path.join(f.directory, terminalFile), JSON.stringify({ version: 1, kind: 'task-terminal' }) + '\n');
   await expect(f.store.recordTaskTerminal({ ...f.input, taskId: 'failed-reader', terminalReason: 'retry' })).rejects.toBeInstanceOf(AgentSessionHandoffCorruptError);
 });

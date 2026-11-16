@@ -99,7 +99,7 @@ export class AgentEgressController {
     });
   }
 
-  noteTransportDrop(reason: AgentEgressDropReason, agentRef?: AgentRef): void {
+  noteTransportDrop(reason: AgentEgressDropReason): void {
     this.noteDrop('latest-value', reason);
   }
 

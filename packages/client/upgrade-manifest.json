@@ -64,7 +64,7 @@
     {
       "id": "remove-egress-drop-receipts",
       "impact": "breaking",
-      "summary": "@byok-sdk/client removes AgentEgressController.dropReceipts(), its buffer and AgentEgressDropReceipt. Read status() for lane counters and the last reason; retain any per-drop audit history at the Host transport boundary.",
+      "summary": "@byok-sdk/client removes AgentEgressController.dropReceipts(), its buffer and AgentEgressDropReceipt. Call noteTransportDrop() with only the reason. Read status() for lane counters and the last reason; retain any per-drop audit history at the Host transport boundary.",
       "migration": "docs/releases/host-upgrade-next-minor.md#egress-drop-receipts",
       "items": [
         "export:@byok-sdk/client#AgentEgressDropReceipt"

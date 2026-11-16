@@ -2135,7 +2135,7 @@ export declare class AgentEgressController {
     /** Permanently fail closed after its authenticated enrollment is replaced. */
     deactivate(): void;
     status(): AgentEgressStatus;
-    noteTransportDrop(reason: AgentEgressDropReason, agentRef?: AgentRef): void;
+    noteTransportDrop(reason: AgentEgressDropReason): void;
     /**
      * Coalesce to the latest value before TaskRunner builds a `task.progress`
      * envelope. Events go to the Host as the runtime produced them. An `error`

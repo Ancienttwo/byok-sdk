@@ -58,7 +58,8 @@ workspace with the desired definition and issue its member leases instead.
 ### Egress drop receipts
 
 `AgentEgressController.dropReceipts()` and `AgentEgressDropReceipt` are removed,
-including the unused in-memory receipt buffer. Use `status()` for each lane's
+including the unused in-memory receipt buffer. `noteTransportDrop(reason)` no
+longer accepts an optional `AgentRef`; pass only the drop reason. Use `status()` for each lane's
 `dropped`, `replaced` and `lastDropReason`. Per-drop history is no longer retained;
 Hosts needing an audit history must collect it at their own transport boundary.
 
