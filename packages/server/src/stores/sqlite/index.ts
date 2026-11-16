@@ -1,7 +1,6 @@
 import { assertCollectExpiredInput, InMemoryStorageLedger, type ObjectCollectExpiredInput, CollectExpiredFailure } from '@byok-sdk/core';
 import {
-  REQUEST_RECEIPT_PREFIXES, createInMemoryBlobBytes, createInProcessTaskEventsWake,
-  type ReceiptCollectExpiredInput, type TaskEventsWake,
+  createInMemoryBlobBytes, createInProcessTaskEventsWake, type ReceiptCollectExpiredInput, type TaskEventsWake,
 } from '@byok-sdk/cloud';
 import {
   ByokCoreError,
@@ -255,6 +254,13 @@ const TASK_EVENTS_WAKE_TRIGGERS = ['task_attempt', 'activity_log_head', 'approva
       BEGIN SELECT ${TASK_CHANGED_FUNCTION}(${row}.tenant_id, ${row}.task_id); END;`;
   })).join('\n');
 
+const TASK_ATTEMPT_INDEX_NAMES = ['task_attempt_status_idx', 'task_attempt_archive_idx', 'task_attempt_unsettled_idx'] as const;
+const TASK_ATTEMPT_INDEXES = `
+CREATE INDEX task_attempt_status_idx ON task_attempt (tenant_id, status, cancellation_requested_at, task_id);
+CREATE INDEX task_attempt_archive_idx ON task_attempt (tenant_id, archive_after, task_id) WHERE archived_at IS NULL;
+CREATE INDEX task_attempt_unsettled_idx ON task_attempt (tenant_id, task_id) WHERE archived_at IS NOT NULL AND archive_settled_at IS NULL;
+`;
+
 /**
  * The refusal a file's own schema metadata calls for, or `undefined` when this
  * build adopts the file: it is current, or holds no table yet. Reads only.
@@ -336,6 +342,8 @@ class SqliteCoordinator {
           this.db.exec(APPROVAL_TIMELINE_SCHEMA);
           this.db.exec(ACTIVITY_LOG_SCHEMA);
           this.db.exec(STEER_REFUSAL_SCHEMA);
+          this.db.exec(PROOF_REQUEST_RECEIPT_SCHEMA);
+          this.db.exec(TASK_ATTEMPT_INDEXES);
           // The closure reads the phase columns, so it follows them.
           this.db.exec(OUTPUT_CLOSURE_TRIGGER);
           this.db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)").run(SQLITE_SCHEMA_VERSION);
@@ -357,14 +365,15 @@ class SqliteCoordinator {
         if (this.db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(OUTPUT_CLOSURE_TRIGGER_NAME) === undefined) {
           throw schemaError('SQLITE_SCHEMA_INVALID', 'Missing BYOK SQLite task output closure');
         }
+        for (const index of TASK_ATTEMPT_INDEX_NAMES) {
+          if (this.db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'index' AND name = ?").get(index) === undefined) {
+            throw schemaError('SQLITE_SCHEMA_INVALID', `Missing BYOK SQLite index ${index}`);
+          }
+        }
         assertProjection('tenant_id, wake_id, dedup_key, available_at, payload, state, due_at, retry_at, deliveries, last_error, done_at FROM wake');
         if (wake === undefined && this.db.prepare("SELECT 1 FROM wake WHERE state = 'queued' LIMIT 1").get() !== undefined) {
           throw new WakeHookMissingError();
         }
-        this.db.exec('CREATE INDEX IF NOT EXISTS task_attempt_status_idx ON task_attempt (tenant_id, status, cancellation_requested_at, task_id)');
-        this.db.exec('CREATE INDEX IF NOT EXISTS task_attempt_archive_idx ON task_attempt (tenant_id, archive_after, task_id) WHERE archived_at IS NULL');
-        this.db.exec('CREATE INDEX IF NOT EXISTS task_attempt_unsettled_idx ON task_attempt (tenant_id, task_id) WHERE archived_at IS NOT NULL AND archive_settled_at IS NULL');
-        this.db.exec(PROOF_REQUEST_RECEIPT_SCHEMA);
         assertProjection(PROOF_REQUEST_RECEIPT_PROJECTION);
         assertProjection('tenant_id, device_id, product_id, machine_id, device_name, device_public_key, proof_key_id, proof_key_epoch, capabilities_json, harnesses_json FROM device_directory');
         const receiptColumns = this.db.prepare('PRAGMA table_info(request_receipt)').all() as unknown as
@@ -375,8 +384,8 @@ class SqliteCoordinator {
           column.pk !== (index < 2 ? index + 1 : 0))) {
           throw schemaError('SQLITE_SCHEMA_INVALID', 'Invalid BYOK SQLite request receipt schema');
         }
-        // Schema v6 retains the wire-major fence. A pending old envelope must be
-        // refused before routes can repeatedly fail to decode the same row.
+        // The wire-major fence: a pending envelope of another major is refused
+        // here, before routes repeatedly fail to decode the same row.
         for (const row of this.db.prepare("SELECT body FROM mailbox_message WHERE state = 'pending'").iterate()) {
           let envelope: unknown;
           try { envelope = JSON.parse(row.body as string); } catch { envelope = undefined; }
@@ -545,17 +554,8 @@ class SqliteRequestReceiptStore implements RequestReceiptStore {
   collectExpired(tenant: TenantId, input: ReceiptCollectExpiredInput): Promise<CollectExpiredResult> {
     assertCollectExpiredInput(input);
     assertCanonicalTimestamp(input.requestBefore, 'requestBefore');
-    return this.coordinator.transaction((db) => {
-      if (REQUEST_RECEIPT_PREFIXES.length === 0) return { removed: 0, expired: 0, releasedBytes: 0n, more: false };
-      const predicate = REQUEST_RECEIPT_PREFIXES.map(() => 'substr(key, 1, length(?)) = ?').join(' OR ');
-      const parameters = REQUEST_RECEIPT_PREFIXES.flatMap(prefix => [prefix, prefix]);
-      const removed = Number(db.prepare(`DELETE FROM request_receipt WHERE rowid IN
-        (SELECT rowid FROM request_receipt WHERE tenant_id = ? AND recorded_at < ? AND (${predicate}) ORDER BY recorded_at, key LIMIT ?)`)
-        .run(tenant, input.requestBefore, ...parameters, input.limit).changes);
-      const more = db.prepare(`SELECT 1 FROM request_receipt WHERE tenant_id = ? AND recorded_at < ? AND (${predicate}) LIMIT 1`)
-        .get(tenant, input.requestBefore, ...parameters) !== undefined;
-      return { removed, expired: 0, releasedBytes: 0n, more };
-    });
+    // No receipt family expires here: every SDK receipt is an identity fence.
+    return Promise.resolve({ removed: 0, expired: 0, releasedBytes: 0n, more: false });
   }
 
   record(tenant: TenantId, input: { key: string; body: string }): Promise<{ receipt: RequestReceipt; created: boolean }> {
@@ -1536,7 +1536,6 @@ export function createSqliteEmbeddedStores(
   options: SqliteEmbeddedStoreOptions,
   dependencies: { readonly clock: Clock; readonly crypto: CloudCrypto; readonly wake?: WakeConsumer },
 ): SqliteEmbeddedStores {
-  if ('migration' in options) throw new SqliteSchemaError('SQLITE_SCHEMA_UNSUPPORTED', 'SQLite migration selectors are not supported; use a new state path and enrollment.', undefined, SQLITE_SCHEMA_VERSION);
   const coordinator = new SqliteCoordinator(options.path, dependencies.wake);
   const ledger = new InMemoryStorageLedger(dependencies.clock);
   const objects = new SqliteObjectStore(coordinator, dependencies.clock, ledger);

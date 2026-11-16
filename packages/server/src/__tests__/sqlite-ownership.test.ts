@@ -210,22 +210,16 @@ describeSqlite('SQLite single-process ownership', { timeout: 20_000 }, () => {
     finally { await reopened.close(); }
   });
 
-  it('adds the active-task covering index to existing v7 files without a schema bump', async () => {
+  it('refuses a current file missing its active-task index without recreating it', async () => {
     const path = databasePath();
-    const first = open(path);
-    await first.close();
+    await open(path).close();
     const old = new DatabaseSync(path);
     old.exec('DROP INDEX task_attempt_status_idx');
     old.close();
-    const reopened = open(path);
-    try { expect((await reopened.stats()).taskCountsByState.Offered).toBe(0); }
-    finally { await reopened.close(); }
-    // External reads require the EXCLUSIVE owner to release its handle first.
+    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID' }));
     const inspect = new DatabaseSync(path, { readOnly: true });
     try {
-      expect(inspect.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'task_attempt_status_idx'").get())
-        .toEqual({ name: 'task_attempt_status_idx' });
-      expect(inspect.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '10' });
+      expect(inspect.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'task_attempt_status_idx'").get()).toBeUndefined();
     } finally { inspect.close(); }
   });
 

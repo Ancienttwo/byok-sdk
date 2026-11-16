@@ -309,10 +309,9 @@ and [runbook](../../deploy/runbooks/cloud-cleanup.md) for the port contract.
 
 Receipt keys are tenant scoped and first-write-wins. All SDK receipt families
 and unknown prefixes are identity fences: immutable offer, delivered and
-canonical terminal facts remain for the lifetime of the database. The kernel's
-derived `request` class is currently empty, so its configured 24-hour policy
-does not expire SDK identity receipts. Monitor disk usage; exhaustion does not
-authorize deleting those fences.
+canonical terminal facts remain for the lifetime of the database: receipt
+maintenance deletes none. Monitor disk usage; exhaustion does not authorize
+deleting those fences.
 
 Offer and terminal receipts hold wire bytes, and a wire v4 server reads only
 v4 bytes. There is no migration: a SQLite file a v3 build wrote is not
@@ -466,7 +465,7 @@ rewritten the main file. Such a store holds almost no data.
 
 Open failures use `SqliteSchemaError` with `foundVersion` and `requiredVersion`:
 
-- `SQLITE_SCHEMA_UNSUPPORTED`: an older or newer schema, or the removed migration option.
+- `SQLITE_SCHEMA_UNSUPPORTED`: an older or newer schema.
 - `SQLITE_SCHEMA_INVALID`: no BYOK metadata in a non-empty file, or a required authority is missing or malformed.
 - `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: pending mailbox bytes are not the current wire major.
 
