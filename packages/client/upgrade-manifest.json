@@ -16,6 +16,15 @@
   },
   "entries": [
     {
+      "id": "dataplane-revoke-keeps-assertion-replay",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud-dataplane createPostgresCloudStores() devices.revoke() and machine supersession through devices.register() or pairing.redeemAndRegister() no longer delete the device's device_assertion_replay rows; the rows stay until the assertion expires and collectExpired removes them. A device or task assertion spent before the retirement is now refused when the same deviceId registers again with the same key. Hosts that implement their own @byok-sdk/cloud DeviceDirectory must likewise leave replay entries to expiry; no schema change or migration is needed.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#device-retirement-keeps-assertion-replay-entries-2264",
+      "items": [
+        "behavior:dataplane-revoke-keeps-assertion-replay"
+      ]
+    },
+    {
       "id": "bot-round-inbound-disposition",
       "impact": "breaking",
       "summary": "@byok-sdk/bot-collaboration inboundDispositions() and inbound: projections now report answered when any round seat succeeded or delivered, even if a sibling was cancelled. Without success, cancelled seats mean failed, including when all seats were cancelled; only an authoritative root Turn can report cancelled. Update Host disposition consumers to distinguish root cancellation from seat failure; existing ledger rows use the new precedence on read.",

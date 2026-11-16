@@ -6,11 +6,12 @@ import { createObjectStorageScope } from './support/dataplane';
  * Two boundaries are pinned here and neither is visible through the port:
  *
  * 1. Which dependent rows go. Device-scoped state (presence, challenge nonces,
- *    inbound dedup, assertion replay) is deleted with the row it hung off; the
- *    history keyed by the device_id STRING (task, agent_egress_event,
- *    proof_request_receipt) survives, because what a device did stays true
- *    after the grant that let it is gone. Its unfinished `task` rows are
- *    settled as cancelled under the retirement cause (#1119), not deleted.
+ *    inbound dedup) is deleted with the row it hung off; the history keyed by
+ *    the device_id STRING (task, agent_egress_event, proof_request_receipt)
+ *    survives, because what a device did stays true after the grant that let
+ *    it is gone. Its unfinished `task` rows are settled as cancelled under the
+ *    retirement cause (#1119), not deleted. Assertion replay entries stay
+ *    until their assertion expires (#2264).
  * 2. That the delete never leaves a stranger's row short. `device_id` is
  *    globally unique but the DELETEs are tenant-first, and a tenant-blind
  *    dependent delete would be invisible to every port-level assertion.
@@ -180,7 +181,8 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device revocation deletes the registra
         device_presence: 0,
         auth_nonce: 0,
         inbound_dedup: 0,
-        device_assertion_replay: 0,
+        // Kept until the assertion expires, so a spent assertion stays spent.
+        device_assertion_replay: 1,
         // History keyed by the device_id string, with no foreign key: what the
         // device did stays true after its grant is gone.
         task: 1,
@@ -265,7 +267,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device revocation deletes the registra
         device_presence: 0,
         auth_nonce: 0,
         inbound_dedup: 0,
-        device_assertion_replay: 0,
+        device_assertion_replay: 1,
         task: 1,
         agent_egress_event: 1,
         proof_request_receipt: 1,

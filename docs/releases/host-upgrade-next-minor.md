@@ -34,6 +34,22 @@ root or batch cancellation and accept `failed` for seat-only cancellation.
 Re-reading existing ledger rows uses this precedence too. No store migration
 is needed.
 
+## Device retirement keeps assertion replay entries (#2264)
+
+On the Postgres data plane (`@byok-sdk/cloud-dataplane`
+`createPostgresCloudStores()`), `devices.revoke()` and machine supersession
+through `devices.register()` or `pairing.redeemAndRegister()` no longer delete
+the retired device's `device_assertion_replay` rows. Each row stays until its
+assertion expires (at most 5 minutes after issue) and `collectExpired` removes
+it. Before, re-registering the same `deviceId` with the same public key let a
+device or task assertion spent before the retirement authenticate once more.
+
+The in-memory and SQLite compositions never deleted these entries and are
+unchanged. A Host that implements its own `@byok-sdk/cloud` `DeviceDirectory`
+must not delete replay entries on revoke or supersession either. No schema
+change or migration is needed; replay retention stays bounded by the assertion
+TTL.
+
 ## OAR 0.109.0 (#2235)
 
 The vendored OAR moves from 0.105.0 to 0.109.0 (`packages/client/vendor/oar/4eb5919/`, fork branch `byok/0.109.0`). No public type, export or configuration field changes. The upgrade manifest declares the three behavior-only breaking changes below as `model-confirmation-non-retryable`, `agy-model-confirmation-deadline` and `claude-queued-write-failure`.

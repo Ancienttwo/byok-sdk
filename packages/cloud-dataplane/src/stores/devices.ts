@@ -97,10 +97,13 @@ const SELECT_COLUMNS =
  *   `(tenant_id, agent_id)`; `device_id` is provenance, not identity. Erasing
  *   a head has its OWN protocol (0014's epoch fence), and bypassing it would
  *   let a stale writer re-enter under a lower epoch.
+ * - `device_assertion_replay` — the single-use ledger for device and task
+ *   assertions. It is a deny-list: deleting an entry can only re-admit an
+ *   assertion that was already spent, and re-registering the same id with the
+ *   same key would restore every other input the check reads (#2264). Its
+ *   entries expire within the assertion TTL and `collectExpired` removes them.
  *
  * Every statement below is index-covered by its table's primary key, except
- * `device_assertion_replay`, whose PK leads with `tenant_id` and is swept by
- * expiry — a tenant-prefixed scan over live assertions, so no new index — and
  * `e2ee_scope_key_package`, which deletes through its `(tenant_id, recipient)`
  * index.
  */
@@ -108,7 +111,6 @@ const DEVICE_STATE_DELETES = [
   'DELETE FROM device_presence WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
   'DELETE FROM auth_nonce WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
   'DELETE FROM inbound_dedup WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
-  'DELETE FROM device_assertion_replay WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
   // #654 E2c: the device's member state. Packages go first, while the
   // registration still names the device's member. Security does not rest on
   // this cleanup: the remaining members rotate (design §7.6). The package
