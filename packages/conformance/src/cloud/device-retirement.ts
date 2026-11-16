@@ -133,12 +133,35 @@ async function expectRetired(
  * the nonce it consumes) and an entry in both inbound dedup ledgers.
  */
 async function seedDeviceState(handle: CloudCompositionHandle, deviceId: string): Promise<readonly [string, string]> {
-  const { stores, presence } = handle;
+  const { stores, presence, e2eeMember } = handle;
   await presence.publish(TENANT, { deviceId, level: 'online', ttlMs: 60_000, minimumIntervalMs: 0 });
   const nonces = [await stores.nonces.issue(TENANT, deviceId), await stores.nonces.issue(TENANT, deviceId)] as const;
   expect(await stores.dedup.checkAndRecord(TENANT, deviceId, 'envelope-1')).toBe(false);
   expect(await stores.dedup.checkAndRecordAgent(TENANT, deviceId, AGENT_REF, 'envelope-2')).toBe(false);
+  if (e2eeMember !== undefined) {
+    // #2267: a member key, its client pairing MAC, and a scope key package
+    // addressed to the member, beside one for a browser member with no device.
+    const memberId = `member-${deviceId}`;
+    const request = { requestId: `register-${deviceId}-${++e2eeRequests}`, operation: 'op', resource: '/resource', bodySha256: 'sha256', bodySize: 1 };
+    const expiresAt = new Date(Date.parse(handle.now()) + 60_000).toISOString();
+    expect(await e2eeMember.registerMember(TENANT, { deviceId, memberId, bundle: `{"memberId":"${memberId}"}`, deviceMac: 'mac', macExpiresAt: expiresAt, request }))
+      .toBe('registered');
+    expect(await e2eeMember.putClientPairingMac(TENANT, { deviceId, body: '{"mac":"client"}', expiresAt })).toBe('stored');
+    expect(await e2eeMember.putScopeKeyPackages(TENANT, { rows: [scopePackage(BROWSER_MEMBER), scopePackage(memberId)] }))
+      .toEqual({ outcome: 'stored', stored: 2 });
+  }
   return nonces;
+}
+
+const SCOPE = 'retirement-scope';
+const BROWSER_MEMBER = 'member-browser';
+let e2eeRequests = 0;
+const scopePackage = (recipient: string) =>
+  ({ scopeId: SCOPE, epoch: 1, recipient, keyId: 'key-1', sender: 'sender', package: `{"recipient":"${recipient}"}`, recipientKemEpoch: 1 });
+
+/** The recipients the Host reads for the scope: the same set in every composition. */
+async function scopeRecipients(handle: CloudCompositionHandle): Promise<readonly string[]> {
+  return (await handle.e2eeMember!.readScopeKeyPackages(TENANT, { scopeId: SCOPE })).map((row) => row.recipient);
 }
 
 /** Each read answers as for state never written. Asserted before any clock advance, so expiry cannot stand in for deletion. */
@@ -149,6 +172,12 @@ async function expectDeviceStateDeleted(handle: CloudCompositionHandle, deviceId
   await expect(stores.nonces.consumeIfValid(TENANT, deviceId, nonce)).resolves.toBe(false);
   await expect(stores.dedup.checkAndRecord(TENANT, deviceId, 'envelope-1')).resolves.toBe(false);
   await expect(stores.dedup.checkAndRecordAgent(TENANT, deviceId, AGENT_REF, 'envelope-2')).resolves.toBe(false);
+  if (handle.e2eeMember !== undefined) {
+    const now = handle.now();
+    await expect(handle.e2eeMember.readMemberRegistration(TENANT, { deviceId, now })).resolves.toBeUndefined();
+    await expect(handle.e2eeMember.readClientPairingMac(TENANT, { deviceId, now })).resolves.toBeUndefined();
+    expect(await scopeRecipients(handle)).not.toContain(`member-${deviceId}`);
+  }
 }
 
 async function expectDeviceStateKept(handle: CloudCompositionHandle, deviceId: string, nonce: string): Promise<void> {
@@ -157,6 +186,12 @@ async function expectDeviceStateKept(handle: CloudCompositionHandle, deviceId: s
   await expect(stores.nonces.consumeIfValid(TENANT, deviceId, nonce)).resolves.toBe(true);
   await expect(stores.dedup.checkAndRecord(TENANT, deviceId, 'envelope-1')).resolves.toBe(true);
   await expect(stores.dedup.checkAndRecordAgent(TENANT, deviceId, AGENT_REF, 'envelope-2')).resolves.toBe(true);
+  if (handle.e2eeMember !== undefined) {
+    const now = handle.now();
+    await expect(handle.e2eeMember.readMemberRegistration(TENANT, { deviceId, now })).resolves.toMatchObject({ memberId: `member-${deviceId}` });
+    await expect(handle.e2eeMember.readClientPairingMac(TENANT, { deviceId, now })).resolves.toBe('{"mac":"client"}');
+    expect(await scopeRecipients(handle)).toContain(`member-${deviceId}`);
+  }
 }
 
 export function runDeviceRetirementConformance(factory: CloudCompositionFactory): void {
@@ -387,7 +422,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
       });
     }
     for (const retire of ['revoke', 'supersession'] as const) {
-      it(`${retire} deletes the retired device's presence, nonces and dedup ledgers and keeps a sibling's`, async () => {
+      it(`${retire} deletes the retired device's presence, nonces, dedup ledgers and E2EE member state and keeps a sibling's`, async () => {
         await withCloudComposition(factory, async (handle) => {
           const { stores } = handle;
           await stores.devices.register(TENANT, registration('stateful', { machineId: MACHINE }));
@@ -400,6 +435,14 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
 
           await expectDeviceStateDeleted(handle, 'stateful', retired);
           await expectDeviceStateKept(handle, 'sibling', kept);
+          if (handle.e2eeMember !== undefined) {
+            expect(await scopeRecipients(handle)).toEqual([BROWSER_MEMBER, 'member-sibling']);
+            // The retired member id is free for another device.
+            const request = { requestId: 'register-reuse', operation: 'op', resource: '/resource', bodySha256: 'sha256', bodySize: 1 };
+            await expect(handle.e2eeMember.registerMember(TENANT, {
+              deviceId: 'reuser', memberId: 'member-stateful', bundle: '{"memberId":"member-stateful"}', deviceMac: 'mac', macExpiresAt: handle.now(), request,
+            })).resolves.toBe('registered');
+          }
         });
       });
     }

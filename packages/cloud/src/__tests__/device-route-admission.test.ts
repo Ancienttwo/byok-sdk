@@ -20,7 +20,6 @@ import { createInMemoryByokCloud } from '../composition/in-memory';
 import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 import { routeKey } from '../router/registry';
 import { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore } from '../stores/in-memory/agent-memory-projection';
-import { InMemoryE2eeMemberStore } from '../stores/in-memory/e2ee-member';
 import type { CloudStores, InboundRateLimiter, RateLimitUnit } from '../stores/ports';
 import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract';
 import { CLOUD_ORIGIN, PRODUCT_ID, TENANT_A, createDeviceKeys } from './support/harness';
@@ -58,19 +57,18 @@ interface FullHarness {
  * the declaration is derived from those ports, so every optional route mounts.
  */
 function createFullHarness(): FullHarness {
-  const base = createInMemoryByokCloud({ longPollHoldMs: 20, mailboxWake: createInProcessMailboxWake({ fallbackMs: 5 }) });
-  const ports: Required<CapabilityPorts> = {
+  const base = createInMemoryByokCloud({ longPollHoldMs: 20, mailboxWake: createInProcessMailboxWake({ fallbackMs: 5 }), e2eeMember: true });
+  const ports = {
     blobContentProxy: base.blobContentProxy,
     truthCommitter: UNREACHED_TRUTH,
     truthObjectDownloads: UNREACHED_TRUTH,
     skillPacks: new InMemorySkillPackStore(),
     agentMemoryProjectionAuthorizer: new InMemoryAgentMemoryProjectionAuthorizer(),
     agentMemoryProjectionStore: new InMemoryAgentMemoryProjectionStore(base.clock, base.crypto),
-    e2eeMemberStore: new InMemoryE2eeMemberStore(base.stores.receipts),
-  };
+    cloud: base.stores,
+  } satisfies Required<CapabilityPorts>;
   const cloud = createByokCloud({
     core: base.core,
-    cloud: base.stores,
     mailboxWake: base.mailboxWake,
     crypto: base.crypto,
     tokenSigner: createHmacTokenSigner(globalThis.crypto.getRandomValues(new Uint8Array(32)), base.clock),

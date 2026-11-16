@@ -28,16 +28,6 @@ CREATE TABLE approval_timeline_tail (
 CREATE INDEX approval_timeline_expiry ON approval_timeline_tail (tenant_id, expires_at, task_id) WHERE expires_at IS NOT NULL;
 `;
 
-/** The 7->8 step: the idle expiry column goes, every retained observation stays. */
-export const APPROVAL_TIMELINE_V7_REBUILD = `
-ALTER TABLE approval_timeline_tail RENAME TO approval_timeline_tail_v7;
-DROP INDEX approval_timeline_expiry;
-${APPROVAL_TIMELINE_SCHEMA}
-INSERT INTO approval_timeline_tail (tenant_id, task_id, entries_json, next_revision, dropped, capacity)
-SELECT tenant_id, task_id, entries_json, next_revision, dropped, capacity FROM approval_timeline_tail_v7;
-DROP TABLE approval_timeline_tail_v7;
-`;
-
 interface Coordinator {
   run<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T>;
   transaction<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T>;

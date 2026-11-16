@@ -808,9 +808,9 @@ export class HostExecutionCore {
     this.ledger.transaction(state => {
       const row = state.executions[intent.taskId]!;
       if (attempt) row.attempt = attempt;
-      if (attempt?.claimedRuntime || attempt?.ownerDeviceId) row.started = true;
+      if (attempt?.claimedExecutor || attempt?.ownerDeviceId) row.started = true;
     });
-    if (attempt?.status === 'cancelled' && !attempt.claimedRuntime && !attempt.ownerDeviceId && !terminal) {
+    if (attempt?.status === 'cancelled' && !attempt.claimedExecutor && !attempt.ownerDeviceId && !terminal) {
       this.ledger.transaction(state => settle(state, state.intents[intent.id]!, intent.cancelReason === 'expired' ? 'expired' : 'cancelled'));
       return true;
     }

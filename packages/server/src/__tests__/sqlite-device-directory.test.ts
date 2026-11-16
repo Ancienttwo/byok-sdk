@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -71,15 +72,25 @@ describe('SQLite durable device authority', () => {
     } finally { await stores.close(); }
   });
 
-  it.each(['1', '2', '3', '4', '5'])('refuses a schema %s database at open and leaves it unchanged', async (version) => {
+  it.each(['1', '2', '3', '4', '5', '9'])('refuses a schema %s database at open and leaves it unchanged', async (version) => {
     const path = database(); await open(path).close();
     const old = new DatabaseSync(path);
     old.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(version); old.close();
-    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '9' }));
+    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '10' }));
     expect(() => open(path)).toThrow('start on a new database');
     const read = new DatabaseSync(path, { readOnly: true });
     expect(read.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe(version);
     read.close();
+  });
+
+  it('refuses a released store before any write: the file bytes and its directory stay as they were', () => {
+    const path = database();
+    copyFileSync(new URL('../../../../scripts/release/fixtures/stores/0.43.0/server-sqlite.db', import.meta.url), path);
+    const digest = () => createHash('sha256').update(readFileSync(path)).digest('hex');
+    const before = digest();
+    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '9' }));
+    expect(digest()).toBe(before);
+    expect(readdirSync(join(path, '..'))).toEqual(['server.sqlite']);
   });
 
   it('rejects unknown versions and malformed old databases without marking them migrated', async () => {

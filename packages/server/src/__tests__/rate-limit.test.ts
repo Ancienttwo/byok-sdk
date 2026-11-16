@@ -12,6 +12,7 @@ import {
   type FakeLongPollDaemon,
   TEST_AGENT_DISPATCH,
   TEST_AGENT_REF,
+  TEST_CLAIMED_EXECUTOR,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -55,7 +56,7 @@ async function rateLimitedEventsUpTo(byok: ByokServer, barrierTaskId: string): P
 
 /** Offered -> Claimed -> Running over the long-poll send path. */
 async function claimAndStart(daemon: FakeLongPollDaemon, taskId: string): Promise<void> {
-  await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId }));
+  await daemon.send(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId }));
   await daemon.send(createEnvelope('task.started', {}, { taskId }));
 }
 
@@ -128,7 +129,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
 
     const statuses: number[] = [];
     for (let i = 0; i < 8; i++) {
-      const res = await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+      const res = await daemon.send(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
       statuses.push(res.status);
     }
     expect(statuses).toContain(429);
@@ -147,7 +148,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
 
     const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'recovers after refill' });
     for (let i = 0; i < 6; i++) {
-      await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+      await daemon.send(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
     }
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Claimed'); // the first (in-budget) claim landed
 
@@ -174,7 +175,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     });
 
     const envelopes = Array.from({ length: 6 }, () =>
-      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: 'unused' }, { taskId: 'task_bogus' }),
+      createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: 'unused' }, { taskId: 'task_bogus' }),
     );
 
     const post = () => fetch(`${started.baseUrl}/byok/messages`, {
@@ -211,7 +212,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
 
     const statuses: number[] = [];
     for (let i = 0; i < 8; i++) {
-      const res = await deviceA.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: deviceA.deviceId }, { taskId: handleA.taskId }));
+      const res = await deviceA.send(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: deviceA.deviceId }, { taskId: handleA.taskId }));
       statuses.push(res.status);
     }
     expect(statuses).toContain(429);
@@ -254,7 +255,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     // remaining 7 all hit the limit — 7 raw hits, but they're all the SAME
     // continuous episode (nothing in between ever succeeds).
     for (let i = 0; i < 10; i++) {
-      await flooder.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: flooder.deviceId }, { taskId: 'bogus-task-coalesce' }));
+      await flooder.send(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: flooder.deviceId }, { taskId: 'bogus-task-coalesce' }));
     }
 
     const barrier = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: barrierDevice.deviceId, instruction: 'coalesce barrier' });

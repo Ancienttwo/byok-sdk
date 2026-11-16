@@ -6,24 +6,27 @@ import { HostExecutionCore, type ExecutionServer } from '../../execution-core/co
 import { HostLedger } from '../../execution-core/ledger';
 import { validateInput, type IntentInput, type ExecutionTemplate } from '../../execution-core/model';
 
-function input(selection: Record<string, unknown>): IntentInput {
+function input(target: unknown): IntentInput {
   return { key: 'message', source: 'user', waitUntil: 60_000, execution: { deviceId: 'device', payload: {
-    ...selection, session: { mode: 'fresh' }, instruction: 'Return result', agentRef: { agentId: 'main', profileRevision: '1' },
+    ...(target === undefined ? {} : { target }), session: { mode: 'fresh' }, instruction: 'Return result', agentRef: { agentId: 'main', profileRevision: '1' },
     egressPolicy: { policyRevision: 'v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 4096 },
       reliable: { maxPendingEventsPerAgent: 16, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 16384 },
       transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
     terminalProjection: { mode: 'none' },
   } } as ExecutionTemplate };
 }
-it.each([{ runtime: 'pi' }, { runtime: 'claude' }, { runtime: 'codex' }, { harnessId: 'grok' }, { harnessId: 'acme.test-1' }])(
-  'accepts one valid execution identity: %j', selection => expect(() => validateInput(input(selection))).not.toThrow());
-it.each([{}, { runtime: 'grok' }, { runtime: '' }, { runtime: 1 }, { harnessId: '' }, { harnessId: 'Bad ID' },
-  { harnessId: 'pi' }, { harnessId: 1 }, { harnessId: 'a'.repeat(129) }, { harnessId: null },
-  { runtime: 'pi', harnessId: 'grok' }, { runtime: 'pi', harnessId: '' }, { runtime: 'pi', harnessId: null },
-  { runtime: '', harnessId: 'grok' }, { runtime: null, harnessId: 'grok' }])(
-  'rejects malformed or mixed execution identity: %j', selection => expect(() => validateInput(input(selection))).toThrow());
+const PI = { lane: 'runtime', runtimeId: 'pi' };
+const GROK = { lane: 'harness', harnessId: 'grok' };
+const MIXED = { lane: 'runtime', runtimeId: 'pi', harnessId: 'grok' };
 
-it.each([{ runtime: 'pi' }, { harnessId: 'grok' }])('preserves %j through enqueue, submit, settle and durable replay', async selection => {
+it.each([PI, { lane: 'runtime', runtimeId: 'claude' }, { lane: 'runtime', runtimeId: 'codex' }, GROK, { lane: 'harness', harnessId: 'acme.test-1' }])(
+  'accepts one valid execution identity: %j', target => expect(() => validateInput(input(target))).not.toThrow());
+it.each([undefined, { lane: 'auto' }, { lane: 'runtime', runtimeId: 'grok' }, { lane: 'runtime', runtimeId: '' }, { lane: 'runtime', runtimeId: 1 },
+  { lane: 'harness', harnessId: '' }, { lane: 'harness', harnessId: 'Bad ID' }, { lane: 'harness', harnessId: 'pi' }, { lane: 'harness', harnessId: 1 },
+  { lane: 'harness', harnessId: 'a'.repeat(129) }, { lane: 'harness', harnessId: null }, MIXED, { lane: 'harness', runtimeId: 'pi', harnessId: 'grok' }])(
+  'rejects malformed or mixed execution identity: %j', target => expect(() => validateInput(input(target))).toThrow());
+
+it.each([PI, GROK])('preserves %j through enqueue, submit, settle and durable replay', async selection => {
   const root = mkdtempSync(join(tmpdir(), 'k4-identity-'));
   const filename = join(root, 'host.sqlite');
   let ledger = new HostLedger(filename, 'test');
@@ -41,7 +44,7 @@ it.each([{ runtime: 'pi' }, { harnessId: 'grok' }])('preserves %j through enqueu
   let core = new HostExecutionCore(server, ledger, { now: () => 1000, applyOutcome });
   try {
     const before = ledger.snapshot();
-    await expect(core.enqueue(input({ runtime: 'pi', harnessId: 'grok' }))).rejects.toThrow();
+    await expect(core.enqueue(input(MIXED))).rejects.toThrow();
     expect(ledger.snapshot()).toEqual(before);
     expect(submit).not.toHaveBeenCalled();
     const original = input(selection);
@@ -73,14 +76,14 @@ it('accepts harness routines on create/update and refuses mixed replacements wit
   const server = { wakes: { schedule: vi.fn(), cancel: vi.fn(), pending: async () => [] } } as unknown as ExecutionServer;
   const core = new HostExecutionCore(server, ledger, { now: () => 1000 });
   const routine = { id: 'routine', version: 1, timeZone: 'UTC', rule: { anchorMs: 2000, everyMs: 60_000 },
-    waitMs: 60_000, lateAfterMs: 1000, execution: input({ harnessId: 'grok' }).execution };
+    waitMs: 60_000, lateAfterMs: 1000, execution: input(GROK).execution };
   try {
     await core.addRoutine(routine);
-    await core.updateRoutine({ ...routine, version: 2, execution: input({ runtime: 'pi' }).execution });
+    await core.updateRoutine({ ...routine, version: 2, execution: input(PI).execution });
     await core.updateRoutine({ ...routine, version: 3 });
-    expect(Object.values(ledger.snapshot().routines)[0]!.definition.execution!.payload.harnessId).toBe('grok');
+    expect(Object.values(ledger.snapshot().routines)[0]!.definition.execution!.payload.target).toEqual(GROK);
     const before = ledger.snapshot();
-    const invalid = input({ runtime: 'pi', harnessId: 'grok' }).execution;
+    const invalid = input(MIXED).execution;
     await expect(core.updateRoutine({ ...routine, version: 4, execution: invalid })).rejects.toThrow();
     await expect(core.addRoutine({ ...routine, id: 'invalid', execution: invalid })).rejects.toThrow();
     expect(ledger.snapshot()).toEqual(before);

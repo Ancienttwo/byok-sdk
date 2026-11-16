@@ -19,7 +19,7 @@ describe('POST /byok/messages with a failing Agent message', () => {
       taskId,
       deviceId: device.deviceId,
       payload: {
-        instruction: 'reply', agentRef, runtime: 'codex', session: { mode: 'fresh' },
+        instruction: 'reply', agentRef, target: { lane: 'runtime' as const, runtimeId: 'codex' as const }, session: { mode: 'fresh' },
         egressPolicy: {
           policyRevision: 'policy-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
@@ -37,7 +37,7 @@ describe('POST /byok/messages with a failing Agent message', () => {
       contentHash: 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
     }, { taskId });
     const batch = [
-      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef, runtime: 'codex' }, { taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId }),
       createEnvelope('task.started', {}, { taskId }),
       message,
     ];

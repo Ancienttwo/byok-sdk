@@ -125,7 +125,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     expect(open).toThrow('Unsupported BYOK SQLite schema version');
     expect(open).toThrow(SqliteSchemaError);
     expect(open).toThrow(expect.objectContaining({
-      code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '999', requiredVersion: '9',
+      code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '999', requiredVersion: '10',
     }));
   });
 
@@ -141,6 +141,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     await expect(reopened.cloud.tasks.claim(TENANT, {
       taskId: 'task-target-fence',
       deviceId: 'device-intruder',
+      executor: { kind: 'runtime', runtimeId: 'pi' },
     })).resolves.toMatchObject({
       deviceId: 'device-target',
       status: 'offered',

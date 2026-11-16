@@ -187,6 +187,18 @@ export class PostgresMailboxStore implements MailboxStore {
     };
   }
 
+  async readMessage(
+    tenant: TenantId,
+    input: { readonly deviceId: string; readonly messageId: string },
+  ): Promise<MailboxMessage | undefined> {
+    const result = await this.#pool.query<OutboxRow>(
+      `SELECT ${OUTBOX_COLUMNS} FROM outbox WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
+      [tenant, input.deviceId, input.messageId],
+    );
+    const row = result.rows[0];
+    return row === undefined ? undefined : toMailboxMessage(row);
+  }
+
   /**
    * One past the highest row this device lost, which is exactly the highest
    * `expired` seq — `1` when it has lost nothing.

@@ -14,6 +14,7 @@ import {
   type FakeLongPollDaemon,
   TEST_AGENT_DISPATCH,
   TEST_AGENT_REF,
+  TEST_CLAIMED_EXECUTOR,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -99,7 +100,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     );
     await sendOne(
       daemon,
-      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_1' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_1' }, { taskId: handle.taskId }),
     );
 
     const result = await handle.result();
@@ -153,7 +154,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     await claimAndStart(instance, daemon, handle);
     await sendOne(
       daemon,
-      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_end' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_end' }, { taskId: handle.taskId }),
     );
 
     // State is read, not replayed: the live reader saw the states it was
@@ -180,7 +181,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
 
     const claimEnvelope = createEnvelope(
       'task.claim',
-      { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId },
+      { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId },
       { taskId: handle.taskId },
     );
     const startedEnvelope = createEnvelope('task.started', {}, { taskId: handle.taskId });
@@ -196,7 +197,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     await sendOne(daemon, startedEnvelope);
     await sendOne(
       daemon,
-      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_3' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_3' }, { taskId: handle.taskId }),
     );
 
     const result = await handle.result();
@@ -263,7 +264,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
 
     await sendOne(
       daemon,
-      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_2' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_2' }, { taskId: handle.taskId }),
     );
 
     const result = await handle.result();
@@ -314,7 +315,7 @@ describe('redelivery from a stale cursor (§9)', () => {
     if (offer1?.type !== 'task.offer') throw new Error('unreachable');
     const cursor = offer1.seq; // "I've fully processed everything through this seq"
 
-    await claimAndStart(started.byok, daemon, handle1, 'pi', PI_RUNTIME_INFO.capabilities);
+    await claimAndStart(started.byok, daemon, handle1, { kind: 'runtime', runtimeId: 'pi' }, PI_RUNTIME_INFO.capabilities);
     await handle1.steer('keep going'); // assigns the next seq; deliberately never read
 
     // task2 is cancelled before the resync — terminal by the time redelivery
@@ -392,7 +393,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
     // stop action in the branded CLI's UI) and reports it directly.
     await sendOne(
       daemon,
-      createEnvelope('task.cancelled', { agentRef: TEST_AGENT_REF, reason: 'user stopped it locally' }, { taskId: handle.taskId }),
+      createEnvelope('task.cancelled', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, reason: 'user stopped it locally' }, { taskId: handle.taskId }),
     );
 
     const result = await handle.result();
@@ -413,7 +414,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     // The send's own response is the barrier — the kernel applied (or dropped)
     // this envelope inside the request, so no ordering marker is needed.
-    await sendOne(daemon, createEnvelope('task.cancelled', { agentRef: TEST_AGENT_REF, reason: 'stopped locally' }, { taskId: handle.taskId }));
+    await sendOne(daemon, createEnvelope('task.cancelled', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, reason: 'stopped locally' }, { taskId: handle.taskId }));
 
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Cancelled'); // unchanged, not re-applied
     expect((await instance.tasks.get(handle.taskId))?.result).toEqual(recorded);
@@ -437,7 +438,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
     // task.fail must not resurrect/overwrite the Cancelled outcome.
     await sendOne(
       daemon,
-      createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'crashed', retryable: false }, { taskId: handle.taskId }),
+      createEnvelope('task.fail', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, reason: 'crashed', retryable: false }, { taskId: handle.taskId }),
     );
 
     expect((await instance.tasks.get(handle.taskId))?.result).toEqual(recorded);
@@ -497,7 +498,7 @@ describe('unknown AgentEvent forwarding (pre-freeze tolerance, @byok-sdk/protoco
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
     await sendOne(
       daemon,
-      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_unknown_evt' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_unknown_evt' }, { taskId: handle.taskId }),
     );
     const result = await handle.result();
     expect(result).toEqual({ state: 'Complete', summary: 'done', sessionRef: 'sess_unknown_evt' });

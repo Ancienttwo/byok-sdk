@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
 import { createByokCloud, createHmacTokenSigner, createWebCrypto, fullCapabilityDeclaration } from '@byok-sdk/cloud';
-import { createEnvelope, type TaskClaimPayload } from '@byok-sdk/protocol';
+import { createEnvelope, type ClaimedExecutor } from '@byok-sdk/protocol';
 import { handleInboundEnvelope } from '../../../cloud/src/inbound';
 import { tenantStoresFor } from '../../../cloud/src/tenant-stores';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
@@ -18,6 +18,9 @@ const harnessId = 'acme-harness';
 const capabilities = { steer: true };
 const payload = { agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, instruction: 'run custom adapter' } as const;
 const agentRef = TEST_AGENT_REF;
+const HARNESS: ClaimedExecutor = { kind: 'harness', harnessId };
+const OTHER_HARNESS: ClaimedExecutor = { kind: 'harness', harnessId: 'other' };
+const PI: ClaimedExecutor = { kind: 'runtime', runtimeId: 'pi' };
 
 describe('SQLite custom-harness claim authority', () => {
   const roots: string[] = [];
@@ -65,12 +68,12 @@ describe('SQLite custom-harness claim authority', () => {
       await runtime.bound.devices.recordCapabilities({ capabilities: ['agent-home-contract', 'custom-harness'],
         harnesses: [{ id: harnessId, capabilities }, { id: 'other', capabilities }] });
       const offer = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, {
-        payload: { ...payload, ...(selection === 'explicit' ? { harnessId } : {}) },
+        payload: { ...payload, target: selection === 'explicit' ? { lane: 'harness', harnessId } : { lane: 'auto' } },
       });
       const taskId = offer.taskId;
-      const claim = createEnvelope('task.claim', { deviceId, agentRef, harnessId, capabilities }, { taskId });
+      const claim = createEnvelope('task.claim', { executor: HARNESS, deviceId, agentRef, capabilities }, { taskId });
       expect(await handleInboundEnvelope(runtime.bound, deviceId, claim).then((result) => result.outcome)).toBe('accepted');
-      const expected = { ownerDeviceId: deviceId, claimedHarnessId: harnessId,
+      const expected = { ownerDeviceId: deviceId, claimedExecutor: HARNESS,
         claimedRuntimeCapabilities: capabilities, status: 'claimed' };
       expect(await runtime.bound.tasks.get(taskId)).toMatchObject(expected);
       await runtime.stores.close();
@@ -79,61 +82,83 @@ describe('SQLite custom-harness claim authority', () => {
       expect(await runtime.stores.cloud.tasks.getMany(tenant, [taskId])).toMatchObject([expected]);
       expect((await runtime.stores.cloud.tasks.list(tenant, { limit: 10 })).attempts).toMatchObject([expected]);
       expect(await handleInboundEnvelope(runtime.bound, deviceId, claim).then((result) => result.outcome)).toBe('accepted');
-      for (const changed of [{}, { harnessId: 'other' }, { runtime: 'pi' }] satisfies Omit<TaskClaimPayload, 'deviceId'>[]) {
+      for (const executor of [OTHER_HARNESS, PI]) {
         expect(await handleInboundEnvelope(runtime.bound, deviceId,
-          createEnvelope('task.claim', { deviceId, agentRef, ...changed }, { taskId })).then((result) => result.outcome)).toBe('rejected');
+          createEnvelope('task.claim', { executor, deviceId, agentRef }, { taskId })).then((result) => result.outcome)).toBe('rejected');
       }
       // Mutable inventory is not authority for this already-claimed execution.
       await runtime.bound.devices.recordCapabilities({ capabilities: [], harnesses: [] });
-      for (const identity of [{}, { harnessId: 'other' }]) {
+      for (const executor of [OTHER_HARNESS, PI]) {
         for (const terminal of [
-          createEnvelope('task.complete', { agentRef, summary: 'wrong', sessionRef: 's', ...identity }, { taskId }),
-          createEnvelope('task.fail', { agentRef, reason: 'wrong', retryable: false, ...identity }, { taskId }),
-          createEnvelope('task.cancelled', { agentRef, ...identity }, { taskId }),
+          createEnvelope('task.complete', { executor, agentRef, summary: 'wrong', sessionRef: 's' }, { taskId }),
+          createEnvelope('task.fail', { executor, agentRef, reason: 'wrong', retryable: false }, { taskId }),
+          createEnvelope('task.cancelled', { executor, agentRef }, { taskId }),
         ]) expect(await handleInboundEnvelope(runtime.bound, deviceId, terminal).then((result) => result.outcome)).toBe('rejected');
       }
+      // After a claim, a failure or cancellation must echo the claimed executor.
+      for (const terminal of [
+        createEnvelope('task.fail', { agentRef, reason: 'wrong', retryable: false }, { taskId }),
+        createEnvelope('task.cancelled', { agentRef }, { taskId }),
+      ]) expect(await handleInboundEnvelope(runtime.bound, deviceId, terminal).then((result) => result.outcome)).toBe('rejected');
       expect(await runtime.cloud.readTerminalReceipt(tenant, taskId)).toBeUndefined();
       expect(await runtime.bound.tasks.get(taskId)).toMatchObject(expected);
       const terminal = status === 'complete'
-        ? createEnvelope('task.complete', { agentRef, summary: 'done', sessionRef: 's', harnessId }, { taskId })
+        ? createEnvelope('task.complete', { executor: HARNESS, agentRef, summary: 'done', sessionRef: 's' }, { taskId })
         : status === 'failed'
-          ? createEnvelope('task.fail', { agentRef, reason: 'fixture-failure', retryable: false, harnessId }, { taskId })
-          : createEnvelope('task.cancelled', { agentRef, harnessId }, { taskId });
+          ? createEnvelope('task.fail', { executor: HARNESS, agentRef, reason: 'fixture-failure', retryable: false }, { taskId })
+          : createEnvelope('task.cancelled', { executor: HARNESS, agentRef }, { taskId });
       expect(await handleInboundEnvelope(runtime.bound, deviceId, terminal).then((result) => result.outcome)).toBe('accepted');
       await runtime.stores.close();
       runtime = open();
       expect(await runtime.bound.tasks.get(taskId)).toMatchObject({ ...expected, status });
-      expect(await runtime.cloud.readTaskResult(tenant, taskId)).toMatchObject({ state: status, harnessId });
+      expect(await runtime.cloud.readTaskResult(tenant, taskId)).toMatchObject({ state: status });
+      expect((await runtime.cloud.readDeviceTerminal(tenant, taskId))?.envelope.payload).toMatchObject({ executor: HARNESS });
     } finally { await runtime.stores.close(); }
   });
 
-  it.each(['pi', 'claude', 'codex', undefined] as const)('preserves built-in or identity-free claim %s without fabricating a harness', async (runtimeId) => {
+  it.each(['pi', 'claude', 'codex'] as const)('preserves built-in claim %s without fabricating a harness', async (runtimeId) => {
+    const executor: ClaimedExecutor = { kind: 'runtime', runtimeId };
     const { open } = fixture();
     let runtime = open();
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
       await runtime.bound.devices.recordCapabilities({ capabilities: ['agent-home-contract'] });
-      const { taskId } = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, { payload });
+      const { taskId } = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, { payload: { ...payload, target: { lane: 'auto' } } });
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', {
-        deviceId, agentRef, ...(runtimeId === undefined ? {} : { runtime: runtimeId }),
+        deviceId, agentRef, executor,
       }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       await runtime.stores.close(); runtime = open();
       const attempt = await runtime.bound.tasks.get(taskId);
-      expect(attempt?.claimedRuntime).toBe(runtimeId);
-      expect(attempt?.claimedHarnessId).toBeUndefined();
+      expect(attempt?.claimedExecutor).toEqual(executor);
       expect(await handleInboundEnvelope(runtime.bound, deviceId,
-        createEnvelope('task.complete', { agentRef, summary: 'wrong', sessionRef: 's', harnessId }, { taskId })).then((result) => result.outcome)).toBe('rejected');
+        createEnvelope('task.complete', { executor: HARNESS, agentRef, summary: 'wrong', sessionRef: 's' }, { taskId })).then((result) => result.outcome)).toBe('rejected');
       expect(await handleInboundEnvelope(runtime.bound, deviceId,
-        createEnvelope('task.complete', { agentRef, summary: 'done', sessionRef: 's' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
+        createEnvelope('task.complete', { executor, agentRef, summary: 'done', sessionRef: 's' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
     } finally { await runtime.stores.close(); }
   });
 
-  it('refuses a v6 file missing its claim authority without recreating the column', async () => {
+  it('refuses a task attempt row that names both a claimed runtime and a claimed harness', async () => {
+    const { open, path } = fixture();
+    const runtime = open();
+    try {
+      await runtime.stores.cloud.tasks.reserveAgentOffer(tenant, { taskId: 'both', deviceId, agentRef });
+    } finally { await runtime.stores.close(); }
+    const db = new DatabaseSync(path);
+    try {
+      expect(() => db.prepare("UPDATE task_attempt SET claimed_runtime = 'pi', claimed_harness_id = ? WHERE task_id = 'both'").run(harnessId))
+        .toThrow(/CHECK constraint failed/);
+      expect(db.prepare("SELECT claimed_runtime, claimed_harness_id FROM task_attempt WHERE task_id = 'both'").get())
+        .toEqual({ claimed_runtime: null, claimed_harness_id: null });
+    } finally { db.close(); }
+  });
+
+  it('refuses a file missing its claim authority without recreating the column', async () => {
     const { open, path } = fixture();
     await open().stores.close();
     const db = new DatabaseSync(path);
-    db.exec('ALTER TABLE task_attempt DROP COLUMN claimed_harness_id');
+    // The executor CHECK names the column, so it cannot be dropped; renamed, it is just as missing.
+    db.exec('ALTER TABLE task_attempt RENAME COLUMN claimed_harness_id TO claimed_harness_removed');
     db.close();
     expect(() => open()).toThrow('claimed_harness_id');
     const check = new DatabaseSync(path, { readOnly: true });

@@ -218,6 +218,7 @@ describe('Issues #112/#114/#115/#116/#117/#118/#120 reference-server regressions
       ],
     });
     const task = await started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: daemon.deviceId,
       instruction: 'late publish must not side effect',
       agentRef: AGENT_REF,

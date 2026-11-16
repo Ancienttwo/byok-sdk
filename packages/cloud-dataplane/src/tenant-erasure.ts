@@ -58,6 +58,7 @@ export const TENANT_ERASURE_TABLES = [
   'e2ee_pairing_mac',
   'e2ee_member_key',
   'agent_message_admission',
+  'task_steer_refusal',
   'task',
   'task_agentless_retired',
   'device_presence',
@@ -283,7 +284,7 @@ export class PostgresTenantErasure {
          JOIN pg_namespace n ON n.oid = t.relnamespace
         WHERE n.nspname = current_schema()
           AND t.relkind = 'r'
-          AND t.relname NOT IN ('byok_schema_migration', 'tenant_erasure_operation')
+          AND t.relname NOT IN ('byok_schema_migration', 'byok_wire_epoch', 'tenant_erasure_operation')
         ORDER BY t.relname`,
     );
     const actual = new Set(found.rows.map((row) => row.relname));

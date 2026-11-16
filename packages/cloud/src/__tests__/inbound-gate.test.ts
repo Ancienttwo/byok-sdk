@@ -18,13 +18,14 @@ import { tenantStoresFor, type TenantStores } from '../tenant-stores';
 import { TENANT_A, TENANT_B, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+const EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
 
 function devicePrincipal(tenant: TenantId, deviceId: string) {
   return { kind: 'device', tenantId: tenant, productId: 'test-product', deviceId } as const;
 }
 
 function claim(taskId: string, deviceId: string): Envelope {
-  return createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId });
+  return createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: EXECUTOR }, { taskId });
 }
 
 function progress(taskId: string): Envelope {
@@ -32,7 +33,7 @@ function progress(taskId: string): Envelope {
 }
 
 function complete(taskId: string, summary: string): Envelope {
-  return createEnvelope('task.complete', { summary, sessionRef: 'session-1', agentRef: TEST_AGENT_REF }, { taskId });
+  return createEnvelope('task.complete', { summary, sessionRef: 'session-1', agentRef: TEST_AGENT_REF, executor: EXECUTOR }, { taskId });
 }
 
 describe('the inbound gate', () => {
@@ -111,6 +112,7 @@ describe('the inbound gate', () => {
       }
       const outcome = await handleInboundEnvelope(stores, deviceId, envelope).then((result) => result.outcome);
       if (type === 'agent.message.draft') expect(outcome).toBe('rejected'); // No frozen message requirement in this generic fixture.
+      if (type === 'task.steer_refused') expect(outcome).toBe('rejected'); // The cloud sent no steer in this generic fixture.
       if (outcome === 'accepted') accepted.push(type);
     }
     for (const [type, payload] of sealedGoldenPayloads) {
@@ -121,7 +123,7 @@ describe('the inbound gate', () => {
     // `agent.message.publish` has its own exact task/Agent binding and product
     // consumer contract; its common dedup admission is covered by the
     // issue regression rather than this generic lifecycle fixture.
-    expect(accepted).toEqual(sent.filter((type) => type !== 'agent.message.publish' && type !== 'agent.message.draft'));
+    expect(accepted).toEqual(sent.filter((type) => type !== 'agent.message.publish' && type !== 'agent.message.draft' && type !== 'task.steer_refused'));
   });
 
   it('step 2: rejects an envelope from a device other than the immutable offer target before claim', async () => {
@@ -138,6 +140,7 @@ describe('the inbound gate', () => {
     await expect(harness.stores.tasks.claim(TENANT_A, {
       taskId,
       deviceId: other.deviceId,
+      executor: EXECUTOR,
     })).resolves.toMatchObject({
       deviceId,
       status: 'offered',
@@ -151,7 +154,7 @@ describe('the inbound gate', () => {
 
   it('step 2: rejects a claim whose device echo differs from its authenticated principal', async () => {
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
-    const spoofed = createEnvelope('task.claim', { deviceId: 'device-spoofed', agentRef: TEST_AGENT_REF }, { taskId });
+    const spoofed = createEnvelope('task.claim', { deviceId: 'device-spoofed', agentRef: TEST_AGENT_REF, executor: EXECUTOR }, { taskId });
 
     expect(await handleInboundEnvelope(stores, deviceId, spoofed).then((result) => result.outcome)).toBe('rejected');
     await expect(harness.cloud.readTaskAttempt(TENANT_A, taskId)).resolves.toMatchObject({
@@ -207,6 +210,7 @@ describe('the inbound gate', () => {
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, {
       payload: offerPayload(),
     });
+    expect(await handleInboundEnvelope(stores, deviceId, claim(taskId, deviceId)).then((result) => result.outcome)).toBe('accepted');
     const requested = createEnvelope(
       'task.await_approval',
       { summary: 'Allow write', approvalId: 'approval-1' },
@@ -269,6 +273,8 @@ describe('the inbound gate', () => {
     });
     await harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-first-device', deviceId, agentRef: AGENT_REF });
     await harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-other-device', deviceId: other.deviceId, agentRef: AGENT_REF });
+    await harness.stores.tasks.claim(TENANT_A, { taskId: 'task-first-device', deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } });
+    await harness.stores.tasks.claim(TENANT_A, { taskId: 'task-other-device', deviceId: other.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } });
     const envelopeId = '10000000-0000-4000-8000-000000000123';
     const first = createEnvelope('task.progress', { seq: 1, events: [] }, {
       id: envelopeId,
@@ -291,6 +297,7 @@ describe('the inbound gate', () => {
     });
     await harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-shared', deviceId, agentRef: AGENT_REF });
     await harness.stores.tasks.reserveAgentOffer(TENANT_B, { taskId: 'task-shared', deviceId, agentRef: AGENT_REF });
+    for (const tenant of [TENANT_A, TENANT_B]) await harness.stores.tasks.claim(tenant, { taskId: 'task-shared', deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } });
     const envelope = progress('task-shared');
 
     expect(await handleInboundEnvelope(stores, deviceId, envelope).then((result) => result.outcome)).toBe('accepted');
@@ -346,7 +353,7 @@ describe('the inbound gate', () => {
 
 /** The first sealed golden line of each daemon type with a sealed branch (#654). */
 const sealedGoldenPayloads = new Map<string, unknown>();
-for (const raw of readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8').trimEnd().split('\n')) {
+for (const raw of readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8').trimEnd().split('\n')) {
   const line = JSON.parse(raw) as { type: string; payload: unknown };
   if ((DAEMON_TO_SERVER_TYPES as readonly string[]).includes(line.type) && isSealedPayload(line.type, line.payload)
     && !sealedGoldenPayloads.has(line.type)) sealedGoldenPayloads.set(line.type, line.payload);
@@ -355,7 +362,7 @@ for (const raw of readFileSync(new URL('../../../protocol/src/__tests__/golden/v
 function envelopeOfType(type: (typeof DAEMON_TO_SERVER_TYPES)[number], taskId: string, deviceId: string): Envelope {
   switch (type) {
     case 'task.claim':
-      return createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId });
+      return createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: EXECUTOR }, { taskId });
     case 'task.started':
       return createEnvelope('task.started', {}, { taskId });
     case 'task.decline':
@@ -367,17 +374,19 @@ function envelopeOfType(type: (typeof DAEMON_TO_SERVER_TYPES)[number], taskId: s
     case 'task.await_approval':
       return createEnvelope('task.await_approval', { summary: 'may I', approvalId: 'ap-1' }, { taskId });
     case 'task.complete':
-      return createEnvelope('task.complete', { summary: 'ok', sessionRef: 's', agentRef: TEST_AGENT_REF }, { taskId });
+      return createEnvelope('task.complete', { summary: 'ok', sessionRef: 's', agentRef: TEST_AGENT_REF, executor: EXECUTOR }, { taskId });
     case 'task.fail':
-      return createEnvelope('task.fail', { reason: 'nope', agentRef: TEST_AGENT_REF }, { taskId });
+      return createEnvelope('task.fail', { reason: 'nope', agentRef: TEST_AGENT_REF, executor: EXECUTOR }, { taskId });
     case 'task.cancelled':
-      return createEnvelope('task.cancelled', { agentRef: TEST_AGENT_REF }, { taskId });
+      return createEnvelope('task.cancelled', { agentRef: TEST_AGENT_REF, executor: EXECUTOR }, { taskId });
     case 'task.approval_resolved':
       return createEnvelope(
         'task.approval_resolved',
         { approvalId: 'ap-1', decision: 'approve', resolvedBy: 'local', at: new Date().toISOString() },
         { taskId },
       );
+    case 'task.steer_refused':
+      return createEnvelope('task.steer_refused', { steerMessageId: '10000000-0000-4000-8000-000000000004', reason: 'task_not_active' }, { taskId });
     case 'agent.message.draft':
       return createEnvelope(type, { agentRef: { agentId: 'agent-inbound', profileRevision: 'profile-inbound' }, revision: 1, offset: 0, text: 'draft' }, { taskId });
     case 'agent.egress.reliable':

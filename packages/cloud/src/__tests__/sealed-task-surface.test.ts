@@ -23,7 +23,7 @@ import { PRODUCT_ID, TENANT_A, TEST_AGENT_REF, createHarness, type CloudHarness 
 import { SEALING, inlineMember } from './support/sealed';
 
 type CorpusLine = { type: MessageType; payload: Record<string, unknown> };
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as CorpusLine);
@@ -38,6 +38,8 @@ const OUTPUT_MEMBER = corpus.find((line) => line.type === 'task.complete' && lin
 const CONTEXT = { destinationBinding: 'conversation/654/turn/1' };
 
 let taskCount = 0;
+
+const PI_EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
 
 const SCOPE_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
 
@@ -79,7 +81,7 @@ async function sealAgentInstruction(
 
 /** A sealed Agent resume offer payload with both categories sealed. */
 function sealedAgentOffer(sealed: Awaited<ReturnType<typeof sealAgentInstruction>>) {
-  return { runtime: 'pi' as const, agentRef: TEST_AGENT_REF, session: { mode: 'resume' as const, sessionRef: 'test-session' }, sealing: SEALING, sealed };
+  return { target: { lane: 'runtime', runtimeId: 'pi' } as const, agentRef: TEST_AGENT_REF, session: { mode: 'resume' as const, sessionRef: 'test-session' }, sealing: SEALING, sealed };
 }
 
 function deviceStores(harness: CloudHarness, deviceId: string) {
@@ -111,9 +113,7 @@ async function egressTask(
   taskCount += 1;
   const taskId = `sealed-surface-${taskCount}`;
   const fixture = typeof build === 'function' ? await build(device.deviceId, taskId) : build;
-  const payload: EgressPayload = { ...fixture,
-    runtime: (fixture.dispatchSelection as { runtimeId: string } | undefined)?.runtimeId ?? fixture.runtime,
-  };
+  const payload: EgressPayload = fixture;
   await harness.stores.devices.recordCapabilities(TENANT_A, {
     deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(type, payload as never),
   });
@@ -179,12 +179,12 @@ describe('the Host read surface of a sealed task (#654 E4a)', () => {
     await harness.cloud.enqueueSealedAgentOffer(TENANT_A, device.deviceId, { taskId, payload: sealedAgentOffer(instruction) as never });
     const send = deviceSender(harness, device.deviceId, taskId);
     for (const [type, payload] of [
-      ['task.claim', { deviceId: device.deviceId, runtime: 'pi', agentRef: TEST_AGENT_REF }],
+      ['task.claim', { deviceId: device.deviceId, executor: PI_EXECUTOR, agentRef: TEST_AGENT_REF }],
       ['task.started', {}],
       ['task.progress', { seq: 1, sealed: OUTPUT_MEMBER }],
       ['task.await_approval', { approvalId: 'approval-1', sealed: OUTPUT_MEMBER }],
       ['task.approval_resolved', { approvalId: 'approval-1', decision: 'approve', resolvedBy: 'local', at: '2026-10-24T00:00:00.000Z' }],
-      ['task.complete', { sessionRef: 'session-sealed', agentRef: TEST_AGENT_REF, sealed: OUTPUT_MEMBER }],
+      ['task.complete', { sessionRef: 'session-sealed', agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR, sealed: OUTPUT_MEMBER }],
     ] as const) {
       expect(await send(type, payload), type).toEqual({ outcome: 'accepted' });
     }
@@ -194,15 +194,15 @@ describe('the Host read surface of a sealed task (#654 E4a)', () => {
     expect(offer?.payload).toEqual(sealedAgentOffer(instruction));
 
     expect(await harness.cloud.readTaskAttempt(TENANT_A, taskId)).toEqual({
-      tenantId: TENANT_A, taskId, deviceId: device.deviceId, agentRef: TEST_AGENT_REF, ownerDeviceId: device.deviceId, claimedRuntime: 'pi',
+      tenantId: TENANT_A, taskId, deviceId: device.deviceId, agentRef: TEST_AGENT_REF, ownerDeviceId: device.deviceId, claimedExecutor: PI_EXECUTOR,
       status: 'complete', offeredAt: expect.any(String), claimedAt: expect.any(String), terminalAt: expect.any(String),
       updatedAt: expect.any(String),
     });
 
     expect((await harness.cloud.readDeviceTerminal(TENANT_A, taskId))?.envelope.payload)
-      .toEqual({ sessionRef: 'session-sealed', agentRef: TEST_AGENT_REF, sealed: OUTPUT_MEMBER });
+      .toEqual({ sessionRef: 'session-sealed', agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR, sealed: OUTPUT_MEMBER });
     expect(await harness.cloud.readTaskResult(TENANT_A, taskId))
-      .toEqual({ taskId, state: 'complete', sessionRef: 'session-sealed', agentRef: TEST_AGENT_REF, recordedAt: expect.any(String) });
+      .toEqual({ taskId, state: 'complete', sessionRef: 'session-sealed', agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR, recordedAt: expect.any(String) });
 
     expect((await harness.cloud.readActivity(TENANT_A, taskId))?.entries).toEqual([{
       taskId, sourceEnvelopeId: expect.any(String), batchSeq: 1, kind: 'sealed-progress', revision: 1, sourceDropped: 0,
@@ -226,12 +226,12 @@ describe('the Host read surface of a sealed task (#654 E4a)', () => {
     });
     await harness.cloud.enqueueSealedAgentOffer(TENANT_A, device.deviceId, { taskId, payload: sealedAgentOffer(instruction) as never });
     const send = deviceSender(harness, device.deviceId, taskId);
-    expect(await send('task.claim', { deviceId: device.deviceId, runtime: 'pi', agentRef: TEST_AGENT_REF })).toEqual({ outcome: 'accepted' });
-    expect(await send('task.fail', { reason: 'sealed_key_unavailable', retryable: false, agentRef: TEST_AGENT_REF })).toEqual({ outcome: 'accepted' });
+    expect(await send('task.claim', { deviceId: device.deviceId, executor: PI_EXECUTOR, agentRef: TEST_AGENT_REF })).toEqual({ outcome: 'accepted' });
+    expect(await send('task.fail', { reason: 'sealed_key_unavailable', retryable: false, agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR })).toEqual({ outcome: 'accepted' });
     expect(await harness.cloud.readTaskAttempt(TENANT_A, taskId)).toMatchObject({ status: 'failed', terminalCause: 'sealed_key_unavailable' });
     expect(await harness.cloud.readTaskResult(TENANT_A, taskId)).toEqual({
       taskId, state: 'failed', reason: 'sealed_key_unavailable', terminalCause: 'sealed_key_unavailable', retryable: false,
-      agentRef: TEST_AGENT_REF, recordedAt: expect.any(String),
+      agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR, recordedAt: expect.any(String),
     });
   });
 });

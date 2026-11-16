@@ -175,6 +175,7 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
     await this.#state.presence.deleteDevice(tenant, deviceId);
     await this.#state.nonces.deleteDevice(tenant, deviceId);
     await this.#state.dedup.deleteDevice(tenant, deviceId);
+    await this.#state.e2eeMember?.deleteDevice(tenant, deviceId);
   }
 
   /** Runs registrations and revocations one at a time, whatever the previous one's outcome. */

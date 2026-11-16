@@ -247,9 +247,10 @@ export interface ServiceUpgradeReceipt {
  *   `upgrade_pending` with it in `cause`. A timed-out start is not thrown:
  *   recover() resolves with a `failed` receipt (`switch_unhealthy` or
  *   `rollback_unhealthy`).
- * - `uninstall()`: a timed-out stop, unregistration or `daemon-reload` is
- *   thrown as is, after `current` is removed; the unit files stay when the
- *   stop or unregistration timed out.
+ * - `uninstall()`: a timed-out stop or unregistration is thrown as is and
+ *   removes nothing: the unit files and `current` stay. A timed-out
+ *   `daemon-reload` is thrown as is after `current` and the unit files are
+ *   removed; the rest of the install root stays.
  * - `lifecycle`: each of its operations rejects with it as is.
  *
  * A payload starts only through `current` (#2011): while a pending receipt
@@ -378,7 +379,7 @@ export interface ServiceInstallation {
    * failures follow the same rule as on `rollback()`.
    */
   recover(): Promise<ServiceUpgradeReceipt | undefined>;
-  /** Removes `current` first, so no payload starts even if the unit stays; uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
+  /** Stops and unregisters the service while `current` still holds its payload, removes `current`, then the unit files, then `previous`, `versions/`, `snapshots/` and the receipt. A failed stop throws as is and removes nothing, so the unit and `current` stay and the service can start again until `uninstall()` is retried. A unit whose removal fails after the stop stays without `current`, so it starts no payload (#2011); retry `uninstall()`. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
   uninstall(): Promise<void>;
   /** The last receipt, or `undefined`. */
   receipt(): Promise<ServiceUpgradeReceipt | undefined>;
@@ -987,7 +988,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           // check: a boot or login must not start it on those stores. The
           // next operation restores the repair snapshot first.
           let note = error.unfinished;
-          if (stopMarked) await held.uninstall().catch((removal: unknown) => { later.push(removal); note = `${note} The marked service unit could not be removed: ${inspection.unitPath}.`; });
+          if (stopMarked) await removeUnit(held).catch((removal: unknown) => { later.push(removal); note = `${note} The marked service unit could not be removed: ${inspection.unitPath}.`; });
           throw unfinishedFailure([...error.errors, ...later], note);
         }
       }
@@ -1028,13 +1029,16 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       let releaseRestored: (() => Promise<unknown[]>) | undefined;
       let leasesReleased = false;
       let repairKept: string | undefined;
+      // A first install that failed before activation has not touched the
+      // allowed foreign unit. Never try to uninstall that unit.
+      const ownsUnit = activationAttempted || stopMarked;
+      // `current` goes between the stop and the unit's removal, as in
+      // uninstall(): a unit whose removal fails cannot start the payload that
+      // failed its health check (#2279).
       const removals = [
-        { name: 'service unit and launcher', remove: async () => {
-          // A first install that failed before activation has not touched
-          // the allowed foreign unit. Never try to uninstall that unit.
-          if (activationAttempted || stopMarked) await held.uninstall();
-        } },
+        { name: 'service registration', remove: async () => { if (ownsUnit) await held.deactivate(); } },
         { name: 'current pointer', remove: () => setPointer('current', undefined) },
+        { name: 'service unit and launcher', remove: async () => { if (ownsUnit) await held.removeFiles(); } },
         { name: 'installation record', remove: () => fs.rm(serviceInstallationRecordPath(storeDir), { force: true }) },
         { name: 'staged version directory', remove: () => fs.rm(path.join(versionsDir, id), { recursive: true, force: true }) },
         ...(prepared === undefined ? [] : [{ name: 'prepared store snapshot restoration', remove: async () => {
@@ -1463,6 +1467,12 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     return (await listDir(snapshotsDir)).filter((entry) => entry.startsWith(INSTALL_SNAPSHOT_PREFIX));
   }
 
+  /** Uninstalls the unit where no `current` exists, so nothing has to go between its two steps. */
+  async function removeUnit(held: HeldServiceLifecycle): Promise<void> {
+    await held.deactivate();
+    await held.removeFiles();
+  }
+
   /**
    * Run first by every operation, recover() included, holding the
    * install-root gate (#2010). Only an operation that holds it writes
@@ -1520,7 +1530,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       const later: unknown[] = [];
       if (inspection?.state === 'exact' || inspection?.state === 'repairable') {
         const { unitPath } = inspection;
-        await held.uninstall().catch((removal: unknown) => { later.push(removal); note = `${note} The marked service unit could not be removed: ${unitPath}.`; });
+        await removeUnit(held).catch((removal: unknown) => { later.push(removal); note = `${note} The marked service unit could not be removed: ${unitPath}.`; });
       }
       throw unfinishedFailure([error, ...later], note);
     }
@@ -1741,9 +1751,13 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   function uninstall(): Promise<void> {
     return rootOwned(async (held) => {
       await refusePending();
-      // Without `current` no unit starts a payload, even one this uninstall fails to remove (#2011).
+      // The Host's stop program may run from under `current` (Windows runs it
+      // on every stop), so `current` goes only once the service is down
+      // (#2274), and before the unit files, so a unit whose removal fails
+      // starts no payload (#2279).
+      await held.deactivate();
       await setPointer('current', undefined);
-      await held.uninstall();
+      await held.removeFiles();
       await setPointer('previous', undefined);
       await fs.rm(versionsDir, { recursive: true, force: true });
       // Install snapshots stay, and so does `snapshots/` around them.

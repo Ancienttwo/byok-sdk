@@ -232,7 +232,7 @@ describe('in-memory task events wake (#1113 A4)', () => {
       expect(performance.now() - started).toBeLessThan(100);
     };
     await woken(() => stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task', deviceId: 'device', agentRef: AGENT_REF }));
-    await woken(() => stores.tasks.claim(TENANT_A, { taskId: 'task', deviceId: 'device' }));
+    await woken(() => stores.tasks.claim(TENANT_A, { taskId: 'task', deviceId: 'device', executor: { kind: 'runtime', runtimeId: 'pi' } }));
     await woken(() => stores.activity.append(TENANT_A, {
       taskId: 'task', sourceEnvelopeId: 'progress', batchSeq: 1, events: [{ type: 'progress', text: 'one' }], dropped: 0, ttlMs: 600_000,
     }));

@@ -29,7 +29,7 @@ import {
 const TASK_ID = 'sealed-host-task';
 const TYPE = 'task.offer';
 /** The plaintext fields of the sealed Agent resume offer. */
-const RESUME = { runtime: 'pi', agentRef: TEST_AGENT_REF, session: offerPayload().session } as const;
+const RESUME = { target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: TEST_AGENT_REF, session: offerPayload().session } as const;
 const SCOPE_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
 
 async function sealedDevice(): Promise<{ harness: CloudHarness; device: PairedDevice }> {

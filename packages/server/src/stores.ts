@@ -223,6 +223,7 @@ function observingMailbox(inner: MailboxStore, presence: LeasedPresence): Mailbo
     append: (tenant, input) => inner.append(tenant, input),
     readUsage: (tenant) => inner.readUsage(tenant),
     readAfter: (tenant, query) => inner.readAfter(tenant, query),
+    readMessage: (tenant, query) => inner.readMessage(tenant, query),
     recordDelivery: (tenant, input) => inner.recordDelivery(tenant, input),
     advanceCursor: (tenant, input) => inner.advanceCursor(tenant, input),
     readCursor: async (tenant, deviceId) => {

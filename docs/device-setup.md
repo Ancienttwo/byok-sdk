@@ -654,9 +654,10 @@ One that outlives it is stopped and reported as `ServiceUnitError`
   `upgrade_pending` with it in `cause`. A timed-out start is not thrown:
   `recover()` resolves with a `failed` receipt (`switch_unhealthy` or
   `rollback_unhealthy`).
-- `uninstall()`: a timed-out stop, unregistration or `daemon-reload` is
-  thrown as is, after `current` is removed; the unit files stay when the stop
-  or unregistration timed out.
+- `uninstall()`: a timed-out stop or unregistration is thrown as is and
+  removes nothing: the unit files and `current` stay. A timed-out
+  `daemon-reload` is thrown as is after `current` and the unit files are
+  removed; the rest of the install root stays.
 - The lifecycle's own `install`, `repair`, `uninstall`, `start`, `stop` and
   `status` (also through `ServiceInstallation.lifecycle`) reject with it as
   is.
@@ -665,8 +666,9 @@ Install awaits platform commands before proceeding, so cleanup cannot race
 a start that could restart the service after removal.
 
 If the service fails to install, activate, start or pass its health check,
-install removes the unit and launcher, `current`, the installation record and
-the staged `versions/<id>` directory, then throws `ServiceInstallationError`
+install stops and unregisters the service, removes `current`, then the unit
+and launcher, the installation record and the staged `versions/<id>`
+directory, then throws `ServiceInstallationError`
 with code `install_health_check_failed` and the original error as `cause`. A failed same-id reinstall
 (repair) is different: it keeps the payload, `current` and the unit, and the
 receipt it replaced, so run `install` again once the cause is fixed. After a first
@@ -682,6 +684,8 @@ installed and the stores stay migrated: consistent, but newer than the
 snapshot. The snapshot keeps its ordinary name and the error names it. Cleanup never clears OS credentials. If removal itself fails, the
 same error code carries an `AggregateError` containing the original failure
 and the removal error as `cause`; its message names the artifacts that remain.
+A unit whose removal fails after its stop stays without `current`, so a boot
+or login starts no payload that failed its health check (#2279).
 
 A failed same-id reinstall after an upgrade preserves artifacts belonging to
 other versions: `previous`, `versions/<previous-id>`, `snapshots/` and

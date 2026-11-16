@@ -26,6 +26,8 @@ import { tenantStoresFor, type TenantStores } from '../tenant-stores';
 import { TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
 const KIB = 1024;
+const PI_EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+const GHOST_EXECUTOR = { kind: 'harness', harnessId: 'ghost' } as const;
 
 function storesFor(harness: CloudHarness, deviceId: string): TenantStores {
   return tenantStoresFor(
@@ -70,6 +72,7 @@ describe('observer.onInboundRefused', () => {
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload(),
     });
+    await handleInboundEnvelope(stores, device.deviceId, createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR }, { taskId }));
     const envelope = oversizedProgress(taskId);
 
     expect(await handleInboundEnvelope(stores, device.deviceId, envelope, undefined, undefined, observer).then((result) => result.outcome)).toBe(
@@ -93,8 +96,8 @@ describe('observer.onInboundRefused', () => {
     const stores = storesFor(harness, deviceId);
     await grantAgentHome(harness, TENANT_A, deviceId);
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
-    // Claimed without a harness, so a terminal echoing one is a mismatch.
-    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId })).then((result) => result.outcome)).toBe(
+    // Claimed by the Pi runtime, so a terminal echoing a harness is a mismatch.
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR }, { taskId })).then((result) => result.outcome)).toBe(
       'accepted',
     );
     const unclaimed = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload('second') });
@@ -114,10 +117,10 @@ describe('observer.onInboundRefused', () => {
       ['task_not_found_for_device', createEnvelope('task.started', {}, { taskId: 'task-nobody-offered' })],
       ['hello_device_mismatch', hello({ deviceId: 'someone-else' })],
       ['hello_protocol_version_unsupported', hello({ protocolVersions: [PROTOCOL_VERSION + 1] })],
-      ['claim_device_mismatch', createEnvelope('task.claim', { deviceId: 'someone-else' }, { taskId })],
-      ['claim_harness_mismatch', createEnvelope('task.claim', { deviceId, harnessId: 'ghost' }, { taskId })],
-      ['claim_harness_unavailable', createEnvelope('task.claim', { deviceId, harnessId: 'ghost' }, { taskId: unclaimed.taskId })],
-      ['terminal_harness_mismatch', createEnvelope('task.complete', { summary: 'done', sessionRef: 's', harnessId: 'ghost' }, { taskId })],
+      ['claim_device_mismatch', createEnvelope('task.claim', { deviceId: 'someone-else', executor: PI_EXECUTOR }, { taskId })],
+      ['claim_executor_mismatch', createEnvelope('task.claim', { deviceId, executor: GHOST_EXECUTOR }, { taskId })],
+      ['claim_harness_unavailable', createEnvelope('task.claim', { deviceId, executor: GHOST_EXECUTOR }, { taskId: unclaimed.taskId })],
+      ['terminal_executor_mismatch', createEnvelope('task.complete', { summary: 'done', sessionRef: 's', executor: GHOST_EXECUTOR }, { taskId })],
       ['activity_batch_too_large', oversizedProgress(taskId)],
       ['activity_batch_invalid', createEnvelope('task.progress', { seq: -1, events: [{ type: 'turn_end' }] }, { taskId })],
     ];
@@ -146,7 +149,7 @@ describe('observer.onInboundRefused', () => {
     const { refused, observer } = refusalRecorder();
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId });
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR }, { taskId });
 
     expect(await handleInboundEnvelope(stores, device.deviceId, claim, undefined, undefined, observer).then((result) => result.outcome)).toBe('accepted');
     expect(await handleInboundEnvelope(stores, device.deviceId, claim, undefined, undefined, observer).then((result) => result.outcome)).toBe('duplicate');
@@ -199,7 +202,7 @@ describe('observer.onInboundRefused', () => {
       const device = await harness.pairDevice(TENANT_A);
       await grantAgentHome(harness, TENANT_A, device.deviceId);
       const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-      const messages = [oversizedProgress(taskId), createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId })];
+      const messages = [createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR }, { taskId }), oversizedProgress(taskId)];
       const response = await harness.request('/byok/messages', {
         method: 'POST',
         headers: { ...device.authorization, 'content-type': 'application/json' },
@@ -210,8 +213,8 @@ describe('observer.onInboundRefused', () => {
       expect(response.status).toBe(200);
       const answer = await response.json();
       expect(answer).toEqual({ accepted: 1, rejected: 1, outcomes: [
-        { id: messages[0]!.id, outcome: 'rejected', reason: 'limit_exceeded' },
-        { id: messages[1]!.id, outcome: 'accepted' },
+        { id: messages[0]!.id, outcome: 'accepted' },
+        { id: messages[1]!.id, outcome: 'rejected', reason: 'limit_exceeded' },
       ] });
       answers.push(answer);
     }

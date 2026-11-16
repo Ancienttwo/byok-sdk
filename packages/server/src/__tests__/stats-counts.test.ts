@@ -18,6 +18,7 @@ import {
   type FakeLongPollDaemon,
   TEST_AGENT_DISPATCH,
   TEST_AGENT_REF,
+  TEST_CLAIMED_EXECUTOR,
 } from './test-support';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
@@ -115,8 +116,8 @@ async function runToTerminal(
   } else {
     const terminal =
       outcome === 'complete'
-        ? createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess' }, { taskId: handle.taskId })
-        : createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'broke', retryable: false }, { taskId: handle.taskId });
+        ? createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess' }, { taskId: handle.taskId })
+        : createEnvelope('task.fail', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, reason: 'broke', retryable: false }, { taskId: handle.taskId });
     expect(await sendOne(daemon, terminal)).toMatchObject({ status: 200, body: { accepted: 1 } });
   }
   return handle.taskId;
@@ -196,7 +197,7 @@ describe('store-aggregated stats()', () => {
     await leaveLiveTasks(started.byok, daemon);
     const claimed = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'claimed only' });
     await nextEnvelope(daemon);
-    const claim = createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: claimed.taskId });
+    const claim = createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: claimed.taskId });
     expect(await sendOne(daemon, claim))
       .toEqual({ status: 200, body: { accepted: 1, outcomes: [{ id: claim.id, outcome: 'accepted' }] } });
     const complete = await runToTerminal(started.byok, daemon, 'complete');
@@ -204,7 +205,7 @@ describe('store-aggregated stats()', () => {
     expect(await started.byok.tasks.get(complete)).toMatchObject({ state: 'Complete' });
     await runToTerminal(started.byok, daemon, 'fail');
     const ownedCancel = await runToTerminal(started.byok, daemon, 'cancel');
-    const lateComplete = createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'late', sessionRef: 'late' }, { taskId: ownedCancel });
+    const lateComplete = createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'late', sessionRef: 'late' }, { taskId: ownedCancel });
     expect(await sendOne(daemon, lateComplete))
       .toEqual({ status: 200, body: { accepted: 1, outcomes: [{ id: lateComplete.id, outcome: 'accepted' }] } });
     const unowned = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'cancel before claim' });
@@ -246,7 +247,7 @@ describe('store-aggregated stats()', () => {
     await nextEnvelope(daemon);
     await claimAndStart(started.byok, daemon, handle);
     kernelCalls.afterCount = async () => {
-      const complete = createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'race-session' }, { taskId: handle.taskId });
+      const complete = createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'race-session' }, { taskId: handle.taskId });
       expect(await sendOne(daemon, complete)).toEqual({ status: 200, body: { accepted: 1, outcomes: [{ id: complete.id, outcome: 'accepted' }] } });
     };
     const counts = (await started.byok.stats()).taskCountsByState;
@@ -271,7 +272,7 @@ describe('store-aggregated stats()', () => {
     await nextEnvelope(daemon);
     await claimAndStart(started.byok, daemon, handle);
     kernelCalls.beforeApproval = async () => {
-      const complete = createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'race-session' }, { taskId: handle.taskId });
+      const complete = createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'race-session' }, { taskId: handle.taskId });
       expect(await sendOne(daemon, complete)).toEqual({ status: 200, body: { accepted: 1, outcomes: [{ id: complete.id, outcome: 'accepted' }] } });
     };
     const counts = (await started.byok.stats()).taskCountsByState;
@@ -322,7 +323,7 @@ describe('store-aggregated stats()', () => {
 
     vi.setSystemTime(new Date('2026-10-13T00:00:02.000Z'));
     await claimAndStart(first.byok, daemon, handle);
-    expect(await sendOne(daemon, createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'failed', retryable: false }, { taskId: handle.taskId })))
+    expect(await sendOne(daemon, createEnvelope('task.fail', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, reason: 'failed', retryable: false }, { taskId: handle.taskId })))
       .toMatchObject({ status: 200, body: { accepted: 1 } });
     expect(await first.byok.tasks.get(handle.taskId)).toMatchObject({ state: 'Failed', createdAt: openedAt, sessionRef: 'requested-session' });
 

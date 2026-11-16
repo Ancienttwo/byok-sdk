@@ -47,7 +47,7 @@ import { PostgresDeviceAssertionReplayAuthority } from '../stores/device-asserti
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const OFFER_TENANT = tenantId('tenant-offer-sequence');
-const OFFER_AGENT = { agentRef: { agentId: 'offer-sequence-agent', profileRevision: 'rev-1' }, session: { mode: 'resume' as const, sessionRef: 'offer-sequence-session' } };
+const OFFER_AGENT = { agentRef: { agentId: 'offer-sequence-agent', profileRevision: 'rev-1' }, session: { mode: 'resume' as const, sessionRef: 'offer-sequence-session' }, target: { lane: 'auto' as const } };
 
 const postgresFactory: CloudCompositionFactory = {
   async create() {
@@ -59,17 +59,19 @@ const postgresFactory: CloudCompositionFactory = {
     const objectStorage = await createObjectStorageScope();
 
     const clock = createMutableClock();
-    const stores = await createPostgresCloudStores({
+    const { e2eeMember, ...stores } = await createPostgresCloudStores({
       rateLimit: { tokensPerSecond: 1_000, burst: 1_000 },
       pool: scope.pool,
       clock,
       crypto: createWebCrypto(),
       objectStorage: objectStorage.config,
+      e2eeMember: true,
     });
     const core = createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: objectStorage.config });
 
     return {
       presence: core.presence,
+      e2eeMember: e2eeMember!,
       replay: new PostgresDeviceAssertionReplayAuthority(scope.pool),
       stores,
       now: () => clock.now().toISOString(),

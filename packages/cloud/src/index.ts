@@ -413,7 +413,6 @@ export {
   InMemoryCloudBlobStore,
   InMemoryActivityStore,
   InMemoryAgentMessageDraftStore,
-  InMemoryE2eeMemberStore,
   InMemoryDeviceDirectory,
   InMemoryInboundDedupStore,
   InMemoryNonceStore,

@@ -11,6 +11,7 @@ import {
   type FakeLongPollDaemon,
   TEST_AGENT_DISPATCH,
   TEST_AGENT_REF,
+  TEST_CLAIMED_EXECUTOR,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -19,7 +20,7 @@ const SHORT_HOLD_MS = 150;
 
 /** Offered -> Claimed -> Running over the long-poll send path. */
 async function claimAndStart(daemon: FakeLongPollDaemon, handle: TaskHandle): Promise<void> {
-  await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+  await daemon.send(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
   await daemon.send(createEnvelope('task.started', {}, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 }
@@ -99,7 +100,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
     expect(snapshot?.pendingApprovalId).toBeUndefined();
     const decisions = (await daemon.next()).filter((e) => e.type === 'task.reject');
     expect(decisions).toMatchObject([{ type: 'task.reject', task_id: handle.taskId, payload: { approvalId: 'appr-1', reason: 'looked risky' } }]);
-    await daemon.send(createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'runtime stopped after rejection', retryable: false }, { taskId: handle.taskId }));
+    await daemon.send(createEnvelope('task.fail', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, reason: 'runtime stopped after rejection', retryable: false }, { taskId: handle.taskId }));
     expect((await instance.tasks.get(handle.taskId))?.result).toMatchObject({ state: 'Failed', reason: 'runtime stopped after rejection', retryable: false });
   });
 
@@ -304,7 +305,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
       expect(snapshot?.pendingApprovalId).toBeUndefined();
       const decisions = (await daemon.next()).filter((e) => e.type === 'task.reject');
       expect(decisions).toMatchObject([{ type: 'task.reject', task_id: handle.taskId, payload: { approvalId: 'appr-A', reason: 'looked risky' } }]);
-      await daemon.send(createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'runtime stopped after rejection', retryable: false }, { taskId: handle.taskId }));
+      await daemon.send(createEnvelope('task.fail', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, reason: 'runtime stopped after rejection', retryable: false }, { taskId: handle.taskId }));
       expect((await instance.tasks.get(handle.taskId))?.result).toMatchObject({ state: 'Failed', reason: 'runtime stopped after rejection', retryable: false });
     });
 

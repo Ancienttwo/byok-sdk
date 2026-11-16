@@ -55,6 +55,25 @@ Expired replay rows are not removed on their own. Pass the replay authority as
 schedule; without the authority the `deviceAssertionReplay` step reports
 `not-configured` and expired rows accumulate.
 
+## Grok tasks no longer run the Grok updater (#2269)
+
+`GrokAdapter` (`DaemonConfig.runtimes.grok`) now starts every Grok agent
+process with `GROK_DISABLE_AUTOUPDATER=1`, Grok's documented process switch
+for its updater. The SDK sets it last, so a `GROK_DISABLE_AUTOUPDATER` in the
+task environment, including `0` or an empty value, no longer reaches Grok.
+
+Under `agentUserContext: 'inherit'`, a task started from a managed Grok install
+with `GROK_HOME` at that install used to run Grok's updater module, which wrote
+an `agent` link into the install's `bin/`. SDK tasks no longer change the
+user's Grok install and no longer check for Grok updates. Grok the user runs
+still updates itself. Under `agentUserContext: 'excluded'`, Grok already
+skipped its updater, because the SDK-owned `GROK_HOME` is not a managed
+install.
+
+Host action: if your product relied on Grok tasks to keep the user's Grok
+current, update Grok outside SDK tasks, for example by having the user run
+Grok or its installer.
+
 ## OAR 0.109.0 (#2235)
 
 The vendored OAR moves from 0.105.0 to 0.109.0 (`packages/client/vendor/oar/4eb5919/`, fork branch `byok/0.109.0`). No public type, export or configuration field changes. The upgrade manifest declares the three behavior-only breaking changes below as `model-confirmation-non-retryable`, `agy-model-confirmation-deadline` and `claude-queued-write-failure`.
@@ -249,9 +268,134 @@ idempotency across re-registration if it needs it.
 `@byok-sdk/cloud-dataplane` `PostgresPresenceStore`, `PostgresNonceStore` and
 `PostgresInboundDedupStore` implement `deleteDevice`. Postgres `revoke()` now
 deletes the presence, nonce and dedup rows of the id even when no device row
-was left, so a repeated revoke clears rows a racing write recreated. Its E2EE
-member state is still deleted only with a row the call removed (#2267). No
-schema change.
+was left, so a repeated revoke clears rows a racing write recreated. The same
+now holds for its E2EE member state (see below). No schema change.
+
+## E2EE member state on retirement (#2267)
+
+Revoke and machine supersession now delete the retired device's E2EE member
+state in every composition that has an E2EE member store: its member key
+registration, both pairing MACs, and the scope key packages addressed to its
+member. Before, only Postgres deleted it; the in-memory store kept it, so
+`ByokCloud.readScopeKeyPackages()` still returned the retired member's
+packages. The member chain, scope epochs and their `keyId`s, shred records,
+the member's KEM floor and recorded proof requests stay.
+
+The store is now one field of the composition, `CloudStores.e2eeMember`, so
+the routes and the device directory that retires it always use the same one.
+
+### E2EE member store moves into CloudStores
+
+`ByokCloudOptions.e2eeMemberStore` is removed. Get the store from the
+composition factory's opt-in and pass the stores as `cloud`:
+
+```ts
+// Postgres
+const stores = await createPostgresCloudStores({ pool, clock, crypto, objectStorage, rateLimit, e2eeMember: true });
+const cloud = createByokCloud({
+  cloud: stores, // stores.e2eeMember is a PostgresE2eeMemberStore
+  capabilities: fullCapabilityDeclaration(1, { includeE2eeMember: true }),
+  // ...the rest of the options, without e2eeMemberStore
+});
+
+// In memory
+const composition = createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, core.presence, objectBytes, undefined, { e2eeMember: true });
+// or: createInMemoryByokCloud({ e2eeMember: true }), which also declares e2ee.member
+```
+
+A Host that builds `CloudStores` and its directory itself, without a standard
+factory's opt-in, must give the same instance to `CloudStores.e2eeMember` and
+to its device directory (see the retirement contract below). Nothing checks
+this at run time: a second instance would serve the routes while retirement
+cleans the other one.
+
+### Capability ports read cloud.e2eeMember
+
+`e2ee.member` is still bound both ways: declaring it without
+`cloud.e2eeMember`, or passing `cloud.e2eeMember` without declaring it, is
+refused at construction (`capability_over_declared`,
+`capability_port_undeclared`), and the error names the port
+`cloud.e2eeMember`. `CapabilityPorts` loses `e2eeMemberStore` and gains
+`cloud?: Pick<CloudStores, 'e2eeMember'>`. A caller of
+`capabilityDeclarationForPorts()` passes `cloud: stores` instead of
+`e2eeMemberStore`.
+
+### InMemoryE2eeMemberStore is no longer exported
+
+Use the in-memory composition's opt-in (`stores.e2eeMember` above). A
+standalone instance would not be retired with the directory's devices.
+
+### E2eeMemberStore gains deleteDevice
+
+`E2eeMemberStore` gains a required `deleteDevice(tenant, deviceId): Promise<void>`.
+It deletes the scope key packages addressed to the member the device
+registered, then that registration with its device pairing MAC, then the
+client pairing MAC. It keeps the chain, epochs, `keyId`s, shred records, the
+member's KEM floor and recorded proof requests; a device with no state is a
+no-op. A Host with its own store implements it.
+
+### Retirement deletes E2EE member state
+
+A Host with its own `DeviceDirectory` and an E2EE member store deletes the
+member state on both retirement paths, under the same rules as presence,
+nonces and dedup: only once the registration change is durable (or in the
+same transaction when the store shares its database), and on every `revoke`,
+whether or not a row was removed. `DeviceScopedStores` takes it as optional
+`e2eeMember`.
+
+What a Host sees:
+
+- After a revoke or supersession, `readScopeKeyPackages()` omits the retired
+  member's packages in every composition.
+- The retired member id can be registered by another device. In memory this
+  used to fail with `e2ee_member_key_conflict`. The id keeps its KEM floor.
+- Postgres `revoke()` now deletes E2EE member rows of the id even when no
+  device row was left.
+- A package put to the retired member id after the retirement is not removed:
+  cleanup finds packages through the device's registration, which is gone.
+
+### E2EE composition opt-ins
+
+Additive: `CloudStores.e2eeMember`, `DeviceScopedStores.e2eeMember`, the
+`{ e2eeMember: true }` options of `createInMemoryCloudStores()`,
+`createInMemoryByokCloud()` and `createPostgresCloudStores()`, and
+`PostgresE2eeMemberStore.deleteDevice()`.
+
+## Service uninstall stops before it removes `current` (#2274)
+
+This corrects a 0.43.0 regression. `@byok-sdk/client`
+`ServiceInstallation.uninstall()` now stops and unregisters the service while
+`current` still points at the installed payload, then removes `current`, then
+the unit and launcher, then `previous`, `versions/`, `snapshots/` and the
+receipt. 0.43.0 removed `current` before the stop (#2011), so a Windows stop
+program under `current` was gone when the stop ran, and every uninstall failed
+with `service_stop_failed`.
+
+- A stop that fails, times out or is refused (a stop program that exits
+  non-zero, a refused or timed-out `launchctl bootout`) throws as is, without
+  a retry, and removes nothing: the unit and `current` both stay, so the
+  service can start again, for example at the next login, until `uninstall()`
+  is retried.
+- A unit whose removal fails after the stop stays without `current`, so a
+  boot or login starts no payload, as in 0.43.0 (#2011, #2279). A timed-out
+  `daemon-reload` after the unit files are removed is thrown the same way.
+- A Windows `user` scope lifecycle's `stop()`, and the stop inside
+  `uninstall()`, now run the Host's `stop` program only while a launcher
+  runs. With none running they write the stop marker and return. A retried
+  `uninstall()` therefore finishes after `current` is gone, instead of
+  failing with `service_stop_failed` because a stop program under `current`
+  no longer exists (#2279).
+- A first install that fails to activate, start or pass its health check
+  cleans up in the same order: stop and unregister, remove `current`, then
+  the unit and launcher. A leftover unit can no longer start the payload that
+  failed its health check. When the unit cannot be removed, the
+  `install_health_check_failed` message lists `service unit and launcher`
+  first among the remaining artifacts; when the stop fails, it lists
+  `service registration, current pointer` before it.
+
+Retry `uninstall()` after any failure; a retry finishes once the cause is
+fixed. No Host change is needed for a stop program that runs from under
+`current`.
 
 ## Wire v7
 
@@ -285,8 +429,8 @@ supported:
 - The Host's K4 frozen work and outbox snapshots rotate: start them fresh on
   the v7 store.
 - The SQLite startup check refuses a pending row of another major
-  (`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`). The hosted data plane's store
-  check: phase 1.
+  (`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`). The hosted data plane checks the
+  database's wire epoch instead; see "Cloud data plane" below.
 
 ### What a v6 daemon sees
 
@@ -444,6 +588,109 @@ machine's current device. See
   decodes a v6 entry. `start` deletes it and reports re-pair required, pairing
   deletes it and pairs as a first pairing, and a clear deletes it. Re-pair
   every device after the cloud upgrade, as the operator order above says.
+
+### Cloud (`@byok-sdk/cloud`)
+
+- **Claim and terminal executor.** The cloud records the winning claim's
+  `executor` as `TaskAttempt.claimedExecutor`. A replayed claim must name the
+  same executor. A harness claim needs a `harness` or `auto` target, and a
+  `harness` target needs a claim of that harness. After a claim, every
+  terminal must echo exactly that executor. Before a claim, a terminal carries
+  none: a cancel or an unclaimed `daemon_interrupted` recovery. A
+  `task.complete` with no claim is rejected. An unclaimed recovery is no
+  longer checked against the offer's target.
+- **Renamed inbound refusal reasons** (`INBOUND_REFUSAL_REASONS`, as an
+  observer reports them; the wire codes are unchanged). Rename these strings
+  if your observer matches them:
+  - `claim_harness_mismatch` is now `claim_executor_mismatch`;
+  - `terminal_harness_mismatch` is now `terminal_executor_mismatch`;
+  - `claim_harness_and_runtime_conflict` is removed: a claim can no longer
+    express it.
+  - New: `steer_refusal_id_mismatch` (wire `payload_invalid`),
+    `steer_refusal_unknown_steer` (wire `not_permitted`) and
+    `task_not_claimed` (wire `not_permitted`).
+- **Reports before a claim** (#2289). Before a task is claimed, the cloud
+  takes only `task.claim`, `task.decline`, `task.cancelled` and a
+  `task.fail` with `recovery` from the offered device. Every other task
+  report is rejected with `task_not_claimed` (wire `not_permitted`) and
+  changes nothing: `task.started`, `task.progress`, `task.artifact`,
+  `task.await_approval`, `task.approval_resolved`, `task.steer_refused`,
+  `task.complete`, and a `task.fail` without `recovery`. The previous
+  release took them, so an unclaimed task could become running, awaiting
+  approval or terminal with no owner. Reports from any other device were already rejected
+  (`task_not_found_for_device`). A device that claims before it reports
+  sees no change.
+- **Renamed fields.** `SteerRejectedError.executor` replaces `.runtime`, and
+  `TerminalResult.executor` replaces `.harnessId`.
+- **Steer refusals.** Read them with
+  `ByokCloud.readSteerRefusal(tenant, taskId, steerMessageId)`, using the id
+  of the envelope `steerTask` returned. Or page them with
+  `ByokCloud.listSteerRefusals(tenant, { taskId, afterRevision, limit })`.
+  The cloud records a refusal only for a `task.steer` it sent that device for
+  that task. It takes the refusal in every task state and never changes the
+  task's state. Task archive and redaction keep refusal rows, as they keep
+  the terminal receipt; a row carries no content.
+- **Steer text bound.** `steerTask` rejects a plaintext text over 65,536 UTF-8
+  bytes with `coordination_input_invalid`, before any mailbox row exists.
+- **`POST /byok/messages`** answers an entry of another wire major with
+  `rejected` and `protocol_version_unsupported`, and an unknown type with
+  `rejected` and `type_unsupported`, each with HTTP 200. The handshake answer
+  carries `ingress` and no `capabilities`.
+
+### Cloud data plane (`@byok-sdk/cloud-dataplane`)
+
+- **New database.** Run the migrations on a new Postgres database, then write
+  the storage entitlements and retention policy. `0040_wire_v7.sql` stops
+  before any change when any table already holds a row, Host configuration
+  included, with an error that names the table. Otherwise it records wire
+  epoch 7 in `byok_wire_epoch`.
+- **Startup check.** `createPostgresCloudStores` rejects a database whose
+  epoch is not 7, or that has none, with `PostgresStoreEpochUnsupportedError`
+  (`code: 'POSTGRES_STORE_EPOCH_UNSUPPORTED'`, `requiredEpoch`, `foundEpoch`
+  when present) and changes nothing. It replaces the pending-mailbox check:
+  `PostgresMailboxProtocolUnsupportedError` and
+  `POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED` are removed. Match the new code
+  where you matched the old one.
+- **New store.** `PostgresTaskSteerRefusalStore` is the `steerRefusals` port
+  (table `task_steer_refusal`); `createPostgresCloudStores` includes it.
+  Archive, redaction, retention and device retirement keep its rows; tenant
+  erasure deletes them (`TENANT_ERASURE_TABLES`).
+- **Claims.** A claimed task stores exactly one executor, in
+  `claimed_runtime` or `claimed_harness_id` (a new CHECK).
+- **One schema.** The migrations and the preflight act on the first schema of
+  the connecting role's `search_path` in that database. Run the migrations and
+  the cloud with the same role, database and `search_path`; changing the
+  `search_path` between them points the cloud at another schema.
+- **Cut over at once.** Per-task locks (steer refusals, approval timeline) use
+  new keys, which a v6 process does not take. Do not run v6 and v7 cloud
+  processes against one database; v7 starts on a new one.
+
+### Embedded server (`@byok-sdk/server`)
+
+- **SQLite store.** The schema is version 10 and no older file is upgraded in
+  place. Opening a file from a v6 build (schema 6 to 9) fails with
+  `SqliteSchemaError` `SQLITE_SCHEMA_UNSUPPORTED`, and `inspectSqliteStore`
+  reports `new-path-repair`. Point `storage.path` at a new file, keep the old
+  one for the history export, and pair the devices again.
+- **Dispatch.** `DispatchInput` takes one required `target` in place of
+  `runtime`, `harnessId` and `dispatchSelection`. Pass `{ lane: 'auto' }` to
+  keep the device's own runtime choice. An execution-core intent names a
+  concrete target; `auto` is refused there.
+- **Claimed executor.** `TaskSnapshot.claimedExecutor` and the `task.state`
+  server event's `claimedExecutor` replace `claimedRuntime` and
+  `claimedHarnessId`; `SteerRejectedError.executor` replaces `runtime`.
+- **Steer.** `TaskHandle.steer` resolves `{ messageId }`. Text over 65,536
+  UTF-8 bytes is refused with `ByokCloudError` `coordination_input_invalid`
+  before anything is enqueued.
+- **Steer refusals.** A task's event feed yields
+  `{ kind: 'steer_refused', messageId, reason, at }` for each refusal
+  recorded before its terminal; add the arm to exhaustive switches over
+  `ServerTaskEvent`. `tasks.readSteerRefusal(taskId, messageId)` and
+  `tasks.listSteerRefusals(taskId, { afterRevision, limit })` read every
+  refusal, including one recorded after the feed ended. A refusal is kept for
+  the life of the store, archived task included.
+- **Event cursors.** `tasks.events` cursors start with `te2.`; a `te1.`
+  cursor is refused with `cursor_unknown`. Start a new read.
 
 ### Phase 1 and 2 items
 

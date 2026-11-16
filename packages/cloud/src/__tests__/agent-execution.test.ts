@@ -14,7 +14,7 @@ const RESULT_CAPABILITIES = [
 
 const input = {
   taskId: 'turn-execution-1', deviceId: 'device',
-  payload: { instruction: 'context plus current input', runtime: 'codex',
+  payload: { instruction: 'context plus current input', target: { lane: 'runtime', runtimeId: 'codex' },
     agentRef: { agentId: 'agent', profileRevision: 'revision' },
     session: { mode: 'fresh' },
     egressPolicy: { policyRevision: 'policy', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
@@ -26,7 +26,7 @@ const input = {
 };
 
 describe('fresh Agent execution submission', () => {
-  it.each(['taskId', 'deviceId', 'runtime', 'agentRef', 'egressPolicy', 'terminalProjection', 'session', 'resumeSession', 'sessionRef', 'unknownField'])('rejects invalid %s before any attempt or mailbox write', async (field) => {
+  it.each(['taskId', 'deviceId', 'target', 'agentRef', 'egressPolicy', 'terminalProjection', 'session', 'resumeSession', 'sessionRef', 'unknownField'])('rejects invalid %s before any attempt or mailbox write', async (field) => {
     const harness = createHarness();
     const candidate = structuredClone(input) as any;
     if (field === 'sessionRef') candidate.payload.sessionRef = 'old-session';
@@ -139,7 +139,7 @@ describe('fresh Agent execution submission', () => {
     expect((await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages).toHaveLength(1);
   });
 
-  it('accepts a harnessId-only fresh payload without runtime', async () => {
+  it('accepts a harness-target fresh payload', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
@@ -150,41 +150,34 @@ describe('fresh Agent execution submission', () => {
       ],
       harnesses: [{ id: 'acme-harness', version: '1.0.0', capabilities: { steer: true, resume: true, approvalInteractive: false } }],
     });
-    const { messageEgress: _messageEgress, runtime: _runtime, ...payload } = input.payload;
+    const { messageEgress: _messageEgress, ...payload } = input.payload;
     const persisted = AgentExecutionInputSchema.parse({
       taskId: input.taskId,
       deviceId: device.deviceId,
-      payload: { ...payload, harnessId: 'acme-harness', requiredToolsets: ['example.tools'], terminalProjection: { mode: 'none' } },
+      payload: { ...payload, target: { lane: 'harness', harnessId: 'acme-harness' }, requiredToolsets: ['example.tools'], terminalProjection: { mode: 'none' } },
     });
-    expect(persisted.payload).not.toHaveProperty('runtime');
-    expect(persisted.payload.harnessId).toBe('acme-harness');
+    expect(persisted.payload.target).toEqual({ lane: 'harness', harnessId: 'acme-harness' });
     const offered = await harness.cloud.submitAgentExecution(TENANT_A, persisted);
-    expect(offered.envelope.payload).toMatchObject({ harnessId: 'acme-harness', requiredToolsets: ['example.tools'] });
-    expect(offered.envelope.payload).not.toHaveProperty('runtime');
-    expect(offered.envelope.payload).not.toHaveProperty('dispatchSelection');
+    expect(offered.envelope.payload).toMatchObject({ target: { lane: 'harness', harnessId: 'acme-harness' }, requiredToolsets: ['example.tools'] });
   });
 
-  it('rejects harnessId together with runtime or dispatchSelection', () => {
-    const { messageEgress: _messageEgress, runtime: _runtime, ...payload } = input.payload;
+  it('rejects a payload without a target or with an unknown lane', () => {
+    const { messageEgress: _messageEgress, target: _target, ...payload } = input.payload;
     expect(AgentExecutionInputSchema.safeParse({
       taskId: input.taskId, deviceId: 'device',
-      payload: { ...payload, runtime: 'codex', harnessId: 'acme-harness', terminalProjection: { mode: 'none' } },
-    }).success).toBe(false);
+      payload: { ...payload, terminalProjection: { mode: 'none' } },
+    }).error?.issues).toMatchObject([{ path: ['payload', 'target'] }]);
     expect(AgentExecutionInputSchema.safeParse({
       taskId: input.taskId, deviceId: 'device',
-      payload: {
-        ...payload, harnessId: 'acme-harness',
-        dispatchSelection: { lane: 'subscription', runtimeId: 'codex', providerId: null, modelId: 'gpt-5' },
-        terminalProjection: { mode: 'none' },
-      },
-    }).success).toBe(false);
+      payload: { ...payload, target: { lane: 'model', harnessId: 'acme-harness' }, terminalProjection: { mode: 'none' } },
+    }).error?.issues).toMatchObject([{ path: ['payload', 'target', 'lane'] }]);
   });
 
   describe('selection admission', () => {
     const BASE_CAPABILITIES = [
       'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'terminal-projection-selection',
     ];
-    const SELECTION = { lane: 'subscription', runtimeId: 'codex', providerId: null, modelId: 'gpt-5' } as const;
+    const SELECTION = { lane: 'subscription', runtimeId: 'codex', modelId: 'gpt-5' } as const;
     async function setup(capabilities: string[]) {
       const harness = createHarness();
       const device = await harness.pairDevice(TENANT_A);
@@ -217,8 +210,6 @@ describe('fresh Agent execution submission', () => {
       }
       for (const [path, patch] of [
         ['agentMemory', { homeAccess: 'memory-reader', agentMemory: 'read-write' }],
-        ['runtime', { runtime: 'claude', dispatchSelection: SELECTION }],
-        ['harnessId', { harnessId: 'custom' }],
       ] as const) {
         const candidate = { taskId: input.taskId, deviceId: device.deviceId, payload: { ...base, ...patch } };
         for (let retry = 0; retry < 2; retry++) {
@@ -233,10 +224,10 @@ describe('fresh Agent execution submission', () => {
       }
     });
 
-    it('refuses dispatchSelection without the dispatch-selection capability', async () => {
+    it('refuses a model-lane target without the dispatch-selection capability', async () => {
       const { harness, device, payload } = await setup(BASE_CAPABILITIES);
       const candidate = AgentExecutionInputSchema.parse({ taskId: input.taskId, deviceId: device.deviceId,
-        payload: { ...payload, dispatchSelection: SELECTION, terminalProjection: { mode: 'none' } } });
+        payload: { ...payload, target: SELECTION, terminalProjection: { mode: 'none' } } });
       await expect(harness.cloud.submitAgentExecution(TENANT_A, candidate))
         .rejects.toMatchObject({ code: 'agent_capability_missing', message: expect.stringContaining('dispatch-selection') });
       await expectNothingWritten(harness, device.deviceId);
@@ -251,25 +242,25 @@ describe('fresh Agent execution submission', () => {
       await expectNothingWritten(harness, device.deviceId);
     });
 
-    it('refuses a runtime that differs from dispatchSelection.runtimeId', async () => {
+    it('refuses a model lane naming a runtime that cannot hold it', async () => {
       const { harness, device, payload } = await setup([...BASE_CAPABILITIES, 'dispatch-selection', 'toolset-selection']);
       const candidate = { taskId: input.taskId, deviceId: device.deviceId,
-        payload: { ...payload, runtime: 'claude', dispatchSelection: SELECTION, terminalProjection: { mode: 'none' } } };
+        payload: { ...payload, target: { ...SELECTION, runtimeId: 'pi' }, terminalProjection: { mode: 'none' } } };
       expect(() => AgentExecutionInputSchema.parse(candidate)).toThrow(ZodError);
       expect(AgentExecutionInputSchema.safeParse(candidate).error?.issues)
-        .toMatchObject([{ code: 'custom', path: ['payload', 'runtime'], message: expect.stringMatching(/claude.*codex/) }]);
+        .toMatchObject([{ path: ['payload', 'target', 'runtimeId'] }]);
       await expect(harness.cloud.submitAgentExecution(TENANT_A, candidate as never))
-        .rejects.toMatchObject({ issues: [{ path: ['payload', 'runtime'] }] });
+        .rejects.toMatchObject({ issues: [{ path: ['payload', 'target', 'runtimeId'] }] });
       await expectNothingWritten(harness, device.deviceId);
     });
 
-    it('accepts a matching runtime when the device advertises both capabilities', async () => {
+    it('accepts a model-lane target when the device advertises both capabilities', async () => {
       const { harness, device, payload } = await setup([...BASE_CAPABILITIES, 'dispatch-selection', 'toolset-selection']);
       const candidate = AgentExecutionInputSchema.parse({ taskId: input.taskId, deviceId: device.deviceId,
-        payload: { ...payload, dispatchSelection: SELECTION, requiredToolsets: ['example.tools'], terminalProjection: { mode: 'none' } } });
+        payload: { ...payload, target: SELECTION, requiredToolsets: ['example.tools'], terminalProjection: { mode: 'none' } } });
       const offered = await harness.cloud.submitAgentExecution(TENANT_A, candidate);
       expect(offered.taskId).toBe(input.taskId);
-      expect(offered.envelope.payload).toMatchObject({ dispatchSelection: SELECTION, requiredToolsets: ['example.tools'] });
+      expect(offered.envelope.payload).toMatchObject({ target: SELECTION, requiredToolsets: ['example.tools'] });
       expect((await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages).toHaveLength(1);
     });
   });
