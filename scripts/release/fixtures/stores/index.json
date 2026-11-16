@@ -27,7 +27,7 @@
         "keys-profile-store": "0.31.0/keys-profile-store.db"
       },
       "expected": {
-        "server-sqlite": "accepted",
+        "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "migration-required"
@@ -43,7 +43,7 @@
         "keys-profile-store": "0.32.0/keys-profile-store.db"
       },
       "expected": {
-        "server-sqlite": "accepted",
+        "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "migration-required"
@@ -59,7 +59,7 @@
         "keys-profile-store": "0.33.0/keys-profile-store.db"
       },
       "expected": {
-        "server-sqlite": "accepted",
+        "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "migration-required"
@@ -75,7 +75,7 @@
         "keys-profile-store": "0.34.0/keys-profile-store.db"
       },
       "expected": {
-        "server-sqlite": "accepted",
+        "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "migration-required"
@@ -91,7 +91,7 @@
         "keys-profile-store": "0.35.0/keys-profile-store.db"
       },
       "expected": {
-        "server-sqlite": "accepted",
+        "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "migration-required"
@@ -107,7 +107,7 @@
         "keys-profile-store": "0.36.0/keys-profile-store.db"
       },
       "expected": {
-        "server-sqlite": "accepted",
+        "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "migration-required"
@@ -123,7 +123,7 @@
         "keys-profile-store": "0.37.0/keys-profile-store.db"
       },
       "expected": {
-        "server-sqlite": "accepted",
+        "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "migration-required"
@@ -139,7 +139,7 @@
         "keys-profile-store": "0.38.0/keys-profile-store.db"
       },
       "expected": {
-        "server-sqlite": "accepted",
+        "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "migration-required"
@@ -155,7 +155,7 @@
         "keys-profile-store": "0.39.0/keys-profile-store.db"
       },
       "expected": {
-        "server-sqlite": "accepted",
+        "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "migration-required"
@@ -171,7 +171,7 @@
         "keys-profile-store": "0.40.0/keys-profile-store.db"
       },
       "expected": {
-        "server-sqlite": "accepted",
+        "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "migration-required"
@@ -187,7 +187,7 @@
         "keys-profile-store": "0.41.0/keys-profile-store.db"
       },
       "expected": {
-        "server-sqlite": "accepted",
+        "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "migration-required"
@@ -205,7 +205,7 @@
         "bot-collaboration-ledger": "0.42.0/bot-collaboration-ledger.sqlite"
       },
       "expected": {
-        "server-sqlite": "accepted",
+        "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "accepted",
@@ -224,7 +224,7 @@
         "bot-collaboration-ledger": "0.43.0/bot-collaboration-ledger.sqlite"
       },
       "expected": {
-        "server-sqlite": "accepted",
+        "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "accepted",
@@ -241,7 +241,7 @@
         "keys-profile-store": "main/keys-profile-store.db"
       },
       "expected": {
-        "server-sqlite": "accepted",
+        "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
         "keys-profile-store": "migration-required"
