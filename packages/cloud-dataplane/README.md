@@ -57,32 +57,29 @@ and token routes reach Postgres on every request and need an edge limit (or
 `deploy/runbooks/hosted-operations.md`, "Public routes and edge rate limits".
 `blobs` is the R2 adapter described below.
 
-### Wire-major startup fence
+### Store wire-epoch fence
 
-`createPostgresCloudStores` is async. Before it returns any store it reads every
-pending mailbox (`outbox`) row and rejects with
-`PostgresMailboxProtocolUnsupportedError` (`code`
-`POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED`, plus `requiredVersion`, `tenantId`,
-`deviceId` and `seq` of the first offending row) if any body is not a wire
-envelope of the build's `PROTOCOL_VERSION` (6). Acked and expired rows are
-history and are not inspected. The check is read-only: no row is rewritten,
-reclassified or deleted, and there is no synchronous variant that skips it.
+Each wire major starts on a new database. The migration that opens a major
+(`0040_wire_v7.sql` for v7) refuses a database where any table other than the
+migration ledger and the erasure operation log holds a row, Host
+configuration included, and changes nothing. Otherwise it writes the
+database's wire epoch to `byok_wire_epoch`. Write storage entitlements and
+retention policy after the migrations.
 
-When it fails, keep the database and drain the mailbox with the previous SDK
-(stop new submissions, let every pending row be delivered and acked), then
-upgrade; or start a new database and re-enroll devices, with the Host
-resubmitting unfinished work from its own intent. `createPostgresCoreStores`
-carries no fence: the core `MailboxStore` port treats bodies as opaque, and only
-the cloud composition gives them wire-envelope meaning.
-
-The scan walks the pending rows of every tenant in primary-key pages, so it
-costs one read of the pending mailbox per composition. On Workers the
-composition is built per invocation (see below), so that read happens on every
-invocation.
+`createPostgresCloudStores` is async. Before it returns any store it reads that
+epoch and rejects with `PostgresStoreEpochUnsupportedError` (`code`
+`POSTGRES_STORE_EPOCH_UNSUPPORTED`, `requiredEpoch`, and `foundEpoch` when the
+database has one) unless it equals the build's `PROTOCOL_VERSION` (7). The
+check reads one row and changes nothing, and there is no synchronous variant
+that skips it. When it fails, run the migrations on a new database and pair the
+devices again; the SDK keeps no history across the cut.
+`createPostgresCoreStores` carries no fence: the core `MailboxStore` port treats
+bodies as opaque, and only the cloud composition gives them wire-envelope
+meaning.
 
 ### Wire v3 stores
 
-The fence covers pending mailbox rows only. Offer receipts
+Offer receipts
 (`task-offer:<messageId>`) and terminal receipts (`task:<taskId>:terminal`) in
 `device_request_receipts` hold wire bytes that never expire, and a wire v4
 cloud reads only v4 bytes. There is no migration: a database a wire v3 build

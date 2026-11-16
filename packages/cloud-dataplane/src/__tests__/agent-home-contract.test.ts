@@ -93,6 +93,7 @@ if (POSTGRES_URL === undefined) {
         await tasks.claim(TENANT, {
           taskId: 'agent-home-task',
           deviceId: 'agent-home-device',
+          executor: { kind: 'runtime', runtimeId: 'pi' },
         });
         await tasks.recordStatus(TENANT, {
           taskId: 'agent-home-task',

@@ -30,7 +30,7 @@
 //   ObjectStoreFetch -> dist/stores/r2-blobs.d.ts
 //   ObjectStoreRequestError -> dist/stores/r2-blobs.d.ts
 //   ObjectUsageRebuildResult -> dist/cleanup.d.ts
-//   POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED -> dist/stores/mailbox-protocol.d.ts
+//   POSTGRES_STORE_EPOCH_UNSUPPORTED -> dist/stores/store-epoch.d.ts
 //   PostgresActivityStore -> dist/stores/activity.d.ts
 //   PostgresAgentMemoryProjectionStore -> dist/stores/agent-memory-projection.d.ts
 //   PostgresAgentMemoryProjectionStoreOptions -> dist/stores/agent-memory-projection.d.ts
@@ -47,7 +47,6 @@
 //   PostgresDeviceDirectory -> dist/stores/devices.d.ts
 //   PostgresE2eeMemberStore -> dist/stores/e2ee-member.d.ts
 //   PostgresInboundDedupStore -> dist/stores/dedup.d.ts
-//   PostgresMailboxProtocolUnsupportedError -> dist/stores/mailbox-protocol.d.ts
 //   PostgresMailboxStore -> dist/stores/core/mailbox.d.ts
 //   PostgresMailboxWake -> dist/mailbox-wake.d.ts
 //   PostgresMailboxWakeOptions -> dist/mailbox-wake.d.ts
@@ -63,12 +62,14 @@
 //   PostgresRequestReceiptStore -> dist/stores/receipts.d.ts
 //   PostgresRetentionPolicyStore -> dist/stores/retention-policy.d.ts
 //   PostgresSkillPackStore -> dist/stores/core/skill-pack.d.ts
+//   PostgresStoreEpochUnsupportedError -> dist/stores/store-epoch.d.ts
 //   PostgresTaskAttemptStore -> dist/stores/task-attempts.d.ts
 //   PostgresTaskCancellationStore -> dist/stores/task-cancellations.d.ts
 //   PostgresTaskEventsWake -> dist/task-events-wake.d.ts
 //   PostgresTaskEventsWakeOptions -> dist/task-events-wake.d.ts
 //   PostgresTaskRedactionStore -> dist/stores/task-redaction.d.ts
 //   PostgresTaskRedactionStoreOptions -> dist/stores/task-redaction.d.ts
+//   PostgresTaskSteerRefusalStore -> dist/stores/steer-refusals.d.ts
 //   PostgresTenantErasure -> dist/tenant-erasure.d.ts
 //   PostgresTenantErasureCompositionOptions -> dist/tenant-erasure.d.ts
 //   PostgresTenantErasureOptions -> dist/tenant-erasure.d.ts
@@ -127,7 +128,7 @@
 //   MIN_PRESIGN_TTL_SECONDS -> dist/stores/r2-blobs.d.ts
 //   ObjectStoreFetch -> dist/stores/r2-blobs.d.ts
 //   ObjectStoreRequestError -> dist/stores/r2-blobs.d.ts
-//   POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED -> dist/stores/mailbox-protocol.d.ts
+//   POSTGRES_STORE_EPOCH_UNSUPPORTED -> dist/stores/store-epoch.d.ts
 //   PostgresActivityStore -> dist/stores/activity.d.ts
 //   PostgresAgentMemoryProjectionStore -> dist/stores/agent-memory-projection.d.ts
 //   PostgresAgentMemoryProjectionStoreOptions -> dist/stores/agent-memory-projection.d.ts
@@ -141,7 +142,6 @@
 //   PostgresDeviceDirectory -> dist/stores/devices.d.ts
 //   PostgresE2eeMemberStore -> dist/stores/e2ee-member.d.ts
 //   PostgresInboundDedupStore -> dist/stores/dedup.d.ts
-//   PostgresMailboxProtocolUnsupportedError -> dist/stores/mailbox-protocol.d.ts
 //   PostgresMailboxStore -> dist/stores/core/mailbox.d.ts
 //   PostgresNonceStore -> dist/stores/nonces.d.ts
 //   PostgresObjectStorageOptions -> dist/stores/index.d.ts
@@ -155,10 +155,12 @@
 //   PostgresRequestReceiptStore -> dist/stores/receipts.d.ts
 //   PostgresRetentionPolicyStore -> dist/stores/retention-policy.d.ts
 //   PostgresSkillPackStore -> dist/stores/core/skill-pack.d.ts
+//   PostgresStoreEpochUnsupportedError -> dist/stores/store-epoch.d.ts
 //   PostgresTaskAttemptStore -> dist/stores/task-attempts.d.ts
 //   PostgresTaskCancellationStore -> dist/stores/task-cancellations.d.ts
 //   PostgresTaskRedactionStore -> dist/stores/task-redaction.d.ts
 //   PostgresTaskRedactionStoreOptions -> dist/stores/task-redaction.d.ts
+//   PostgresTaskSteerRefusalStore -> dist/stores/steer-refusals.d.ts
 //   PostgresTruthCommitter -> dist/truth-committer.d.ts
 //   PostgresTruthCommitterOptions -> dist/truth-committer.d.ts
 //   PostgresTruthStore -> dist/stores/core/truth.d.ts
@@ -365,7 +367,7 @@ export declare function retireAgentlessTasks(pool: ByokPool, options: RetireAgen
 // ==== @byok-sdk/cloud-dataplane dist/runtime.d.ts ====
 export { createByokPool } from './pool.js';
 export type { ByokPool, ByokPoolOptions } from './pool.js';
-export { PostgresDeviceDirectory, PostgresInboundDedupStore, PostgresNonceStore, PostgresPairingCodeStore, PostgresProofReceiptRetentionAuthority, PostgresProofRequestReceiptStore, PostgresRequestReceiptStore, PostgresTaskAttemptStore, PostgresTaskCancellationStore, PostgresActivityStore, PostgresAgentMessageDraftStore, PostgresApprovalTimelineStore, PostgresDeviceAssertionReplayAuthority, PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, PostgresTaskRedactionStore, createPostgresTaskRedactionStore, PostgresE2eeMemberStore, createPostgresCloudStores, POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED, PostgresMailboxProtocolUnsupportedError, } from './stores/index.js';
+export { PostgresDeviceDirectory, PostgresInboundDedupStore, PostgresNonceStore, PostgresPairingCodeStore, PostgresProofReceiptRetentionAuthority, PostgresProofRequestReceiptStore, PostgresRequestReceiptStore, PostgresTaskAttemptStore, PostgresTaskSteerRefusalStore, PostgresTaskCancellationStore, PostgresActivityStore, PostgresAgentMessageDraftStore, PostgresApprovalTimelineStore, PostgresDeviceAssertionReplayAuthority, PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, PostgresTaskRedactionStore, createPostgresTaskRedactionStore, PostgresE2eeMemberStore, createPostgresCloudStores, POSTGRES_STORE_EPOCH_UNSUPPORTED, PostgresStoreEpochUnsupportedError, } from './stores/index.js';
 export type { PostgresCloudStoreOptions, PostgresCloudStores, PostgresObjectStorageOptions, PostgresRateLimitOptions, PostgresAgentMemoryProjectionStoreOptions, PostgresTaskRedactionStoreOptions, } from './stores/index.js';
 export { DEFAULT_MAX_ATTEMPTS, DEFAULT_PRESIGN_TTL_SECONDS, DEFAULT_RETRY_DELAY_MS, MAX_PRESIGN_TTL_SECONDS, MIN_PRESIGN_TTL_SECONDS, ObjectStoreRequestError, R2_BLOB_ERROR_CODES, R2BlobStoreError, R2CloudBlobStore, R2ObjectMaintenanceStore, } from './stores/index.js';
 export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './stores/index.js';
@@ -480,6 +482,10 @@ export declare class PostgresMailboxStore implements MailboxStore {
     append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage>;
     readUsage(tenant: TenantId): Promise<MailboxUsage>;
     readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage>;
+    readMessage(tenant: TenantId, input: {
+        readonly deviceId: string;
+        readonly messageId: string;
+    }): Promise<MailboxMessage | undefined>;
     advanceCursor(tenant: TenantId, input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
     recordDelivery(tenant: TenantId, input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
     readCursor(tenant: TenantId, deviceId: string): Promise<MailboxCursorState>;
@@ -669,7 +675,8 @@ export { PostgresTaskCancellationStore } from './task-cancellations.js';
 export { PostgresActivityStore } from './activity.js';
 export { PostgresApprovalTimelineStore } from './approval-timeline.js';
 export type { PostgresRateLimitOptions } from './rate-limiter.js';
-export { POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED, PostgresMailboxProtocolUnsupportedError, } from './mailbox-protocol.js';
+export { POSTGRES_STORE_EPOCH_UNSUPPORTED, PostgresStoreEpochUnsupportedError, } from './store-epoch.js';
+export { PostgresTaskSteerRefusalStore } from './steer-refusals.js';
 export { PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, } from './agent-memory-projection.js';
 export type { PostgresAgentMemoryProjectionStoreOptions } from './agent-memory-projection.js';
 export { PostgresTaskRedactionStore, createPostgresTaskRedactionStore } from './task-redaction.js';
@@ -690,20 +697,6 @@ export interface PostgresCloudStoreOptions {
     readonly e2eeMember?: boolean;
 }
 export declare function createPostgresCloudStores(options: PostgresCloudStoreOptions): Promise<PostgresCloudStores>;
-// ==== @byok-sdk/cloud-dataplane dist/stores/mailbox-protocol.d.ts ====
-export declare const POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED: 'POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED';
-export declare class PostgresMailboxProtocolUnsupportedError extends Error {
-    readonly code: "POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED";
-    readonly requiredVersion: number;
-    readonly tenantId: string;
-    readonly deviceId: string;
-    readonly seq: bigint;
-    constructor(row: {
-        readonly tenantId: string;
-        readonly deviceId: string;
-        readonly seq: bigint;
-    });
-}
 // ==== @byok-sdk/cloud-dataplane dist/stores/nonces.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import { type NonceStore } from '@byok-sdk/cloud';
@@ -873,10 +866,41 @@ export declare class PostgresRetentionPolicyStore {
     writeRetentionPolicy(tenant: TenantId, input: TenantRetentionPolicyInput): Promise<TenantRetentionPolicy>;
     readRetentionPolicy(tenant: TenantId): Promise<TenantRetentionPolicy>;
 }
+// ==== @byok-sdk/cloud-dataplane dist/stores/steer-refusals.d.ts ====
+import type { SteerRefusalRecord, TaskSteerRefusalStore } from '@byok-sdk/cloud';
+import type { Clock, TenantId } from '@byok-sdk/core';
+import type { ByokPool } from '../pool.js';
+export declare class PostgresTaskSteerRefusalStore implements TaskSteerRefusalStore {
+    #private;
+    constructor(pool: ByokPool, clock: Clock);
+    record(tenant: TenantId, input: {
+        readonly taskId: string;
+        readonly steerMessageId: string;
+        readonly reason: string;
+        readonly deviceId: string;
+    }): Promise<{
+        readonly refusal: SteerRefusalRecord;
+        readonly created: boolean;
+    }>;
+    get(tenant: TenantId, taskId: string, steerMessageId: string): Promise<SteerRefusalRecord | undefined>;
+    list(tenant: TenantId, query: {
+        readonly taskId: string;
+        readonly afterRevision: number;
+        readonly limit: number;
+    }): Promise<readonly SteerRefusalRecord[]>;
+}
+// ==== @byok-sdk/cloud-dataplane dist/stores/store-epoch.d.ts ====
+export declare const POSTGRES_STORE_EPOCH_UNSUPPORTED: 'POSTGRES_STORE_EPOCH_UNSUPPORTED';
+export declare class PostgresStoreEpochUnsupportedError extends Error {
+    readonly code: "POSTGRES_STORE_EPOCH_UNSUPPORTED";
+    readonly requiredEpoch: number;
+    readonly foundEpoch?: number;
+    constructor(foundEpoch: number | undefined);
+}
 // ==== @byok-sdk/cloud-dataplane dist/stores/task-attempts.d.ts ====
 import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptCounts, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { ClaimedExecutor, RuntimeCapabilities } from '@byok-sdk/protocol';
 import type { ByokPool } from '../pool.js';
 export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
     #private;
@@ -923,8 +947,7 @@ export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
     claim(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;
-        readonly runtime?: RuntimeId;
-        readonly harnessId?: string;
+        readonly executor: ClaimedExecutor;
         readonly capabilities?: RuntimeCapabilities;
     }): Promise<TaskAttempt | undefined>;
     recordStatus(tenant: TenantId, input: {
@@ -975,7 +998,7 @@ export declare function createPostgresTaskEventsWake(options: PostgresTaskEvents
 import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { ByokPool } from './pool.js';
 import { type R2BlobStoreOptions, type R2ObjectMaintenance } from './stores/r2-blobs.js';
-export declare const TENANT_ERASURE_TABLES: readonly ['object_reference', 'object_manifest', 'storage_reservation', 'storage_usage', 'storage_entitlement', 'gc_cursor', 'cleanup_job', 'tenant_retention_policy', 'skill_pack_file', 'skill_pack', 'approval_timeline_tail', 'activity_log_entry', 'activity_log_head', 'attested_record', 'board_item', 'tenant_stream', 'outbox', 'agent_memory_projection_metering_receipt', 'agent_memory_projection_head', 'agent_memory_projection_erase_fence', 'agent_egress_event', 'device_request_receipts', 'proof_request_receipt', 'agent_message_draft', 'e2ee_scope_key_package', 'e2ee_scope_epoch', 'e2ee_scope_shred', 'e2ee_member_kem_floor', 'e2ee_member_chain_entry', 'e2ee_pairing_mac', 'e2ee_member_key', 'agent_message_admission', 'task', 'task_agentless_retired', 'device_presence', 'device_assertion_replay', 'device_stream', 'inbound_dedup', 'auth_nonce', 'pairing_code', 'device'];
+export declare const TENANT_ERASURE_TABLES: readonly ['object_reference', 'object_manifest', 'storage_reservation', 'storage_usage', 'storage_entitlement', 'gc_cursor', 'cleanup_job', 'tenant_retention_policy', 'skill_pack_file', 'skill_pack', 'approval_timeline_tail', 'activity_log_entry', 'activity_log_head', 'attested_record', 'board_item', 'tenant_stream', 'outbox', 'agent_memory_projection_metering_receipt', 'agent_memory_projection_head', 'agent_memory_projection_erase_fence', 'agent_egress_event', 'device_request_receipts', 'proof_request_receipt', 'agent_message_draft', 'e2ee_scope_key_package', 'e2ee_scope_epoch', 'e2ee_scope_shred', 'e2ee_member_kem_floor', 'e2ee_member_chain_entry', 'e2ee_pairing_mac', 'e2ee_member_key', 'agent_message_admission', 'task_steer_refusal', 'task', 'task_agentless_retired', 'device_presence', 'device_assertion_replay', 'device_stream', 'inbound_dedup', 'auth_nonce', 'pairing_code', 'device'];
 export declare const TENANT_ERASURE_ERROR_CODES: {
     readonly tenant_erasure_invalid_input: 'tenant_erasure_invalid_input';
     readonly tenant_erasure_schema_drift: 'tenant_erasure_schema_drift';
