@@ -158,6 +158,7 @@ export function openCodeChildCases(contract: ReturnType<typeof openCodeContract>
             expect(beforeDispose.some(row => row.pid === holdPid), 'background tool is alive before root answer').toBe(true);
             expect(beforeDispose.some(row => /opencode.*acp/.test(row.command))).toBe(true);
             expect(afterDispose).toEqual([]);
+            expect(recorder.attempts, 'no external requests through the refusing proxy, including the child run').toEqual([]);
           } finally {
             try { await session?.close(); }
             finally {
