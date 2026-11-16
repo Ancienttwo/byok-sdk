@@ -29,8 +29,8 @@ export interface RetentionSweeperOptions {
   readonly timers?: RetentionTimers;
   readonly jitter: (sequence: number, baseMs: number) => number;
   readonly onSweep?: (report: SweepReport) => void;
-  /** `taskId` is set only for a journal task that failed its integrity check; one call per such task. */
-  readonly onFailure?: (trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string) => void;
+  /** `taskId` is set only for a journal task that failed its integrity check; one call per such task. `path` names an item a sweep kept. */
+  readonly onFailure?: (trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string, path?: string) => void;
 }
 
 /** One report per integrity-failed task, plus one untagged report for any other failure. */
@@ -81,6 +81,7 @@ export class RetentionSweeper {
       remaining: () => this.options.config.maxDeletionsPerPass - deleted,
       removed: bytes => { deleted++; bytesReclaimed += bytes; },
       truncate: () => { truncated = true; },
+      report: (classId, code, file) => { failures++; this.options.onFailure?.(trigger, classId, code, undefined, file); },
     };
     const { registry, pressure } = this.options;
     let classes = this.status.classes, freeBytes = this.status.freeBytes;

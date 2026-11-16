@@ -67,6 +67,8 @@ export interface RuntimeAdaptersRuntimes {
     compatInstructions?: GrokAdapterOptions['compatInstructions'];
     /** `GrokAdapterOptions.agentUserMcpServers`: `excluded` switches off the user MCP sources Grok can disable and refuses an Agent task while another is enabled. Default `inherit`. */
     agentUserMcpServers?: GrokAdapterOptions['agentUserMcpServers'];
+    /** `GrokAdapterOptions.agentUserContext`: `excluded` runs an Agent task in an SDK-owned `GROK_HOME` that keeps the user's `AGENTS.md`, rules, skills, memory, plugins and sessions out, links the login, configuration, folder trust and hooks, keeps the Agent's sessions in its home, and refuses a start while Grok still lists a user instruction file. Default `inherit`. */
+    agentUserContext?: GrokAdapterOptions['agentUserContext'];
     /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
     /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */
@@ -177,7 +179,7 @@ const RUNTIME_OPTION_VALUES: Readonly<Record<keyof RuntimeAdaptersRuntimes, Read
   pi: { agentUserContext: ['excluded', 'inherit'] },
   claude: { agentUserContext: ['excluded', 'inherit'], agentSessionPersistence: ['disabled', 'enabled'] },
   codex: { agentUserMcpServers: ['excluded', 'inherit'], agentUserContext: ['excluded', 'inherit'] },
-  grok: { compatInstructions: ['disabled', 'inherit'], agentUserMcpServers: ['excluded', 'inherit'] },
+  grok: { compatInstructions: ['disabled', 'inherit'], agentUserMcpServers: ['excluded', 'inherit'], agentUserContext: ['excluded', 'inherit'] },
   dsh: { sandbox: ['danger-full-access', 'read-only', 'workspace-write'] },
   agy: {},
   opencode: {},
@@ -316,6 +318,7 @@ function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig
         nativeAssetRoot: config.nativeAssetRoot, ...environment,
         ...(grok?.compatInstructions === undefined ? {} : { compatInstructions: grok.compatInstructions }),
         ...(grok?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: grok.agentUserMcpServers }),
+        ...(grok?.agentUserContext === undefined ? {} : { agentUserContext: grok.agentUserContext }),
         ...(grok?.versionPolicy === undefined ? {} : { versionPolicy: grok.versionPolicy }),
       });
     case 'dsh':

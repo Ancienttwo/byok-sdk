@@ -385,9 +385,27 @@ export interface GrokAdapterOptions {
      * children that Grok starts itself, such as stdio MCP servers and hooks, may
      * inherit them. `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and
      * `[paths] extra_rule_dirs` still load; Grok has no per-process switch for
-     * them. Default `inherit`: the user's Grok settings apply.
+     * them, and `agentUserContext: 'excluded'` keeps them out of Agent tasks.
+     * Default `inherit`: the user's Grok settings apply.
      */
     compatInstructions?: 'inherit' | 'disabled';
+    /**
+     * For an Agent task (`task.offer`), `excluded` runs Grok with `GROK_HOME`
+     * set to `<execution scratch>/grok-home`, which holds symbolic links only:
+     * to the user's `auth.json`, `config.toml`, `trusted_folders.toml` and
+     * `hooks/`, and `sessions/` to the Agent's own store in
+     * `<Agent home>/.byok/grok/`. The user's `AGENTS.md`, `rules/`, skills,
+     * memory, plugins and sessions stay out. It also sets the four Claude and
+     * Cursor `agents` and `rules` variables of `compatInstructions: 'disabled'`
+     * on the Grok agent process, then runs `grok inspect --json` with that
+     * environment. The start fails before the agent starts if inspect still
+     * lists a user instruction file (such as an `[paths] extra_rule_dirs`
+     * file) or fails, if the task has no sealed Agent home, or if the user
+     * `GROK_HOME` has no `auth.json` and `XAI_API_KEY` is not set. It controls
+     * which user context Grok loads; it is not a filesystem boundary. Other
+     * tasks are unchanged. Default `inherit`.
+     */
+    agentUserContext?: 'inherit' | 'excluded';
     /**
      * For an Agent task (`task.offer`), `excluded` sets
      * `GROK_CLAUDE_MCPS_ENABLED`, `GROK_CURSOR_MCPS_ENABLED` and
@@ -1004,6 +1022,8 @@ export interface RuntimeAdaptersRuntimes {
         compatInstructions?: GrokAdapterOptions['compatInstructions'];
         /** `GrokAdapterOptions.agentUserMcpServers`: `excluded` switches off the user MCP sources Grok can disable and refuses an Agent task while another is enabled. Default `inherit`. */
         agentUserMcpServers?: GrokAdapterOptions['agentUserMcpServers'];
+        /** `GrokAdapterOptions.agentUserContext`: `excluded` runs an Agent task in an SDK-owned `GROK_HOME` that keeps the user's `AGENTS.md`, rules, skills, memory, plugins and sessions out, links the login, configuration, folder trust and hooks, keeps the Agent's sessions in its home, and refuses a start while Grok still lists a user instruction file. Default `inherit`. */
+        agentUserContext?: GrokAdapterOptions['agentUserContext'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
         /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */
@@ -7469,6 +7489,7 @@ export type DaemonEvent = ({
     count: number;
     code: string;
     taskId?: string;
+    path?: string;
 } | {
     kind: 'offered';
     ts: string;
@@ -7967,7 +7988,7 @@ export declare class DaemonObserver {
      * cursor advancement or the next envelope being processed.
      */
     noteRetentionSweep(report: SweepReport): void;
-    noteRetentionFailure(trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string): void;
+    noteRetentionFailure(trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string, path?: string): void;
     private emit;
 }
 // ==== @byok-sdk/client dist/daemon/operational-health.d.ts ====
@@ -8263,6 +8284,7 @@ export declare function resolveStorageConfig(storeDir: string, input?: StorageCo
         "durable-replica": number;
         "exec-runtime": number;
         "exec-sdk": number;
+        "grok-session-store": number;
         "home-temp": number;
         "input-preparation": number;
         "pi-session-dir": number;
@@ -8299,7 +8321,7 @@ export declare class StoragePressure {
     assertAckCriticalAllowed(): void;
 }
 // ==== @byok-sdk/client dist/daemon/retention/registry.d.ts ====
-export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger', 'terminal-evidence', 'pi-session-dir', 'agy-session-store', 'codex-session-store'];
+export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger', 'terminal-evidence', 'pi-session-dir', 'agy-session-store', 'codex-session-store', 'grok-session-store'];
 export declare const PROTECTED_CLASS_IDS: readonly ['journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'agent-content', 'byok-authority', 'agent-home-lease', 'skill-pack-current', 'store-authority', 'runtime-session-external'];
 export type ExpiringClassId = typeof EXPIRING_CLASS_IDS[number];
 export type ProtectedClassId = typeof PROTECTED_CLASS_IDS[number];
@@ -8331,6 +8353,8 @@ export interface SweepBudget {
     remaining(): number;
     removed(bytes: number): void;
     truncate(): void;
+    /** Reports an item the sweep keeps and must not remove, such as a held Grok login, as a failure of `classId`. */
+    report(classId: RetentionClassId, code: string, path: string): void;
 }
 /**
  * How a class stays finite. An expiring class is deleted by TTL, optionally also by count. A protected
@@ -8478,8 +8502,8 @@ export interface RetentionSweeperOptions {
     readonly timers?: RetentionTimers;
     readonly jitter: (sequence: number, baseMs: number) => number;
     readonly onSweep?: (report: SweepReport) => void;
-    /** `taskId` is set only for a journal task that failed its integrity check; one call per such task. */
-    readonly onFailure?: (trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string) => void;
+    /** `taskId` is set only for a journal task that failed its integrity check; one call per such task. `path` names an item a sweep kept. */
+    readonly onFailure?: (trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string, path?: string) => void;
 }
 /** All maintenance has this one lifecycle owner, including daemons without a journal. */
 export declare class RetentionSweeper {

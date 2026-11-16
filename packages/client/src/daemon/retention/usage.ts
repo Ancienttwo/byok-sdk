@@ -1,10 +1,10 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-export interface TreeUsage { bytes: number; entries: number; oldestAgeMs: number | null }
+export interface TreeUsage { bytes: number; entries: number; oldestAgeMs: number | null; newestMtimeMs: number | null }
 /** A complete physical measurement; symbolic links are counted, never followed. */
 export async function measureTree(root: string, now: Date, maxEntries: number): Promise<TreeUsage> {
-  let bytes = 0, entries = 0, oldestAgeMs: number | null = null, scanned = 0;
+  let bytes = 0, entries = 0, oldestAgeMs: number | null = null, newestMtimeMs: number | null = null, scanned = 0;
   async function visit(target: string): Promise<void> {
     const stat = await fs.lstat(target).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return undefined;
@@ -19,10 +19,11 @@ export async function measureTree(root: string, now: Date, maxEntries: number): 
       bytes += stat.size;
       entries++;
       oldestAgeMs = Math.max(oldestAgeMs ?? 0, Math.max(0, now.getTime() - stat.mtimeMs));
+      newestMtimeMs = Math.max(newestMtimeMs ?? stat.mtimeMs, stat.mtimeMs);
     }
   }
   await visit(root);
-  return { bytes, entries, oldestAgeMs };
+  return { bytes, entries, oldestAgeMs, newestMtimeMs };
 }
 
 /** Only existing, canonical directories are eligible mutation roots. */

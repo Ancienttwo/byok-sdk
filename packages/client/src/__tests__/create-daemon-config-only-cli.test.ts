@@ -175,7 +175,7 @@ describe('Salesko-shaped CLI config sets isolation and static auto from the file
     const versionPolicy = { qualifiedVersion: '0.2.3', unqualified: 'warn' as const, block: [{ kind: 'exact' as const, version: '0.2.1' }] };
     const { file } = await salesko((input) => {
       input.runtimeAllowlist = ['grok'];
-      input.runtimes = { grok: { compatInstructions: 'disabled', agentUserMcpServers: 'excluded', versionPolicy } };
+      input.runtimes = { grok: { compatInstructions: 'disabled', agentUserMcpServers: 'excluded', agentUserContext: 'excluded', versionPolicy } };
       input.toolAuthorization = { default: 'all' };
     });
     const daemon = createDaemon(loadConfig(file));
@@ -183,11 +183,11 @@ describe('Salesko-shaped CLI config sets isolation and static auto from the file
     expect(effective.warnings).toEqual([]);
     expect(effective.runtimes).toEqual([{
       id: 'grok', source: 'sdk-built', toolAuthorizationAuto: false, runtimeEnvironment: { base: 'login-shell' },
-      isolation: { compatInstructions: 'disabled', agentUserMcpServers: 'excluded' }, versionPolicy,
+      isolation: { compatInstructions: 'disabled', agentUserMcpServers: 'excluded', agentUserContext: 'excluded' }, versionPolicy,
     }]);
     expect(effective.toolAuthorization).toEqual({ mode: 'static', byRuntime: { grok: 'all' }, localToolApproval: 'host-only' });
     expect(constructed.grok).toEqual([expect.objectContaining({
-      compatInstructions: 'disabled', agentUserMcpServers: 'excluded', versionPolicy,
+      compatInstructions: 'disabled', agentUserMcpServers: 'excluded', agentUserContext: 'excluded', versionPolicy,
     })]);
     expect([...constructed.pi, ...constructed.claude, ...constructed.codex]).toEqual([]);
 

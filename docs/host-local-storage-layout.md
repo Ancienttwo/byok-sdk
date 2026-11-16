@@ -110,6 +110,13 @@ only non-current hash revisions past 24h are deleted under the install gate.
 
 ### Retention bounds
 
+An execution whose `sdk/grok-home/auth.json` is a regular file holds a login
+Grok wrote over the SDK home's link. The release keeps it, both execution
+sweeps skip it and report a `grok_login_preserved` `retention-failure` event
+with its `path` on every pass, and it is reclaimed as usual once the user moved
+the file back to `~/.grok/auth.json` or deleted it and logged in again (see
+[A login Grok writes over the link](adapter-capabilities.md#a-login-grok-writes-over-the-link)).
+
 Every retention class declares how its storage stays finite (#1105). An
 expiring class has a TTL and sometimes a count; a protected class has a fixed
 count, or an exemption that says why it cannot be bounded, who clears it and
@@ -119,9 +126,9 @@ until it has one. TTLs are `storage.retention.ttlMs[<class>]`.
 
 | Class | Bound | Cleared by |
 | --- | --- | --- |
-| `exec-sdk`, `durable-replica`, `input-preparation` | TTL 0 (removed at release or terminal) | SDK |
+| `exec-sdk`, `durable-replica`, `input-preparation` | TTL 0 (removed at release or terminal); an execution holding a Grok login is kept until the user resolves it | SDK; the user, for a held Grok login |
 | `daemon-temp`, `home-temp` | TTL 1 hour | SDK |
-| `exec-runtime`, `skill-pack-old` | TTL 24 hours | SDK |
+| `exec-runtime`, `skill-pack-old` | TTL 24 hours; an execution holding a Grok login is kept | SDK |
 | `reader-run` | TTL 7 days, 32 per home | SDK, idle home |
 | `agent-result` | TTL 7 days, 256 per home | SDK, idle home |
 | `confirmed-journal` | TTL 30 days (must exceed 7 days) | SDK |
@@ -130,6 +137,7 @@ until it has one. TTLs are `storage.retention.ttlMs[<class>]`.
 | `pi-session-dir` | TTL 31 days by last write; at least `session-ledger` plus one day | SDK |
 | `agy-session-store` | TTL 31 days by last write; with an `AgyAdapter`, at least `session-ledger` plus one day | SDK |
 | `codex-session-store` | TTL 31 days by last write (or `session-ledger` plus one day if longer), kept while the thread's ledger lives | SDK, idle home |
+| `grok-session-store` | TTL 31 days by a session folder's newest write (or `session-ledger` plus one day if longer), kept while the session's ledger lives | SDK, idle home |
 | `agent-home-lease` | 1 per home | SDK |
 | `skill-pack-current` | 1 revision per installed pack | Host, by uninstalling the pack |
 | `journal` | Exempt: live-task ack and recovery rows; confirmed rows expire as `confirmed-journal` and maintenance compacts the file | SDK |
@@ -217,6 +225,21 @@ classes, and treat the class as expiring, not exempt. Rollouts that stayed
 until the Host removed the Agent home are now deleted once idle past the TTL;
 set `storage.retention.ttlMs['codex-session-store']` higher to keep idle
 threads longer.
+
+`grok-session-store` is the Grok sessions that `agentUserContext: 'excluded'`
+keeps in `<home>/.byok/grok/sessions`. A session folder,
+`sessions/<encoded cwd>/<session id>/`, goes as a unit once its newest file, or
+the folder itself, was last written longer ago than the TTL. The sweep reads
+only those two folder levels: Grok's index `sessions/session_search.sqlite`
+(with its `-wal` and `-shm`), the cwd folders and anything else under
+`.byok/grok` stay, and links are removed, never followed. A `sessions` folder
+that is a link or has a link above it fails the sweep for that home. The walk
+resumes across passes like the Codex one, and a folder whose removal a pass
+cut short is finished first in the next pass. The idle-home lease, the
+session-ledger hold, the default TTL and its lower bound are those of
+`codex-session-store`. A resume of a session whose folder is gone fails through
+the existing missing-session path. A Host that switches exhaustively over
+`ExpiringClassId` adds a branch for `grok-session-store`.
 
 Custom adapters that own swept session data implement
 `PreparedRuntimeOperation.acquireSessionLease(sessionRef)`. A custom caller must

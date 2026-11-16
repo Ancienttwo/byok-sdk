@@ -1154,6 +1154,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `storage.retention.ttlMs.durable-replica` | advanced | number |
 | `storage.retention.ttlMs.exec-runtime` | advanced | number |
 | `storage.retention.ttlMs.exec-sdk` | advanced | number |
+| `storage.retention.ttlMs.grok-session-store` | advanced | number |
 | `storage.retention.ttlMs.home-temp` | advanced | number |
 | `storage.retention.ttlMs.input-preparation` | advanced | number |
 | `storage.retention.ttlMs.pi-session-dir` | advanced | number |
@@ -1263,6 +1264,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.grok` | advanced | object |
 | `runtimes.grok.compatInstructions` | advanced | "disabled" / "inherit" |
 | `runtimes.grok.agentUserMcpServers` | advanced | "excluded" / "inherit" |
+| `runtimes.grok.agentUserContext` | advanced | "excluded" / "inherit" |
 | `runtimes.grok.versionPolicy` | advanced | object |
 | `runtimes.grok.versionPolicy.qualifiedVersion` | required when parent is set | string |
 | `runtimes.grok.versionPolicy.unqualified` | required when parent is set | "allow" / "block" / "warn" |
@@ -1426,6 +1428,8 @@ Manifest transition: **0.43.0 → 0.43.0**. Versions and entries below come from
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
+| grok-agent-user-context | additive | GrokAdapterOptions.agentUserContext and runtimes.grok.agentUserContext, default inherit, which changes nothing. Under excluded, a Grok Agent task runs with GROK_HOME set to an SDK-owned directory that links the user's auth.json, config.toml, trusted_folders.toml and hooks/, keeps AGENTS.md, rules/, skills, memory, plugins and the user's sessions out, keeps the Agent's sessions in <Agent home>/.byok/grok/sessions, and sets the four Claude and Cursor agents and rules variables. The start fails as a non-retryable authority failure while grok inspect still lists a user instruction file (such as an [paths] extra_rule_dirs file), when inspect fails, without a sealed Agent home, or when the user GROK_HOME has no auth.json and XAI_API_KEY is not set. A login Grok writes over the auth.json link stays in the execution scratch: the release fails with a cleanup RuntimeDisposalFailure naming its path, retention skips that execution and reports a grok_login_preserved retention-failure event with the path on every pass, and every Grok task of the daemon refuses to start until the user moves the file back to ~/.grok/auth.json or deletes it, then logs in again. The SDK never restores or deletes it. The Grok descriptor then declares isolation.userInstructions. A Bot switched from inherit cannot resume sessions it made in the user's store. [Migration](../docs/adapter-capabilities.md#agentusercontext-grok) |
+| grok-session-store | additive | The new expiring retention class grok-session-store covers the sessions a Grok Agent task keeps under <Agent home>/.byok/grok/sessions when agentUserContext is excluded. A session folder, sessions/<encoded cwd>/<session id>/, is deleted once its newest write is older than the new DaemonConfig.storage.retention.ttlMs['grok-session-store'] (default 31 days, or the session-ledger TTL plus one day if longer; an explicit value must be at least the session-ledger TTL plus one day), unless a live session ledger still names the session or its Agent home is running a task. Grok's own index, sessions/session_search.sqlite, is never touched. A Host that switches exhaustively over retention class ids (ExpiringClassId or EXPIRING_CLASS_IDS) must add a branch for grok-session-store. No data migration: the store exists only for Grok Agent tasks under agentUserContext excluded, and resuming a pruned session fails through the existing missing-session path. [Migration](../docs/host-local-storage-layout.md#retention-bounds) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

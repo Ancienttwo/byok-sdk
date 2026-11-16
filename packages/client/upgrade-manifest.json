@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "b81b00f84a29eee6caaac12846759589d9ec426d8980dac925b20ee3aaee0ab1"
+    "snapshotSha256": "cf0abedb3032a5910dcbaa798fa5bfbcae5437984e451c38a62ac99a8563f120"
   },
   "configFields": {
     "status": "tracked",
@@ -145,9 +145,48 @@
         "export:@byok-sdk/server/execution-core#HostExecutionCore",
         "export:@byok-sdk/server/execution-core#HostOptions"
       ]
+    },
+    {
+      "id": "grok-agent-user-context",
+      "impact": "additive",
+      "summary": "GrokAdapterOptions.agentUserContext and runtimes.grok.agentUserContext, default inherit, which changes nothing. Under excluded, a Grok Agent task runs with GROK_HOME set to an SDK-owned directory that links the user's auth.json, config.toml, trusted_folders.toml and hooks/, keeps AGENTS.md, rules/, skills, memory, plugins and the user's sessions out, keeps the Agent's sessions in <Agent home>/.byok/grok/sessions, and sets the four Claude and Cursor agents and rules variables. The start fails as a non-retryable authority failure while grok inspect still lists a user instruction file (such as an [paths] extra_rule_dirs file), when inspect fails, without a sealed Agent home, or when the user GROK_HOME has no auth.json and XAI_API_KEY is not set. A login Grok writes over the auth.json link stays in the execution scratch: the release fails with a cleanup RuntimeDisposalFailure naming its path, retention skips that execution and reports a grok_login_preserved retention-failure event with the path on every pass, and every Grok task of the daemon refuses to start until the user moves the file back to ~/.grok/auth.json or deletes it, then logs in again. The SDK never restores or deletes it. The Grok descriptor then declares isolation.userInstructions. A Bot switched from inherit cannot resume sessions it made in the user's store.",
+      "migration": "docs/adapter-capabilities.md#agentusercontext-grok",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client#GrokAdapterOptions",
+        "export:@byok-sdk/client/adapters#GrokAdapterOptions",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+        "export:@byok-sdk/client#DaemonEvent",
+        "export:@byok-sdk/client#DaemonObserver"
+      ]
+    },
+    {
+      "id": "grok-session-store",
+      "impact": "additive",
+      "summary": "The new expiring retention class grok-session-store covers the sessions a Grok Agent task keeps under <Agent home>/.byok/grok/sessions when agentUserContext is excluded. A session folder, sessions/<encoded cwd>/<session id>/, is deleted once its newest write is older than the new DaemonConfig.storage.retention.ttlMs['grok-session-store'] (default 31 days, or the session-ledger TTL plus one day if longer; an explicit value must be at least the session-ledger TTL plus one day), unless a live session ledger still names the session or its Agent home is running a task. Grok's own index, sessions/session_search.sqlite, is never touched. A Host that switches exhaustively over retention class ids (ExpiringClassId or EXPIRING_CLASS_IDS) must add a branch for grok-session-store. No data migration: the store exists only for Grok Agent tasks under agentUserContext excluded, and resuming a pruned session fails through the existing missing-session path.",
+      "migration": "docs/host-local-storage-layout.md#retention-bounds",
+      "items": [
+        "config:storage",
+        "export:@byok-sdk/client#ExpiringClassId",
+        "export:@byok-sdk/client#resolveStorageConfig"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "config:runtimes",
+      "change": "changed",
+      "before": "optional schema-sha256=733c24d0d48a4795",
+      "after": "optional schema-sha256=c31225db3310daa3",
+      "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "config:storage",
+      "change": "changed",
+      "before": "optional schema-sha256=e89f34f2223d0907",
+      "after": "optional schema-sha256=0e2b685e4a3635ba",
+      "entry": "grok-session-store"
+    },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
       "change": "changed",
@@ -164,9 +203,29 @@
       "entry": "remove-task-terminal-read"
     },
     {
+      "item": "export:@byok-sdk/client#DaemonEvent",
+      "change": "changed",
+      "entry": "grok-agent-user-context"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonLog",
       "change": "removed",
       "entry": "remove-standalone-daemon-log"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonObserver",
+      "change": "changed",
+      "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#ExpiringClassId",
+      "change": "changed",
+      "entry": "grok-session-store"
+    },
+    {
+      "item": "export:@byok-sdk/client#GrokAdapterOptions",
+      "change": "changed",
+      "entry": "grok-agent-user-context"
     },
     {
       "item": "export:@byok-sdk/client#LocalTeamWorkspace",
@@ -189,9 +248,24 @@
       "entry": "remove-standalone-daemon-log"
     },
     {
+      "item": "export:@byok-sdk/client#resolveStorageConfig",
+      "change": "changed",
+      "entry": "grok-session-store"
+    },
+    {
       "item": "export:@byok-sdk/client#serviceExitDisposition",
       "change": "removed",
       "entry": "remove-service-exit-disposition"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#GrokAdapterOptions",
+      "change": "changed",
+      "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+      "change": "changed",
+      "entry": "grok-agent-user-context"
     },
     {
       "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",

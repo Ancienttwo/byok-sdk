@@ -206,7 +206,7 @@ it('releases every Pi gate in order and preserves the operation error', async ()
   await scratch.open(root);
   const registry = createRetentionRegistry({ storeDir: root, config, scratch, clock: () => now, piSessionDir: sessions,
     journal: () => undefined, identity: () => undefined, preparation: () => undefined });
-  const budget = { trigger: 'periodic' as const, now, available: () => true, remaining: () => 100, removed: () => {}, truncate: () => {} };
+  const budget = { trigger: 'periodic' as const, now, available: () => true, remaining: () => 100, removed: () => {}, truncate: () => {}, report: () => {} };
   try {
     const error = await registry.sweep('pi-session-dir', budget).catch(e => e);
     expect(error).toBeInstanceOf(AggregateError);

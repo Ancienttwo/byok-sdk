@@ -83,7 +83,7 @@ function passBudget(f: Awaited<ReturnType<typeof fixture>>, clock: { ms: number 
     },
     remaining: () => f.config.maxDeletionsPerPass - tally.deleted,
     removed: () => { tally.deleted++; },
-    truncate: () => { tally.truncated = true; },
+    truncate: () => { tally.truncated = true; }, report: () => {},
   };
   return { value, tally };
 }

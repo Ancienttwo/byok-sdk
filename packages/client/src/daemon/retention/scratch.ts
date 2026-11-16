@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { acquirePathMutationGate } from '../../util/path-mutation-gate.js';
 import { promises as fs, realpathSync } from 'node:fs';
 import path from 'node:path';
+import { HELD_LOGIN_RESOLUTION, heldLogin } from '../../adapters/grok/held-login.js';
 import { RuntimeDisposalFailure } from '../../runtime-failure.js';
 import { atomicWriteFile } from '../../util/atomic-write.js';
 import { ensureOwnedPrivateDirectory } from '../../util/private-unix-socket.js';
@@ -198,11 +199,18 @@ export class ScratchRoot {
       return inFlight ??= (async () => {
         try {
           await privateDirectory(directory);
+          // Kept for retention: its sweeps report the held login on every pass and reclaim the execution once it is gone.
+          const held = await heldLogin(directory);
+          if (held !== undefined) {
+            this.live.delete(token);
+            throw new RuntimeDisposalFailure({ stage: 'cleanup', reason: `grok wrote a login over the linked auth.json; the SDK kept the execution scratch and holds the login at ${held}; ${HELD_LOGIN_RESOLUTION}` });
+          }
           await fs.rm(sdkDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
           await atomicWriteFile(path.join(directory, 'released'), this.clock().toISOString(), { mode: 0o600, fsync: true });
           released = true;
           this.live.delete(token);
         } catch (cause) {
+          if (cause instanceof RuntimeDisposalFailure) throw cause;
           throw new RuntimeDisposalFailure({ stage: 'cleanup', reason: 'execution scratch disposal did not complete' }, { cause });
         }
       })().finally(() => { inFlight = undefined; });

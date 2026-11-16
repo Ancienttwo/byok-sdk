@@ -174,6 +174,7 @@ function sdkBuiltIsolation(id: string, config: DaemonConfig): Readonly<Record<st
     case 'grok': return {
       compatInstructions: runtimes?.grok?.compatInstructions ?? 'inherit',
       agentUserMcpServers: runtimes?.grok?.agentUserMcpServers ?? 'inherit',
+      agentUserContext: runtimes?.grok?.agentUserContext ?? 'inherit',
     };
     case 'dsh': return runtimes?.dsh === undefined ? undefined : {
       home: runtimes.dsh.home,

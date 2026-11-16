@@ -266,6 +266,9 @@
                 "exec-sdk": {
                   "type": "number"
                 },
+                "grok-session-store": {
+                  "type": "number"
+                },
                 "home-temp": {
                   "type": "number"
                 },
@@ -1388,6 +1391,13 @@
                 "inherit"
               ],
               "description": "`GrokAdapterOptions.agentUserMcpServers`: `excluded` switches off the user MCP sources Grok can disable and refuses an Agent task while another is enabled. Default `inherit`."
+            },
+            "agentUserContext": {
+              "enum": [
+                "excluded",
+                "inherit"
+              ],
+              "description": "`GrokAdapterOptions.agentUserContext`: `excluded` runs an Agent task in an SDK-owned `GROK_HOME` that keeps the user's `AGENTS.md`, rules, skills, memory, plugins and sessions out, links the login, configuration, folder trust and hooks, keeps the Agent's sessions in its home, and refuses a start while Grok still lists a user instruction file. Default `inherit`."
             },
             "versionPolicy": {
               "type": "object",

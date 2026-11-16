@@ -16,6 +16,10 @@ const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const MODEL = 'contract-model';
 const adapter = (options: GrokAdapterOptions = {}) => new GrokAdapter({ resolveBin, model: MODEL, ...options });
 const PROJECT_MARKER = 'BYOK-CONTRACT-GROK-PROJECT-5d20';
+/** One marker per user instruction source `agentUserContext: 'excluded'` keeps out. */
+const USER_MARKERS = {
+  grokAgents: 'BYOK-CONTRACT-GROK-USER-AGENTS-71c4', grokRules: 'BYOK-CONTRACT-GROK-USER-RULES-2b9e', claude: 'BYOK-CONTRACT-GROK-USER-CLAUDE-8f03',
+} as const;
 
 /** Grok's own `--version` text: `grok 1.0.77 (50ca579fa996)`. */
 const identifies = (version: string, expected: string) => /^grok (\S+)/.exec(version.trim())?.[1] === expected;
@@ -49,9 +53,15 @@ async function loopbackGrokHome(home: string, baseUrl: string): Promise<string> 
 
 /**
  * One contract turn as an Agent task: a loopback chat-completions model in
- * GROK_HOME, a Host MCP server, the Agent home AGENTS.md, and a user MCP server
+ * GROK_HOME, a Host MCP server, the Agent home AGENTS.md, a user MCP server
  * in Grok's Claude-compatible `~/.claude.json`, which `agentUserMcpServers`
- * switches off.
+ * switches off, and user instructions in `$GROK_HOME/AGENTS.md`,
+ * `$GROK_HOME/rules/` and `~/.claude/CLAUDE.md`, which `agentUserContext`
+ * keeps out. An empty `auth.json` in the synthetic home stands in for the login
+ * the SDK home links. Never satisfy a login precondition with an API key
+ * placeholder (`XAI_API_KEY` or any other): Grok 1.0.77 then calls api.x.ai with
+ * it, which is undeclared egress. The case must make no request outside the
+ * loopback provider and the declared hosts.
  */
 async function turn(mode: 'inherit' | 'excluded') {
   const box = await createSandbox(`grok-${mode}`);
@@ -65,7 +75,13 @@ async function turn(mode: 'inherit' | 'excluded') {
     const user = await writeSubmitResultServer(box.root, userReceipt, 'user_tool');
     await fs.writeFile(path.join(box.home, '.claude.json'), JSON.stringify({ mcpServers: { usermcp: { type: 'stdio', command: user.command, args: user.args } } }));
     await fs.writeFile(path.join(box.workspace, 'AGENTS.md'), `# Project\n\n${PROJECT_MARKER}\n`);
-    const options: GrokAdapterOptions = mode === 'excluded' ? { compatInstructions: 'disabled', agentUserMcpServers: 'excluded' } : {};
+    await fs.mkdir(path.join(grokHome, 'rules'));
+    await fs.mkdir(path.join(box.home, '.claude'));
+    await fs.writeFile(path.join(grokHome, 'AGENTS.md'), `# User\n\n${USER_MARKERS.grokAgents}\n`);
+    await fs.writeFile(path.join(grokHome, 'rules', 'user.md'), `${USER_MARKERS.grokRules}\n`);
+    await fs.writeFile(path.join(box.home, '.claude', 'CLAUDE.md'), `${USER_MARKERS.claude}\n`);
+    await fs.writeFile(path.join(grokHome, 'auth.json'), '{}', { mode: 0o600 });
+    const options: GrokAdapterOptions = mode === 'excluded' ? { agentUserMcpServers: 'excluded', agentUserContext: 'excluded' } : {};
     const events = await runTurn(adapter(options), 'Call the submit_result tool, then finish.', {
       workspaceDir: box.workspace, agentHome: box.workspace,
       env: { ...baseEnv(box.home), GROK_HOME: grokHome, ...recorder.env },
@@ -79,7 +95,7 @@ async function turn(mode: 'inherit' | 'excluded') {
 
 const excluded = once(() => turn('excluded'));
 const inherited = once(() => turn('inherit'));
-const descriptor = adapter({ agentUserMcpServers: 'excluded' }).descriptor;
+const descriptor = adapter({ agentUserMcpServers: 'excluded', agentUserContext: 'excluded' }).descriptor;
 
 defineRuntimeContract(`grok runtime contract (${target.mode} ${target.expectedVersion})`, descriptor, {
   'detect.version': check(async () => {
@@ -103,7 +119,12 @@ defineRuntimeContract(`grok runtime contract (${target.mode} ${target.expectedVe
   'instructions.project': check(async () => {
     expect((await excluded()).provider.saw(PROJECT_MARKER)).toBe(true);
   }),
-  'isolation.userInstructions': skip('Grok has no per-process switch for $GROK_HOME/AGENTS.md, $GROK_HOME/rules/ or [paths] extra_rule_dirs; compatInstructions turns off only the Claude and Cursor sources (docs/adapter-capabilities.md)'),
+  'isolation.userInstructions': check(async () => {
+    for (const marker of Object.values(USER_MARKERS)) {
+      expect((await inherited()).provider.saw(marker), `positive control: inherited ${marker}`).toBe(true);
+      expect((await excluded()).provider.saw(marker)).toBe(false);
+    }
+  }),
   'isolation.userOutputStyle': notAdvertised(descriptor, 'isolation.userOutputStyle'),
   'isolation.userMemory': notAdvertised(descriptor, 'isolation.userMemory'),
   'isolation.userSkills': notAdvertised(descriptor, 'isolation.userSkills'),

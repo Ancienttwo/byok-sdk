@@ -243,6 +243,9 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "exec-sdk": {
                   "type": "number"
                 },
+                "grok-session-store": {
+                  "type": "number"
+                },
                 "home-temp": {
                   "type": "number"
                 },
@@ -1308,6 +1311,12 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               ]
             },
             "agentUserMcpServers": {
+              "enum": [
+                "excluded",
+                "inherit"
+              ]
+            },
+            "agentUserContext": {
               "enum": [
                 "excluded",
                 "inherit"

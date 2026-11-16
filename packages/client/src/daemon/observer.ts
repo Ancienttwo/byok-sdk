@@ -56,7 +56,7 @@ export type DaemonEvent =
     ))
   | ({ kind: 'retention-sweep'; ts: string } & SweepReport)
   /** `taskId`: the confirmed-journal task whose stored rows failed an integrity check; absent for every other failure. */
-  | { kind: 'retention-failure'; ts: string; trigger: RetentionTrigger; classId: RetentionClassId; count: number; code: string; taskId?: string }
+  | { kind: 'retention-failure'; ts: string; trigger: RetentionTrigger; classId: RetentionClassId; count: number; code: string; taskId?: string; path?: string }
   | { kind: 'offered'; ts: string; taskId: string; runtime?: string }
   /** `admission`: how long this device took to admit the offer (#1014), as the claim carried it. */
   | { kind: 'claimed'; ts: string; taskId: string; claimedRuntime?: string; admission?: OfferAdmissionTimings }
@@ -740,8 +740,8 @@ export class DaemonObserver {
    * cursor advancement or the next envelope being processed.
    */
   noteRetentionSweep(report: SweepReport): void { this.emit({ kind: 'retention-sweep', ts: report.at, ...report }); }
-  noteRetentionFailure(trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string): void {
-    this.emit({ kind: 'retention-failure', ts: nowIso(), trigger, classId, code, count: 1, ...(taskId === undefined ? {} : { taskId }) });
+  noteRetentionFailure(trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string, path?: string): void {
+    this.emit({ kind: 'retention-failure', ts: nowIso(), trigger, classId, code, count: 1, ...(taskId === undefined ? {} : { taskId }), ...(path === undefined ? {} : { path }) });
   }
 
   private emit(event: DaemonEvent): void {

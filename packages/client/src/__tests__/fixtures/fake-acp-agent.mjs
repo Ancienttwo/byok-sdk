@@ -15,7 +15,7 @@
 // FAKE_ACP_INITIALIZE=exit ends the agent on `initialize`; =error answers it
 // with an internal error.
 // `inspect --json` logs an `inspect` fact and prints FAKE_ACP_INSPECT (default:
-// no servers and no plugins); FAKE_ACP_INSPECT=fail exits 1 instead.
+// no servers, plugins or instruction files); FAKE_ACP_INSPECT=fail exits 1 instead.
 // The `orphan-tool` prompt starts a tool parent in this group whose own child
 // left it (setsid) and writes their pids to FAKE_ACP_TOOL_TREE; the native
 // cancel then SIGKILLs the parent, orphaning the tool, as a real cancel can.
@@ -37,7 +37,7 @@ if (args.includes('--help')) {
 if (args[0] === 'inspect') {
   if (process.env.FAKE_ACP_LOG) appendFileSync(process.env.FAKE_ACP_LOG, `${JSON.stringify({ kind: 'inspect', argv: args, cwd: process.cwd(), env: process.env })}\n`);
   if (process.env.FAKE_ACP_INSPECT === 'fail') { process.stderr.write('inspect failed\n'); process.exit(1); }
-  process.stdout.write(`${process.env.FAKE_ACP_INSPECT ?? '{"mcpServers":[],"plugins":[]}'}\n`);
+  process.stdout.write(`${process.env.FAKE_ACP_INSPECT ?? '{"mcpServers":[],"plugins":[],"projectInstructions":[],"externalCompat":{"cells":[]}}'}\n`);
   process.exit(0);
 }
 const agy = args[0] === 'acp';
