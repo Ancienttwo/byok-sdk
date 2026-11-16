@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "d940aa4d8d088c6376521a5bcd4e27b588c0a39320f752e0aaa191b5c17b83ce"
+    "snapshotSha256": "e021540cb85263aacf0f261ae5c864fa142a753eca8b74d3e441fa750c425212"
   },
   "configFields": {
     "status": "tracked",
@@ -41,7 +41,22 @@
       "items": [
         "behavior:claude-queued-write-failure"
       ]
+    },
+    {
+      "id": "remove-task-terminal-read",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes AgentSessionHandoffStore.getTaskTerminal(). Remove reads; recordTaskTerminal() still persists failure evidence and returns its write receipt.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#task-terminal-evidence",
+      "items": [
+        "export:@byok-sdk/client#AgentSessionHandoffStore"
+      ]
     }
   ],
-  "changes": []
+  "changes": [
+    {
+      "item": "export:@byok-sdk/client#AgentSessionHandoffStore",
+      "change": "changed",
+      "entry": "remove-task-terminal-read"
+    }
+  ]
 }

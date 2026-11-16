@@ -680,7 +680,7 @@ describe('SDK-owned Agent home contract', () => {
     expect(terminalEvidence).toHaveBeenCalledTimes(1);
     expect(sent.map((entry) => entry.type)).toEqual(['task.claim', 'task.fail']);
     expect(sent.at(-1)?.payload).toMatchObject({ agentRef });
-    await expect(new AgentSessionHandoffStore().getTaskTerminal({ agentRef, taskId, runtimeId: 'pi', cwd }))
+    await expect(terminalEvidence.mock.results[0]!.value)
       .resolves.toMatchObject({
       agentRef,
       taskId,
@@ -689,6 +689,9 @@ describe('SDK-owned Agent home contract', () => {
       terminalCause: 'failed',
       terminalReason: expect.stringContaining('start'),
       });
+    const evidenceDir = path.join(cwd, '.byok/runtime-sessions');
+    const evidence = JSON.parse((await fs.readFile(path.join(evidenceDir, (await fs.readdir(evidenceDir))[0]!), 'utf8')).trim());
+    expect(evidence).toMatchObject(await terminalEvidence.mock.results[0]!.value);
   });
 
   it('persists claimed Agent handoff-write failure before task.fail and includes the runtime sessionRef', async () => {
@@ -731,7 +734,7 @@ describe('SDK-owned Agent home contract', () => {
     expect(adapter.sessions[0]?.closeCalled).toBe(true);
     expect(sent.map((entry) => entry.type)).toEqual(['task.claim', 'task.fail']);
     expect(sent.at(-1)?.payload).toMatchObject({ agentRef });
-    await expect(new AgentSessionHandoffStore().getTaskTerminal({ agentRef, taskId, runtimeId: 'pi', cwd }))
+    await expect(terminalEvidence.mock.results[0]!.value)
       .resolves.toMatchObject({
       agentRef,
       taskId,
@@ -741,6 +744,9 @@ describe('SDK-owned Agent home contract', () => {
       terminalCause: 'failed',
       terminalReason: expect.stringContaining('disk unavailable'),
       });
+    const evidenceDir = path.join(cwd, '.byok/runtime-sessions');
+    const evidence = JSON.parse((await fs.readFile(path.join(evidenceDir, (await fs.readdir(evidenceDir))[0]!), 'utf8')).trim());
+    expect(evidence).toMatchObject(await terminalEvidence.mock.results[0]!.value);
   });
 
   it('retains the startup owner after handoff and close failures until explicit cleanup retry', async () => {

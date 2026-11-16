@@ -3030,7 +3030,6 @@ export declare class AgentSessionHandoffStore {
     recordTaskTerminal(input: Omit<AgentTaskTerminalEvidence, 'updatedAt' | 'terminalCause'> & {
         readonly home?: string;
     }): Promise<AgentTaskTerminalEvidence>;
-    getTaskTerminal(expectedInput: AgentTaskTerminalMatch): Promise<AgentTaskTerminalEvidence | undefined>;
     private filePath;
     private taskTerminalFilePath;
     private enqueue;
