@@ -2548,13 +2548,24 @@ redelivered or losing claim leaves it as it is. v7 replaced the claim's
 `runtime` and `harnessId` with this field and removed `agentId`;
 `agentRef` names the Agent.
 
+The claimed executor must be one the offer's `target` allows: any under
+`auto`, otherwise exactly the named runtime (`runtime`, `subscription`,
+`byok`, `byok-profile`) or harness (`harness`). A claim naming another is
+rejected (`claim_offer_mismatch`).
+
 The terminals echo it. `task.complete` requires `executor`: a task completes
 only from `Running`, so every completion follows a claim. `task.fail` and
-`task.cancelled` carry it optionally on the wire. A device that restarts
-after acknowledging an offer it never claimed reports `daemon_interrupted`
-with no executor, and a cancel before any claim omits it. After a claim, the
-server requires the terminal's `executor` and requires it to equal the
-claimed one.
+`task.cancelled` carry it optionally on the wire. After a claim, the server
+requires the terminal's `executor` and requires it to equal the claimed one.
+Before a claim, a cancel omits it. A device that restarts after admitting an
+offer reports `daemon_interrupted` (a `task.fail` with `recovery`), and it
+cannot tell whether its claim reached the cloud, so that report may name the
+executor it admitted. With no claim recorded, the server only checks that
+executor against the offer's `target` (the rule above), rejecting another
+with `terminal_executor_mismatch`; it records no claim and no owner, and the
+task fails unowned. With a claim recorded, the report must name the claimed
+executor like every terminal. The terminal read model's `executor` is the
+claimed one, so an unclaimed task's result has none.
 
 **Attempt phase instants (#980, cloud only).** `@byok-sdk/cloud` records four
 write-once instants on its `TaskAttempt`, from the same clock and in the same
@@ -4584,9 +4595,10 @@ offer receipt and exact offer UUID; a missing receipt is a rejection.
 
 A local admission may commit before the cloud accepts claim. If cloud ownership
 is absent, this bound recovery report can settle the task without asserting or
-creating a claim, and it carries no `executor`. If cloud ownership exists, all
-terminals, including recovery, must carry `executor` equal to
-`claimedExecutor`. Ordinary failures gain no exception. The terminal
+creating a claim. It may carry the `executor` the device admitted, which must
+be one the offer's `target` allows and is not recorded (§3.1). If cloud
+ownership exists, all terminals, including recovery, must carry `executor`
+equal to `claimedExecutor`. Ordinary failures gain no exception. The terminal
 read model copies `recovery` verbatim; `TaskAttempt` remains cloud claim authority.
 Deploy the supporting server before using these recovery reports. Migration
 0021 remains required for custom claims; the recovery object lives in existing
