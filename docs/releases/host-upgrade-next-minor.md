@@ -6,8 +6,9 @@ Add future Host-visible changes here; do not amend the 0.43.0 cut's upgrade-mani
 
 ## Retired compatibility paths
 
-Remove calls to `migrateProviderProfileStore` and `migrateWouldDo`, including
-AiphaBee's installer and toolset migration integrations and their re-exports.
+Remove `migrateProviderProfileStore` from AiphaBee's `user-installer.ts` and
+`byok-host` coordinator. Remove `migrateWouldDo` and `WouldDoMigration` from
+`toolset-migration.ts` and the `byok-host` bot-collaboration re-exports.
 Provider profile stores with an earlier provider-kind schema are refused with
 `PROVIDER_STORE_SCHEMA_STALE`; would-do ledger rows without `turnId` are refused
 with `would_do_unsupported_old`. Keep the old files intact and explicitly

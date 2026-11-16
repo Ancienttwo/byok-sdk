@@ -42,35 +42,45 @@
       "impact": "breaking",
       "summary": "@byok-sdk/keys MacOsKeychainSecretStore.get refuses an unprefixed record with KEYCHAIN_SECRET_DECODE_FAILED; the allowUnprefixedRead option is removed. Configure a current-format credential separately.",
       "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
-      "items": ["behavior:reject-unprefixed-keychain-records"]
+      "items": [
+        "behavior:reject-unprefixed-keychain-records"
+      ]
     },
     {
       "id": "reject-older-provider-kind-store",
       "impact": "breaking",
       "summary": "@byok-sdk/keys SqliteProviderProfileStore and inspectProviderProfileStore refuse an earlier provider-kind schema with PROVIDER_STORE_SCHEMA_STALE instead of offering migration; preserve the old store and explicitly configure a separate current store.",
       "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
-      "items": ["behavior:reject-older-provider-kind-store"]
+      "items": [
+        "behavior:reject-older-provider-kind-store"
+      ]
     },
     {
       "id": "reject-local-old-would-do",
       "impact": "breaking",
       "summary": "@byok-sdk/bot-collaboration stateOf and inspectLedger refuse local would-do rows lacking turnId with would_do_unsupported_old. Preserve the old ledger and use a separate current ledger.",
       "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
-      "items": ["behavior:reject-local-old-would-do"]
+      "items": [
+        "behavior:reject-local-old-would-do"
+      ]
     },
     {
       "id": "reject-hosted-frame-would-do",
       "impact": "breaking",
       "summary": "The hosted bot-collaboration example refuses would-do rows held in an old scope frame with would_do_unsupported_old rather than relocating them; preserve the old hosted store and provision separately.",
       "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
-      "items": ["behavior:reject-hosted-frame-would-do"]
+      "items": [
+        "behavior:reject-hosted-frame-would-do"
+      ]
     },
     {
       "id": "reject-hosted-old-would-do-row",
       "impact": "breaking",
       "summary": "The hosted bot-collaboration example refuses would-do entity rows without turnId with would_do_unsupported_old rather than backfilling or archiving them; preserve the old hosted store and provision separately.",
       "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
-      "items": ["behavior:reject-hosted-old-would-do-row"]
+      "items": [
+        "behavior:reject-hosted-old-would-do-row"
+      ]
     },
     {
       "id": "pi-agent-skill-paths-config",
@@ -681,6 +691,36 @@
       "entry": "k4-settlement-notice"
     },
     {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#WouldDoMigration",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#commitImport",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#discardImport",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#importForSwitch",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#migrateWouldDo",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#sealedRoutineInstruction",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#supersededDeliveryIds",
       "change": "added",
       "entry": "bot-delivery-supersession"
@@ -1079,6 +1119,46 @@
       "item": "export:@byok-sdk/core#PresenceStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
+    },
+    {
+      "item": "export:@byok-sdk/keys#MacOsKeychainSecretStoreOptions",
+      "change": "changed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#PROVIDER_PROFILE_TRUTH_RECORD_KEY",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#ProviderProfileStoreMigration",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#TruthStoreProviderProfileStore",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#TruthStoreProviderProfileStoreOptions",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#migrateProviderProfileStore",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#scopeSecretStore",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#listPiCatalogModels",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
     },
     {
       "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
