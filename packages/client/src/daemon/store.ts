@@ -14,6 +14,7 @@ import { pickPlainDataProperties } from '../util/plain-data.js';
 import { sameContent, sameFile } from '../util/file-state.js';
 import { ensureSecureStoreRoot, type EnsureSecureDirOptions } from '../util/secure-dir.js';
 import {
+  DeviceCredentialLegacyEntryError,
   type DeviceCredentialBackend,
   type DeviceCredentialConfig,
   type DeviceMetadata,
@@ -209,7 +210,7 @@ export class DeviceStore {
     private readonly secureDirOptions?: EnsureSecureDirOptions,
   ) {
     if (credentials === null || (typeof credentials !== 'object' && typeof credentials !== 'function') ||
-        (['read', 'readFirstPairingAttempt', 'saveFirstPairingAttempt', 'replace', 'clear'] as const)
+        (['read', 'readPairingAttempt', 'savePairingAttempt', 'replace', 'clear'] as const)
           .some((method) => typeof credentials[method] !== 'function')) {
       throw new TypeError('device credential backend must implement complete enrollment custody');
     }
@@ -416,7 +417,8 @@ export async function readStoreEnrollment(store: DeviceStore): Promise<Enrollmen
       ? { state: 'unpaired' }
       : { state: 're_pair_required' };
   } catch (error) {
-    if (error instanceof DeviceRecordRePairRequiredError) {
+    // A wire v6 entry is void; the next pairing or clear deletes it.
+    if (error instanceof DeviceRecordRePairRequiredError || error instanceof DeviceCredentialLegacyEntryError) {
       return { state: 're_pair_required' };
     }
     throw error;

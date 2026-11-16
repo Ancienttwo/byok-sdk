@@ -1032,13 +1032,13 @@ three and runs these suites.
   abort, a submit claimed before the freeze, the drain and cancel with a tried intent that holds the commit until it
   concludes, the cancel of a Host intent with no Turn, a routine fire during the freeze and after an abort, a new store that reads the freeze, and home flushes during the switch. Each commit away
   exports the scope first and passes the export's digest.
-- The switch export tests (`switch-export.test.ts`, #975) move a scope that holds a retained and compacted Turn, a Bot
-  routine with a settled occurrence and routine Turn, a Host intent and an unsent home write into a new L tenant: K8
-  `importForSwitch` reads it back to the same digest, and H commits away on its receipt. They cover each export refusal,
+- The switch export tests (`switch-export.test.ts`, #975) export a scope that holds a retained and compacted Turn, a Bot
+  routine with a settled occurrence and routine Turn, a Host intent and an unsent home write. H commits away on the export
+  digest. They cover each export refusal,
   a receipt that is not the export's, a scope that changed after its export, an abort that lifts the fence, the refusal of
   each write path after its own refusals with nothing written, the scans that leave an exported scope out, the backoff
-  writes of a scan that raced an export, and a scope lock outside `inSchema`. The import tests take a domain from H to L
-  and back to a new H scope, and on to a new L tenant, with every section the one that left H. They cover earlier
+  writes of a scan that raced an export, and a scope lock outside `inSchema`. The hosted import tests use a sealed L-source
+  fixture derived from an H export. They cover earlier
   generations, a memory block and a slot replay count, the answers to a message of an earlier task, compaction, the reply
   check of a chain end in a later generation, a pending Host job that runs after the commit, an import that does not
   read back and writes nothing, the import refusals, commit and discard, the refusal of each write path on an

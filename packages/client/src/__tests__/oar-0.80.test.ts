@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { codexThreadOpen } from '../../vendor/oar/4eb5919/runtimes/codex/open';
-import { createSessionKernel } from '../../vendor/oar/4eb5919/shared/session-kernel';
+import { codexThreadOpen } from '../../vendor/oar/552a4f9/runtimes/codex/open';
+import { createSessionKernel } from '../../vendor/oar/552a4f9/shared/session-kernel';
 
 describe('OAR 0.80 upstream behavior at SDK seams', () => {
   it('keeps every observer in sequence when an observer emits another record', () => {

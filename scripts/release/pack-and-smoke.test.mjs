@@ -13,12 +13,31 @@ import {
   assertRecordedPiClosureIntegrity, piCertificateIdentityPattern, readLockedPiClosure,
 } from './pi-runtime-identity.mjs';
 import { assertNoStorePaths } from './published-store-paths.mjs';
+import { assertNpmCoreClosure, assertSingleVersionSet } from './install-graph.mjs';
 import { nodeNextConsumerProbe } from './node-next-consumer-probe.mjs';
 
 const releasePackSource = readFileSync(
   fileURLToPath(new URL('./pack-and-smoke.mjs', import.meta.url)),
   'utf8',
 );
+
+test('installed package graph rejects unexpected, nested, and missing versions', t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'byok-install-graph-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const pkg = path.join(root, 'node_modules/@byok-sdk/core');
+  mkdirSync(pkg, { recursive: true });
+  writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: '@byok-sdk/core', version: '1.0.0' }));
+  assert.doesNotThrow(() => assertSingleVersionSet(root, { '@byok-sdk/core': '1.0.0' }, 'test'));
+  assert.throws(() => assertSingleVersionSet(root, { '@byok-sdk/core': '2.0.0' }, 'test'), /expected 2.0.0/);
+  assert.throws(() => assertSingleVersionSet(root, {}, 'test'), /unexpected/);
+  assert.throws(() => assertSingleVersionSet(root, { '@byok-sdk/core': '1.0.0', '@byok-sdk/keys': '1.0.0' }, 'test'), /missing/);
+  const nested = path.join(pkg, 'node_modules/@byok-sdk/core');
+  mkdirSync(nested, { recursive: true });
+  writeFileSync(path.join(nested, 'package.json'), JSON.stringify({ name: '@byok-sdk/core', version: '1.0.0' }));
+  assert.throws(() => assertSingleVersionSet(root, { '@byok-sdk/core': '1.0.0' }, 'test'), /nested copies/);
+  assert.doesNotThrow(() => assertNpmCoreClosure({ dependencies: { '@byok-sdk/core': { version: '1.0.0' } } }, '1.0.0', 'test'));
+  assert.throws(() => assertNpmCoreClosure({ dependencies: { '@byok-sdk/core': { version: '2.0.0' } } }, '1.0.0', 'test'), /expected only/);
+});
 
 test('NodeNext probe accepts real declarations and rejects an any-typed consumer', async t => {
   for (const declaration of ['export declare function createDaemonWithAdapters(): void;', 'export declare const createDaemonWithAdapters: any;']) {

@@ -191,7 +191,7 @@ describe('MacOsKeychainSecretStore.get', () => {
     await expect(store().get('model-openai-api-key')).resolves.toBe(secret);
   });
 
-  it('fails closed on an unprefixed stored value by default', async () => {
+  it('fails closed on an unprefixed stored value', async () => {
     runner.queue({ exitCode: 0, stdout: `${CANARY}\n` });
     await expect(store().get('model-openai-api-key')).rejects.toThrowError(
       expect.objectContaining({ code: 'KEYCHAIN_SECRET_DECODE_FAILED' }),
@@ -207,22 +207,6 @@ describe('MacOsKeychainSecretStore.get', () => {
       thrown = error;
     }
     expect((thrown as Error).message).not.toContain(CANARY);
-  });
-
-  it('returns an unprefixed value only when allowUnprefixedRead is explicitly true', async () => {
-    runner.queue({ exitCode: 0, stdout: `${CANARY}\n` });
-    await expect(
-      store({ allowUnprefixedRead: true }).get('model-openai-api-key'),
-    ).resolves.toBe(CANARY);
-  });
-
-  it('still fails closed when allowUnprefixedRead is explicitly false', async () => {
-    runner.queue({ exitCode: 0, stdout: `${CANARY}\n` });
-    await expect(
-      store({ allowUnprefixedRead: false }).get('model-openai-api-key'),
-    ).rejects.toThrowError(
-      expect.objectContaining({ code: 'KEYCHAIN_SECRET_DECODE_FAILED' }),
-    );
   });
 
   it('fails closed on a prefixed value whose payload is not valid base64', async () => {
@@ -346,9 +330,10 @@ describe('MacOsKeychainSecretStore.set', () => {
 });
 
 describe('MacOsKeychainSecretStore.delete', () => {
-  it('deletes through delete-generic-password', async () => {
+  it('deletes through delete-generic-password without reading the stored value', async () => {
     runner.queue({ exitCode: 0 });
     await expect(store().delete('model-openai-api-key')).resolves.toBe(true);
+    expect(runner.invocations).toHaveLength(1);
     expect(runner.invocations[0]?.args).toEqual([
       'delete-generic-password',
       '-a',
@@ -437,10 +422,9 @@ describe('MacOsKeychainSecretStore platform and scope', () => {
   });
 
   it('carries every option into the scoped store', async () => {
-    runner.queue({ exitCode: 0, stdout: `${CANARY}\n` });
+    runner.queue({ exitCode: 0, stdout: `${encoded(CANARY)}\n` });
     const scoped = store({
       account: 'other-account',
-      allowUnprefixedRead: true,
       keychainPath: KEYCHAIN_PATH,
     }).scope('acct_00000000');
     await expect(scoped.get('model-openai-api-key')).resolves.toBe(CANARY);

@@ -2,9 +2,10 @@ import { LISTS, MAPS, ROOM_MESSAGE } from './layout';
 
 /**
  * The H store version (#793 O3). A store refuses a scope row of any version it does not support, under
- * the scope lock and before any write (#798 Q4). It is not the `CollaborationState.version` literal.
+ * the scope lock and before any write (#798 Q4). Version 3 (#2286): the collaboration state has no
+ * `version` field, so a scope written by version 2 is refused at open and the Host provisions a new store.
  */
-export const STORE_VERSION = 2;
+export const STORE_VERSION = 3;
 
 const names = (values: readonly string[]) => values.map(value => `'${value}'`).join(', ');
 
@@ -49,10 +50,9 @@ CREATE TABLE IF NOT EXISTS entity (
   ordinal  bigint NOT NULL CHECK (ordinal >= 0),
   body     json   NOT NULL,
   PRIMARY KEY (scope, kind, key),
-  UNIQUE (scope, kind, ordinal)
+  UNIQUE (scope, kind, ordinal),
+  CONSTRAINT entity_kind_check CHECK (kind IN (${names(MAPS.map(([kind]) => kind))}))
 );
-ALTER TABLE entity DROP CONSTRAINT IF EXISTS entity_kind_check;
-ALTER TABLE entity ADD CONSTRAINT entity_kind_check CHECK (kind IN (${names(MAPS.map(([kind]) => kind))}));
 CREATE TABLE IF NOT EXISTS entry (
   scope     text   NOT NULL REFERENCES scope (scope),
   kind      text   NOT NULL CHECK (kind IN (${names([...LISTS.map(([kind]) => kind), ROOM_MESSAGE])})),

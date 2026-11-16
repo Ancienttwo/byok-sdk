@@ -57,9 +57,11 @@ import {
   type WithheldOfferRecord,
   type WithheldOfferTask,
 } from './journal.js';
+import { readSqliteFileUnchanged, SqliteReadOnlyOpenError } from '@byok-sdk/core/sqlite-node';
 import {
   isSqliteAvailable,
   JournalHandleCleanupError,
+  loadSqliteModule,
   openJournalDatabase,
   secureJournalFilePermissions,
   type JournalOpenFaultSeam,
@@ -184,8 +186,7 @@ export interface SqliteLocalTaskJournalOptions {
  *   retry/error;
  * - `journal_idempotency` — outbound request / envelope / receipt ids;
  *
- * Opening permanently drops the three unused candidate/usage/artifact tables.
- * Actual artifact producers and policy live in daemon/retention.
+ * Artifact producers and policy live in daemon/retention.
  *
  * The foreign keys are load-bearing rather than decorative: with
  * `foreign_keys=ON`, a transition or terminal for a task whose offer envelope
@@ -261,11 +262,70 @@ CREATE TABLE IF NOT EXISTS journal_idempotency (
   PRIMARY KEY (scope, key)
 );
 
-DROP TABLE IF EXISTS local_artifact_ref;
-DROP TABLE IF EXISTS local_cleanup_candidate;
-DROP TABLE IF EXISTS local_storage_usage;
 CREATE INDEX IF NOT EXISTS journal_terminal_retention ON journal_terminal (truth_state, updated_at);
 `;
+
+/**
+ * The tables and columns of a current journal, read from {@link SCHEMA} itself
+ * so the format check and the schema cannot drift apart.
+ */
+let currentJournalTables: ReadonlyMap<string, string> | undefined;
+
+/** `table -> sorted column names` for every user table in `db`. */
+function journalTables(db: DatabaseSync): Map<string, string> {
+  const tables = new Map<string, string>();
+  const rows = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as Array<{ name: string }>;
+  for (const { name } of rows) {
+    const columns = db.prepare('SELECT name FROM pragma_table_info(?)').all(name) as Array<{ name: string }>;
+    tables.set(name, columns.map((column) => column.name).sort().join(','));
+  }
+  return tables;
+}
+
+function expectedJournalTables(): ReadonlyMap<string, string> {
+  if (currentJournalTables) return currentJournalTables;
+  const { DatabaseSync } = loadSqliteModule();
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec(SCHEMA);
+    currentJournalTables = journalTables(db);
+  } finally {
+    db.close();
+  }
+  return currentJournalTables;
+}
+
+const PRESERVE = 'preserve/export this journal and resolve it before starting this build';
+
+/**
+ * The journal's one format authority, run on the main file before anything
+ * opens it for writing (through `readSqliteFileUnchanged`) and again on the
+ * writable connection, where a not-yet-checkpointed WAL is visible. There is no
+ * version row: a current journal is one whose tables and columns are exactly
+ * {@link SCHEMA}'s, and a file with no schema objects is new. Anything else is
+ * refused with {@link JournalUnavailableError} and left as it is.
+ */
+function assertCurrentJournalFormat(db: DatabaseSync): 'empty' | 'current' {
+  const objects = db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").get() as { n: number };
+  if (Number(objects.n) === 0) return 'empty';
+  const tables = journalTables(db);
+  const terminal = tables.get('journal_terminal');
+  // A hash-only predecessor cannot be silently upgraded into replay evidence:
+  // never synthesize missing terminal bytes.
+  if (terminal !== undefined && !terminal.split(',').includes('bytes')) {
+    throw new JournalUnavailableError(`hash-only journal format cannot replay terminals; ${PRESERVE} with the new execution-recovery format`);
+  }
+  const envelope = tables.get('journal_envelope');
+  if (envelope !== undefined && !envelope.split(',').includes('withheld_bytes')) {
+    throw new JournalUnavailableError(`journal written before the withheld-offer column (#826); ${PRESERVE}`);
+  }
+  const expected = expectedJournalTables();
+  const differs = [...new Set([...expected.keys(), ...tables.keys()])].filter((name) => expected.get(name) !== tables.get(name));
+  if (differs.length > 0) {
+    throw new JournalUnavailableError(`journal tables ${differs.sort().join(', ')} do not match this build's journal format; ${PRESERVE}`);
+  }
+  return 'current';
+}
 
 /** Task-keyed envelope lookups (stored cancellation, prune) read through this instead of scanning the table. */
 const ENVELOPE_TASK_INDEX = 'CREATE INDEX IF NOT EXISTS journal_envelope_task ON journal_envelope (task_id, seq)';
@@ -398,16 +458,33 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
 
     mkdirSync(options.storeDir, { recursive: true, mode: 0o700 });
 
+    // The format is decided on the unchanged main file before the writable open
+    // and its pragmas. A format refusal, or a file the read-only check cannot
+    // open, is not corruption: the file
+    // stays where it is. A main file SQLite cannot read is left to the writable
+    // open below, which also sees the WAL and quarantines only what it cannot open.
+    try {
+      readSqliteFileUnchanged(this.#dbPath, assertCurrentJournalFormat);
+    } catch (err) {
+      if (err instanceof JournalUnavailableError) throw err;
+      if (err instanceof SqliteReadOnlyOpenError) {
+        throw new JournalUnavailableError(`the journal at ${this.#dbPath} could not be opened read-only to check its format; it was left unchanged`, { cause: err });
+      }
+    }
     // Open + schema are one unit for quarantine purposes: a file whose header
     // reads fine but whose schema cannot be created is just as unusable, and
     // just as much evidence, as one that fails at open.
     let db: DatabaseSync | undefined;
+    let created = false;
     try {
       db = openJournalDatabase(
         this.#dbPath,
         options.busyTimeoutMs ?? DEFAULT_JOURNAL_BUSY_TIMEOUT_MS,
         options.openFaults,
       );
+      // The main file may hold no schema yet while a WAL does: the writable
+      // connection sees both and makes the final decision.
+      created = assertCurrentJournalFormat(db) === 'empty';
       db.exec(SCHEMA);
     } catch (err) {
       // `openJournalDatabase` owns the handle until it returns. If that helper
@@ -427,30 +504,18 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
           [err, closeError],
         );
       }
+      if (err instanceof JournalUnavailableError) throw err;
       const reason = err instanceof Error ? err.message : String(err);
       const quarantinePath = quarantineDatabase(options.storeDir, this.#dbPath, reason, this.#clock());
       throw new JournalCorruptError(this.#dbPath, quarantinePath, reason, { cause: err });
     }
-    // A hash-only predecessor cannot be silently upgraded into replay evidence.
-    // Preserve its files and require an explicit operator resolution; never quarantine
-    // a structurally valid old format or synthesize missing terminal bytes.
-    const terminalColumns = db.prepare('PRAGMA table_info(journal_terminal)').all() as Array<{ name: string }>;
-    if (!terminalColumns.some((column) => column.name === 'bytes')) {
-      db.close();
-      throw new JournalUnavailableError('hash-only journal format cannot replay terminals; preserve/export this journal and resolve it before starting the new execution-recovery format');
-    }
-    // A journal written before #826 has no `withheld_bytes`. It is refused here,
-    // not altered, so it never fails on its first write.
-    const envelopeColumns = db.prepare('PRAGMA table_info(journal_envelope)').all() as Array<{ name: string }>;
-    if (!envelopeColumns.some((column) => column.name === 'withheld_bytes')) {
-      db.close();
-      throw new JournalUnavailableError('journal written before the withheld-offer column (#826); preserve/export this journal and resolve it before starting this build');
-    }
-    // Built after the format checks so a refused predecessor is left byte-for-byte
-    // unchanged. A deployed store gains the index on its first open; a failure is
-    // a refusal to start, not corruption, so the file stays in place.
+    // A deployed store gains the index on its first open; a failure is a
+    // refusal to start, not corruption, so the file stays in place.
     try {
       db.exec(ENVELOPE_TASK_INDEX);
+      // A new journal's schema reaches the main file at once, so the window in
+      // which only the WAL describes the format stays short.
+      if (created) db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
     } catch (err) {
       db.close();
       throw new JournalUnavailableError(`journal task index could not be built: ${err instanceof Error ? err.message : String(err)}`, { cause: err });

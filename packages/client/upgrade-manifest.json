@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "0658a2801057b0a6c193103b94cf57345540d8b3d3d4dd28921d097b6e8d3a53"
+    "snapshotSha256": "e06ef77d3911c56ccfd11404cbc47a72bb3bee9036e419b85c11eef5a1247291"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,150 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "retire-compatibility-apis",
+      "impact": "breaking",
+      "summary": "The keys and bot-collaboration Host APIs remove compatibility migrators, unused helpers, the TruthStore provider adapter and its PROVIDER_TRUTH_INVALID error code, and local Host switch import. Remove their calls and use a supported provider store; local Host export remains available.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "export:@byok-sdk/keys#scopeSecretStore",
+        "export:@byok-sdk/keys/model-route#listPiCatalogModels",
+        "export:@byok-sdk/keys#migrateProviderProfileStore",
+        "export:@byok-sdk/keys#ProviderProfileStoreMigration",
+        "export:@byok-sdk/keys#TruthStoreProviderProfileStore",
+        "export:@byok-sdk/keys#TruthStoreProviderProfileStoreOptions",
+        "export:@byok-sdk/keys#PROVIDER_PROFILE_TRUTH_RECORD_KEY",
+        "export:@byok-sdk/keys#MacOsKeychainSecretStoreOptions",
+        "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
+        "export:@byok-sdk/bot-collaboration/host-kit#migrateWouldDo",
+        "export:@byok-sdk/bot-collaboration/host-kit#WouldDoMigration",
+        "export:@byok-sdk/bot-collaboration/host-kit#sealedRoutineInstruction",
+        "export:@byok-sdk/bot-collaboration/host-kit#importForSwitch",
+        "export:@byok-sdk/bot-collaboration/host-kit#commitImport",
+        "export:@byok-sdk/bot-collaboration/host-kit#discardImport"
+      ]
+    },
+    {
+      "id": "reject-hosted-old-entity-constraint",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example refuses an older entity kind constraint with hosted_schema_unsupported_old before DDL; preserve the old store and provision a separate current store.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "behavior:reject-hosted-old-entity-constraint"
+      ]
+    },
+    {
+      "id": "reject-older-provider-kind-store",
+      "impact": "breaking",
+      "summary": "@byok-sdk/keys SqliteProviderProfileStore and inspectProviderProfileStore refuse an earlier provider-kind schema with PROVIDER_STORE_SCHEMA_STALE instead of offering migration; preserve the old store and explicitly configure a separate current store.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "behavior:reject-older-provider-kind-store"
+      ]
+    },
+    {
+      "id": "reject-local-old-would-do",
+      "impact": "breaking",
+      "summary": "@byok-sdk/bot-collaboration Host opening, direct ledger writes and inspectLedger refuse local would-do rows lacking turnId with would_do_unsupported_old. Preserve the old ledger and use a separate current ledger.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "behavior:reject-local-old-would-do"
+      ]
+    },
+    {
+      "id": "reject-hosted-frame-would-do",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example refuses would-do rows held in an old scope frame with would_do_unsupported_old rather than relocating them; preserve the old hosted store and provision separately.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "behavior:reject-hosted-frame-would-do"
+      ]
+    },
+    {
+      "id": "reject-hosted-old-would-do-row",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example refuses would-do entity rows without turnId with would_do_unsupported_old rather than backfilling or archiving them; preserve the old hosted store and provision separately.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "behavior:reject-hosted-old-would-do-row"
+      ]
+    },
+    {
+      "id": "core-sqlite-node-entry",
+      "impact": "additive",
+      "summary": "@byok-sdk/core/sqlite-node is a new entry, whose functions need Node, exporting readSqliteFileUnchanged(path, readMetadata). It opens an existing, non-empty SQLite file read-only and immutable, runs readMetadata on its main file and closes it, so a store can decide its format before any writable open, pragma or DDL; it returns undefined for :memory:, a missing path or a zero-length file, and throws SqliteReadOnlyOpenError when the file exists but cannot be stat'ed or opened read-only. sqliteOpenPath(path) and sqliteFileUri(path) name a store file for SQLite under one rule, with the Windows extended-length prefix past MAX_PATH; the client journal's writable open uses sqliteOpenPath, and the read-only check opens sqliteFileUri. The core root does not export it. No Host action is required.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
+      "items": [
+        "entry:@byok-sdk/core/sqlite-node",
+        "export:@byok-sdk/core/sqlite-node#SqliteReadOnlyOpenError",
+        "export:@byok-sdk/core/sqlite-node#readSqliteFileUnchanged",
+        "export:@byok-sdk/core/sqlite-node#sqliteFileUri",
+        "export:@byok-sdk/core/sqlite-node#sqliteOpenPath"
+      ]
+    },
+    {
+      "id": "sqlite-stores-refuse-before-write",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client decides the format of an existing durable replica and replica lock file before any write. A durable replica in a pi-durable schema version other than the pinned one is refused with DurableReplicaFormatError instead of migrated forward, and a replica lock path that holds another database, such as the replica of a task whose id ends in .sqlite.lock, is refused instead of written. Both files stay unchanged. Released replicas are already current; preserve a refused replica and resolve it before starting this build.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
+      "items": [
+        "behavior:sqlite-stores-refuse-before-write"
+      ]
+    },
+    {
+      "id": "client-journal-exact-format",
+      "impact": "breaking",
+      "acceptance": "reject",
+      "summary": "@byok-sdk/client SqliteLocalTaskJournal decides an existing journal's format on its unchanged main file before the writable open and its auto_vacuum and WAL pragmas. A journal is current only when its tables and columns are exactly this build's; any other, including one that still holds the retired local_artifact_ref, local_cleanup_candidate or local_storage_usage table, is refused with JournalUnavailableError, left unchanged and no longer moved to quarantine. Startup no longer drops those tables. A journal the read-only check cannot open is refused with JournalUnavailableError and left in place rather than quarantined; a file SQLite cannot read is still quarantined. Released journals are already current; preserve or export a refused journal and resolve it before starting this build.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
+      "items": [
+        "store:client-journal"
+      ]
+    },
+    {
+      "id": "host-ledger-format-table",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server/execution-core HostLedger records its format in a host_store_format table, one row per layer (k4, and k8 for Bot collaboration ledgers), and decides an existing ledger's format on its unchanged main file before the writable open, pragmas or DDL. A ledger written by 0.43.0 or earlier has tables but no host_store_format and is refused with HostStoreFormatError (code host_store_format_unsupported); it is not migrated, repaired or deleted. Finish or abandon in-flight Bot collaboration work before upgrading, then open a new ledger file at a new path.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledgers-record-their-format-2286",
+      "acceptance": "reject",
+      "items": [
+        "store:bot-collaboration-ledger"
+      ]
+    },
+    {
+      "id": "host-ledger-format-api",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server/execution-core: HostLedgerOptions gains expectedFormats, HostLedger exposes formats, and HostStoreFormatError is new. LedgerState loses its version field, and LedgerDump moves to version 2, so a switch dump written by an earlier release is refused. @byok-sdk/bot-collaboration: open every Bot ledger with the new botLedgerOptions (compactVeto plus the k8 format) instead of { compactVeto: botCompactVeto }; BotCollaboration refuses a ledger opened without it. CollaborationState loses its version field and SWITCH_EXPORT_VERSION is 2, so an earlier switch export is refused.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledgers-record-their-format-2286",
+      "items": [
+        "export:@byok-sdk/server/execution-core#HostLedger",
+        "export:@byok-sdk/server/execution-core#HostLedgerOptions",
+        "export:@byok-sdk/server/execution-core#HostStoreFormatError",
+        "export:@byok-sdk/server/execution-core#LedgerState",
+        "export:@byok-sdk/server/execution-core#LedgerDump",
+        "export:@byok-sdk/bot-collaboration#botLedgerOptions",
+        "export:@byok-sdk/bot-collaboration/host-kit#CollaborationState",
+        "export:@byok-sdk/bot-collaboration/host-kit#SWITCH_EXPORT_VERSION"
+      ]
+    },
+    {
+      "id": "keys-store-refuse-before-write",
+      "impact": "breaking",
+      "summary": "@byok-sdk/keys SqliteProviderProfileStore decides an existing store's format on its unchanged main file before the writable open, journal_mode or DDL. A store that has provider_profile but lacks a custody table is refused with PROVIDER_STORE_SCHEMA_STALE instead of having the table created, and a store the read-only check cannot open is refused with PROVIDER_STORE_UNAVAILABLE. Every released store is still accepted; preserve a refused store and resolve it before starting this build.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledgers-record-their-format-2286",
+      "items": [
+        "behavior:keys-store-refuse-before-write"
+      ]
+    },
+    {
+      "id": "reject-hosted-store-version-2",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example's Postgres store moves to STORE_VERSION 3 because the collaboration state no longer carries a version field; a scope written by version 2 is refused at open with HostedStoreVersionError, under the scope lock and before any write, and the schedulers skip it. Finish or abandon in-flight collaboration work before upgrading, then provision a new hosted store.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledgers-record-their-format-2286",
+      "items": [
+        "behavior:reject-hosted-store-version-2"
+      ]
+    },
     {
       "id": "pi-agent-skill-paths-config",
       "impact": "additive",
@@ -63,7 +207,7 @@
     {
       "id": "agy-model-confirmation-deadline",
       "impact": "breaking",
-      "summary": "@byok-sdk/client agy starts that request a model may now wait up to the 30 s request deadline (packages/client/vendor/oar/4eb5919/runtimes/antigravity/session.ts:42) before failing a model mismatch; a matching update still confirms the switch immediately. A conflicting config_option_update followed by the requested model now starts the task instead of failing, and a real mismatch reaches task.fail about 30 s after the switch instead of immediately. A Host start timeout shorter than 30 s now fires first and never receives the ModelConfirmationError failure; allow at least the 30 s deadline for agy starts that request a model.",
+      "summary": "@byok-sdk/client agy starts that request a model may now wait up to the 30 s request deadline (packages/client/vendor/oar/552a4f9/runtimes/antigravity/session.ts:42) before failing a model mismatch; a matching update still confirms the switch immediately. A conflicting config_option_update followed by the requested model now starts the task instead of failing, and a real mismatch reaches task.fail about 30 s after the switch instead of immediately. A Host start timeout shorter than 30 s now fires first and never receives the ModelConfirmationError failure; allow at least the 30 s deadline for agy starts that request a model.",
       "migration": "docs/releases/host-upgrade-next-minor.md#agy-model-mismatches-wait-up-to-the-request-deadline",
       "items": [
         "behavior:agy-model-confirmation-deadline"
@@ -76,6 +220,15 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#claude-queued-follow-up-write-failures",
       "items": [
         "behavior:claude-queued-write-failure"
+      ]
+    },
+    {
+      "id": "pi-turn-own-run",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client Pi tasks on the pi-rpc lane send their first prompt with streamingBehavior 'followUp' and end a turn only when the run their own prompt joined settles. A task that starts while a Pi extension's own run is active (a user extension under the default agentUserContext 'inherit', a workspace .pi extension, or agentExtensionPaths) no longer fails non-retryable with 'Agent is already processing': its input joins that run, the turn ends when that run settles, and the turn's events carry the rest of that run's output. Frames written before the task's prompt was accepted or between turns, such as an extension run's settlement, progress, usage and tool events, are no longer reported as the task's events and no longer end its turn; a tool result whose call started before the task joined the run is not reported either. Every extension_error is still reported. A first prompt Pi handles without a run (an extension command) now ends the turn at once instead of waiting for the next settlement. An extension run that is still in its agent_settled hook and starts compaction can leave the first prompt without any response; that start stays pending until the Host's own start deadline (#2300). No Host action is required; a Host that needs task output free of extension runs uses agentUserContext 'excluded' and lists only Host-owned agentExtensionPaths.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pi-tasks-and-extension-runs-2299",
+      "items": [
+        "behavior:pi-turn-own-run"
       ]
     },
     {
@@ -383,6 +536,166 @@
       ]
     },
     {
+      "id": "wire-v7-pair-fencing",
+      "impact": "breaking",
+      "summary": "@byok-sdk/protocol PairRequestSchema requires expectedDeviceDigest: null, or the pairDeviceDigest (PairDeviceDigestSchema, PAIR_DEVICE_DIGEST_NAMESPACE, PairDeviceDigestInput) of the device the client knew as current for its machine. With machineId, POST /byok/pair supersedes only when it names the current device, and otherwise answers 409 PairSupersededResponseSchema (PAIRING_SUPERSEDED_CODE, currentDeviceDigest only) without consuming the code. The 401 is PairingCodeInvalidResponseSchema (PAIRING_CODE_INVALID_CODE). A v6 client gets 400; upgrade the cloud first.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pairing-registration-fence-2045",
+      "items": [
+        "export:@byok-sdk/protocol#PairRequestSchema",
+        "export:@byok-sdk/protocol#pairDeviceDigest",
+        "export:@byok-sdk/protocol#PairDeviceDigestSchema",
+        "export:@byok-sdk/protocol#PAIR_DEVICE_DIGEST_NAMESPACE",
+        "export:@byok-sdk/protocol#PairDeviceDigestInput",
+        "export:@byok-sdk/protocol#PairSupersededResponseSchema",
+        "export:@byok-sdk/protocol#PairSupersededResponse",
+        "export:@byok-sdk/protocol#PAIRING_SUPERSEDED_CODE",
+        "export:@byok-sdk/protocol#PairingCodeInvalidResponseSchema",
+        "export:@byok-sdk/protocol#PairingCodeInvalidResponse",
+        "export:@byok-sdk/protocol#PAIRING_CODE_INVALID_CODE"
+      ]
+    },
+    {
+      "id": "wire-v7-pair-field-bounds",
+      "impact": "breaking",
+      "summary": "@byok-sdk/protocol bounds PairRequest.deviceName and PairResponse.deviceId to 1-64 characters (PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH, PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH), so every field a device stores from a pairing has a bound. A server rejects a longer deviceName with 400; a client refuses a longer deviceId. deviceName, deviceId and tenantId must also be isPairingText: well-formed text with no control character (C0, DEL, C1) and no unpaired surrogate.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "export:@byok-sdk/protocol#PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH",
+        "export:@byok-sdk/protocol#PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH",
+        "export:@byok-sdk/protocol#isPairingText"
+      ]
+    },
+    {
+      "id": "wire-v7-tenant-id-text",
+      "impact": "breaking",
+      "summary": "@byok-sdk/core tenantId() and isTenantId refuse any control character or unpaired surrogate, not only NUL, matching the protocol's isPairingText. A Host that mints such tenant ids changes them before upgrading.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-tenant-id-text"
+      ]
+    },
+    {
+      "id": "wire-v7-pairing-enrollment-port",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud DeviceRegistration and PairingEnrollmentInput require expectedDeviceDigest. DeviceDirectory.register returns DeviceRegistrationResult (registered or conflict) and PairingEnrollment.redeemAndRegister returns PairingEnrollmentResult (registered, conflict, or code_invalid in place of undefined). A custom store checks the fence, supersedes and inserts in one atomic section per (tenant, product, machineId); a conflict writes nothing and consumes no code, and a consumed code with the same binding replays before the fence is read. Run the cloud conformance suite.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pairing-registration-fence-2045",
+      "items": [
+        "export:@byok-sdk/cloud#AuthPlane",
+        "export:@byok-sdk/cloud#InMemoryPairingCodeStore",
+        "export:@byok-sdk/cloud#DeviceDirectory",
+        "export:@byok-sdk/cloud#DeviceRegistration",
+        "export:@byok-sdk/cloud#DeviceRegistrationResult",
+        "export:@byok-sdk/cloud#PairingEnrollment",
+        "export:@byok-sdk/cloud#PairingEnrollmentInput",
+        "export:@byok-sdk/cloud#PairingEnrollmentResult",
+        "export:@byok-sdk/cloud#PairInput",
+        "export:@byok-sdk/cloud-dataplane#PostgresDeviceDirectory",
+        "export:@byok-sdk/cloud-dataplane#PostgresPairingCodeStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceDirectory",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresPairingCodeStore"
+      ]
+    },
+    {
+      "id": "wire-v7-pairing-product-id-bound",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud createPairingCode (and the server's pairing.createPairingCode) refuses a productId longer than PAIRING_CODE_PRODUCT_ID_MAX_LENGTH (64) with ByokCloudError code pairing_product_id_invalid and mints nothing. The device keys its enrollment and every pairDeviceDigest by productId, so it is bounded where it enters.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pairing-registration-fence-2045",
+      "items": [
+        "export:@byok-sdk/cloud#PAIRING_CODE_PRODUCT_ID_MAX_LENGTH"
+      ]
+    },
+    {
+      "id": "wire-v7-pairing-product-id-refused",
+      "impact": "breaking",
+      "summary": "createPairingCode throws ByokCloudError pairing_product_id_invalid for a productId over 64 characters and mints nothing.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pairing-registration-fence-2045",
+      "items": [
+        "behavior:wire-v7-pairing-product-id-refused"
+      ]
+    },
+    {
+      "id": "wire-v7-client-pairing-errors",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client pairing rejects with PairingSupersededError (another pairing of this productId replaced this one while its request was in flight; nothing written), PairingBusyError (retryable; two pairings of one machine at once; retry with the same code) and PairingCodeRejectedError (code unknown, expired or used). FirstPairingAttemptRefusedError is renamed PairingAttemptRefusedError and has no code. PairingInputInvalidError (field deviceName or machineId) refuses an out-of-bound pairing input before anything is staged or sent. AuthResponseInvalidError's cause is optional: a malformed 2xx body carries none, since the parser's message quotes the body.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "export:@byok-sdk/client#PairingSupersededError",
+        "export:@byok-sdk/client#PairingBusyError",
+        "export:@byok-sdk/client#PairingCodeRejectedError",
+        "export:@byok-sdk/client#PairingAttemptRefusedError",
+        "export:@byok-sdk/client#FirstPairingAttemptRefusedError",
+        "export:@byok-sdk/client#PairingInputInvalidError",
+        "export:@byok-sdk/client#AuthResponseInvalidError"
+      ]
+    },
+    {
+      "id": "wire-v7-device-credential-attempt",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client DeviceCredentialBackend implements readPairingAttempt and savePairingAttempt (PairingAttempt) in place of the first-pairing methods; InMemoryDeviceCredentialBackend follows. clearDeviceEnrollment loses clearUnattributedAttempt and DeviceEnrollmentClearErrorCode loses pairing_attempt_unattributed: a v7 attempt always names its store. DeviceRecord drops accessToken and expiresAt, and replace always discards a staged attempt.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "export:@byok-sdk/client#DeviceCredentialBackend",
+        "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
+        "export:@byok-sdk/client#clearDeviceEnrollment",
+        "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode"
+      ]
+    },
+    {
+      "id": "wire-v7-auth-manager-pair",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client AuthManager.pair, reached through BlobClient and InstallSkillPacksOptions, no longer takes the internal custody option; nothing to change unless a Host passed it.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "export:@byok-sdk/client#BlobClient",
+        "export:@byok-sdk/client#InstallSkillPacksOptions"
+      ]
+    },
+    {
+      "id": "wire-v7-pair-gate-split",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client Daemon.pair no longer holds the productId enrollment lock across its request or its E2EE member custody; re-pairing a running daemon shuts it down outside the lock, and member entries are written only while the new enrollment holds. Hosts that relied on another store's pairing waiting for this one get the server fence instead.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-pair-gate-split"
+      ]
+    },
+    {
+      "id": "wire-v7-pair-new-code-fresh-key",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client Daemon.pair stages an attempt on every pairing: the same code resumes it, a new code stages a fresh device key, except a re-pair of the store's own enrollment, which keeps its key.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-pair-new-code-fresh-key"
+      ]
+    },
+    {
+      "id": "wire-v7-v6-enrollment-entry-deleted",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client deletes a wire v6 device-enrollment OS entry, recognized by its format version without reading its key: start deletes it and reports re-pair required, pair deletes it and pairs as a first pairing, clearDeviceEnrollment deletes it. Re-pair every device after the cloud upgrade.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-v6-enrollment-entry-deleted"
+      ]
+    },
+    {
+      "id": "wire-v7-auth-errors-without-server-text",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client pairing and token renewal errors carry only the HTTP status, never the server's response text; read the typed errors instead of parsing messages.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-auth-errors-without-server-text"
+      ]
+    },
+    {
+      "id": "wire-v7-access-token-in-memory",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client no longer persists the access token: the daemon exchanges one with the device key on its first request after start and after a 401, and keeps it in memory. A start costs one /byok/challenge and /byok/token round trip; renewal writes nothing to the OS entry.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-access-token-in-memory"
+      ]
+    },
+    {
       "id": "wire-v7-server-execution-target",
       "impact": "breaking",
       "summary": "@byok-sdk/server follows the wire v7 execution target. DispatchInput (AgentResumeDispatchInput) takes one required target: ExecutionTarget in place of runtime, harnessId and dispatchSelection; pass { lane: 'auto' } for the device's own runtime preference. TaskSnapshot and the task.state ByokServerEvent expose claimedExecutor (a runtime or a harness) in place of claimedRuntime and claimedHarnessId, and SteerRejectedError carries executor in place of runtime. An execution-core intent's fresh execution template must name a concrete target; auto is refused.",
@@ -491,6 +804,157 @@
         "export:@byok-sdk/cloud-dataplane#PostgresE2eeMemberStore",
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresE2eeMemberStore"
+      ]
+    },
+    {
+      "id": "remove-unused-client-aliases",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes AGENT_CONTENT_READ_CAPABILITY_WORKSPACE/_TRANSCRIPT/_ARTIFACT (use AGENT_CONTENT_READ_CAPABILITIES), TOOL_AUTHORIZATION_MODES and TOOL_FILE_ACCESS (the types remain), DaemonEventKind (use DaemonEvent['kind']), and createAgentHomeProjection with AgentHomeProjectionFunction (pass agentHome.projection: { prepare } directly).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#aliases-and-convenience-factories",
+      "items": [
+        "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_ARTIFACT",
+        "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT",
+        "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_WORKSPACE",
+        "export:@byok-sdk/client#TOOL_AUTHORIZATION_MODES",
+        "export:@byok-sdk/client#TOOL_FILE_ACCESS",
+        "export:@byok-sdk/client#DaemonEventKind",
+        "export:@byok-sdk/client#createAgentHomeProjection",
+        "export:@byok-sdk/client#AgentHomeProjectionFunction"
+      ]
+    },
+    {
+      "id": "remove-list-installed-skill-packs",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes listInstalledSkillPacks(); installSkillPacks() reports what it installed and projectSkillPack() copies one pack by name.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#installed-skill-pack-listing",
+      "items": [
+        "export:@byok-sdk/client#listInstalledSkillPacks"
+      ]
+    },
+    {
+      "id": "remove-truth-memory-client",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes TruthMemoryClient, TruthMemoryClientError and their option, input and result types. The cloud truth routes and createStoredDeviceProofSigner() are unchanged.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#truth-memory-client",
+      "items": [
+        "export:@byok-sdk/client#TruthMemoryClient",
+        "export:@byok-sdk/client#TruthMemoryClientError",
+        "export:@byok-sdk/client#TruthMemoryClientErrorCode",
+        "export:@byok-sdk/client#TruthMemoryClientOptions",
+        "export:@byok-sdk/client#TruthMemoryMetric",
+        "export:@byok-sdk/client#TruthManifestQueryInput",
+        "export:@byok-sdk/client#TruthManifestRecord",
+        "export:@byok-sdk/client#TruthSnapshotCandidateInput",
+        "export:@byok-sdk/client#TruthSnapshotWriteInput",
+        "export:@byok-sdk/client#TruthTerminalWriteInput",
+        "export:@byok-sdk/client#TruthWriteBody",
+        "export:@byok-sdk/client#TruthWriteResult",
+        "export:@byok-sdk/client#VerifiedTruthRecord",
+        "export:@byok-sdk/client#LocalMemoryFilter",
+        "export:@byok-sdk/client#MemorySelector"
+      ]
+    },
+    {
+      "id": "runtime-status-inline",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client control status carries versionVerdict, versionChange and the executable inside runtimes[]; the runtimeVersionVerdicts, runtimeVersionChanges and runtimeExecutables side arrays are removed, which changes DiagnosticsSnapshot's control status type. Run status and doctor from the daemon's release.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#runtime-status-carries-every-observation-field-inline",
+      "items": [
+        "export:@byok-sdk/client#DiagnosticsSnapshot"
+      ]
+    },
+    {
+      "id": "runtime-status-side-arrays-refused",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client byok-agent status and doctor refuse a control status from an earlier daemon that still sends runtimeVersionVerdicts, runtimeVersionChanges or runtimeExecutables beside runtimes[]: status reports the live status unavailable with ControlStatusShapeUnsupportedError, and doctor reports the daemon status request failed and probes runtimes locally. Upgrade the CLI and the daemon together.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#runtime-status-carries-every-observation-field-inline",
+      "items": [
+        "behavior:runtime-status-side-arrays-refused"
+      ]
+    },
+    {
+      "id": "runtime-version-verdict-only",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client and /adapters remove RuntimeDetectResult.advisory and RuntimeDetectionAdvisory; versionVerdict { state: 'warn' } is the one unqualified-version warning and validateRuntimeDetectResult() refuses a detect result that still carries advisory. Custom adapters return versionVerdict; Hosts read availability.versionVerdict.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#version-verdict-is-the-one-runtime-version-warning",
+      "items": [
+        "export:@byok-sdk/client#RuntimeDetectResult",
+        "export:@byok-sdk/client#RuntimeDetectionAdvisory",
+        "export:@byok-sdk/client/adapters#RuntimeDetectResult",
+        "export:@byok-sdk/client/adapters#RuntimeDetectionAdvisory"
+      ]
+    },
+    {
+      "id": "daemon-config-unknown-fields-fail-closed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes DaemonConfigFieldRemovedError, the removed_field issue code, DaemonConfigIssue.severity and .migration, DaemonEffectiveConfig.warnings and byok-agent config check --strict; every DaemonConfig issue is an error. The generated daemon-config.schema.json closes every object (additionalProperties: false) and declares the root $schema, so editors refuse the unknown fields the daemon refuses.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#daemonconfig-rejects-unknown-fields",
+      "items": [
+        "export:@byok-sdk/client#DaemonConfigFieldRemovedError",
+        "export:@byok-sdk/client#DaemonConfigIssue",
+        "export:@byok-sdk/client#DaemonConfigIssueCode",
+        "export:@byok-sdk/client#DaemonEffectiveConfig",
+        "config:$schema",
+        "config:agentEgress",
+        "config:agentHome",
+        "config:agentMemory",
+        "config:artifactLimits",
+        "config:branding",
+        "config:deviceAssertion",
+        "config:deviceCredentials",
+        "config:mcpToolsets",
+        "config:piByokLauncher",
+        "config:presence",
+        "config:progressBatch",
+        "config:runtimeEnvironment",
+        "config:sdkHelperHost",
+        "config:serviceEnrollment",
+        "config:toolAuthorization"
+      ]
+    },
+    {
+      "id": "daemon-config-unknown-field-rejected",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client DaemonConfig: an unknown field, including one an earlier release removed (workspaceRoot, gitWorkspace, strictAgentOnly, hostedJournal and the rest), is an unknown_field error from config files and embedded createDaemon (DaemonConfigInvalidError) instead of a warning or DaemonConfigFieldRemovedError. Delete every field byok-agent config check reports.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#daemonconfig-rejects-unknown-fields",
+      "items": [
+        "behavior:daemon-config-unknown-field-rejected"
+      ]
+    },
+    {
+      "id": "agent-memory-outbox-version-error",
+      "impact": "additive",
+      "summary": "@byok-sdk/client adds AgentMemoryOutboxVersionUnsupportedError, the typed refusal of an Agent memory outbox state this build does not read.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-outbox-version-2-is-refused",
+      "items": [
+        "export:@byok-sdk/client#AgentMemoryOutboxVersionUnsupportedError"
+      ]
+    },
+    {
+      "id": "agent-memory-outbox-v2-rejected",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client Agent memory projection refuses a .byok/agent-memory-redacted-outbox-v2.json still in the 0.32.0 version 2 state with AgentMemoryOutboxVersionUnsupportedError instead of upgrading it; the file is not rewritten or deleted. Remove or archive it to resume projection.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-outbox-version-2-is-refused",
+      "items": [
+        "behavior:agent-memory-outbox-v2-rejected"
+      ]
+    },
+    {
+      "id": "todo-config-legacy-location-refused",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client bundled Pi todo extension reads only $XDG_CONFIG_HOME/rpiv-todo/config.json. When XDG_CONFIG_HOME points elsewhere and that file is absent while ~/.config/rpiv-todo/config.json exists, it throws TodoConfigLegacyLocationError naming both paths instead of reading the old file or running on defaults. Move the file under XDG_CONFIG_HOME.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#todo-extension-reads-one-config-location",
+      "items": [
+        "behavior:todo-config-legacy-location-refused"
+      ]
+    },
+    {
+      "id": "mcp-frame-ceiling-single-authority",
+      "impact": "additive",
+      "summary": "@byok-sdk/client/mcp-server MCP_SERVER_MAX_FRAME_BYTES keeps its 1 MiB value and now re-exports the constant the SDK MCP client and HTTP server share.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#mcp-frame-ceiling-has-one-authority",
+      "items": [
+        "export:@byok-sdk/client/mcp-server#MCP_SERVER_MAX_FRAME_BYTES"
       ]
     },
     {
@@ -763,18 +1227,134 @@
   ],
   "changes": [
     {
+      "item": "config:$schema",
+      "change": "added",
+      "after": "optional schema-sha256=00404e686415370f",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:agentEgress",
+      "change": "changed",
+      "before": "optional schema-sha256=0fe1bb45b19bbe3f",
+      "after": "optional schema-sha256=7c33d7337649acb5",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:agentHome",
+      "change": "changed",
+      "before": "optional schema-sha256=66edf8f80ce054e9",
+      "after": "optional schema-sha256=8c5a867aec8e8f93",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:agentMemory",
+      "change": "changed",
+      "before": "optional schema-sha256=0355ed29f3569663",
+      "after": "optional schema-sha256=b194debb42611ec2",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:artifactLimits",
+      "change": "changed",
+      "before": "optional schema-sha256=92efb10e4b237352",
+      "after": "optional schema-sha256=b63ced141cf6b9d4",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:branding",
+      "change": "changed",
+      "before": "optional schema-sha256=f5eaf56d7a1d0cc8",
+      "after": "optional schema-sha256=30b1cfd028418632",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:deviceAssertion",
+      "change": "changed",
+      "before": "optional schema-sha256=67738e44d544c345",
+      "after": "optional schema-sha256=8e4b67cd4089ef2e",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:deviceCredentials",
+      "change": "changed",
+      "before": "optional schema-sha256=f92318979ea72557",
+      "after": "optional schema-sha256=d355d1a17b00b7b8",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:mcpToolsets",
+      "change": "changed",
+      "before": "optional schema-sha256=c398321f7555b326",
+      "after": "optional schema-sha256=fba615fff84b94e3",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:piByokLauncher",
+      "change": "changed",
+      "before": "optional schema-sha256=7c3012d0c95b15da",
+      "after": "optional schema-sha256=a5a36c0fd971f657",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:presence",
+      "change": "changed",
+      "before": "optional schema-sha256=ca5de1d109969e37",
+      "after": "optional schema-sha256=13088095a63c489a",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:progressBatch",
+      "change": "changed",
+      "before": "optional schema-sha256=3f9b54486eda932a",
+      "after": "optional schema-sha256=3e65c5db3b469541",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:runtimeEnvironment",
+      "change": "changed",
+      "before": "optional schema-sha256=25be0c05980d06a5",
+      "after": "optional schema-sha256=3a110b8636d2d43f",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
       "item": "config:runtimes",
       "change": "changed",
       "before": "optional schema-sha256=733c24d0d48a4795",
-      "after": "optional schema-sha256=d0c93f4b002b16c5",
+      "after": "optional schema-sha256=0274d0856fb11b28",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "config:sdkHelperHost",
+      "change": "changed",
+      "before": "optional schema-sha256=54a73cacf0ba88bb",
+      "after": "optional schema-sha256=fe299de91ee27fe1",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:serviceEnrollment",
+      "change": "changed",
+      "before": "optional schema-sha256=2c6116713313cb4b",
+      "after": "optional schema-sha256=19e8773d76c24dc3",
+      "entry": "daemon-config-unknown-fields-fail-closed"
     },
     {
       "item": "config:storage",
       "change": "changed",
       "before": "optional schema-sha256=e89f34f2223d0907",
-      "after": "optional schema-sha256=0e2b685e4a3635ba",
+      "after": "optional schema-sha256=0044d659c81fe859",
       "entry": "grok-session-store"
+    },
+    {
+      "item": "config:toolAuthorization",
+      "change": "changed",
+      "before": "optional schema-sha256=1e3298b66ffff519",
+      "after": "optional schema-sha256=58f8a89f7ff38710",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "entry:@byok-sdk/core/sqlite-node",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
@@ -782,9 +1362,69 @@
       "entry": "k4-settlement-notice"
     },
     {
+      "item": "export:@byok-sdk/bot-collaboration#botLedgerOptions",
+      "change": "added",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#CollaborationState",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SWITCH_EXPORT_VERSION",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#WouldDoMigration",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#commitImport",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#discardImport",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#importForSwitch",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#migrateWouldDo",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#sealedRoutineInstruction",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#supersededDeliveryIds",
       "change": "added",
       "entry": "bot-delivery-supersession"
+    },
+    {
+      "item": "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_ARTIFACT",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_WORKSPACE",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
     },
     {
       "item": "export:@byok-sdk/client#AgentEgressDropReceipt",
@@ -792,9 +1432,29 @@
       "entry": "remove-egress-drop-receipts"
     },
     {
+      "item": "export:@byok-sdk/client#AgentHomeProjectionFunction",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentMemoryOutboxVersionUnsupportedError",
+      "change": "added",
+      "entry": "agent-memory-outbox-version-error"
+    },
+    {
       "item": "export:@byok-sdk/client#AgentSessionHandoffStore",
       "change": "changed",
       "entry": "remove-task-terminal-read"
+    },
+    {
+      "item": "export:@byok-sdk/client#AuthResponseInvalidError",
+      "change": "changed",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#BlobClient",
+      "change": "changed",
+      "entry": "wire-v7-auth-manager-pair"
     },
     {
       "item": "export:@byok-sdk/client#DAEMON_HALT_REASONS",
@@ -802,9 +1462,34 @@
       "entry": "wire-v7-client-negotiation-halt"
     },
     {
+      "item": "export:@byok-sdk/client#DaemonConfigFieldRemovedError",
+      "change": "removed",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfigIssue",
+      "change": "changed",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfigIssueCode",
+      "change": "changed",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEffectiveConfig",
+      "change": "changed",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonEvent",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEventKind",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
     },
     {
       "item": "export:@byok-sdk/client#DaemonLifecycle",
@@ -822,14 +1507,44 @@
       "entry": "grok-agent-user-context"
     },
     {
+      "item": "export:@byok-sdk/client#DeviceCredentialBackend",
+      "change": "changed",
+      "entry": "wire-v7-device-credential-attempt"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
+      "change": "changed",
+      "entry": "wire-v7-device-credential-attempt"
+    },
+    {
+      "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
+      "change": "changed",
+      "entry": "runtime-status-inline"
+    },
+    {
       "item": "export:@byok-sdk/client#ExpiringClassId",
       "change": "changed",
       "entry": "grok-session-store"
     },
     {
+      "item": "export:@byok-sdk/client#FirstPairingAttemptRefusedError",
+      "change": "removed",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
       "item": "export:@byok-sdk/client#GrokAdapterOptions",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#InstallSkillPacksOptions",
+      "change": "changed",
+      "entry": "wire-v7-auth-manager-pair"
+    },
+    {
+      "item": "export:@byok-sdk/client#LocalMemoryFilter",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
     },
     {
       "item": "export:@byok-sdk/client#LocalTeamWorkspace",
@@ -840,6 +1555,46 @@
       "item": "export:@byok-sdk/client#LocalTeamWorkspaceService",
       "change": "changed",
       "entry": "remove-unused-team-workspace-methods"
+    },
+    {
+      "item": "export:@byok-sdk/client#MemorySelector",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#PairingAttemptRefusedError",
+      "change": "added",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#PairingBusyError",
+      "change": "added",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#PairingCodeRejectedError",
+      "change": "added",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#PairingInputInvalidError",
+      "change": "added",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#PairingSupersededError",
+      "change": "added",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeDetectResult",
+      "change": "changed",
+      "entry": "runtime-version-verdict-only"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeDetectionAdvisory",
+      "change": "removed",
+      "entry": "runtime-version-verdict-only"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
@@ -860,6 +1615,96 @@
       "item": "export:@byok-sdk/client#ServiceExitDisposition",
       "change": "removed",
       "entry": "remove-service-exit-disposition"
+    },
+    {
+      "item": "export:@byok-sdk/client#TOOL_AUTHORIZATION_MODES",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#TOOL_FILE_ACCESS",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthManifestQueryInput",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthManifestRecord",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthMemoryClient",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthMemoryClientError",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthMemoryClientErrorCode",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthMemoryClientOptions",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthMemoryMetric",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthSnapshotCandidateInput",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthSnapshotWriteInput",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthTerminalWriteInput",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthWriteBody",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthWriteResult",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#VerifiedTruthRecord",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#clearDeviceEnrollment",
+      "change": "changed",
+      "entry": "wire-v7-device-credential-attempt"
+    },
+    {
+      "item": "export:@byok-sdk/client#createAgentHomeProjection",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#listInstalledSkillPacks",
+      "change": "removed",
+      "entry": "remove-list-installed-skill-packs"
     },
     {
       "item": "export:@byok-sdk/client#openDaemonLog",
@@ -892,6 +1737,16 @@
       "entry": "grok-agent-user-context"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#RuntimeDetectResult",
+      "change": "changed",
+      "entry": "runtime-version-verdict-only"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeDetectionAdvisory",
+      "change": "removed",
+      "entry": "runtime-version-verdict-only"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#RuntimeDetectionRefusalReason",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
@@ -907,6 +1762,16 @@
       "entry": "wire-v7-client-execution-target"
     },
     {
+      "item": "export:@byok-sdk/client/mcp-server#MCP_SERVER_MAX_FRAME_BYTES",
+      "change": "changed",
+      "entry": "mcp-frame-ceiling-single-authority"
+    },
+    {
+      "item": "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
+      "change": "changed",
+      "entry": "wire-v7-device-credential-attempt"
+    },
+    {
       "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
       "change": "changed",
       "entry": "wire-v7-execution-target"
@@ -920,6 +1785,11 @@
       "item": "export:@byok-sdk/cloud#ApprovalTimelineEventSchema",
       "change": "changed",
       "entry": "cloud-approval-identity-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AuthPlane",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud#BoardFeedClient",
@@ -1007,6 +1877,21 @@
       "entry": "e2ee-member-store-in-cloud-stores"
     },
     {
+      "item": "export:@byok-sdk/cloud#DeviceDirectory",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#DeviceRegistration",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#DeviceRegistrationResult",
+      "change": "added",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
       "item": "export:@byok-sdk/cloud#DeviceScopedStores",
       "change": "added",
       "entry": "in-memory-directory-device-state"
@@ -1057,6 +1942,11 @@
       "entry": "device-state-delete-ports"
     },
     {
+      "item": "export:@byok-sdk/cloud#InMemoryPairingCodeStore",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
       "item": "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
       "change": "changed",
       "entry": "wire-v7-cloud-executor"
@@ -1070,6 +1960,31 @@
       "item": "export:@byok-sdk/cloud#NonceStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#PAIRING_CODE_PRODUCT_ID_MAX_LENGTH",
+      "change": "added",
+      "entry": "wire-v7-pairing-product-id-bound"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#PairInput",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#PairingEnrollment",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#PairingEnrollmentInput",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#PairingEnrollmentResult",
+      "change": "added",
+      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud#PendingApproval",
@@ -1202,6 +2117,11 @@
       "entry": "e2ee-composition-opt-ins"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresDeviceDirectory",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresE2eeMemberStore",
       "change": "changed",
       "entry": "e2ee-composition-opt-ins"
@@ -1235,6 +2155,11 @@
       "item": "export:@byok-sdk/cloud-dataplane#PostgresNonceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresPairingCodeStore",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresPresenceStore",
@@ -1362,6 +2287,11 @@
       "entry": "e2ee-composition-opt-ins"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceDirectory",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresE2eeMemberStore",
       "change": "changed",
       "entry": "e2ee-composition-opt-ins"
@@ -1385,6 +2315,11 @@
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresNonceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPairingCodeStore",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPresenceStore",
@@ -1450,6 +2385,71 @@
       "item": "export:@byok-sdk/core#PresenceStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#SqliteReadOnlyOpenError",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#readSqliteFileUnchanged",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#sqliteFileUri",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#sqliteOpenPath",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
+      "change": "changed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#MacOsKeychainSecretStoreOptions",
+      "change": "changed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#PROVIDER_PROFILE_TRUTH_RECORD_KEY",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#ProviderProfileStoreMigration",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#TruthStoreProviderProfileStore",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#TruthStoreProviderProfileStoreOptions",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#migrateProviderProfileStore",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#scopeSecretStore",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#listPiCatalogModels",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
     },
     {
       "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
@@ -1562,6 +2562,31 @@
       "entry": "wire-v7-execution-target"
     },
     {
+      "item": "export:@byok-sdk/protocol#PAIRING_CODE_INVALID_CODE",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PAIRING_SUPERSEDED_CODE",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PAIR_DEVICE_DIGEST_NAMESPACE",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH",
+      "change": "added",
+      "entry": "wire-v7-pair-field-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH",
+      "change": "added",
+      "entry": "wire-v7-pair-field-bounds"
+    },
+    {
       "item": "export:@byok-sdk/protocol#PREPARED_OFFER_DECLINE_CODES",
       "change": "added",
       "entry": "wire-v7-decline-codes"
@@ -1575,6 +2600,41 @@
       "item": "export:@byok-sdk/protocol#PROVIDER_PROFILE_BINDING_CAPABILITY",
       "change": "removed",
       "entry": "wire-v7-retired-flags-and-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PairDeviceDigestInput",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PairDeviceDigestSchema",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PairRequestSchema",
+      "change": "changed",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PairSupersededResponse",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PairSupersededResponseSchema",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PairingCodeInvalidResponse",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PairingCodeInvalidResponseSchema",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
     },
     {
       "item": "export:@byok-sdk/protocol#PreparedOfferDeclineCode",
@@ -1712,9 +2772,19 @@
       "entry": "wire-v7"
     },
     {
+      "item": "export:@byok-sdk/protocol#isPairingText",
+      "change": "added",
+      "entry": "wire-v7-pair-field-bounds"
+    },
+    {
       "item": "export:@byok-sdk/protocol#offerSelectionViolation",
       "change": "changed",
       "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#pairDeviceDigest",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
     },
     {
       "item": "export:@byok-sdk/protocol#readSteerRefusalReason",
@@ -1797,9 +2867,48 @@
       "entry": "k4-settlement-notice"
     },
     {
+      "item": "export:@byok-sdk/server/execution-core#HostLedger",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostLedgerOptions",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
       "item": "export:@byok-sdk/server/execution-core#HostOptions",
       "change": "changed",
       "entry": "k4-settlement-notice"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostStoreFormatError",
+      "change": "added",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#LedgerDump",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#LedgerState",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "store:bot-collaboration-ledger",
+      "change": "changed",
+      "before": "ledger=1 collaboration=3 ddl-sha256=c5721e95abe5c4d1",
+      "after": "k4=1 k8=3 ddl-sha256=10c5abc21474e995",
+      "entry": "host-ledger-format-table"
+    },
+    {
+      "item": "store:client-journal",
+      "change": "changed",
+      "before": "ddl-sha256=dc9f3290dd91055a",
+      "after": "ddl-sha256=e8335dbafcb630c4",
+      "entry": "client-journal-exact-format"
     },
     {
       "item": "store:cloud-dataplane-postgres",

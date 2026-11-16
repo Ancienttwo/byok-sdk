@@ -112,6 +112,7 @@ describe('the embedded agent-memory entry module graph', () => {
     // #2018: agent-home.ts releases its gates through the leaf util/with-release.ts, which imports only util/path-mutation-gate.ts.
     // #2200 splits the helper facade into its private implementation and probe
     // outcome/budget leaf. Both stay within memory filesystem authority.
+    // The stdio server's frame ceiling is the import-free leaf mcp/frame-limit.ts, shared with the MCP client.
     expect(GRAPH.modules).toEqual([
       'agent-home-readers.ts',
       'agent-home.ts',
@@ -130,6 +131,7 @@ describe('the embedded agent-memory entry module graph', () => {
       'mcp-server/dispatch.ts',
       'mcp-server/framing.ts',
       'mcp-server/index.ts',
+      'mcp/frame-limit.ts',
       'resident-memory.ts',
       'sdk-reserved-mcp.ts',
       'util/agent-memory-helper-digest.ts',

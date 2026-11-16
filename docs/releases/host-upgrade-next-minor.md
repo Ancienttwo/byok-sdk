@@ -4,6 +4,132 @@ Draft checklist for changes after 0.43.0. Earlier Hosts must first apply the [0.
 
 Add future Host-visible changes here; do not amend the 0.43.0 cut's upgrade-manifest entries. The 0.43.0 release record archived that manifest unchanged and established the 0.43.0 release snapshot as the next baseline.
 
+## Retired compatibility paths
+
+Remove `migrateProviderProfileStore` from AiphaBee's `user-installer.ts` and
+`byok-host` coordinator. Remove `migrateWouldDo` and `WouldDoMigration` from
+`toolset-migration.ts` and the `byok-host` bot-collaboration re-exports.
+Provider profile stores with an earlier provider-kind schema are refused with
+`PROVIDER_STORE_SCHEMA_STALE`; would-do ledger rows without `turnId` are refused
+with `would_do_unsupported_old`. Keep the old files intact and explicitly
+configure a separate current store. Hosted stores also reject would-do rows
+held in an old frame or lacking `turnId` without converting or archiving them.
+Hosted stores with an old `entity_kind_check` are refused with
+`hosted_schema_unsupported_old` before any DDL. The server ledger opening
+boundary is handled separately by #2286.
+
+`scopeSecretStore`, `listPiCatalogModels`, `sealedRoutineInstruction`, the
+TruthStore provider profile adapter, and the local Host switch importer and its
+commit/discard APIs are removed. Use `SecretStore.scope(secretScopeId(scope))`,
+read model choices from `modelRouteView`, and construct the instruction at the
+member endpoint. Hosts using the TruthStore adapter must configure a supported
+profile store. Local Host switch export remains available and is to be evaluated
+separately; there is no local import path for its peer's exported document.
+
+## SQLite stores decide their format before any write (#2286)
+
+A store that refuses an older file now refuses it before it opens the file for
+writing, sets a pragma such as `journal_mode = WAL` or `auto_vacuum`, or runs
+DDL. The refused file keeps its bytes, and no `-wal`, `-shm` or `-journal` file
+appears next to it.
+
+The new entry `@byok-sdk/core/sqlite-node` exports
+`readSqliteFileUnchanged(path, readMetadata)`. It opens an existing, non-empty
+file read-only and immutable, runs `readMetadata` on the main file and closes
+it; it returns `undefined` for `:memory:`, a missing path or a zero-length
+file. A copy-and-own Host store can call it with its own format check before
+its writable open. The core root does not export it. Its functions need Node:
+they load `node:sqlite` and `node:fs` only when called, so a Worker bundle that
+reaches `HostLedger` through `@byok-sdk/bot-collaboration/host-kit` still
+resolves the entry.
+
+`@byok-sdk/client`:
+
+- The local task journal has no version row. It is current when its tables and
+  columns are exactly this build's. Any other journal, including one that still
+  holds the retired `local_artifact_ref`, `local_cleanup_candidate` or
+  `local_storage_usage` table, is refused with `JournalUnavailableError` and
+  stays in place; startup no longer drops those tables, and a format refusal is
+  no longer moved to `quarantine/`. A file that SQLite cannot read is still
+  quarantined.
+- A journal that the read-only check cannot open is refused with
+  `JournalUnavailableError` and stays in place; it is not quarantined. Other
+  stores that call `readSqliteFileUnchanged` get `SqliteReadOnlyOpenError` in
+  the same case. On Windows the check opens a path past `MAX_PATH` in the
+  same `\\?\` extended-length form as the writable open: both name the file
+  through `sqliteOpenPath` / `sqliteFileUri` from `@byok-sdk/core/sqlite-node`.
+- A durable replica written in another pi-durable schema version than the
+  pinned one is refused instead of migrated forward.
+- A replica lock path that holds another database, such as the replica of a
+  task whose id ends in `.sqlite.lock`, is refused instead of written.
+
+Every released journal and replica is already current. Preserve or export a
+refused store and resolve it before starting this build.
+
+The copy-and-own examples follow the same order: the Desktop example
+`HostStore`, the basic example's Clarification and goal/btw stores and the MCP
+example `BetaLedger`. The basic example's two stores now record their format in
+a `host_format` table, one row per store, so they can share one Host database.
+A Host database with their tables but without `host_format` predates it and is
+refused; recreate it with this version or move its rows yourself.
+
+Not handled: the format is read from the main file. A store created by an older
+version that crashed before its first checkpoint holds its schema only in its
+WAL; its format is decided on a writable connection, and when that connection
+closes after the refusal SQLite checkpoints the WAL into the main file and
+removes the `-wal` and `-shm` files. The refused store keeps its logical content,
+but its file bytes change. This applies to every store above, the Host ledger and
+the keys store below. Such a store holds almost no data. New stores checkpoint
+right after creating their schema, which keeps that window short.
+
+## Host ledgers record their format (#2286)
+
+`@byok-sdk/server/execution-core` `HostLedger` records the ledger's format in a
+`host_store_format(owner, version)` table, one row per layer: `k4` for the ledger
+itself and `k8` for a Bot collaboration ledger. It is the only format authority;
+the ledger body and the Bot collaboration state no longer carry a `version`. An
+existing ledger is decided on its unchanged main file, before the writable
+open, pragmas or DDL, and is refused with `HostStoreFormatError` (code
+`host_store_format_unsupported`) when a row's version differs, an expected layer
+is missing, an unknown layer is present, or it has tables but no
+`host_store_format`. A refused file is not migrated, repaired or deleted.
+
+Every ledger written by 0.43.0 or earlier has no `host_store_format` and is
+refused. Before you upgrade, finish or abandon in-flight Bot collaboration work
+(open turns, delegations, routines and any topology switch). After the upgrade,
+open a new ledger file at a new path; keep the old file if you need its history,
+since this build does not read it.
+
+- `HostLedgerOptions.expectedFormats` names each layer's row besides `k4`;
+  `ledger.formats` exposes the rows.
+- `@byok-sdk/bot-collaboration` exports `botLedgerOptions` (the compact veto and
+  the `k8` format). Open every Bot ledger with it, for example
+  `new HostLedger(file, tenant, { ...botLedgerOptions, projectionOutboxLimits })`.
+  `BotCollaboration` refuses a ledger opened without it, and `inspectLedger`
+  reports an older ledger as `rejected`.
+- `LedgerState.version` and `CollaborationState.version` are removed.
+  `LedgerDump` and `SWITCH_EXPORT_VERSION` are now 2, so a switch dump or switch
+  export written by an earlier release is refused; complete a topology switch
+  before upgrading.
+
+The hosted bot-collaboration example (Postgres) follows the same decision: its
+`STORE_VERSION` is now 3, and a scope written by version 2 is refused when it is
+opened with `HostedStoreVersionError`, under the scope lock and before any
+write; the schedulers skip it. Finish or abandon its in-flight collaboration
+work before upgrading, then provision a new hosted store (a new schema or
+database).
+
+`@byok-sdk/keys` `SqliteProviderProfileStore` decides an existing store's format
+the same way, before `journal_mode` or DDL. A store with `provider_profile` but
+without one of its custody tables is refused with `PROVIDER_STORE_SCHEMA_STALE`
+instead of having the table created; a store the read-only check cannot open is
+refused with `PROVIDER_STORE_UNAVAILABLE`. Every released keys store is still
+accepted. Its configuration lock file is opened through `sqliteOpenPath` like
+the store.
+
+`sqliteOpenPath` from `@byok-sdk/core/sqlite-node` now returns `:memory:`
+unchanged on Windows too.
+
 ## Bot collaboration inbound conversation identity (#2250)
 
 `@byok-sdk/bot-collaboration` `inboundKey(message)` now hashes channel,
@@ -74,9 +200,46 @@ Host action: if your product relied on Grok tasks to keep the user's Grok
 current, update Grok outside SDK tasks, for example by having the user run
 Grok or its installer.
 
-## OAR 0.109.0 (#2235)
+## Pi tasks and extension runs (#2299)
 
-The vendored OAR moves from 0.105.0 to 0.109.0 (`packages/client/vendor/oar/4eb5919/`, fork branch `byok/0.109.0`). No public type, export or configuration field changes. The upgrade manifest declares the three behavior-only breaking changes below as `model-confirmation-non-retryable`, `agy-model-confirmation-deadline` and `claude-queued-write-failure`.
+A Pi extension can start a run of its own: from `session_start`, a timer, or
+one of its hooks. Pi RPC events name no run, so before this change a pi-rpc
+task could lose its start or its turn to such a run.
+
+- A task that starts while an extension run is active used to fail as
+  non-retryable `RuntimeExecutionFailure` `Agent is already processing`. Its
+  first prompt now carries `streamingBehavior: 'followUp'`, so the input joins
+  that run. The turn ends when that run settles, and its events include the
+  rest of that run's output.
+- An extension run that settles before the task's prompt is accepted, or that
+  runs between turns, no longer ends the task's turn early. Frames written
+  outside the task's turn, such as that run's progress, usage and tool
+  events, are no longer reported as the task's events. When the task's input
+  joins a run in the middle of a tool call, that call's result is not reported
+  either. Every `extension_error` is still reported, because Pi does not say
+  which prompt or run it belongs to.
+- A first prompt that Pi handles without a run, such as an extension command,
+  now ends the turn at once instead of waiting for the next settlement.
+
+The turn boundary relies on Pi 1.5.2's implementation order (runs never
+overlap; a started prompt is answered before its run begins), which a test
+pins against the installed Pi.
+
+One case is not covered. When an extension run is still in its `agent_settled`
+hook and that hook starts compaction, Pi defers the task's first prompt and
+then drops it without any response. The start stays pending until the Host's
+own start deadline; #2300 bounds it inside the SDK.
+
+Host action: none. Extensions reach a pi-rpc task under the default
+`agentUserContext: 'inherit'` (the user's Pi agent directory and settings
+packages, and `.pi/extensions` in the task workspace) and through
+`agentExtensionPaths` in either mode. A Host that needs task output free of
+extension runs uses `agentUserContext: 'excluded'` and lists only Host-owned
+`agentExtensionPaths`.
+
+## OAR 0.110.0 (#2235, #2296)
+
+The vendored OAR moves from 0.105.0 to 0.110.0 (`packages/client/vendor/oar/552a4f9/`, fork branch `byok/0.110.0`). No public type, export or configuration field changes. The upgrade manifest declares the three behavior-only breaking changes below as `model-confirmation-non-retryable`, `agy-model-confirmation-deadline` and `claude-queued-write-failure`.
 
 ### Unconfirmed models fail non-retryable (Codex, agy)
 
@@ -86,7 +249,7 @@ Do not retry these starts as transient: the same request asks for the same model
 
 ### agy model mismatches wait up to the request deadline
 
-agy confirms a model switch from its `config_option_update` notifications. 0.43.0 failed the start on the first notification that reported another model (`packages/client/vendor/oar/2f81b34/shared/acp/config-updates.ts:32-35`). Now a conflicting notification is only an observation: a notification with the requested model still confirms the switch immediately, and the start fails only when the request's deadline runs out with agy still reporting another model (`packages/client/vendor/oar/4eb5919/shared/acp/config-updates.ts:50-57`). That deadline is agy's request timeout, 30 s (`packages/client/vendor/oar/4eb5919/runtimes/antigravity/session.ts:42`). The Host sees two differences:
+agy confirms a model switch from its `config_option_update` notifications. 0.43.0 failed the start on the first notification that reported another model (`packages/client/vendor/oar/2f81b34/shared/acp/config-updates.ts:32-35`). Now a conflicting notification is only an observation: a notification with the requested model still confirms the switch immediately, and the start fails only when the request's deadline runs out with agy still reporting another model (`packages/client/vendor/oar/552a4f9/shared/acp/config-updates.ts:50-57`). That deadline is agy's request timeout, 30 s (`packages/client/vendor/oar/552a4f9/runtimes/antigravity/session.ts:42`). The Host sees two differences:
 
 - A conflicting notification followed by the requested model now starts the task; 0.43.0 sent `task.fail`.
 - A real mismatch reaches the Host as `task.fail` about 30 s after the switch instead of immediately.
@@ -101,7 +264,7 @@ agy's ACP command now carries `--gemini-dir <owned home>/.gemini`, the directory
 
 `ClaudeAdapter` session `followUp()` sends a busy-refused instruction through OAR's queue. OAR now always holds a queued input (record `queued: "adapter"`) and writes it to Claude as a separate `toRuntime` prompt request when Claude's own turn ends. Host events for a queued follow-up are unchanged; the held record and the prompt request are internal records and are not projected to events.
 
-One failure path changes. If Claude's own turn ends between the busy refusal and the queue, 0.43.0 wrote the input inside `queue()` (`packages/client/vendor/oar/2f81b34/shared/stream-json/session.ts:247-259`), and a failed stdin write rejected `followUp()` with retryable `RuntimeExecutionFailure` `claude follow-up instruction transport failed` (`packages/client/src/adapters/claude/claude-adapter.ts:772-775`). The write now happens after the queue request is answered (`packages/client/vendor/oar/4eb5919/shared/stream-json/session.ts:253-263`), outside the writes `followUp()` awaits, so `followUp()` resolves. The write failure fails the Claude process (`packages/client/src/adapters/claude/stream-session.ts:94-99`), and the session's `events` iteration then throws the retryable run failure for the ended process: `claude runtime event transport failed` or `claude runtime process ended before a terminal result frame` (`packages/client/src/adapters/claude/claude-adapter.ts:671-684`).
+One failure path changes. If Claude's own turn ends between the busy refusal and the queue, 0.43.0 wrote the input inside `queue()` (`packages/client/vendor/oar/2f81b34/shared/stream-json/session.ts:247-259`), and a failed stdin write rejected `followUp()` with retryable `RuntimeExecutionFailure` `claude follow-up instruction transport failed` (`packages/client/src/adapters/claude/claude-adapter.ts:772-775`). The write now happens after the queue request is answered (`packages/client/vendor/oar/552a4f9/shared/stream-json/session.ts:253-263`), outside the writes `followUp()` awaits, so `followUp()` resolves. The write failure fails the Claude process (`packages/client/src/adapters/claude/stream-session.ts:94-99`), and the session's `events` iteration then throws the retryable run failure for the ended process: `claude runtime event transport failed` or `claude runtime process ended before a terminal result frame` (`packages/client/src/adapters/claude/claude-adapter.ts:671-684`).
 
 This affects only a Host that embeds `ClaudeAdapter` directly; the daemon does not call `followUp()`, so daemon Hosts need no change. An embedding Host must treat a resolved `followUp()` as accepted for delivery, not as written, and handle the failure from `events` as it handles any mid-turn process failure: the follow-up was not delivered, so resend it on a new session.
 
@@ -159,6 +322,35 @@ inspect `terminalError` / `processExited` for RPC termination. `dispose()` remai
 the explicit process-tree cleanup receipt; calling it initiates termination and
 is not a passive close wait. Internal process-tree cleanup still waits for the
 client's private close promise.
+
+### Aliases and convenience factories
+
+`AGENT_CONTENT_READ_CAPABILITY_WORKSPACE`, `AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT`
+and `AGENT_CONTENT_READ_CAPABILITY_ARTIFACT` are removed; read the same names from
+`AGENT_CONTENT_READ_CAPABILITIES.workspace`, `.transcript` and `.artifact`.
+`TOOL_AUTHORIZATION_MODES` and `TOOL_FILE_ACCESS` are removed; the
+`ToolAuthorizationMode` and `ToolFileAccess` types remain. `DaemonEventKind` is
+removed; use `DaemonEvent['kind']`.
+
+`createAgentHomeProjection()` and `AgentHomeProjectionFunction` are removed. Pass
+the projection object itself: `agentHome.projection: { prepare: async ({ agentRef, cwd }) => { ... } }`.
+
+### Installed skill-pack listing
+
+`listInstalledSkillPacks()` is removed. `installSkillPacks()` returns what it
+installed and kept, and `projectSkillPack()` copies one installed pack by name;
+a Host that needs an inventory keeps the names it installed.
+
+### Truth memory client
+
+`TruthMemoryClient`, `TruthMemoryClientError` and their option, input and result
+types (`LocalMemoryFilter`, `MemorySelector`, `TruthManifestQueryInput`,
+`TruthManifestRecord`, `TruthMemoryClientErrorCode`, `TruthMemoryClientOptions`,
+`TruthMemoryMetric`, `TruthSnapshotCandidateInput`, `TruthSnapshotWriteInput`,
+`TruthTerminalWriteInput`, `TruthWriteBody`, `TruthWriteResult`,
+`VerifiedTruthRecord`) are removed. No Host used them. The cloud truth routes and
+`createStoredDeviceProofSigner()` are unchanged; a Host that writes truth records
+calls those routes with a device proof from that signer.
 
 ## Blocked Turn projection ids (#2245)
 
@@ -524,6 +716,90 @@ A plaintext `task.steer` text is at most 65,536 UTF-8 bytes
 enqueues. A sealed steer is not checked on the device. `conn.hello` carries
 at most 64 capability flags.
 
+### Pairing registration fence (#2045)
+
+`POST /byok/pair` fences machine supersession with a compare-and-set on the
+machine's current device. See
+"Registration fence" in [§6.1](../protocol.md#61-pairing--post-byokpair-v2).
+
+- `PairRequest` requires `expectedDeviceDigest` (`null` or a
+  `pairDeviceDigest`). A v6 client gets `400`.
+- `401` carries `code: 'pairing_code_invalid'`. The new `409`
+  `pairing_superseded` carries only `currentDeviceDigest`, and its code stays
+  redeemable.
+- Custom cloud stores: `DeviceRegistration` and `PairingEnrollmentInput`
+  require `expectedDeviceDigest`. `DeviceDirectory.register` returns
+  `DeviceRegistrationResult` (`registered` or `conflict`), and
+  `PairingEnrollment.redeemAndRegister` returns `PairingEnrollmentResult`
+  (`registered`, `conflict` or `code_invalid` in place of `undefined`).
+  With `machineId`, the fence check, the supersession and the insert form
+  one atomic section per machine; a conflict writes nothing and consumes no
+  code. The cloud conformance suite has a case for each rule.
+- `createPairingCode` refuses a `productId` longer than 64 characters
+  (`PAIRING_CODE_PRODUCT_ID_MAX_LENGTH`) with `ByokCloudError` code
+  `pairing_product_id_invalid`, and mints nothing. Hosts with longer product
+  ids shorten them before upgrading.
+- The in-memory, SQLite and Postgres reference stores implement the fence.
+  Postgres serializes registrations of one machine with
+  `pg_advisory_xact_lock`; no schema change.
+
+#### Client pairing
+
+- `Daemon.pair()` and `byok-agent pair` reject with three new errors:
+  `PairingSupersededError` (another pairing of this `productId` replaced this
+  one while its request was in flight; nothing was written), `PairingBusyError`
+  (`retryable: true`; two pairings of the same machine ran at once; retry with
+  the same code) and `PairingCodeRejectedError` (the code is unknown, expired
+  or used; pair with a new code).
+- `FirstPairingAttemptRefusedError` is renamed `PairingAttemptRefusedError`
+  and has no `code`: its only cause is another store's staged attempt.
+- `pairing_attempt_unattributed` and
+  `clearDeviceEnrollment({ clearUnattributedAttempt })` are removed: a v7
+  attempt always names its store. Hosts that handled them (AiphaBee:
+  aiphabee#1384) drop that path.
+- An injected `DeviceCredentialBackend` implements `readPairingAttempt` and
+  `savePairingAttempt` in place of `readFirstPairingAttempt` and
+  `saveFirstPairingAttempt`; the attempt type is `PairingAttempt`.
+- Every pairing stages an attempt, including a re-pair. A retry with the same
+  code resumes it; a new code stages a fresh key, except a re-pair of the
+  store's own enrollment, which keeps its key.
+- Pairing no longer holds the `productId` lock across its request or across
+  its E2EE member custody. Re-pairing a running daemon shuts it down outside
+  the lock; the member entries are written only while the new enrollment
+  still holds.
+- A pairing or renewal error carries only the HTTP status, never the server's
+  response text. A malformed `2xx` body is `AuthResponseInvalidError` with no
+  `cause`.
+- **Wire bounds.** `PairRequest.deviceName` and `PairResponse.deviceId` are
+  1 to 64 UTF-16 code units (`PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH`,
+  `PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH`) and a tenant id 1 to 200, of
+  well-formed text without control characters. Code units, not code points:
+  an astral character such as an emoji counts as two. One check,
+  `isPairingText(value, maxUnits)`, owns both length and text at every
+  boundary. The core tenant id mint (`tenantId`, `isTenantId`) now refuses any
+  control character or unpaired surrogate, not only NUL; a Host that mints
+  tenant ids with such characters changes them before upgrading. A client
+  refuses a longer `deviceId` as `AuthResponseInvalidError` and writes
+  nothing. These bounds are the wire contract, under which the largest OS
+  credential entry measures 2,106 bytes; the client guarantees the 2,400-byte
+  fit by checking the encoded entry before every write, and a pairing
+  validates everything it writes before it writes `device.json`. A Host whose
+  hostnames exceed 64 code units sets `deviceName`: `config check` reports it, and
+  pairing throws `PairingInputInvalidError` (`field: 'deviceName'`). A
+  `machineId` resolver must return a lowercase hex SHA-256, or pairing throws
+  `PairingInputInvalidError` (`field: 'machineId'`).
+- **The access token is no longer persisted.** `DeviceRecord` (and
+  `DeviceCredentialBackend.read` and `replace`) carries no `accessToken` or
+  `expiresAt`. The daemon exchanges a token with the device key on its first
+  request after start and after a `401`, and keeps it in memory: a start costs
+  the `/byok/challenge` and `/byok/token` round trips once. Renewal writes
+  nothing. An injected `DeviceCredentialBackend` drops those two fields, and
+  its `replace` always discards a staged attempt.
+- **v6 OS entry.** The client reads the OS entry's format version and never
+  decodes a v6 entry. `start` deletes it and reports re-pair required, pairing
+  deletes it and pairs as a first pairing, and a clear deletes it. Re-pair
+  every device after the cloud upgrade, as the operator order above says.
+
 ### Cloud (`@byok-sdk/cloud`)
 
 - **Claim and terminal executor.** The cloud records the winning claim's
@@ -716,3 +992,85 @@ use the replacement named here.
   wire v7 starts on a new database. The retired-id fence stays: a task id in
   `task_agentless_retired` still refuses a new offer with
   `agent_task_already_exists`.
+
+## Runtime status carries every observation field inline
+
+`@byok-sdk/client` control `status` (`byok-agent status`, `doctor`) now returns
+each runtime's `versionVerdict`, `versionChange`, `executablePath` and
+`executableSource` inside `runtimes[]`, like `Daemon.status()`. The
+`runtimeVersionVerdicts`, `runtimeVersionChanges` and `runtimeExecutables` side
+arrays are gone. A status from an earlier daemon that still sends them is
+refused (`ControlStatusShapeUnsupportedError`): `status` reports the live status
+unavailable, and `doctor` reports the daemon status request failed and probes
+runtimes locally. Run `status` and `doctor` from the same release as the daemon.
+Audit records and the support bundle still carry neither the verdict, the
+restart comparison nor the executable path.
+
+## Version verdict is the one runtime version warning
+
+`RuntimeDetectResult.advisory` and the `RuntimeDetectionAdvisory` type are
+removed. An unqualified runtime version is reported only as
+`versionVerdict: { state: 'warn', qualifiedVersion }`, and
+`RuntimeObservation.qualifiedVersion` is that warning's projection. A custom
+runtime adapter whose `detect()` still returns `advisory` is refused by
+`validateRuntimeDetectResult()`; return `versionVerdict` instead (or
+`runtimeVersionDetectionFields()` output). A Host that read
+`availability.advisory.qualifiedVersion` reads
+`availability.versionVerdict?.state === 'warn' ? availability.versionVerdict.qualifiedVersion : undefined`.
+
+## Agent memory outbox version 2 is refused
+
+An Agent home whose `.byok/agent-memory-redacted-outbox-v2.json` still holds the
+0.32.0 version 2 state is no longer upgraded in memory. Memory projection for
+that home fails with `AgentMemoryOutboxVersionUnsupportedError`
+(`stateVersion: 2`); the file is neither read further, rewritten nor deleted, and
+a higher writer epoch does not replace it. Remove or archive the file to resume
+projection. Its pending memory mutations, if any, are not published.
+
+## Todo extension reads one config location
+
+The bundled Pi todo extension reads its settings only from
+`$XDG_CONFIG_HOME/rpiv-todo/config.json` (`~/.config/rpiv-todo/config.json`
+when `XDG_CONFIG_HOME` is unset). It no longer falls back to
+`~/.config/rpiv-todo/config.json` when `XDG_CONFIG_HOME` points elsewhere:
+if the `XDG_CONFIG_HOME` file is absent and the old one exists, loading the
+extension's config throws `TodoConfigLegacyLocationError` naming both paths.
+Only the old file's existence is checked; its content is never read. With a
+todo config at the old location, Pi reports this error when it loads the todo
+extension; moving the file fixes it.
+
+## DaemonConfig rejects unknown fields
+
+`@byok-sdk/client` `validateDaemonConfig()`, `checkDaemonConfig()`,
+`createDaemon()` / `createDaemonWithAdapters()` and the `byok-agent` config
+loader now refuse every unknown `DaemonConfig` field as an `unknown_field`
+error, with a "did you mean" hint when one is close. Before, an unknown field was
+a warning and the daemon started (Q4'), and a field removed in an earlier
+release (`permissionDefaults`, `agentEgress.sanitizer`, `mcpLaunchCwd`,
+`toolImplementationAuthority`, `hostedJournal`, `strictAgentOnly`,
+`gitWorkspace`, `workspaceRoot`, `resultDocument`,
+`maxConcurrentMutableSessionsPerAgentHome`, `durablePi`,
+`agentMemoryFilesystem`) threw `DaemonConfigFieldRemovedError`. Those fields
+are now unknown fields too: an embedded Host gets `DaemonConfigInvalidError`,
+and the CLI exits with the config error. `overrides.hostedJournal` and
+`overrides.gitWorkspace` throw a `TypeError`.
+
+Removed with it: `DaemonConfigFieldRemovedError` (and its setup-catalog code
+`daemon_config_field_removed`), the `removed_field` issue code,
+`DaemonConfigIssue.severity` and `.migration` (every issue is an error),
+`DaemonEffectiveConfig.warnings` (also gone from `Daemon.status().config`) and
+`byok-agent config check --strict`, which now prints usage. A config that
+rolls back to an older daemon no longer starts with fields that release does
+not know; remove them first. Run `byok-agent config check` against each config
+file before upgrading and delete every field it reports. The published
+`daemon-config.schema.json` now closes every object (`additionalProperties:
+false`) and declares the root `$schema`, so an editor that applies it flags
+the same unknown fields.
+
+## MCP frame ceiling has one authority
+
+`@byok-sdk/client/mcp-server` `MCP_SERVER_MAX_FRAME_BYTES` is unchanged at
+1 MiB. It is now a re-export of the same constant the SDK MCP client's read
+buffer and the HTTP server's `maxOutboundFrameBytes` default use, so the three
+can no longer drift apart. No Host change.
+

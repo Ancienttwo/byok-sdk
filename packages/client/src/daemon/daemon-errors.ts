@@ -1,25 +1,5 @@
-import { PROTOCOL_VERSION } from '@byok-sdk/protocol';
+import { PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH, PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import type { DeviceMetadata } from './device-credential-store.js';
-
-/**
- * A `DaemonConfig` field that no longer exists was supplied. Construction
- * refuses it rather than ignoring it, so a host upgrading across a removal
- * learns at startup which seam is gone instead of silently losing behavior.
- */
-export class DaemonConfigFieldRemovedError extends Error {
-  readonly code = 'daemon_config_field_removed' as const;
-
-  constructor(
-    /** The removed path, e.g. `resultDocument` or `agentEgress.sanitizer`. */
-    readonly field: string,
-    message: string,
-    /** Repo-relative `.md#anchor` of the migration note (#1094). */
-    readonly migration: string,
-  ) {
-    super(message);
-    this.name = 'DaemonConfigFieldRemovedError';
-  }
-}
 
 export type DaemonJournalProtocolRecord = 'recovery-offer' | 'pending-terminal';
 
@@ -86,23 +66,70 @@ export class DeviceStoreBindingMismatchError extends Error {
   }
 }
 
-const PAIRING_ATTEMPT_MESSAGES = {
-  store_not_bound: 'another storeDir staged the first-pairing attempt of this productId; nothing was written. Pair with replaceOtherStore (--replace-other-store) to discard it',
-  pairing_attempt_unattributed: 'the first-pairing attempt of this productId names no storeDir; nothing was written. Clear it with clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }), then pair',
-} as const;
+/**
+ * A pairing refused to reuse a staged pairing attempt another storeDir of
+ * this productId staged (#1964, #2033), by the same rule as an enrollment
+ * clear. Nothing was written; pairing with `replaceOtherStore`
+ * (`--replace-other-store`) discards that attempt.
+ */
+export class PairingAttemptRefusedError extends Error {
+  constructor() {
+    super('another storeDir staged the pairing attempt of this productId; nothing was written. Pair with replaceOtherStore (--replace-other-store) to discard it');
+    this.name = 'PairingAttemptRefusedError';
+  }
+}
 
 /**
- * A pairing refused to reuse a staged first-pairing attempt this storeDir
- * cannot prove it staged (#1964, #2033), by the same rule as an enrollment
- * clear: `store_not_bound` when another storeDir staged it (pairing with
- * `replaceOtherStore` discards it), `pairing_attempt_unattributed` when it
- * names no storeDir (staged by 0.42.0; clear it with
- * `clearUnattributedAttempt`, then pair). Nothing was written.
+ * Another pairing of this productId replaced this pairing's attempt while its
+ * request was in flight (#2045). This pairing wrote nothing and does not
+ * retry; the slot belongs to the pairing that replaced it. Pair again to take
+ * it back.
  */
-export class FirstPairingAttemptRefusedError extends Error {
-  constructor(readonly code: keyof typeof PAIRING_ATTEMPT_MESSAGES) {
-    super(PAIRING_ATTEMPT_MESSAGES[code]);
-    this.name = 'FirstPairingAttemptRefusedError';
+export class PairingSupersededError extends Error {
+  constructor() {
+    super('another pairing of this productId replaced this pairing while its request was in flight; nothing was written');
+    this.name = 'PairingSupersededError';
+  }
+}
+
+/**
+ * The server refused the pairing code: unknown, expired or already used,
+ * which it does not tell apart (`pairing_code_invalid`, protocol §6.1).
+ * The current enrollment is unchanged. Pair with a new code.
+ */
+export class PairingCodeRejectedError extends Error {
+  constructor() {
+    super('the server rejected the pairing code: it is unknown, expired or already used');
+    this.name = 'PairingCodeRejectedError';
+  }
+}
+
+/**
+ * The server refused this pairing twice because another pairing of the same
+ * machine registered in between (#2045). It happens only while two pairings
+ * of one machine run at once. Nothing was written and the staged attempt is
+ * kept, so retrying with the same code resumes it.
+ */
+export class PairingBusyError extends Error {
+  readonly retryable = true;
+  constructor() {
+    super('another pairing of this machine registered at the same time; retry the pairing');
+    this.name = 'PairingBusyError';
+  }
+}
+
+/**
+ * A pairing input is out of its wire bound, checked before anything is staged
+ * or sent (#2045): `deviceName` is not `isPairingText` within
+ * `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` UTF-16 code units (set `deviceName`
+ * when the hostname is not), or `machineId` is not lowercase hex SHA-256.
+ */
+export class PairingInputInvalidError extends Error {
+  constructor(readonly field: 'deviceName' | 'machineId') {
+    super(field === 'deviceName'
+      ? `deviceName must be 1 to ${PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH} UTF-16 code units of text without control characters; set deviceName when the hostname is not`
+      : 'machineId must be a lowercase hex SHA-256');
+    this.name = 'PairingInputInvalidError';
   }
 }
 

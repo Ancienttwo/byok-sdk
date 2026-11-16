@@ -624,31 +624,6 @@ export async function readInstalledSkillPack(dataDir: string, name: string): Pro
   };
 }
 
-/**
- * Every pack this device has a valid lock for, sorted by name.
- *
- * Reads only the locks — never the pack bytes — so a caller listing what is
- * installed pays nothing for packs it is not about to project.
- */
-export async function listInstalledSkillPacks(dataDir: string): Promise<readonly InstalledSkillPack[]> {
-  let entries;
-  try {
-    const root = await checkedDirectory(dataDir, SKILL_PACKS_DIRNAME, false);
-    entries = await fs.readdir(root, { withFileTypes: true });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw err;
-  }
-  const packs: InstalledSkillPack[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const installed = await readInstalledSkillPack(dataDir, entry.name);
-    if (installed !== undefined) packs.push(installed);
-  }
-  packs.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
-  return packs;
-}
-
 export interface ProjectedSkillPack {
   readonly name: string;
   readonly contentHash: string;

@@ -19,6 +19,7 @@ async function pair(harness: CloudHarness, tenant: typeof TENANT_A, requestTenan
       pairingCode: pairing.code,
       deviceName: 'projection-test-device',
       devicePublicKey: keys.publicKeyBase64Url,
+      expectedDeviceDigest: null,
       ...(requestTenant === undefined ? {} : { tenantId: requestTenant }),
     }),
   });

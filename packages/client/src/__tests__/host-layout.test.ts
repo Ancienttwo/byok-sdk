@@ -80,7 +80,7 @@ describe('resolveHostLayout (#1094)', () => {
     const config = { ...product, serverUrl: 'https://byok.example' } as DaemonConfig;
     expect(cliServiceDefinition(config, '/etc/salesko.json', []).logDir).toBe(layout.logDir);
     const effective = describeEffectiveDaemonConfig({
-      config, warnings: [], memoryHelper: { state: 'not-needed' }, agentMemoryMcpAdmission: 'unavailable',
+      config, memoryHelper: { state: 'not-needed' }, agentMemoryMcpAdmission: 'unavailable',
       storeDir: layout.storeDir, scratchRoot: path.join(layout.storeDir, 'tmp'), adapters: [], runtimeSource: 'injected',
     });
     expect(effective.directories.logDir).toBe(layout.logDir);

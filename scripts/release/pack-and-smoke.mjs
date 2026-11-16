@@ -1,3 +1,4 @@
+import { assertNpmCoreClosure, assertSingleVersionSet } from './install-graph.mjs';
 import { readRegistryExpectations, runtimeDependencyMetadata } from './registry-contract.mjs';
 import { nodeNextConsumerProbe, typesBearingEntries } from './node-next-consumer-probe.mjs';
 import { assertNoStorePaths } from './published-store-paths.mjs';
@@ -178,100 +179,12 @@ function assertTarballInternalEdges(tarballPath, packageName, expectedPackageVer
   console.log(`[release-pack] ${path.basename(tarballPath)} internal @byok-sdk edges all pin ${releaseVersion}`);
 }
 
-/**
- * Asserts an install tree's @byok-sdk graph closes to exactly one version set:
- * every installed @byok-sdk package sits at the release version, and no copy
- * hides under a second node_modules — the nested-copy fallback npm takes when
- * published internal edges disagree. The retired `byok-sdk` umbrella is still
- * collected, so any artifact that drags it back in fails as an unexpected
- * package. Follows node_modules chains only, so the walk stays cheap on large
- * trees.
- */
-function assertSingleVersionSet(installDirectory, expectedVersions) {
-  const root = path.join(installDirectory, 'node_modules');
-  const found = [];
-  const visit = (nodeModulesDirectory) => {
-    const retiredUmbrella = path.join(nodeModulesDirectory, 'byok-sdk', 'package.json');
-    if (existsSync(retiredUmbrella)) found.push(retiredUmbrella);
-    const scope = path.join(nodeModulesDirectory, '@byok-sdk');
-    if (existsSync(scope)) {
-      for (const entry of readdirSync(scope)) {
-        const manifest = path.join(scope, entry, 'package.json');
-        if (existsSync(manifest)) found.push(manifest);
-      }
-    }
-    for (const entry of readdirSync(nodeModulesDirectory, { withFileTypes: true })) {
-      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-      if (entry.name.startsWith('@')) {
-        for (const scoped of readdirSync(path.join(nodeModulesDirectory, entry.name))) {
-          const nested = path.join(nodeModulesDirectory, entry.name, scoped, 'node_modules');
-          if (existsSync(nested)) visit(nested);
-        }
-        continue;
-      }
-      const nested = path.join(nodeModulesDirectory, entry.name, 'node_modules');
-      if (existsSync(nested)) visit(nested);
-    }
-  };
-  visit(root);
-  if (found.length === 0) throw new Error(`${installDirectory}: no @byok-sdk packages found under node_modules`);
-  const allowedParents = new Set([path.join(root, 'byok-sdk')]);
-  const scopeRoot = path.join(root, '@byok-sdk');
-  if (existsSync(scopeRoot)) {
-    for (const entry of readdirSync(scopeRoot)) allowedParents.add(path.join(scopeRoot, entry));
-  }
-  const nestedCopies = found.filter((manifestPath) => !allowedParents.has(path.dirname(manifestPath)));
-  if (nestedCopies.length > 0) {
-    throw new Error(`split @byok-sdk version set — nested copies installed:\n  ${nestedCopies.join('\n  ')}`);
-  }
-  const seenNames = new Set();
-  for (const manifestPath of found) {
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    const expected = expectedVersions[manifest.name];
-    if (typeof expected !== 'string') {
-      throw new Error(`${manifestPath}: unexpected @byok-sdk package ${manifest.name} in the release install`);
-    }
-    if (manifest.version !== expected) {
-      throw new Error(`${manifestPath}: version ${manifest.version}, expected ${expected} — the @byok-sdk graph does not close to its exact package versions`);
-    }
-    seenNames.add(manifest.name);
-  }
-  for (const packageName of Object.keys(expectedVersions)) {
-    if (!seenNames.has(packageName)) {
-      throw new Error(`${installDirectory}: missing expected release package ${packageName}`);
-    }
-  }
-  console.log(`[release-pack] install tree closes to exact package versions (${found.length} package(s))`);
-}
-
-function assertNpmCoreClosure(installDirectory) {
-  const tree = JSON.parse(run(npmInvocation.command, [...npmInvocation.prefix, 'ls', '@byok-sdk/core', '--all', '--json'], installDirectory));
-  const versions = new Set();
-  function collect(value) {
-    if (Array.isArray(value)) {
-      for (const entry of value) collect(entry);
-      return;
-    }
-    if (!value || typeof value !== 'object') return;
-    for (const [name, entry] of Object.entries(value)) {
-      if (name === '@byok-sdk/core' && entry && typeof entry === 'object' && typeof entry.version === 'string') {
-        versions.add(entry.version);
-      }
-      collect(entry);
-    }
-  }
-  collect(tree);
-  if (versions.size !== 1 || !versions.has(releaseVersion)) {
-    throw new Error(
-      `npm ls @byok-sdk/core --all --json resolved ${[...versions].sort().join(', ') || '(none)'}, expected only ${releaseVersion}`,
-    );
-  }
-  console.log(`[release-pack] npm ls @byok-sdk/core --all --json resolves only ${releaseVersion}`);
-}
 
 function runStaleKeysEdgeNegativeControl() {
   const fixturePath = path.join(repoRoot, 'scripts', 'release', 'fixtures', 'keys-0.2.0-stale-core-edge.json');
-  const fixture = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  let fixture;
+  try { fixture = JSON.parse(readFileSync(fixturePath, 'utf8')); }
+  catch (cause) { throw new Error(`Invalid stale-edge fixture: ${fixturePath}`, { cause }); }
   const staleCoreVersion = fixture.dependencies?.['@byok-sdk/core'];
   if (
     fixture.schemaVersion !== 1 ||
@@ -529,8 +442,8 @@ try {
     // This is the decisive installed-runtime proof (real RPC get_state against
     // the pinned Pi with extensions loaded); echo it instead of swallowing it.
     console.log(run(nodeBin, ['scripts/release/pi-launcher-smoke.mjs'], smokeDir));
-    assertSingleVersionSet(smokeDir, expectedPackageVersions);
-    assertNpmCoreClosure(smokeDir);
+    assertSingleVersionSet(smokeDir, expectedPackageVersions, 'release-pack');
+    assertNpmCoreClosure(JSON.parse(run(npmInvocation.command, [...npmInvocation.prefix, 'ls', '@byok-sdk/core', '--all', '--json'], smokeDir)), releaseVersion, 'release-pack');
     const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
     if (clientManifest.dependencies['@juicesharp/rpiv-todo'] !== undefined) throw new Error('packed client retained a second npm todo authority');
     console.log('[release-pack] client dependencies=' + Object.keys(clientManifest.dependencies).length +

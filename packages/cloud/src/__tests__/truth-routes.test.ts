@@ -154,6 +154,7 @@ describe('proof-only truth routes', () => {
       devicePublicKey: publicKey,
       proofKeyId: 'identity',
       proofKeyEpoch: 0,
+      expectedDeviceDigest: null,
     });
     await composition.core.quota.writeEntitlement(TENANT, {
       version: 1n,

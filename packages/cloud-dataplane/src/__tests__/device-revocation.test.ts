@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { DEVICE_ASSERTION_SCHEMA_ID, createMutableClock, tenantId } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
+import { pairDeviceDigest } from '@byok-sdk/protocol';
 import { migrate } from '../migrate';
 import { PostgresDeviceDirectory } from '../stores/devices';
 import { PostgresNonceStore } from '../stores/nonces';
@@ -99,6 +100,7 @@ async function fixture(pool: ByokPool): Promise<Fixture> {
         proofKeyId: 'identity',
         proofKeyEpoch: 0,
         ...(machineId === undefined ? {} : { machineId }),
+        expectedDeviceDigest: null,
       });
       await core.presence.publish(tenantBrand, {
         deviceId,
@@ -260,6 +262,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device revocation deletes the registra
         proofKeyId: 'identity',
         proofKeyEpoch: 0,
         machineId: MACHINE,
+        expectedDeviceDigest: await pairDeviceDigest({ tenantId: TENANT_A, productId: PRODUCT, deviceId: 'first-device' }),
       });
 
       await expect(rowCounts(scope.pool, TENANT_A, 'first-device')).resolves.toEqual({
@@ -309,6 +312,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device revocation deletes the registra
         proofKeyId: 'identity',
         proofKeyEpoch: 1,
         machineId: MACHINE,
+        expectedDeviceDigest: await pairDeviceDigest({ tenantId: TENANT_A, productId: PRODUCT, deviceId: 'stable-device' }),
       });
 
       await expect(rowCounts(scope.pool, TENANT_A, 'stable-device')).resolves.toMatchObject({

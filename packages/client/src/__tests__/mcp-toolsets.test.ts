@@ -628,15 +628,6 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
     ).toThrow(/"salesko\.probe", which cannot be expressed as a runtime MCP server name/);
   });
 
-  it('refuses the removed permissionDefaults key instead of ignoring it', () => {
-    expect(() =>
-      createDaemonWithAdapters(
-        {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...({ ...baseConfig, permissionDefaults: { mode: 'auto' } } as DaemonConfig) },
-        [new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE)],
-      ),
-    ).toThrow("DaemonConfig.permissionDefaults was removed: the local agent's own permission settings apply");
-  });
-
   it('rejects malformed ids, reserved names, and env/header fields synchronously', () => {
     const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     expect(() =>

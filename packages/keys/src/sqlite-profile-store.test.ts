@@ -1,17 +1,15 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { ByokKeysError } from './errors';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import type { ModelProviderProfile } from './provider-profile';
-import {
-  SqliteProviderProfileStore,
-  migrateProviderProfileStore,
-  runProviderProfileStoreMigration,
-} from './sqlite-profile-store';
+import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { isSqliteAvailable, openSqliteDatabase } from './sqlite-support';
 
 // node:sqlite requires Node 22.5+, and shipped behind --experimental-sqlite
@@ -91,6 +89,16 @@ const expectSchemaStale = (open: () => SqliteProviderProfileStore): void => {
   }
   expect(thrown).toBeInstanceOf(ByokKeysError);
   expect((thrown as ByokKeysError).code).toBe('PROVIDER_STORE_SCHEMA_STALE');
+};
+
+const FIXTURE_0_43 = fileURLToPath(new URL('../../../scripts/release/fixtures/stores/0.43.0/keys-profile-store.db', import.meta.url));
+const sha256 = (file: string): string => createHash('sha256').update(readFileSync(file)).digest('hex');
+const sidecars = (file: string): string[] => ['-wal', '-shm', '-journal'].filter((suffix) => existsSync(`${file}${suffix}`));
+const tableNames = (file: string): string[] => {
+  const reader = openSqliteDatabase(file, { readOnly: true });
+  try {
+    return (reader.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as { name: string }[]).map((row) => row.name);
+  } finally { reader.close(); }
 };
 
 let directory: string;
@@ -248,6 +256,7 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
     const mode = statSync(databasePath).mode;
     expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath }));
     expect(readFileSync(databasePath)).toEqual(bytes);
+    expect(sidecars(databasePath)).toEqual([]);
     expect(statSync(databasePath).mode).toBe(mode);
     const reader = openSqliteDatabase(databasePath, { readOnly: true });
     expect(reader.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY name').all()).toEqual(schema);
@@ -338,115 +347,45 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
       'updated_at',
     ]);
   });
-});
+  it('refuses a released store missing a custody table without writing to it', () => {
+    mkdirSync(join(directory, 'nested'));
+    copyFileSync(FIXTURE_0_43, databasePath);
+    const raw = openSqliteDatabase(databasePath);
+    raw.exec('DROP TABLE provider_custody_watermark');
+    raw.exec('PRAGMA journal_mode = DELETE');
+    raw.close();
+    const hash = sha256(databasePath);
+    expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath }));
+    expect(sha256(databasePath)).toBe(hash);
+    expect(sidecars(databasePath)).toEqual([]);
+    expect(tableNames(databasePath)).not.toContain('provider_custody_watermark');
+  });
 
-describe.skipIf(!sqliteReady)('migrateProviderProfileStore', () => {
-  const schemaOf = (path: string) => {
-    const reader = openSqliteDatabase(path, { readOnly: true });
+  it('refuses a stale schema held only in an un-checkpointed WAL before any DDL', async () => {
+    const source = join(directory, 'source.sqlite');
+    await new SqliteProviderProfileStore({ path: source }).close();
+    const reader = openSqliteDatabase(source, { readOnly: true });
+    const ddl = (reader.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name <> 'provider_custody_watermark' ORDER BY type DESC").all() as { sql: string }[]).map((row) => row.sql);
+    reader.close();
+    const walOnly = join(directory, 'wal-only.sqlite');
+    const writer = openSqliteDatabase(walOnly);
+    writer.exec('PRAGMA wal_autocheckpoint = 0');
+    for (const statement of ddl) writer.exec(statement);
+    mkdirSync(join(directory, 'nested'));
+    copyFileSync(walOnly, databasePath);
+    copyFileSync(`${walOnly}-wal`, `${databasePath}-wal`);
+    writer.close();
+    expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath }));
+    expect(tableNames(databasePath)).not.toContain('provider_custody_watermark');
+  });
+
+  it('checkpoints a new store so its main file holds the schema', async () => {
+    const store = new SqliteProviderProfileStore({ path: databasePath });
     try {
-      return {
-        schema: reader.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY name').all(),
-        profiles: reader.prepare('SELECT * FROM provider_profile ORDER BY profile_ref').all(),
-        watermarks: reader.prepare('SELECT * FROM provider_custody_watermark').all(),
-      };
-    } finally { reader.close(); }
-  };
-
-  /** A store this version wrote, rebuilt with the narrower CHECK set of a version that lacked `groq`. */
-  const createEarlierKindSetStore = async (): Promise<void> => {
-    const store = new SqliteProviderProfileStore({ path: databasePath });
-    await store.save(profile('openai', { enabled: false }));
-    await store.save(profile('deepseek', { base_url: 'https://api.deepseek.com' }));
-    await store.close();
-    const raw = openSqliteDatabase(databasePath);
-    const { sql } = raw.prepare("SELECT sql FROM sqlite_master WHERE name = 'provider_profile'").get() as { sql: string };
-    const earlier = sql.replace("'groq', ", '');
-    expect(earlier).not.toBe(sql);
-    raw.exec(`
-      INSERT INTO provider_custody_watermark (profile_ref, operation_generation) VALUES ('deepseek', 3);
-      ALTER TABLE provider_profile RENAME TO earlier;
-      ${earlier};
-      INSERT INTO provider_profile SELECT * FROM earlier;
-      DROP TABLE earlier;
-      CREATE UNIQUE INDEX provider_profile_one_enabled ON provider_profile(kind) WHERE enabled = 1;
-    `);
-    raw.close();
-    expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath }));
-  };
-
-  it('migrates an earlier provider_kind set and keeps profiles, enabled state and custody rows', async () => {
-    await createEarlierKindSetStore();
-    const before = schemaOf(databasePath);
-
-    expect(migrateProviderProfileStore(databasePath)).toBe('migrated');
-
-    const after = schemaOf(databasePath);
-    expect(after.profiles).toEqual(before.profiles);
-    expect(after.watermarks).toEqual(before.watermarks);
-    const reader = new SqliteProviderProfileStore({ path: databasePath, readOnly: true });
-    expect((await reader.getEnabled())?.profile_ref).toBe('deepseek');
-    await reader.close();
-    const store = new SqliteProviderProfileStore({ path: databasePath });
-    await store.save(profile('groq', { base_url: 'https://api.groq.com/openai/v1', enabled: false }));
-    expect((await store.list()).map((entry) => entry.profile_ref)).toEqual(['deepseek', 'groq', 'openai']);
-    await store.close();
-  });
-
-  it('rolls back an injected copy failure and leaves the earlier store unchanged', async () => {
-    await createEarlierKindSetStore();
-    const before = schemaOf(databasePath);
-
-    expect(() => runProviderProfileStoreMigration(databasePath, {
-      afterCopy: () => { throw new Error('injected copy failure'); },
-    })).toThrow('injected copy failure');
-
-    expect(schemaOf(databasePath)).toEqual(before);
-    expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath }));
-  });
-
-  it('leaves a current-schema store untouched', async () => {
-    const store = new SqliteProviderProfileStore({ path: databasePath });
-    await store.save(profile('openai'));
-    await store.close();
-    const bytes = readFileSync(databasePath);
-
-    expect(migrateProviderProfileStore(databasePath)).toBe('unchanged');
-
-    expect(readFileSync(databasePath)).toEqual(bytes);
-  });
-
-  it('fails closed when a custody table differs from the current schema', async () => {
-    await createEarlierKindSetStore();
-    const raw = openSqliteDatabase(databasePath);
-    raw.exec(`
-      ALTER TABLE provider_custody_watermark RENAME TO earlier;
-      CREATE TABLE provider_custody_watermark (profile_ref TEXT PRIMARY KEY, operation_generation INTEGER NOT NULL);
-      INSERT INTO provider_custody_watermark SELECT * FROM earlier;
-      DROP TABLE earlier;
-    `);
-    raw.close();
-    const before = schemaOf(databasePath);
-
-    let thrown: unknown;
-    try { migrateProviderProfileStore(databasePath); } catch (error) { thrown = error; }
-    expect((thrown as ByokKeysError).code).toBe('PROVIDER_STORE_SCHEMA_STALE');
-
-    expect(schemaOf(databasePath)).toEqual(before);
-  });
-
-  it('fails closed on a difference other than an earlier provider_kind set', async () => {
-    const store = new SqliteProviderProfileStore({ path: databasePath });
-    await store.save(profile('openai'));
-    await store.close();
-    const raw = openSqliteDatabase(databasePath);
-    raw.exec('ALTER TABLE provider_profile DROP COLUMN pi_model');
-    raw.close();
-    const before = schemaOf(databasePath);
-
-    let thrown: unknown;
-    try { migrateProviderProfileStore(databasePath); } catch (error) { thrown = error; }
-    expect((thrown as ByokKeysError).code).toBe('PROVIDER_STORE_SCHEMA_STALE');
-
-    expect(schemaOf(databasePath)).toEqual(before);
+      const main = new (await import('node:sqlite')).DatabaseSync(`file:${databasePath}?mode=ro&immutable=1`, { readOnly: true });
+      try {
+        expect((main.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'provider_%'").all() as { name: string }[]).length).toBe(5);
+      } finally { main.close(); }
+    } finally { await store.close(); }
   });
 });

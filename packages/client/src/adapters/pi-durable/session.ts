@@ -9,6 +9,7 @@ import { serializePiHostConfig } from '../pi/runtime-host-binding.js';
 import { startToolAuthorizationIpc } from '../../tool-authorization-ipc.js';
 import { serializeFileScopeGrant } from '../../file-scope-serialization.js';
 import { PiRpcClient, type SpawnFn } from '../pi/rpc-client.js';
+import { untilStartAborted } from '../pi/start-signal.js';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 import { AsyncQueue } from '../../util/async-queue.js';
 import { admitReplica, resetReplica } from './replica.js';
@@ -81,7 +82,8 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   let pump: Promise<void> | undefined;
   /** The latest spawned worker ended on its own before its start receipt. */
   let exitedBeforeReceipt = false;
-  const spawn = async (resume: boolean) => {
+  /** `signal` bounds only the task's own start; a recovery respawn runs under the lease. */
+  const spawn = async (resume: boolean, signal?: AbortSignal) => {
     exitedBeforeReceipt = false;
     if (closing || !context.lifecycle.ownsLease()) throw new Error('durable lease ended before spawn');
     const launch = piLaunchCommand(runtimeLaunch, 'pi-durable', serialized.digest, ['--config', configPath],
@@ -91,7 +93,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
     rpc = child;
     let receipt: Awaited<ReturnType<PiRpcClient['send']>>;
     // Read before any disposal: the SDK's own kill also closes the client.
-    try { receipt = await child.send({ type: 'start', resume, ...(resume ? { projectionDigest } : {}) }); }
+    try { receipt = await untilStartAborted(child.send({ type: 'start', resume, ...(resume ? { projectionDigest } : {}) }), signal); }
     catch (error) { exitedBeforeReceipt = child.processExited; throw error; }
     if (receipt.success !== true || typeof receipt.projectionDigest !== 'string' || !/^[0-9a-f]{64}$/u.test(receipt.projectionDigest) || (resume && receipt.projectionDigest !== projectionDigest)) throw new Error('durable worker refused start or changed provider projection');
     if(typeof receipt.workerPid !== 'number'||!Number.isSafeInteger(receipt.workerPid)||receipt.workerPid<=1)throw new Error('durable worker identity missing');
@@ -118,7 +120,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   try {
     await fs.chmod(configDir, 0o700);
     await fs.writeFile(configPath, serialized.bytes, { mode: 0o600 });
-    const first = await spawn(false);
+    const first = await spawn(false, input.signal);
     pump = (async () => {
       let child = first;
       /** A worker ended on its own, and its recovery is in progress or was refused. */

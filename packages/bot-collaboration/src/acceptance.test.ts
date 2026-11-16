@@ -4,14 +4,14 @@ import { template } from './k4-fixtures.test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';
 import { hash, type Json } from '@byok-sdk/server/execution-core';
-import { botCompactVeto } from './compaction';
+import { botLedgerOptions } from './compaction';
 import { seedRoutine } from './routines.test-support';
 
 let fixture: TestHost | undefined;
 let bot: BotCollaboration | undefined;
 afterEach(async () => { await bot?.close(); await fixture?.close(); vi.restoreAllMocks(); });
 async function setup(rest: Partial<BotOptions> = {}) {
-  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal),
+  fixture = await openHost({ externalCore: true, ledgerOptions: botLedgerOptions, consume: (wake, signal) => bot!.consume(wake, signal),
     agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
   const base = template(fixture.deviceId);
   const options: BotOptions = { botId: 'main', execution: { ...base,
@@ -130,19 +130,6 @@ it('applies routine policy before questions and delegation, and publishes cards 
   const projections = Object.entries(fixture!.ledger.snapshot().outbox).filter(([key, row]) => !prior.has(key) && row.kind === 'projection')
     .map(([, row]) => row.kind === 'projection' ? row.id.split(':')[0] : '');
   expect(projections.slice(0, 2)).toEqual(['card', 'question']);
-});
-
-it('uses state version 3 and rejects version 1, version 2, unsupported or unversioned saved state without resetting it', () => {
-  expect(stateOf({}).version).toBe(3);
-  const savedStates: Array<[Json, string]> = [
-    [{ version: 1, sequence: 7 }, 'Bot collaboration state version 1 is not supported. Bot routines moved to K4 routines.'],
-    [{ version: 2, sequence: 7 }, 'Bot collaboration state version 2 is not supported. Retention moved settled rows out of the state.'],
-    [{ version: 4, sequence: 7 }, 'Unsupported Bot collaboration state version'], [{ sequence: 7 }, 'Unsupported Bot collaboration state version']];
-  for (const [saved, message] of savedStates) {
-    const application: Record<string, Json> = { collaboration: saved };
-    expect(() => stateOf(application)).toThrow(message);
-    expect(application.collaboration).toBe(saved);
-  }
 });
 
 it('refreshes expiry before freezing the next input without an intervening drain', async () => {

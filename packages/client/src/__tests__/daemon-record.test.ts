@@ -2,7 +2,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { createDaemonRecordProjector, DAEMON_RECORD_KINDS, isDaemonRecordKind, type DaemonEvent, type DaemonRecord } from '../index';
 import { MAX_TRACKED_TASKS } from '../daemon/observer';
-import { parseRuntimeObservations, validateRuntimeDetectResult } from '../runtime-detection';
+import { parseRuntimeObservations } from '../runtime-detection';
 
 const SENTINEL = 'SENTINEL-395';
 
@@ -85,20 +85,18 @@ describe('daemon-record: createDaemonRecordProjector', () => {
       authorization: { source: 'floor', ruleIds: [] }, reasons: ['sensitive-path'], summaryBytes: Buffer.byteLength(SENTINEL) });
     expect(JSON.stringify(reminder)).not.toContain(SENTINEL);
   });
-  it('keeps the configured unqualified-version advisory without persisting actual runtime version text', () => {
+  it('keeps the configured unqualified-version warning without persisting actual runtime version text', () => {
     const [record] = createDaemonRecordProjector().project({
       kind: 'runtimes-detected', ts: 'T',
       runtimes: [{
         id: 'codex', present: true, outcome: 'available', version: SENTINEL, qualifiedVersion: '0.101.0',
-        versionVerdict: { state: 'block', qualifiedVersion: '0.101.0', matched: '0.10.' }, steer: true, resume: true,
+        versionVerdict: { state: 'warn', qualifiedVersion: '0.101.0' }, steer: true, resume: true,
       }],
     });
     if (record?.kind !== 'runtimes-detected') throw new Error('expected a runtime record');
     expect(record.runtimes).toEqual([{ id: 'codex', present: true, outcome: 'available', qualifiedVersion: '0.101.0', steer: true, resume: true }]);
     expect(JSON.stringify(record)).not.toContain('versionVerdict');
-    expect(parseRuntimeObservations(record.runtimes)).toEqual(record.runtimes);
-    expect(validateRuntimeDetectResult({ kind: 'available', advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '0.101.0' } }))
-      .toEqual({ kind: 'available', advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '0.101.0' } });
+    expect(parseRuntimeObservations(record.runtimes, 'audit')).toEqual(record.runtimes);
   });
   it('a turn of 30 deltas and 3 tool calls is ONE turn record with correct counts', () => {
     const projector = createDaemonRecordProjector();

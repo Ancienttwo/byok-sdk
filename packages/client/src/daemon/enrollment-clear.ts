@@ -1,6 +1,5 @@
 import { acquireDaemonOwner, DaemonOwnerActiveError, DaemonOwnerReclaimingError, type DaemonOwnerLease } from '../util/daemon-owner.js';
 import { acquireEnrollmentGate } from './enrollment-gate.js';
-import { pickPlainDataProperties } from '../util/plain-data.js';
 import {
   DeviceRecordRePairRequiredError, DeviceStore, readEnrollmentOptions, readStoreEnrollment,
   type DeviceEnrollmentStatusOptions, type DeviceRecord,
@@ -8,12 +7,11 @@ import {
 import { DeviceStoreBindingMismatchError } from './daemon-errors.js';
 import { createDeviceCredentialStore, createDeviceMemberCustody } from './device-credential-provider.js';
 import { DeviceMemberRecords } from './device-member-custody.js';
-import type { DeviceCredentialBackend } from './device-credential-store.js';
+import { DeviceCredentialLegacyEntryError, type DeviceCredentialBackend, type PairingAttempt } from './device-credential-store.js';
 
 const CLEAR_MESSAGES = {
   store_owned: 'another process holds this store\'s owner lease (a daemon, doctor or installer); the enrollment is unchanged',
   store_not_bound: 'the OS credential entry for this productId holds an enrollment or pairing attempt of another storeDir; nothing was cleared',
-  pairing_attempt_unattributed: 'the OS credential entry for this productId holds a first-pairing attempt that names no storeDir; nothing was cleared. If no other store of this productId is pairing, clear it with clearDeviceEnrollment({ ..., clearUnattributedAttempt: true })',
   clear_failed: 'the device enrollment could not be cleared; see the cause',
 } as const;
 
@@ -24,12 +22,8 @@ export type DeviceEnrollmentClearErrorCode = keyof typeof CLEAR_MESSAGES;
  * - `store_owned`: another process holds the store's owner lease. It may be a
  *   running daemon, a doctor or an installer; nothing was read or cleared.
  * - `store_not_bound`: the OS entry holds an enrollment another storeDir
- *   paired, or a first-pairing attempt another storeDir staged; nothing was
+ *   paired, or a pairing attempt another storeDir staged; nothing was
  *   cleared.
- * - `pairing_attempt_unattributed`: the OS entry holds a first-pairing
- *   attempt that names no storeDir (staged by 0.42.0), so nothing proves it is
- *   this store's; nothing was cleared. `clearUnattributedAttempt: true`
- *   deletes it.
  * - `clear_failed`: `cause` holds the error. A `device.json` that cannot be
  *   parsed or is empty (`DeviceRecordRePairRequiredError`) is refused before
  *   anything is deleted; the store needs a re-pair. The clear deletes the
@@ -70,10 +64,9 @@ export interface EnrollmentCustody {
  * `DeviceRecordRePairRequiredError`: nothing proves the productId-wide OS
  * entry is this store's, and `remove()` could never delete that file. A valid
  * projection without its credential (left by a failed metadata removal) is
- * cleared. A staged first-pairing attempt is deleted only when it names this
- * store; another store's attempt is refused as `store_not_bound`, and one
- * that names no store as `pairing_attempt_unattributed` unless
- * `clearUnattributedAttempt` is set. The member entries
+ * cleared. A staged pairing attempt is deleted only when this store staged
+ * it; another store's attempt is refused as `store_not_bound`. A wire v6
+ * entry is void and deleted unread. The member entries
  * go first, each read back after deletion, then the credential, also read
  * back. A failure leaves the device paired if its credential is still there,
  * possibly with some member entries deleted, and otherwise leaves
@@ -85,7 +78,6 @@ export async function clearEnrollmentUnderLease(
   custody: EnrollmentCustody,
   readCurrent: () => Promise<DeviceRecord | undefined>,
   onCredentialCleared: () => void = () => {},
-  clearUnattributedAttempt = false,
 ): Promise<DeviceRecord | undefined> {
   const gate = await acquireEnrollmentGate(custody.store.productId);
   try {
@@ -93,16 +85,15 @@ export async function clearEnrollmentUnderLease(
     try {
       current = await readCurrent();
     } catch (error) {
-      if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
+      if (!(error instanceof DeviceCredentialLegacyEntryError) && !(error instanceof DeviceRecordRePairRequiredError)) throw error;
       // Re-pair-required is either a valid projection without its credential,
       // which is cleared, or a projection that cannot be parsed, whose load
       // throws here before anything is deleted.
       await custody.store.load();
     }
-    const attempt = await custody.store.credentials.readFirstPairingAttempt();
+    const attempt = await readAttempt(custody.store.credentials);
     if (attempt !== undefined && attempt.storeIdentity !== custody.store.identity) {
-      if (attempt.storeIdentity !== undefined) throw new DeviceEnrollmentClearError('store_not_bound');
-      if (!clearUnattributedAttempt) throw new DeviceEnrollmentClearError('pairing_attempt_unattributed');
+      throw new DeviceEnrollmentClearError('store_not_bound');
     }
     await custody.memberRecords?.clear();
     try {
@@ -120,6 +111,16 @@ export async function clearEnrollmentUnderLease(
   }
 }
 
+/** The staged attempt; a wire v6 entry holds none this clear could refuse. */
+async function readAttempt(credentials: DeviceCredentialBackend): Promise<PairingAttempt | undefined> {
+  try {
+    return await credentials.readPairingAttempt();
+  } catch (error) {
+    if (error instanceof DeviceCredentialLegacyEntryError) return undefined;
+    throw error;
+  }
+}
+
 /**
  * Clears one store's device enrollment without a daemon: its member
  * entries, its OS credential (read back after deletion) and `device.json`,
@@ -131,22 +132,16 @@ export async function clearEnrollmentUnderLease(
  * enrollment of the account it runs as. The OS credential entry is shared by
  * every store of one productId: the clear never deletes another store's
  * enrollment or staged first pairing, and it excludes their pairing and
- * renewal writes while it runs (#1964, #2034). `clearUnattributedAttempt: true` also deletes a
- * first-pairing attempt that names no store; set it only when no other store
- * of this productId is pairing.
+ * renewal writes while it runs (#1964, #2034). A wire v6 entry is deleted
+ * unread.
  */
 export async function clearDeviceEnrollment(
-  options: DeviceEnrollmentStatusOptions & { readonly storeDir: string; readonly clearUnattributedAttempt?: boolean },
+  options: DeviceEnrollmentStatusOptions & { readonly storeDir: string },
   overrides?: { readonly deviceCredentials?: DeviceCredentialBackend },
 ): Promise<void> {
   const { productId, storeDir: configuredStoreDir, deviceCredentials, nativeAssetRoot } = readEnrollmentOptions(options);
   if (configuredStoreDir === undefined || configuredStoreDir.length === 0) {
     throw new TypeError('clearDeviceEnrollment requires a non-empty storeDir');
-  }
-  // readEnrollmentOptions accepted the object as plain data.
-  const { clearUnattributedAttempt } = pickPlainDataProperties(options, ['clearUnattributedAttempt']);
-  if (clearUnattributedAttempt !== undefined && typeof clearUnattributedAttempt !== 'boolean') {
-    throw new TypeError('clearDeviceEnrollment clearUnattributedAttempt must be a boolean');
   }
   const injected = overrides?.deviceCredentials;
   const storeDir = DeviceStore.resolveDir(productId, configuredStoreDir);
@@ -169,7 +164,7 @@ export async function clearDeviceEnrollment(
       const read = await readStoreEnrollment(custody.store);
       if (read.state === 're_pair_required') throw new DeviceRecordRePairRequiredError();
       return read.state === 'paired' ? read.record : undefined;
-    }, undefined, clearUnattributedAttempt === true);
+    });
   } catch (error) {
     if (error instanceof DeviceEnrollmentClearError) throw error;
     if (error instanceof DeviceStoreBindingMismatchError) throw new DeviceEnrollmentClearError('store_not_bound', { cause: error });

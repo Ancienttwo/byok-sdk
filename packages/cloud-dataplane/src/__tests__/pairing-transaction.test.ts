@@ -1,13 +1,15 @@
 /**
  * Real Postgres evidence for pairing enrollment's all-or-nothing boundary.
  *
- * The trigger is test-local DDL, not a product fault hook: it raises after the
- * guarded code update has selected a valid row but before device insertion can
- * finish. A retry proves the enclosing transaction rolled the code update back.
+ * The trigger is test-local DDL, not a product fault hook: it raises inside the
+ * enrollment transaction, after the code row is locked and the predecessor
+ * superseded but before device insertion can finish. A retry proves the
+ * enclosing transaction rolled the supersession back and left the code unspent.
  */
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
+import { pairDeviceDigest } from '@byok-sdk/protocol';
 import { migrate } from '../migrate';
 import { PostgresDeviceDirectory } from '../stores/devices';
 import { PostgresPairingCodeStore } from '../stores/pairing-codes';
@@ -17,7 +19,7 @@ const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.u
 const TENANT = tenantId('tenant-pairing-transaction');
 const MACHINE_ID = '11'.repeat(32);
 
-function enrollment(pairingCode: string, deviceId: string, machineId?: string) {
+function enrollment(pairingCode: string, deviceId: string, machineId?: string, expectedDeviceDigest: string | null = null) {
   return {
     pairingCode,
     deviceId,
@@ -26,6 +28,7 @@ function enrollment(pairingCode: string, deviceId: string, machineId?: string) {
     proofKeyId: 'identity',
     proofKeyEpoch: 0,
     ...(machineId === undefined ? {} : { machineId }),
+    expectedDeviceDigest,
   };
 }
 
@@ -50,7 +53,9 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres pairing enrollment transaction', () =>
         proofKeyId: 'identity',
         proofKeyEpoch: 0,
         machineId: MACHINE_ID,
+        expectedDeviceDigest: null,
       });
+      const predecessor = await pairDeviceDigest({ tenantId: TENANT, productId: 'product-transaction', deviceId: 'device-predecessor' });
 
       await scope.pool.query(`
         CREATE FUNCTION fail_pairing_device_insert() RETURNS trigger
@@ -68,7 +73,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres pairing enrollment transaction', () =>
 
       await expect(
         pairing.redeemAndRegister(
-          enrollment('retry-after-device-failure', 'device-failed', MACHINE_ID),
+          enrollment('retry-after-device-failure', 'device-failed', MACHINE_ID, predecessor),
         ),
       ).rejects.toThrow('injected pairing device insert failure');
       expect(await devices.get(TENANT, 'device-failed')).toBeUndefined();
@@ -84,12 +89,11 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres pairing enrollment transaction', () =>
       await scope.pool.query('DROP TRIGGER fail_pairing_device_insert ON device');
       await expect(
         pairing.redeemAndRegister(
-          enrollment('retry-after-device-failure', 'device-retry', MACHINE_ID),
+          enrollment('retry-after-device-failure', 'device-retry', MACHINE_ID, predecessor),
         ),
       ).resolves.toMatchObject({
-        tenantId: TENANT,
-        productId: 'product-transaction',
-        deviceId: 'device-retry',
+        outcome: 'registered',
+        device: { tenantId: TENANT, productId: 'product-transaction', deviceId: 'device-retry' },
       });
       expect(await devices.get(TENANT, 'device-predecessor')).toBeUndefined();
       expect(await devices.list(TENANT)).toHaveLength(1);
@@ -115,10 +119,10 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres pairing enrollment transaction', () =>
         pairing.redeemAndRegister(enrollment('concurrent-enrollment', 'device-a')),
         pairing.redeemAndRegister(enrollment('concurrent-enrollment', 'device-b')),
       ]);
-      const enrolled = results.filter((device) => device !== undefined);
+      const enrolled = results.filter((result) => result.outcome === 'registered');
       expect(enrolled).toHaveLength(1);
       expect(await devices.list(TENANT)).toHaveLength(1);
-      expect(await pairing.redeemAndRegister(enrollment('concurrent-enrollment', 'device-c'))).toBeUndefined();
+      expect(await pairing.redeemAndRegister(enrollment('concurrent-enrollment', 'device-c'))).toEqual({ outcome: 'code_invalid' });
     } finally {
       await scope.dispose();
     }

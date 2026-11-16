@@ -13,7 +13,7 @@ Each symbol has one entry (#1845). K4 needs Node 24.22.1 or later, because its l
 
 | Entry | Contents | Loads where |
 | --- | --- | --- |
-| `.` | `BotCollaboration` and its option types, `botCompactVeto`, `createBotPersonaProjection`, `teamSnapshot` and its errors | Node only. It loads the L Host and `@byok-sdk/client`. |
+| `.` | `BotCollaboration` and its option types, `botLedgerOptions`, `botCompactVeto`, `createBotPersonaProjection`, `teamSnapshot` and its errors | Node only. It loads the L Host and `@byok-sdk/client`. |
 | `./host-kit` | The L modules a Host adapter composes: model, channel, delivery, routines, team, migration, retention, dreaming, adapter steps | Node or a Worker. It loads the K4 root entry, but not the L Host or `@byok-sdk/client`. The hosted Worker example bundles it. |
 | `./rules` | The pure rules that the two entries above do not export | Anywhere. It loads only `@byok-sdk/protocol` and `@byok-sdk/server/execution-core/canonical`, so no `node:sqlite`. |
 | `./testing` | The shared vectors, the L test Host, and the K4 test data `policy` and `template` | Tests on Node. It needs the optional peers `vitest` and `@hono/node-server`. |
@@ -35,9 +35,11 @@ bun run --cwd packages/bot-collaboration test
 ```
 
 `src/host.test.ts` shows the embedded setup. Create one `BotCollaboration`
-per tenant and ledger. Open that ledger with the K8 compact veto:
-`new HostLedger(file, tenant, { compactVeto: botCompactVeto })`. The
-constructor refuses a ledger without it ([Compaction](#compaction)). Give it a valid Agent execution template and a Host
+per tenant and ledger. Open that ledger with the K8 ledger options:
+`new HostLedger(file, tenant, botLedgerOptions)`, or
+`{ ...botLedgerOptions, projectionOutboxLimits }` to add options. They register
+the K8 compact veto ([Compaction](#compaction)) and the ledger's `k8` format row.
+The constructor refuses a ledger opened without them. Give it a valid Agent execution template and a Host
 connector. Route the embedded server's `wake.consume` to `bot.consume`.
 Route its `agentMessage.consume` to `bot.consumeMessage`.
 Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
@@ -257,16 +259,8 @@ application rows, so `wouldDoRecords` lists only the rows of roots that are
 still in the state. A Host that keeps the would-do feed longer copies the rows
 before it acknowledges the root.
 
-A ledger written by an earlier version has rows without `turnId`. Run
-`migrateWouldDo(ledger)` from `./host-kit` once per ledger, before the new version
-serves. It fills `turnId` from the K4 task id of each live Turn intent, over
-every generation, and moves each row whose intent K4 already compacted, or
-whose Turn left the state, to the `wouldDo` application rows. It returns
-`{ backfilled, archived }`. `archived` counts rows that leave the feed early;
-they are history of settled Turns, so no Turn reads them. A second run returns
-zeros. A switch export or import refuses a would-do row without `turnId`, so
-migrate the source before a switch. For example, AiphaBee runs it on each
-device ledger in its runtime update.
+A ledger with would-do rows that lack `turnId` is refused with
+`would_do_unsupported_old`; the SDK does not modify it.
 
 ## Actions and context
 
@@ -463,8 +457,8 @@ command needs the Main Bot role and gets the K4 rows through the
 A sealed Bot routine (#953, #654 E3d-4) is a `bot-routine` whose Turn
 instruction only a member and the device can read. The owner's member endpoint
 seals the whole instruction once per routine version with K4
-`sealRoutineTemplate`. The instruction is `sealedRoutineInstruction(prompt)`:
-the K8 Turn frame with every action, `Request:` and the prompt, and no
+`sealRoutineTemplate`. The instruction contains the K8 Turn frame with every
+action, `Request:` and the prompt, and no
 ContextPack, because v1 has no plaintext field for Host content next to a
 sealed instruction. The Turn's frozen outcome schema stays the authority on
 which actions the Bot may take.
@@ -709,10 +703,6 @@ After retention, a late message for an archived Turn gets `binding_mismatch`,
 and an echo can no longer match an archived delivery. Back up the whole SQLite
 database: a JSON-only restore loses the archived rows and tombstones.
 
-`CollaborationState.version` is 3. Version 1 kept the routines in K8 state.
-The Host refuses a version 1 ledger and changes nothing. Restore a ledger
-backup made before this change, or start a new ledger.
-
 The Host drains application commands until all new turns have a K4 intent.
 An immediate terminal cannot leave a continuation without a wake.
 K4 also settles intents in drains that the Host did not start: a terminal
@@ -737,10 +727,10 @@ let the accepted occurrence finish. Pause and resume retry the calendar.
 
 ## Boundaries
 
-The collaboration state has version 3. The Host rejects version 2, unsupported
-and unversioned stored state. It does not reset or migrate that state. A
-version 2 ledger cannot hold archived rows, so restore a ledger backup made
-before this change, or start a new ledger.
+The ledger's `k8` row of `host_store_format` is the format of the collaboration
+state, 3 in this build. `HostLedger` refuses an existing ledger whose `k8` row
+differs or is missing with `HostStoreFormatError` before any write, and it does
+not reset or migrate that state. Keep that file and open a new ledger.
 
 This example has one team and one owner per ledger. Paid Pi success-rate
 measurement belongs to [WO-10b](../../docs/submit-result-measurement.md); the method defines per-runtime/model/platform cells and does not supply live data. Retention of the
@@ -1588,10 +1578,8 @@ back to L by an import into a new L tenant (below).
 
 ### Owner switch on L (#975)
 
-`src/switch.ts` reads an L ledger into the switch format and writes the format
-into an L tenant. One function, `switchContent`, serves both the old owner's
-export and the new owner's read-back, so one function states what an L ledger
-holds. The whole coordination domain moves together.
+`src/switch.ts` reads an L ledger into the switch format. `switchContent`
+checks the old owner’s export. The whole coordination domain moves together.
 
 **Old owner (L → H).** `exportForSwitch(devices, exportedAt?)` runs in one
 synchronous step: it dumps the ledger (K4 `dumpForSwitch`), checks it, seals it
@@ -1640,31 +1628,8 @@ domain is never split between the owners. An abort of a device of the export
 ends the export, and the new owner discards its import; after the commit no
 device of it aborts.
 
-**New owner (H → L).** On a new, empty ledger tenant (a switch back to L opens
-a new tenant), and with no `BotCollaboration` on it:
-
-1. `importForSwitch(ledger, document)` verifies the H export and writes it
-   with each device owned by H and an import record, in one transaction (K4
-   `loadForSwitch`). Before that transaction commits, K4 reads the tenant's
-   rows back, and they must seal to the document's digest under its header;
-   otherwise it throws `SwitchExportError` with `manifest` and writes nothing.
-   So an import is either verified or not there. It returns the receipt
-   `{ digest, devices }` that the old owner commits away on.
-2. After the old owner committed, `commitImport(ledger, digest)` gives L each
-   device of the import and deletes the import record.
-3. `discardImport(ledger)` deletes an import that is not to be committed (K4
-   `discard`). It first marks the import as being discarded, so a commit
-   refuses it from then on.
-
-A `BotCollaboration` refuses to open a ledger with an import record, and the
-root entries (`commitInLedger`, `retainInLedger`, `callCardsInLedger`,
-`syncTurnInLedger`) refuse it the same way before they run. So no work runs on
-an import before its commit, and a committed tenant has no record to discard. The import writes each derived value from the format: `agent` for the
-new tenant, the task ids and inputs of every generation, `applied`, slots, wake
-keys, intent ids, `attempts` and the Host intent handlers. A concluded intent
-gets K4's cursors of a new row (`phase: 'settled'`, `notBefore: 0`). Routines
-and occurrences go in the order of their ordinals, which the format makes their
-positions.
+**New owner (H → L).** The local Host does not provide switch import.
+Existing uncommitted import records remain fenced from normal work.
 
 **Ordering.** The receipt is the export's digest, and nothing between the two
 Hosts proves that the target imported it: there is no authentication between

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { connectControlClient } from '../daemon/control-client';
 import type { ControlStatusResult } from '../daemon/control-protocol';
+import { parseRuntimeObservations } from '../runtime-detection';
 import { runStatusCommand } from '../bin/commands/status';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { createSupportBundle } from '../diagnostics/support-bundle';
@@ -77,11 +78,10 @@ describe('#1103 runtime executable on local status and doctor', () => {
     if (!connection.ok) throw new Error('expected an online daemon');
     try {
       const live = await connection.client.request<ControlStatusResult>('status');
-      expect(JSON.stringify(live.runtimes)).not.toContain('executable');
-      expect(live.runtimeExecutables).toEqual([
-        { id: 'claude', executablePath: CLAUDE_PATH, executableSource: 'env' },
-        { id: 'codex', executableSource: 'path' },
-      ]);
+      const observed = parseRuntimeObservations(live.runtimes, 'status');
+      expect(observed?.find((r) => r.id === 'claude')).toMatchObject({ executablePath: CLAUDE_PATH, executableSource: 'env' });
+      expect(observed?.find((r) => r.id === 'codex')).toMatchObject({ executableSource: 'path' });
+      expect(observed?.find((r) => r.id === 'codex')).not.toHaveProperty('executablePath');
     } finally {
       connection.client.close();
     }

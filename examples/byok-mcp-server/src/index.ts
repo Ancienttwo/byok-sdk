@@ -1,4 +1,4 @@
-export { BetaLedger, type LedgerOptions } from './ledger';
+export { BetaLedger, BetaLedgerRefusedError, type LedgerOptions } from './ledger';
 export { createBetaMcpServer, type BetaMcpOptions, type ScopedTool } from './http';
 export { createTaskTools, type TaskToolOptions, type TaskToolServer } from './tools';
 export { createMemoryTools, type MemoryToolOptions } from './memory';

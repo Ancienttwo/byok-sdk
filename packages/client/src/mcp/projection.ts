@@ -1,6 +1,5 @@
 import { compareCodeUnits } from '../util/compare-code-units.js';
 import { McpAuthorityError } from './authority-error.js';
-import type { McpStdioServerSpec } from './client.js';
 import {
   GRANTABLE_MCP_SERVER_NAME,
   type McpServerObservation,
@@ -89,11 +88,4 @@ export function projectMcpTools(
     compareCodeUnits(left.toolsetId, right.toolsetId)
     || compareCodeUnits(left.serverName, right.serverName)
     || compareCodeUnits(left.toolName, right.toolName)));
-}
-
-/** The task-scoped authority one Pi launch is handed: what to run, and exactly which tools exist. */
-export interface McpLaunchProjection {
-  readonly mcpServers: Readonly<Record<string, McpStdioServerSpec>>;
-  /** Canonically ordered by {@link projectMcpTools}. */
-  readonly tools: readonly McpToolProjection[];
 }

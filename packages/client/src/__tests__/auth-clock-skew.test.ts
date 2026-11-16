@@ -120,7 +120,12 @@ describe('device clock skew observation (#1114)', () => {
 
   it('never feeds token lifetime: expiry is receipt time plus expiresIn whatever the Date says', async () => {
     dateHeader = { at: DEVICE_NOW + 2 * HOUR_MS };
-    const record = await auth.pair('pairing-code');
-    expect(record.expiresAt).toBe(new Date(DEVICE_NOW + 3600 * 1000).toISOString());
+    await auth.pair('pairing-code');
+    // The token lives only in memory (#2045): its expiry shows in when it renews.
+    // Expiry is DEVICE_NOW + 3600 s, so renewal starts 60 s before it.
+    vi.setSystemTime(DEVICE_NOW + 3540 * 1000 - 1);
+    await expect(auth.getValidAccessToken()).resolves.toBe('token-0');
+    vi.setSystemTime(DEVICE_NOW + 3540 * 1000 + 1);
+    await expect(auth.getValidAccessToken()).resolves.toBe('token-1');
   });
 });

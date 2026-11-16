@@ -12,7 +12,6 @@ export type {
   RuntimeLaunchResources,
   RuntimeCapabilities,
   RuntimeDetectResult,
-  RuntimeDetectionAdvisory,
   RuntimeDetectionRefusalReason,
 } from '../types.js';
 export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection.js';

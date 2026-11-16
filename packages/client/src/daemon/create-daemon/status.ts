@@ -40,21 +40,6 @@ export function buildControlStatus(daemonScope: DaemonScope): ControlStatusResul
   // list's count) — same source `approvals.list` itself calls.
   const pendingApprovals = approvalRegistry.list();
   const clockSkew = daemonState.auth.clockSkew();
-  // #1103: keep verdicts out of `runtimes` so a pre-#1103 CLI's strict
-  // observation parser still accepts the array; new readers merge this
-  // additive side channel by runtime id.
-  const runtimeVersionVerdicts = daemonState.runtimeObservations.flatMap((observation) => observation.versionVerdict === undefined
-    ? []
-    : [{ id: observation.id, versionVerdict: { ...observation.versionVerdict } }]);
-  // #1103 §2.6: the restart comparison travels the same way, so a pre-#1103
-  // client's strict observation parser keeps accepting `runtimes`.
-  const runtimeVersionChanges = daemonState.runtimeObservations.flatMap((observation) => observation.versionChange === undefined
-    ? []
-    : [{ id: observation.id, versionChange: { ...observation.versionChange } }]);
-  // #1103 O10: the executable is local status evidence and travels the same way.
-  const runtimeExecutables = daemonState.runtimeObservations.flatMap((observation) => observation.executableSource === undefined
-    ? []
-    : [{ id: observation.id, ...(observation.executablePath === undefined ? {} : { executablePath: observation.executablePath }), executableSource: observation.executableSource }]);
   return {
     localAgentRelease,
     pid: process.pid,
@@ -65,10 +50,7 @@ export function buildControlStatus(daemonScope: DaemonScope): ControlStatusResul
     activeTasks,
     environment: { ...daemonState.resolvedEnvironment },
     ...(daemonState.environmentResolvedAt === undefined ? {} : { environmentResolvedAt: daemonState.environmentResolvedAt }),
-    runtimes: daemonState.runtimeObservations.map(({ versionVerdict: _versionVerdict, versionChange: _versionChange, executablePath: _executablePath, executableSource: _executableSource, ...observation }) => ({ ...observation })),
-    ...(runtimeVersionVerdicts.length === 0 ? {} : { runtimeVersionVerdicts }),
-    ...(runtimeVersionChanges.length === 0 ? {} : { runtimeVersionChanges }),
-    ...(runtimeExecutables.length === 0 ? {} : { runtimeExecutables }),
+    runtimes: daemonState.runtimeObservations.map(observation => ({ ...observation })),
     // M4 Phase 4 (part B.3): queue watermarks come from TaskRunner's own
     // active-task map (distinct from `observer.tasks()` above, which is
     // derived from the envelope feed) — see `TaskRunner.getQueueWatermarks`'s

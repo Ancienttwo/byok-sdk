@@ -137,7 +137,7 @@ describe('Agent memory helper P1 regressions', () => {
         agentHome: { hostStorageRoot: path.join(process.cwd(), '.tmp-agent-memory-linux-helper-home') },
         agentMemory: {},
         ...{ agentMemoryFilesystem: { helperBin: '/opt/byok-agent-memory-fs' } },
-      }, [new StubRuntimeAdapter('pi')])).toThrow('is not admitted on this platform');
+      }, [new StubRuntimeAdapter('pi')])).toThrow('DaemonConfig.agentMemoryFilesystem is not a known field');
     });
   });
 

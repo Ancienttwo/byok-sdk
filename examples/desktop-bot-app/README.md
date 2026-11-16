@@ -84,10 +84,9 @@ first, so the SDK can re-enter the same executable for its helpers, then serves 
 bridge and composes the Host after main's hello (`src/host/compose.ts`):
 
 - Before any store opens, `src/host/precheck.ts` runs `inspectDaemonStores`,
-  `inspectSqliteStore` and `inspectProviderProfileStore`. A keys store that reports
-  `migration-required` is migrated with `migrateProviderProfileStore`; any other
-  verdict than `accepted` or `absent` stops the Host with the store and its reason.
-  Nothing is repaired automatically, and a refusal migrates nothing.
+  `inspectSqliteStore` and `inspectProviderProfileStore`. A verdict other than
+  `accepted` or `absent` stops the Host with the store and its reason.
+  Nothing is repaired automatically.
 - The embedded server runs on SQLite (`<hostStorageRoot>/host/server.sqlite`) behind
   `listenLoopback`; its port is claimed once in `<hostStorageRoot>/host/loopback-port`.
 - The daemon comes from `createDaemonWithAdapters` with `createRuntimeAdapters`. Each

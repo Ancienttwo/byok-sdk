@@ -2,10 +2,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { CompactVetoError, HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, occurrenceIntentKey, type ExecutionServer, type ExecutionTemplate, type LedgerState } from '@byok-sdk/server/execution-core';
+import { CompactVetoError, HostLedger, HostStoreFormatError, MIN_TOMBSTONE_RETENTION_MS, hash, occurrenceIntentKey, type ExecutionServer, type ExecutionTemplate, type LedgerState } from '@byok-sdk/server/execution-core';
 import { template as baseTemplate } from './k4-fixtures.test-support';
 import { BotCollaboration } from './host';
-import { botCompactVeto } from './compaction';
+import { botCompactVeto, botLedgerOptions } from './compaction';
 import { openTeam, settleOutsideK8, type TestTeam } from './__tests__/team.test-support';
 import { crossBot } from './__tests__/cross-bot.test-support';
 import { stateOf, type Delegation, type Turn } from './model';
@@ -29,11 +29,13 @@ afterEach(async () => {
 });
 function open(now: () => number) {
   const root = mkdtempSync(join(tmpdir(), 'k8-compact-')); roots.push(root);
-  const file = join(root, 'host.sqlite'), ledger = new HostLedger(file, 'tenant', { compactVeto: botCompactVeto });
+  const file = join(root, 'host.sqlite'), ledger = new HostLedger(file, 'tenant', botLedgerOptions);
   const bot = new BotCollaboration(server as never, ledger, { botId: 'main', execution: template, now, connector: async () => ({}), dreaming: false });
   closers.push(() => ledger.close(), () => bot.close());
   /** A maintenance writer that opens the same file without the veto. */
-  const unguarded = () => { const other = new HostLedger(file, 'tenant'); closers.push(() => other.close()); return other; };
+  const unguarded = () => {
+    const other = new HostLedger(file, 'tenant', { expectedFormats: botLedgerOptions.expectedFormats }); closers.push(() => other.close()); return other;
+  };
   return { ledger, bot, unguarded };
 }
 const retention = (now: number) => ({ now, tombstoneRetentionMs: MIN_TOMBSTONE_RETENTION_MS });
@@ -105,15 +107,18 @@ it('fails a retired Turn of a Bot archived before the next pass, and does not re
   expect(reports).toEqual([expect.objectContaining({ value: expect.objectContaining({ conclusion: 'failed', reason: 'result_retired' }) })]);
 });
 
-it('refuses a ledger opened without the K8 compact veto', () => {
+it('refuses a ledger opened without the K8 compact veto or k8 format, and a ledger of another k8 format', () => {
   const root = mkdtempSync(join(tmpdir(), 'k8-compact-')); roots.push(root);
-  const ledger = new HostLedger(join(root, 'host.sqlite'), 'tenant'); closers.push(() => ledger.close());
-  expect(() => new BotCollaboration(server as never, ledger, { botId: 'main', execution: template, connector: async () => ({}) }))
-    .toThrow('Open the Host ledger with { compactVeto: botCompactVeto }');
-  const other = new HostLedger(join(root, 'other.sqlite'), 'tenant', { compactVeto: (state, key) => botCompactVeto(state, key) });
-  closers.push(() => other.close());
-  expect(() => new BotCollaboration(server as never, other, { botId: 'main', execution: template, connector: async () => ({}) }))
-    .toThrow('Open the Host ledger with { compactVeto: botCompactVeto }');
+  const opened = (name: string, options?: ConstructorParameters<typeof HostLedger>[2]) => {
+    const ledger = new HostLedger(join(root, name), 'tenant', options); closers.push(() => ledger.close()); return ledger;
+  };
+  for (const ledger of [opened('host.sqlite'), opened('other.sqlite', { ...botLedgerOptions, compactVeto: (state, key) => botCompactVeto(state, key) }),
+    opened('veto-only.sqlite', { compactVeto: botCompactVeto })]) {
+    expect(() => new BotCollaboration(server as never, ledger, { botId: 'main', execution: template, connector: async () => ({}) }))
+      .toThrow('Open the Host ledger with botLedgerOptions');
+  }
+  new HostLedger(join(root, 'k8.sqlite'), 'tenant', botLedgerOptions).close();
+  expect(() => new HostLedger(join(root, 'k8.sqlite'), 'tenant', { ...botLedgerOptions, expectedFormats: { k8: 4 } })).toThrow(HostStoreFormatError);
 });
 
 it('keeps the chain intent of a reply_pending delegation, and its reply check survives a compaction without the veto', async () => {
@@ -134,7 +139,8 @@ it('keeps the chain intent of a reply_pending delegation, and its reply check su
   expect(error).toMatchObject({ code: 'compact_vetoed', intentKey: d.id, message: 'Compaction refused: An unresolved delegation references the Turn' });
   expect(fixture.ledger.snapshot()).toEqual(before);
   expect(fixture.ledger.hasTombstone('intent', d.id, Date.now())).toBe(false);
-  const other = new HostLedger(join(fixture.root, 'host.sqlite'), fixture.ledger.tenant); closers.push(() => other.close());
+  const other = new HostLedger(join(fixture.root, 'host.sqlite'), fixture.ledger.tenant, { expectedFormats: botLedgerOptions.expectedFormats });
+  closers.push(() => other.close());
   expect(other.compact({ acknowledgedIntentKeys: [d.id], ...retention(Date.now()) })).toMatchObject({ compactedIntents: 1 });
   // The due reply check has no readback evidence. It retries and does not stop the pass.
   offset += 60_000;

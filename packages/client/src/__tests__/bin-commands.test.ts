@@ -22,7 +22,8 @@ import {
   UnpairNotConfirmedError,
   UnpairUnknownDaemonStateError,
 } from '../bin/commands/unpair';
-import { appendAuditRecord, auditLogPath } from '../daemon/audit-log';
+import { auditLogPath } from '../daemon/audit-log';
+import { appendAuditRecord } from './fixtures/audit-records';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 /** Fake `connectControlClient` returning an unreachable result — the default for tests below that don't care about the live control socket. */

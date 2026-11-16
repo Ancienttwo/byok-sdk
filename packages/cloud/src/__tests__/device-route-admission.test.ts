@@ -96,7 +96,7 @@ function createFullHarness(): FullHarness {
       const response = await request('/byok/pair', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ pairingCode: pairing.code, deviceName: 'drift-device', devicePublicKey: keys.publicKeyBase64Url }),
+        body: JSON.stringify({ pairingCode: pairing.code, deviceName: 'drift-device', devicePublicKey: keys.publicKeyBase64Url, expectedDeviceDigest: null }),
       });
       expect(response.status).toBe(200);
       const body = (await response.json()) as PairResponse;

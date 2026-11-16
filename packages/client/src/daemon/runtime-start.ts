@@ -3,8 +3,8 @@ import { isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure, RuntimeDisp
 import { bindDeclaredSessionMembers, type DeclaredSessionMembers } from './session-contract.js';
 
 /**
- * After an abort, the adapter's start() still owns what it spawned. Codex and
- * Pi do not read the signal and settle only when their session opens. The
+ * After an abort, the adapter's start() still owns what it spawned. Codex
+ * does not read the signal and settles only when its session opens. The
  * daemon waits this long after the abort for that settlement before it judges
  * the disposal.
  */

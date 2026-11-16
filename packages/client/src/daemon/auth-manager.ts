@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto';
 import os from 'node:os';
 import {
   BYOK_CHALLENGE_PATH,
@@ -5,8 +6,15 @@ import {
   BYOK_TOKEN_PATH,
   ChallengeResponseSchema,
   DeviceNotRegisteredResponseSchema,
+  isPairingText,
+  PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH,
+  PairingCodeInvalidResponseSchema,
   PairResponseSchema,
+  PairSupersededResponseSchema,
+  pairDeviceDigest,
   TokenResponseSchema,
+  type PairRequest,
+  type PairResponse,
 } from '@byok-sdk/protocol';
 import {
   assertStoreBound,
@@ -15,11 +23,17 @@ import {
   type DeviceMetadata,
   type DeviceRecord,
 } from './store.js';
-import type { DeviceCredentialBackend, FirstPairingAttempt } from './device-credential-store.js';
+import { DeviceCredentialLegacyEntryError, encodeEnrollmentEntry, type DeviceCredentialBackend, type PairingAttempt } from './device-credential-store.js';
 import { acquireEnrollmentGate, registerMemberWrites } from './enrollment-gate.js';
-import type { PathMutationGate } from '../util/path-mutation-gate.js';
-import { DeviceStoreBindingMismatchError, FirstPairingAttemptRefusedError } from './daemon-errors.js';
-import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys.js';
+import {
+  DeviceStoreBindingMismatchError,
+  PairingAttemptRefusedError,
+  PairingBusyError,
+  PairingCodeRejectedError,
+  PairingInputInvalidError,
+  PairingSupersededError,
+} from './daemon-errors.js';
+import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, publicKeyOfPrivateKeyPem, signNonce } from './device-keys.js';
 import { toHttpBase } from './url.js';
 import { MAX_TIMER_DELAY_MS } from '../util/timer-delay.js';
 
@@ -54,34 +68,55 @@ export class AuthRequestAbortedError extends Error {
  * is not valid JSON or does not satisfy its protocol schema
  * (`ChallengeResponseSchema` / `TokenResponseSchema`, #386) — for example a
  * truncated body or a missing field such as `expiresIn` (#1114). The renewal or pairing fails and the prior credential
- * is kept unchanged; nothing is inferred from the malformed body. The JSON
- * `SyntaxError` or the schema failure rides in `cause`. Not a revocation.
+ * is kept unchanged; nothing is inferred from the malformed body. It has no
+ * `cause`, so no part of the body reaches the Host through it. Not a
+ * revocation.
  */
 export class AuthResponseInvalidError extends Error {
-  constructor(
-    readonly route: 'challenge' | 'token' | 'pair',
-    options: { cause: unknown },
-  ) {
-    super(`${route === 'pair' ? 'pairing' : `token renewal (${route})`} failed: the server response does not match the protocol schema`, options);
+  constructor(readonly route: 'challenge' | 'token' | 'pair') {
+    super(`${route === 'pair' ? 'pairing' : `token renewal (${route})`} failed: the server response does not match the protocol schema`);
     this.name = 'AuthResponseInvalidError';
   }
 }
 
-type RenewedToken = Pick<DeviceRecord, 'accessToken' | 'expiresAt'> & {
+/**
+ * The access token, held only in memory (#2045). `expiresAt` is device-local
+ * (#1114): this device's receipt time plus the server's relative `expiresIn`,
+ * compared only with this device's clock.
+ */
+interface AccessToken {
+  readonly accessToken: string;
+  readonly expiresAt: string;
+}
+
+type RenewedToken = AccessToken & {
   readonly clockSkew: ClockSkewObservation | undefined;
 };
+
+/** One answer of `POST /byok/pair` that decides the pairing; anything else throws. */
+type PairOutcome =
+  | { readonly kind: 'paired'; readonly body: PairResponse & { readonly expiresAt: string; readonly clockSkew: ClockSkewObservation | undefined } }
+  | { readonly kind: 'conflict'; readonly currentDeviceDigest: string | null };
+
+const PAIRING_CODE_DIGEST_NAMESPACE = 'byok-pairing-code-v1';
+
+/** The local name of a pairing code in a staged attempt: a retry with the same code resumes it. The code itself is never stored. */
+function pairingCodeDigest(pairingCode: string): string {
+  return createHash('sha256').update(JSON.stringify([PAIRING_CODE_DIGEST_NAMESPACE, pairingCode]), 'utf8').digest('base64url');
+}
 
 /**
  * Reads a successful renewal body as JSON. A body read failure (abort,
  * network) propagates unchanged so `runRequest` still classifies it; only a
  * body that is not JSON becomes {@link AuthResponseInvalidError}.
  */
-async function readAuthResponseJson(response: Response, route: 'challenge' | 'token'): Promise<unknown> {
+async function readAuthResponseJson(response: Response, route: 'challenge' | 'token' | 'pair'): Promise<unknown> {
   const text = await response.text();
   try {
     return JSON.parse(text) as unknown;
-  } catch (cause) {
-    throw new AuthResponseInvalidError(route, { cause });
+  } catch {
+    // The parser's message quotes the body; no server text enters an error.
+    throw new AuthResponseInvalidError(route);
   }
 }
 
@@ -170,6 +205,7 @@ export class AuthManager {
         current = await auth.loadRecord(signal);
       } catch (error) {
         if (error instanceof DeviceStoreBindingMismatchError || error instanceof DeviceRecordRePairRequiredError) auth.loseBinding(error);
+        if (error instanceof DeviceCredentialLegacyEntryError) auth.loseBinding(new DeviceRecordRePairRequiredError());
         throw error;
       }
       if (current === undefined || record === undefined) auth.loseBinding(new DeviceRecordRePairRequiredError());
@@ -187,6 +223,12 @@ export class AuthManager {
   }
 
   private record: DeviceRecord | undefined;
+  /**
+   * Never persisted: the device key exchanges a new one whenever none is held,
+   * so a daemon's first request after start runs `/byok/challenge` and
+   * `/byok/token` (#2045).
+   */
+  private token: AccessToken | undefined;
   private renewing: Promise<string> | undefined;
   private proactiveTimer: ReturnType<typeof setTimeout> | undefined;
   private revoked = false;
@@ -254,124 +296,162 @@ export class AuthManager {
    * so {@link stop} cancels a read hung on a locked keychain.
    */
   async loadExisting(): Promise<DeviceRecord | undefined> {
+    const prior = this.record;
     this.record = undefined;
-    this.record = await this.runCredentialMutation((signal) => this.loadRecord(signal));
+    this.record = await this.runCredentialMutation(async (signal) => {
+      try {
+        return await this.loadRecord(signal);
+      } catch (error) {
+        if (!(error instanceof DeviceCredentialLegacyEntryError)) throw error;
+        // A wire v6 entry is void on a v7 cloud: delete it, then answer from
+        // what remains, which is re-pair-required while device.json is there.
+        await this.underEnrollmentGate(signal, () => this.deleteLegacyEntry(signal));
+        return this.loadRecord(signal);
+      }
+    });
+    // A token is kept only for the enrollment it was issued to.
+    if (!sameEnrollment(prior, this.record)) this.token = undefined;
     if (this.record) this.scheduleProactiveRenewal();
     return this.record;
   }
 
   /**
-   * `POST /byok/pair` (v2): generates a device keypair on first pair, reuses
-   * it on any subsequent (e.g. post-revocation) re-pair of this store. It
-   * refuses with {@link DeviceStoreBindingMismatchError} while the OS entry
-   * holds an enrollment this storeDir did not pair, unless
-   * `replaceOtherStore` states the operator's intent to replace it; the
-   * replacement never reuses that enrollment's key. A staged first-pairing
-   * attempt is reused only when it names this store; otherwise it refuses
-   * with {@link FirstPairingAttemptRefusedError}, and `replaceOtherStore`
-   * discards another store's attempt (#2033).
+   * `POST /byok/pair` (v2) with the registration fence (#2045). It refuses
+   * with {@link DeviceStoreBindingMismatchError} while the OS entry holds an
+   * enrollment this storeDir did not pair, unless `replaceOtherStore` states
+   * the operator's intent to replace it, and with
+   * {@link PairingAttemptRefusedError} while another storeDir's attempt is
+   * staged, unless `replaceOtherStore` discards it (#2033).
    *
-   * The whole pairing is one critical section of the enrollment gate: it
-   * rereads the OS entry, `device.json` and the staged attempt after taking
-   * the gate, never trusting a cached record, and releases the gate only
-   * after `custody` has run.
+   * The enrollment gate is never held across the network:
+   * 1. Under the gate it rereads the slot and stages an attempt: a retry with
+   *    the same code resumes this store's staged attempt unchanged (#1767);
+   *    any other pairing stages a new one, keyed by this store's enrollment
+   *    key on a re-pair of its own enrollment and by a fresh key otherwise,
+   *    with the fence digest of the slot's current enrollment.
+   * 2. It sends the request.
+   * 3. On a typed `409` it adopts the server's current device digest and
+   *    resends once, only while the slot still holds exactly its attempt; a
+   *    second `409` is {@link PairingBusyError}.
+   * 4. On success it persists the enrollment under the gate, only while the
+   *    slot still holds exactly its attempt, else {@link PairingSupersededError}.
+   * A request that ends without a decisive answer leaves the attempt staged
+   * for an exact retry with the same code.
    */
-  async pair(pairingCode: string, options?: {
-    readonly replaceOtherStore?: boolean;
-    /** Internal daemon seam: runs once the enrollment is persisted, before the gate is released; the daemon writes its E2EE member custody here (#2030 F2). */
-    readonly custody?: (record: DeviceRecord) => Promise<void>;
-  }): Promise<DeviceRecord> {
+  async pair(pairingCode: string, options?: { readonly replaceOtherStore?: boolean }): Promise<DeviceRecord> {
     this.pairing = true;
     if (this.proactiveTimer) clearTimeout(this.proactiveTimer);
     this.proactiveTimer = undefined;
-    // Held past the credential mutation, so `custody` may stop this manager.
-    let gate: PathMutationGate | undefined;
     try {
-      const paired = await this.runCredentialMutation(async (signal) => {
+      return await this.runCredentialMutation(async (signal) => {
         const replaceOtherStore = options?.replaceOtherStore === true;
-        // These request facts join the key as one immutable first-pair
-        // attempt. A retry after process restart must not silently change its
-        // server-side binding because hostname/config or machine observation
-        // changed after the registration commit.
         const observedDeviceName = this.opts.deviceName ?? os.hostname();
         const observedMachineId = await this.opts.machineId?.();
-        // The pairing holds the enrollment gate across its own request: the
-        // server's registration has no fencing, so a request in flight could
-        // supersede another store's later pairing (#2045 F1). The request
-        // deadline bounds only the request; each OS credential command has its
-        // own deadline. A request that times out is unknown, not failed: its
-        // staged attempt stays for an exact retry with the same key (#1767),
-        // and the server may still register it after the gate is released;
-        // only registration fencing on the server closes that gap.
-        gate = await acquireEnrollmentGate(this.opts.store.productId, signal);
-        const { keyPair, pairingDeviceName, pairingMachineId } = await this.pairingKey(signal, replaceOtherStore, observedDeviceName, observedMachineId);
-
-        const url = new URL(BYOK_PAIR_PATH, toHttpBase(this.opts.serverUrl));
-        // Best-effort and optional: an unresolvable machine identity omits the
-        // field, which is the documented "no supersession" case — it never
-        // becomes an empty string or any other placeholder the server would
-        // then treat as a real machine shared by every unidentifiable device.
-        const body = await this.runRequest(signal, async (requestSignal) => {
-          const sentAt = Date.now();
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              pairingCode,
-              deviceName: pairingDeviceName,
-              devicePublicKey: keyPair.publicKeyBase64Url,
-              ...(pairingMachineId === undefined ? {} : { machineId: pairingMachineId }),
-            }),
-            signal: requestSignal,
-          });
-          const receivedAt = Date.now();
-          if (!res.ok) {
-            throw new Error(`pairing failed: HTTP ${res.status} ${await safeErrorText(res)}`.trimEnd());
-          }
-          // Pairing is the only time an authenticated tenant binding may enter
-          // local state. Parse the required wire contract before building the
-          // one atomic DeviceRecord; no token claim or host configuration is an
-          // alternate tenant authority.
-          const paired = PairResponseSchema.safeParse(await res.json());
-          if (!paired.success) throw new AuthResponseInvalidError('pair', { cause: paired.error });
-          return {
-            ...paired.data,
-            expiresAt: deviceLocalExpiry(receivedAt, paired.data.expiresIn),
-            clockSkew: observeClockSkew(sentAt, receivedAt, res),
-          };
-        });
-
+        // The wire bounds both, and the staged attempt stores both.
+        if (!isPairingText(observedDeviceName, PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH)) {
+          throw new PairingInputInvalidError('deviceName');
+        }
+        if (observedMachineId !== undefined && !/^[0-9a-f]{64}$/u.test(observedMachineId)) throw new PairingInputInvalidError('machineId');
+        const attempt = await this.underEnrollmentGate(signal, () =>
+          this.stagePairingAttempt(signal, pairingCode, replaceOtherStore, observedDeviceName, observedMachineId));
+        const devicePublicKey = publicKeyOfPrivateKeyPem(attempt.devicePrivateKeyPem);
+        let outcome = await this.sendPairRequest(signal, pairingCode, attempt, devicePublicKey, attempt.expectedDeviceDigest);
+        if (outcome.kind === 'conflict') {
+          // Adopted only inside this invocation, never persisted: a later
+          // invocation starts again from the staged digest.
+          const adopted = outcome.currentDeviceDigest;
+          await this.underEnrollmentGate(signal, () => this.assertOwnsAttempt(signal, attempt));
+          outcome = await this.sendPairRequest(signal, pairingCode, attempt, devicePublicKey, adopted);
+          if (outcome.kind === 'conflict') throw new PairingBusyError();
+        }
+        const { body } = outcome;
         const metadata: DeviceMetadata = {
           deviceId: body.deviceId,
           tenantId: body.tenantId,
-          devicePublicKey: keyPair.publicKeyBase64Url,
+          devicePublicKey,
         };
-        const record: DeviceRecord = {
-          ...metadata,
-          accessToken: body.accessToken,
-          expiresAt: body.expiresAt,
-          devicePrivateKeyPem: exportPrivateKeyPem(keyPair.privateKey),
-        };
-        // device.json is this store's pair-time binding and a non-secret
-        // projection. Write it first, then atomically replace the complete OS
-        // enrollment authority. If the authoritative replace fails, the next
-        // load reports the binding mismatch; no mixed identity/key can load,
-        // and recovery is re-running pair or the doctor repair action.
-        await this.opts.store.save(metadata);
-        await this.credentials.replace(record, signal);
+        const record: DeviceRecord = { ...metadata, devicePrivateKeyPem: attempt.devicePrivateKeyPem };
+        // Everything written below is validated first: a record the entry
+        // refuses must not leave a device.json naming it.
+        encodeEnrollmentEntry(record);
+        await this.underEnrollmentGate(signal, async () => {
+          await this.assertOwnsAttempt(signal, attempt);
+          // device.json is this store's pair-time binding and a non-secret
+          // projection. Write it first, then atomically replace the complete
+          // OS enrollment authority, which consumes the attempt. If the
+          // replace fails, the next load reports the binding mismatch; no
+          // mixed identity/key can load.
+          await this.opts.store.save(metadata);
+          await this.credentials.replace(record, signal);
+        });
         this.record = record;
+        this.token = { accessToken: body.accessToken, expiresAt: body.expiresAt };
         this.lastClockSkew = body.clockSkew;
         this.revoked = false;
         return record;
       });
-      await options?.custody?.(paired);
-      return paired;
     } finally {
-      this.pairing = false;
       // Pairing is a short-lived credential mutation, not the start of the
       // daemon lifecycle. loadExisting() is the only place that arms a timer.
-      await gate?.release();
+      this.pairing = false;
     }
+  }
+
+  /**
+   * One `POST /byok/pair`. A typed `401` is {@link PairingCodeRejectedError}
+   * and a typed `409` a conflict. Any other answer, including an untyped
+   * `409`, leaves the outcome unknown and throws a fixed message: no server
+   * text enters an error.
+   */
+  private async sendPairRequest(
+    signal: AbortSignal,
+    pairingCode: string,
+    attempt: PairingAttempt,
+    devicePublicKey: string,
+    expectedDeviceDigest: string | null,
+  ): Promise<PairOutcome> {
+    const url = new URL(BYOK_PAIR_PATH, toHttpBase(this.opts.serverUrl));
+    const request: PairRequest = {
+      pairingCode,
+      deviceName: attempt.deviceName,
+      devicePublicKey,
+      // An unresolvable machine identity omits the field, the documented "no
+      // supersession" case, never a placeholder shared by every device.
+      ...(attempt.machineId === undefined ? {} : { machineId: attempt.machineId }),
+      expectedDeviceDigest,
+    };
+    return this.runRequest(signal, async (requestSignal) => {
+      const sentAt = Date.now();
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(request),
+        signal: requestSignal,
+      });
+      const receivedAt = Date.now();
+      if (res.status === 401 && PairingCodeInvalidResponseSchema.safeParse(await readJsonOrUndefined(res)).success) {
+        throw new PairingCodeRejectedError();
+      }
+      if (res.status === 409) {
+        const conflict = PairSupersededResponseSchema.safeParse(await readJsonOrUndefined(res));
+        if (conflict.success) return { kind: 'conflict', currentDeviceDigest: conflict.data.currentDeviceDigest };
+      }
+      if (!res.ok) throw new Error(`pairing failed: HTTP ${res.status}`);
+      // Pairing is the only time an authenticated tenant binding may enter
+      // local state. Parse the required wire contract before building the
+      // one atomic DeviceRecord; no token claim or host configuration is an
+      // alternate tenant authority.
+      const paired = PairResponseSchema.safeParse(await readAuthResponseJson(res, 'pair'));
+      if (!paired.success) throw new AuthResponseInvalidError('pair');
+      return {
+        kind: 'paired',
+        body: {
+          ...paired.data,
+          expiresAt: deviceLocalExpiry(receivedAt, paired.data.expiresIn),
+          clockSkew: observeClockSkew(sentAt, receivedAt, res),
+        },
+      };
+    });
   }
 
   /** The current, non-expired access token — renews first if it's expired or close to it. Throws {@link DeviceRevokedError} if the device has been revoked. */
@@ -382,11 +462,13 @@ export class AuthManager {
     // Returning the still-long-lived cached token here lets WS reconnect race
     // that renewal and present the same rejected bearer again.
     if (this.renewing) return this.renewing;
-    if (msUntilExpiry(this.record.expiresAt) > RENEW_MARGIN_MS) return this.record.accessToken;
+    const token = this.token;
+    if (token === undefined) return this.renew();
+    if (msUntilExpiry(token.expiresAt) > RENEW_MARGIN_MS) return token.accessToken;
     // Inside the renewal floor the cached token is the newest the server has
     // issued; the proactive timer renews when the floor ends, and a server 401
     // still renews at once through handleUnauthorized().
-    if (this.msUntilRenewAllowed() > 0) return this.record.accessToken;
+    if (this.msUntilRenewAllowed() > 0) return token.accessToken;
     return this.renew();
   }
 
@@ -431,25 +513,15 @@ export class AuthManager {
       body = await this.exchangeToken(record, signal);
       if (body === undefined) this.markRevoked();
     }
-    const updated: DeviceRecord = {
-      ...record,
-      accessToken: body.accessToken,
-      expiresAt: body.expiresAt,
-    };
-    // Renewal atomically replaces the complete enrollment authority; identity
-    // and key cannot drift from the new token/expiry. It writes only while
-    // this store still holds that enrollment, under the enrollment gate
-    // (#2034); otherwise the new token is discarded and the binding is lost.
-    await this.underEnrollmentGate(signal, async () => {
-      await checkBinding(this, record, signal);
-      await this.credentials.replace(updated, signal);
-    });
-    this.record = updated;
+    // The token is used only while this store still holds the enrollment it
+    // was issued to (#2034); otherwise it is discarded and the binding is lost.
+    await this.underEnrollmentGate(signal, () => checkBinding(this, record, signal));
+    this.token = { accessToken: body.accessToken, expiresAt: body.expiresAt };
     this.lastClockSkew = body.clockSkew;
     this.lastRenewedAt = performance.now();
-    this.nearExpiryRenewals = msUntilExpiry(updated.expiresAt) > RENEW_MARGIN_MS ? 0 : this.nearExpiryRenewals + 1;
+    this.nearExpiryRenewals = msUntilExpiry(body.expiresAt) > RENEW_MARGIN_MS ? 0 : this.nearExpiryRenewals + 1;
     this.scheduleProactiveRenewal();
-    return updated.accessToken;
+    return body.accessToken;
   }
 
   /**
@@ -467,12 +539,10 @@ export class AuthManager {
       });
       if (challengeRes.status === 401) return this.readUnauthorized(challengeRes);
       if (!challengeRes.ok) {
-        throw new Error(
-          `token renewal (challenge) failed: HTTP ${challengeRes.status} ${await safeErrorText(challengeRes)}`.trimEnd(),
-        );
+        throw new Error(`token renewal (challenge) failed: HTTP ${challengeRes.status}`);
       }
       const parsed = ChallengeResponseSchema.safeParse(await readAuthResponseJson(challengeRes, 'challenge'));
-      if (!parsed.success) throw new AuthResponseInvalidError('challenge', { cause: parsed.error });
+      if (!parsed.success) throw new AuthResponseInvalidError('challenge');
       return parsed.data;
     });
     if (challenge === undefined) return undefined;
@@ -489,10 +559,10 @@ export class AuthManager {
       const receivedAt = Date.now();
       if (tokenRes.status === 401) return this.readUnauthorized(tokenRes);
       if (!tokenRes.ok) {
-        throw new Error(`token renewal (token) failed: HTTP ${tokenRes.status} ${await safeErrorText(tokenRes)}`.trimEnd());
+        throw new Error(`token renewal (token) failed: HTTP ${tokenRes.status}`);
       }
       const token = TokenResponseSchema.safeParse(await readAuthResponseJson(tokenRes, 'token'));
-      if (!token.success) throw new AuthResponseInvalidError('token', { cause: token.error });
+      if (!token.success) throw new AuthResponseInvalidError('token');
       return {
         accessToken: token.data.accessToken,
         expiresAt: deviceLocalExpiry(receivedAt, token.data.expiresIn),
@@ -528,6 +598,7 @@ export class AuthManager {
   /** The OS entry no longer holds this store's enrollment: drop the cached record, stop renewing and report it. Always throws `error`. */
   private loseBinding(error: DeviceStoreBindingMismatchError | DeviceRecordRePairRequiredError): never {
     this.record = undefined;
+    this.token = undefined;
     if (this.proactiveTimer) clearTimeout(this.proactiveTimer);
     this.proactiveTimer = undefined;
     this.opts.onBindingLost?.(error instanceof DeviceStoreBindingMismatchError ? 'store_not_bound' : 're_pair_required');
@@ -543,54 +614,78 @@ export class AuthManager {
     }
   }
 
-  /** Under the enrollment gate: the key and request facts a pairing proves, staging a new first-pairing attempt when this store has none. */
-  private async pairingKey(
+  /** Under the enrollment gate: this store's attempt for `pairingCode`, resumed or newly staged. */
+  private async stagePairingAttempt(
     signal: AbortSignal,
+    pairingCode: string,
     replaceOtherStore: boolean,
     observedDeviceName: string,
     observedMachineId: string | undefined,
-  ): Promise<{ readonly keyPair: ReturnType<typeof generateDeviceKeyPair>; readonly pairingDeviceName: string; readonly pairingMachineId: string | undefined }> {
-    const { existing, attempt } = await this.pairingAuthority(signal, replaceOtherStore);
-    if (existing) {
-      return {
-        keyPair: { privateKey: importPrivateKeyPem(existing.devicePrivateKeyPem), publicKeyBase64Url: existing.devicePublicKey },
-        pairingDeviceName: observedDeviceName,
-        pairingMachineId: observedMachineId,
-      };
-    }
-    if (attempt) {
-      return {
-        keyPair: { privateKey: importPrivateKeyPem(attempt.devicePrivateKeyPem), publicKeyBase64Url: attempt.devicePublicKey },
-        pairingDeviceName: attempt.deviceName,
-        pairingMachineId: attempt.machineId,
-      };
-    }
-    const generated = generateDeviceKeyPair();
-    // Persist before the first network request. If the server commits
-    // while its response is lost, the explicit retry uses this exact key.
-    await this.credentials.saveFirstPairingAttempt({
-      kind: 'first-pairing-attempt-v1',
-      deviceName: observedDeviceName,
-      devicePublicKey: generated.publicKeyBase64Url,
-      devicePrivateKeyPem: exportPrivateKeyPem(generated.privateKey),
-      ...(observedMachineId === undefined ? {} : { machineId: observedMachineId }),
+  ): Promise<PairingAttempt> {
+    const { existing, attempt: staged } = await this.pairingAuthority(signal, replaceOtherStore);
+    const codeDigest = pairingCodeDigest(pairingCode);
+    if (staged !== undefined && staged.codeDigest === codeDigest) return staged;
+    // The fence names the slot's current enrollment, whichever store paired it.
+    const current = await this.credentials.read(signal);
+    const attempt: PairingAttempt = {
+      kind: 'pairing-attempt-v2',
+      attemptId: randomBytes(16).toString('base64url'),
+      codeDigest,
       storeIdentity: this.opts.store.identity,
-    }, signal);
-    return { keyPair: generated, pairingDeviceName: observedDeviceName, pairingMachineId: observedMachineId };
+      deviceName: observedDeviceName,
+      ...(observedMachineId === undefined ? {} : { machineId: observedMachineId }),
+      devicePrivateKeyPem: existing?.devicePrivateKeyPem ?? exportPrivateKeyPem(generateDeviceKeyPair().privateKey),
+      expectedDeviceDigest: current === undefined
+        ? null
+        : await pairDeviceDigest({ tenantId: current.tenantId, productId: this.opts.store.productId, deviceId: current.deviceId }),
+    };
+    // Persisted before the first request: if the server commits while its
+    // response is lost, the retry with the same code sends this exact request.
+    await this.credentials.savePairingAttempt(attempt, signal);
+    return attempt;
+  }
+
+  /**
+   * Under the enrollment gate: the slot still holds exactly `attempt`, the
+   * one this invocation staged or resumed. Otherwise another pairing replaced
+   * it, and this one must neither resend nor persist.
+   */
+  private async assertOwnsAttempt(signal: AbortSignal, attempt: PairingAttempt): Promise<void> {
+    const current = await this.credentials.readPairingAttempt(signal);
+    if (
+      current === undefined ||
+      current.storeIdentity !== attempt.storeIdentity ||
+      current.attemptId !== attempt.attemptId ||
+      current.codeDigest !== attempt.codeDigest ||
+      current.devicePrivateKeyPem !== attempt.devicePrivateKeyPem
+    ) {
+      throw new PairingSupersededError();
+    }
+  }
+
+  /** Under the enrollment gate: deletes the OS entry only while it still holds the wire v6 format. */
+  private async deleteLegacyEntry(signal: AbortSignal): Promise<void> {
+    try {
+      await this.credentials.read(signal);
+    } catch (error) {
+      if (!(error instanceof DeviceCredentialLegacyEntryError)) throw error;
+      await this.credentials.clear(signal);
+    }
   }
 
   /**
    * Under the enrollment gate, reread from the OS entry and `device.json`:
-   * this store's bound enrollment, or else its own staged first-pairing
-   * attempt (undefined when none, or when `replaceOtherStore` discards another
-   * store's). Another store's enrollment or attempt, or an attempt that names
-   * no store, is refused, also beside this store's enrollment: the pairing
-   * would consume that attempt (#2033, #2030 F1).
+   * this store's bound enrollment, and its own staged attempt (undefined when
+   * none, or when `replaceOtherStore` discards another store's). A wire v6
+   * entry is deleted first, so the store pairs as a first pairing. Another
+   * store's enrollment or attempt is refused, also beside this store's
+   * enrollment: the pairing would consume that attempt (#2033, #2030 F1).
    */
   private async pairingAuthority(
     signal: AbortSignal,
     replaceOtherStore: boolean,
-  ): Promise<{ readonly existing: DeviceRecord | undefined; readonly attempt: FirstPairingAttempt | undefined }> {
+  ): Promise<{ readonly existing: DeviceRecord | undefined; readonly attempt: PairingAttempt | undefined }> {
+    await this.deleteLegacyEntry(signal);
     let existing: DeviceRecord | undefined;
     try {
       existing = await this.loadRecord(signal);
@@ -604,13 +699,12 @@ export class AuthManager {
         (error instanceof DeviceStoreBindingMismatchError && replaceOtherStore);
       if (!replaceable) throw error;
     }
-    const staged = await this.credentials.readFirstPairingAttempt(signal);
+    const staged = await this.credentials.readPairingAttempt(signal);
     if (staged !== undefined && staged.storeIdentity !== this.opts.store.identity) {
-      if (staged.storeIdentity === undefined) throw new FirstPairingAttemptRefusedError('pairing_attempt_unattributed');
-      if (!replaceOtherStore) throw new FirstPairingAttemptRefusedError('store_not_bound');
+      if (!replaceOtherStore) throw new PairingAttemptRefusedError();
       return { existing, attempt: undefined };
     }
-    return { existing, attempt: existing ? undefined : staged };
+    return { existing, attempt: staged };
   }
 
   /** Always throws — `never` return type lets call sites use `if (x === 401) this.markRevoked();` without an explicit `return`/`throw` of their own. */
@@ -624,8 +718,9 @@ export class AuthManager {
   private scheduleProactiveRenewal(): void {
     if (this.proactiveTimer) clearTimeout(this.proactiveTimer);
     this.proactiveTimer = undefined;
-    if (!this.record || this.revoked || this.stopped || this.pairing) return;
-    const delay = Math.max(0, msUntilExpiry(this.record.expiresAt) - RENEW_MARGIN_MS, this.msUntilRenewAllowed());
+    // Without a token there is nothing to keep fresh: the next request exchanges one.
+    if (!this.record || !this.token || this.revoked || this.stopped || this.pairing) return;
+    const delay = Math.max(0, msUntilExpiry(this.token.expiresAt) - RENEW_MARGIN_MS, this.msUntilRenewAllowed());
     // A far-future expiry exceeds what one timer can hold (it would fire at
     // 1 ms). Arm a capped step and re-derive the delay from `expiresAt` when
     // it elapses; renewal only runs once the real renewal point is reached.
@@ -727,12 +822,17 @@ export class AuthManager {
   }
 }
 
+function sameEnrollment(a: DeviceRecord | undefined, b: DeviceRecord | undefined): boolean {
+  return a !== undefined && b !== undefined &&
+    a.deviceId === b.deviceId && a.tenantId === b.tenantId && a.devicePublicKey === b.devicePublicKey;
+}
+
 function msUntilExpiry(expiresAt: string): number {
   return new Date(expiresAt).getTime() - Date.now();
 }
 
 /**
- * The stored `expiresAt` is device-local (#1114): this device's receipt time
+ * `expiresAt` is device-local (#1114): this device's receipt time
  * plus the server's relative `expiresIn`, so {@link msUntilExpiry} compares it
  * only with the same device clock. `refreshHint` is never read for lifetime.
  */
@@ -782,10 +882,17 @@ function isDeviceNotRegistered(body: string): boolean {
   return DeviceNotRegisteredResponseSchema.safeParse(parsed).success;
 }
 
-async function safeErrorText(res: Response): Promise<string> {
+/** A rejection body read only to match a typed schema; unreadable or non-JSON is no match. Its text never enters an error. */
+async function readJsonOrUndefined(res: Response): Promise<unknown> {
+  let text: string;
   try {
-    return await res.text();
+    text = await res.text();
   } catch {
-    return '';
+    return undefined;
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
   }
 }

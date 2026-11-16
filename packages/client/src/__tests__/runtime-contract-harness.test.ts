@@ -162,14 +162,13 @@ describe('runtime contract run selection', () => {
 describe('runtime contract detect.version catches a forced detector break', () => {
   const identifies = (version: string, expected: string) => version.trim() === expected;
   const target = { expectedVersion: '0.160.0', qualifiedVersion: '0.160.0' };
-  const detected = (overrides: { version?: string; state?: 'allow' | 'warn'; advisory?: boolean } = {}): RuntimeDetectResult => ({
+  const detected = (overrides: { version?: string; state?: 'allow' | 'warn' } = {}): RuntimeDetectResult => ({
     kind: 'available',
     version: overrides.version ?? '0.160.0',
     versionVerdict: { state: overrides.state ?? 'allow', qualifiedVersion: '0.160.0' },
-    ...(overrides.advisory === true ? { advisory: { reason: 'runtime_version_unqualified' as const, qualifiedVersion: '0.160.0' } } : {}),
   });
 
-  it('passes the qualified token with no advisory', () => {
+  it('passes the qualified token with an allow verdict', () => {
     expect(() => expectDetectedVersion(detected(), target, identifies, true)).not.toThrow();
   });
 
@@ -180,14 +179,11 @@ describe('runtime contract detect.version catches a forced detector break', () =
       .toThrow(/detected "codex-cli 0\.160\.0", expected 0\.160\.0/);
   });
 
-  it('fails when an unqualified version loses its advisory or its warn verdict', () => {
+  it('fails when an unqualified version loses its warn verdict', () => {
     process.env.BYOK_RUNTIME_CONTRACT = 'latest';
     const latestTarget = { expectedVersion: '0.161.0', qualifiedVersion: '0.160.0' };
-    const latest = detected({ version: '0.161.0', state: 'warn', advisory: true });
-    expect(() => expectDetectedVersion(latest, latestTarget, identifies, true)).not.toThrow();
-    expect(() => expectDetectedVersion({ ...latest, advisory: undefined } as RuntimeDetectResult, latestTarget, identifies, true))
-      .toThrow();
-    expect(() => expectDetectedVersion(detected({ version: '0.161.0', state: 'allow', advisory: true }), latestTarget, identifies, true))
+    expect(() => expectDetectedVersion(detected({ version: '0.161.0', state: 'warn' }), latestTarget, identifies, true)).not.toThrow();
+    expect(() => expectDetectedVersion(detected({ version: '0.161.0', state: 'allow' }), latestTarget, identifies, true))
       .toThrow();
   });
 

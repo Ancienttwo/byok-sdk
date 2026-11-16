@@ -4,7 +4,7 @@
  * MCP's stdio transport is newline-delimited JSON in both directions. Neither
  * direction is bounded by the transport itself, and the SDK has already been
  * bitten by that on the client side: `mcp/client.ts` caps a single inbound
- * frame at `MCP_MAX_FRAME_BYTES` precisely because a peer that never emits a
+ * frame at `MCP_MAX_FRAME_BYTES` (`mcp/frame-limit.ts`) precisely because a peer that never emits a
  * newline would otherwise grow this process's heap without limit. The server
  * side needs the same guarantee, and needs it OUTBOUND too — an oversized
  * answer reaches the official client only as a generic `Connection closed`,

@@ -51,7 +51,7 @@ export function runActivityConformance(name: string, factory: ActivityCompositio
           const publicKey = await globalThis.crypto.subtle.exportKey('jwk', keys.publicKey);
           const pairing = await cloud.createPairingCode(tenant, { productId: 'test-product' });
           const response = await json('/byok/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
-            pairingCode: pairing.code, deviceName: 'test-device', devicePublicKey: publicKey.x,
+            pairingCode: pairing.code, deviceName: 'test-device', devicePublicKey: publicKey.x, expectedDeviceDigest: null,
           }) });
           expect(response.status).toBe(200);
           const body = response.body as { deviceId: string; accessToken: string };

@@ -17,14 +17,9 @@ import {
   NdjsonLineReader,
   controlEndpointPath,
   encodeFrame,
+  type InputPreparationResult,
 } from '../daemon/control-protocol';
-import {
-  cancelInputPreparation,
-  connectControlClient,
-  lookupInputPreparation,
-  requestInputPreparation,
-  type ControlClient,
-} from '../daemon/control-client';
+import { connectControlClient, type ControlClient } from '../daemon/control-client';
 import {
   INPUT_PREPARATION_REQUEST_FORMAT,
   INPUT_PREPARATION_VERSION,
@@ -33,6 +28,9 @@ import {
   type InputPreparationCounterAdapter,
   type InputPreparationCounterRequestV1,
   type InputPreparationCounterResultV1,
+  type InputPreparationCancelParamsV1,
+  type InputPreparationLookupParamsV1,
+  type InputPreparationReceiptV1,
   type InputPreparationRequestV1,
 } from '../input-preparation';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -170,6 +168,18 @@ function preparationRequest(overrides: Partial<InputPreparationRequestV1> = {}):
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
+}
+
+async function requestInputPreparation(client: ControlClient, request: InputPreparationRequestV1): Promise<InputPreparationReceiptV1> {
+  return (await client.request<InputPreparationResult>(INPUT_PREPARATION_PREPARE_METHOD, request)).receipt;
+}
+
+async function lookupInputPreparation(client: ControlClient, params: InputPreparationLookupParamsV1): Promise<InputPreparationReceiptV1> {
+  return (await client.request<InputPreparationResult>(INPUT_PREPARATION_LOOKUP_METHOD, params)).receipt;
+}
+
+async function cancelInputPreparation(client: ControlClient, params: InputPreparationCancelParamsV1): Promise<InputPreparationReceiptV1> {
+  return (await client.request<InputPreparationResult>(INPUT_PREPARATION_CANCEL_METHOD, params)).receipt;
 }
 
 async function controlErrorCode(work: Promise<unknown>): Promise<string> {
