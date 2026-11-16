@@ -19,7 +19,7 @@ import { createByokCloud, type ByokCloud } from '../cloud';
 import { createInMemoryByokCloud } from '../composition/in-memory';
 import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 import { routeKey } from '../router/registry';
-import { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore } from '../stores/in-memory/agent-memory-projection';
+import { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore } from './support/agent-memory-projection';
 import type { CloudStores, InboundRateLimiter, RateLimitUnit } from '../stores/ports';
 import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract';
 import { CLOUD_ORIGIN, PRODUCT_ID, TENANT_A, createDeviceKeys } from './support/harness';

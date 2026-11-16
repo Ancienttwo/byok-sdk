@@ -33,14 +33,11 @@ export type {
   AgentEgressDispatchInput,
   AgentContentReadInput,
   AgentHomeProjectionInput,
-  ProviderProvisioningNoticeInput,
   AgentMemoryIntentNoticeInput,
   AgentHomeProjectionStatusInput,
   InputPreparationInput,
   InputPreparationStatusInput,
   ApproveTaskOptions,
-  SealedAgentDispatchInput,
-  SealedAgentEgressDispatchInput,
   RejectTaskOptions,
   EnqueuedAgentControl,
   EnqueuedAgentHomeProjection,
@@ -83,10 +80,6 @@ export type { InMemoryByokCloud, InMemoryByokCloudOptions } from './composition/
 export { ByokCloudError, CLOUD_ERROR_CODES, DeviceRetiredError, TaskOfferAppendRefusedError, isCloudError } from './errors.js';
 export type { CloudErrorCode } from './errors.js';
 
-export {
-  InMemoryAgentMemoryProjectionAuthorizer,
-  InMemoryAgentMemoryProjectionStore,
-} from './stores/in-memory/agent-memory-projection.js';
 export type {
   AgentMemoryProjectionAuthorization,
   AgentMemoryProjectionEraseResult,
@@ -141,13 +134,11 @@ export type {
 // Capability declaration (ADR-010)
 export {
   CLOUD_CAPABILITIES,
-  CapabilitiesResponseSchema,
   capabilityDeclarationForPorts,
   declares,
   fullCapabilityDeclaration,
 } from './capabilities.js';
 export type {
-  CapabilitiesResponse,
   CapabilityPorts,
   CloudCapability,
   FullCapabilityDeclarationOptions,
@@ -295,21 +286,11 @@ export type {
   ActivityTailEntry,
   TimelineEvent,
 } from './activity.js';
-export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client.js';
-export type {
-  BoardFeedClientOptions,
-  BoardFeedItem,
-  BoardFeedMode,
-  BoardFeedPage,
-  BoardFeedRead,
-} from './coordination-client.js';
 
 export {
   TRUTH_BATCH_MAX_RECORDS,
-  TRUTH_INLINE_CONTENT_TYPE,
   TRUTH_LABEL_MAX_LENGTH,
   TRUTH_MANIFEST_MAX_LIMIT,
-  TRUTH_RECORD_CAPABILITY,
   TRUTH_RECORD_KEY_MAX_LENGTH,
   TRUTH_REQUEST_ID_MAX_LENGTH,
   TruthBodyInputSchema,
@@ -350,7 +331,7 @@ export {
 } from './stores/ports.js';
 // The port method inventory. Contract data, shipped so `@byok-sdk/conformance` and
 // durable adapters read the same table; `ports.ts` itself is untouched.
-export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract.js';
+export { CLOUD_PORT_METHODS } from './stores/ports-contract.js';
 export type {
   BlobContent,
   BlobContentProxy,
@@ -447,7 +428,7 @@ export type {
   RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport,
   ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofReceiptRetentionOptions,
 } from './maintenance.js';
-export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention.js';
+export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES } from './receipt-retention.js';
 export type { ReceiptRetentionClass } from './receipt-retention.js';
 export type { ReceiptCollectExpiredInput } from './stores/ports.js';
 export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake.js';

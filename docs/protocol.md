@@ -972,8 +972,8 @@ sessionRef instead of sending a fresh offer.
 
 Each lane keeps its own Host method: `enqueueAgentOffer`,
 `enqueueAgentEgressOffer`, `enqueuePreparedOffer`, `submitAgentExecution` and
-their sealed counterparts `enqueueSealedAgentOffer`,
-`enqueueSealedAgentEgressOffer` and `submitSealedAgentExecution`. Every one
+its sealed counterpart `submitSealedAgentExecution`. The resume lanes have no
+sealed counterpart and refuse `sealing` and `sealed`. Every one
 sends a `task.offer`. Host policy values are resolved before the wire offer is persisted; the Host
 writes `session` itself (`{ mode: 'resume', sessionRef }` on the resume lanes,
 `{ mode: 'fresh' }` on the execution and prepared lanes), and each lane
@@ -1506,14 +1506,8 @@ the same value as `enrollmentRevision` from `readDeviceEnrollmentIdentity`
 monotonic across proof-key rotation for one device id; re-pair mints a new
 device id.
 
-A Host built on `@byok-sdk/cloud` appends the notice with
-`enqueueProviderProvisioningNotice(tenant, deviceId, { requestId })`. It
-validates the strict payload first, then refuses (`agent_capability_missing`,
-no mailbox row) a device whose durable capabilities lack
-`provider-provisioning.v1`. The mailbox message id is derived from
-tenant, device and `requestId`, so a retried enqueue returns the existing row
-and seq. Cloud records no provisioning receipt: completion and readback are Host
-authority.
+`@byok-sdk/cloud` has no Host method that appends this notice and records no
+provisioning receipt: completion and readback are Host authority.
 
 ### 2.4 Task-free Agent memory intent notice
 

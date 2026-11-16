@@ -21,7 +21,8 @@ import { PRODUCT_ID, TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, of
  * every flag a fresh execution can need.
  *
  * #925: every offer is a `task.offer`, so a corpus line takes the hosted lane
- * its payload selects (`offerVariantOf`), one per old offer type.
+ * its payload selects (`offerVariantOf`), one per old offer type. A sealed
+ * resume offer has no hosted lane, so its corpus lines are out of scope here.
  */
 
 type Enqueue = (harness: CloudHarness, deviceId: string, payload: never) => Promise<unknown>;
@@ -50,12 +51,15 @@ async function steerSealedRunningTask(harness: CloudHarness, deviceId: string, p
   return harness.cloud.steerSealedTask(TENANT_A, offer.taskId, payload);
 }
 
-type OfferVariant = 'resume' | 'resume with egress' | 'fresh execution' | 'prepared' | 'sealed resume' | 'sealed egress' | 'sealed execution';
+type OfferVariant = 'resume' | 'resume with egress' | 'fresh execution' | 'prepared' | 'sealed execution';
 
-/** The hosted lane that sends a `task.offer` payload: every lane sends the one type, so the payload picks the lane. */
-function offerVariantOf(payload: Record<string, unknown>): OfferVariant {
+/**
+ * The hosted lane that sends a `task.offer` payload: every lane sends the one
+ * type, so the payload picks the lane. `undefined` for a sealed resume offer.
+ */
+function offerVariantOf(payload: Record<string, unknown>): OfferVariant | undefined {
   const fresh = (payload.session as { mode?: unknown } | undefined)?.mode === 'fresh';
-  if (payload.sealing !== undefined) return fresh ? 'sealed execution' : payload.egressPolicy === undefined ? 'sealed resume' : 'sealed egress';
+  if (payload.sealing !== undefined) return fresh ? 'sealed execution' : undefined;
   if (payload.preparation !== undefined) return 'prepared';
   if (fresh) return 'fresh execution';
   return payload.egressPolicy === undefined ? 'resume' : 'resume with egress';
@@ -85,18 +89,14 @@ const OFFER_ENQUEUE: Record<OfferVariant, Enqueue> = {
   'resume with egress': (h, d, payload) => h.cloud.enqueueAgentEgressOffer(TENANT_A, d, { taskId: 'gated', payload }),
   'fresh execution': submitFresh,
   prepared: (h, d, payload) => h.cloud.enqueuePreparedOffer(TENANT_A, d, { taskId: 'gated', payload }),
-  // #654: each sealed lane has its own hosted entry.
-  'sealed resume': (h, d, payload) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId: 'gated', payload }),
-  'sealed egress': (h, d, payload) => h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { taskId: 'gated', payload }),
   'sealed execution': submitSealedFresh,
 };
 
 const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
-  'task.offer': (h, d, payload) => OFFER_ENQUEUE[offerVariantOf(payload as Record<string, unknown>)](h, d, payload),
+  'task.offer': (h, d, payload) => OFFER_ENQUEUE[offerVariantOf(payload as Record<string, unknown>)!](h, d, payload),
   'agent.content.read': (h, d, payload) => h.cloud.enqueueAgentContentRead(TENANT_A, d, { payload }),
   'agent.home.projection': (h, d, payload) => h.cloud.enqueueAgentHomeProjection(TENANT_A, d, payload),
   'agent.input.preparation': (h, d, payload) => h.cloud.enqueueInputPreparation(TENANT_A, d, payload),
-  'provider.provisioning.available': (h, d, payload) => h.cloud.enqueueProviderProvisioningNotice(TENANT_A, d, payload),
   'agent.memory.intent.available': (h, d, payload) => h.cloud.enqueueAgentMemoryIntentNotice(TENANT_A, d, payload),
   'e2ee.key_package.available': (h, d, payload) => h.cloud.enqueueScopeKeyPackageNotice(TENANT_A, d, payload),
   'task.steer': steerSealedRunningTask,
@@ -109,6 +109,9 @@ const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
  * `agent-message`, and that offer was gated on the device flag (#1045 S3).
  */
 const CLOUD_EMITTED: readonly MessageType[] = ['agent.message.disposition'];
+
+/** A gated server-to-daemon type this cloud has no Host enqueue for. */
+const NOT_HOSTED: readonly MessageType[] = ['provider.provisioning.available'];
 
 const corpusPath = fileURLToPath(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url));
 const gatedLines = readFileSync(corpusPath, 'utf8')
@@ -124,7 +127,8 @@ const gatedLines = readFileSync(corpusPath, 'utf8')
       flags: requiredReceiverCapabilities(envelope.type, envelope.payload),
     };
   })
-  .filter((entry) => isServerToDaemonType(entry.type) && entry.flags.length > 0 && !CLOUD_EMITTED.includes(entry.type));
+  .filter((entry) => isServerToDaemonType(entry.type) && entry.flags.length > 0 && !CLOUD_EMITTED.includes(entry.type)
+    && !NOT_HOSTED.includes(entry.type) && !(entry.type === 'task.offer' && entry.variant === undefined));
 
 /** Keep every corpus row's gates exercised with valid Host selections (#1671). */
 function hostCopy(entry: (typeof gatedLines)[number]) {
@@ -178,7 +182,7 @@ async function expectTerminalProjectionRequired(run: Promise<unknown>): Promise<
 describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
   it('every device-advertised gated surface has a hosted enqueue path under test', () => {
     const surfaces = new Set(WIRE_ADDITIONS.flatMap((entry) =>
-      !CLOUD_EMITTED.includes(entry.surface) ? [entry.surface] : []));
+      !CLOUD_EMITTED.includes(entry.surface) && !NOT_HOSTED.includes(entry.surface) ? [entry.surface] : []));
     expect([...surfaces].filter((surface) => ENQUEUE[surface] === undefined)).toEqual([]);
     expect(new Set(gatedLines.map((entry) => entry.type))).toEqual(surfaces);
   });
@@ -226,7 +230,6 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     const host = entries.map(hostCopy).filter(submitExpressible);
     expect(new Set(host.flatMap(entry => entry.flags))).toEqual(new Set(entries.flatMap(entry => entry.flags)));
     for (const entry of host) expect(requiredReceiverCapabilities(entry.type, entry.payload)).toEqual(entry.flags);
-    if (variant === 'sealed egress') expect(host.flatMap(entry => entry.flags)).toContain('sealed-payload-v2');
   });
 
   it.each(gatedLines.flatMap((entry) => entry.flags.map((flag) => [entry.line, entry.variant ?? entry.type, flag, entry] as const)))(

@@ -59,13 +59,17 @@ function sameOfferEnvelope(expected: Envelope, actual: Envelope): boolean {
 
 /**
  * A plaintext lane refuses the sealed fields (#654), before any device read,
- * attempt, receipt or mailbox write, with a message that names the sealed lane.
+ * attempt, receipt or mailbox write. The message names the sealed lane when the
+ * plaintext lane has one; a resume lane has no sealed counterpart.
  */
-export function refuseSealedFields(payload: unknown, fields: readonly string[], sealedEntry: string): void {
+export function refuseSealedFields(payload: unknown, fields: readonly string[], sealedEntry?: string): void {
   if (payload === null || typeof payload !== 'object') return;
   const present = fields.filter((field) => field in payload);
   if (present.length > 0) {
-    throw new ByokCloudError('coordination_input_invalid', `${present.join(', ')} belongs to the sealed lane; use ${sealedEntry}`);
+    const message = sealedEntry === undefined
+      ? `${present.join(', ')} belongs to a sealed lane; this lane has no sealed counterpart`
+      : `${present.join(', ')} belongs to the sealed lane; use ${sealedEntry}`;
+    throw new ByokCloudError('coordination_input_invalid', message);
   }
 }
 

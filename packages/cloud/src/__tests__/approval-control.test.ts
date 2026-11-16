@@ -21,6 +21,7 @@ import { StaleApprovalError } from '../approval-control';
 import {
   MAX_APPROVAL_EVENT_BYTES,
   MAX_APPROVAL_TIMELINE_BYTES,
+  parseApprovalObservations,
   retainApprovalObservations,
   validateApprovalTimelineAppend,
   type ApprovalObservation,
@@ -213,32 +214,13 @@ describe('the gates that refuse before any mailbox row exists', () => {
     expect((await poll(harness, device, task.seq)).events).toHaveLength(0);
   });
 
-  it('refuses a pending request recorded before wire v4 without an approvalId, with no write', async () => {
-    const harness = createHarness();
-    const device = await harness.pairDevice(TENANT_A);
-    const task = await claimedTask(harness, device);
-    // The v4 wire refuses an id-less task.await_approval, so only a row
-    // recorded before v4 can hold one. A v4 decision must name its approval.
-    await harness.stores.approvals.append(TENANT_A, {
-      taskId: task.taskId,
-      sourceEnvelopeId: 'pre-v4-request',
+  it('refuses a stored request observation without an approvalId instead of translating it', () => {
+    const observation = {
+      taskId: 'task-1', sourceEnvelopeId: 'pre-v4-request', revision: 1, receivedAt: '2026-10-24T00:00:00.000Z',
       event: { type: 'approval_requested', summary: 'delete production' },
-    });
-    const before = await harness.stores.approvals.read(TENANT_A, task.taskId);
-    expect(before?.entries.map(({ event }) => event)).toEqual([{ type: 'approval_requested', summary: 'delete production' }]);
-
-    for (const decide of [
-      () => harness.cloud.approveTask(TENANT_A, task.taskId),
-      () => harness.cloud.rejectTask(TENANT_A, task.taskId, { reason: 'no' }),
-    ]) {
-      const caught = await decide()
-        .then(() => undefined)
-        .catch((error: unknown) => error);
-      expect(isCloudError(caught, 'task_not_awaiting_approval')).toBe(true);
-    }
-
-    expect(await harness.stores.approvals.read(TENANT_A, task.taskId)).toEqual(before);
-    expect((await poll(harness, device, task.seq)).events).toHaveLength(0);
+    };
+    expect(() => parseApprovalObservations([observation])).toThrow();
+    expect(parseApprovalObservations([{ ...observation, event: { ...observation.event, approvalId: 'approval-1' } }])).toHaveLength(1);
   });
 
   it('refuses a task this tenant never offered', async () => {

@@ -191,8 +191,7 @@ describe('fresh Agent execution submission', () => {
     }
 
     it.each([
-      'enqueueAgentOffer', 'enqueuePreparedOffer', 'enqueueAgentEgressOffer', 'enqueueSealedAgentOffer',
-      'enqueueSealedAgentEgressOffer', 'submitAgentExecution', 'submitSealedAgentExecution',
+      'enqueueAgentOffer', 'enqueuePreparedOffer', 'enqueueAgentEgressOffer', 'submitAgentExecution', 'submitSealedAgentExecution',
     ] as const)('refuses every selection violation on %s before reads or writes, including retries', async lane => {
       const { harness, device, payload } = await setup(BASE_CAPABILITIES);
       const getDevice = vi.spyOn(harness.stores.devices, 'get');
@@ -201,7 +200,7 @@ describe('fresh Agent execution submission', () => {
       const prepared = lane === 'enqueuePreparedOffer';
       const base: Record<string, unknown> = { ...payload,
         session: submit || prepared ? { mode: 'fresh' } : { mode: 'resume', sessionRef: 'session' } };
-      if (lane === 'enqueueAgentOffer' || lane === 'enqueueSealedAgentOffer') delete base.egressPolicy;
+      if (lane === 'enqueueAgentOffer') delete base.egressPolicy;
       if (lane.includes('Sealed')) base.sealing = { scopeId: 'scope', epoch: 1, categories: ['task-output'] };
       if (prepared) {
         delete base.instruction;

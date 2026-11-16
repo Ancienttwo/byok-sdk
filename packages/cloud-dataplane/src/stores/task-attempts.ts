@@ -37,8 +37,9 @@ export interface TaskRow {
   readonly tenant_id: string;
   readonly task_id: string;
   readonly device_id: string;
-  readonly agent_id: string | null;
-  readonly agent_profile_revision: string | null;
+  // NOT NULL from 0039 on.
+  readonly agent_id: string;
+  readonly agent_profile_revision: string;
   readonly owner_device_id: string | null;
   readonly status: string;
   readonly terminal_cause: string | null;
@@ -76,13 +77,7 @@ function admissionRowToRecord(row: AgentMessageAdmissionRow): AgentMessageAdmiss
 }
 
 export function taskRowToAttempt(row: TaskRow): TaskAttempt {
-  // The one task row mapping (the archive step reads through it too). The
-  // Agent columns are NOT NULL from 0039 on; before it, a legacy row fails
-  // closed and names the step.
-  if (row.agent_id === null || row.agent_profile_revision === null) {
-    throw new ByokCloudError('task_attempt_agent_ref_missing',
-      `Task ${row.task_id} of tenant ${row.tenant_id} has no Agent identity: run retireAgentlessTasks, then migration 0039.`);
-  }
+  // The one task row mapping (the archive step reads through it too).
   return {
     tenantId: row.tenant_id as TenantId,
     taskId: row.task_id,
@@ -133,7 +128,7 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
     tenant: TenantId,
     input: { readonly taskId: string; readonly deviceId: string; readonly agentRef: AgentRef },
   ): Promise<{ readonly attempt: TaskAttempt; readonly created: boolean }> {
-    // A task id retireAgentlessTasks retired stays fenced: the same statement refuses it.
+    // A task id in task_agentless_retired stays fenced: the same statement refuses it.
     const inserted = await this.#pool.query<TaskRow>(
       `INSERT INTO task (
          tenant_id, task_id, device_id, agent_id, agent_profile_revision,
@@ -149,7 +144,7 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
     if (created !== undefined) return { attempt: taskRowToAttempt(created), created: true };
     const existing = await this.get(tenant, input.taskId);
     // The insert declines on a conflicting row or a retired id. With no row
-    // to read back, the id is one retireAgentlessTasks retired.
+    // to read back, the id is a retired one.
     if (existing === undefined) {
       throw new ByokCloudError('agent_task_already_exists', `Task ${input.taskId} was retired without an Agent identity and cannot be enqueued again.`);
     }

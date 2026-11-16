@@ -232,10 +232,6 @@ export class PostgresTaskRedactionStore implements TaskRedactionStore {
   }
 }
 
-export function createPostgresTaskRedactionStore(options: PostgresTaskRedactionStoreOptions): TaskRedactionStore {
-  return new PostgresTaskRedactionStore(options);
-}
-
 /** What {@link rewriteTaskBodies} changed. */
 export interface RewrittenTaskBodies {
   readonly receiptsRedacted: number;

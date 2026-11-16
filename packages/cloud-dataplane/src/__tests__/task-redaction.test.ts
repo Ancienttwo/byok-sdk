@@ -18,7 +18,7 @@ import { sealContent } from '@byok-sdk/core/sealed-payload';
 import { byokBlobUrlPath, createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { migrate } from '../migrate';
 import { PostgresActivityStore } from '../stores/activity';
-import { createPostgresTaskRedactionStore } from '../stores';
+import { PostgresTaskRedactionStore } from '../stores';
 import { createDataplaneScope, createObjectStorageScope, SKIP_DATAPLANE, SKIP_REASON } from './support/dataplane';
 import { readObjects, readTenantRows, record, scanObjects, scanPostgres, type Hits } from './support/plaintext-scan';
 import {
@@ -27,6 +27,7 @@ import {
   completeTask,
   composeRedactionHost,
   createCanary,
+  EGRESS_POLICY,
   executionInput,
   pairDevice,
   progressEnvelope,
@@ -74,6 +75,18 @@ const SEALING = { scopeId: 'scope-redaction', epoch: 1, categories: ['task-input
 /** Text this long seals above the inline limit, so the member names its ciphertext blob. */
 const BY_REFERENCE_TEXT = 'x'.repeat(300 * 1024);
 
+/** A fresh sealed execution of `taskId` on Pi; `fields` adds the sealing, the sealed member or the plaintext instruction. */
+function sealedExecution(taskId: string, deviceId: string, fields: Readonly<Record<string, unknown>>) {
+  return {
+    taskId,
+    deviceId,
+    payload: {
+      target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF, session: { mode: 'fresh' },
+      egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' }, ...fields,
+    } as never,
+  };
+}
+
 /** One `task-input` member of `family` for `device`, sealed now. */
 function sealFor(
   deviceId: string,
@@ -120,10 +133,7 @@ async function sealedTerminalByReference(
 ): Promise<{ taskId: string; hash: ContentHash; key: string; terminal: () => Envelope }> {
   const taskId = `task-sealed-terminal-${randomUUID()}`;
   const sealing = { ...SEALING, categories: ['task-output'] } as const;
-  await host.cloud.enqueueSealedAgentOffer(TENANT_1, device.deviceId, {
-    taskId,
-    payload: { instruction: 'answer at length', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF, session: { mode: 'resume', sessionRef: 'session-sealed-terminal' }, sealing } as never,
-  });
+  await host.cloud.submitSealedAgentExecution(TENANT_1, sealedExecution(taskId, device.deviceId, { instruction: 'answer at length', sealing }));
   expect((await device.poll()).map((event) => [event.type, event.task_id])).toEqual([['task.offer', taskId]]);
   await sendAll(device, [
     createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }),
@@ -339,13 +349,9 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
       const hash = (blob.ref as { contentHash: ContentHash }).contentHash;
       const key = `tenants/${TENANT_1}/objects/sha256/${blob.hex}`;
 
-      await host.cloud.enqueueSealedAgentOffer(TENANT_1, device.deviceId, {
-        taskId,
-        payload: {
-          target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF, session: { mode: 'resume', sessionRef: 'session-sealed' }, sealing: SEALING,
-          sealed: { ...content.header, ciphertextRef: blob.ref },
-        } as never,
-      });
+      await host.cloud.submitSealedAgentExecution(TENANT_1, sealedExecution(taskId, device.deviceId, {
+        sealing: SEALING, sealed: { ...content.header, ciphertextRef: blob.ref },
+      }));
       expect((await host.core.objects.get(TENANT_1, hash))?.refCount).toBe(1);
       expect((await device.poll()).map((event) => [event.type, event.task_id])).toEqual([['task.offer', taskId]]);
       await sendAll(device, [
@@ -374,16 +380,10 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
       const device = await pairDevice(host, TENANT_1, ['sealed-payload-v1']);
       const taskId = `task-sealed-steer-${randomUUID()}`;
       const offer = await sealFor(device.deviceId, 'task.offer', { taskId }, { instruction: 'steer me' });
-      await host.cloud.enqueueSealedAgentOffer(TENANT_1, device.deviceId, {
-        taskId,
-        payload: {
-          target: { lane: 'runtime', runtimeId: 'pi' },
-          agentRef: AGENT_REF,
-          session: { mode: 'resume', sessionRef: 'session-sealed-steer' },
-          sealing: SEALING,
-          sealed: { ...offer.header, category: 'task-input', ciphertext: Buffer.from(offer.ciphertext).toString('base64url') },
-        } as never,
-      });
+      await host.cloud.submitSealedAgentExecution(TENANT_1, sealedExecution(taskId, device.deviceId, {
+        sealing: SEALING,
+        sealed: { ...offer.header, category: 'task-input', ciphertext: Buffer.from(offer.ciphertext).toString('base64url') },
+      }));
       expect((await device.poll()).map((event) => [event.type, event.task_id])).toEqual([['task.offer', taskId]]);
       await sendAll(device, [
         createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' }, capabilities: { steer: true } }, { taskId }),
@@ -462,7 +462,7 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
           };
         },
       });
-      const host = await composeRedactionHost(scope.pool, storage, () => createPostgresTaskRedactionStore({
+      const host = await composeRedactionHost(scope.pool, storage, () => new PostgresTaskRedactionStore({
         pool, clock: createMutableClock(), objectStorage: storage.config,
       }));
       const device = await pairDevice(host, TENANT_1, ['sealed-payload-v1']);
@@ -497,12 +497,9 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
       const taskId = `task-sealed-message-${randomUUID()}`;
       const sealing = { ...SEALING, categories: ['agent-message'] } as const;
       const offer = executionInput(taskId, device.deviceId, 'answer');
-      await host.cloud.enqueueSealedAgentEgressOffer(TENANT_1, device.deviceId, {
+      await host.cloud.submitSealedAgentExecution(TENANT_1, {
         ...offer,
-        payload: {
-          ...offer.payload, session: { mode: 'resume', sessionRef: 'session-task-redaction' },
-          messageEgress: { ...offer.payload.messageEgress, maxBytes: 262_144 }, sealing,
-        } as never,
+        payload: { ...offer.payload, messageEgress: { ...offer.payload.messageEgress, maxBytes: 262_144 }, sealing } as never,
       });
       await device.poll();
       await sendAll(device, [createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId })]);

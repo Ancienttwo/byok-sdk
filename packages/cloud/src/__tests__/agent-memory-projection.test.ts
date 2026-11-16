@@ -10,13 +10,12 @@ import {
 import { describe, expect, it } from 'vitest';
 import {
   AGENT_HOME_CONTRACT_CAPABILITY,
-  InMemoryAgentMemoryProjectionAuthorizer,
-  InMemoryAgentMemoryProjectionStore,
   createInMemoryByokCloud,
   createWebCrypto,
   fullCapabilityDeclaration,
 } from '..';
 import { base64UrlEncode } from '../crypto/web-crypto';
+import { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore } from './support/agent-memory-projection';
 import { TENANT_A, createHarness } from './support/harness';
 
 const AGENT_REF = { agentId: 'agent-memory', profileRevision: 'profile-r1' } as const;
