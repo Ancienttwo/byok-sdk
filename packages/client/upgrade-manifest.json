@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "e14181842c50d78407d17fdaca37d85df0413a72c3dcd391f2d6e4689232740c"
+    "snapshotSha256": "81e7c5a0c0f751249118d8f1c1204407822b2c92ee4e32dd435b60a34e51585e"
   },
   "configFields": {
     "status": "tracked",
@@ -805,6 +805,16 @@
       "entry": "in-memory-directory-device-state"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED",
+      "change": "removed",
+      "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#POSTGRES_STORE_EPOCH_UNSUPPORTED",
+      "change": "added",
+      "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudStoreOptions",
       "change": "changed",
       "entry": "e2ee-composition-opt-ins"
@@ -820,6 +830,16 @@
       "entry": "postgres-device-state-delete"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxProtocolUnsupportedError",
+      "change": "removed",
+      "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxStore",
+      "change": "changed",
+      "entry": "wire-v7-dataplane-stores"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresNonceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
@@ -828,6 +848,36 @@
       "item": "export:@byok-sdk/cloud-dataplane#PostgresPresenceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresStoreEpochUnsupportedError",
+      "change": "added",
+      "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskAttemptStore",
+      "change": "changed",
+      "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskSteerRefusalStore",
+      "change": "added",
+      "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TENANT_ERASURE_TABLES",
+      "change": "changed",
+      "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED",
+      "change": "removed",
+      "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#POSTGRES_STORE_EPOCH_UNSUPPORTED",
+      "change": "added",
+      "entry": "wire-v7-dataplane-store-epoch"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
@@ -845,6 +895,16 @@
       "entry": "postgres-device-state-delete"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresMailboxProtocolUnsupportedError",
+      "change": "removed",
+      "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresMailboxStore",
+      "change": "changed",
+      "entry": "wire-v7-dataplane-stores"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresNonceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
@@ -853,6 +913,21 @@
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPresenceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresStoreEpochUnsupportedError",
+      "change": "added",
+      "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskAttemptStore",
+      "change": "changed",
+      "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskSteerRefusalStore",
+      "change": "added",
+      "entry": "wire-v7-dataplane-stores"
     },
     {
       "item": "export:@byok-sdk/core#InMemoryMailboxStore",
@@ -1183,6 +1258,13 @@
       "item": "export:@byok-sdk/server/execution-core#HostOptions",
       "change": "changed",
       "entry": "k4-settlement-notice"
+    },
+    {
+      "item": "store:cloud-dataplane-postgres",
+      "change": "changed",
+      "before": "migrations=39 last=0039_task_agent_ref_not_null.sql sha256=144f848980cbf31e",
+      "after": "migrations=40 last=0040_wire_v7.sql sha256=c254b94fd812fe43",
+      "entry": "wire-v7-dataplane-postgres-new-database"
     },
     {
       "item": "union:wire#task.steer_refused",
