@@ -133,7 +133,10 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
       { taskId, seq: 2 },
     );
     const sentBeforeRedelivery = sent.length;
+    // The guard drops it before beginOffer archives state or opens a generation.
+    const beginOffer = vi.spyOn(host, 'beginOffer');
     await runner.handleEnvelope(redelivered);
+    expect(beginOffer).not.toHaveBeenCalled();
 
     expect(sent).toHaveLength(sentBeforeRedelivery);
     expect(adapter.startCalls).toHaveLength(1);
