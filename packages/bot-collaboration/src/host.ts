@@ -761,7 +761,8 @@ export class BotCollaboration {
   /**
    * Owner API ("Cancel", §8.8), from A's delegation chip or from B's `bot_request` Turn. Idempotent (#1405): an earlier cancel
    * gives `cancel_pending` and a verdict `already_settled`, and neither writes or sends. Refuses with `DelegationError`.
-   * It rejects when `core.cancel` fails. The cancel fact is already committed, and the timer delivers it later.
+   * It rejects when `core.cancel` fails. The cancel fact is already committed. A failure before the K4 commit leaves it for
+   * the timer; a drain failure after the commit leaves it delivered (#2253).
    */
   cancelDelegation(id: string, ...by: PrincipalArg): Promise<DelegationCancelResult> {
     return this.exclusive(async () => {
@@ -792,14 +793,21 @@ export class BotCollaboration {
   /**
    * Deliver each committed cancel to its frozen target (§8.8). A crash before
    * `delivered` leaves the fact for the next pass. It never picks a new Turn.
+   * A cancel is delivered once K4 commits it, even when the drain after that commit fails, and when its target intent has
+   * concluded or was compacted after concluding (#2253). Each fact is tried on its own; the first error is rethrown.
    */
   private async deliverCancels(): Promise<void> {
+    let failure: { error: unknown } | undefined;
     for (const d of Object.values(this.snapshot().delegations)) {
       if (!d.cancel || d.cancel.delivered) continue;
-      const result = await this.core.cancel(d.cancel.targetTurnId);
-      if ('drainError' in result) throw result.drainError;
-      this.write(s => { stateOf(s.application).delegations[d.id]!.cancel!.delivered = true; });
+      try {
+        const target = this.core.intent(d.cancel.targetTurnId);
+        const result = target && !target.conclusion ? await this.core.cancel(d.cancel.targetTurnId) : {};
+        this.write(s => { stateOf(s.application).delegations[d.id]!.cancel!.delivered = true; });
+        if ('drainError' in result) throw result.drainError;
+      } catch (error) { failure ??= { error }; }
     }
+    if (failure) throw failure.error;
   }
 
   /**
