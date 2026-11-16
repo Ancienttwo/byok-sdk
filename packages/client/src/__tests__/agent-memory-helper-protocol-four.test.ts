@@ -269,7 +269,7 @@ describe('recoverable daemon memory proof (#2200)', () => {
     // SAFETY: only record/sealedRun and the explicitly supplied runner callbacks are used.
     const run = { record: { tenantId: 'tenant', deviceId: 'device' }, sealedRun: {}, agentMemoryBackend: undefined, agentMemoryIntentBackend: undefined } as unknown as StartRun;
     const result = composeStartLanes(selected, run);
-    const { deps } = composeStartRunnerDeps(selected, { ...run, ...result, sendEnvelope: vi.fn(), withReplyTransition: async work => work(), recordReplyState: vi.fn() });
+    const { deps } = composeStartRunnerDeps(selected, { ...run, ...result, sendEnvelope: vi.fn(), withReplyTransition: async work => work(), recordReplyState: vi.fn(), awaitClaimSettlement: vi.fn() });
     return { ...result, deps };
   }
   function nextHelperRequest(kind: 'root' | 'open'): Promise<void> {
