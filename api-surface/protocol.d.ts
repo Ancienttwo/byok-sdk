@@ -2910,8 +2910,38 @@ export declare const PairRequestSchema: z.ZodObject<{
     deviceName: z.ZodString;
     devicePublicKey: z.ZodString;
     machineId: z.ZodOptional<z.ZodString>;
+    expectedDeviceDigest: z.ZodNullable<z.ZodString>;
 }, z.core.$strip>;
 export type PairRequest = z.infer<typeof PairRequestSchema>;
+/**
+ * The typed rejections of `POST /byok/pair` (§6.1). Each body carries a fixed
+ * `error` text and its `code`, and nothing else the server knows, except the
+ * one field the `409` carries.
+ */
+export declare const PAIRING_CODE_INVALID_CODE = "pairing_code_invalid";
+export declare const PAIRING_SUPERSEDED_CODE = "pairing_superseded";
+/**
+ * `401`: the code is unknown, expired or already used. The three answer with
+ * this one body, so a code holder learns nothing more than that it failed.
+ */
+export declare const PairingCodeInvalidResponseSchema: z.ZodObject<{
+    error: z.ZodString;
+    code: z.ZodLiteral<"pairing_code_invalid">;
+}, z.core.$strip>;
+export type PairingCodeInvalidResponse = z.infer<typeof PairingCodeInvalidResponseSchema>;
+/**
+ * `409`: `expectedDeviceDigest` is not the digest of the machine's current
+ * device. Nothing changed and the code is not consumed. `currentDeviceDigest`
+ * is that device's digest, or `null` when the machine has none; only the
+ * pairing invocation that still owns its local attempt may resend once with
+ * it (§6.1).
+ */
+export declare const PairSupersededResponseSchema: z.ZodObject<{
+    error: z.ZodString;
+    code: z.ZodLiteral<"pairing_superseded">;
+    currentDeviceDigest: z.ZodNullable<z.ZodString>;
+}, z.core.$strip>;
+export type PairSupersededResponse = z.infer<typeof PairSupersededResponseSchema>;
 /**
  * The authenticated tenant projection is opaque to the wire protocol. It is
  * bounded so a malformed control-plane value cannot become an unbounded local
@@ -3836,14 +3866,15 @@ export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state.js';
 export type { TaskState } from './task-state.js';
 export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, RuntimeVersionPolicyProjectionSchema, RuntimeUnavailableEntrySchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, ExecutionTargetSchema, ClaimedExecutorSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, CONN_HELLO_CAPABILITIES_MAX_ITEMS, AgentHomeAccessSchema, AgentMemorySelectionSchema, AgentMemoryCommitSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessagePublishPlainPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentMessageDispositionPlainPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskSteerSealedPayloadSchema, TASK_STEER_TEXT_MAX_BYTES, TaskSteerRefusedPayloadSchema, STEER_REFUSAL_REASONS, readSteerRefusalReason, TaskClaimPayloadSchema, OfferAdmissionTimingsSchema, OFFER_ADMISSION_MAX_DURATION_MS, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, RuntimeFailureClassSchema, TaskFailureSchema, readTaskFailure, readDeclineCode, DECLINE_CODES, readRuntimeUnavailableCause, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, TerminalResidentMemoryOverLimitSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, offerSelectionViolation, } from './messages.js';
 export { steerRefusalEnvelopeId, uuidFromSha256 } from './steer-refusal.js';
+export { PAIR_DEVICE_DIGEST_NAMESPACE, PairDeviceDigestSchema, pairDeviceDigest, type PairDeviceDigestInput, } from './pair-device-digest.js';
 export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, RuntimeVersionPolicyProjection, RuntimeUnavailableEntry, AgentRef, AgentHomeProjectionAgentRef, ExecutionTarget, ClaimedExecutor, ToolsetId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessagePublishPlainPayload, AgentMessagePublishSealedPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentMessageDispositionPlainPayload, AgentMessageDispositionSealedPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskSteerRefusedPayload, SteerRefusalReason, SteerRefusalReasonReading, TaskClaimPayload, OfferAdmissionTimings, TaskStartedPayload, TaskDeclinePayload, TaskDeclineCode, TaskDeclineCodeReading, RuntimeUnavailableCauseReading, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, RuntimeQuotaScope, TaskFailure, TaskFailureReading, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, TerminalResidentMemoryOverLimit, AgentHomeAccess, AgentMemorySelection, AgentMemoryCommit, OfferSelectionRule, OfferSelectionViolation, } from './messages.js';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope.js';
 export type { Envelope } from './envelope.js';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, ProtocolNegotiationError, } from './errors.js';
 export { encodeEnvelope, decodeEnvelope, createEnvelope, parseMessage } from './codec.js';
 export type { CreateEnvelopeOptions } from './codec.js';
-export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, DEVICE_NOT_REGISTERED_CODE, DeviceNotRegisteredResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, ActivityIngressSchema, MessageSendOutcomeSchema, OUTBOUND_REFUSAL_REASONS, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, MESSAGES_SEND_MAX_BODY_BYTES, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_E2EE_MEMBER_KEY_PATH, BYOK_E2EE_CHAIN_PATH, BYOK_E2EE_KEY_PACKAGES_PATH, BYOK_E2EE_PAIRING_MAC_PATH, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, BYOK_INPUT_PREPARATIONS_PATH, BYOK_INPUT_PREPARATION_COMPLETION_ROUTE, BYOK_INPUT_PREPARATION_STATUS_ROUTE, byokInputPreparationCompletionPath, byokInputPreparationStatusPath, InputPreparationCompletionRequestSchema, InputPreparationStatusSchema, InputPreparationReadbackSchema, InputPreparationStatusQuerySchema, } from './http-api.js';
-export type { PairRequest, PairResponse, ChallengeRequest, ChallengeResponse, TokenRequest, TokenResponse, DeviceNotRegisteredResponse, PresencePublishRequest, CreateBlobRequest, CreateBlobResponse, BlobDownloadUrlResponse, EventsPollQuery, ActivityIngress, MessageSendOutcome, OutboundRefusalReason, EventsPollResponse, MessagesSendRequest, MessagesSendResponse, AgentHomeProjectionCompletionRequest, AgentHomeProjectionStatus, AgentHomeProjectionReadback, AgentMemoryProjectionCommitRequest, AgentMemoryProjectionCommitResponse, InputPreparationCompletionRequest, InputPreparationStatus, InputPreparationReadback, InputPreparationStatusQuery, } from './http-api.js';
+export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, DEVICE_NOT_REGISTERED_CODE, DeviceNotRegisteredResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, ActivityIngressSchema, MessageSendOutcomeSchema, OUTBOUND_REFUSAL_REASONS, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, MESSAGES_SEND_MAX_BODY_BYTES, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_E2EE_MEMBER_KEY_PATH, BYOK_E2EE_CHAIN_PATH, BYOK_E2EE_KEY_PACKAGES_PATH, BYOK_E2EE_PAIRING_MAC_PATH, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, BYOK_INPUT_PREPARATIONS_PATH, BYOK_INPUT_PREPARATION_COMPLETION_ROUTE, BYOK_INPUT_PREPARATION_STATUS_ROUTE, byokInputPreparationCompletionPath, byokInputPreparationStatusPath, InputPreparationCompletionRequestSchema, InputPreparationStatusSchema, InputPreparationReadbackSchema, InputPreparationStatusQuerySchema, PAIRING_CODE_INVALID_CODE, PAIRING_SUPERSEDED_CODE, PairingCodeInvalidResponseSchema, PairSupersededResponseSchema, } from './http-api.js';
+export type { PairRequest, PairResponse, PairingCodeInvalidResponse, PairSupersededResponse, ChallengeRequest, ChallengeResponse, TokenRequest, TokenResponse, DeviceNotRegisteredResponse, PresencePublishRequest, CreateBlobRequest, CreateBlobResponse, BlobDownloadUrlResponse, EventsPollQuery, ActivityIngress, MessageSendOutcome, OutboundRefusalReason, EventsPollResponse, MessagesSendRequest, MessagesSendResponse, AgentHomeProjectionCompletionRequest, AgentHomeProjectionStatus, AgentHomeProjectionReadback, AgentMemoryProjectionCommitRequest, AgentMemoryProjectionCommitResponse, InputPreparationCompletionRequest, InputPreparationStatus, InputPreparationReadback, InputPreparationStatusQuery, } from './http-api.js';
 export type { HarnessId, HarnessInfo } from './messages.js';
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation.js';
 export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_APPEND_OPERATION, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_MEMBER_KEY_REGISTER_OPERATION, E2EE_SCOPE_ID_MAX_LENGTH, E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eeMemberKeyRegisterRequestSchema, E2eeKeyPackageAvailablePayloadSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, } from './e2ee-member.js';
@@ -8397,6 +8428,30 @@ export declare const SERVER_TO_DAEMON_TYPES: readonly ["task.offer", "agent.egre
  */
 export declare const DAEMON_TO_SERVER_TYPES: readonly ["task.claim", "task.started", "task.decline", "task.progress", "task.artifact", "task.await_approval", "task.complete", "task.fail", "task.cancelled", "task.approval_resolved", "task.steer_refused", "agent.egress.reliable", "agent.message.draft", "agent.message.publish", "agent.content.receipt"];
 export {};
+// ==== @byok-sdk/protocol dist/pair-device-digest.d.ts ====
+import { z } from 'zod';
+/** Domain separator of {@link pairDeviceDigest}; a new digest definition takes a new namespace. */
+export declare const PAIR_DEVICE_DIGEST_NAMESPACE = "byok-pair-device-v1";
+/** Canonical unpadded base64url of the 32-byte SHA-256 output: exactly one spelling per digest. */
+export declare const PairDeviceDigestSchema: z.ZodString;
+export interface PairDeviceDigestInput {
+    readonly tenantId: string;
+    readonly productId: string;
+    readonly deviceId: string;
+}
+/**
+ * The pairing fence's name for one registered device (#2045, docs/protocol.md
+ * §6.1): base64url SHA-256 of the UTF-8 JSON array
+ * `["byok-pair-device-v1", tenantId, productId, deviceId]`. The device and
+ * every store compute it with this one function.
+ *
+ * A JSON array of strings has one serialization, so no field can bleed into
+ * its neighbour. Tenant and product salt the digest: the same device id
+ * yields unrelated digests in two scopes, and a digest cannot be matched
+ * across tenants. Device ids are server-minted UUIDs, so the digest cannot be
+ * inverted; it only tells whether the device changed.
+ */
+export declare function pairDeviceDigest(input: PairDeviceDigestInput): Promise<string>;
 // ==== @byok-sdk/protocol dist/plain-json.d.ts ====
 /**
  * Plain-JSON-data canonicalization shared by every bounded JSON channel of
