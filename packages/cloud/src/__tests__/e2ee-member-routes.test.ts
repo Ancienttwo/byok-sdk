@@ -81,7 +81,7 @@ function setup(overrides: Partial<ByokCloudOptions> = {}) {
     const response = await fetch('/byok/pair', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ pairingCode: pairing.code, deviceName: 'device', devicePublicKey: x }),
+      body: JSON.stringify({ pairingCode: pairing.code, deviceName: 'device', devicePublicKey: x, expectedDeviceDigest: null }),
     });
     const body = (await response.json()) as PairResponse;
     const row = (await base.stores.devices.get(tenant, body.deviceId))!;
