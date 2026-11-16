@@ -145,7 +145,7 @@ describe('board coordination surface', () => {
     });
     await harness.json('/byok/board/projected/claim', jsonInit(device, { expectedStatus: 'todo' }));
 
-    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: 'projected' });
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'projected' });
     const progress = createEnvelope(
       'task.progress',
       {
@@ -160,7 +160,7 @@ describe('board coordination surface', () => {
     );
     const complete = createEnvelope(
       'task.complete',
-      { summary: 'complete', sessionRef: 'session-1', agentRef: TEST_AGENT_REF },
+      { summary: 'complete', sessionRef: 'session-1', agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } },
       { taskId: 'projected' },
     );
     const sent = await harness.json('/byok/messages', jsonInit(device, { messages: [claim, progress, complete] }));

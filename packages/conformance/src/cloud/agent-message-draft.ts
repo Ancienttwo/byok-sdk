@@ -118,6 +118,8 @@ export function runAgentMessageDraftConformance(name: string, factory: AgentMess
         expect(await h.store.read(tenant, taskId)).toBeUndefined();
         expect(await handleInboundEnvelope(bound, deviceId, frame, undefined, undefined, undefined, h.clock.now().toISOString())).toEqual({ outcome: 'accepted' });
         expect(await h.store.read(tenant, taskId)).toMatchObject({ text: '你好' });
+        // Wire v7: a completion follows a claim and echoes its executor.
+        if (type === 'task.complete') await stores.tasks.claim(tenant, { taskId, deviceId, executor: PI_EXECUTOR });
         const terminal = type === 'task.complete' ? createEnvelope(type, { agentRef, executor: PI_EXECUTOR, summary: 'done', sessionRef: 'session' }, { taskId })
           : type === 'task.cancelled' ? createEnvelope(type, { agentRef }, { taskId })
           : createEnvelope(type, { agentRef, reason: 'stop' }, { taskId });

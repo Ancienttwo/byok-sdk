@@ -234,6 +234,7 @@ describe('the public surface', () => {
       'tasks',
       'cancellations',
       'receipts',
+      'steerRefusals',
       'egress',
       'proofReceipts',
       'blobs',

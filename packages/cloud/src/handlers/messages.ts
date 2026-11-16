@@ -96,8 +96,6 @@ const WIRE_REFUSAL_REASONS = {
   steer_refusal_unknown_steer: 'not_permitted',
 } satisfies Record<InboundRefusalReason, import('@byok-sdk/protocol').OutboundRefusalReason>;
 
-const KNOWN_TYPES = new Set<string>(MESSAGE_TYPES);
-
 /**
  * The cross-version refusals, decided before an entry is decoded (wire v7).
  * An entry of another wire major is `protocol_version_unsupported`, so a
@@ -108,7 +106,7 @@ const KNOWN_TYPES = new Set<string>(MESSAGE_TYPES);
  */
 function frameRefusal(entry: { readonly v: number; readonly [key: string]: unknown }): 'protocol_version_unsupported' | 'type_unsupported' | undefined {
   if (entry.v !== PROTOCOL_VERSION) return 'protocol_version_unsupported';
-  return typeof entry.type === 'string' && !KNOWN_TYPES.has(entry.type) ? 'type_unsupported' : undefined;
+  return typeof entry.type === 'string' && !(MESSAGE_TYPES as readonly string[]).includes(entry.type) ? 'type_unsupported' : undefined;
 }
 
 export interface MessagesRouteDeps extends DeviceRouteDeps {
