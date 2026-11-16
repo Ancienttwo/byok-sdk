@@ -1947,6 +1947,9 @@ coalescing off. This is the remaining interaction of #1229 item 1.
 Every inbound human message gets one deterministic destination, derived from
 the rows the Host already writes. There is no second disposition table:
 `inboundDispositions()` reads the inbound, input-batch and Turn rows.
+An admitted redelivery replaces an earlier filtered row for the same message,
+binding its root and reply route. Redelivery of an already admitted message
+keeps its original reply credential and expiry. The earlier refusal stays in audit.
 
 | Destination | Meaning |
 | --- | --- |

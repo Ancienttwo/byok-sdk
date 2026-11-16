@@ -5,7 +5,8 @@ import { createByokServer } from '@byok-sdk/server';
 import { BotCollaboration } from './host';
 import { addTurn, stateOf } from './model';
 import { inboundKey, type InboundMessage } from './channel';
-import { cleanReplyTokens, deliveryRoute, enablePush, queueDelivery, refuseRoute, rememberInbound, resendUnknown, revokePush } from './delivery-routing';
+import { cleanReplyTokens, deliveryRoute, enablePush, queueDelivery, refuseRoute, rememberFilteredInbound, rememberInbound, resendUnknown, revokePush } from './delivery-routing';
+import { inboundDispositionsOf } from './inbound';
 import { botCompactVeto } from './compaction';
 
 const ledgers: HostLedger[] = [];
@@ -55,6 +56,19 @@ it('keeps a blocked root reply route until it resumes and replies', () => {
     turn.status = 'processing'; delete turn.blockedReason;
     const reply = queueDelivery(s, state, turn, 'task', 'message', 'answer', 150)!;
     expect(deliveryRoute(state, reply, 150)).toMatchObject({ token: 'secret-in1' });
+  });
+});
+
+it('replaces a filtered inbound when the same message is admitted', () => {
+  ledger().transaction(s => {
+    const state = stateOf(s.application), message = incoming(), turn = state.turns.root!;
+    rememberFilteredInbound(state, { ...message, sender: undefined }, 'unverified_sender');
+    rememberInbound(state, message, turn.root);
+    expect(inboundDispositionsOf(state)).toMatchObject([{ disposition: 'coalesced', turnId: turn.id }]);
+    const reply = queueDelivery(s, state, turn, 'task', 'message', 'answer', 100)!;
+    expect(deliveryRoute(state, reply, 100)).toMatchObject({ token: 'secret-in1' });
+    turn.conclusion = 'succeeded';
+    expect(inboundDispositionsOf(state)).toMatchObject([{ disposition: 'answered', turnId: turn.id }]);
   });
 });
 

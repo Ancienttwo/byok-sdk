@@ -37,7 +37,7 @@ function rootOpen(ledger: IntentConclusions, state: CollaborationState, root: st
     || Object.values(state.inputBatches ?? {}).some(batch => batch.id === root && batch.state === 'open')
     || Object.values(state.team.seats).some(seat => state.team.rounds[seat.roundId]?.root === root && !seat.released);
 }
-/** Save with input admission, before any process pass can accept its reply. Redelivery never refreshes a token. */
+/** Save with input admission, replacing a filtered row. Redelivery of an admitted input never refreshes its token. */
 export function rememberInbound(state: CollaborationState, message: InboundMessage, root: string): void {
   if (typeof message.channel !== 'string' || !message.channel.trim() || typeof message.platformMessageId !== 'string' || !message.platformMessageId) throw new Error('Invalid inbound identity');
   const route = message.replyRoute;
@@ -46,7 +46,8 @@ export function rememberInbound(state: CollaborationState, message: InboundMessa
     throw new Error('Invalid reply route binding');
   }
   const channels = channelState(state), id = inboundKey(message);
-  channels.inbounds[id] ??= { id, root, conversation: { ...message.conversation }, channel: message.channel,
+  const prior = channels.inbounds[id];
+  if (!prior || prior.filtered !== undefined) channels.inbounds[id] = { id, root, conversation: { ...message.conversation }, channel: message.channel,
     sequence: ++state.sequence, ...(route ? { reply: { ...route } } : {}) };
 }
 /**
