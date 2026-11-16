@@ -271,6 +271,15 @@
       "items": [
         "behavior:service-uninstall-stops-before-pointers"
       ]
+    },
+    {
+      "id": "grok-task-autoupdate-off",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client and @byok-sdk/client/adapters GrokAdapter (DaemonConfig.runtimes.grok) now start every Grok agent process with GROK_DISABLE_AUTOUPDATER=1, replacing any value of that variable in the task environment. A task under agentUserContext 'inherit' on a managed Grok install no longer runs Grok's updater: it no longer writes the agent link into the install's bin/ and no longer checks for updates. Grok the user runs still updates itself; a Host that relied on SDK tasks to keep Grok current updates it outside the tasks.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#grok-tasks-no-longer-run-the-grok-updater-2269",
+      "items": [
+        "behavior:grok-task-autoupdate-off"
+      ]
     }
   ],
   "changes": [

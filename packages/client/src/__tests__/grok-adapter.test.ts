@@ -191,7 +191,7 @@ describe('GrokAdapter sessions', () => {
     for (const options of [{}, { compatInstructions: 'inherit' as const }]) {
       const plain = await ctx();
       await turn(await open(adapter(options), { instruction: 'hello' }, plain));
-      expect(Object.keys(facts(plain.log).find(fact => fact.kind === 'start')!.env).filter(name => name.startsWith('GROK_'))).toEqual([]);
+      expect(Object.keys(facts(plain.log).find(fact => fact.kind === 'start')!.env).filter(name => name.startsWith('GROK_'))).toEqual(['GROK_DISABLE_AUTOUPDATER']);
     }
     const resources = await ctx();
     const s = await open(adapter({ compatInstructions: 'disabled' }), { instruction: 'terminal-compat' }, resources);
@@ -563,7 +563,7 @@ describe('GrokAdapter agentUserMcpServers (#935)', () => {
       const resources = agent ? await agentCtx() : await ctx();
       await turn(await open(adapter(options), { instruction: 'hello' }, resources));
       expect(kinds(resources.log)).toEqual(['start']);
-      expect(Object.keys(facts(resources.log).find(fact => fact.kind === 'start')!.env).filter(name => name.startsWith('GROK_'))).toEqual([]);
+      expect(Object.keys(facts(resources.log).find(fact => fact.kind === 'start')!.env).filter(name => name.startsWith('GROK_'))).toEqual(['GROK_DISABLE_AUTOUPDATER']);
     }
   });
 });
@@ -672,6 +672,19 @@ describe('GrokAdapter agentUserContext (#2239)', () => {
     await fs.symlink(resources.user, path.join(resources.agentHome, '.byok', 'grok'), 'dir');
     const error = await startPreparedOperation(adapter({ agentUserContext: 'excluded' }), { instruction: 'hello' }, resources).catch(e => e);
     expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable', message: `${PREFIX}: the Agent home session store is not a real directory inside the Agent home` });
+  });
+  it('starts every agent with GROK_DISABLE_AUTOUPDATER=1, which the task env cannot override (#2269)', async () => {
+    const modes = [
+      [{}, false], [{ compatInstructions: 'disabled' as const }, false], [{}, true], [{ agentUserMcpServers: 'excluded' as const }, true],
+      [{ agentUserContext: 'excluded' as const }, true], [{ agentUserMcpServers: 'excluded' as const, agentUserContext: 'excluded' as const }, true],
+    ] as const;
+    for (const value of ['0', '']) {
+      for (const [options, agent] of modes) {
+        const resources = agent ? await agentCtx({ GROK_DISABLE_AUTOUPDATER: value }) : await ctx({ GROK_DISABLE_AUTOUPDATER: value });
+        await turn(await open(adapter(options), { instruction: 'hello' }, resources));
+        expect(facts(resources.log).find(fact => fact.kind === 'start')!.env.GROK_DISABLE_AUTOUPDATER, JSON.stringify({ options, agent, value })).toBe('1');
+      }
+    }
   });
 });
 
