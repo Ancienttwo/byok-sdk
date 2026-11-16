@@ -18,7 +18,6 @@ export type {
   RuntimeVersionSpec,
   RuntimeVersionVerdict,
   RuntimeDetectResult,
-  RuntimeDetectionAdvisory,
   RuntimeDetectionRefusalReason,
   RuntimeExecutableSource,
   Session,

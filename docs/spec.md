@@ -1371,9 +1371,11 @@ or self-update are added.
 `DaemonStatus` and control `status` carry `runtimes: RuntimeObservation[]`,
 including unavailable outcomes, plus the closed `environment` projection.
 An observation carries the optional local `versionVerdict` and
-`versionChange` (#1103); the control-socket shape keeps both outside the
-strict observation array (additive `runtimeVersionVerdicts` /
-`runtimeVersionChanges` channels) so a pre-#1103 client still parses it.
+`versionChange` (#1103) inline in both. The verdict is the one warning
+authority; an observation's `qualifiedVersion` is only its `warn` projection,
+which audit keeps while it drops the verdict. A runtime detection result that
+still carries the removed `advisory` field is invalid. The CLI and the daemon
+must be the same release: a reader parses only this inline shape.
 `environment-resolved` is emitted once after ownership is acquired and before
 runtime detection; audit uses the same content-free flat shape as #409.
 
@@ -1399,15 +1401,15 @@ found by the OS at spawn, so `path` carries no path. Pi reports the fields only
 for a Host `resolveBin` on its plain pi-rpc lane, the one lane that launches
 that file; its bundled package, `BYOK_PI_BIN`, durable lane and SDK helper
 host launch SDK entries and report neither field.
-`Daemon.status()` carries them inline, control `status` through the additive
-`runtimeExecutables` channel, and `status`, `runtimes` and `doctor` print them
+`Daemon.status()` and control `status` carry them inline, and `status`,
+`runtimes` and `doctor` print them
 as `executable=<source>("<path>")`. The path can name the local user, so it
 never enters `conn.hello`, presence, `audit.jsonl`, `DaemonRecord` or a
 support bundle.
 
-For the next minor, a newer CLI reports unknown when an older daemon omits
-these fields. It never translates `runtimeIds` into availability or executes
-a local probe to fill the missing daemon facts.
+A reader reports unknown when an observation omits these fields. It never
+translates `runtimeIds` into availability or executes a local probe to fill
+the missing daemon facts.
 
 ### Durable daemon records
 
@@ -1418,7 +1420,7 @@ lifecycle facts, IDs, closed codes, configured identifiers, byte sizes, counts
 and timestamps. Progress is aggregated per turn, with an unfinished turn flushed
 before its terminal record or on shutdown. Artifact names, runtime version text,
 approval/completion summaries and free-form reasons never enter these sinks.
-Configured runtime advisory identifiers remain, and offline observations show
+A warning's configured qualified version remains, and offline observations show
 their timestamp. Full events remain on the authenticated control socket;
 `tasks --follow` requires that socket. Support-bundle kinds come from
 `DAEMON_RECORD_KINDS`.
@@ -4520,7 +4522,7 @@ becoming a second permission system.
 
 Codex is qualified against CLI 0.160.0. As in OAR, the version is read and by
 default does not gate: Codex updates itself, so any other version is admitted
-with a `runtime_version_unqualified` advisory. Native contracts are probed
+with a `warn` version verdict. Native contracts are probed
 instead (app-server presence). The only exception is a Host-configured version
 policy whose block matches the installed version: that version is declined
 before claim with `runtime_unavailable` / `version_blocked`, non-retryably.

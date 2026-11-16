@@ -317,7 +317,7 @@ function parseRecordLine(line: string | undefined): DaemonRecord | undefined {
       return environment === undefined ? undefined : { kind: 'environment-resolved', ts: environment.ts, ...environment.status };
     }
     case 'runtimes-detected': {
-      const runtimes = parseRuntimeObservations(raw.runtimes);
+      const runtimes = parseRuntimeObservations(raw.runtimes, 'audit');
       // The installed version and the local policy verdict never enter audit
       // (#1103); a record that carries either is not a record this reader wrote.
       if (runtimes?.some(runtime => runtime.version !== undefined || runtime.versionVerdict !== undefined)) return undefined;

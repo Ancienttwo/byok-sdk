@@ -2,7 +2,7 @@ import path from 'node:path';
 import { RUNTIME_IDS } from '@byok-sdk/protocol/constants';
 import type { RuntimeId } from '@byok-sdk/protocol';
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
-import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectionAdvisory, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeExecutableSource, type RuntimeVersionVerdict } from './types.js';
+import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeExecutableSource, type RuntimeVersionVerdict } from './types.js';
 
 /** How one restart changed an installed runtime's version token (#1103 §2.6). */
 export type RuntimeVersionChangeDirection = 'upgrade' | 'downgrade' | 'changed' | 'unknown';
@@ -24,32 +24,32 @@ export interface RuntimeObservation {
   /** With `reason: 'runtime_environment_unavailable'`: why the login-shell capture or, on win32, the logon registry read failed. */
   code?: ServiceEnvironmentUnavailableCode;
   version?: string;
+  /**
+   * The qualified version of a `warn` verdict, and only of one. Audit keeps
+   * this projection of the warning while it drops the verdict itself.
+   */
   qualifiedVersion?: string;
   /**
-   * The effective version policy's verdict (#1103). Local-only: `Daemon.status()`
-   * carries it inline, while control `status` ships it through the additive
-   * `runtimeVersionVerdicts` side channel so a pre-#1103 client's strict
-   * observation parser still accepts `runtimes`. `doctor` merges the two. The
-   * wire still carries only the protocol's `RuntimeInfo` fields. Additive and
-   * optional: an observation from an older daemon has no verdict, and a reader
-   * must not infer `allow` from its absence.
+   * The effective version policy's verdict (#1103). Local-only:
+   * `Daemon.status()` and control `status` carry it inline; the wire carries
+   * only the protocol's `RuntimeInfo` fields. Optional: an adapter without a
+   * policy has no verdict, and a reader must not infer `allow` from its absence.
    */
   versionVerdict?: RuntimeVersionVerdict;
   /**
    * #1103 §2.6: this run's comparison with the last stored token. Local-only
    * (status, doctor, startup stderr); never on the wire, in audit or in a
-   * support bundle. Absent on a first run, an unchanged version, an
-   * unavailable runtime, or an older daemon.
+   * support bundle. Absent on a first run, an unchanged version, or an
+   * unavailable runtime.
    */
   versionChange?: RuntimeVersionChange;
   /**
    * #1103 O10: the absolute executable detection ran, and who chose it.
-   * Local-only (`Daemon.status()`, control `status` through the additive
-   * `runtimeExecutables` side channel, `doctor`); never on the wire, in audit
-   * or in a support bundle, because the path can name the local user. Absent
-   * when detection did not run an executable it can name: an unavailable
-   * runtime, a bare command the OS finds on PATH at spawn (source `path`
-   * only), a Pi lane that launches an SDK entry, or an older daemon.
+   * Local-only (`Daemon.status()`, control `status`, `doctor`); never on the
+   * wire, in audit or in a support bundle, because the path can name the local
+   * user. Absent when detection did not run an executable it can name: an
+   * unavailable runtime, a bare command the OS finds on PATH at spawn (source
+   * `path` only), or a Pi lane that launches an SDK entry.
    */
   executablePath?: string;
   executableSource?: RuntimeExecutableSource;
@@ -75,7 +75,7 @@ export function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, 
     ...(detected.kind === 'refused' ? { reason: detected.reason } : {}),
     ...(detected.kind === 'refused' && detected.reason === 'runtime_environment_unavailable' ? { code: detected.code } : {}),
     ...(detected.kind === 'available' && detected.version !== undefined ? { version: bounded(detected.version, 256) } : {}),
-    ...(detected.kind === 'available' && detected.advisory !== undefined ? { qualifiedVersion: bounded(detected.advisory.qualifiedVersion, 256) } : {}),
+    ...(verdict?.state === 'warn' ? { qualifiedVersion: verdict.qualifiedVersion } : {}),
     ...(verdict === undefined ? {} : { versionVerdict: verdict }),
     ...(detected.kind === 'available' && detected.executablePath !== undefined ? { executablePath: detected.executablePath } : {}),
     ...(detected.kind === 'available' && detected.executableSource !== undefined ? { executableSource: detected.executableSource } : {}),
@@ -85,43 +85,54 @@ export function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, 
   };
 }
 
-/** Reject unreadable observations; never infer availability from an older discovery shape. */
-export function parseRuntimeObservations(value: unknown): RuntimeObservation[] | undefined {
+/** Keys of the redacted audit observation; see `DaemonRecord` `runtimes-detected`. */
+const AUDIT_OBSERVATION_KEYS: readonly string[] = Object.freeze(['id', 'present', 'outcome', 'reason', 'code', 'version', 'qualifiedVersion', 'authPresent', 'steer', 'resume']);
+/** Live status adds the local-only evidence audit never holds. */
+const STATUS_OBSERVATION_KEYS: readonly string[] = Object.freeze([...AUDIT_OBSERVATION_KEYS, 'versionVerdict', 'versionChange', 'executablePath', 'executableSource']);
+
+/**
+ * Reject unreadable observations; never infer availability from another
+ * discovery shape. `audit` reads the redacted `runtimes-detected` record;
+ * `status` reads the control `status` result, which carries the verdict,
+ * restart comparison and executable inline.
+ */
+export function parseRuntimeObservations(value: unknown, source: 'audit' | 'status'): RuntimeObservation[] | undefined {
   if (!Array.isArray(value)) return undefined;
+  const allowed = source === 'audit' ? AUDIT_OBSERVATION_KEYS : STATUS_OBSERVATION_KEYS;
   const observations: RuntimeObservation[] = [];
   for (const raw of value) {
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
     const r = raw as Record<string, unknown>;
-    if (Object.keys(r).some(key => !['id', 'present', 'outcome', 'reason', 'code', 'version', 'qualifiedVersion', 'versionVerdict', 'versionChange', 'authPresent', 'steer', 'resume'].includes(key))
+    if (Object.keys(r).some(key => !allowed.includes(key))
       || typeof r.id !== 'string' || r.id.length === 0 || r.id.length > 128 || /[\r\n\t]/.test(r.id)
       || typeof r.steer !== 'boolean' || typeof r.resume !== 'boolean'
       || r.present !== (r.outcome === 'available')
       || (r.version !== undefined && (typeof r.version !== 'string' || r.version.length > 256 || /[\r\n\t]/.test(r.version)))
       || (r.qualifiedVersion !== undefined && (typeof r.qualifiedVersion !== 'string' || r.qualifiedVersion.length > 256 || /[\r\n\t]/.test(r.qualifiedVersion)))
-      || (r.versionVerdict !== undefined && !isVersionVerdict(r.versionVerdict))
       || (r.versionChange !== undefined && !isVersionChange(r.versionChange))) return undefined;
+    let detected: RuntimeDetectResult;
     try {
-      validateRuntimeDetectResult({
+      detected = validateRuntimeDetectResult({
         kind: r.outcome,
         ...(r.reason === undefined ? {} : { reason: r.reason }),
         ...(r.code === undefined ? {} : { code: r.code }),
         ...(r.version === undefined ? {} : { version: r.version }),
         ...(r.authPresent === undefined ? {} : { authPresent: r.authPresent }),
-        ...(r.qualifiedVersion === undefined ? {} : { advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: r.qualifiedVersion } }),
         ...(r.versionVerdict === undefined ? {} : { versionVerdict: r.versionVerdict }),
+        ...(r.executablePath === undefined ? {} : { executablePath: r.executablePath }),
+        ...(r.executableSource === undefined ? {} : { executableSource: r.executableSource }),
       });
     } catch { return undefined; }
-    const verdict = r.versionVerdict as RuntimeVersionVerdict | undefined;
+    if (r.qualifiedVersion !== undefined && detected.kind !== 'available') return undefined;
+    const verdict = detected.kind === 'available' ? detected.versionVerdict : undefined;
+    // With the verdict present, `qualifiedVersion` must be exactly its warning projection.
+    if (verdict !== undefined
+      && (verdict.state === 'warn' ? r.qualifiedVersion !== verdict.qualifiedVersion : r.qualifiedVersion !== undefined)) return undefined;
+    if (source === 'status' && verdict === undefined && r.qualifiedVersion !== undefined) return undefined;
     const change = r.versionChange as RuntimeVersionChange | undefined;
     observations.push({
       ...r,
-      ...(verdict === undefined ? {} : {
-        versionVerdict: Object.freeze({
-          state: verdict.state,
-          qualifiedVersion: verdict.qualifiedVersion,
-          ...(verdict.matched === undefined ? {} : { matched: verdict.matched }),
-        }) as RuntimeVersionVerdict,
-      }),
+      ...(verdict === undefined ? {} : { versionVerdict: verdict }),
       ...(change === undefined ? {} : {
         versionChange: Object.freeze({
           fromVersion: change.fromVersion,
@@ -133,103 +144,6 @@ export function parseRuntimeObservations(value: unknown): RuntimeObservation[] |
     } as unknown as RuntimeObservation);
   }
   return observations;
-}
-
-/**
- * Merge the control status's additive {@link RuntimeVersionVerdict} channel
- * (#1103) into observations. The verdicts travel outside `runtimes` so a
- * pre-#1103 client's strict observation parser still accepts that array; a
- * missing or malformed side channel means "unknown", never `allow`.
- *
- * @internal
- */
-export function attachRuntimeVersionVerdicts(observations: RuntimeObservation[], value: unknown): RuntimeObservation[] {
-  if (!Array.isArray(value)) return observations;
-  const verdicts = new Map<string, RuntimeVersionVerdict>();
-  for (const raw of value) {
-    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) continue;
-    const entry = raw as Record<string, unknown>;
-    if (Object.keys(entry).some((key) => !['id', 'versionVerdict'].includes(key))) continue;
-    if (typeof entry.id !== 'string' || entry.id.length === 0 || entry.id.length > 128 || /[\r\n\t]/.test(entry.id)) continue;
-    if (!isVersionVerdict(entry.versionVerdict)) continue;
-    verdicts.set(entry.id, Object.freeze({
-      state: entry.versionVerdict.state,
-      qualifiedVersion: entry.versionVerdict.qualifiedVersion,
-      ...(entry.versionVerdict.matched === undefined ? {} : { matched: entry.versionVerdict.matched }),
-    }) as RuntimeVersionVerdict);
-  }
-  if (verdicts.size === 0) return observations;
-  return observations.map((observation) => {
-    const verdict = verdicts.get(observation.id);
-    if (verdict === undefined) return observation;
-    // Keep the legacy advisory (warn) and the verdict two projections of one
-    // fact; a side channel that disagrees is ignored, not rendered.
-    if (verdict.state === 'warn'
-      ? observation.qualifiedVersion !== verdict.qualifiedVersion
-      : observation.qualifiedVersion !== undefined) return observation;
-    return { ...observation, versionVerdict: verdict };
-  });
-}
-
-/**
- * Merge the control status's additive {@link RuntimeVersionChange} channel
- * (#1103 §2.6) into observations. The change travels outside `runtimes` so a
- * pre-#1103 client's strict observation parser still accepts that array; a
- * missing or malformed side channel means "unknown", never "unchanged".
- *
- * @internal
- */
-export function attachRuntimeVersionChanges(observations: RuntimeObservation[], value: unknown): RuntimeObservation[] {
-  if (!Array.isArray(value)) return observations;
-  const changes = new Map<string, RuntimeVersionChange>();
-  for (const raw of value) {
-    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) continue;
-    const entry = raw as Record<string, unknown>;
-    if (Object.keys(entry).some((key) => !['id', 'versionChange'].includes(key))) continue;
-    if (typeof entry.id !== 'string' || entry.id.length === 0 || entry.id.length > 128 || /[\r\n\t]/.test(entry.id)) continue;
-    if (!isVersionChange(entry.versionChange)) continue;
-    changes.set(entry.id, Object.freeze({
-      fromVersion: entry.versionChange.fromVersion,
-      toVersion: entry.versionChange.toVersion,
-      direction: entry.versionChange.direction,
-      observedAt: entry.versionChange.observedAt,
-    }));
-  }
-  if (changes.size === 0) return observations;
-  return observations.map((observation) => {
-    const change = changes.get(observation.id);
-    return change === undefined ? observation : { ...observation, versionChange: change };
-  });
-}
-
-/**
- * Merge the control status's additive executable channel (#1103 O10) into
- * observations, under the same side-channel rule as
- * {@link attachRuntimeVersionChanges}. A missing or malformed entry means
- * unknown; the reader never resolves a path itself.
- *
- * @internal
- */
-export function attachRuntimeExecutables(observations: RuntimeObservation[], value: unknown): RuntimeObservation[] {
-  if (!Array.isArray(value)) return observations;
-  const executables = new Map<string, Pick<RuntimeObservation, 'executablePath' | 'executableSource'>>();
-  for (const raw of value) {
-    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) continue;
-    const entry = raw as Record<string, unknown>;
-    if (Object.keys(entry).some((key) => !['id', 'executablePath', 'executableSource'].includes(key))) continue;
-    if (typeof entry.id !== 'string' || entry.id.length === 0 || entry.id.length > 128 || /[\r\n\t]/.test(entry.id)) continue;
-    if (entry.executableSource === undefined || !isExecutableFields(entry.executablePath, entry.executableSource)) continue;
-    executables.set(entry.id, {
-      ...(entry.executablePath === undefined ? {} : { executablePath: entry.executablePath as string }),
-      executableSource: entry.executableSource as RuntimeExecutableSource,
-    });
-  }
-  if (executables.size === 0) return observations;
-  return observations.map((observation) => {
-    const executable = executables.get(observation.id);
-    // Only an available runtime ran an executable.
-    return executable === undefined || !observation.present ? observation : { ...observation, ...executable };
-  });
 }
 
 const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze(['app_server_unavailable', 'acp_unavailable', 'platform_unsupported', 'agent_user_context_unavailable']);
@@ -251,12 +165,6 @@ function isVersionText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= MAX_VERSION_CHARS;
 }
 
-function isAdvisory(value: unknown): value is RuntimeDetectionAdvisory {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const advisory = value as Record<string, unknown>;
-  return Object.keys(advisory).length === 2 && advisory.reason === 'runtime_version_unqualified'
-    && isVersionText(advisory.qualifiedVersion);
-}
 
 function isVersionChange(value: unknown): value is RuntimeVersionChange {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -287,28 +195,17 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
   }
   const result = value as Record<string, unknown>;
   if (!Object.hasOwn(result, 'kind')) throw new TypeError('invalid runtime detection result');
-  const { kind, version, rawVersion, authPresent, advisory, versionVerdict, executablePath, executableSource } = result;
+  const { kind, version, rawVersion, authPresent, versionVerdict, executablePath, executableSource } = result;
   if (kind === 'available') {
-    if (Object.keys(result).some((key) => !['kind', 'version', 'rawVersion', 'authPresent', 'advisory', 'versionVerdict', 'executablePath', 'executableSource'].includes(key))
+    if (Object.keys(result).some((key) => !['kind', 'version', 'rawVersion', 'authPresent', 'versionVerdict', 'executablePath', 'executableSource'].includes(key))
       || !isExecutableFields(executablePath, executableSource)
       || (version !== undefined && typeof version !== 'string')
       || (rawVersion !== undefined && typeof rawVersion !== 'string')
       || (authPresent !== undefined && typeof authPresent !== 'boolean')
-      || (advisory !== undefined && !isAdvisory(advisory))
       || (versionVerdict !== undefined && !isVersionVerdict(versionVerdict))) {
       throw new TypeError('invalid runtime detection result');
     }
-    // A warning verdict and the legacy advisory are two projections of one
-    // fact: warn ⇔ advisory, with the same qualified version. An absent
-    // verdict keeps the old semantics (an advisory means warn).
     const verdict = versionVerdict as RuntimeVersionVerdict | undefined;
-    const warn = verdict?.state === 'warn';
-    if (warn && (advisory === undefined || advisory.qualifiedVersion !== verdict!.qualifiedVersion)) {
-      throw new TypeError('invalid runtime detection result');
-    }
-    if (verdict !== undefined && !warn && advisory !== undefined) {
-      throw new TypeError('invalid runtime detection result');
-    }
     return Object.freeze({
       kind,
       ...(version === undefined ? {} : { version }),
@@ -316,7 +213,6 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
       ...(authPresent === undefined ? {} : { authPresent }),
       ...(executablePath === undefined ? {} : { executablePath: executablePath as string }),
       ...(executableSource === undefined ? {} : { executableSource: executableSource as RuntimeExecutableSource }),
-      ...(advisory === undefined ? {} : { advisory: Object.freeze({ reason: advisory.reason, qualifiedVersion: advisory.qualifiedVersion }) }),
       ...(verdict === undefined ? {} : {
         versionVerdict: Object.freeze({
           state: verdict.state,

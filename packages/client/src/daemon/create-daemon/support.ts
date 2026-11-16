@@ -131,8 +131,8 @@ export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
       }
       continue;
     }
-    if (detected.advisory !== undefined) {
-      console.warn(`[byok/client] ${adapter.descriptor.id} ${detected.version ?? '(unknown version)'} is not the qualified ${detected.advisory.qualifiedVersion}; continuing`);
+    if (detected.versionVerdict?.state === 'warn') {
+      console.warn(`[byok/client] ${adapter.descriptor.id} ${detected.version ?? '(unknown version)'} is not the qualified ${detected.versionVerdict.qualifiedVersion}; continuing`);
     }
     // Absence of a verdict means the adapter declares no policy: omit the
     // field rather than inventing `allow` (#1103 D8/D9).

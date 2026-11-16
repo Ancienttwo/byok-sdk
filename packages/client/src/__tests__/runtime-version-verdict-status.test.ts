@@ -6,7 +6,7 @@ import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../dae
 import { connectControlClient } from '../daemon/control-client';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import {
-  attachRuntimeVersionVerdicts, parseRuntimeObservations, projectRuntimeObservation, validateRuntimeDetectResult,
+  parseRuntimeObservations, projectRuntimeObservation, validateRuntimeDetectResult,
 } from '../runtime-detection';
 import { runStatusCommand } from '../bin/commands/status';
 import { runDoctorCommand } from '../bin/commands/doctor';
@@ -27,12 +27,7 @@ const BLOCK = { state: 'block' as const, qualifiedVersion: '0.160.0', matched: '
 
 const adapters = () => [
   new StubRuntimeAdapter('pi', { kind: 'available', version: '1.4.0', versionVerdict: ALLOW }),
-  new StubRuntimeAdapter('claude', {
-    kind: 'available',
-    version: '2.1.400',
-    versionVerdict: WARN,
-    advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '2.1.312' },
-  }),
+  new StubRuntimeAdapter('claude', { kind: 'available', version: '2.1.400', versionVerdict: WARN }),
   new StubRuntimeAdapter('codex', { kind: 'available', version: 'codex-cli 0.161.0', versionVerdict: BLOCK }),
 ];
 
@@ -82,17 +77,7 @@ describe('#1103: version verdicts in local status and doctor', () => {
       if (!connection.ok) throw new Error('expected an online daemon');
       try {
         const live = await connection.client.request<ControlStatusResult>('status');
-        // The additive channel keeps `runtimes` parseable by a pre-#1103
-        // client, which rejects an unknown key inside any observation.
-        expect(JSON.stringify(live.runtimes)).not.toContain('versionVerdict');
-        const observed = parseRuntimeObservations(live.runtimes);
-        expect(observed?.map(({ versionVerdict }) => versionVerdict)).toEqual([undefined, undefined, undefined]);
-        expect(live.runtimeVersionVerdicts).toEqual([
-          { id: 'pi', versionVerdict: ALLOW },
-          { id: 'claude', versionVerdict: WARN },
-          { id: 'codex', versionVerdict: BLOCK },
-        ]);
-        expect(attachRuntimeVersionVerdicts(observed!, live.runtimeVersionVerdicts).map(({ versionVerdict }) => versionVerdict))
+        expect(parseRuntimeObservations(live.runtimes, 'status')?.map(({ versionVerdict }) => versionVerdict))
           .toEqual([ALLOW, WARN, BLOCK]);
       } finally {
         connection.client.close();
@@ -146,8 +131,7 @@ describe('#1103: version verdicts in local status and doctor', () => {
         kind: 'available', version: '1.4.0', versionVerdict: ALLOW,
       }),
       projectRuntimeObservation(descriptor('claude'), {
-        kind: 'available', version: '2.1.400', advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '2.1.312' },
-        versionVerdict: WARN,
+        kind: 'available', version: '2.1.400', versionVerdict: WARN,
       }),
       projectRuntimeObservation(descriptor('codex'), {
         kind: 'available', version: 'codex-cli 0.161.0', versionVerdict: BLOCK,
@@ -161,23 +145,24 @@ describe('#1103: version verdicts in local status and doctor', () => {
   });
 });
 
-describe('#1103: additive runtime observation parsing', () => {
-  it('keeps an old observation without a verdict byte-for-byte additive', () => {
-    const old = { id: 'codex', present: true, outcome: 'available', version: '0.101.0', qualifiedVersion: '0.160.0', steer: true, resume: true };
-    expect(parseRuntimeObservations([old])).toEqual([old]);
-    expect(parseRuntimeObservations([{ id: 'pi', present: false, outcome: 'not-found', steer: true, resume: true }])).toEqual([
+describe('#1103: runtime observation parsing', () => {
+  it('reads the redacted audit observation, whose warning survives only as qualifiedVersion', () => {
+    const audited = { id: 'codex', present: true, outcome: 'available', qualifiedVersion: '0.160.0', steer: true, resume: true };
+    expect(parseRuntimeObservations([audited], 'audit')).toEqual([audited]);
+    expect(parseRuntimeObservations([{ id: 'pi', present: false, outcome: 'not-found', steer: true, resume: true }], 'audit')).toEqual([
       { id: 'pi', present: false, outcome: 'not-found', steer: true, resume: true },
     ]);
+    expect(parseRuntimeObservations([{ ...audited, versionVerdict: WARN }], 'audit')).toBeUndefined();
   });
 
-  it('accepts and copies a new verdict, including the block match', () => {
+  it('accepts and copies an inline status verdict, including the block match', () => {
     const observed = { id: 'codex', present: true, outcome: 'available', version: 'codex-cli 0.161.0', versionVerdict: BLOCK, steer: true, resume: true };
-    expect(parseRuntimeObservations([observed])).toEqual([observed]);
+    expect(parseRuntimeObservations([observed], 'status')).toEqual([observed]);
     const warned = {
       id: 'claude', present: true, outcome: 'available', version: '2.1.400', qualifiedVersion: '2.1.312',
       versionVerdict: WARN, steer: true, resume: true,
     };
-    expect(parseRuntimeObservations([warned])).toEqual([warned]);
+    expect(parseRuntimeObservations([warned], 'status')).toEqual([warned]);
   });
 
   it('rejects malformed verdicts and does not infer allow from an absent one', () => {
@@ -185,26 +170,19 @@ describe('#1103: additive runtime observation parsing', () => {
       { id: 'codex', present: true, outcome: 'available', versionVerdict: { state: 'invented', qualifiedVersion: '0.160.0' }, steer: true, resume: true },
       { id: 'codex', present: true, outcome: 'available', versionVerdict: { state: 'block', qualifiedVersion: '0.160.0' }, steer: true, resume: true },
       { id: 'claude', present: true, outcome: 'available', versionVerdict: WARN, steer: true, resume: true },
+      { id: 'claude', present: true, outcome: 'available', qualifiedVersion: '2.1.312', steer: true, resume: true },
       { id: 'codex', present: true, outcome: 'available', versionVerdict: { ...BLOCK, extra: true }, steer: true, resume: true },
       { id: 'codex', present: true, outcome: 'available', versionVerdict: { ...BLOCK, matched: 'x'.repeat(257) }, steer: true, resume: true },
-    ]) expect(parseRuntimeObservations([value])).toBeUndefined();
+    ]) expect(parseRuntimeObservations([value], 'status')).toBeUndefined();
+    const unknown = [{ id: 'codex', present: true, outcome: 'available' as const, version: '0.101.0', steer: true, resume: true }];
+    expect(parseRuntimeObservations(unknown, 'status')).toEqual(unknown);
   });
 
-  it('treats an old daemon\'s missing verdict channel as unknown, never allow', () => {
-    const old = [
-      { id: 'codex', present: true, outcome: 'available' as const, version: '0.101.0', steer: true, resume: true },
-    ];
-    expect(parseRuntimeObservations(old)).toEqual(old);
-    expect(attachRuntimeVersionVerdicts(old, undefined)).toEqual(old);
-    expect(attachRuntimeVersionVerdicts(old, [{ id: 'codex', versionVerdict: { state: 'invented' } }])).toEqual(old);
-    expect(attachRuntimeVersionVerdicts(old, [{ id: 'codex', versionVerdict: BLOCK, extra: true }])).toEqual(old);
-  });
-
-  it('keeps the detect-result warning/advisory invariant when a verdict is present', () => {
-    expect(() => validateRuntimeDetectResult({ kind: 'available', versionVerdict: WARN })).toThrow();
+  it('rejects a detect result that still carries the removed advisory', () => {
+    expect(validateRuntimeDetectResult({ kind: 'available', versionVerdict: WARN })).toEqual({ kind: 'available', versionVerdict: WARN });
     expect(() => validateRuntimeDetectResult({
-      kind: 'available', versionVerdict: BLOCK,
-      advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '0.160.0' },
+      kind: 'available', versionVerdict: WARN,
+      advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '2.1.312' },
     })).toThrow();
   });
 });

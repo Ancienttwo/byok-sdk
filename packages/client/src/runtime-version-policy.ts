@@ -1,6 +1,5 @@
 import type { RuntimeVersionPolicyProjection } from '@byok-sdk/protocol';
 import type {
-  RuntimeDetectionAdvisory,
   RuntimeVersionPolicy,
   RuntimeVersionSpec,
   RuntimeVersionVerdict,
@@ -204,21 +203,11 @@ export function runtimeVersionPolicyProjection(
     : { state: verdict.state, qualifiedVersion: verdict.qualifiedVersion };
 }
 
-/**
- * The `available` detect fields for one token: the verdict, and the existing
- * advisory exactly when the verdict is a warning. Adapters call this so the
- * verdict and the legacy advisory can never disagree (#1103 §2.4).
- */
+/** The `available` detect field for one token: the verdict, omitted when the adapter declares no policy. */
 export function runtimeVersionDetectionFields(
   policy: RuntimeVersionPolicy | undefined,
   token: string | undefined,
-): { readonly versionVerdict?: RuntimeVersionVerdict; readonly advisory?: RuntimeDetectionAdvisory } {
+): { readonly versionVerdict?: RuntimeVersionVerdict } {
   const verdict = runtimeVersionVerdict(policy, token);
-  if (verdict === undefined) return {};
-  return {
-    versionVerdict: verdict,
-    ...(verdict.state === 'warn'
-      ? { advisory: { reason: 'runtime_version_unqualified' as const, qualifiedVersion: verdict.qualifiedVersion } }
-      : {}),
-  };
+  return verdict === undefined ? {} : { versionVerdict: verdict };
 }

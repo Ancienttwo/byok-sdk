@@ -394,8 +394,8 @@ task's `auto | all` mode and the runtime's own guardrails:
   app-server support and uses `approval_policy=never` with sandbox
   `danger-full-access` by default (`DaemonConfig.codexSandbox`). Detection
   refuses an unavailable app-server. It never refuses a version: an
-  auto-updated Codex is admitted with a `runtime_version_unqualified`
-  advisory, shown by `byok-agent runtimes`.
+  auto-updated Codex is admitted with a `warn` version verdict, shown by
+  `byok-agent runtimes`.
 - Pi: before admission, the daemon starts each projected server and reads its
   own `tools/list` answer. Pi registers one tool per observed tool.
 
