@@ -375,9 +375,9 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   } else {
     if (!version(before.version) || !version(after.version)) throw new Error('Invalid package version');
     delete before.version; delete after.version;
-    // #2286: core gains exactly its Node-only sqlite-node entry. One-time: remove this admission in the release
+    // #2286: core gains exactly its sqlite-node entry. One-time: remove this admission in the release
     // that ships #2286 part A, once that release's core manifest is the base (as #2218 removed spent admissions).
-    const sqliteNode = { types: './dist/sqlite-node.d.ts', node: { import: './dist/sqlite-node.js' } };
+    const sqliteNode = { types: './dist/sqlite-node.d.ts', default: './dist/sqlite-node.js' };
     if (path === 'packages/core/package.json' && before.exports?.['./sqlite-node'] === undefined
       && isDeepStrictEqual(after.exports?.['./sqlite-node'], sqliteNode)) delete after.exports['./sqlite-node'];
   }

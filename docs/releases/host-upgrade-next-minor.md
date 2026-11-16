@@ -33,13 +33,15 @@ writing, sets a pragma such as `journal_mode = WAL` or `auto_vacuum`, or runs
 DDL. The refused file keeps its bytes, and no `-wal`, `-shm` or `-journal` file
 appears next to it.
 
-The new Node-only entry `@byok-sdk/core/sqlite-node` exports
+The new entry `@byok-sdk/core/sqlite-node` exports
 `readSqliteFileUnchanged(path, readMetadata)`. It opens an existing, non-empty
 file read-only and immutable, runs `readMetadata` on the main file and closes
 it; it returns `undefined` for `:memory:`, a missing path or a zero-length
 file. A copy-and-own Host store can call it with its own format check before
-its writable open. The core root does not export it, so Worker and rules
-entries never load it.
+its writable open. The core root does not export it. Its functions need Node:
+they load `node:sqlite` and `node:fs` only when called, so a Worker bundle that
+reaches `HostLedger` through `@byok-sdk/bot-collaboration/host-kit` still
+resolves the entry.
 
 `@byok-sdk/client`:
 

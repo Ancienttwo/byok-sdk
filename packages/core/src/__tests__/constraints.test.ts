@@ -91,11 +91,9 @@ describe('dependency isolation', () => {
     expect(SHIPPED_SOURCES.filter((file) => !nodeOnly.includes(file.path)
       && /sqlite-node|system-tool/.test(stripComments(file.text))).map((file) => file.path)).toEqual([]);
     const manifest = JSON.parse(readFileSync(new URL('../package.json', SRC_URL), 'utf8'));
-    for (const entry of ['sqlite-node', 'system-tool']) {
-      expect(manifest.exports[`./${entry}`]).toEqual({
-        types: `./dist/${entry}.d.ts`, node: { import: `./dist/${entry}.js` },
-      });
-    }
+    expect(manifest.exports['./system-tool']).toEqual({ types: './dist/system-tool.d.ts', node: { import: './dist/system-tool.js' } });
+    // #2286: a Worker bundle reaches HostLedger, so it resolves this entry too; its builtins load only when it is called.
+    expect(manifest.exports['./sqlite-node']).toEqual({ types: './dist/sqlite-node.d.ts', default: './dist/sqlite-node.js' });
     const builtins = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `
       import { createWalker, manifestEntries } from './scripts/api-surface/entry-closure.mjs';
       const root = process.cwd();

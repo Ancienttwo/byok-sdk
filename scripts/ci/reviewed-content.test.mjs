@@ -399,15 +399,15 @@ function rebase(f, message) {
   f.base = git('rev-parse', 'HEAD').trim();
 }
 
-test('#2286: core admits exactly its Node-only sqlite-node entry', t => {
+test('#2286: core admits exactly its sqlite-node entry', t => {
   const f = fixture(t), path = 'packages/core/package.json';
   const manifest = { name: '@byok-sdk/core', version: '0.43.0', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } } };
   f.write(path, manifest); rebase(f, 'core before sqlite-node');
-  const entry = { types: './dist/sqlite-node.d.ts', node: { import: './dist/sqlite-node.js' } };
+  const entry = { types: './dist/sqlite-node.d.ts', default: './dist/sqlite-node.js' };
   const write = value => f.write(path, { ...manifest, exports: { ...manifest.exports, './sqlite-node': value } });
   write(entry);
   assert.doesNotThrow(() => selectImpact([path], f));
-  for (const invalid of [{ ...entry, types: './dist/other.d.ts' }, { types: entry.types, import: './dist/sqlite-node.js' }]) {
+  for (const invalid of [{ ...entry, types: './dist/other.d.ts' }, { ...entry, default: './dist/other.js' }, { types: entry.types, node: { import: './dist/sqlite-node.js' } }]) {
     write(invalid);
     assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
   }
