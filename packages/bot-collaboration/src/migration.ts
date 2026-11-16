@@ -43,7 +43,7 @@ import { DEVICE_SWITCHING } from './rules/sync.js';
  * does not record whether a pending projection was sent (H does: it raises `tries` before the send), so the source
  * flushes its projections before the export.
  */
-export const SWITCH_EXPORT_VERSION = 1;
+export const SWITCH_EXPORT_VERSION = 2;
 export const SWITCH_SECTIONS = ['collaboration', 'archived', 'intents', 'routines', 'occurrences', 'outbox', 'tombstones'] as const;
 export type SwitchSection = typeof SWITCH_SECTIONS[number];
 
@@ -426,7 +426,7 @@ function checkReferences(content: SwitchContent): void {
  * The K8 state keys (`model.ts`). The source's owner records (`topology`, `hostIntents`) and L's switch records
  * (`switchExport`, `switchImport`) are refused as `owner_record`.
  */
-const COLLABORATION_KEYS = ['version', 'team', 'turns', 'budgets', 'delegations', 'batches', 'units', 'replies', 'schemas', 'questions', 'cards',
+const COLLABORATION_KEYS = ['team', 'turns', 'budgets', 'delegations', 'batches', 'units', 'replies', 'schemas', 'questions', 'cards',
   'rejected', 'audit', 'sequence'];
 const COLLABORATION_OPTIONAL = ['inputs', 'inputBatches', 'channel', 'revision', 'commands', 'cardCalls', 'wouldDo', 'dreams'];
 
@@ -443,7 +443,7 @@ function checkCollaboration(content: SwitchContent): void {
   if (state.switchExport !== undefined || state.switchImport !== undefined) {
     throw new SwitchExportError('owner_record', 'Switch export carries an L switch record (switchExport or switchImport)');
   }
-  ensure(keys(state, COLLABORATION_KEYS, COLLABORATION_OPTIONAL) && state.version === 3 && object(state.team) && object(state.team.bots)
+  ensure(keys(state, COLLABORATION_KEYS, COLLABORATION_OPTIONAL) && object(state.team) && object(state.team.bots)
     && Array.isArray(state.team.homeOperations) && object(state.turns) && optional(state.inputBatches, object) && optional(state.cardCalls, object)
     && optional(state.wouldDo, object),
   'collaboration state');

@@ -1,7 +1,7 @@
 import { agentKey, canonical, frozenInput, hash, isOccurrenceIntentKey, occurrenceIntentKey, parseRoutineWakeKey, routineWakeKey, taskId,
   type HostLedger, type Json, type LedgerDump } from '@byok-sdk/server/execution-core';
 import { stateOf, type CollaborationState } from './model.js';
-import { exportMarkOf, sealSwitchExport, switchAttempts, SwitchExportedError, SwitchExportError, SwitchImportedError, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type OutboxRecord,
+import { exportMarkOf, sealSwitchExport, switchAttempts, SWITCH_EXPORT_VERSION, SwitchExportedError, SwitchExportError, SwitchImportedError, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type OutboxRecord,
   type RoutineRecord, type SwitchContent, type SwitchExport, type SwitchExportRefusal, type SwitchHeader } from './migration.js';
 
 // The L side of the #975 state move. `switchContent` reads and checks an L ledger for the old owner's export.
@@ -35,7 +35,7 @@ const ROUTINE_KEYS = ['definition', 'lifecycle', 'status', 'next'];
 const ROUTINE_OPTIONAL = ['pending', 'scheduleRetryAt', 'scheduleRetryCount', 'lastError', 'calendarErrors'];
 const OCCURRENCE_KEYS = ['key', 'routineId', 'definitionVersion', 'trigger', 'wakeKey', 'recordedAt', 'nextAt', 'attempts'];
 const OCCURRENCE_OPTIONAL = ['intentId', 'job', 'hook', 'conclusion', 'slotReplayCount'];
-const LEDGER_KEYS = ['version', 'sequence', 'scanSequence', 'intents', 'executions', 'routines', 'occurrences', 'slots', 'outbox', 'applied',
+const LEDGER_KEYS = ['sequence', 'scanSequence', 'intents', 'executions', 'routines', 'occurrences', 'slots', 'outbox', 'applied',
   'application', 'scanWake'];
 const LEDGER_OPTIONAL = ['memory', 'ignoredWakes'];
 
@@ -174,7 +174,7 @@ export function switchContent(dump: LedgerDump, tenant: string, header: SwitchHe
   derived(same(Object.entries(s.slots).sort(), [...slots].sort()), 'K4 slots are not one per occurrence');
 
   return {
-    version: 1, ...header, collaboration: liveState(state),
+    version: SWITCH_EXPORT_VERSION, ...header, collaboration: liveState(state),
     archived: dump.rows.map(row => defined({ namespace: row.namespace, id: row.id, body: row.value, expiresAt: row.expiresAt ?? undefined }) as SwitchContent['archived'][number]),
     intents, routines, occurrences, outbox,
     tombstones: dump.tombstones.map(row => defined({ kind: row.kind, digest: row.identity, expiresAt: row.expiresAt ?? undefined }) as SwitchContent['tombstones'][number]),

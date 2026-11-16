@@ -2,7 +2,7 @@ import { LISTS, MAPS, ROOM_MESSAGE } from './layout';
 
 /**
  * The H store version (#793 O3). A store refuses a scope row of any version it does not support, under
- * the scope lock and before any write (#798 Q4). It is not the `CollaborationState.version` literal.
+ * the scope lock and before any write (#798 Q4).
  */
 export const STORE_VERSION = 2;
 

@@ -1,6 +1,6 @@
 import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { describe, expect, it } from 'vitest';
-import { sealSwitchExport, switchAttempts, SwitchExportError, verifySwitchExport, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type RoutineRecord,
+import { sealSwitchExport, switchAttempts, SWITCH_EXPORT_VERSION, SwitchExportError, verifySwitchExport, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type RoutineRecord,
   type SwitchContent, type SwitchExport, type SwitchExportRefusal } from './migration';
 import { stateOf, type CollaborationState } from './model';
 import type { BotProfile, HomeOperation } from './team-model';
@@ -46,7 +46,7 @@ function content(edit: (state: CollaborationState) => void = () => {}): SwitchCo
   state.replies[hash(['i2', 1])] = structuredClone(REPLY);
   edit(state);
   return {
-    version: 1, source: 'L', domain: 'tenant-1', devices: [{ deviceId: 'd2', frozenRevision: 1 }, { deviceId: 'd1', frozenRevision: 3 }], exportedAt: 1_000,
+    version: SWITCH_EXPORT_VERSION, source: 'L', domain: 'tenant-1', devices: [{ deviceId: 'd2', frozenRevision: 1 }, { deviceId: 'd1', frozenRevision: 3 }], exportedAt: 1_000,
     collaboration: state,
     archived: [{ namespace: 'turns', id: 't2', body: { n: 2 }, expiresAt: 9_000 }, { namespace: 'commands', id: 'c1', body: { n: 1 } }],
     intents: [intent('i2', 0, { attempt: { id: 'a' }, terminal: { type: 'task.complete' }, messageReceipt: { ...RECEIPT } }),
@@ -343,13 +343,13 @@ describe('switch export format (#975)', () => {
 
   it('refuses malformed content', () => {
     refusesEach('invalid', [
-      value => { (value as { version: number }).version = 2; },
+      value => { (value as { version: number }).version = 1; },
       value => { (value as { source: string }).source = 'K'; },
       value => { value.domain = ''; },
       value => { value.exportedAt = -1; },
       value => { value.devices = []; },
       value => { value.devices = [{ deviceId: 'd1', frozenRevision: 0 }]; },
-      value => { (value.collaboration as { version: number }).version = 2; },
+      value => { (value.collaboration as { version?: number }).version = 3; },
       value => { value.intents[0]!.taskId = 'not-a-digest'; },
       value => { (value.intents[0] as { submission: string }).submission = 'sent'; },
       value => { (value.intents[0] as { input: unknown }).input = 'frozen'; },

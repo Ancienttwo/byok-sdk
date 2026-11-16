@@ -13,7 +13,7 @@ Each symbol has one entry (#1845). K4 needs Node 24.22.1 or later, because its l
 
 | Entry | Contents | Loads where |
 | --- | --- | --- |
-| `.` | `BotCollaboration` and its option types, `botCompactVeto`, `createBotPersonaProjection`, `teamSnapshot` and its errors | Node only. It loads the L Host and `@byok-sdk/client`. |
+| `.` | `BotCollaboration` and its option types, `botLedgerOptions`, `botCompactVeto`, `createBotPersonaProjection`, `teamSnapshot` and its errors | Node only. It loads the L Host and `@byok-sdk/client`. |
 | `./host-kit` | The L modules a Host adapter composes: model, channel, delivery, routines, team, migration, retention, dreaming, adapter steps | Node or a Worker. It loads the K4 root entry, but not the L Host or `@byok-sdk/client`. The hosted Worker example bundles it. |
 | `./rules` | The pure rules that the two entries above do not export | Anywhere. It loads only `@byok-sdk/protocol` and `@byok-sdk/server/execution-core/canonical`, so no `node:sqlite`. |
 | `./testing` | The shared vectors, the L test Host, and the K4 test data `policy` and `template` | Tests on Node. It needs the optional peers `vitest` and `@hono/node-server`. |
@@ -35,9 +35,11 @@ bun run --cwd packages/bot-collaboration test
 ```
 
 `src/host.test.ts` shows the embedded setup. Create one `BotCollaboration`
-per tenant and ledger. Open that ledger with the K8 compact veto:
-`new HostLedger(file, tenant, { compactVeto: botCompactVeto })`. The
-constructor refuses a ledger without it ([Compaction](#compaction)). Give it a valid Agent execution template and a Host
+per tenant and ledger. Open that ledger with the K8 ledger options:
+`new HostLedger(file, tenant, botLedgerOptions)`, or
+`{ ...botLedgerOptions, projectionOutboxLimits }` to add options. They register
+the K8 compact veto ([Compaction](#compaction)) and the ledger's `k8` format row.
+The constructor refuses a ledger opened without them. Give it a valid Agent execution template and a Host
 connector. Route the embedded server's `wake.consume` to `bot.consume`.
 Route its `agentMessage.consume` to `bot.consumeMessage`.
 Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
@@ -701,10 +703,6 @@ After retention, a late message for an archived Turn gets `binding_mismatch`,
 and an echo can no longer match an archived delivery. Back up the whole SQLite
 database: a JSON-only restore loses the archived rows and tombstones.
 
-`CollaborationState.version` is 3. Version 1 kept the routines in K8 state.
-The Host refuses a version 1 ledger and changes nothing. Restore a ledger
-backup made before this change, or start a new ledger.
-
 The Host drains application commands until all new turns have a K4 intent.
 An immediate terminal cannot leave a continuation without a wake.
 K4 also settles intents in drains that the Host did not start: a terminal
@@ -729,10 +727,10 @@ let the accepted occurrence finish. Pause and resume retry the calendar.
 
 ## Boundaries
 
-The collaboration state has version 3. The Host rejects version 2, unsupported
-and unversioned stored state. It does not reset or migrate that state. A
-version 2 ledger cannot hold archived rows, so restore a ledger backup made
-before this change, or start a new ledger.
+The ledger's `k8` row of `host_store_format` is the format of the collaboration
+state, 3 in this build. `HostLedger` refuses an existing ledger whose `k8` row
+differs or is missing with `HostStoreFormatError` before any write, and it does
+not reset or migrate that state. Keep that file and open a new ledger.
 
 This example has one team and one owner per ledger. Paid Pi success-rate
 measurement belongs to [WO-10b](../../docs/submit-result-measurement.md); the method defines per-runtime/model/platform cells and does not supply live data. Retention of the

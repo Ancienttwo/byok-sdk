@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { HostLedger } from '@byok-sdk/server/execution-core';
 import type { StoreCompatibility } from '@byok-sdk/client';
-import { OldCollaborationStateError, stateOf } from './model.js';
+import { botLedgerOptions } from './compaction.js';
+import { stateOf } from './model.js';
 import { refuseUnmigratedWouldDo } from './rules/autonomy.js';
 import { checkTopology } from './topology.js';
 import { checkSwitchRecords } from './switch.js';
@@ -27,7 +28,7 @@ export function inspectLedger(path: string, tenant: string): StoreCompatibility 
       try {
         if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='host_ledger'").get()) throw new Error('Not a Host ledger');
       } finally { db.close(); }
-      const ledger = new HostLedger(copy, tenant);
+      const ledger = new HostLedger(copy, tenant, botLedgerOptions);
       try {
         const state = stateOf(ledger.snapshot().application);
         refuseUnmigratedWouldDo(state);
@@ -36,8 +37,8 @@ export function inspectLedger(path: string, tenant: string): StoreCompatibility 
       } finally { ledger.close(); }
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
-      return { store, path: file, verdict: error instanceof OldCollaborationStateError ? 'new-path-repair' : 'rejected',
-        ...(typeof code === 'string' ? { code } : {}), reason: error instanceof Error ? error.message : String(error) };
+      return { store, path: file, verdict: 'rejected', ...(typeof code === 'string' ? { code } : {}),
+        reason: error instanceof Error ? error.message : String(error) };
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 }

@@ -4,7 +4,7 @@ import { openHost, type TestHost } from '@byok-sdk/example-host-execution-core/t
 import { template } from './k4-fixtures.test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';
-import { botCompactVeto } from './compaction';
+import { botLedgerOptions } from './compaction';
 import { DeviceSwitchingError, sealSwitchExport, SwitchExportedError, SwitchExportError, verifySwitchExport, type SwitchExport, type SwitchHeader } from './migration';
 import { checkSwitchRecords, sealLedger, switchContent } from './switch';
 import { deliverRoutine, routineOf, seedRoutine } from './routines.test-support';
@@ -26,7 +26,7 @@ const device = () => fixture!.deviceId;
 let bot: BotCollaboration;
 async function setup(): Promise<BotCollaboration> {
   offset = 0;
-  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot.consume(wake, signal),
+  fixture = await openHost({ externalCore: true, ledgerOptions: botLedgerOptions, consume: (wake, signal) => bot.consume(wake, signal),
     agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
   bot = new BotCollaboration(fixture.server, fixture.ledger, options());
   bots.push(bot);

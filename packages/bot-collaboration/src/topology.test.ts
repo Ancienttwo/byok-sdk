@@ -7,7 +7,7 @@ import { addTurn, stateOf } from './model';
 import { CommitConflict } from './commit';
 import { roomFields, updateBot } from './team';
 import { deliverRoutine, routineOf, seedRoutine } from './routines.test-support';
-import { botCompactVeto } from './compaction';
+import { botLedgerOptions } from './compaction';
 import { DeviceSwitchingError } from './migration';
 import { DeviceModeError } from './topology';
 
@@ -32,7 +32,7 @@ function options(): BotOptions {
 }
 async function setup(rest: Partial<BotOptions> = {}): Promise<BotCollaboration> {
   offset = 0; extra = rest;
-  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal),
+  fixture = await openHost({ externalCore: true, ledgerOptions: botLedgerOptions, consume: (wake, signal) => bot!.consume(wake, signal),
     agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
   bot = new BotCollaboration(fixture.server, fixture.ledger, options());
   // A second Bot on another device, and a room with both Bots. Test fixture: the Main Bot applies its actions (#1229).
