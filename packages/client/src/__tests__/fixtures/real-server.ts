@@ -1,7 +1,8 @@
 import type { Server as HttpServer } from 'node:http';
 import { serve } from '@hono/node-server';
 import { randomUUID } from 'node:crypto';
-import type { AgentRef, RuntimeId } from '@byok-sdk/protocol';
+import type { AgentRef, ExecutionTarget, RuntimeId } from '@byok-sdk/protocol';
+import { taskRuntimeTarget } from '../../runtime-detection';
 import { expect, vi } from 'vitest';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
 import type { StubRuntimeAdapter, StubSession } from './stub-adapter';
@@ -156,14 +157,12 @@ export async function waitForTaskState(real: Pick<RealServerHandle, 'byok'>, tas
 export async function dispatchResumedAgentTask(
   real: RealServerHandle,
   adapter: StubRuntimeAdapter,
-  input: Omit<DispatchInput, 'sessionRef' | 'agentRef'> & { agentRef?: AgentRef },
+  input: Omit<DispatchInput, 'sessionRef' | 'agentRef' | 'target'> & { agentRef?: AgentRef; target?: ExecutionTarget },
   options: { beforeResume?: () => Promise<void> } = {},
 ): Promise<{ handle: TaskHandle; session: StubSession; sessionRef: string }> {
   const agentRef = input.agentRef ?? { agentId: `e2e-agent-${randomUUID()}`, profileRevision: 'rev-1' };
   // The seed runs on the same adapter the resume names, so the session handoff matches exactly.
-  const target = input.harnessId !== undefined
-    ? { target: { lane: 'harness' as const, harnessId: input.harnessId } }
-    : { target: { lane: 'runtime' as const, runtimeId: input.runtime ?? (adapter.descriptor.id as RuntimeId) } };
+  const target = { target: input.target ?? taskRuntimeTarget(adapter.descriptor) };
   const seedTaskId = `seed-${randomUUID()}`;
   const seedSessions = adapter.sessions.length;
   await vi.waitFor(async () => {

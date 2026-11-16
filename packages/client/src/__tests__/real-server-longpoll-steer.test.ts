@@ -73,7 +73,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
 
     const machines = await real.byok.machines.list();
     expect(machines.find(m => m.deviceId === record.deviceId)?.harnesses).toEqual([expect.objectContaining({ id: 'acme-harness', version: '0.0.0' })]);
-    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, harnessId: 'acme-harness', instruction: 'run over long-poll' });
+    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, target: { lane: 'harness', harnessId: 'acme-harness' }, instruction: 'run over long-poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 
     // The claim really did carry the adapter's self-report across the long-poll
@@ -140,7 +140,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
 
     const machines = await real.byok.machines.list();
     expect(machines.find(m => m.deviceId === record.deviceId)?.harnesses).toEqual([expect.objectContaining({ id: 'acme-harness', version: '0.0.0' })]);
-    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, harnessId: 'acme-harness', instruction: 'run over long-poll' });
+    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, target: { lane: 'harness', harnessId: 'acme-harness' }, instruction: 'run over long-poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 
     expect((await real.byok.tasks.get(handle.taskId))?.claimedRuntimeCapabilities?.steer).toBe(false);

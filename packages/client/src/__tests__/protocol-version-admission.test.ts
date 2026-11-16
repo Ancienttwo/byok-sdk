@@ -77,7 +77,7 @@ describe('protocol-version admission at real long-poll receive', () => {
     await connection.start();
     await waitForOpen(connection);
     await real.byok.dispatch({
-      deviceId: record.deviceId, instruction: 'known v1 offer must not run',
+      deviceId: record.deviceId, instruction: 'known v1 offer must not run', target: { lane: 'auto' },
       agentRef: { agentId: 'version-admission-agent', profileRevision: 'rev-1' }, sessionRef: 'version-admission-session',
     });
 
