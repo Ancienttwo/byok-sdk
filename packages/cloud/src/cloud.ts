@@ -127,7 +127,7 @@ import {
 import type { SteerRejectedError } from './steer-control.js';
 import { createAuthPlane, type AuthPlane } from './auth/plane.js';
 import type { TokenSigner } from './auth/tokens.js';
-import { CAPABILITY_PORTS, CLOUD_CAPABILITIES, declares, type CapabilityPorts, type CloudCapability } from './capabilities.js';
+import { CAPABILITY_PORTS, CLOUD_CAPABILITIES, capabilityPort, declares, type CapabilityPortName, type CapabilityPorts, type CloudCapability } from './capabilities.js';
 import {
   DEFAULT_ACTIVITY_BOUNDS,
   DEFAULT_PRESENCE_DETAIL_MAX_BYTES,
@@ -207,6 +207,7 @@ import type {
   AgentEgressRecord,
   PairingCodeInfo,
   RequestReceipt,
+  SteerRefusalRecord,
   TaskAbandonCause,
   TaskAttempt,
   TaskAttemptListQuery,
@@ -220,7 +221,6 @@ import {
 } from './task-redaction.js';
 import { type CloudRootStores, type TenantStores } from './tenant-stores.js';
 import * as e2eeMember from './e2ee-member.js';
-import type { E2eeMemberStore } from './e2ee-member.js';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract.js';
 
 /** Matches the reference server's ceiling (§7). */
@@ -317,8 +317,6 @@ export interface ByokCloudOptions {
   readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
   /** Durable authority for {@link ByokCloud.redactTasks}. Without it, `redactTasks` fails closed. */
   readonly taskRedactionStore?: TaskRedactionStore;
-  /** Durable authority for the E2EE member chain, key packages and pairing MACs. Without it, those calls fail closed. */
-  readonly e2eeMemberStore?: E2eeMemberStore;
   readonly maxBlobSizeBytes?: number;
   readonly longPollHoldMs?: number;
   readonly eventsPageLimit?: number;
@@ -824,6 +822,8 @@ export interface ByokCloud {
    * in full before a mailbox row is allocated, so a refused call has
    * zero side effects:
    *
+   *   0. a text over `TASK_STEER_TEXT_MAX_BYTES` (65,536) UTF-8 bytes ->
+   *      `coordination_input_invalid` ({@link ByokCloudError});
    *   1. no such task for this tenant -> `task_not_found` ({@link ByokCloudError});
    *   2. terminal attempt -> {@link SteerRejectedError} `task_terminal`,
    *      checked BEFORE the running check so a steer racing a terminal
@@ -835,8 +835,9 @@ export interface ByokCloud {
    *      there is no snapshot at all.
    *
    * Delivery is the same best-effort notification every control message has:
-   * the enqueued envelope is durable, and whether the runtime acted on it is
-   * observable only through that task's own later messages.
+   * the enqueued envelope is durable. A device that does not deliver it to the
+   * runtime reports `task.steer_refused`; read that with
+   * {@link ByokCloud.readSteerRefusal} by the returned envelope's id.
    */
   steerTask(
     tenant: TenantId,
@@ -854,6 +855,17 @@ export interface ByokCloud {
     taskId: string,
     payload: TaskSteerSealedPayload,
   ): Promise<EnqueuedAgentControl>;
+  /**
+   * The device's refusal of one steer (wire v7, #2009), by the steer's
+   * envelope id, or `undefined` while none is recorded. The first refusal
+   * recorded wins; its `reason` reads through `readSteerRefusalReason`.
+   */
+  readSteerRefusal(tenant: TenantId, taskId: string, steerMessageId: string): Promise<SteerRefusalRecord | undefined>;
+  /** The task's steer refusals with `revision > afterRevision`, ascending, at most `limit`. */
+  listSteerRefusals(
+    tenant: TenantId,
+    query: { readonly taskId: string; readonly afterRevision: number; readonly limit: number },
+  ): Promise<readonly SteerRefusalRecord[]>;
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
   /** Read the original executable offer; missing/corrupt authority never becomes a guessed payload. */
   readTaskOffer(tenant: TenantId, taskId: string): Promise<TaskOfferReadback | undefined>;
@@ -1199,7 +1211,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     );
   }
 
-  if (options.e2eeMemberStore !== undefined && declares(declaration, CLOUD_CAPABILITIES.e2eeMember)) {
+  if (options.cloud.e2eeMember !== undefined && declares(declaration, CLOUD_CAPABILITIES.e2eeMember)) {
     const e2eeDeps = {
       proof: { devices: options.cloud.devices, crypto: options.crypto, clock: options.clock },
       device: deviceRouteDeps,
@@ -1334,6 +1346,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     steerTask: steeringApi.steerTask,
     steerSealedTask: steeringApi.steerSealedTask,
+    readSteerRefusal: steeringApi.readSteerRefusal,
+    listSteerRefusals: steeringApi.listSteerRefusals,
 
     cancelTask: taskCancellationApi.cancelTask,
 
@@ -1405,9 +1419,9 @@ function assertDeclarationMatchesPorts(declaration: CapabilityDeclaration, ports
     );
   }
   const undeclared: string[] = [];
-  for (const [capability, names] of Object.entries(CAPABILITY_PORTS) as [CloudCapability, readonly (keyof CapabilityPorts)[]][]) {
+  for (const [capability, names] of Object.entries(CAPABILITY_PORTS) as [CloudCapability, readonly CapabilityPortName[]][]) {
     if (declares(declaration, capability)) {
-      const missing = names.filter((name) => ports[name] === undefined);
+      const missing = names.filter((name) => capabilityPort(ports, name) === undefined);
       if (missing.length > 0) {
         throw new ByokCloudError(
           'capability_over_declared',
@@ -1415,7 +1429,7 @@ function assertDeclarationMatchesPorts(declaration: CapabilityDeclaration, ports
         );
       }
     } else {
-      for (const name of names) if (ports[name] !== undefined) undeclared.push(`${name} (${capability})`);
+      for (const name of names) if (capabilityPort(ports, name) !== undefined) undeclared.push(`${name} (${capability})`);
     }
   }
   if (undeclared.length > 0) {

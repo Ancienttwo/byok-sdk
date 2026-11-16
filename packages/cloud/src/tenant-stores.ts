@@ -54,7 +54,7 @@ import {
   type StorageReservationInput,
   type TenantId,
 } from '@byok-sdk/core';
-import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { AgentRef, ClaimedExecutor, RuntimeCapabilities } from '@byok-sdk/protocol';
 import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake.js';
 import { DeviceRetiredError } from './errors.js';
 import type { ActivityAppendInput, ActivityTail, ActivityReadOptions } from './activity.js';
@@ -67,6 +67,8 @@ import type {
   CloudStores,
   DeviceRecord,
   AgentEgressRecord,
+  SteerRefusalRecord,
+  TaskSteerRefusalStore,
   RateLimitDecision,
   RateLimitUnit,
   RequestReceipt,
@@ -83,6 +85,8 @@ export interface TenantBoundMailbox {
   append(input: MailboxAppendInput): Promise<MailboxMessage>;
   /** Pure read. Never advances the cursor — the daemon's next poll is the only ack. */
   readAfter(query: MailboxReadQuery): Promise<MailboxPage>;
+  /** Pure read of one retained row on this device's stream (wire v7, #2009). */
+  readMessage(input: { readonly deviceId: string; readonly messageId: string }): Promise<MailboxMessage | undefined>;
   recordDelivery(input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
   advanceCursor(input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
   readCursor(deviceId: string): Promise<MailboxCursorState>;
@@ -159,8 +163,7 @@ export interface TenantBoundTaskAttempts {
   claim(input: {
     readonly taskId: string;
     readonly deviceId: string;
-    readonly runtime?: RuntimeId;
-      readonly harnessId?: string;
+    readonly executor: ClaimedExecutor;
     readonly capabilities?: RuntimeCapabilities;
   }): Promise<TaskAttempt | undefined>;
   recordStatus(input: {
@@ -189,6 +192,12 @@ export interface TenantBoundReceipts {
     readonly created: boolean;
   }>;
   get(key: string): Promise<RequestReceipt | undefined>;
+}
+
+export interface TenantBoundSteerRefusals {
+  record(input: Parameters<TaskSteerRefusalStore['record']>[1]): ReturnType<TaskSteerRefusalStore['record']>;
+  get(taskId: string, steerMessageId: string): Promise<SteerRefusalRecord | undefined>;
+  list(query: Parameters<TaskSteerRefusalStore['list']>[1]): Promise<readonly SteerRefusalRecord[]>;
 }
 
 export interface TenantBoundAgentEgress {
@@ -242,6 +251,7 @@ export interface TenantStores {
   readonly dedup: TenantBoundDedup;
   readonly receipts: TenantBoundReceipts;
   readonly egress: TenantBoundAgentEgress;
+  readonly steerRefusals: TenantBoundSteerRefusals;
   readonly blobs: TenantBoundBlobs;
   readonly objects: TenantBoundObjects;
   readonly quota: TenantBoundQuota;
@@ -275,6 +285,7 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
         return message;
       },
       readAfter: (query) => core.mailbox.readAfter(tenant, query),
+      readMessage: (input) => core.mailbox.readMessage(tenant, input),
       recordDelivery: (input) => core.mailbox.recordDelivery(tenant, input),
       advanceCursor: (input) => core.mailbox.advanceCursor(tenant, input),
       readCursor: (deviceId) => core.mailbox.readCursor(tenant, deviceId),
@@ -354,6 +365,11 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
     egress: {
       record: (input) => cloud.egress.record(tenant, input),
       get: (deviceId, agentRef, eventId) => cloud.egress.get(tenant, deviceId, agentRef, eventId),
+    },
+    steerRefusals: {
+      record: (input) => cloud.steerRefusals.record(tenant, input),
+      get: (taskId, steerMessageId) => cloud.steerRefusals.get(tenant, taskId, steerMessageId),
+      list: (query) => cloud.steerRefusals.list(tenant, query),
     },
     blobs: {
       createUpload: (reservation) => cloud.blobs.createUpload(tenant, reservation),

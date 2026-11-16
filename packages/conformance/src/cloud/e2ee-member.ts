@@ -347,5 +347,29 @@ export function runE2eeMemberStoreConformance(name: string, factory: E2eeMemberC
       expect(await store.readClientPairingMac(other, { deviceId: 'dev-1', now: T0 })).toBeUndefined();
       expect(await store.putClientPairingMac(other, { deviceId: 'dev-1', body: '{"mac":"c1"}', expiresAt: T1 })).toBe('not_registered');
     });
+    check('deleteDevice deletes the device member state and keeps the scope and member rules (#2267)', async store => {
+      await store.registerMember(tenant, registration('dev-1', 'm1'));
+      await store.registerMember(tenant, registration('dev-2', 'm2'));
+      await store.registerMember(other, registration('dev-1', 'm1'));
+      await store.putClientPairingMac(tenant, { deviceId: 'dev-1', body: '{"mac":"c1"}', expiresAt: T1 });
+      expect(await store.putScopeKeyPackages(tenant, { rows: v2([pkg(1, 'm1', 'k1'), pkg(1, 'm2', 'k1')]) })).toEqual({ outcome: 'stored', stored: 2 });
+      await store.appendChainEntries(tenant, { rows: [entry(1)], rotations: [rotation(1, 'm1', 2)], shreds: [] });
+
+      await store.deleteDevice(tenant, 'dev-1');
+      await store.deleteDevice(tenant, 'dev-1');
+
+      expect(await store.readMemberRegistration(tenant, { deviceId: 'dev-1', now: T0 })).toBeUndefined();
+      expect(await store.readClientPairingMac(tenant, { deviceId: 'dev-1', now: T0 })).toBeUndefined();
+      expect(await store.readScopeKeyPackages(tenant, { scopeId: 'scope-1' })).toEqual([pkg(1, 'm2', 'k1')]);
+      expect(await store.readMemberRegistration(tenant, { deviceId: 'dev-2', now: T0 })).toMatchObject({ memberId: 'm2' });
+      expect(await store.readMemberRegistration(other, { deviceId: 'dev-1', now: T0 })).toMatchObject({ memberId: 'm1' });
+      expect(await store.readChainEntries(tenant, { afterSeq: 0, limit: 256 })).toEqual([entry(1)]);
+      // The epoch keeps its keyId and the member its KEM floor; only the member id is free again.
+      expect(await store.putScopeKeyPackages(tenant, { rows: v2([pkg(1, 'm3', 'k2')]) }))
+        .toEqual({ outcome: 'key_id_conflict', scopeId: 'scope-1', epoch: 1, keyId: 'k1' });
+      expect(await store.putScopeKeyPackages(tenant, { rows: v2([pkg(1, 'm1', 'k1')]) }))
+        .toEqual({ outcome: 'kem_epoch_stale', recipient: 'm1', kemEpoch: 1, floor: 2 });
+      expect(await store.registerMember(tenant, registration('dev-3', 'm1'))).toBe('registered');
+    });
   });
 }

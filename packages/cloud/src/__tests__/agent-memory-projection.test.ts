@@ -27,7 +27,7 @@ function agentPayload() {
   return {
     instruction: 'run an Agent memory task',
     agentRef: AGENT_REF,
-    session: { mode: 'resume', sessionRef: 'session-resume-1' } as const,
+    session: { mode: 'resume', sessionRef: 'session-resume-1' } as const, target: { lane: 'auto' as const },
   };
 }
 

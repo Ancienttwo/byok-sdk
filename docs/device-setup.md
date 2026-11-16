@@ -655,8 +655,8 @@ One that outlives it is stopped and reported as `ServiceUnitError`
   `recover()` resolves with a `failed` receipt (`switch_unhealthy` or
   `rollback_unhealthy`).
 - `uninstall()`: a timed-out stop, unregistration or `daemon-reload` is
-  thrown as is, after `current` is removed; the unit files stay when the stop
-  or unregistration timed out.
+  thrown as is; `current` and everything under the install root stay, and so
+  do the unit files when the stop or unregistration timed out.
 - The lifecycle's own `install`, `repair`, `uninstall`, `start`, `stop` and
   `status` (also through `ServiceInstallation.lifecycle`) reject with it as
   is.

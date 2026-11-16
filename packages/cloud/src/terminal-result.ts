@@ -2,6 +2,7 @@ import {
   decodeEnvelope,
   type AgentRef,
   type BlobRef,
+  type ClaimedExecutor,
   type Envelope,
   type TerminalInferenceUsage,
   type TerminalPreparedObservation,
@@ -52,7 +53,8 @@ export function readDeviceTerminalReceipt(taskId: string, receipt: RequestReceip
  */
 export interface TerminalResult {
   readonly taskId: string;
-  readonly harnessId?: string;
+  /** The executor the terminal echoed (wire v7); absent on a decline and an unclaimed cancel or interruption. */
+  readonly executor?: ClaimedExecutor;
   /** Local interruption observation; claimed ownership remains on TaskAttempt. */
   readonly recovery?: TaskFailPayload['recovery'];
   readonly state: 'complete' | 'failed' | 'cancelled';
@@ -167,7 +169,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
           ...(envelope.payload.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: envelope.payload.residentMemoryOverLimit }),
           sessionRef: envelope.payload.sessionRef,
-          ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+          ...(envelope.payload.executor === undefined ? {} : { executor: envelope.payload.executor }),
           ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
           recordedAt: receipt.recordedAt,
         };
@@ -186,7 +188,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ? { artifactRefs: envelope.payload.artifactRefs }
           : {}),
         ...(envelope.payload.document !== undefined ? { document: envelope.payload.document } : {}),
-        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+        ...(envelope.payload.executor === undefined ? {} : { executor: envelope.payload.executor }),
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         ...(envelope.payload.preparedObservation === undefined
           ? {}
@@ -204,7 +206,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ...(envelope.payload.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: envelope.payload.residentMemoryOverLimit }),
           ...(envelope.payload.retryable !== undefined ? { retryable: envelope.payload.retryable } : {}),
           ...(envelope.payload.failure === undefined ? {} : { failure: readTaskFailure(envelope.payload.failure) }),
-          ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+          ...(envelope.payload.executor === undefined ? {} : { executor: envelope.payload.executor }),
           ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
           recordedAt: receipt.recordedAt,
         };
@@ -223,7 +225,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ? { retryable: envelope.payload.retryable }
           : {}),
         ...(envelope.payload.failure === undefined ? {} : { failure: readTaskFailure(envelope.payload.failure) }),
-        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+        ...(envelope.payload.executor === undefined ? {} : { executor: envelope.payload.executor }),
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         ...(envelope.payload.preparedObservation === undefined
           ? {}
@@ -267,7 +269,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
           ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
           ...(envelope.payload.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: envelope.payload.residentMemoryOverLimit }),
-          ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+          ...(envelope.payload.executor === undefined ? {} : { executor: envelope.payload.executor }),
           ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
           recordedAt: receipt.recordedAt,
         };
@@ -281,7 +283,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         ...(envelope.payload.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: envelope.payload.residentMemoryOverLimit }),
         ...(envelope.payload.reason !== undefined ? { reason: envelope.payload.reason } : {}),
         ...(envelope.payload.reason === undefined ? {} : { terminalCause: envelope.payload.reason }),
-        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+        ...(envelope.payload.executor === undefined ? {} : { executor: envelope.payload.executor }),
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         recordedAt: receipt.recordedAt,
       };

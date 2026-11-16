@@ -25,6 +25,7 @@ const AGENT_REF = { agentId: 'agent-prepared-1', profileRevision: 'profile-r1' }
 function preparedPayload() {
   return {
     egressPolicy: EGRESS_POLICY,
+    target: { lane: 'auto' } as const,
     agentRef: AGENT_REF,
     session: { mode: 'fresh' } as const,
     agentMemory: 'none' as const,

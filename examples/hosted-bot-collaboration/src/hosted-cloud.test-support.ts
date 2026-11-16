@@ -4,7 +4,7 @@ import pg from 'pg';
 import { createByokCloud, createHmacTokenSigner, createInProcessMailboxWake, createWebCrypto, fullCapabilityDeclaration, tenantId,
   type ByokCloud, type ByokCloudObserver } from '@byok-sdk/cloud';
 import { createPostgresCloudStores, createPostgresCoreStores, migrate, migrationsDir } from '@byok-sdk/cloud-dataplane';
-import { createByokPool, PostgresE2eeMemberStore, PostgresProofReceiptRetentionAuthority } from '@byok-sdk/cloud-dataplane/runtime';
+import { createByokPool, PostgresProofReceiptRetentionAuthority } from '@byok-sdk/cloud-dataplane/runtime';
 import type { BotStubAdapter } from '../../basic/goal-btw.test-support';
 import type { TaskSealing } from './e2ee-member.test-support';
 import { openHostedDevice } from './hosted-device.test-support';
@@ -54,10 +54,10 @@ export async function openHostedCloud(options: HostedCloudOptions = {}) {
     const objectStorage = options.objectStorage ?? { endpoint: S3_ENDPOINT!, bucket: `hosted-${randomBytes(6).toString('hex')}`,
       accessKeyId: 'byokminio', secretAccessKey: 'byokminio', region: 'us-east-1', signingClock: clock };
     const core = createPostgresCoreStores({ pool, clock, objectStorage });
-    const stores = await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool, clock, crypto, objectStorage });
+    const stores = await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool, clock, crypto, objectStorage,
+      e2eeMember: options.e2ee !== undefined });
     const declared = fullCapabilityDeclaration(undefined, { includeE2eeMember: options.e2ee !== undefined });
     const cloud: ByokCloud = createByokCloud({ proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(pool) }, core, cloud: stores, mailboxWake: createInProcessMailboxWake(), clock, crypto,
-      ...(options.e2ee === undefined ? {} : { e2eeMemberStore: new PostgresE2eeMemberStore(pool, clock) }),
       ...(options.observer === undefined ? {} : { observer: options.observer }),
       tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(3), clock),
       capabilities: { ...declared, capabilities: declared.capabilities.filter(capability => capability !== 'blobs.contentproxy') } });

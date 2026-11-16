@@ -58,14 +58,13 @@ function setup(overrides: Partial<ByokCloudOptions> = {}) {
   const cloud = createByokCloud({
     proofReceiptRetention: base.proofReceiptRetention,
     core: base.core,
-    cloud: base.stores,
+    cloud: { ...base.stores, e2eeMember: store },
     mailboxWake: base.mailboxWake,
     blobContentProxy: base.blobContentProxy,
     crypto: base.crypto,
     tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(7), clock),
     clock,
     capabilities: fullCapabilityDeclaration(1, { includeE2eeMember: true }),
-    e2eeMemberStore: store,
     ...overrides,
   });
   const fetch = (path: string, init: RequestInit = {}) => Promise.resolve(cloud.fetch(new Request(`${ORIGIN}${path}`, init)));
@@ -135,11 +134,12 @@ describe('E2EE member device routes', () => {
     const e2eeRoutes = (cloud: { readonly routes: readonly { method: string; path: string; class: string }[] }) =>
       Object.fromEntries(cloud.routes.filter(route => route.path.startsWith('/byok/e2ee/')).map(route => [`${route.method} ${route.path}`, route.class]));
     expect(e2eeRoutes(setup().cloud)).toEqual(E2EE_ROUTES);
-    expect(e2eeRoutes(setup({ capabilities: fullCapabilityDeclaration(), e2eeMemberStore: undefined }).cloud)).toEqual({});
+    const withoutStore = setup().base.stores;
+    expect(e2eeRoutes(setup({ capabilities: fullCapabilityDeclaration(), cloud: withoutStore }).cloud)).toEqual({});
     expect(fullCapabilityDeclaration().capabilities).not.toContain(CLOUD_CAPABILITIES.e2eeMember);
-    expect(() => setup({ e2eeMemberStore: undefined })).toThrowError(expect.objectContaining({ code: 'capability_over_declared' }));
+    expect(() => setup({ cloud: withoutStore })).toThrowError(expect.objectContaining({ code: 'capability_over_declared' }));
     expect(() => setup({ capabilities: fullCapabilityDeclaration() }))
-      .toThrowError(expect.objectContaining({ code: 'capability_port_undeclared', message: expect.stringContaining('e2eeMemberStore (e2ee.member)') }));
+      .toThrowError(expect.objectContaining({ code: 'capability_port_undeclared', message: expect.stringContaining('cloud.e2eeMember (e2ee.member)') }));
   });
 
   it('declares e2ee.member.kem-epoch exactly with e2ee.member', async () => {

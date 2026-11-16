@@ -34,7 +34,7 @@
  * it was claimed. Same pin the reference server holds in
  * `packages/server/src/__tests__/steer-runtime-capability-gate.test.ts`.
  */
-import type { RuntimeId } from '@byok-sdk/protocol';
+import type { ClaimedExecutor } from '@byok-sdk/protocol';
 import type { TaskAttemptStatus } from './stores/ports.js';
 
 /**
@@ -60,7 +60,7 @@ function steerRejectionMessage(
   taskId: string,
   code: SteerRejectionCode,
   status: TaskAttemptStatus,
-  runtime: RuntimeId | undefined,
+  executor: ClaimedExecutor | undefined,
 ): string {
   switch (code) {
     case 'task_terminal':
@@ -68,8 +68,13 @@ function steerRejectionMessage(
     case 'task_not_running':
       return `cannot steer task ${taskId}: not running (status ${status})`;
     case 'steer_unsupported_runtime':
-      return `cannot steer task ${taskId}: claimed runtime ${runtime ?? '(unknown)'} does not support steering`;
+      return `cannot steer task ${taskId}: claimed executor ${executorLabel(executor)} does not support steering`;
   }
+}
+
+function executorLabel(executor: ClaimedExecutor | undefined): string {
+  if (executor === undefined) return '(unknown)';
+  return executor.kind === 'runtime' ? `runtime ${executor.runtimeId}` : `harness ${executor.harnessId}`;
 }
 
 /**
@@ -78,7 +83,7 @@ function steerRejectionMessage(
  * typed-error idiom as `StaleApprovalError` (`approval-control.ts`).
  *
  * A distinct class rather than a `CloudErrorCode`, for the same reason as
- * `StaleApprovalError`: it carries the state and the runtime the caller needs to
+ * `StaleApprovalError`: it carries the state and the executor the caller needs to
  * explain the refusal, and a code alone cannot.
  *
  * Thrown before any mailbox row is allocated — a refused steer is a NON-EVENT,
@@ -90,10 +95,10 @@ export class SteerRejectedError extends Error {
     public readonly code: SteerRejectionCode,
     /** The attempt's status at the moment the steer was refused. */
     public readonly status: TaskAttemptStatus,
-    /** {@link TaskAttempt.claimedRuntime} — `undefined` when nothing was ever recorded, which is itself a reason `steer_unsupported_runtime` can fire. */
-    public readonly runtime: RuntimeId | undefined,
+    /** {@link TaskAttempt.claimedExecutor} — `undefined` before a claim wins. */
+    public readonly executor: ClaimedExecutor | undefined,
   ) {
-    super(steerRejectionMessage(taskId, code, status, runtime));
+    super(steerRejectionMessage(taskId, code, status, executor));
     this.name = 'SteerRejectedError';
   }
 }

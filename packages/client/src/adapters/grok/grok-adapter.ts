@@ -51,6 +51,13 @@ const COMPAT_INSTRUCTIONS_OFF = Object.freeze({
   GROK_CLAUDE_AGENTS_ENABLED: '0', GROK_CLAUDE_RULES_ENABLED: '0',
   GROK_CURSOR_AGENTS_ENABLED: '0', GROK_CURSOR_RULES_ENABLED: '0',
 });
+/**
+ * Grok's documented process switch for its updater. Started from a managed
+ * install with `GROK_HOME` at that install, Grok's stdio agent runs the
+ * update module and writes into the install's `bin/` (#2269). An SDK task
+ * never updates or edits the user's install; Grok run by the user still does.
+ */
+const AUTO_UPDATE_OFF = Object.freeze({ GROK_DISABLE_AUTOUPDATER: '1' });
 
 export interface GrokAdapterOptions {
   /** Absolute product native asset directory; scoped to this adapter. */
@@ -227,6 +234,7 @@ export class GrokAdapter implements RuntimeAdapter {
       ...(this.options.compatInstructions === 'disabled' || excludeUserContext ? COMPAT_INSTRUCTIONS_OFF : {}),
       ...(excludeUserMcp ? GROK_USER_MCP_SERVERS_OFF : {}),
       ...(excludeUserContext ? { GROK_HOME: await createGrokAgentHome(env, input.scratch.sdkDir, input.manifest.lease?.canonicalHome) } : {}),
+      ...AUTO_UPDATE_OFF,
     };
     if (excludeUserMcp || excludeUserContext) {
       // One inspect judges both options, with the environment the agent gets.
