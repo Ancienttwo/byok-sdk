@@ -100,7 +100,7 @@ describe('a pending approval is resolved only by a decision or a daemon report, 
     const completed = await daemon.send(
       createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done after local approval', sessionRef: 'sess-1' }, { taskId: handle.taskId }),
     );
-    expect(await completed.json()).toMatchObject({ accepted: 1 });
+    expect(await completed.json()).toMatchObject({ accepted: 1, outcomes: [{ outcome: 'accepted' }] });
 
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Complete');
 
