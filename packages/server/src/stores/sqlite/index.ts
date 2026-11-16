@@ -270,7 +270,8 @@ const SCHEMA_DDL = [
 
 /** A file's tables, indexes and triggers, keyed `type name`, each with its table and stored definition. */
 function schemaObjects(db: DatabaseSync): Map<string, string> {
-  const rows = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
+  // Only SQLite's own objects carry the literal `sqlite_` prefix; LIKE would read `_` as a wildcard.
+  const rows = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE substr(name, 1, 7) <> 'sqlite_'").all();
   return new Map(rows.map((row) => [`${String(row.type)} ${String(row.name)}`, `${String(row.tbl_name)}\n${String(row.sql)}`]));
 }
 
