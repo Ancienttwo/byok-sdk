@@ -8283,6 +8283,7 @@ export declare function resolveStorageConfig(storeDir: string, input?: StorageCo
         "durable-replica": number;
         "exec-runtime": number;
         "exec-sdk": number;
+        "grok-session-store": number;
         "home-temp": number;
         "input-preparation": number;
         "pi-session-dir": number;
@@ -8319,7 +8320,7 @@ export declare class StoragePressure {
     assertAckCriticalAllowed(): void;
 }
 // ==== @byok-sdk/client dist/daemon/retention/registry.d.ts ====
-export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger', 'terminal-evidence', 'pi-session-dir', 'agy-session-store', 'codex-session-store'];
+export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger', 'terminal-evidence', 'pi-session-dir', 'agy-session-store', 'codex-session-store', 'grok-session-store'];
 export declare const PROTECTED_CLASS_IDS: readonly ['journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'agent-content', 'byok-authority', 'agent-home-lease', 'skill-pack-current', 'store-authority', 'runtime-session-external'];
 export type ExpiringClassId = typeof EXPIRING_CLASS_IDS[number];
 export type ProtectedClassId = typeof PROTECTED_CLASS_IDS[number];

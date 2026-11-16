@@ -686,7 +686,13 @@ copies or hard links:
 - `sessions/` to the Agent's own store, `<Agent home>/.byok/grok/sessions`,
   created so that every component inside the Agent home is a real directory.
   A later task of the same Agent resumes its session from there. A Bot switched
-  from `inherit` cannot resume sessions it made in the user's store.
+  from `inherit` cannot resume sessions it made in the user's store. The store
+  is the `grok-session-store` retention class
+  ([storage layout](host-local-storage-layout.md)): a session folder expires
+  31 days after its newest write by default
+  (`storage.retention.ttlMs['grok-session-store']`, at least `session-ledger`
+  plus one day) and is kept while the session's ledger lives or a task of the
+  Agent runs.
 
 The user's `AGENTS.md`, `rules/`, `skills/`, memory, plugins, sessions and
 other state stay out; Grok writes its own state (`settings_cache.json`,

@@ -243,6 +243,9 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "exec-sdk": {
                   "type": "number"
                 },
+                "grok-session-store": {
+                  "type": "number"
+                },
                 "home-temp": {
                   "type": "number"
                 },

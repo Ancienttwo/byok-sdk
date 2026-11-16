@@ -261,8 +261,8 @@ it('a daemon runs a jittered retention timer and reports path-free classes in st
  const config={localAgentRelease:{version:'0.0.0-test'},productName:'Retention',productId:'retention',serverUrl:server.url,storeDir:testScratchRoot(),storage:{scratchRoot:testScratchRoot()}};
  const daemon=createDaemonWithAdapters(config,[new StubRuntimeAdapter()],{retention:{timers:{setTimeout:(h,ms)=>{handler=h;delays.push(ms);return 'timer';},clearTimeout:()=>{}}}});
  cleanups.push(()=>daemon.stop());await daemon.pair('pairing-code');await daemon.start();expect(delays[0]).toBeGreaterThanOrEqual(675_000);expect(delays[0]).toBeLessThanOrEqual(1_125_000);
- expect(daemon.status().storage.classes).toHaveLength(25);handler!();await vi.waitFor(()=>expect(daemon.status().storage.lastSweep?.trigger).toBe('periodic'));
- const bundle=await createSupportBundle(config,config.storeDir);expect(bundle.storage.classes).toHaveLength(25);expect(bundle.storage.lastSweep?.trigger).toBe('periodic');
+ expect(daemon.status().storage.classes).toHaveLength(26);handler!();await vi.waitFor(()=>expect(daemon.status().storage.lastSweep?.trigger).toBe('periodic'));
+ const bundle=await createSupportBundle(config,config.storeDir);expect(bundle.storage.classes).toHaveLength(26);expect(bundle.storage.lastSweep?.trigger).toBe('periodic');
  expect(JSON.stringify(bundle.storage)).not.toContain(config.storeDir);expect(JSON.stringify(bundle.storage)).not.toContain(config.storage.scratchRoot);
 });
 it('uses newly measured pressure for maintenance even when the timer fired as periodic',async()=>{
@@ -592,6 +592,40 @@ it('Codex rollout cleanup walks only the date folders',async()=>{
  const f=await fixture({home});await f.sweeper.runPass('periodic');await f.sweeper.runPass('periodic');
  expect(await exists(unrelated)).toBe(true);expect(await exists(nested)).toBe(true);
 });
+const grokSession=(directory:string,cwd:string,id:string)=>path.join(directory,'.byok','grok','sessions',cwd,id);
+async function grokStore(directory:string,sessions:Record<string,string>){
+ for(const [session,time] of Object.entries(sessions)){const file=path.join(directory,'.byok','grok','sessions',session,'nested','events.jsonl');await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'{}');await stamp(file,time);await stamp(path.dirname(file),time);await stamp(path.dirname(path.dirname(file)),EXPIRED);}
+}
+it('Grok session folders expire by their newest write unless a live ledger names them; a held home, the index, links and other entries stay',async()=>{
+ const {home,binding,directory}=await idleHome();
+ await grokStore(directory,{'cwd-a/s-old':EXPIRED,'cwd-a/s-new':FRESH,'cwd-b/s-named':EXPIRED});
+ const sessions=path.join(directory,'.byok','grok','sessions'),index=[path.join(sessions,'session_search.sqlite'),path.join(sessions,'session_search.sqlite-wal'),path.join(sessions,'cwd-a','stray.txt')];
+ for(const file of index){await fs.writeFile(file,'x');await stamp(file,EXPIRED);}
+ const ledger=path.join(directory,'.byok','runtime-sessions',sessionFileName('grok','s-named'));await fs.mkdir(path.dirname(ledger),{recursive:true});await fs.writeFile(ledger,'');
+ const outside=testScratchRoot(),escaped=path.join(outside,'s-out','events.jsonl');await fs.mkdir(path.dirname(escaped),{recursive:true});await fs.writeFile(escaped,'{}');await stamp(escaped,EXPIRED);await stamp(path.dirname(escaped),EXPIRED);
+ if(process.platform!=='win32'){await fs.symlink(outside,path.join(sessions,'cwd-link'));const link=path.join(grokSession(directory,'cwd-a','s-old'),'linked');await fs.symlink(escaped,link);await fs.lutimes(link,new Date(EXPIRED),new Date(EXPIRED));await stamp(grokSession(directory,'cwd-a','s-old'),EXPIRED);}
+ const f=await fixture({home});
+ expect(f.registry.classes.find(entry=>entry.id==='grok-session-store')!.authority).toEqual(expect.objectContaining({scope:'agent-home',bound:{kind:'ttl',ttlMs:31*DAY}}));
+ const kept=()=>Promise.all(['s-old','s-new','s-named'].map((id,n)=>exists(grokSession(directory,n===2?'cwd-b':'cwd-a',id))));
+ await f.sweeper.runPass('periodic');expect(await kept()).toEqual([true,true,true]);
+ await binding.lease.release();await f.sweeper.runPass('periodic');
+ expect(await kept()).toEqual([false,true,true]);expect(await Promise.all(index.map(exists))).toEqual([true,true,true]);expect(await exists(escaped)).toBe(true);
+ await stamp(ledger,EXPIRED);await f.sweeper.runPass('periodic');expect(await kept()).toEqual([false,true,false]);
+ expect(await exists(path.join(sessions,'cwd-b'))).toBe(true);expect(await exists(escaped)).toBe(true);
+ expect(usage(f,'grok-session-store')).toMatchObject({protected:false,measured:true});expect(f.failures).toEqual([]);
+});
+it('Grok session cleanup cut after each unlink finishes one folder before it starts another, across passes and a restart',async()=>{
+ const {home,binding,directory}=await idleHome();await binding.lease.release();
+ const store=testScratchRoot(),expired=['cwd-a/s-1','cwd-a/s-2','cwd-b/s-3'].map(id=>path.join(directory,'.byok','grok','sessions',id));
+ await grokStore(directory,{'cwd-a/s-1':EXPIRED,'cwd-a/s-2':EXPIRED,'cwd-b/s-3':EXPIRED,'cwd-b/s-kept':FRESH});
+ // Each Grok unlink moves the clock past the per-home deletion window, so every pass is cut inside a folder.
+ let cut=false;const now=performance.now.bind(performance),unlink=fs.unlink.bind(fs);vi.spyOn(performance,'now').mockImplementation(()=>now()+(cut?60_000:0));
+ vi.spyOn(fs,'unlink').mockImplementation((async(...args:Parameters<typeof fs.unlink>)=>{await unlink(...args);if(String(args[0]).includes(`${path.sep}grok${path.sep}`))cut=true;}) as typeof fs.unlink);
+ const partial=async()=>(await Promise.all(expired.map(async dir=>await exists(dir)&&!await exists(path.join(dir,'nested','events.jsonl'))))).filter(Boolean).length;
+ let f=await fixture({home,store,limits:RETENTION_LIMITS});
+ for(let pass=0;pass<20&&(await Promise.all(expired.map(exists))).some(Boolean);pass++){cut=false;await f.sweeper.runPass('periodic');expect(await partial()).toBeLessThanOrEqual(1);if(pass===2)f=await fixture({home,store,limits:RETENTION_LIMITS});}
+ expect(await Promise.all(expired.map(exists))).toEqual([false,false,false]);expect(await exists(grokSession(directory,'cwd-b','s-kept'))).toBe(true);expect(f.failures).toEqual([]);
+});
 it('session ledgers and terminal evidence expire by last append; other names, directories and symlinks stay',async()=>{
  const {home,binding,directory}=await idleHome();await binding.lease.release();
  const root=await sessionLedgers(directory,{[`pi-${ledgerHex('a')}.jsonl`]:EXPIRED,[`pi-${ledgerHex('b')}.jsonl`]:FRESH,[`my-task-runner-${ledgerHex('c')}.jsonl`]:EXPIRED,
@@ -803,5 +837,8 @@ it('Pi session TTL defaults to 31 days and must outlive the session-ledger TTL b
  expect(resolveStorageConfig(store).ttlMs['codex-session-store']).toBe(31*DAY);
  expect(resolveStorageConfig(store,{retention:{ttlMs:{'session-ledger':45*DAY,'pi-session-dir':46*DAY}}}).ttlMs['codex-session-store']).toBe(46*DAY);
  expect(()=>resolveStorageConfig(store,{retention:{ttlMs:{'codex-session-store':30*DAY}}})).toThrow("DaemonConfig.storage.retention.ttlMs.codex-session-store must be at least retention.ttlMs['session-ledger'] plus one day");
+ expect(resolveStorageConfig(store).ttlMs['grok-session-store']).toBe(31*DAY);
+ expect(resolveStorageConfig(store,{retention:{ttlMs:{'session-ledger':45*DAY,'pi-session-dir':46*DAY}}}).ttlMs['grok-session-store']).toBe(46*DAY);
+ expect(()=>resolveStorageConfig(store,{retention:{ttlMs:{'grok-session-store':30*DAY}}})).toThrow("DaemonConfig.storage.retention.ttlMs.grok-session-store must be at least retention.ttlMs['session-ledger'] plus one day");
  expect(resolveStorageConfig(store,{retention:{ttlMs:{'terminal-evidence':0}}}).ttlMs['terminal-evidence']).toBe(0);
 });

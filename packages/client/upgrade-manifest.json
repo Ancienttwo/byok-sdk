@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "4c5ea60004e07852718a63f05f9662d116270ebf2130353b94bc26d984727e6b"
+    "snapshotSha256": "4bea4ddea772ed03eba657d06e3a2dbdebb9453514736ae14afbb282c051baf9"
   },
   "configFields": {
     "status": "tracked",
@@ -157,6 +157,17 @@
         "export:@byok-sdk/client/adapters#GrokAdapterOptions",
         "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes"
       ]
+    },
+    {
+      "id": "grok-session-store",
+      "impact": "additive",
+      "summary": "The new expiring retention class grok-session-store covers the sessions a Grok Agent task keeps under <Agent home>/.byok/grok/sessions when agentUserContext is excluded. A session folder, sessions/<encoded cwd>/<session id>/, is deleted once its newest write is older than the new DaemonConfig.storage.retention.ttlMs['grok-session-store'] (default 31 days, or the session-ledger TTL plus one day if longer; an explicit value must be at least the session-ledger TTL plus one day), unless a live session ledger still names the session or its Agent home is running a task. Grok's own index, sessions/session_search.sqlite, is never touched. A Host that switches exhaustively over retention class ids (ExpiringClassId or EXPIRING_CLASS_IDS) must add a branch for grok-session-store. No data migration: the store exists only for Grok Agent tasks under agentUserContext excluded, and resuming a pruned session fails through the existing missing-session path.",
+      "migration": "docs/host-local-storage-layout.md#retention-bounds",
+      "items": [
+        "config:storage",
+        "export:@byok-sdk/client#ExpiringClassId",
+        "export:@byok-sdk/client#resolveStorageConfig"
+      ]
     }
   ],
   "changes": [
@@ -166,6 +177,13 @@
       "before": "optional schema-sha256=733c24d0d48a4795",
       "after": "optional schema-sha256=c31225db3310daa3",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "config:storage",
+      "change": "changed",
+      "before": "optional schema-sha256=e89f34f2223d0907",
+      "after": "optional schema-sha256=0e2b685e4a3635ba",
+      "entry": "grok-session-store"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
@@ -186,6 +204,11 @@
       "item": "export:@byok-sdk/client#DaemonLog",
       "change": "removed",
       "entry": "remove-standalone-daemon-log"
+    },
+    {
+      "item": "export:@byok-sdk/client#ExpiringClassId",
+      "change": "changed",
+      "entry": "grok-session-store"
     },
     {
       "item": "export:@byok-sdk/client#GrokAdapterOptions",
@@ -211,6 +234,11 @@
       "item": "export:@byok-sdk/client#openDaemonLog",
       "change": "removed",
       "entry": "remove-standalone-daemon-log"
+    },
+    {
+      "item": "export:@byok-sdk/client#resolveStorageConfig",
+      "change": "changed",
+      "entry": "grok-session-store"
     },
     {
       "item": "export:@byok-sdk/client#serviceExitDisposition",
