@@ -2,13 +2,14 @@ import { describe, expect, it, beforeAll } from 'vitest';
 import { hash, promoteOccurrence, recordOccurrence, routineCommands, routineTemplateBinding, sealRoutineTemplate, type LedgerState,
   type Routine } from '@byok-sdk/server/execution-core';
 import { sealContent } from '@byok-sdk/core/sealed-payload';
-import { sealedTestInstruction, template } from './k4-fixtures.test-support';
+import { template } from './k4-fixtures.test-support';
 import { BOT_ROUTINE, botRoutines, resealDefinition, routineCalendar, routineTurn, sealedDefinition, sealedTemplate,
   SealedRoutineVersionError, updateDefinition, type SealedRoutineAction, type SealedRoutineTemplate } from './routines';
 import { SYSTEM_PROMPT } from './rules/schema';
 import { syncTurn } from './rules/sync';
 import { stateOf } from './model';
 
+const sealedTestInstruction = (prompt: string) => `${SYSTEM_PROMPT}\n\nRequest:\n${prompt}`;
 const execution = template('device-1');
 const sealing = { scopeId: 'scope-1', epoch: 1, categories: ['task-input' as const] };
 const notAfter = '2099-01-01T00:00:00.000Z';

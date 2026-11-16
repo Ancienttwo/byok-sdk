@@ -39,13 +39,9 @@ export function recordWouldDo(state: AutonomyState, row: Omit<WouldDo, 'id'>): W
   return record;
 }
 /** Refuse would-do rows written before turn identities were required. */
-export class OldWouldDoError extends Error {
-  readonly code = 'would_do_unsupported_old' as const;
-  constructor() { super('A would-do row has no turnId'); this.name = 'OldWouldDoError'; }
-}
 export function refuseUnmigratedWouldDo(state: AutonomyState): void {
   if (Object.values(state.wouldDo ?? {}).some(row => typeof row.turnId !== 'string')) {
-    throw new OldWouldDoError();
+    throw Object.assign(new Error('A would-do row has no turnId'), { code: 'would_do_unsupported_old' as const });
   }
 }
 /** The would-do rows of one Bot, or of every Bot, oldest first. A row of the same instant keeps a stable id order. */

@@ -1,6 +1,6 @@
 import { assertNpmCoreClosure, assertSingleVersionSet } from './install-graph.mjs';
 import { assertFrozenRegistryExpectations, npmView, readRegistryExpectations, readRegistryMetadata } from './registry-contract.mjs';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';

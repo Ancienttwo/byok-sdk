@@ -12,10 +12,11 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { sealRoutineTemplate } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { ROUTINE_LATE_AFTER_MS, type SealedRoutineAction } from '@byok-sdk/bot-collaboration/host-kit';
-import { sealedTestInstruction } from '@byok-sdk/bot-collaboration/testing';
+import { ROUTINE_LATE_AFTER_MS, SYSTEM_PROMPT, type SealedRoutineAction } from '@byok-sdk/bot-collaboration/host-kit';
 import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout';
 import { openHome, RUN, until, type Home } from './worker.test-support';
+
+const sealedTestInstruction = (prompt: string) => `${SYSTEM_PROMPT}\n\nRequest:\n${prompt}`;
 
 /** The slot is at least this far from the create, so the setup is done before it. */
 const LEAD_MS = 20_000;

@@ -1,9 +1,5 @@
 import type { AgentEgressPolicy } from '@byok-sdk/client';
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
-import { SYSTEM_PROMPT } from './rules/schema.js';
-
-/** Instruction fixture used by sealed routine tests. */
-export const sealedTestInstruction = (prompt: string): string => `${SYSTEM_PROMPT}\n\nRequest:\n${prompt}`;
 
 /**
  * #1845 S1: the K4 test data that K8 reads, owned here so K8 needs no private example to typecheck or to run its
