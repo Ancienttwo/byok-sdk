@@ -9,7 +9,7 @@ import type { CommandRecord } from './rules/commit.js';
 import type { DeviceTopology } from './topology.js';
 import type { SwitchExportMark } from './migration.js';
 import type { SwitchImport } from './switch.js';
-import { refuseUnmigratedWouldDo, type AutonomyState, type WouldDo } from './rules/autonomy.js';
+import type { AutonomyState, WouldDo } from './rules/autonomy.js';
 import type { DreamState } from './dream.js';
 
 export type { Authority, InputBatch, SealReason, UserInput } from './rules/coalesce.js';
@@ -88,7 +88,5 @@ export function stateOf(application: Record<string, Json>): CollaborationState {
     + 'Restore a ledger backup made before this change, or start a new ledger.');
   if (version !== 3) throw new Error(`Unsupported Bot collaboration state version: ${String(version)}`);
   // SAFETY: The stored version was checked above; version 3 is the collaboration state this build writes.
-  const state = application.collaboration as unknown as CollaborationState;
-  refuseUnmigratedWouldDo(state);
-  return state;
+  return application.collaboration as unknown as CollaborationState;
 }

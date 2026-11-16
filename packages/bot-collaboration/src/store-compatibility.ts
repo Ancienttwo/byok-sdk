@@ -4,6 +4,7 @@ import { basename, join, resolve } from 'node:path';
 import { HostLedger } from '@byok-sdk/server/execution-core';
 import type { StoreCompatibility } from '@byok-sdk/client';
 import { OldCollaborationStateError, stateOf } from './model.js';
+import { refuseUnmigratedWouldDo } from './rules/autonomy.js';
 import { checkTopology } from './topology.js';
 import { checkSwitchRecords } from './switch.js';
 
@@ -29,6 +30,7 @@ export function inspectLedger(path: string, tenant: string): StoreCompatibility 
       const ledger = new HostLedger(copy, tenant);
       try {
         const state = stateOf(ledger.snapshot().application);
+        refuseUnmigratedWouldDo(state);
         checkTopology(state); checkSwitchRecords(state);
         return { store, path: file, verdict: 'accepted', reason: 'This build opens the ledger' };
       } finally { ledger.close(); }

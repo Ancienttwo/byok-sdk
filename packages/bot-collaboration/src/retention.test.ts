@@ -4,12 +4,12 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
-import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, occurrenceIntentKey, taskId, type ExecutionServer, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
+import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, occurrenceIntentKey, type ExecutionServer, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { template as baseTemplate } from './k4-fixtures.test-support';
 import { BotCollaboration } from './host';
 import { botCompactVeto } from './compaction';
 import { RetentionRefused } from './retention';
-import { retainInLedger } from './commit';
+import { retainInLedger, writeLedger } from './commit';
 import { stateOf } from './model';
 import { inspectLedger } from './index';
 
@@ -143,7 +143,10 @@ it('L: refuses old would-do rows without changing the ledger (#1756)', () => {
   const files = () => Object.fromEntries(readdirSync(root).filter(name => !name.endsWith('-shm')).sort().map(name => [name, readFileSync(join(root, name)).toString('hex')]));
   const before = files();
   expect(inspectLedger(file, 'tenant')).toMatchObject({ verdict: 'rejected', code: 'would_do_unsupported_old' });
-  expect(() => stateOf(ledger.snapshot().application)).toThrow('A would-do row has no turnId');
+  expect(() => stateOf(ledger.snapshot().application)).not.toThrow();
+  expect(() => new BotCollaboration(server, ledger, { botId: 'main', execution: template, dreaming: false, connector: async () => ({}) }))
+    .toThrow('A would-do row has no turnId');
+  expect(() => writeLedger(ledger, () => { throw new Error('write must not run'); })).toThrow('A would-do row has no turnId');
   expect(files()).toEqual(before);
   // Remove the synthetic test row to exercise other independent ledger refusals.
   ledger.transaction(s => {
@@ -153,6 +156,11 @@ it('L: refuses old would-do rows without changing the ledger (#1756)', () => {
   const open = () => new BotCollaboration(server, ledger, { botId: 'main', execution: template, dreaming: false, connector: async () => ({}) });
   const exported = open(); closers.push(() => exported.close());
   expect(inspectLedger(file, 'tenant')).toMatchObject({ verdict: 'accepted' });
+  ledger.transaction(s => {
+    stateOf(s.application).wouldDo = { old: { id: 'old', botId: 'main', taskId: 'task', action: 'delegate', index: 0, at: 0, detail: null } } as never;
+  });
+  expect(open).toThrow('A would-do row has no turnId');
+  ledger.transaction(s => { delete stateOf(s.application).wouldDo; });
   ledger.transaction(s => { stateOf(s.application).switchExport!.devices = []; });
   expect(open).toThrow('Invalid switch export record');
   expect(inspectLedger(file, 'tenant')).toMatchObject({ verdict: 'rejected', reason: 'Invalid switch export record' });

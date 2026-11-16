@@ -9,6 +9,7 @@ import type { HostJobHandler, Routine } from '@byok-sdk/server/execution-core';
 import { HostLedger, type Conclusion } from '@byok-sdk/server/execution-core';
 import { canonical, hash, isOccurrenceIntentKey, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/server/execution-core';
 import { stateOf, type CollaborationState, type Turn } from './model.js';
+import { checkLedgerWouldDo } from './ledger-compatibility.js';
 import { contextTurns, DEFAULT_HANDOFF_BUDGETS, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema.js';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation.js';
@@ -264,11 +265,12 @@ export class BotCollaboration {
       readOnlyToolsets: ownReadOnlyToolsets(options.readOnlyToolsets) };
     admitBotToolsets(options.execution, options.readOnlyToolsets);
     for (const model of Object.values(this.models())) admitBotToolsets(model, options.readOnlyToolsets);
-    const persisted = ledger.snapshot(), team = stateOf(persisted.application).team;
+    const persisted = ledger.snapshot(), state = stateOf(persisted.application), team = state.team;
+    checkLedgerWouldDo(ledger, state);
     // #957: the owner records are read before any pass. Each refusal reads them again in the transaction that would write.
-    checkTopology(stateOf(persisted.application));
+    checkTopology(state);
     // #975: an uncommitted import refuses here, before the constructor's own write and before K4 starts.
-    checkSwitchRecords(stateOf(persisted.application));
+    checkSwitchRecords(state);
     // The team mode is stored in the ledger. A restart cannot change it.
     if (options.team === 'external' ? !team.external && Object.keys(team.bots).length : team.external) {
       throw new Error(`This ledger has ${team.external ? 'an external' : 'a local'} team`);

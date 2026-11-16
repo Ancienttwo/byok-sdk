@@ -1,5 +1,6 @@
 import { enqueue, hash, project, promoteOccurrence, type ApplicationRows, type HostLedger, type Intent, type LedgerState } from '@byok-sdk/server/execution-core';
 import { stateOf, type Card, type CollaborationState, type Turn } from './model.js';
+import { admitLedgerWouldDo } from './ledger-compatibility.js';
 import { intentFacts } from './delegation.js';
 import { turnIntentRetired } from './compaction.js';
 import { concludeRoutineTurn, routineOccurrence, type BotRoutine } from './routines.js';
@@ -28,6 +29,7 @@ export type { Command, CommandPorts } from './rules/commands.js';
  */
 export function writeLedger<T>(ledger: Pick<HostLedger, 'transaction'>, apply: (state: LedgerState, rows: ApplicationRows) => T): T {
   return ledger.transaction((s, rows) => {
+    admitLedgerWouldDo(ledger, stateOf(s.application));
     refuseImported(stateOf(s.application));
     const result = apply(s, rows);
     refuseExported(stateOf(s.application));
