@@ -3832,7 +3832,7 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
 import { type OutboundRefusalReason, type ActivityIngress, type CapabilityFlag, type Envelope, type RuntimeInfo, type RuntimeUnavailableEntry, type ToolsetId } from '@byok-sdk/protocol';
 import { AuthManager } from './auth-manager.js';
 import type { CursorStore } from './cursor-store.js';
-import type { DaemonHaltReason } from './daemon-lifecycle.js';
+import type { DaemonHalt, DaemonHaltReason } from './daemon-lifecycle.js';
 import { type FleetJitter } from './deterministic-jitter.js';
 export { ReplayCursorTooOldError } from './replay-cursor.js';
 /**
@@ -3847,7 +3847,12 @@ export declare const MAX_OUTBOX_EPHEMERAL_BYTES: number;
  */
 export type ConnectionState = 'connecting' | 'open';
 /** The remote conditions that end a session for good. */
-export type ConnectionHaltReason = Extract<DaemonHaltReason, 'device_revoked' | 'handshake_rejected' | 'replay_cursor_too_old' | 'store_not_bound' | 're_pair_required'>;
+export type ConnectionHaltReason = Extract<DaemonHaltReason, 'device_revoked' | 'handshake_rejected' | 'protocol_negotiation_failed' | 'replay_cursor_too_old' | 'store_not_bound' | 're_pair_required'>;
+export type ConnectionHalt = {
+    reason: Exclude<ConnectionHaltReason, 'protocol_negotiation_failed'>;
+} | Extract<DaemonHalt, {
+    reason: 'protocol_negotiation_failed';
+}>;
 export interface ConnectionManagerOptions {
     serverUrl: string;
     deviceId: string;
@@ -3871,12 +3876,6 @@ export interface ConnectionManagerOptions {
     onEnvelope: (envelope: Envelope) => void | Promise<void>;
     /** Every transition between `connecting` and `open`, starting with `connecting` from {@link ConnectionManager.start}. */
     onStateChange?: (state: ConnectionState) => void;
-    /**
-     * Called each time the server's advertisement newly carries a capability
-     * the previous one did not — after every reconnect, the first advertisement
-     * is new in full. Hooks that retry capability-gated sends wait here.
-     */
-    onCapabilitiesAdvertised?: (added: readonly string[]) => void;
     /** Await durable disposition before retiring the exact accepted/rejected bytes. */
     onOutboundSettled?: (settlements: readonly OutboundSettlement[]) => Promise<void>;
     onOutboundQueued?: (envelope: Envelope) => void;
@@ -3894,9 +3893,9 @@ export interface ConnectionManagerOptions {
     fleetJitter?: FleetJitter;
     onOperationalOutcome?: (outcome: 'success' | 'failure', source: 'reconnect' | 'upload') => void;
     /** The session ended for good; nothing reconnects after this. Called once. */
-    onHalted?: (reason: ConnectionHaltReason) => void;
+    onHalted?: (halt: ConnectionHalt) => void;
     /**
-     * An observer callback ({@link onStateChange}, {@link onCapabilitiesAdvertised})
+     * An observer callback ({@link onStateChange})
      * or the reconnect loop itself threw. The session ends for good, as for a
      * halt: nothing reconnects. Called once, never for a halt or a stop.
      */
@@ -3925,8 +3924,9 @@ export type OutboundSettlement = {
  * of every session, including after a reconnect (protocol §8). Any route
  * failure returns the session to `connecting` and the loop handshakes again
  * after the capped exponential `fleetJitter('reconnect')`, or the server's
- * `Retry-After` when that is longer. A rejected hello, a revoked device or a
- * lost replay cursor halts it instead.
+ * `Retry-After` when that is longer. A rejected hello, a 400 to the hello (a
+ * server of another wire major), a revoked device or a lost replay cursor
+ * halts it instead.
  *
  * `send()` (Design B, finding N4) pushes onto a single shared outbox this
  * class owns and drains through `POST /byok/messages`; long-poll is a full
@@ -4016,13 +4016,12 @@ export declare class ConnectionManager {
     /** The longest `Retry-After` a route answered since the last reconnect wait; see `nextReconnectDelayMs`. */
     private retryAfterMs;
     /**
-     * The capabilities the current server response advertised — untyped
-     * `string[]` for forward compatibility. An advertisement is scoped to the
-     * current session and is cleared when it ends (a route failure, stop, or
-     * halt). This keeps capability-gated outbound messages fail-closed until
-     * the current server has explicitly advertised support.
+     * Outbound types the current session's server answered `type_unsupported`.
+     * The rest of the session settles them locally as rejected, unsent. Scoped
+     * to the session: the responder behind the next session may know them.
+     * `conn.hello` never enters it.
      */
-    private serverCapabilities;
+    private readonly unsupportedTypes;
     constructor(opts: ConnectionManagerOptions);
     /**
      * Loads the durable cursor and starts the reconnect loop. Resolves without
@@ -4050,7 +4049,13 @@ export declare class ConnectionManager {
      * the meantime is sent ahead of the next session's handshake.
      */
     private breakSession;
-    private applyServerCapabilities;
+    /**
+     * The peer cannot read this wire major: a permanent 4xx to the lone
+     * handshake (a v6 server requires `v: 6`), or a `rejected` hello with
+     * `protocol_version_unsupported` (HTTP 200). Neither states the peer
+     * major, so `peerVersion` stays unset.
+     */
+    private haltOnNegotiation;
     private setState;
     /**
      * Observer callbacks run inside the reconnect loop, the poll loop and the
@@ -4118,12 +4123,6 @@ export declare class ConnectionManager {
      * itself while nothing else (such as the live long-poll GET) legitimately is.
      */
     private drainRetryDelay;
-    /**
-     * The capabilities the current session's server advertised — on the
-     * handshake answer or a poll response. Empty before either and after the
-     * session ends.
-     */
-    getServerCapabilities(): readonly string[];
     /** True while the server has accepted this session's `conn.hello` and no route has failed since. */
     isOpen(): boolean;
     /** Why the session ended for good, if it did. */
@@ -5145,9 +5144,9 @@ export interface DaemonConfig {
      */
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /**
-     * Separate-process Pi BYOK credential boundary. Required only for a
-     * `dispatchSelection` in the BYOK lane; subscription runtimes and legacy
-     * Pi tasks do not invoke it.
+     * Separate-process Pi BYOK credential boundary. Required only for an offer
+     * `target` in the `byok` or `byok-profile` lane; subscription runtimes and
+     * Pi tasks without a model lane do not invoke it.
      */
     piByokLauncher?: import('../adapters/pi/pi-adapter.js').PiByokLauncherConfig;
     /**
@@ -5172,7 +5171,7 @@ export interface DaemonConfig {
      * construction order — see `ALL_RUNTIME_IDS`'s own doc comment below for
      * the construction-vs-selection-order split this introduces.
      *
-     * Only affects the auto-select (no `task.offer.runtime`) path — an offer
+     * Only affects the auto-select (`task.offer.target.lane: 'auto'`) path — an offer
      * naming an explicit runtime is unaffected (unchanged semantics: that
      * exact adapter is used, or the offer is declined; never a fallback
      * substitution). Independent of `runtimeAllowlist` above (which restricts
@@ -5950,6 +5949,8 @@ export declare const DAEMON_HALT_REASONS: readonly [
 'device_revoked', 
 /** The server answered this device's `conn.hello` with a rejection. */
 'handshake_rejected', 
+/** The server refused the whole handshake request with HTTP 400: it speaks another wire major (`ProtocolNegotiationError`). */
+'protocol_negotiation_failed', 
 /** The server no longer retains the history after this device's acknowledged cursor. */
 'replay_cursor_too_old', 
 /** The durable delivery cursor file is unreadable: run `doctor --repair reset-cursor`. */
@@ -5972,6 +5973,17 @@ export declare function isDaemonHaltReason(value: unknown): value is DaemonHaltR
  *   supervisor restarts it. It stays crashed (also after `stop()`) until the
  *   next `start()`.
  */
+/**
+ * A halt and its evidence. A refused wire major keeps the HTTP status of the
+ * answer that refused the hello (200 for a `rejected` outcome), so an
+ * operator can tell a peer of another major from a missing route.
+ */
+export type DaemonHalt = {
+    reason: Exclude<DaemonHaltReason, 'protocol_negotiation_failed'>;
+} | {
+    reason: 'protocol_negotiation_failed';
+    httpStatus: number;
+};
 export type DaemonLifecycle = {
     phase: 'stopped';
 } | {
@@ -5979,11 +5991,10 @@ export type DaemonLifecycle = {
 } | {
     phase: 'running';
     connection: 'connecting' | 'open';
-} | {
+} | ({
     phase: 'halted';
-    reason: DaemonHaltReason;
     at: string;
-} | {
+} & DaemonHalt) | {
     phase: 'crashed';
     at: string;
 };
@@ -13384,7 +13395,7 @@ export declare const LOCAL_AGENT_RELEASE_BUILD_ID_MAX_LENGTH = 128;
  */
 export declare function resolveLocalAgentReleaseIdentity(input: LocalAgentReleaseIdentity | undefined): Readonly<LocalAgentReleaseIdentity>;
 // ==== @byok-sdk/client dist/runtime-detection.d.ts ====
-import type { RuntimeId } from '@byok-sdk/protocol';
+import type { ExecutionTarget, RuntimeId } from '@byok-sdk/protocol';
 import { type ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
 import { type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeExecutableSource, type RuntimeVersionVerdict } from './types.js';
 /** How one restart changed an installed runtime's version token (#1103 §2.6). */
@@ -13476,14 +13487,12 @@ export declare function validateRuntimeDetectResult(value: unknown): RuntimeDete
  * platform outside `descriptor.platforms` is refused before `detect()` runs.
  */
 export declare function observeRuntimeDetection(adapter: RuntimeAdapter, signal?: AbortSignal): Promise<RuntimeDetectResult>;
-/** Whether `id` is a frozen wire runtime id. Every other adapter id is selected by `harnessId`. */
+/** Whether `id` is a frozen wire runtime id. Every other adapter id is selected by a `harness` target. */
 export declare function isWireRuntimeId(id: string): id is RuntimeId;
-/** The task selection that reaches this adapter: `runtime` for a wire runtime id, else `harnessId`. Never both. */
-export declare function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescriptor, 'id'>): {
-    readonly runtime: RuntimeId;
-} | {
-    readonly harnessId: string;
-};
+/** The `task.offer` target that reaches this adapter: the `runtime` lane for a wire runtime id, else the `harness` lane. */
+export declare function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescriptor, 'id'>): Extract<ExecutionTarget, {
+    readonly lane: 'runtime' | 'harness';
+}>;
 // ==== @byok-sdk/client dist/runtime-failure.d.ts ====
 import type { RuntimeFailureClass, TaskFailure } from '@byok-sdk/protocol';
 /** Closed lifecycle phases for failures after an offer has been admitted. */
@@ -14446,7 +14455,7 @@ import type { NativeInteractionCapabilities, NativeInteractionChannel } from './
 import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization.js';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory.js';
-import type { AgentEvent, TaskOfferPlainPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, ExecutionTarget, TaskOfferPlainPayload } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation.js';
 import type { AgentRef } from './agent-home.js';
 import type { McpToolsetServerObservation } from './mcp/observation.js';
@@ -14455,11 +14464,20 @@ export type { AgentRef } from './agent-home.js';
  * The offer fields a runtime adapter receives. The client owns this shape;
  * the daemon projects each wire offer onto it.
  */
-export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'runtime' | 'harnessId' | 'dispatchSelection' | 'limits'> & {
+export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'target' | 'limits'> & {
     instruction: NonNullable<TaskOfferPlainPayload['instruction']>;
     /** The runtime session to resume (`session.mode: 'resume'` on the offer); absent for a fresh session. */
     sessionRef?: string;
 };
+/**
+ * The model lanes of an offer `target`: the only lanes that carry a model
+ * selection an adapter must honor. The other lanes only name the adapter.
+ */
+export type ModelLaneTarget = Extract<ExecutionTarget, {
+    readonly lane: 'subscription' | 'byok' | 'byok-profile';
+}>;
+/** The model selection of an offer `target`, or `undefined` for the `auto`, `runtime` and `harness` lanes. */
+export declare function modelLaneTarget(target: ExecutionTarget): ModelLaneTarget | undefined;
 export type { McpServerObservation, McpToolDescriptor, McpToolsetServerObservation, } from './mcp/observation.js';
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 /**
@@ -14770,7 +14788,7 @@ export interface RuntimeAdapterDescriptor {
      * adapter constructor. Absent for a custom adapter with no policy.
      */
     readonly versionPolicy?: RuntimeVersionPolicy;
-    /** Explicit opt-in to authoritative `task.offer.dispatchSelection` semantics. */
+    /** Explicit opt-in to the authoritative model lanes of `task.offer.target` (`subscription`, `byok`, `byok-profile`). */
     readonly supportsDispatchSelection: boolean;
     /**
      * Whether this adapter actually CONSUMES
@@ -14883,12 +14901,12 @@ export interface RuntimeOperationManifest {
     /** Required by prepared operations, absent on ordinary operations. */
     readonly agentMemory?: PreparedAgentMemoryMode;
     readonly taskId: string;
-    /** Selected runtime id; lane/provider/model, when present, live only in `dispatchSelection`. */
+    /** Selected runtime id; lane/provider/model, when present, live only in `modelTarget`. */
     readonly runtimeId: string;
     readonly descriptor: RuntimeAdapterDescriptor;
     readonly requiredToolsetIds: readonly string[];
-    /** The credential-free runtime/lane/provider/model authority for this operation. */
-    readonly dispatchSelection?: RuntimeTaskInput['dispatchSelection'];
+    /** The credential-free runtime/lane/provider/model authority for this operation: the offer's model-lane target. */
+    readonly modelTarget?: ModelLaneTarget;
     readonly sessionRef?: string;
     /** Strict Agent identity, present on every `task.offer`. */
     readonly agentRef?: AgentRef;
