@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "81e7c5a0c0f751249118d8f1c1204407822b2c92ee4e32dd435b60a34e51585e"
+    "snapshotSha256": "cd89b4f1d6732664e49c61a45d96110b8fe925d093afc7a071b63a63423a17bd"
   },
   "configFields": {
     "status": "tracked",
@@ -1263,7 +1263,7 @@
       "item": "store:cloud-dataplane-postgres",
       "change": "changed",
       "before": "migrations=39 last=0039_task_agent_ref_not_null.sql sha256=144f848980cbf31e",
-      "after": "migrations=40 last=0040_wire_v7.sql sha256=c254b94fd812fe43",
+      "after": "migrations=40 last=0040_wire_v7.sql sha256=d1b9f29467de31be",
       "entry": "wire-v7-dataplane-postgres-new-database"
     },
     {
