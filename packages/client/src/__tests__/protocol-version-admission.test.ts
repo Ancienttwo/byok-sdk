@@ -48,7 +48,7 @@ describe('protocol-version admission at real long-poll receive', () => {
       if (url.startsWith(`${real!.url}/byok/events`) && rewroteKnownOffer) eventsRequestsAfterStale += 1;
       const response = await nativeFetch(input, init);
       if (!url.startsWith(`${real!.url}/byok/events`) || !response.ok) return response;
-      const page = await response.json() as { events: Array<Record<string, unknown>>; cursor: number; capabilities?: string[] };
+      const page = await response.json() as { events: Array<Record<string, unknown>>; cursor: number };
       const events = page.events.map((event) => {
         if (!rewriteStale || event.type !== 'task.offer') return event;
         rewroteKnownOffer = true;

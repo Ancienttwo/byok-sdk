@@ -206,7 +206,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'do work', ...FRESH_OFFER }, { taskId: 't1', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'do work', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
 
@@ -237,7 +237,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'do work', ...FRESH_OFFER }, { taskId: 't1', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'do work', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -282,7 +282,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     const subscription = conn.client.subscribe('tasks.subscribe', {}, (event) => viaSocket.push(event));
 
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'do work', ...FRESH_OFFER }, { taskId: 't1', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'do work', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -305,7 +305,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER }, { taskId: 't1', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -351,7 +351,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     // `pushLongPollEvent` queues the inbound offer for the daemon's next
     // events response.
     server.pushLongPollEvent(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER }, { taskId: 't-stalled', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 't-stalled', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -441,7 +441,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER },
+        { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER, target: { lane: 'auto' } },
         { taskId: 'race-task', seq: server.nextSeq() },
       ),
     );
@@ -501,7 +501,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
         if (linesLive.some((l) => /started taskId="t-live-\d+"/.test(l))) return;
         attempt += 1;
         server.send(
-          createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: `t-live-${attempt}`, seq: server.nextSeq() }),
+          createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: `t-live-${attempt}`, seq: server.nextSeq() }),
         );
         throw new Error('live subscription not yet active');
       },

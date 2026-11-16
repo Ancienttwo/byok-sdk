@@ -42,7 +42,7 @@ describe('drainOutbox chunks outbound sends by encoded bytes', () => {
 
   // `task.complete.summary` is unbounded text; a `task.fail` reason is capped by the schema (#1124).
   const big = (index: number, bytes: number): Envelope =>
-    createEnvelope('task.complete', { sessionRef: 'outbox-bytes-session', summary: 'x'.repeat(bytes) }, { taskId: `bytes-task-${index}` });
+    createEnvelope('task.complete', { sessionRef: 'outbox-bytes-session', summary: 'x'.repeat(bytes), executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: `bytes-task-${index}` });
   const bodyBytes = (batch: Envelope[]): number => Buffer.byteLength(JSON.stringify({ messages: batch }));
 
   it('splits a queue whose encoded size passes the body limit into several in-limit posts, in order', async () => {
@@ -99,7 +99,7 @@ describe('the outbox drops its oldest ephemeral envelopes past its byte cap', ()
       createEnvelope('task.progress', { seq, events: [{ type: 'progress', text: 'p'.repeat(chunk) }] }, { taskId: 'cap-task', seq });
     const count = Math.ceil(MAX_OUTBOX_EPHEMERAL_BYTES / chunk) + 3;
     const progresses = Array.from({ length: count }, (_, index) => progress(index + 1));
-    const terminal = createEnvelope('task.complete', { sessionRef: 'cap-session', summary: 't'.repeat(chunk) }, { taskId: 'cap-task' });
+    const terminal = createEnvelope('task.complete', { sessionRef: 'cap-session', summary: 't'.repeat(chunk), executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'cap-task' });
     for (const envelope of progresses.slice(0, 2)) manager.send(envelope);
     manager.send(terminal);
     for (const envelope of progresses.slice(2)) manager.send(envelope);

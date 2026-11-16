@@ -62,10 +62,10 @@ describe('an invalid envelope does not hold the report queue (real @byok-sdk/ser
     await connection.start();
     await waitForOpen(connection);
 
-    const before = createEnvelope('task.claim', { deviceId: record.deviceId }, { taskId: 'entry-task-1' });
+    const before = createEnvelope('task.claim', { deviceId: record.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'entry-task-1' });
     // A payload this wire version cannot decode (task_id must be a string).
     const invalid = { ...createEnvelope('task.started', {}, { taskId: 'entry-task-2' }), task_id: 42 } as unknown as Envelope;
-    const after = createEnvelope('task.claim', { deviceId: record.deviceId }, { taskId: 'entry-task-3' });
+    const after = createEnvelope('task.claim', { deviceId: record.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'entry-task-3' });
     for (const envelope of [before, invalid, after]) connection.send(envelope);
 
     await vi.waitFor(() => expect([before, invalid, after].every(envelope => settled.has(envelope.id))).toBe(true), { timeout: 5_000 });
