@@ -71,36 +71,57 @@ test('full CLI reports raw and normalized bytes and refuses normalized overflow 
   }
 });
 
-test('walks a two-hop relative chain, orders by path, and ignores unreachable files', (t) => {
+// The golden after its generated header: the entry index and the sections.
+const fromIndex = (golden) => golden.slice(golden.indexOf('// entry '));
+const sections = (golden) => golden.slice(golden.indexOf('// ==== '));
+
+test('renders only exported names and the declarations their signatures reach', (t) => {
   const root = makeRoot(t);
-  writePackage(root, 'core', {
-    exports: singleEntry,
-    dist: {
-      'index.d.ts': "export * from './a.js';\nexport declare const entry: number;\n",
-      'a.d.ts': "export * from './nested/b.js';\nexport declare const a: string;\n",
-      'nested/b.d.ts': 'export declare const b: boolean;\n',
-      'unreachable.d.ts': 'export declare const unreachable: never;\n',
-    },
-  });
+  const dist = {
+    'index.d.ts':
+      "/** Entry. */\nexport * from './a.js';\nexport { b } from './nested/b.js';\nexport declare const entry: number;\n",
+    'a.d.ts': "import { type Hidden, type Unused } from './hidden.js';\nexport declare const a: Hidden;\n",
+    'hidden.d.ts': "export type Hidden = 'h';\nexport type Unused = 'u';\n",
+    'nested/b.d.ts': 'export declare const b: boolean;\nexport declare const internalB: never;\n',
+    'unreachable.d.ts': 'export declare const unreachable: never;\n',
+  };
+  writePackage(root, 'core', { exports: singleEntry, dist });
 
   assert.equal(runCheck(root, ['--update']).status, 0);
   const golden = readFileSync(goldenPath(root, 'core'), 'utf8');
 
   assert.equal(
-    golden,
+    fromIndex(golden),
     [
+      '// entry @byok-sdk/core',
+      '//   a -> dist/a.d.ts',
+      '//   b -> dist/nested/b.d.ts',
+      '//   entry -> dist/index.d.ts',
       '// ==== @byok-sdk/core dist/a.d.ts ====',
-      "export * from './nested/b.js';",
-      'export declare const a: string;',
+      "import { type Hidden } from './hidden.js';",
+      'export declare const a: Hidden;',
+      '// ==== @byok-sdk/core dist/hidden.d.ts ====',
+      '// support',
+      "export type Hidden = 'h';",
       '// ==== @byok-sdk/core dist/index.d.ts ====',
       "export * from './a.js';",
+      "export { b } from './nested/b.js';",
       'export declare const entry: number;',
       '// ==== @byok-sdk/core dist/nested/b.d.ts ====',
       'export declare const b: boolean;',
       '',
     ].join('\n'),
   );
-  assert.ok(!golden.includes('unreachable'));
+
+  // An unexported sibling is not surface; a support type a signature reaches is.
+  const distFile = (relative) => path.join(root, 'packages', 'core', 'dist', relative);
+  writeFileSync(distFile('nested/b.d.ts'), 'export declare const b: boolean;\nexport declare const internalB: string;\n');
+  writeFileSync(distFile('hidden.d.ts'), "export type Hidden = 'h';\nexport type Unused = 'v';\n");
+  assert.equal(runCheck(root).status, 0);
+  writeFileSync(distFile('hidden.d.ts'), "export type Hidden = 'H';\nexport type Unused = 'v';\n");
+  const drifted = runCheck(root);
+  assert.equal(drifted.status, 1);
+  assert.match(drifted.stderr, /\+export type Hidden = 'H';/);
 });
 
 test('drift against the committed golden exits 1 with a diff', (t) => {
@@ -149,7 +170,7 @@ test('normalises CRLF, sourceMappingURL comments, and trailing blank lines', (t)
   });
   assert.equal(runCheck(root, ['--update']).status, 0);
   assert.equal(
-    readFileSync(goldenPath(root, 'core'), 'utf8'),
+    sections(readFileSync(goldenPath(root, 'core'), 'utf8')),
     [
       '// ==== @byok-sdk/core dist/index.d.ts ====',
       'export declare const entry: number;',

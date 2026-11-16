@@ -1,9 +1,11 @@
 // Public export digests from the api-surface goldens.
 //
 // The goldens (`api-surface/<pkg>.d.ts`) are already the gated, checked-in
-// image of every package's declaration closure, so this module reads them
-// instead of `dist/`: the upgrade-manifest snapshot then needs no build and is
-// identical on every machine for the same commit.
+// public surface of every package: the declarations its entries export and
+// everything they reach, rendered by check-api-surface.mjs from the same
+// `declarationGraph` below. This module reads them instead of `dist/`: the
+// upgrade-manifest snapshot then needs no build and is identical on every
+// machine for the same commit.
 //
 // For each public entry (`api-surface/entries.json`, kind `exports`) it
 // resolves the entry declaration file's exports through `export *`,
@@ -25,6 +27,7 @@ import path from 'node:path';
 const SECTION = /^\/\/ ==== (\S+) (dist\/\S+) ====$/;
 const IDENT = /[A-Za-z_$][\w$]*/g;
 const INLINE_IMPORT = /import\(\s*["']([^"']+)["']\s*\)\.([A-Za-z_$][\w$]*)/g;
+const INLINE_MODULE = /import\(\s*["']([^"']+)["']\s*\)(?!\s*\.)/g;
 const BLOCK_HEADS = new Set(['interface', 'class', 'enum', 'namespace', 'module', 'global']);
 const DECLARATION = /^(?:export\s+)?(?:declare\s+)?(?:default\s+)?(?:abstract\s+)?(const\s+enum|const|let|var|function|class|interface|type|enum|namespace|module)\s+([A-Za-z_$][\w$]*)/;
 
@@ -257,10 +260,11 @@ const isRelative = (specifier) => specifier === '.' || specifier === '..' || spe
  * resolves to: `{ kind: 'declaration', key, file, name }`, `{ kind: 'namespace',
  * key: file }` or `{ kind: 'bare', key }` for a name re-exported from another
  * package. `references(ref)` lists what a declaration names by identifier or
- * inline `import()`. Every export, star re-export and import binding a
- * resolution passes through is recorded in `routes` (per file: `export:<name>`,
- * `star:<specifier>`, `import:<local>`), which is what a renderer needs to print
- * a self-consistent subset of the files.
+ * inline `import()`; a whole-module `import('./x')` is a namespace. Every
+ * export, star re-export and import binding a resolution passes through is
+ * recorded in `routes` (per file: `export:<name>`, `star:<specifier>`,
+ * `import:<local>`), which is what a renderer needs to print a self-consistent
+ * subset of the files.
  */
 export function declarationGraph({ files, entryFiles }) {
   const modules = new Map();
@@ -355,6 +359,11 @@ export function declarationGraph({ files, entryFiles }) {
     const raw = text(ref);
     for (const match of raw.matchAll(INLINE_IMPORT)) {
       const target = isRelative(match[1]) ? importRef(ref.file, match[1], match[2]) : { kind: 'bare', key: `${match[1]}#${match[2]}` };
+      found.set(target.key, target);
+    }
+    // `typeof import('./x')` names the whole module.
+    for (const match of raw.matchAll(INLINE_MODULE)) {
+      const target = isRelative(match[1]) ? importRef(ref.file, match[1], '*') : { kind: 'bare', key: `${match[1]}#*` };
       found.set(target.key, target);
     }
     for (const token of new Set(raw.replace(/(['"`])(?:\\.|(?!\1).)*\1/g, '""').match(IDENT) ?? [])) {

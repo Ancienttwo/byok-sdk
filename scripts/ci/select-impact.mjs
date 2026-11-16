@@ -542,7 +542,9 @@ export const reviewedScripts = Object.freeze({
   // #1102: the upgrade-manifest gate. Every targeted run also runs the gate itself.
   'scripts/release/check-upgrade-manifest.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/check-upgrade-manifest.test.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
-  'scripts/release/upgrade-manifest/dts-surface.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
+  // The api-surface golden renderer shares the declaration graph, so a change
+  // here also needs its test and the build job that runs check:api-surface.
+  'scripts/release/upgrade-manifest/dts-surface.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs', 'scripts/api-surface/check-api-surface.test.mjs'], install: true },
   'scripts/release/upgrade-manifest/history.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/upgrade-manifest/manifest.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/upgrade-manifest/snapshot.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },

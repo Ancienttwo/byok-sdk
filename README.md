@@ -457,7 +457,8 @@ require Node.js 24.22.1 or newer. MIT licensed.
 all published exports, bins and private imports. `bun run check:api-surface`
 checks coverage, policies, measured workspace bytes, facts and this table.
 `--update` rewrites facts and the table only; policies must pass first.
-`--package` retains the declaration-only golden view.
+`--package <name>` checks only that package's public-surface golden
+(`api-surface/<name>.d.ts`; see `api-surface/README.md`).
 
 The budget counts workspace static JavaScript closures, not third-party bytes,
 sourcemaps or literal lazy edges. `nodeBuiltins` separately controls workspace

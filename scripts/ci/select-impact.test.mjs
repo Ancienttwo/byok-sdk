@@ -634,6 +634,9 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
           assert.ok(source.includes('check-api-surface.mjs'));
           assert.ok(readFileSync(new URL('scripts/api-surface/check-api-surface.mjs', root), 'utf8').includes('entry-closure.mjs'));
           assert.ok(readFileSync(new URL('scripts/api-surface/entry-closure.mjs', root), 'utf8').includes('module-scan.mjs'));
+        } else if (path === 'scripts/release/upgrade-manifest/dts-surface.mjs' && file === 'scripts/api-surface/check-api-surface.test.mjs') {
+          assert.ok(source.includes('check-api-surface.mjs'));
+          assert.ok(readFileSync(new URL('scripts/api-surface/check-api-surface.mjs', root), 'utf8').includes('dts-surface.mjs'));
         } else assert.ok(source.includes(path.split('/').pop()), `${file} does not run ${path}`);
       }
     }
