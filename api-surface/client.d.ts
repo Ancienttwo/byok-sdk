@@ -455,7 +455,7 @@ export declare class GrokAdapter implements RuntimeAdapter {
     private start;
 }
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, } from '../types.js';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionRefusalReason, } from '../types.js';
 export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection.js';
 export type { RuntimeObservation } from '../runtime-detection.js';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure.js';
@@ -1317,7 +1317,6 @@ export interface AgentHomeProjection {
      */
     apply?(input: AgentHomeProjectionApplyInput): void | Promise<void>;
 }
-export type AgentHomeProjectionFunction = (input: AgentHomeProjectionInput) => void | Promise<void>;
 export type AgentHomeProjectionApplyFunction = (input: AgentHomeProjectionApplyInput) => void | Promise<void>;
 export interface AgentHomeLease {
     readonly leaseId: string;
@@ -1603,7 +1602,6 @@ export declare class AgentHomeManager {
      */
     project(input: AgentHomeProjectionPayload): Promise<AgentHomeProjectionOutcome>;
 }
-export declare function createAgentHomeProjection(prepare: AgentHomeProjectionFunction): AgentHomeProjection;
 /**
  * Create the task-free atomic/idempotent opaque desired-state consumer.
  * Exact revision/hash delivery may invoke it again before an idempotent receipt;
@@ -1890,10 +1888,10 @@ export type { RequestDeviceAssertionResult } from '../daemon/assertion-client.js
 import type { DaemonConfigIssue } from './daemon/config-schema/validate.js';
 /**
  * Daemon construction rejected configuration or injected runtime adapters:
- * a missing required field, an invalid value, or a duplicate adapter ID.
+ * a missing required field, an unknown field, an invalid value, or a
+ * duplicate adapter ID.
  * Schema failures come from {@link validateDaemonConfig}; construction also
  * checks invariants that the schema cannot express.
- * A removed field throws {@link DaemonConfigFieldRemovedError} instead.
  * `createRuntimeAdapters` throws it too, so this module stays free of the
  * schema and the validator that the `/adapters` entry must not load.
  */
@@ -1949,9 +1947,6 @@ export declare const AGENT_CONTENT_READ_CAPABILITIES: Readonly<{
     readonly transcript: "agent-content-transcript-read";
     readonly artifact: "agent-content-artifact-read";
 }>;
-export declare const AGENT_CONTENT_READ_CAPABILITY_WORKSPACE: "agent-content-workspace-read";
-export declare const AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT: "agent-content-transcript-read";
-export declare const AGENT_CONTENT_READ_CAPABILITY_ARTIFACT: "agent-content-artifact-read";
 export declare const AGENT_CONTENT_READ_DECISIONS: readonly ['allow', 'deny'];
 export type AgentContentReadDecision = (typeof AGENT_CONTENT_READ_DECISIONS)[number];
 /**
@@ -2095,10 +2090,6 @@ export declare class AgentContentReadPolicyEngine {
     private readonly resolveTranscriptIdentity?;
     constructor(options: AgentContentReadPolicyEngineOptions);
     read(input: AgentContentReadRequest): Promise<AgentContentReadResult>;
-    /** Alias used by integration adapters that call the operation request. */
-    readContent(request: AgentContentReadRequest): Promise<AgentContentReadResult>;
-    /** A request is one bounded read, never a directory listing or recursive mirror. */
-    request(request: AgentContentReadRequest): Promise<AgentContentReadResult>;
     private resolveRoot;
     private validateRuntimeRoot;
     private checkSessionIdentity;
@@ -2651,6 +2642,16 @@ export declare class AgentMemorySnapshotLimitError extends AgentMemoryValidation
  */
 export declare class AgentMemoryIoError extends AgentMemoryError {
     constructor(message: string);
+}
+/**
+ * The Agent home's redacted projection outbox is in a state format this build
+ * does not read, such as the version 2 state of 0.32.0. The file is left as it
+ * is: nothing reads, rewrites or deletes it, and projection stays refused until
+ * an operator disposes of `.byok/` + {@link AGENT_MEMORY_OUTBOX_FILENAME}.
+ */
+export declare class AgentMemoryOutboxVersionUnsupportedError extends AgentMemoryError {
+    readonly stateVersion: unknown;
+    constructor(stateVersion: unknown);
 }
 export declare class AgentMemoryRevisionConflictError extends AgentMemoryError {
     readonly expectedRevision: string;
@@ -3552,7 +3553,7 @@ export interface DaemonConfigCheckOptions {
     readonly adapters?: readonly RuntimeAdapter[];
 }
 export interface DaemonConfigCheck {
-    /** No `error` issue. A caller that treats warnings as failures (`config check --strict`) checks `issues`. */
+    /** No issue. */
     readonly ok: boolean;
     readonly issues: readonly DaemonConfigIssue[];
     /** The effective values, when the config would construct a daemon. */
@@ -3572,7 +3573,6 @@ export declare function checkDaemonConfig(input: unknown, options: DaemonConfigC
 import { type ToolAuthorizationMode, type ToolFileScope } from '../../tool-authorization.js';
 import type { RuntimeAdapter, RuntimeVersionPolicy } from '../../types.js';
 import type { DaemonConfig, DaemonStatus } from '../create-daemon.js';
-import type { DaemonConfigIssue } from './validate.js';
 import type { RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 /**
  * How daemon construction resolved the SDK Agent memory filesystem helper
@@ -3637,8 +3637,6 @@ export interface DaemonEffectiveRuntime {
 export interface DaemonEffectiveConfig {
     /** Version of the generated `daemon-config.schema.json` this daemon validates against. */
     readonly schemaVersion: number;
-    /** Unknown-field warnings; a daemon starts with them (Q4'). */
-    readonly warnings: readonly DaemonConfigIssue[];
     readonly directories: {
         readonly storeDir: {
             readonly path: string;
@@ -3698,7 +3696,6 @@ export type DaemonEffectiveToolAuthorization = ({
 };
 export interface EffectiveDaemonConfigInput {
     readonly config: DaemonConfig;
-    readonly warnings: readonly DaemonConfigIssue[];
     readonly memoryHelper: DaemonMemoryHelperResolution;
     readonly agentMemoryMcpAdmission: DaemonStatus['agentMemoryMcp'];
     /** Resolved `storeDir`. */
@@ -3719,29 +3716,6 @@ export { checkDaemonConfig } from './check.js';
 export type { DaemonConfigCheck, DaemonConfigCheckOptions } from './check.js';
 export { DaemonConfigInvalidError } from '../../daemon-config-invalid-error.js';
 export type { DaemonEffectiveConfig, DaemonEffectiveMcpServer, DaemonEffectiveRuntime, DaemonEffectiveToolAuthorization, DaemonMemoryHelperResolution } from './effective.js';
-// ==== @byok-sdk/client dist/daemon/config-schema/removed-fields.d.ts ====
-/**
- * `DaemonConfig` fields that no longer exist (#1094). The one table both the
- * validator and the generated schema (`x-byok-removedFields`) read: supplying
- * one of these is a typed {@link DaemonConfigFieldRemovedError} on every
- * surface, never an unknown-field warning, because the Host relied on it and
- * must change its config or code.
- *
- * Every entry points at the migration note in `docs/spec.md`.
- *
- * This module has no imports so the schema generator can load it with Node's
- * type stripping.
- */
-export interface RemovedDaemonConfigField {
-    /** Dotted path from the config root, e.g. `workspaceRoot` or `agentEgress.sanitizer`. */
-    readonly path: string;
-    /** What replaced it; the error message. */
-    readonly message: string;
-    /** Repo-relative `.md#anchor` of the migration note. */
-    readonly migration: string;
-}
-export declare const REMOVED_DAEMON_CONFIG_FIELDS_MIGRATION = "docs/spec.md#removed-daemonconfig-fields";
-export declare const REMOVED_DAEMON_CONFIG_FIELDS: readonly RemovedDaemonConfigField[];
 // ==== @byok-sdk/client dist/daemon/config-schema/schema-types.d.ts ====
 /**
  * The JSON Schema subset `generate-schema.mjs` emits for `DaemonConfig`, and
@@ -3769,17 +3743,12 @@ export interface DaemonConfigJsonSchema {
      */
     readonly 'x-byok-embeddedAlternative'?: 'function';
     readonly 'x-byok-schemaVersion'?: number;
-    readonly 'x-byok-removedFields'?: readonly {
-        readonly path: string;
-        readonly migration: string;
-    }[];
 }
 // ==== @byok-sdk/client dist/daemon/config-schema/schema.generated.d.ts ====
 import type { DaemonConfigJsonSchema } from './schema-types.js';
 export declare const DAEMON_CONFIG_SCHEMA_VERSION = 1;
 export declare const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema;
 // ==== @byok-sdk/client dist/daemon/config-schema/validate.d.ts ====
-import { type RemovedDaemonConfigField } from './removed-fields.js';
 /**
  * Where a `DaemonConfig` comes from (#1094).
  *
@@ -3790,39 +3759,31 @@ import { type RemovedDaemonConfigField } from './removed-fields.js';
  *   by daemon construction.
  */
 export type DaemonConfigSource = 'cli' | 'embedded';
-export type DaemonConfigIssueCode = 'not_an_object' | 'missing_required' | 'invalid_type' | 'invalid_value' | 'invalid_version_policy' | 'invalid_file_scope' | 'unknown_field' | 'removed_field' | 'embedded_only' | 'distribution_owned';
+export type DaemonConfigIssueCode = 'not_an_object' | 'missing_required' | 'invalid_type' | 'invalid_value' | 'invalid_version_policy' | 'invalid_file_scope' | 'unknown_field' | 'embedded_only' | 'distribution_owned';
 /**
  * One finding of {@link validateDaemonConfig}. Messages name the field path
  * and the expected type, never the supplied value.
  */
 export interface DaemonConfigIssue {
-    /** `warning` never stops a daemon (Q4'); `byok-agent config check --strict` fails on it. */
-    readonly severity: 'error' | 'warning';
     readonly code: DaemonConfigIssueCode;
     /** Dotted path from the config root; `''` for the root itself. */
     readonly path: string;
     readonly message: string;
-    /** Repo-relative `.md#anchor` of the migration note, for `removed_field`. */
-    readonly migration?: string;
 }
 export interface DaemonConfigValidation {
-    /** No `error` issue. Warnings do not affect it. */
+    /** No issue. */
     readonly ok: boolean;
     readonly issues: readonly DaemonConfigIssue[];
 }
-/** The removed-field entry for `path`, if `path` names a removed `DaemonConfig` field. */
-export declare function removedDaemonConfigField(path: string): RemovedDaemonConfigField | undefined;
 /**
  * The one `DaemonConfig` validator, shared by `byok-agent` (config files) and
  * daemon construction (#1094). It checks what the generated schema
  * (`daemon-config.schema.json`) expresses: required fields, JSON types and
- * literal values, unknown fields and removed fields. Value ranges and
- * cross-field rules stay with daemon construction, which reports them as
- * construction errors.
+ * literal values and unknown fields. Value ranges and cross-field rules stay
+ * with daemon construction, which reports them as construction errors.
  *
- * An unknown field is a `warning`: a config written by a newer Host or SDK
- * must still start an older daemon after a rollback (Q4'). A removed field is
- * an `error` with its migration note, because the Host relied on it.
+ * Every issue is an error: an unknown field, including one an older release
+ * accepted, fails the config instead of being silently ignored.
  */
 export declare function validateDaemonConfig(input: unknown, options: {
     readonly source: DaemonConfigSource;
@@ -4244,11 +4205,11 @@ import type { StoragePressureState } from './retention/pressure.js';
 import type { RetentionSnapshot } from './retention/sweeper.js';
 import type { OperationalHealthSnapshot } from './operational-health.js';
 import type { DaemonLifecycle } from './daemon-lifecycle.js';
-import type { RuntimeObservation, RuntimeVersionChange } from '../runtime-detection.js';
+import type { RuntimeObservation } from '../runtime-detection.js';
 import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
 import type { RuntimeEnvironmentReport } from '../runtime/environment.js';
 import type { LocalAgentReleaseIdentity } from '../release-identity.js';
-import type { McpToolsetConfig, McpToolsetRegistryStatus, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types.js';
+import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types.js';
 import type { AgentHomeExecutionStatus } from '../agent-home.js';
 import type { InputPreparationCancelParamsV1, InputPreparationLookupParamsV1, InputPreparationReceiptV1, InputPreparationRequestV1 } from '../input-preparation.js';
 /**
@@ -4369,12 +4330,6 @@ export interface ControlResponseErr {
     ok: false;
     error: ControlErrorShape;
 }
-export type ControlResponse = ControlResponseOk | ControlResponseErr;
-export interface ControlEventFrame {
-    v: 1;
-    id: string;
-    event: unknown;
-}
 export declare function encodeFrame(frame: unknown): string;
 /** Thrown by a method handler to control the wire error `{code, message}` a caller sees — anything else thrown surfaces as a generic `internal_error`. See `control-server.ts`'s dispatch and `daemon/control-client.ts`'s `request()` (which re-throws this same class on the client side). */
 export declare class ControlError extends Error {
@@ -4482,28 +4437,10 @@ export interface ControlStatusResult {
     activeTasks: ControlActiveTask[];
     /**
      * Absent for a pre-#392 control peer: report unknown, never probe locally.
-     * A pre-#1103 client validates every key of each entry, so the policy verdict
-     * travels in {@link runtimeVersionVerdicts} instead of inside this array;
-     * that keeps an older CLI's strict observation parser working against a newer
-     * daemon. New readers merge the two.
+     * Each entry carries its local verdict, restart comparison and executable
+     * inline.
      */
     runtimes?: RuntimeObservation[];
-    /** #1103: verdicts for the same runtime ids as {@link runtimes}; absent from a pre-#1103 daemon. */
-    runtimeVersionVerdicts?: Array<{
-        readonly id: string;
-        readonly versionVerdict: RuntimeVersionVerdict;
-    }>;
-    /** #1103 §2.6: this run's restart comparison, same side-channel rule; absent from a pre-#1103 daemon. */
-    runtimeVersionChanges?: Array<{
-        readonly id: string;
-        readonly versionChange: RuntimeVersionChange;
-    }>;
-    /** #1103 O10: the executable each runtime's detection ran, same side-channel rule; absent from an older daemon. */
-    runtimeExecutables?: Array<{
-        readonly id: string;
-        readonly executablePath?: string;
-        readonly executableSource: RuntimeExecutableSource;
-    }>;
     /** Absent for a pre-#392 control peer. */
     environment?: ServiceEnvironmentStatus;
     /** Timestamp of the same environment-resolved event; absent before startup resolves it. */
@@ -4593,10 +4530,6 @@ export interface AgentMessagePublishParams {
     body: string;
 }
 export declare function parseAgentMessagePublishParams(value: unknown): AgentMessagePublishParams | undefined;
-export interface AgentMessagePublishResult {
-    messageId: string;
-    state: 'staged' | 'pending';
-}
 /**
  * `agent_results.describe`: the SDK result helper asks, by its per-task
  * context token, for the one tool it advertises. The schema is the offer's
@@ -5836,23 +5769,6 @@ export declare class CursorStore {
 }
 // ==== @byok-sdk/client dist/daemon/daemon-errors.d.ts ====
 import type { DeviceMetadata } from './device-credential-store.js';
-/**
- * A `DaemonConfig` field that no longer exists was supplied. Construction
- * refuses it rather than ignoring it, so a host upgrading across a removal
- * learns at startup which seam is gone instead of silently losing behavior.
- */
-export declare class DaemonConfigFieldRemovedError extends Error {
-    /** The removed path, e.g. `resultDocument` or `agentEgress.sanitizer`. */
-    readonly field: string;
-    /** Repo-relative `.md#anchor` of the migration note (#1094). */
-    readonly migration: string;
-    readonly code: 'daemon_config_field_removed';
-    constructor(
-    /** The removed path, e.g. `resultDocument` or `agentEgress.sanitizer`. */
-    field: string, message: string, 
-    /** Repo-relative `.md#anchor` of the migration note (#1094). */
-    migration: string);
-}
 export type DaemonJournalProtocolRecord = 'recovery-offer' | 'pending-terminal';
 /**
  * The local journal holds envelope bytes of another wire major. This daemon
@@ -7472,8 +7388,6 @@ import type { ServiceEnvironmentStatus } from '../login-shell-environment.js';
  * so wrapping them (call this module first, then the real behavior,
  * unchanged) is the entire integration.
  */
-/** Every local event kind this daemon can emit — see {@link DaemonEvent}. */
-export type DaemonEventKind = DaemonEvent['kind'];
 import type { OutboundRejection } from './outbound-settlement.js';
 export type DaemonEvent = ({
     kind: 'outbound-rejected';
@@ -8651,13 +8565,6 @@ export declare function skillPacksRoot(dataDir: string): string;
  */
 export declare function installSkillPacks(options: InstallSkillPacksOptions): Promise<SkillPackInstallResult>;
 export declare function readInstalledSkillPack(dataDir: string, name: string): Promise<InstalledSkillPack | undefined>;
-/**
- * Every pack this device has a valid lock for, sorted by name.
- *
- * Reads only the locks — never the pack bytes — so a caller listing what is
- * installed pays nothing for packs it is not about to project.
- */
-export declare function listInstalledSkillPacks(dataDir: string): Promise<readonly InstalledSkillPack[]>;
 export interface ProjectedSkillPack {
     readonly name: string;
     readonly contentHash: string;
@@ -9205,101 +9112,6 @@ export declare class McpToolsetRegistry {
     reload(configured: McpToolsetConfigInput, expectedRevision: string): McpToolsetReloadReceipt;
     report(toolsetId: string, expectedDefinitionRevision: string, observation: McpToolsetObservation): void;
     private statusRows;
-}
-// ==== @byok-sdk/client dist/daemon/truth-memory-client.d.ts ====
-import { type ContentHash, type TruthRecordKind, type TruthRecordSelector } from '@byok-sdk/core';
-import type { DeviceProofSigner } from './device-proof-signer.js';
-export interface TruthManifestRecord {
-    readonly kind: TruthRecordKind;
-    readonly recordKey: string;
-    readonly rev: number;
-    readonly contentHash: ContentHash;
-    readonly byteSize: number;
-    readonly label?: string;
-    readonly updatedAt: string;
-}
-export interface TruthManifestQueryInput {
-    readonly kind?: TruthRecordKind;
-    readonly keyPrefix?: string;
-    readonly limit?: number;
-}
-/** Cloud-agnostic local semantic selection. It sees metadata and no body bytes. */
-export interface MemorySelector {
-    select(manifest: readonly TruthManifestRecord[]): readonly TruthRecordSelector[] | Promise<readonly TruthRecordSelector[]>;
-}
-/** A body reaches this seam only after manifest equality, byte-size and SHA-256 checks. */
-export interface VerifiedTruthRecord extends TruthManifestRecord {
-    readonly bytes: Uint8Array;
-}
-/** The only value returned by `loadSelected`; runtime prompt/context shape stays host-owned. */
-export interface LocalMemoryFilter<Context> {
-    filter(records: readonly VerifiedTruthRecord[]): Context | Promise<Context>;
-}
-export interface TruthMemoryMetric {
-    readonly kind: 'truth.snapshot.large';
-    readonly selector: TruthRecordSelector;
-    readonly byteSize: number;
-    readonly thresholdBytes: number;
-}
-export interface TruthMemoryClientOptions {
-    readonly serverUrl: string;
-    readonly signer: DeviceProofSigner;
-    /** Exact http(s) origins permitted to receive object-download grants. An empty list disables object reads. */
-    readonly allowedObjectDownloadOrigins: readonly string[];
-    readonly fetch?: typeof globalThis.fetch;
-    readonly requestId?: () => string;
-    readonly onMetric?: (metric: TruthMemoryMetric) => void;
-}
-export type TruthWriteBody = {
-    readonly kind: 'inline';
-    readonly content: string;
-} | {
-    readonly kind: 'object';
-    readonly contentHash: string;
-    readonly byteSize: number;
-};
-export interface TruthSnapshotWriteInput {
-    readonly kind: 'profile' | 'memory';
-    readonly recordKey: string;
-    readonly expectedRev: number;
-    readonly body: TruthWriteBody;
-    readonly requestId: string;
-    readonly label?: string;
-}
-export interface TruthSnapshotCandidateInput {
-    readonly kind: 'profile' | 'memory';
-    readonly recordKey: string;
-    readonly expectedRev: number;
-    readonly body: TruthWriteBody;
-    readonly label?: string;
-}
-export interface TruthTerminalWriteInput {
-    readonly taskId: string;
-    readonly body: TruthWriteBody;
-    readonly requestId: string;
-    readonly label?: string;
-    readonly snapshots?: readonly TruthSnapshotCandidateInput[];
-}
-export interface TruthWriteResult {
-    readonly primary: TruthManifestRecord;
-    readonly snapshots: readonly TruthManifestRecord[];
-    readonly replayed: boolean;
-}
-export type TruthMemoryClientErrorCode = 'truth_http_failed' | 'truth_response_invalid' | 'truth_selection_invalid' | 'truth_manifest_changed' | 'truth_content_size_mismatch' | 'truth_content_hash_mismatch' | 'truth_object_url_rejected' | 'truth_write_invalid' | 'truth_write_confirmation_mismatch';
-export declare class TruthMemoryClientError extends Error {
-    readonly code: TruthMemoryClientErrorCode;
-    readonly status?: number | undefined;
-    constructor(code: TruthMemoryClientErrorCode, message: string, status?: number | undefined);
-}
-/** Proof-only client for S6 truth records. It never sends a bearer token. */
-export declare class TruthMemoryClient {
-    #private;
-    private readonly options;
-    constructor(options: TruthMemoryClientOptions);
-    listManifest(query?: TruthManifestQueryInput): Promise<readonly TruthManifestRecord[]>;
-    loadSelected<Context>(selector: MemorySelector, filter: LocalMemoryFilter<Context>, query?: TruthManifestQueryInput): Promise<Context>;
-    writeSnapshot(input: TruthSnapshotWriteInput): Promise<TruthWriteResult>;
-    writeTerminal(input: TruthTerminalWriteInput): Promise<TruthWriteResult>;
 }
 // ==== @byok-sdk/client dist/daemon/win32-credential-api.d.ts ====
 /** `CREDENTIALW` as written; the unnamed fields are NULL or zero. */
@@ -9922,12 +9734,12 @@ export declare const FILE_SCOPE_GUARD_CODES: readonly FileScopeGuardCode[];
 export { HostLayoutInputError, resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout.js';
 // ==== @byok-sdk/client dist/index.d.ts ====
 export type { StoreCompatibility } from '@byok-sdk/core';
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types.js';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types.js';
 export type { AgentRef } from './agent-home.js';
-export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home.js';
+export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home.js';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store.js';
 export type { AgentSessionHandoff, AgentSessionHandoffMatch, AgentTaskTerminalEvidence, AgentTaskTerminalMatch, AgentTerminalCause, } from './daemon/agent-session-handoff-store.js';
-export type { AgentHomeResolution, AgentHomeProjection, AgentHomeProjectionInput, AgentHomeProjectionApplyInput, AgentHomeProjectionFunction, AgentHomeProjectionApplyFunction, AgentHomeLease, AgentHomeBinding, AgentHomeExecutionLease, AgentHomeExecutionBinding, AgentHomeExecutionStatus, } from './agent-home.js';
+export type { AgentHomeResolution, AgentHomeProjection, AgentHomeProjectionInput, AgentHomeProjectionApplyInput, AgentHomeProjectionApplyFunction, AgentHomeLease, AgentHomeBinding, AgentHomeExecutionLease, AgentHomeExecutionBinding, AgentHomeExecutionStatus, } from './agent-home.js';
 export type { AgentHomeAccessMode } from './agent-home-readers.js';
 export { localStateRelocation, LocalStateRelocationError, LocalStateRelocationBusyError, LocalStateRelocationIntegrityError, } from './local-state-relocation.js';
 export type { LocalStateRelocationInput, LocalStateRelocationLease, } from './local-state-relocation.js';
@@ -9941,7 +9753,7 @@ export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartu
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure.js';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon.js';
 export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema/index.js';
-export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, FirstPairingAttemptRefusedError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
+export { DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, FirstPairingAttemptRefusedError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals.js';
 export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals.js';
@@ -9953,10 +9765,10 @@ export { ProviderProvisioningNoticeError, PROVIDER_PROVISIONING_NOTICE_FAILURE_R
 export type { ProviderProvisioningHandler, ProviderProvisioningNotice, ProviderProvisioningNoticeFailureReason, } from './daemon/provider-provisioning.js';
 export { AgentMemoryIntentNoticeError, AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS, } from './daemon/agent-memory-intent.js';
 export type { AgentMemoryIntentNoticeFailureReason, } from './daemon/agent-memory-intent.js';
-export { AgentMemorySnapshotLimitError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory.js';
+export { AgentMemorySnapshotLimitError, AgentMemoryOutboxVersionUnsupportedError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory.js';
 export type { AgentMemoryRedactor, AgentMemoryProjectionGrant, AgentMemoryHostedProjection, } from './daemon/agent-memory.js';
 export type { AgentEgressLaneStatus, AgentEgressStatus, } from './daemon/agent-egress-policy.js';
-export { AGENT_CONTENT_READ_CAPABILITIES, AGENT_CONTENT_READ_CAPABILITY_WORKSPACE, AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT, AGENT_CONTENT_READ_CAPABILITY_ARTIFACT, } from './daemon/agent-content-read.js';
+export { AGENT_CONTENT_READ_CAPABILITIES, } from './daemon/agent-content-read.js';
 export type { AgentContentReadSurface, AgentContentReadDecision, AgentContentReadReason, AgentContentReadRoot, AgentContentReadPolicy, AgentContentReadPolicySelection, AgentContentReadRequest, AgentContentReadResult, AgentContentReadAllowed, AgentContentReadDenied, AgentContentSessionIdentity, AgentContentAuditReceipt, } from './daemon/agent-content-read.js';
 export { McpToolsetRevisionConflictError, McpToolsetDefinitionRevisionConflictError, } from './daemon/toolset-registry.js';
 export type { ProgressBatcherOptions } from './daemon/progress-batcher.js';
@@ -10025,21 +9837,19 @@ export type { DeviceEnrollment, DeviceEnrollmentIdentity, DeviceEnrollmentIdenti
 /**
  * Host device proofs signed with the stored enrollment key, scoped to one
  * enrollment identity and an explicit operation allowlist. The key never
- * leaves the signer; `DeviceProofSigner` is also what `TruthMemoryClient` takes.
+ * leaves the signer.
  */
 export { createStoredDeviceProofSigner, DeviceProofSignerError } from './daemon/device-proof-signer.js';
 export type { CreateStoredDeviceProofSignerOptions, DeviceProofRequest, DeviceProofSigner, DeviceProofSignerErrorCode, HostDeviceProofSigner, } from './daemon/device-proof-signer.js';
 /**
  * Plan `skill-pack-delivery-channel`: the device half of the `skills.pack`
- * channel. The install pipeline and the two read APIs are public because the
+ * channel. The install pipeline and the projection API are public because the
  * HOST, not this SDK, decides where a vendor CLI keeps its skills (K4) — a host
- * lists what is installed and projects the pack it wants into the directory its
+ * installs packs and projects the pack it wants into the directory its
  * own runtime reads. Nothing here ever writes to a vendor CLI's skill directory.
  */
-export { SKILL_PACKS_CAPABILITY, SKILL_PACKS_DIRNAME, SKILL_PACK_AUDIT_FILENAME, SKILL_PACK_INSTALL_ERROR_CODES, SKILL_PACK_LOCK_FILENAME, SKILL_PACK_LOCK_SCHEMA, SKILL_PACK_RESPONSE_MAX_BYTES, SkillPackInstallError, installSkillPacks, listInstalledSkillPacks, projectSkillPack, skillPacksRoot, } from './daemon/skill-pack-installer.js';
+export { SKILL_PACKS_CAPABILITY, SKILL_PACKS_DIRNAME, SKILL_PACK_AUDIT_FILENAME, SKILL_PACK_INSTALL_ERROR_CODES, SKILL_PACK_LOCK_FILENAME, SKILL_PACK_LOCK_SCHEMA, SKILL_PACK_RESPONSE_MAX_BYTES, SkillPackInstallError, installSkillPacks, projectSkillPack, skillPacksRoot, } from './daemon/skill-pack-installer.js';
 export type { InstallSkillPacksOptions, InstalledSkillPack, ProjectedSkillPack, SkillPackInstallErrorCode, SkillPackInstallResult, SkillPackLock, } from './daemon/skill-pack-installer.js';
-export { TruthMemoryClient, TruthMemoryClientError } from './daemon/truth-memory-client.js';
-export type { LocalMemoryFilter, MemorySelector, TruthManifestQueryInput, TruthManifestRecord, TruthMemoryClientErrorCode, TruthMemoryClientOptions, TruthMemoryMetric, TruthSnapshotCandidateInput, TruthSnapshotWriteInput, TruthTerminalWriteInput, TruthWriteBody, TruthWriteResult, VerifiedTruthRecord, } from './daemon/truth-memory-client.js';
 export type { ConnectionState } from './daemon/connection-manager.js';
 export { DaemonTaskUnknownError, type DaemonTaskSettlement, type DaemonTaskTerminal } from './daemon/task-settlement.js';
 export { DAEMON_HALT_REASONS, DaemonHaltError, DaemonNotOpenError, isDaemonHaltReason } from './daemon/daemon-lifecycle.js';
@@ -10048,7 +9858,7 @@ export { ReplayCursorTooOldError } from './daemon/replay-cursor.js';
 export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client.js';
 export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client.js';
 export { DaemonObserver } from './daemon/observer.js';
-export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer.js';
+export type { DaemonEvent, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer.js';
 export { createDaemonRecordProjector, DAEMON_RECORD_KINDS, isDaemonRecordKind } from './daemon/daemon-record.js';
 export type { DaemonRecord, DaemonRecordKind, DaemonRecordProjector, DaemonTurnRecord } from './daemon/daemon-record.js';
 export type { ExecutionRecord, ExecutionRecordGap, ExecutionRecordStatus, ExecutionRecordUnknown } from './daemon/execution-record.js';
@@ -10112,7 +9922,7 @@ export { isReservedMcpServerName } from './sdk-reserved-mcp.js';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets.js';
 export { resolveSdkHosting, SdkHostingAssetsMissingError, type SdkHosting, type SdkHostingOptions } from './sdk-hosting.js';
 export type { AgentMemoryExportOptions } from './daemon/agent-memory-export.js';
-export { classifyToolCall, createAutoToolAuthorizationGate, FileScopePolicyError, parseToolAuthorizationMode, parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES, TOOL_FILE_ACCESS, } from './tool-authorization.js';
+export { classifyToolCall, createAutoToolAuthorizationGate, FileScopePolicyError, parseToolAuthorizationMode, parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, } from './tool-authorization.js';
 export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationHomeAccess, ToolAuthorizationLane, ToolAuthorizationMode, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolFileAccess, ToolFileScope, ToolFileScopeRoot, ToolReminder, ToolRisk, ToolRiskReason, ToolAuthorizationDecision, ToolAuthorizationPolicy, ToolAuthorizationReason, ToolAuthorizationRules, ToolRule, } from './tool-authorization.js';
 export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './adapters/opencode/opencode-adapter.js';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
@@ -12824,12 +12634,8 @@ import { type McpServerRequestId } from './dispatch.js';
 export declare const MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS: readonly string[];
 /** Inbound: maximum bytes between two newlines before the session fails closed. */
 export declare const MCP_SERVER_MAX_LINE_BYTES = 1048576;
-/**
- * Outbound: maximum UTF-8 bytes of one encoded frame. Matches
- * `MCP_MAX_FRAME_BYTES` in `src/mcp/client.ts`, so an SDK server and an SDK
- * client agree on the same 1 MiB ceiling in both directions.
- */
-export declare const MCP_SERVER_MAX_FRAME_BYTES = 1048576;
+/** Outbound: maximum UTF-8 bytes of one encoded frame, the SDK MCP client's inbound ceiling. */
+export { MCP_MAX_FRAME_BYTES as MCP_SERVER_MAX_FRAME_BYTES } from '../mcp/frame-limit.js';
 /** Maximum `tools/call` requests in flight or queued at once. */
 export declare const MCP_SERVER_MAX_IN_FLIGHT = 64;
 /** Maximum distinct request ids remembered per session for duplicate detection. */
@@ -12938,7 +12744,7 @@ export interface McpServerOptions {
     readonly toolsListChanged?: McpServerToolsListChangedEmitter;
     /** Default {@link MCP_SERVER_MAX_LINE_BYTES}. Fail closed and close on exceed. */
     readonly maxLineBytes?: number;
-    /** Default {@link MCP_SERVER_MAX_FRAME_BYTES}. Outbound cap; an over-cap frame is never partially written. */
+    /** Default `MCP_SERVER_MAX_FRAME_BYTES`. Outbound cap; an over-cap frame is never partially written. */
     readonly maxOutboundFrameBytes?: number;
     /** Default {@link MCP_SERVER_MAX_IN_FLIGHT}. Over-limit `tools/call` requests get a typed `-32000` refusal. */
     readonly maxInFlight?: number;
@@ -13017,12 +12823,6 @@ export { McpAuthorityError };
  * bounded lifecycle opt in; everyone else is bounded per frame instead.
  */
 export declare const MCP_OBSERVATION_MAX_STDOUT_BYTES = 1048576;
-/**
- * Hard cap on a single JSON-RPC frame, always applied. A server that never
- * emits a newline cannot make the client accumulate without limit: the read
- * buffer rejects at this size and the connection fails closed.
- */
-export declare const MCP_MAX_FRAME_BYTES = 1048576;
 /** Default ceiling for one request/response round trip. */
 export declare const MCP_DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 /**
@@ -13133,6 +12933,14 @@ export declare class McpStdioClient {
      */
     private classify;
 }
+// ==== @byok-sdk/client dist/mcp/frame-limit.d.ts ====
+/**
+ * Hard cap on one newline-delimited JSON-RPC frame, shared by the SDK's MCP
+ * client read buffer and its stdio and HTTP servers' outbound frames, so an SDK
+ * server and an SDK client agree on one ceiling in both directions. A peer that
+ * never emits a newline cannot make the reader accumulate without limit.
+ */
+export declare const MCP_MAX_FRAME_BYTES = 1048576;
 // ==== @byok-sdk/client dist/mcp/observation.d.ts ====
 import { type McpStdioClientOptions, type McpStdioServerSpec } from './client.js';
 /**
@@ -13405,32 +13213,32 @@ export interface RuntimeObservation {
     /** With `reason: 'runtime_environment_unavailable'`: why the login-shell capture or, on win32, the logon registry read failed. */
     code?: ServiceEnvironmentUnavailableCode;
     version?: string;
+    /**
+     * The qualified version of a `warn` verdict, and only of one. Audit keeps
+     * this projection of the warning while it drops the verdict itself.
+     */
     qualifiedVersion?: string;
     /**
-     * The effective version policy's verdict (#1103). Local-only: `Daemon.status()`
-     * carries it inline, while control `status` ships it through the additive
-     * `runtimeVersionVerdicts` side channel so a pre-#1103 client's strict
-     * observation parser still accepts `runtimes`. `doctor` merges the two. The
-     * wire still carries only the protocol's `RuntimeInfo` fields. Additive and
-     * optional: an observation from an older daemon has no verdict, and a reader
-     * must not infer `allow` from its absence.
+     * The effective version policy's verdict (#1103). Local-only:
+     * `Daemon.status()` and control `status` carry it inline; the wire carries
+     * only the protocol's `RuntimeInfo` fields. Optional: an adapter without a
+     * policy has no verdict, and a reader must not infer `allow` from its absence.
      */
     versionVerdict?: RuntimeVersionVerdict;
     /**
      * #1103 §2.6: this run's comparison with the last stored token. Local-only
      * (status, doctor, startup stderr); never on the wire, in audit or in a
-     * support bundle. Absent on a first run, an unchanged version, an
-     * unavailable runtime, or an older daemon.
+     * support bundle. Absent on a first run, an unchanged version, or an
+     * unavailable runtime.
      */
     versionChange?: RuntimeVersionChange;
     /**
      * #1103 O10: the absolute executable detection ran, and who chose it.
-     * Local-only (`Daemon.status()`, control `status` through the additive
-     * `runtimeExecutables` side channel, `doctor`); never on the wire, in audit
-     * or in a support bundle, because the path can name the local user. Absent
-     * when detection did not run an executable it can name: an unavailable
-     * runtime, a bare command the OS finds on PATH at spawn (source `path`
-     * only), a Pi lane that launches an SDK entry, or an older daemon.
+     * Local-only (`Daemon.status()`, control `status`, `doctor`); never on the
+     * wire, in audit or in a support bundle, because the path can name the local
+     * user. Absent when detection did not run an executable it can name: an
+     * unavailable runtime, a bare command the OS finds on PATH at spawn (source
+     * `path` only), or a Pi lane that launches an SDK entry.
      */
     executablePath?: string;
     executableSource?: RuntimeExecutableSource;
@@ -13440,35 +13248,13 @@ export interface RuntimeObservation {
 }
 /** The daemon and explicit local probes project the same detection authority. */
 export declare function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, detected: RuntimeDetectResult): RuntimeObservation;
-/** Reject unreadable observations; never infer availability from an older discovery shape. */
-export declare function parseRuntimeObservations(value: unknown): RuntimeObservation[] | undefined;
 /**
- * Merge the control status's additive {@link RuntimeVersionVerdict} channel
- * (#1103) into observations. The verdicts travel outside `runtimes` so a
- * pre-#1103 client's strict observation parser still accepts that array; a
- * missing or malformed side channel means "unknown", never `allow`.
- *
- * @internal
+ * Reject unreadable observations; never infer availability from another
+ * discovery shape. `audit` reads the redacted `runtimes-detected` record;
+ * `status` reads the control `status` result, which carries the verdict,
+ * restart comparison and executable inline.
  */
-export declare function attachRuntimeVersionVerdicts(observations: RuntimeObservation[], value: unknown): RuntimeObservation[];
-/**
- * Merge the control status's additive {@link RuntimeVersionChange} channel
- * (#1103 §2.6) into observations. The change travels outside `runtimes` so a
- * pre-#1103 client's strict observation parser still accepts that array; a
- * missing or malformed side channel means "unknown", never "unchanged".
- *
- * @internal
- */
-export declare function attachRuntimeVersionChanges(observations: RuntimeObservation[], value: unknown): RuntimeObservation[];
-/**
- * Merge the control status's additive executable channel (#1103 O10) into
- * observations, under the same side-channel rule as
- * {@link attachRuntimeVersionChanges}. A missing or malformed entry means
- * unknown; the reader never resolves a path itself.
- *
- * @internal
- */
-export declare function attachRuntimeExecutables(observations: RuntimeObservation[], value: unknown): RuntimeObservation[];
+export declare function parseRuntimeObservations(value: unknown, source: 'audit' | 'status'): RuntimeObservation[] | undefined;
 /** Reject legacy/mixed authoring shapes; copy only validated, known facts. */
 export declare function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult;
 /**
@@ -14194,10 +13980,8 @@ import type { AgentRef } from './agent-home.js';
  * Neither mode is an OS sandbox or a file-scope boundary.
  */
 export type ToolAuthorizationMode = 'auto' | 'all';
-export declare const TOOL_AUTHORIZATION_MODES: readonly ToolAuthorizationMode[];
 /** The access one file-scope root grants. `write` implies `read`. */
 export type ToolFileAccess = 'read' | 'write';
-export declare const TOOL_FILE_ACCESS: readonly ToolFileAccess[];
 /**
  * One explicit additional workspace root of a file-scope policy. `id` is for
  * local audit/display only; `path` is a local, already-existing directory the
@@ -14530,7 +14314,6 @@ export type RuntimeDetectResult = {
     /** Verbatim local version probe output; never an admission token. */
     readonly rawVersion?: string;
     readonly authPresent?: boolean;
-    readonly advisory?: RuntimeDetectionAdvisory;
     readonly versionVerdict?: RuntimeVersionVerdict;
     /** The absolute executable this probe ran (#1103 O10). Local-only and user-path sensitive: never on the wire, in audit or in a support bundle. */
     readonly executablePath?: string;
@@ -14546,14 +14329,6 @@ export type RuntimeDetectResult = {
     readonly reason: 'runtime_environment_unavailable';
     readonly code: ServiceEnvironmentUnavailableCode;
 };
-/**
- * A local agent updates itself, so a version the SDK was not qualified against
- * is a warning, not a refusal. `version` on the result carries what was found.
- */
-export interface RuntimeDetectionAdvisory {
-    readonly reason: 'runtime_version_unqualified';
-    readonly qualifiedVersion: string;
-}
 /**
  * `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode.
  * `platform_unsupported`: the host platform is not in {@link RuntimeAdapterDescriptor.platforms}; no probe ran.

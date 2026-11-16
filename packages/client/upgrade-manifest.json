@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "70836ce1529e3560f503aaeedef4313c4a69b4cc489c0fafcc81d7b510a18d25"
+    "snapshotSha256": "c343a1773caa721560cac7efe7ef76abc63280a1297ca96759e3c91e59766d9f"
   },
   "configFields": {
     "status": "tracked",
@@ -339,6 +339,141 @@
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresE2eeMemberStore"
       ]
+    },
+    {
+      "id": "remove-unused-client-aliases",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes AGENT_CONTENT_READ_CAPABILITY_WORKSPACE/_TRANSCRIPT/_ARTIFACT (use AGENT_CONTENT_READ_CAPABILITIES), TOOL_AUTHORIZATION_MODES and TOOL_FILE_ACCESS (the types remain), DaemonEventKind (use DaemonEvent['kind']), and createAgentHomeProjection with AgentHomeProjectionFunction (pass agentHome.projection: { prepare } directly).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#aliases-and-convenience-factories",
+      "items": [
+        "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_ARTIFACT",
+        "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT",
+        "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_WORKSPACE",
+        "export:@byok-sdk/client#TOOL_AUTHORIZATION_MODES",
+        "export:@byok-sdk/client#TOOL_FILE_ACCESS",
+        "export:@byok-sdk/client#DaemonEventKind",
+        "export:@byok-sdk/client#createAgentHomeProjection",
+        "export:@byok-sdk/client#AgentHomeProjectionFunction"
+      ]
+    },
+    {
+      "id": "remove-list-installed-skill-packs",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes listInstalledSkillPacks(); installSkillPacks() reports what it installed and projectSkillPack() copies one pack by name.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#installed-skill-pack-listing",
+      "items": [
+        "export:@byok-sdk/client#listInstalledSkillPacks"
+      ]
+    },
+    {
+      "id": "remove-truth-memory-client",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes TruthMemoryClient, TruthMemoryClientError and their option, input and result types. The cloud truth routes and createStoredDeviceProofSigner() are unchanged.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#truth-memory-client",
+      "items": [
+        "export:@byok-sdk/client#TruthMemoryClient",
+        "export:@byok-sdk/client#TruthMemoryClientError",
+        "export:@byok-sdk/client#TruthMemoryClientErrorCode",
+        "export:@byok-sdk/client#TruthMemoryClientOptions",
+        "export:@byok-sdk/client#TruthMemoryMetric",
+        "export:@byok-sdk/client#TruthManifestQueryInput",
+        "export:@byok-sdk/client#TruthManifestRecord",
+        "export:@byok-sdk/client#TruthSnapshotCandidateInput",
+        "export:@byok-sdk/client#TruthSnapshotWriteInput",
+        "export:@byok-sdk/client#TruthTerminalWriteInput",
+        "export:@byok-sdk/client#TruthWriteBody",
+        "export:@byok-sdk/client#TruthWriteResult",
+        "export:@byok-sdk/client#VerifiedTruthRecord",
+        "export:@byok-sdk/client#LocalMemoryFilter",
+        "export:@byok-sdk/client#MemorySelector"
+      ]
+    },
+    {
+      "id": "runtime-status-inline",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client control status carries versionVerdict, versionChange and the executable inside runtimes[]; the runtimeVersionVerdicts, runtimeVersionChanges and runtimeExecutables side arrays are removed, which changes DiagnosticsSnapshot's control status type. Run status and doctor from the daemon's release.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#runtime-status-carries-every-observation-field-inline",
+      "items": [
+        "export:@byok-sdk/client#DiagnosticsSnapshot"
+      ]
+    },
+    {
+      "id": "runtime-status-side-arrays-not-read",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client byok-agent status and doctor read only the inline runtimes[] status; a daemon of an earlier release that sends verdicts, restart changes and executables in side arrays is reported without them. Upgrade the CLI and the daemon together.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#runtime-status-carries-every-observation-field-inline",
+      "items": [
+        "behavior:runtime-status-side-arrays-not-read"
+      ]
+    },
+    {
+      "id": "runtime-version-verdict-only",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client and /adapters remove RuntimeDetectResult.advisory and RuntimeDetectionAdvisory; versionVerdict { state: 'warn' } is the one unqualified-version warning and validateRuntimeDetectResult() refuses a detect result that still carries advisory. Custom adapters return versionVerdict; Hosts read availability.versionVerdict.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#version-verdict-is-the-one-runtime-version-warning",
+      "items": [
+        "export:@byok-sdk/client#RuntimeDetectResult",
+        "export:@byok-sdk/client#RuntimeDetectionAdvisory",
+        "export:@byok-sdk/client/adapters#RuntimeDetectResult",
+        "export:@byok-sdk/client/adapters#RuntimeDetectionAdvisory"
+      ]
+    },
+    {
+      "id": "daemon-config-unknown-fields-fail-closed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes DaemonConfigFieldRemovedError, the removed_field issue code, DaemonConfigIssue.severity and .migration, DaemonEffectiveConfig.warnings and byok-agent config check --strict; every DaemonConfig issue is an error.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#daemonconfig-rejects-unknown-fields",
+      "items": [
+        "export:@byok-sdk/client#DaemonConfigFieldRemovedError",
+        "export:@byok-sdk/client#DaemonConfigIssue",
+        "export:@byok-sdk/client#DaemonConfigIssueCode",
+        "export:@byok-sdk/client#DaemonEffectiveConfig"
+      ]
+    },
+    {
+      "id": "daemon-config-unknown-field-rejected",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client DaemonConfig: an unknown field, including one an earlier release removed (workspaceRoot, gitWorkspace, strictAgentOnly, hostedJournal and the rest), is an unknown_field error from config files and embedded createDaemon (DaemonConfigInvalidError) instead of a warning or DaemonConfigFieldRemovedError. Delete every field byok-agent config check reports.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#daemonconfig-rejects-unknown-fields",
+      "items": [
+        "behavior:daemon-config-unknown-field-rejected"
+      ]
+    },
+    {
+      "id": "agent-memory-outbox-version-error",
+      "impact": "additive",
+      "summary": "@byok-sdk/client adds AgentMemoryOutboxVersionUnsupportedError, the typed refusal of an Agent memory outbox state this build does not read.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-outbox-version-2-is-refused",
+      "items": [
+        "export:@byok-sdk/client#AgentMemoryOutboxVersionUnsupportedError"
+      ]
+    },
+    {
+      "id": "agent-memory-outbox-v2-rejected",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client Agent memory projection refuses a .byok/agent-memory-redacted-outbox-v2.json still in the 0.32.0 version 2 state with AgentMemoryOutboxVersionUnsupportedError instead of upgrading it; the file is not rewritten or deleted. Remove or archive it to resume projection.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-outbox-version-2-is-refused",
+      "items": [
+        "behavior:agent-memory-outbox-v2-rejected"
+      ]
+    },
+    {
+      "id": "todo-config-legacy-location-ignored",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client bundled Pi todo extension reads only $XDG_CONFIG_HOME/rpiv-todo/config.json and no longer falls back to ~/.config/rpiv-todo/config.json when XDG_CONFIG_HOME points elsewhere. Move the file under XDG_CONFIG_HOME.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#todo-extension-reads-one-config-location",
+      "items": [
+        "behavior:todo-config-legacy-location-ignored"
+      ]
+    },
+    {
+      "id": "mcp-frame-ceiling-single-authority",
+      "impact": "additive",
+      "summary": "@byok-sdk/client/mcp-server MCP_SERVER_MAX_FRAME_BYTES keeps its 1 MiB value and now re-exports the constant the SDK MCP client and HTTP server share.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#mcp-frame-ceiling-has-one-authority",
+      "items": [
+        "export:@byok-sdk/client/mcp-server#MCP_SERVER_MAX_FRAME_BYTES"
+      ]
     }
   ],
   "changes": [
@@ -367,9 +502,34 @@
       "entry": "bot-delivery-supersession"
     },
     {
+      "item": "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_ARTIFACT",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_WORKSPACE",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
       "item": "export:@byok-sdk/client#AgentEgressDropReceipt",
       "change": "removed",
       "entry": "remove-egress-drop-receipts"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentHomeProjectionFunction",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentMemoryOutboxVersionUnsupportedError",
+      "change": "added",
+      "entry": "agent-memory-outbox-version-error"
     },
     {
       "item": "export:@byok-sdk/client#AgentSessionHandoffStore",
@@ -377,9 +537,34 @@
       "entry": "remove-task-terminal-read"
     },
     {
+      "item": "export:@byok-sdk/client#DaemonConfigFieldRemovedError",
+      "change": "removed",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfigIssue",
+      "change": "changed",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfigIssueCode",
+      "change": "changed",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEffectiveConfig",
+      "change": "changed",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonEvent",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEventKind",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
     },
     {
       "item": "export:@byok-sdk/client#DaemonLog",
@@ -392,6 +577,11 @@
       "entry": "grok-agent-user-context"
     },
     {
+      "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
+      "change": "changed",
+      "entry": "runtime-status-inline"
+    },
+    {
       "item": "export:@byok-sdk/client#ExpiringClassId",
       "change": "changed",
       "entry": "grok-session-store"
@@ -400,6 +590,11 @@
       "item": "export:@byok-sdk/client#GrokAdapterOptions",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#LocalMemoryFilter",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
     },
     {
       "item": "export:@byok-sdk/client#LocalTeamWorkspace",
@@ -412,6 +607,21 @@
       "entry": "remove-unused-team-workspace-methods"
     },
     {
+      "item": "export:@byok-sdk/client#MemorySelector",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeDetectResult",
+      "change": "changed",
+      "entry": "runtime-version-verdict-only"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeDetectionAdvisory",
+      "change": "removed",
+      "entry": "runtime-version-verdict-only"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
@@ -420,6 +630,91 @@
       "item": "export:@byok-sdk/client#ServiceExitDisposition",
       "change": "removed",
       "entry": "remove-service-exit-disposition"
+    },
+    {
+      "item": "export:@byok-sdk/client#TOOL_AUTHORIZATION_MODES",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#TOOL_FILE_ACCESS",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthManifestQueryInput",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthManifestRecord",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthMemoryClient",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthMemoryClientError",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthMemoryClientErrorCode",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthMemoryClientOptions",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthMemoryMetric",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthSnapshotCandidateInput",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthSnapshotWriteInput",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthTerminalWriteInput",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthWriteBody",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthWriteResult",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#VerifiedTruthRecord",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#createAgentHomeProjection",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#listInstalledSkillPacks",
+      "change": "removed",
+      "entry": "remove-list-installed-skill-packs"
     },
     {
       "item": "export:@byok-sdk/client#openDaemonLog",
@@ -452,9 +747,24 @@
       "entry": "grok-agent-user-context"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#RuntimeDetectResult",
+      "change": "changed",
+      "entry": "runtime-version-verdict-only"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeDetectionAdvisory",
+      "change": "removed",
+      "entry": "runtime-version-verdict-only"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#RuntimeDetectionRefusalReason",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/client/mcp-server#MCP_SERVER_MAX_FRAME_BYTES",
+      "change": "changed",
+      "entry": "mcp-frame-ceiling-single-authority"
     },
     {
       "item": "export:@byok-sdk/cloud#ByokCloudOptions",

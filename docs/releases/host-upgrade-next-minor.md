@@ -451,3 +451,36 @@ The bundled Pi todo extension reads its settings only from
 when `XDG_CONFIG_HOME` is unset). It no longer falls back to
 `~/.config/rpiv-todo/config.json` when `XDG_CONFIG_HOME` points elsewhere.
 Move that file under `XDG_CONFIG_HOME` to keep its settings.
+
+## DaemonConfig rejects unknown fields
+
+`@byok-sdk/client` `validateDaemonConfig()`, `checkDaemonConfig()`,
+`createDaemon()` / `createDaemonWithAdapters()` and the `byok-agent` config
+loader now refuse every unknown `DaemonConfig` field as an `unknown_field`
+error, with a "did you mean" hint when one is close. Before, an unknown field was
+a warning and the daemon started (Q4'), and a field removed in an earlier
+release (`permissionDefaults`, `agentEgress.sanitizer`, `mcpLaunchCwd`,
+`toolImplementationAuthority`, `hostedJournal`, `strictAgentOnly`,
+`gitWorkspace`, `workspaceRoot`, `resultDocument`,
+`maxConcurrentMutableSessionsPerAgentHome`, `durablePi`,
+`agentMemoryFilesystem`) threw `DaemonConfigFieldRemovedError`. Those fields
+are now unknown fields too: an embedded Host gets `DaemonConfigInvalidError`,
+and the CLI exits with the config error. `overrides.hostedJournal` and
+`overrides.gitWorkspace` throw a `TypeError`.
+
+Removed with it: `DaemonConfigFieldRemovedError` (and its setup-catalog code
+`daemon_config_field_removed`), the `removed_field` issue code,
+`DaemonConfigIssue.severity` and `.migration` (every issue is an error),
+`DaemonEffectiveConfig.warnings` (also gone from `Daemon.status().config`) and
+`byok-agent config check --strict`, which now prints usage. A config that
+rolls back to an older daemon no longer starts with fields that release does
+not know; remove them first. Run `byok-agent config check` against each config
+file before upgrading and delete every field it reports.
+
+## MCP frame ceiling has one authority
+
+`@byok-sdk/client/mcp-server` `MCP_SERVER_MAX_FRAME_BYTES` is unchanged at
+1 MiB. It is now a re-export of the same constant the SDK MCP client's read
+buffer and the HTTP server's `maxOutboundFrameBytes` default use, so the three
+can no longer drift apart. No Host change.
+
