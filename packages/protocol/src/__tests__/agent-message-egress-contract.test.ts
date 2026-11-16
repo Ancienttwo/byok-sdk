@@ -30,7 +30,7 @@ describe('Agent-initiated message egress protocol', () => {
     const shared = {
       instruction: 'send one message',
       agentRef,
-      runtime: 'codex',
+      target: { lane: 'runtime', runtimeId: 'codex' },
       egressPolicy,
       messageEgress,
       terminalProjection: { mode: 'none' },
@@ -43,7 +43,7 @@ describe('Agent-initiated message egress protocol', () => {
     const shared = {
       instruction: 'send one message',
       agentRef,
-      runtime: 'codex',
+      target: { lane: 'runtime', runtimeId: 'codex' },
       egressPolicy,
       messageEgress,
       session: FRESH,

@@ -8,10 +8,16 @@ import {
   TaskApprovalResolvedPayloadSchema,
   TaskClaimPayloadSchema,
   TaskOfferPayloadSchema,
+  CONN_HELLO_CAPABILITIES_MAX_ITEMS,
+  TaskCompletePayloadSchema,
+  TaskFailPayloadSchema,
+  TaskCancelledPayloadSchema,
   createEnvelope,
   decodeEnvelope,
   parseMessage,
 } from '../index';
+
+const PI_EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
 
 describe('conn.hello: runtimes replaces agents (M1 gap #4)', () => {
   it('accepts a typed runtimes array', () => {
@@ -78,6 +84,13 @@ describe('conn.hello: runtimes replaces agents (M1 gap #4)', () => {
       cursor: 42,
     });
     expect(result.success).toBe(true);
+  });
+
+  it('bounds the capability list (wire v7)', () => {
+    const hello = (count: number) => ({ protocolVersions: [7], deviceId: 'device-1', productId: 'acme-agent',
+      capabilities: Array.from({ length: count }, (_, index) => `flag-${index}`) });
+    expect(ConnHelloPayloadSchema.safeParse(hello(CONN_HELLO_CAPABILITIES_MAX_ITEMS)).success).toBe(true);
+    expect(ConnHelloPayloadSchema.safeParse(hello(CONN_HELLO_CAPABILITIES_MAX_ITEMS + 1)).success).toBe(false);
   });
 });
 
@@ -167,7 +180,7 @@ describe('task.claim.capabilities (additive-minor optional field)', () => {
   it('accepts a claim carrying a fully-populated capabilities block', () => {
     const result = TaskClaimPayloadSchema.safeParse({
       deviceId: 'device-1',
-      runtime: 'pi',
+      executor: PI_EXECUTOR,
       capabilities: {
         steer: true,
         resume: true,
@@ -186,7 +199,7 @@ describe('task.claim.capabilities (additive-minor optional field)', () => {
   it('accepts a claim carrying a partially-populated capabilities block', () => {
     const result = TaskClaimPayloadSchema.safeParse({
       deviceId: 'device-1',
-      runtime: 'claude',
+      executor: { kind: 'runtime', runtimeId: 'claude' },
       capabilities: { steer: false },
     });
     expect(result.success).toBe(true);
@@ -199,7 +212,7 @@ describe('task.claim.capabilities (additive-minor optional field)', () => {
     // decision on `capabilities.steer` has to be able to tell "not reported"
     // apart from "reported false", and fail closed on the former by its own
     // rule rather than by a schema-invented default.
-    const result = TaskClaimPayloadSchema.safeParse({ deviceId: 'device-1', runtime: 'pi' });
+    const result = TaskClaimPayloadSchema.safeParse({ deviceId: 'device-1', executor: PI_EXECUTOR });
     expect(result.success).toBe(true);
     if (!result.success) throw new Error('unreachable');
     expect('capabilities' in result.data).toBe(false);
@@ -209,6 +222,7 @@ describe('task.claim.capabilities (additive-minor optional field)', () => {
   it('is the same shape as runtimes[].capabilities — an unknown flag inside it is stripped, not passed through', () => {
     const result = TaskClaimPayloadSchema.safeParse({
       deviceId: 'device-1',
+      executor: PI_EXECUTOR,
       capabilities: { steer: true, futureFlag: 'from a newer daemon' },
     });
     expect(result.success).toBe(true);
@@ -219,20 +233,21 @@ describe('task.claim.capabilities (additive-minor optional field)', () => {
   it('rejects a non-boolean steer (control-relevant field keeps its type, no coercion)', () => {
     const result = TaskClaimPayloadSchema.safeParse({
       deviceId: 'device-1',
+      executor: PI_EXECUTOR,
       capabilities: { steer: 'true' },
     });
     expect(result.success).toBe(false);
   });
 
   it('rejects a non-object capabilities value outright', () => {
-    const result = TaskClaimPayloadSchema.safeParse({ deviceId: 'device-1', capabilities: true });
+    const result = TaskClaimPayloadSchema.safeParse({ deviceId: 'device-1', executor: PI_EXECUTOR, capabilities: true });
     expect(result.success).toBe(false);
   });
 
   it('round-trips through the real wire entrypoint with capabilities intact', () => {
     const envelope = createEnvelope(
       'task.claim',
-      { deviceId: 'device-1', runtime: 'pi', capabilities: { steer: true, resume: true } },
+      { deviceId: 'device-1', executor: PI_EXECUTOR, capabilities: { steer: true, resume: true } },
       { taskId: 'task-1' },
     );
     const decoded = decodeEnvelope(`${JSON.stringify(envelope)}\n`);
@@ -242,11 +257,23 @@ describe('task.claim.capabilities (additive-minor optional field)', () => {
   });
 
   it('a pre-S0 claim envelope (no capabilities) still validates — the field is additive, never required', () => {
-    const envelope = createEnvelope('task.claim', { deviceId: 'device-1', runtime: 'pi' }, { taskId: 'task-1' });
+    const envelope = createEnvelope('task.claim', { deviceId: 'device-1', executor: PI_EXECUTOR }, { taskId: 'task-1' });
     expect(EnvelopeSchema.safeParse(envelope).success).toBe(true);
     const decoded = decodeEnvelope(`${JSON.stringify(envelope)}\n`);
     if (decoded.type !== 'task.claim') throw new Error('unreachable');
     expect(decoded.payload.capabilities).toBeUndefined();
+  });
+});
+
+describe('claimed executor (wire v7)', () => {
+  it('refuses a claim without an executor', () => {
+    expect(TaskClaimPayloadSchema.safeParse({ deviceId: 'device-1' }).success).toBe(false);
+  });
+
+  it('requires the executor on task.complete and leaves it optional on task.fail and task.cancelled', () => {
+    expect(TaskCompletePayloadSchema.safeParse({ summary: 'done', sessionRef: 'sess-1' }).success).toBe(false);
+    expect(TaskFailPayloadSchema.safeParse({ reason: 'interrupted before claim' }).success).toBe(true);
+    expect(TaskCancelledPayloadSchema.safeParse({}).success).toBe(true);
   });
 });
 
@@ -257,6 +284,7 @@ describe('taskId placement: envelope task_id is the sole routing key (M1 gap #7)
       instruction: 'do it',
       agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
       session: { mode: 'resume', sessionRef: 'session-1' },
+      target: { lane: 'auto' },
     });
     expect(result.success).toBe(false);
   });
@@ -265,6 +293,7 @@ describe('taskId placement: envelope task_id is the sole routing key (M1 gap #7)
     const result = TaskClaimPayloadSchema.safeParse({
       taskId: 'task-1', // M0 shape — payload-level duplicate, now meaningless
       deviceId: 'device-1',
+      executor: PI_EXECUTOR,
     });
     expect(result.success).toBe(true);
     if (result.success) {
@@ -277,7 +306,7 @@ describe('taskId placement: envelope task_id is the sole routing key (M1 gap #7)
     // payload, and the envelope never sets task_id. M1 requires the envelope
     // field, so this must now be rejected rather than silently unroutable.
     const raw = {
-      v: 6,
+      v: 7,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.claim',
@@ -291,7 +320,7 @@ describe('taskId placement: envelope task_id is the sole routing key (M1 gap #7)
   it('an M1-shaped task.claim envelope (envelope.task_id, no payload.taskId) is valid and routes correctly', () => {
     const envelope = createEnvelope(
       'task.claim',
-      { deviceId: 'device-1' },
+      { deviceId: 'device-1', executor: PI_EXECUTOR },
       { taskId: 'task-1' },
     );
     const parsed = parseMessage(envelope);
@@ -409,11 +438,11 @@ describe('runtime messageDraft capability', () => {
   it('is optional discovery data in hello and claim', () => {
     const capabilities = { messageDraft: true };
     const hello = MESSAGE_PAYLOAD_SCHEMAS['conn.hello'].parse({
-      protocolVersions: [6], capabilities: [], deviceId: 'device-1', productId: 'app',
+      protocolVersions: [7], capabilities: [], deviceId: 'device-1', productId: 'app',
       runtimes: [{ id: 'pi', version: '1', authPresent: true, capabilities }],
     });
     expect(hello.runtimes?.[0]?.capabilities).toEqual(capabilities);
-    expect(MESSAGE_PAYLOAD_SCHEMAS['task.claim'].parse({ deviceId: 'device-1', capabilities }).capabilities).toEqual(capabilities);
-    expect(MESSAGE_PAYLOAD_SCHEMAS['task.claim'].parse({ deviceId: 'device-1' }).capabilities).toBeUndefined();
+    expect(MESSAGE_PAYLOAD_SCHEMAS['task.claim'].parse({ deviceId: 'device-1', executor: PI_EXECUTOR, capabilities }).capabilities).toEqual(capabilities);
+    expect(MESSAGE_PAYLOAD_SCHEMAS['task.claim'].parse({ deviceId: 'device-1', executor: PI_EXECUTOR }).capabilities).toBeUndefined();
   });
 });

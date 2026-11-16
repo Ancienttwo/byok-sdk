@@ -4,8 +4,13 @@ import {
   EnvelopeSchema,
   MessagesSendRequestSchema,
   ProtocolError,
+  TASK_STEER_TEXT_MAX_BYTES,
   TaskArtifactPayloadSchema,
   TaskOfferPayloadSchema,
+  TaskSteerPayloadSchema,
+  readSteerRefusalReason,
+  steerRefusalEnvelopeId,
+  uuidFromSha256,
   UnknownMessageTypeError,
   createEnvelope,
   decodeEnvelope,
@@ -14,7 +19,7 @@ import {
 } from '../index';
 
 describe('malformed payload rejection', () => {
-  it.each([0, -1, 1, 2, 3, 4, 5, 7, 99])('rejects unsupported wire major %i before either decode or HTTP batch admission', (v) => {
+  it.each([0, -1, 1, 2, 3, 4, 5, 6, 99])('rejects unsupported wire major %i at decode; the batch frame admits only a positive major', (v) => {
     const supported = createEnvelope('task.cancel', {
       reason: 'same task contract',
     }, { taskId: 'version-gate', seq: 1 });
@@ -22,13 +27,14 @@ describe('malformed payload rejection', () => {
     expect(() => parseMessage(unsupported)).toThrow(EnvelopeValidationError);
     expect(() => decodeEnvelope(JSON.stringify(unsupported))).toThrow(EnvelopeValidationError);
     expect(EnvelopeSchema.safeParse(unsupported).success).toBe(false);
-    expect(MessagesSendRequestSchema.safeParse({ messages: [unsupported] }).success).toBe(false);
+    // Wire v7: the frame carries an entry of another positive major, answered protocol_version_unsupported on its own.
+    expect(MessagesSendRequestSchema.safeParse({ messages: [unsupported] }).success).toBe(v > 0);
     expect(parseMessage(supported)).toEqual(supported);
   });
 
   it('rejects task.steer with wrong payload field type', () => {
     const raw = {
-      v: 6,
+      v: 7,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.steer',
@@ -41,7 +47,7 @@ describe('malformed payload rejection', () => {
 
   it('rejects an envelope with a non-uuid id', () => {
     const raw = {
-      v: 6,
+      v: 7,
       id: 'not-a-uuid',
       ts: new Date().toISOString(),
       type: 'task.approve',
@@ -54,7 +60,7 @@ describe('malformed payload rejection', () => {
 
   it('rejects an envelope with a non-ISO-8601 timestamp', () => {
     const raw = {
-      v: 6,
+      v: 7,
       id: '11111111-1111-4111-8111-111111111111',
       ts: 'yesterday',
       type: 'task.approve',
@@ -71,7 +77,7 @@ describe('malformed payload rejection', () => {
 
   it('EnvelopeValidationError carries the zod issues for diagnostics', () => {
     const raw = {
-      v: 6,
+      v: 7,
       id: 'not-a-uuid',
       ts: new Date().toISOString(),
       type: 'task.approve',
@@ -112,7 +118,7 @@ describe('unknown-field tolerance (forward-compat)', () => {
 describe('unknown message type handling', () => {
   it('throws UnknownMessageTypeError (not EnvelopeValidationError) for an unrecognized type', () => {
     const raw = {
-      v: 6,
+      v: 7,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.teleport', // does not exist (yet)
@@ -152,11 +158,11 @@ describe('unknown message type handling', () => {
   });
 
   it('missing/non-string type is also treated as unknown, not a hard parse error', () => {
-    expect(() => parseMessage({ v: 6, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString() })).toThrow(
+    expect(() => parseMessage({ v: 7, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString() })).toThrow(
       UnknownMessageTypeError,
     );
     expect(() =>
-      parseMessage({ v: 6, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString(), type: 42 }),
+      parseMessage({ v: 7, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString(), type: 42 }),
     ).toThrow(UnknownMessageTypeError);
   });
 });
@@ -186,5 +192,28 @@ describe('task.artifact inline size limit (<=64KB)', () => {
   it('rejects inline payloads over the limit', () => {
     const tooBig = { name: 'a.txt', contentType: 'text/plain', inline: 'x'.repeat(65_537) };
     expect(TaskArtifactPayloadSchema.safeParse(tooBig).success).toBe(false);
+  });
+});
+
+describe('task.steer text bound and task.steer_refused (wire v7, #2009)', () => {
+  it('bounds the plaintext steer text in UTF-8 bytes', () => {
+    expect(TASK_STEER_TEXT_MAX_BYTES).toBe(65_536);
+    expect(TaskSteerPayloadSchema.safeParse({ text: 'x'.repeat(65_536) }).success).toBe(true);
+    expect(TaskSteerPayloadSchema.safeParse({ text: 'x'.repeat(65_537) }).success).toBe(false);
+    // 21,846 three-byte characters are 65,538 bytes though only 21,846 UTF-16 units.
+    expect(TaskSteerPayloadSchema.safeParse({ text: '\u4e2d'.repeat(21_846) }).success).toBe(false);
+  });
+
+  it('reads a known refusal reason typed and keeps an unknown one verbatim', () => {
+    expect(readSteerRefusalReason('input_too_large')).toEqual({ reason: 'input_too_large' });
+    expect(readSteerRefusalReason('invented_reason')).toEqual({ reason: 'unknown', reportedReason: 'invented_reason' });
+  });
+
+  it('derives one envelope id per refused steer: SHA-256 of the domain-tagged steer id, as an RFC 9562 v8 UUID', async () => {
+    // sha256({"domain":"byok:task-steer-refused","steerMessageId":"00000000-0000-4000-8000-000000000007"}) = 075b8b83fa37f6d141ef4947cff3b8b7…
+    expect(await steerRefusalEnvelopeId('00000000-0000-4000-8000-000000000007')).toBe('075b8b83-fa37-86d1-81ef-4947cff3b8b7');
+    expect(uuidFromSha256(`sha256:${'f'.repeat(64)}`)).toBe('ffffffff-ffff-8fff-bfff-ffffffffffff');
+    expect(uuidFromSha256(`sha256:${'0'.repeat(64)}`)).toBe('00000000-0000-8000-8000-000000000000');
+    expect(() => uuidFromSha256('F'.repeat(64))).toThrow();
   });
 });

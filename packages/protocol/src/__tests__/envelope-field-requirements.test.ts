@@ -25,6 +25,7 @@ const OFFER_PAYLOAD = {
   instruction: 'x',
   agentRef: { agentId: 'a', profileRevision: 'r' },
   session: { mode: 'resume', sessionRef: 's' },
+  target: { lane: 'auto' },
 } as const;
 
 const OFFER_EGRESS_POLICY = {
@@ -40,12 +41,14 @@ const OFFER_VARIANTS = {
     instruction: 'run with an explicit egress policy',
     agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
     session: { mode: 'resume', sessionRef: 'session-1' },
+    target: { lane: 'auto' },
     egressPolicy: OFFER_EGRESS_POLICY,
   },
   fresh: {
     instruction: 'start with an explicit egress policy',
     agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
     session: { mode: 'fresh' },
+    target: { lane: 'auto' },
     egressPolicy: OFFER_EGRESS_POLICY,
   },
   prepared: {
@@ -53,6 +56,7 @@ const OFFER_VARIANTS = {
     egressPolicy: OFFER_EGRESS_POLICY,
     agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
     session: { mode: 'fresh' },
+    target: { lane: 'auto' },
     preparation: { reference: 'prep-record-1', requestDigest: 'request-digest-1' },
   },
 } as const;
@@ -71,6 +75,7 @@ function minimalPayload(type: MessageType): unknown {
         instruction: 'run for agent',
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
         session: { mode: 'resume', sessionRef: 'session-1' },
+        target: { lane: 'auto' },
       };
     case 'agent.egress.reliable':
       return {
@@ -200,7 +205,7 @@ function minimalPayload(type: MessageType): unknown {
     case 'task.steer':
       return { text: 'hi' };
     case 'task.claim':
-      return { deviceId: 'device-1' };
+      return { deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' } };
     case 'task.started':
       return {};
     case 'task.decline':
@@ -212,13 +217,15 @@ function minimalPayload(type: MessageType): unknown {
     case 'task.await_approval':
       return { summary: 'about to do a thing', approvalId: 'approval-1' };
     case 'task.complete':
-      return { summary: 'done', sessionRef: 'sess-1' };
+      return { executor: { kind: 'runtime', runtimeId: 'pi' }, summary: 'done', sessionRef: 'sess-1' };
     case 'task.fail':
       return { reason: 'boom' };
     case 'task.cancelled':
       return {};
     case 'task.approval_resolved':
       return { approvalId: 'appr-1', decision: 'approve', resolvedBy: 'local', at: new Date().toISOString() };
+    case 'task.steer_refused':
+      return { steerMessageId: '00000000-0000-4000-8000-000000000028', reason: 'task_not_active' };
     default: {
       const exhaustive: never = type;
       throw new Error(`no minimal payload fixture for message type: ${exhaustive}`);
@@ -364,8 +371,8 @@ describe('createEnvelope: taskId/seq requiredness (finding F1)', () => {
       createEnvelope('conn.hello', { protocolVersions: [1], capabilities: [], deviceId: 'd', productId: 'p' }); // no opts at all
       createEnvelope('provider.provisioning.available', { requestId: '00000000-0000-4000-8000-000000000026' }, { seq: 1 });
       createEnvelope('task.offer', OFFER_PAYLOAD, { taskId: 't', seq: 1 });
-      createEnvelope('task.claim', { deviceId: 'd' }, { taskId: 't' }); // seq optional, may be omitted
-      createEnvelope('task.claim', { deviceId: 'd' }, { taskId: 't', seq: 1 }); // seq optional, may also be supplied
+      createEnvelope('task.claim', { deviceId: 'd', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 't' }); // seq optional, may be omitted
+      createEnvelope('task.claim', { deviceId: 'd', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 't', seq: 1 }); // seq optional, may also be supplied
     }).not.toThrow();
   });
 });

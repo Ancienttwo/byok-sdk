@@ -105,6 +105,7 @@ interface EnvelopeShapeOptions {
   'task.fail': { taskId: string; seq?: number };
   'task.cancelled': { taskId: string; seq?: number };
   'task.approval_resolved': { taskId: string; seq?: number };
+  'task.steer_refused': { taskId: string; seq?: number };
   'agent.egress.reliable': { taskId?: string; seq?: number };
   'agent.message.draft': { taskId: string; seq?: number };
   'agent.message.publish': { taskId: string; seq?: number };

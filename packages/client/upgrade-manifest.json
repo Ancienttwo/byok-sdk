@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "e04376db7aa21e8bfd4d39df1db6382328626654af4c2c3182b0272fafffd356"
+    "snapshotSha256": "112d09353ef288d06cfe5b9afaff9c848c912f1a45cb0e774c8446b922b0712e"
   },
   "configFields": {
     "status": "tracked",
@@ -262,6 +262,126 @@
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresNonceStore",
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresInboundDedupStore"
       ]
+    },
+    {
+      "id": "wire-v7",
+      "impact": "breaking",
+      "summary": "@byok-sdk/protocol PROTOCOL_VERSION is 7 and there is no v6 reader: start the server side on a new store, pair the devices again, upgrade the cloud first and the daemons after. The POST /byok/messages frame (MessagesSendRequestSchema) accepts any positive v; an entry of another major is answered rejected with protocol_version_unsupported and an unknown daemon-to-server type with type_unsupported (OUTBOUND_REFUSAL_REASONS, MessageSendOutcomeSchema). A v6 daemon halts on that answer to its hello; ProtocolNegotiationError (code protocol_negotiation_failed) is the typed halt of a v7 peer refused by another major. EnvelopeSchema, MESSAGE_PAYLOAD_SCHEMAS and createEnvelope carry the v7 message set.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/protocol#PROTOCOL_VERSION",
+        "export:@byok-sdk/protocol#MessagesSendRequestSchema",
+        "export:@byok-sdk/protocol#MessageSendOutcomeSchema",
+        "export:@byok-sdk/protocol#OUTBOUND_REFUSAL_REASONS",
+        "export:@byok-sdk/protocol#ProtocolNegotiationError",
+        "export:@byok-sdk/protocol#EnvelopeSchema",
+        "export:@byok-sdk/protocol#MESSAGE_PAYLOAD_SCHEMAS",
+        "export:@byok-sdk/protocol#createEnvelope",
+        "export:@byok-sdk/protocol#CreateEnvelopeOptions",
+        "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION"
+      ]
+    },
+    {
+      "id": "wire-v7-execution-target",
+      "impact": "breaking",
+      "summary": "task.offer replaces runtime, harnessId and dispatchSelection with one required target (ExecutionTargetSchema: auto, runtime, subscription without providerId, byok, byok-profile, harness) and drops limits.maxTokens; nativeSessions needs an explicit Pi target. task.claim replaces runtime, harnessId and agentId with a required executor (ClaimedExecutorSchema); task.complete requires executor and task.fail and task.cancelled carry it after a claim. DispatchSelectionSchema and DispatchSelection are removed; the offer selection rules runtime_selection_mismatch and harness_selection_conflict are gone (OfferSelectionRule, offerSelectionViolation). @byok-sdk/cloud TaskAttempt.claimedExecutor replaces claimedRuntime and claimedHarnessId, and TaskAttemptStore.claim takes executor; AgentExecutionInputSchema and SealedAgentExecutionInputSchema embed the v7 offer. Build offers with target and read claimedExecutor.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/protocol#ExecutionTarget",
+        "export:@byok-sdk/protocol#ExecutionTargetSchema",
+        "export:@byok-sdk/protocol#ClaimedExecutor",
+        "export:@byok-sdk/protocol#ClaimedExecutorSchema",
+        "export:@byok-sdk/protocol#DispatchSelection",
+        "export:@byok-sdk/protocol#DispatchSelectionSchema",
+        "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+        "export:@byok-sdk/protocol#HostOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
+        "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
+        "export:@byok-sdk/protocol#TaskCompletePayloadSchema",
+        "export:@byok-sdk/protocol#TaskCompleteSealedPayload",
+        "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+        "export:@byok-sdk/protocol#TaskFailSealedPayload",
+        "export:@byok-sdk/protocol#TaskCancelledPayloadSchema",
+        "export:@byok-sdk/protocol#TaskCancelledSealedPayload",
+        "export:@byok-sdk/protocol#OfferSelectionRule",
+        "export:@byok-sdk/protocol#offerSelectionViolation",
+        "export:@byok-sdk/protocol#SEALED_SPLIT_TABLE",
+        "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+        "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+        "export:@byok-sdk/cloud#TaskAttempt",
+        "export:@byok-sdk/cloud#TaskAttemptStore"
+      ]
+    },
+    {
+      "id": "wire-v7-steer-refused",
+      "impact": "breaking",
+      "summary": "Wire v7 adds the daemon-to-server task.steer_refused { steerMessageId, reason } (TaskSteerRefusedPayloadSchema, DAEMON_TO_SERVER_TYPES): a device reports a steer it received and did not deliver. reason is open (STEER_REFUSAL_REASONS, readSteerRefusalReason); the envelope id is steerRefusalEnvelopeId(steerMessageId), built on uuidFromSha256, so the first reason wins. Custom @byok-sdk/cloud compositions add the steerRefusals port (TaskSteerRefusalStore, SteerRefusalRecord; CloudStores, CLOUD_STORE_NAMES) and @byok-sdk/core MailboxStore.readMessage; both have conformance specs. Host read APIs follow in the same release.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "union:wire#task.steer_refused",
+        "export:@byok-sdk/protocol#TaskSteerRefusedPayload",
+        "export:@byok-sdk/protocol#TaskSteerRefusedPayloadSchema",
+        "export:@byok-sdk/protocol#STEER_REFUSAL_REASONS",
+        "export:@byok-sdk/protocol#SteerRefusalReason",
+        "export:@byok-sdk/protocol#SteerRefusalReasonReading",
+        "export:@byok-sdk/protocol#readSteerRefusalReason",
+        "export:@byok-sdk/protocol#steerRefusalEnvelopeId",
+        "export:@byok-sdk/protocol#uuidFromSha256",
+        "export:@byok-sdk/protocol#DAEMON_TO_SERVER_TYPES",
+        "export:@byok-sdk/cloud#TaskSteerRefusalStore",
+        "export:@byok-sdk/cloud#SteerRefusalRecord",
+        "export:@byok-sdk/cloud#CloudStores",
+        "export:@byok-sdk/cloud#CLOUD_STORE_NAMES",
+        "export:@byok-sdk/core#MailboxStore"
+      ]
+    },
+    {
+      "id": "wire-v7-no-server-capabilities",
+      "impact": "breaking",
+      "summary": "The server advertises no capabilities in wire v7: EventsPollResponseSchema and MessagesSendResponseSchema lose capabilities, and WireAddition loses kind, rule and advertisedBy; every row is a device-gated server-to-daemon surface, and the offer's model lanes (target.lane subscription, byok, byok-profile) take the dispatch-selection row. Stop reading server capabilities.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/protocol#EventsPollResponseSchema",
+        "export:@byok-sdk/protocol#MessagesSendResponseSchema",
+        "export:@byok-sdk/protocol#WireAddition"
+      ]
+    },
+    {
+      "id": "wire-v7-decline-codes",
+      "impact": "breaking",
+      "summary": "task.decline codes are typed: DECLINE_CODES lists every known code (TaskDeclineCode), including runtime_unavailable, the offer admission codes that used to be a reason prefix, PREPARED_OFFER_DECLINE_CODES (PreparedOfferDeclineCode) and the input-preparation rejections. code stays optional and open: read it with readDeclineCode and keep unknown codes; stop parsing reason prefixes.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/protocol#DECLINE_CODES",
+        "export:@byok-sdk/protocol#TaskDeclineCode",
+        "export:@byok-sdk/protocol#PREPARED_OFFER_DECLINE_CODES",
+        "export:@byok-sdk/protocol#PreparedOfferDeclineCode"
+      ]
+    },
+    {
+      "id": "wire-v7-retired-flags-and-bounds",
+      "impact": "breaking",
+      "summary": "CAPABILITY_FLAGS loses the device flags steer and provider-profile-binding (PROVIDER_PROFILE_BINDING_CAPABILITY is removed): steering is gated on the claim's runtime capabilities, and a device that cannot bind a provider profile declines. conn.hello carries at most CONN_HELLO_CAPABILITIES_MAX_ITEMS (64) flags, and a plaintext task.steer text at most TASK_STEER_TEXT_MAX_BYTES (65,536 UTF-8 bytes); send longer follow-up input as a new task.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol#PROVIDER_PROFILE_BINDING_CAPABILITY",
+        "export:@byok-sdk/protocol#CONN_HELLO_CAPABILITIES_MAX_ITEMS",
+        "export:@byok-sdk/protocol#TASK_STEER_TEXT_MAX_BYTES",
+        "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol/constants#PROVIDER_PROFILE_BINDING_CAPABILITY"
+      ]
+    },
+    {
+      "id": "wire-v7-decline-reason-bound",
+      "impact": "breaking",
+      "summary": "@byok-sdk/protocol TaskDeclinePayloadSchema now bounds task.decline reason like task.fail reason: every parse and createEnvelope redacts credentials and truncates it to TASK_FAIL_REASON_MAX_BYTES UTF-8 bytes. A Host that showed or stored the full decline reason gets the bounded text; read the meaning from code.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-decline-reason-bound"
+      ]
     }
   ],
   "changes": [
@@ -380,6 +500,21 @@
       "entry": "agent-user-context-unavailable-cause"
     },
     {
+      "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CLOUD_STORE_NAMES",
+      "change": "changed",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CloudStores",
+      "change": "changed",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
       "item": "export:@byok-sdk/cloud#DeviceScopedStores",
       "change": "added",
       "entry": "in-memory-directory-device-state"
@@ -408,6 +543,31 @@
       "item": "export:@byok-sdk/cloud#NonceStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SteerRefusalRecord",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskAttempt",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskAttemptStore",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskSteerRefusalStore",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
     },
     {
       "item": "export:@byok-sdk/cloud#createInMemoryBlobs",
@@ -455,9 +615,34 @@
       "entry": "device-state-delete-ports"
     },
     {
+      "item": "export:@byok-sdk/core#MailboxStore",
+      "change": "changed",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
       "item": "export:@byok-sdk/core#PresenceStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "wire-v7-retired-flags-and-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CONN_HELLO_CAPABILITIES_MAX_ITEMS",
+      "change": "added",
+      "entry": "wire-v7-retired-flags-and-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ClaimedExecutor",
+      "change": "added",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ClaimedExecutorSchema",
+      "change": "added",
+      "entry": "wire-v7-execution-target"
     },
     {
       "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
@@ -465,9 +650,119 @@
       "entry": "agent-user-context-unavailable-cause"
     },
     {
+      "item": "export:@byok-sdk/protocol#CreateEnvelopeOptions",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DAEMON_TO_SERVER_TYPES",
+      "change": "changed",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DECLINE_CODES",
+      "change": "added",
+      "entry": "wire-v7-decline-codes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DispatchSelection",
+      "change": "removed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DispatchSelectionSchema",
+      "change": "removed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#EnvelopeSchema",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#EventsPollResponseSchema",
+      "change": "changed",
+      "entry": "wire-v7-no-server-capabilities"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ExecutionTarget",
+      "change": "added",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ExecutionTargetSchema",
+      "change": "added",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferPlainPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MESSAGE_PAYLOAD_SCHEMAS",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MessageSendOutcomeSchema",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MessagesSendRequestSchema",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MessagesSendResponseSchema",
+      "change": "changed",
+      "entry": "wire-v7-no-server-capabilities"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#OUTBOUND_REFUSAL_REASONS",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#OfferSelectionRule",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PREPARED_OFFER_DECLINE_CODES",
+      "change": "added",
+      "entry": "wire-v7-decline-codes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PROTOCOL_VERSION",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PROVIDER_PROFILE_BINDING_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v7-retired-flags-and-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PreparedOfferDeclineCode",
+      "change": "added",
+      "entry": "wire-v7-decline-codes"
+    },
+    {
       "item": "export:@byok-sdk/protocol#PresencePublishRequestSchema",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProtocolNegotiationError",
+      "change": "added",
+      "entry": "wire-v7"
     },
     {
       "item": "export:@byok-sdk/protocol#RUNTIME_UNAVAILABLE_CAUSES",
@@ -480,6 +775,61 @@
       "entry": "agent-user-context-unavailable-cause"
     },
     {
+      "item": "export:@byok-sdk/protocol#SEALED_SPLIT_TABLE",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#STEER_REFUSAL_REASONS",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SteerRefusalReason",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SteerRefusalReasonReading",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TASK_STEER_TEXT_MAX_BYTES",
+      "change": "added",
+      "entry": "wire-v7-retired-flags-and-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCancelledPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCancelledSealedPayload",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCompletePayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCompleteSealedPayload",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclineCode",
+      "change": "changed",
+      "entry": "wire-v7-decline-codes"
+    },
+    {
       "item": "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
@@ -488,6 +838,86 @@
       "item": "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailSealedPayload",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskSteerRefusedPayload",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskSteerRefusedPayloadSchema",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#WireAddition",
+      "change": "changed",
+      "entry": "wire-v7-no-server-capabilities"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#createEnvelope",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#offerSelectionViolation",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#readSteerRefusalReason",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#steerRefusalEnvelopeId",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#uuidFromSha256",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "wire-v7-retired-flags-and-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#PROVIDER_PROFILE_BINDING_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v7-retired-flags-and-bounds"
     },
     {
       "item": "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSES",
@@ -503,6 +933,11 @@
       "item": "export:@byok-sdk/server/execution-core#HostOptions",
       "change": "changed",
       "entry": "k4-settlement-notice"
+    },
+    {
+      "item": "union:wire#task.steer_refused",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
     }
   ]
 }

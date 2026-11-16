@@ -27,6 +27,43 @@ test('reviewed graph covers every workspace and all local dependency edges', () 
   assert.deepEqual(workspaceGraph, actual);
 });
 
+test('only the 0.41.0 v6 decoder alias may leave the protocol manifest', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-v6-alias-removal-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  mkdirSync(join(cwd, 'packages/protocol'), { recursive: true });
+  const path = 'packages/protocol/package.json';
+  const alias = 'byok-protocol-v6-baseline';
+  const tarball = 'https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.41.0.tgz';
+  const write = value => writeFileSync(join(cwd, path), JSON.stringify(value));
+  const git = (...args) => spawnSync('git', args, { cwd, encoding: 'utf8' });
+  assert.equal(git('init').status, 0);
+  const commit = value => {
+    write(value);
+    assert.equal(git('add', path).status, 0);
+    assert.equal(git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'base').status, 0);
+    return git('rev-parse', 'HEAD').stdout.trim();
+  };
+  const manifest = spec => ({ name: '@byok-sdk/protocol', version: '0.43.0', devDependencies: { previous: '1.0.0', [alias]: spec } });
+  const removed = { ...manifest(tarball), devDependencies: { previous: '1.0.0' } };
+  let base = commit(manifest(tarball));
+  write(removed);
+  assert.ok(selectImpact([path], { cwd, base }).dirs.includes('packages/protocol'));
+  // Another alias removed, or this key still present with another value: refused.
+  for (const invalid of [{ ...manifest(tarball), devDependencies: { [alias]: tarball } }, manifest(null)]) {
+    write(invalid);
+    assert.throws(() => selectImpact([path], { cwd, base }), /Reviewed CI mapping required/);
+  }
+  // The key kept as it was: the admission does not fire and the existing rules decide.
+  write({ ...manifest(tarball), devDependencies: { previous: '1.0.1', [alias]: tarball } });
+  assert.ok(selectImpact([path], { cwd, base }).dirs.includes('packages/protocol'));
+  // The alias pinned another version or carrying another integrity: refused.
+  for (const spec of [tarball.replace('0.41.0', '0.42.0'), `${tarball}#sha512-other`]) {
+    base = commit(manifest(spec));
+    write(removed);
+    assert.throws(() => selectImpact([path], { cwd, base }), /Reviewed CI mapping required/);
+  }
+});
+
 test('the Worker browser sources retain their workspace checks', () => {
   const dir = 'examples/hosted-bot-collaboration-worker';
   for (const relative of ['src/browser/vitest.config.ts', 'src/browser/vectors.browser.ts']) {

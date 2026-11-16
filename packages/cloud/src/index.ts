@@ -382,6 +382,8 @@ export type {
   RateLimitUnit,
   RequestReceipt,
   RequestReceiptStore,
+  SteerRefusalRecord,
+  TaskSteerRefusalStore,
   TaskAttempt,
   TaskAttemptListQuery,
   TaskAttemptCounts,

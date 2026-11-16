@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createEnvelope, decodeEnvelope, PROTOCOL_VERSION, RUNTIME_UNAVAILABLE_CAUSES, readDeclineCode, readRuntimeUnavailableCause,
 } from '../index';
+import { TASK_FAIL_REASON_MAX_BYTES } from '../constants';
 
 function wire(payload: Record<string, unknown>): string {
   return JSON.stringify({
@@ -14,8 +15,8 @@ describe('typed home-busy decline code', () => {
   it.each(['agent_home_writer_busy', 'agent_home_reader_busy'])(
     'preserves %s through wire decoding without a reason prefix', (code) => {
       const payload = { reason: 'display only', retryable: true, code };
-      expect(decodeEnvelope(wire(payload))).toMatchObject({ v: 6, type: 'task.decline', payload });
-      expect(PROTOCOL_VERSION).toBe(6);
+      expect(decodeEnvelope(wire(payload))).toMatchObject({ v: 7, type: 'task.decline', payload });
+      expect(PROTOCOL_VERSION).toBe(7);
     },
   );
 
@@ -39,6 +40,19 @@ describe('typed home-busy decline code', () => {
   });
 });
 
+describe('wire v7 decline vocabulary', () => {
+  it('reads a prepared-offer refusal as a typed code', () => {
+    expect(readDeclineCode('preparation_not_found')).toEqual({ code: 'preparation_not_found' });
+  });
+
+  it('bounds the display reason like task.fail: an over-long reason is truncated, never refused', () => {
+    const decoded = decodeEnvelope(wire({ reason: 'x'.repeat(TASK_FAIL_REASON_MAX_BYTES + 1), code: 'offer_capability_missing' }));
+    const reason = (decoded.payload as { reason: string }).reason;
+    expect(new TextEncoder().encode(reason).length).toBeLessThanOrEqual(TASK_FAIL_REASON_MAX_BYTES);
+    expect(reason).toMatch(/truncated/u);
+  });
+});
+
 describe('typed runtime-unavailable cause (#1103 B2a)', () => {
   it('carries the open runtime_unavailable code beside the typed cause', () => {
     const payload = {
@@ -48,8 +62,8 @@ describe('typed runtime-unavailable cause (#1103 B2a)', () => {
       runtimeUnavailable: { cause: 'not_installed' },
     };
     expect(decodeEnvelope(wire(payload)).payload).toEqual(payload);
-    // The code stays an open token: a pre-#1103 receiver records it as unknown.
-    expect(readDeclineCode('runtime_unavailable')).toEqual({ code: 'unknown', reportedCode: 'runtime_unavailable' });
+    // Wire v7 types the code a v6 device already sent.
+    expect(readDeclineCode('runtime_unavailable')).toEqual({ code: 'runtime_unavailable' });
     expect(readRuntimeUnavailableCause('not_installed')).toEqual({ cause: 'not_installed' });
   });
 

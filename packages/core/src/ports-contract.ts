@@ -45,6 +45,7 @@ export const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly string[]
     'append',
     'readUsage',
     'readAfter',
+    'readMessage',
     'recordDelivery',
     'advanceCursor',
     'readCursor',

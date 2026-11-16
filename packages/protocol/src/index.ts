@@ -242,6 +242,7 @@ export {
   InputPreparationReferenceSchema,
   InputPreparationOfferBindingSchema,
   InputPreparationRejectionReasonSchema,
+  PREPARED_OFFER_DECLINE_CODES,
 } from './input-preparation.js';
 export type {
   InputPreparationSource,
@@ -258,6 +259,7 @@ export type {
   InputPreparationReceiptSummary,
   InputPreparationOfferBinding,
   InputPreparationRejectionReason,
+  PreparedOfferDeclineCode,
 } from './input-preparation.js';
 
 export {
@@ -343,12 +345,14 @@ export {
   AgentRefSchema,
   AgentHomeProjectionAgentRefSchema,
   AGENT_REF_MAX_BYTES,
-  DispatchSelectionSchema,
+  ExecutionTargetSchema,
+  ClaimedExecutorSchema,
   ToolsetIdSchema,
   ConfiguredToolsetsSchema,
   RequiredToolsetsSchema,
   CONFIGURED_TOOLSETS_MAX_ITEMS,
   ConnHelloPayloadSchema,
+  CONN_HELLO_CAPABILITIES_MAX_ITEMS,
   AgentHomeAccessSchema,
   AgentMemorySelectionSchema,
   AgentMemoryCommitSchema,
@@ -373,6 +377,10 @@ export {
   TaskCancelPayloadSchema,
   TaskSteerPayloadSchema,
   TaskSteerSealedPayloadSchema,
+  TASK_STEER_TEXT_MAX_BYTES,
+  TaskSteerRefusedPayloadSchema,
+  STEER_REFUSAL_REASONS,
+  readSteerRefusalReason,
   TaskClaimPayloadSchema,
   OfferAdmissionTimingsSchema,
   OFFER_ADMISSION_MAX_DURATION_MS,
@@ -387,6 +395,7 @@ export {
   TaskFailureSchema,
   readTaskFailure,
   readDeclineCode,
+  DECLINE_CODES,
   readRuntimeUnavailableCause,
   TaskCancelledPayloadSchema,
   TaskApprovalResolvedPayloadSchema,
@@ -406,6 +415,7 @@ export {
   TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH,
   offerSelectionViolation,
 } from './messages.js';
+export { steerRefusalEnvelopeId, uuidFromSha256 } from './steer-refusal.js';
 export type {
   ResultDocumentCheck,
   MessageType,
@@ -416,7 +426,8 @@ export type {
   RuntimeUnavailableEntry,
   AgentRef,
   AgentHomeProjectionAgentRef,
-  DispatchSelection,
+  ExecutionTarget,
+  ClaimedExecutor,
   ToolsetId,
   ConnHelloPayload,
   SessionSelection,
@@ -449,6 +460,9 @@ export type {
   TaskRejectPayload,
   TaskCancelPayload,
   TaskSteerPayload,
+  TaskSteerRefusedPayload,
+  SteerRefusalReason,
+  SteerRefusalReasonReading,
   TaskClaimPayload,
   OfferAdmissionTimings,
   TaskStartedPayload,
@@ -487,6 +501,7 @@ export {
   EnvelopeParseError,
   UnknownMessageTypeError,
   EnvelopeValidationError,
+  ProtocolNegotiationError,
 } from './errors.js';
 
 export { encodeEnvelope, decodeEnvelope, createEnvelope, parseMessage } from './codec.js';

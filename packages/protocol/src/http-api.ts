@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { PROTOCOL_VERSION } from './version.js';
 import { CONTENT_HASH_RE } from './blob.js';
 import {
   AgentRefSchema,
@@ -249,7 +248,18 @@ export const ActivityIngressSchema = z.object({
   activityMaxBytes: z.number().int().min(2),
 });
 export type ActivityIngress = z.infer<typeof ActivityIngressSchema>;
-export const OUTBOUND_REFUSAL_REASONS = ['payload_invalid', 'not_permitted', 'limit_exceeded', 'state_conflict', 'unsupported'] as const;
+/**
+ * Why one posted envelope was rejected. `protocol_version_unsupported` (wire
+ * v7) answers an entry whose `v` is another wire major; `type_unsupported`
+ * answers a daemon-to-server type this server does not know, and the sender
+ * does not retry that envelope. The shape of such an answer is frozen from v7
+ * on, so a peer of another major reads it (docs/protocol.md "Cross-version
+ * refusal").
+ */
+export const OUTBOUND_REFUSAL_REASONS = [
+  'payload_invalid', 'not_permitted', 'limit_exceeded', 'state_conflict', 'unsupported',
+  'protocol_version_unsupported', 'type_unsupported',
+] as const;
 /** `unknown` is an unrecognized wire reason string, kept as an observation. */
 export type OutboundRefusalReason = typeof OUTBOUND_REFUSAL_REASONS[number] | 'unknown';
 function isOutboundRefusalCode(value: string): value is typeof OUTBOUND_REFUSAL_REASONS[number] {
@@ -271,11 +281,6 @@ export const EventsPollResponseSchema = z.object({
    */
   events: z.array(z.unknown()),
   cursor: z.number().int(),
-  /**
-   * Required: the server capabilities for THIS long-poll response. Each page
-   * replaces the daemon's advertisement; an empty list advertises nothing.
-   */
-  capabilities: z.array(z.string()),
   /** Required in v3: the activity limits that apply to new progress pushes. */
   ingress: ActivityIngressSchema,
 });
@@ -305,16 +310,18 @@ export const MAX_MESSAGES_PER_BATCH = 256;
 export const MESSAGES_SEND_MAX_BODY_BYTES = 2 * 1024 * 1024;
 
 /**
- * The batch frame only (#1121). Each entry must speak this wire major and
- * carry the UUID its outcome is correlated by; everything else is decoded per
- * entry with `parseMessage`, so one invalid envelope is answered
+ * The batch frame only (#1121). Each entry carries a positive wire major and
+ * the UUID its outcome is correlated by; everything else is decoded per entry
+ * with `parseMessage`, so one invalid envelope is answered
  * `rejected: payload_invalid` on its own instead of failing every envelope in
  * the batch — the same split as `EventsPollResponseSchema.events` (#386) on
- * the receive side. A different `v` still fails the whole request: the wire
- * major belongs to the sender, which could not read this version's outcomes.
+ * the receive side. An entry of another major is answered `rejected:
+ * protocol_version_unsupported` on its own (wire v7): a peer of any major
+ * reads that answer, so a mismatched daemon stops at its handshake instead of
+ * retrying a request this server cannot read.
  */
 export const MessagesSendRequestSchema = z.object({
-  messages: z.array(z.looseObject({ v: z.literal(PROTOCOL_VERSION), id: z.uuid() })).max(MAX_MESSAGES_PER_BATCH),
+  messages: z.array(z.looseObject({ v: z.number().int().positive(), id: z.uuid() })).max(MAX_MESSAGES_PER_BATCH),
 });
 export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
 
@@ -328,17 +335,13 @@ export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
  * (or deduplicated). The client enforces the per-envelope rules against the
  * posted batch and treats a violation as an unusable response.
  *
- * `capabilities` (additive) is the same server capability advertisement a
- * `GET /byok/events` response carries. A server includes it when the batch
- * carries `conn.hello`: the daemon's handshake is a lone `conn.hello` POST,
- * so its answer carries readiness and capabilities in one round trip.
- * Absence means "no update" — the daemon keeps the advertisement it already
- * holds — never an empty list.
+ * The cross-version refusal `{ accepted, rejected, outcomes }` with a
+ * `protocol_version_unsupported` outcome is frozen from v7 on: a v6 daemon
+ * reads `rejected > 0` on its lone hello as a refused handshake and halts.
  */
 export const MessagesSendResponseSchema = z.object({
   accepted: z.number().int().nonnegative(),
   rejected: z.number().int().nonnegative().optional(),
-  capabilities: z.array(z.string()).optional(),
   ingress: ActivityIngressSchema.optional(),
   outcomes: z.array(MessageSendOutcomeSchema).max(MAX_MESSAGES_PER_BATCH),
 });

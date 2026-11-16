@@ -11,7 +11,7 @@
  *   the field is an array that includes it); a dotted field names a nested
  *   field, for example `sealed.ciphertextRef`. A type entry applies to every
  *   message of that type. Only server-to-daemon surfaces are gated, each by a
- *   device flag: wire v6 has no server flag.
+ *   device flag: the server advertises nothing (wire v7).
  *
  * v3 baseline: every v3 decoder reads every surface v2 had, so the v2
  * strip-safe rows and the v2 `result-document` gate are gone. The device
@@ -34,6 +34,11 @@
  * gone. The rows left name device flags that a daemon advertises only when it
  * is configured for them.
  *
+ * v7 baseline: the server capability channel is gone, so every row is a
+ * device-gated server-to-daemon surface. The offer's model lanes
+ * (`target.lane` subscription, byok, byok-profile) take the
+ * `dispatch-selection` row the old `dispatchSelection` field had.
+ *
  * Senders derive their admission flags from {@link requiredReceiverCapabilities}
  * and nowhere else, so a gate cannot exist in one place and be missing in
  * another. This module imports no runtime code except the plain-data split
@@ -43,20 +48,18 @@ import type { MessageType } from './messages.js';
 import { SEALED_CATEGORY_CAPABILITY, SEALED_SPLIT_TABLE, type SealableMessageType, type SealedSplitEntry } from './sealed-split-table.js';
 import type { CapabilityFlag } from './version.js';
 
+/** One gated server-to-daemon surface and the device flag it needs. */
 export interface WireAddition {
-  readonly kind: 'envelope';
-  readonly rule: 'gated';
   readonly surface: MessageType;
   readonly field?: string;
   readonly value?: string;
   readonly capability: CapabilityFlag;
-  readonly advertisedBy: 'device' | 'server';
 }
 
 const offerRow = (field: string | undefined, capability: CapabilityFlag, value?: string): WireAddition => ({
-  kind: 'envelope', rule: 'gated', surface: 'task.offer',
+  surface: 'task.offer',
   ...(field === undefined ? {} : { field }), ...(value === undefined ? {} : { value }),
-  capability, advertisedBy: 'device',
+  capability,
 });
 
 /**
@@ -71,7 +74,7 @@ function sealedRows(): WireAddition[] {
   return (Object.keys(SEALED_SPLIT_TABLE) as SealableMessageType[]).flatMap((surface): WireAddition[] => {
     const entry: SealedSplitEntry = SEALED_SPLIT_TABLE[surface];
     if (entry.category !== 'task-input') return [];
-    return [{ kind: 'envelope', rule: 'gated', surface, field: entry.marker, capability: SEALED_CATEGORY_CAPABILITY[entry.category], advertisedBy: 'device' }];
+    return [{ surface, field: entry.marker, capability: SEALED_CATEGORY_CAPABILITY[entry.category] }];
   });
 }
 
@@ -83,7 +86,7 @@ function sealedRows(): WireAddition[] {
 const SEALED_V2_ROWS: readonly WireAddition[] = [
   offerRow('sealing.categories', 'sealed-payload-v2', 'agent-message'),
   offerRow('sealing.categories', 'sealed-payload-v2', 'memory-projection'),
-  { kind: 'envelope', rule: 'gated', surface: 'agent.message.disposition', field: 'contentMac', capability: 'sealed-payload-v2', advertisedBy: 'device' },
+  { surface: 'agent.message.disposition', field: 'contentMac', capability: 'sealed-payload-v2' },
 ];
 
 const PLAIN_ROWS: readonly WireAddition[] = [
@@ -91,7 +94,9 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   // field and value names the device flag a daemon advertises when it is
   // configured for it.
   offerRow(undefined, 'agent-home-contract'),
-  offerRow('dispatchSelection', 'dispatch-selection'),
+  offerRow('target.lane', 'dispatch-selection', 'subscription'),
+  offerRow('target.lane', 'dispatch-selection', 'byok'),
+  offerRow('target.lane', 'dispatch-selection', 'byok-profile'),
   offerRow('requiredToolsets', 'toolset-selection'),
   offerRow('homeAccess', 'agent-home-readers'),
   offerRow('agentMemory', 'agent-memory-selection'),
@@ -105,20 +110,20 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   offerRow('session.mode', 'agent-egress-fresh-session', 'fresh'),
   offerRow('preparation', 'agent-input-preparation-v9'),
   // Server to daemon: Agent control messages.
-  { kind: 'envelope', rule: 'gated', surface: 'agent.content.read', capability: 'agent-home-contract', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'agent.content.read', capability: 'agent-egress-policy', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'agent.content.read', capability: 'agent-egress-reliable-ack', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'agent.content.read', field: 'surface', value: 'workspace', capability: 'agent-content-workspace-read', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'agent.content.read', field: 'surface', value: 'transcript', capability: 'agent-content-transcript-read', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'agent.content.read', field: 'surface', value: 'artifact', capability: 'agent-content-artifact-read', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'agent.home.projection', capability: 'agent-home-contract', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'agent.home.projection', capability: 'agent-home-projection', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'agent.home.projection', field: 'hostRevision', capability: 'agent-home-projection-host-revision', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'agent.input.preparation', capability: 'agent-home-contract', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'agent.input.preparation', capability: 'agent-input-preparation-v9', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'provider.provisioning.available', capability: 'provider-provisioning.v1', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'agent.memory.intent.available', capability: 'agent-memory-intent.v1', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'e2ee.key_package.available', capability: 'sealed-payload-v1', advertisedBy: 'device' },
+  { surface: 'agent.content.read', capability: 'agent-home-contract' },
+  { surface: 'agent.content.read', capability: 'agent-egress-policy' },
+  { surface: 'agent.content.read', capability: 'agent-egress-reliable-ack' },
+  { surface: 'agent.content.read', field: 'surface', value: 'workspace', capability: 'agent-content-workspace-read' },
+  { surface: 'agent.content.read', field: 'surface', value: 'transcript', capability: 'agent-content-transcript-read' },
+  { surface: 'agent.content.read', field: 'surface', value: 'artifact', capability: 'agent-content-artifact-read' },
+  { surface: 'agent.home.projection', capability: 'agent-home-contract' },
+  { surface: 'agent.home.projection', capability: 'agent-home-projection' },
+  { surface: 'agent.home.projection', field: 'hostRevision', capability: 'agent-home-projection-host-revision' },
+  { surface: 'agent.input.preparation', capability: 'agent-home-contract' },
+  { surface: 'agent.input.preparation', capability: 'agent-input-preparation-v9' },
+  { surface: 'provider.provisioning.available', capability: 'provider-provisioning.v1' },
+  { surface: 'agent.memory.intent.available', capability: 'agent-memory-intent.v1' },
+  { surface: 'e2ee.key_package.available', capability: 'sealed-payload-v1' },
 ];
 
 export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([

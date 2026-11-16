@@ -4,6 +4,7 @@ import { AGENT_MEMORY_START_REFUSALS, RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNT
 import { BlobRefSchema } from './blob.js';
 import {
   SEALED_DECLINE_CODES,
+  type SealedDeclineCode,
   SealedTaskInputSchema,
   SealedAgentMessageSchema,
   SealedTaskOutputSchema,
@@ -43,8 +44,10 @@ import {
   InputPreparationOfferBindingSchema,
   InputPreparationPolicyRevisionSchema,
   InputPreparationProfileIdSchema,
+  InputPreparationRejectionReasonSchema,
   InputPreparationSelectionSchema,
   InputPreparationSourceSchema,
+  PREPARED_OFFER_DECLINE_CODES,
 } from './input-preparation.js';
 import { openVocabularyToken, unrecognizedToken } from './open-vocabulary.js';
 import { ProviderProfileBindingSchema } from './provider-profile-binding.js';
@@ -272,10 +275,14 @@ export const ConfiguredToolsetsSchema = z
   .max(CONFIGURED_TOOLSETS_MAX_ITEMS)
   .superRefine((ids, ctx) => rejectDuplicateToolsets(ids, ctx, 'configured'));
 
+/** The most capability flags one `conn.hello` carries (wire v7). */
+export const CONN_HELLO_CAPABILITIES_MAX_ITEMS = 64;
+
 /** daemon -> server: opening handshake. */
 export const ConnHelloPayloadSchema = z.object({
   protocolVersions: z.array(ProtocolVersionNumberSchema).max(16),
-  capabilities: z.array(z.string()),
+  /** Device capability flags; at most {@link CONN_HELLO_CAPABILITIES_MAX_ITEMS}. An unknown flag is ignored. */
+  capabilities: z.array(z.string()).max(CONN_HELLO_CAPABILITIES_MAX_ITEMS),
   deviceId: z.string(),
   productId: z.string(),
   /** U4a Local Agent release identity; this is the sole client-version authority. */
@@ -332,18 +339,21 @@ const DispatchTargetIdSchema = z
   .regex(/^[^\u0000\r\n]+$/u, 'dispatch target ids must not contain control line breaks');
 
 /**
- * The web-selected runtime/model target carried end to end with a task.
- *
- * This is an additive v1 field. The discriminated union makes lane ownership
- * fail closed at decode time: subscription credentials can only belong to the
- * vendor CLIs, while a BYOK provider can only be executed through Pi.
+ * What a `task.offer` asks the device to run (wire v7): one discriminated
+ * union, so no two selectors can disagree. `auto` lets the device pick a
+ * built-in runtime by its own preference; `runtime` names a built-in runtime
+ * with the device's model; the three model lanes carry a model selection and
+ * fix which runtime may hold it (subscription credentials belong to the
+ * vendor CLIs, a BYOK provider runs only through Pi); `harness` names a
+ * custom harness. The field is required: absence carries no meaning.
  */
-export const DispatchSelectionSchema = z.discriminatedUnion('lane', [
+export const ExecutionTargetSchema = z.discriminatedUnion('lane', [
+  z.object({ lane: z.literal('auto') }).strict(),
+  z.object({ lane: z.literal('runtime'), runtimeId: RuntimeIdSchema }).strict(),
   z
     .object({
       lane: z.literal('subscription'),
       runtimeId: z.enum(['claude', 'codex']),
-      providerId: z.null(),
       modelId: DispatchTargetIdSchema,
     })
     .strict(),
@@ -362,8 +372,21 @@ export const DispatchSelectionSchema = z.discriminatedUnion('lane', [
       providerProfile: ProviderProfileBindingSchema,
     })
     .strict(),
+  z.object({ lane: z.literal('harness'), harnessId: HarnessIdSchema }).strict(),
 ]);
-export type DispatchSelection = z.infer<typeof DispatchSelectionSchema>;
+export type ExecutionTarget = z.infer<typeof ExecutionTargetSchema>;
+
+/**
+ * What a device actually ran (wire v7): a built-in runtime or a custom
+ * harness, never a model. The offer's {@link ExecutionTargetSchema} is the
+ * request; this is the claim's answer, so a claim cannot assert a model
+ * selection it never confirmed.
+ */
+export const ClaimedExecutorSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('runtime'), runtimeId: RuntimeIdSchema }).strict(),
+  z.object({ kind: z.literal('harness'), harnessId: HarnessIdSchema }).strict(),
+]);
+export type ClaimedExecutor = z.infer<typeof ClaimedExecutorSchema>;
 
 /**
  * #654: the plaintext branch of a sealable type refuses the sealed members.
@@ -454,14 +477,11 @@ const OFFER_FIELDS = {
     .refine(window => window.fromMs <= window.toMs, { message: 'nativeSessions requires fromMs <= toMs' }).optional(),
   homeAccess: AgentHomeAccessSchema.optional(),
   requiredToolsets: RequiredToolsetsSchema.optional(),
-  runtime: RuntimeIdSchema.optional(),
-  harnessId: HarnessIdSchema.optional(),
-  dispatchSelection: DispatchSelectionSchema.optional(),
+  target: ExecutionTargetSchema,
   terminalProjection: TerminalProjectionSelectionSchema.optional(),
   limits: z
     .object({
       maxDurationMs: z.number().int().positive().optional(),
-      maxTokens: z.number().int().positive().optional(),
     })
     .strict()
     .optional(),
@@ -514,10 +534,15 @@ function offerRule(payload: OfferRuleInput, ctx: z.RefinementCtx, plaintext: boo
   }
 }
 
-const OFFER_SELECTION_RULES = ['agent_memory_selection_invalid', 'native_sessions_selection_invalid', 'runtime_selection_mismatch', 'harness_selection_conflict'] as const;
+const OFFER_SELECTION_RULES = ['agent_memory_selection_invalid', 'native_sessions_selection_invalid'] as const;
 /** A semantic offer selection rule; also the `task.decline` code a device sends when the rule fails. */
 export type OfferSelectionRule = (typeof OFFER_SELECTION_RULES)[number];
 export type OfferSelectionViolation = { readonly rule: OfferSelectionRule; readonly path: readonly string[]; readonly message: string };
+
+/** Whether an offer target names Pi explicitly: the built-in Pi runtime or a Pi model lane. */
+function targetsPi(target: { readonly lane: string; readonly runtimeId?: string } | undefined): boolean {
+  return target !== undefined && target.lane !== 'auto' && target.lane !== 'harness' && target.runtimeId === 'pi';
+}
 
 /**
  * The single definition of the offer selection rules. The Host offer schemas
@@ -536,11 +561,9 @@ export function offerSelectionViolation(payload: {
   readonly preparation?: unknown;
   readonly requiredToolsets?: unknown;
   readonly messageEgress?: unknown;
-  readonly runtime?: string;
-  readonly harnessId?: string;
-  readonly dispatchSelection?: { readonly runtimeId: string };
+  readonly target?: { readonly lane: string; readonly runtimeId?: string };
 }): OfferSelectionViolation | undefined {
-  const { session, homeAccess, agentMemory, agentMemoryCommit, runtime, harnessId, dispatchSelection } = payload;
+  const { session, homeAccess, agentMemory, agentMemoryCommit } = payload;
   if (homeAccess === 'memory-reader' && (agentMemory === 'read-write' || agentMemory === 'read-write-if-admitted')) {
     return { rule: 'agent_memory_selection_invalid', path: ['agentMemory'], message: `agentMemory ${agentMemory} requires a writer; a memory-reader Attempt reads memory only` };
   }
@@ -548,22 +571,17 @@ export function offerSelectionViolation(payload: {
     return { rule: 'agent_memory_selection_invalid', path: ['agentMemoryCommit'], message: 'agentMemoryCommit needs a writer; a memory-reader Attempt reads the live files' };
   }
   if (payload.nativeSessions !== undefined) {
-    // nativeSessions runs only a fresh memory-only task, without other tool or output lanes.
+    // nativeSessions runs only a fresh memory-only Pi task, without other tool or output lanes.
     const rule = 'native_sessions_selection_invalid';
+    if (!targetsPi(payload.target)) return { rule, path: ['target'], message: 'nativeSessions needs an explicit Pi target' };
     if (session?.mode !== 'fresh') return { rule, path: ['session'], message: 'nativeSessions needs a fresh session' };
     if (agentMemory !== 'none') return { rule, path: ['agentMemory'], message: 'nativeSessions needs agentMemory none' };
     if (payload.terminalProjection !== undefined && payload.terminalProjection.mode !== 'none') {
       return { rule, path: ['terminalProjection'], message: 'nativeSessions forbids terminal projection' };
     }
-    for (const field of ['agentMemoryCommit', 'homeAccess', 'preparation', 'requiredToolsets', 'messageEgress', 'harnessId'] as const) {
+    for (const field of ['agentMemoryCommit', 'homeAccess', 'preparation', 'requiredToolsets', 'messageEgress'] as const) {
       if (payload[field] !== undefined) return { rule, path: [field], message: `nativeSessions forbids ${field}` };
     }
-  }
-  if (runtime !== undefined && dispatchSelection !== undefined && runtime !== dispatchSelection.runtimeId) {
-    return { rule: 'runtime_selection_mismatch', path: ['runtime'], message: `runtime ${runtime} does not match dispatchSelection.runtimeId ${dispatchSelection.runtimeId}` };
-  }
-  if (harnessId !== undefined && (runtime !== undefined || dispatchSelection !== undefined)) {
-    return { rule: 'harness_selection_conflict', path: ['harnessId'], message: 'harnessId conflicts with built-in runtime selection' };
   }
   return undefined;
 }
@@ -1027,10 +1045,19 @@ export const TaskCancelPayloadSchema = z.object({
 });
 export type TaskCancelPayload = z.infer<typeof TaskCancelPayloadSchema>;
 
+/**
+ * The most UTF-8 bytes a plaintext `task.steer` text carries (wire v7). A
+ * sender refuses a longer text before it enqueues the steer. A sealed steer's
+ * plaintext is not checked on the device: it is opened after delivery.
+ */
+export const TASK_STEER_TEXT_MAX_BYTES = 65_536;
+
 /** server -> daemon: inject steering text into a running task. */
 const TaskSteerPlainPayloadSchema = z.object({
   ...NO_SEALED_MEMBER,
-  text: z.string(),
+  text: z.string().refine((text) => new TextEncoder().encode(text).length <= TASK_STEER_TEXT_MAX_BYTES, {
+    message: `task.steer text is at most ${TASK_STEER_TEXT_MAX_BYTES} UTF-8 bytes`,
+  }),
 });
 
 // ---------------------------------------------------------------------------
@@ -1070,18 +1097,11 @@ export type OfferAdmissionTimings = z.infer<typeof OfferAdmissionTimingsSchema>;
  * Claiming no longer implies the task is `Running` (M1 gap #2) — see
  * `task.started`.
  *
- * `runtime` (M5, additive-minor — docs/protocol.md §3.1): the ACTUAL
- * adapter this device selected for the task, distinct from the offer's
- * own `runtime` (the merely REQUESTED one, `TaskOfferPayloadSchema`'s `runtime`
- * above). When an offer names no runtime the daemon auto-selects (pi-first —
- * `TaskRunner.pickAdapter`, `packages/client`'s `task-runner.ts`), and before
- * this field existed the server had no way to learn which adapter actually
- * ran — `TaskSnapshot.runtime` (`packages/server`'s `types.ts`) only ever
- * recorded what was requested. Plain optional property on this already-
- * tolerant `z.object()`: an old server simply never reads it, so this needed
- * no version bump and no emission gating — a new daemon sends it
- * unconditionally, regardless of whether the connected server is new enough
- * to store it.
+ * `executor` (wire v7, required): the ACTUAL runtime or harness this device
+ * selected for the task, distinct from the offer's `target` (the merely
+ * REQUESTED one). For an `auto` target the device picks by its own
+ * preference, and this is the only way the server learns what ran. It never
+ * carries a model: see {@link ClaimedExecutorSchema}.
  *
  * `capabilities` (S0/D-4, additive-minor — docs/protocol.md §2.4): the
  * TASK-level capability authority — what the claiming adapter reported about
@@ -1100,10 +1120,9 @@ export type OfferAdmissionTimings = z.infer<typeof OfferAdmissionTimingsSchema>;
  */
 export const TaskClaimPayloadSchema = z.object({
   deviceId: z.string(),
-  agentId: z.string().optional(),
   agentRef: AgentRefSchema.optional(),
-  runtime: RuntimeIdSchema.optional(),
-  harnessId: HarnessIdSchema.optional(),
+  /** Wire v7: what this device runs the task with; the offer's `target` was only the request. */
+  executor: ClaimedExecutorSchema,
   capabilities: RuntimeCapabilitiesSchema.optional(),
   admission: OfferAdmissionTimingsSchema.optional(),
 });
@@ -1133,13 +1152,41 @@ export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
  * terminal-state consumer into "Failed or Declined, handle both".
  */
 const HOME_DECLINE_CODES = ['agent_home_writer_busy', 'agent_home_reader_busy'] as const;
-const DECLINE_CODES = [...HOME_DECLINE_CODES, ...SEALED_DECLINE_CODES, ...OFFER_SELECTION_RULES] as const;
-export type TaskDeclineCode = (typeof DECLINE_CODES)[number];
 /**
- * The decline code is open (#1121): a well-formed code this version does not
+ * Wire v7: the offer admission outcomes that were a `<code>: ` prefix of the
+ * decline `reason`, and `runtime_unavailable`, which devices already sent as
+ * a code. Each names device state, never user content.
+ */
+const OFFER_ADMISSION_DECLINE_CODES = [
+  'runtime_unavailable',
+  'offer_capability_missing',
+  'preparation_store_unavailable',
+  'agent_memory_commit_unavailable',
+  'agent_memory_unavailable',
+  'tool_authorization_unsupported',
+  'file_scope_conflicts_with_all',
+  'file_scope_unsupported',
+] as const;
+/**
+ * Every `task.decline` code this version knows (wire v7). The input
+ * preparation rejections and the prepared-offer refusals are referenced from
+ * their own vocabularies. A code names device state: on a sealed task it
+ * stays plaintext while `reason` is sealed, so no code is ever derived from
+ * user content. Append-only.
+ *
+ * The wire code is open (#1121): a well-formed code this version does not
  * know is accepted and kept verbatim, so the decline is still recorded.
  * {@link readDeclineCode} is the typed reading.
  */
+export const DECLINE_CODES = [
+  ...HOME_DECLINE_CODES,
+  ...SEALED_DECLINE_CODES,
+  ...OFFER_SELECTION_RULES,
+  ...OFFER_ADMISSION_DECLINE_CODES,
+  ...PREPARED_OFFER_DECLINE_CODES,
+  ...InputPreparationRejectionReasonSchema.options,
+] as const;
+export type TaskDeclineCode = (typeof DECLINE_CODES)[number];
 /**
  * The typed reason a runtime was unavailable before claim (#1103 D6).
  * Append-only: an unknown well-formed cause is accepted and kept verbatim
@@ -1157,7 +1204,8 @@ const RuntimeUnavailableSchema = z.object({
 
 const DeclineFields = z.object({
   ...NO_SEALED_MEMBER,
-  reason: z.string(),
+  /** Display text, bounded like `task.fail.reason` (`boundFailureReason`); the code carries the meaning. */
+  reason: z.string().transform(boundFailureReason),
   retryable: z.boolean().optional(),
   agentRef: AgentRefSchema.optional(),
   code: z.union([z.enum(DECLINE_CODES), unrecognizedToken(DECLINE_CODES)]).optional(),
@@ -1498,7 +1546,11 @@ export type TerminalResidentMemoryOverLimit = z.infer<typeof TerminalResidentMem
  */
 const TaskCompletePlainPayloadSchema = z.object({
   ...NO_SEALED_MEMBER,
-  harnessId: HarnessIdSchema.optional(),
+  /**
+   * Wire v7: the claimed executor, echoed. Required: a task completes only
+   * from `Running`, so every completion follows a claim.
+   */
+  executor: ClaimedExecutorSchema,
   summary: z.string(),
   /**
    * The runtime's closing reply: the assistant text after the last tool
@@ -1575,7 +1627,13 @@ const TaskFailPlainPayloadSchema = z.object({
   ...NO_SEALED_MEMBER,
   /** Local interruption observation bound to the immutable offer; does not assert a cloud claim. */
   recovery: z.object({ kind: z.literal('daemon_interrupted'), offerId: z.uuid() }).strict().optional(),
-  harnessId: HarnessIdSchema.optional(),
+  /**
+   * Wire v7: the claimed executor, echoed. Optional on the wire: a device that
+   * restarts after acknowledging an offer it never claimed reports that
+   * interruption with no executor. The server requires it, equal to the
+   * claimed executor, on a failure after a claim.
+   */
+  executor: ClaimedExecutorSchema.optional(),
   /**
    * Display text, bounded by `boundFailureReason` on every parse (#1124):
    * credentials redacted, at most `TASK_FAIL_REASON_MAX_BYTES` UTF-8 bytes.
@@ -1616,7 +1674,8 @@ const TaskFailPlainPayloadSchema = z.object({
  */
 const TaskCancelledPlainPayloadSchema = z.object({
   ...NO_SEALED_MEMBER,
-  harnessId: HarnessIdSchema.optional(),
+  /** Wire v7: the claimed executor, echoed after a claim; a cancel before any claim omits it. */
+  executor: ClaimedExecutorSchema.optional(),
   reason: z.string().optional(),
   usage: TerminalInferenceUsageSchema.optional(),
   agentRef: AgentRefSchema.optional(),
@@ -1624,6 +1683,38 @@ const TaskCancelledPlainPayloadSchema = z.object({
   agentHomeMemoryChange: TerminalAgentHomeMemoryChangeSchema.optional(),
   residentMemoryOverLimit: TerminalResidentMemoryOverLimitSchema.optional(),
 });
+
+/** Why a device did not deliver a `task.steer` to the runtime (#2009). Append-only. */
+export const STEER_REFUSAL_REASONS = ['input_too_large', 'steer_unsupported', 'task_not_active'] as const;
+export type SteerRefusalReason = (typeof STEER_REFUSAL_REASONS)[number];
+
+/**
+ * daemon -> server (wire v7, #2009): the device received this `task.steer`
+ * and did not deliver it to the runtime. It names the refused steer by its
+ * envelope id and carries no content, so it is plaintext on a sealed task too.
+ * Its envelope id is `steerRefusalEnvelopeId(steerMessageId)`, so every
+ * replay of one refusal is the same envelope. The first reason recorded wins.
+ *
+ * `reason` is open (#1121), like the decline code: a later device may report
+ * a reason this version does not know, and {@link readSteerRefusalReason}
+ * reads it as `unknown` with the raw token kept.
+ */
+export const TaskSteerRefusedPayloadSchema = z.object({
+  steerMessageId: z.uuid(),
+  reason: z.union([z.enum(STEER_REFUSAL_REASONS), unrecognizedToken(STEER_REFUSAL_REASONS)]),
+}).strict();
+export type TaskSteerRefusedPayload = z.infer<typeof TaskSteerRefusedPayloadSchema>;
+
+/** A steer refusal reason as this version understands it. */
+export type SteerRefusalReasonReading =
+  | { readonly reason: SteerRefusalReason }
+  | { readonly reason: 'unknown'; readonly reportedReason: string };
+
+export function readSteerRefusalReason(reason: string): SteerRefusalReasonReading {
+  return (STEER_REFUSAL_REASONS as readonly string[]).includes(reason)
+    ? { reason: reason as SteerRefusalReason }
+    : { reason: 'unknown', reportedReason: reason };
+}
 
 /**
  * daemon -> server: a pending `task.await_approval` was resolved entirely
@@ -1701,9 +1792,12 @@ export type TaskFailSealedPayload = z.infer<typeof TaskFailSealedPayloadSchema>;
  * The sealed decline codes go only on the plaintext branch: a device that
  * cannot open or use the scope key often cannot seal a reply either.
  */
+const SEALED_BRANCH_DECLINE_CODES = DECLINE_CODES.filter(
+  (code): code is Exclude<TaskDeclineCode, SealedDeclineCode> => !(SEALED_DECLINE_CODES as readonly string[]).includes(code),
+) as [Exclude<TaskDeclineCode, SealedDeclineCode>, ...Exclude<TaskDeclineCode, SealedDeclineCode>[]];
 export const TaskDeclineSealedPayloadSchema = DeclineFields.omit({ reason: true })
   .extend({
-    code: z.union([z.enum([...HOME_DECLINE_CODES, ...OFFER_SELECTION_RULES]), unrecognizedToken(DECLINE_CODES)]).optional(),
+    code: z.union([z.enum(SEALED_BRANCH_DECLINE_CODES), unrecognizedToken(DECLINE_CODES)]).optional(),
     sealed: SealedTaskOutputSchema,
   })
   .strict();
@@ -1824,6 +1918,7 @@ export const MESSAGE_PAYLOAD_SCHEMAS = {
   'task.fail': TaskFailPayloadSchema as typeof TaskFailPayloadSchema,
   'task.cancelled': TaskCancelledPayloadSchema as typeof TaskCancelledPayloadSchema,
   'task.approval_resolved': TaskApprovalResolvedPayloadSchema as typeof TaskApprovalResolvedPayloadSchema,
+  'task.steer_refused': TaskSteerRefusedPayloadSchema as typeof TaskSteerRefusedPayloadSchema,
   'agent.egress.reliable': AgentEgressReliablePayloadSchema as typeof AgentEgressReliablePayloadSchema,
   'agent.message.draft': AgentMessageDraftPayloadSchema as typeof AgentMessageDraftPayloadSchema,
   'agent.message.publish': AgentMessagePublishPayloadSchema as typeof AgentMessagePublishPayloadSchema,
@@ -1878,6 +1973,7 @@ export const DAEMON_TO_SERVER_TYPES = [
   'task.fail',
   'task.cancelled',
   'task.approval_resolved',
+  'task.steer_refused',
   'agent.egress.reliable',
   'agent.message.draft',
   'agent.message.publish',

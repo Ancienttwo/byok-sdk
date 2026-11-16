@@ -1,5 +1,5 @@
 import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl } from '../cloud.js';
-import { uuidFromSha256 } from '../offer-identity.js';
+import { uuidFromSha256 } from '@byok-sdk/protocol';
 import { requiredReceiverCapabilities } from '@byok-sdk/protocol';
 import { type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import {

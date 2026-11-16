@@ -11,6 +11,8 @@ import {
   requiredReceiverCapabilities,
 } from '../index';
 
+const EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+
 /**
  * `task.complete.document` — the bounded structured-result channel and its
  * cap semantics. See `messages.ts`'s `RESULT_DOCUMENT_MAX_BYTES` /
@@ -40,7 +42,7 @@ describe('task.complete.document: byte cap boundary', () => {
     const document = documentOfExactJsonBytes(RESULT_DOCUMENT_MAX_BYTES);
     expect(new TextEncoder().encode(JSON.stringify(document)).length).toBe(RESULT_DOCUMENT_MAX_BYTES);
 
-    const result = TaskCompletePayloadSchema.safeParse({ summary: 'done', sessionRef: 'sess-1', document });
+    const result = TaskCompletePayloadSchema.safeParse({ executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1', document });
     expect(result.success).toBe(true);
   });
 
@@ -48,7 +50,7 @@ describe('task.complete.document: byte cap boundary', () => {
     const document = documentOfExactJsonBytes(RESULT_DOCUMENT_MAX_BYTES + 1);
     expect(new TextEncoder().encode(JSON.stringify(document)).length).toBe(RESULT_DOCUMENT_MAX_BYTES + 1);
 
-    const result = TaskCompletePayloadSchema.safeParse({ summary: 'done', sessionRef: 'sess-1', document });
+    const result = TaskCompletePayloadSchema.safeParse({ executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1', document });
     expect(result.success).toBe(false);
   });
 
@@ -61,7 +63,7 @@ describe('task.complete.document: byte cap boundary', () => {
 
     expect(checkResultDocument(atCap)).toEqual({ ok: true, bytes: RESULT_DOCUMENT_MAX_BYTES, canonical: atCap });
     expect(checkResultDocument(overCap)).toEqual({ ok: false, reason: 'over-cap', bytes: RESULT_DOCUMENT_MAX_BYTES + 2 });
-    expect(TaskCompletePayloadSchema.safeParse({ summary: 'done', sessionRef: 'sess-1', document: overCap }).success).toBe(false);
+    expect(TaskCompletePayloadSchema.safeParse({ executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1', document: overCap }).success).toBe(false);
   });
 
   it('rejects a non-JSON-serializable document (circular reference, BigInt, function root)', () => {
@@ -71,14 +73,14 @@ describe('task.complete.document: byte cap boundary', () => {
     for (const document of [circular, { big: 10n }, () => 'not data', { toJSON() { throw new Error('nope'); } }]) {
       expect(checkResultDocument(document)).toEqual({ ok: false, reason: 'not-serializable' });
       expect(
-        TaskCompletePayloadSchema.safeParse({ summary: 'done', sessionRef: 'sess-1', document }).success,
+        TaskCompletePayloadSchema.safeParse({ executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1', document }).success,
         `must reject non-serializable document: ${String(document)}`,
       ).toBe(false);
     }
   });
 
   it('accepts a payload with NO document at all — the field is optional and its absence is the pre-existing shape', () => {
-    const result = TaskCompletePayloadSchema.safeParse({ summary: 'done', sessionRef: 'sess-1' });
+    const result = TaskCompletePayloadSchema.safeParse({ executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1' });
     expect(result.success).toBe(true);
     expect(result.success && 'document' in result.data).toBe(false);
   });
@@ -86,7 +88,7 @@ describe('task.complete.document: byte cap boundary', () => {
   it('accepts every JSON root shape, not just objects — the channel is schema-neutral', () => {
     for (const document of [[1, 2, 3], 'a string', 42, true, null, {}]) {
       expect(
-        TaskCompletePayloadSchema.safeParse({ summary: 'done', sessionRef: 'sess-1', document }).success,
+        TaskCompletePayloadSchema.safeParse({ executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1', document }).success,
         `must accept JSON root: ${JSON.stringify(document)}`,
       ).toBe(true);
     }
@@ -121,7 +123,7 @@ describe('task.complete.document must be plain JSON data', () => {
     expect(new TextEncoder().encode(JSON.stringify({ document: smuggler })).length).toBeGreaterThan(RESULT_DOCUMENT_MAX_BYTES);
 
     expect(checkResultDocument(smuggler)).toEqual({ ok: false, reason: 'not-plain-json' });
-    expect(TaskCompletePayloadSchema.safeParse({ summary: 'done', sessionRef: 'sess-1', document: smuggler }).success).toBe(false);
+    expect(TaskCompletePayloadSchema.safeParse({ executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1', document: smuggler }).success).toBe(false);
   });
 
   it('REJECTS silently-lossy values that JSON.stringify accepts: an undefined-valued key, NaN, and undefined inside an array', () => {
@@ -133,7 +135,7 @@ describe('task.complete.document must be plain JSON data', () => {
     expect(JSON.stringify(lossy)).toBe('{"n":null,"arr":[null]}');
 
     expect(checkResultDocument(lossy)).toEqual({ ok: false, reason: 'not-plain-json' });
-    expect(TaskCompletePayloadSchema.safeParse({ summary: 'done', sessionRef: 'sess-1', document: lossy }).success).toBe(false);
+    expect(TaskCompletePayloadSchema.safeParse({ executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1', document: lossy }).success).toBe(false);
   });
 
   it('REJECTS a Date instance — it serializes "successfully" into a string that is no longer the value the producer held', () => {
@@ -141,7 +143,7 @@ describe('task.complete.document must be plain JSON data', () => {
 
     expect(checkResultDocument(withDate)).toEqual({ ok: false, reason: 'not-plain-json' });
     expect(checkResultDocument(new Date('2026-01-01T00:00:00.000Z'))).toEqual({ ok: false, reason: 'not-plain-json' });
-    expect(TaskCompletePayloadSchema.safeParse({ summary: 'done', sessionRef: 'sess-1', document: withDate }).success).toBe(false);
+    expect(TaskCompletePayloadSchema.safeParse({ executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1', document: withDate }).success).toBe(false);
   });
 
   it('REJECTS an unstable getter — a value that answers differently on a second read cannot be measured at all', () => {
@@ -206,7 +208,7 @@ describe('task.complete.document must be plain JSON data', () => {
 
     expect(checkResultDocument(map)).toEqual({ ok: false, reason: 'not-plain-json' });
     expect(checkResultDocument(set)).toEqual({ ok: false, reason: 'not-plain-json' });
-    expect(TaskCompletePayloadSchema.safeParse({ summary: 'done', sessionRef: 'sess-1', document: map }).success).toBe(false);
+    expect(TaskCompletePayloadSchema.safeParse({ executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1', document: map }).success).toBe(false);
   });
 
   it('REJECTS a Map/Set nested inside otherwise-plain data — the rule applies at every object node, not just the root', () => {
@@ -215,7 +217,7 @@ describe('task.complete.document must be plain JSON data', () => {
 
     expect(checkResultDocument(nested)).toEqual({ ok: false, reason: 'not-plain-json' });
     expect(checkResultDocument(deeper)).toEqual({ ok: false, reason: 'not-plain-json' });
-    expect(TaskCompletePayloadSchema.safeParse({ summary: 'done', sessionRef: 'sess-1', document: nested }).success).toBe(false);
+    expect(TaskCompletePayloadSchema.safeParse({ executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1', document: nested }).success).toBe(false);
   });
 
   it('ACCEPTS a null-prototype object carrying data — a null prototype is plain data, just without Object.prototype', () => {
@@ -227,7 +229,7 @@ describe('task.complete.document must be plain JSON data', () => {
     expect(check.ok).toBe(true);
     if (!check.ok) throw new Error('unreachable');
     expect(check.canonical).toEqual({ kind: 'invoice', total: 42 });
-    expect(TaskCompletePayloadSchema.safeParse({ summary: 'done', sessionRef: 'sess-1', document: bare }).success).toBe(true);
+    expect(TaskCompletePayloadSchema.safeParse({ executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1', document: bare }).success).toBe(true);
   });
 
   it('ACCEPTS a class instance whose data is in its OWN enumerable fields — that data really does survive the round trip', () => {
@@ -298,7 +300,7 @@ describe('checkResultDocument: one measurement authority for both sides', () => 
       () => 'not data',
     ];
     for (const document of cases) {
-      const schemaAccepts = TaskCompletePayloadSchema.safeParse({ summary: 'done', sessionRef: 'sess-1', document }).success;
+      const schemaAccepts = TaskCompletePayloadSchema.safeParse({ executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1', document }).success;
       const helperAccepts = document === undefined || checkResultDocument(document).ok;
       expect(schemaAccepts, `schema and helper must agree for: ${String(document)}`).toBe(helperAccepts);
     }
@@ -314,7 +316,7 @@ describe('task.complete.document on the wire', () => {
     const document = { kind: 'invoice', lines: [{ sku: 'a', qty: 2 }], total: 42.5, note: null };
     const envelope = createEnvelope(
       'task.complete',
-      { summary: 'done', sessionRef: 'sess-1', document },
+      { executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1', document },
       { taskId: 'task-1' },
     );
 
@@ -332,14 +334,13 @@ describe('task.complete.document on the wire', () => {
 describe('task.complete.document is v3 baseline (no capability flag)', () => {
   it('the v2 result-document flag is gone and no receiver capability gates document', () => {
     expect(CAPABILITY_FLAGS).not.toContain('result-document');
-    expect(requiredReceiverCapabilities('task.complete', { summary: 'done', sessionRef: 'sess-1', document: { a: 1 } })).toEqual([]);
+    expect(requiredReceiverCapabilities('task.complete', { executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1', document: { a: 1 } })).toEqual([]);
   });
 
-  it('kept every other pre-existing flag in order', () => {
-    expect([...CAPABILITY_FLAGS].slice(0, 3)).toEqual([
-      'steer',
+  it('kept every other pre-existing flag in order (v7 retired steer and provider-profile-binding)', () => {
+    expect([...CAPABILITY_FLAGS].slice(0, 2)).toEqual([
       'dispatch-selection',
-      'provider-profile-binding',
+      'toolset-selection',
     ]);
   });
 });

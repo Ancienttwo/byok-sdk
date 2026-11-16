@@ -12,7 +12,7 @@ import { createHmacTokenSigner } from '../auth/tokens';
 import { fullCapabilityDeclaration } from '../capabilities';
 import { createByokCloud, type ByokCloud } from '../cloud';
 import { createInMemoryByokCloud } from '../composition/in-memory';
-import { uuidFromSha256 } from '../offer-identity';
+import { uuidFromSha256 } from '@byok-sdk/protocol';
 import { InMemoryE2eeMemberStore } from '../stores/in-memory/e2ee-member';
 import { keyPackage, newMember, type Member } from './support/e2ee-members';
 import { TENANT_A, TENANT_B } from './support/harness';
