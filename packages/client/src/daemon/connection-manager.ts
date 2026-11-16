@@ -17,7 +17,7 @@ import {
 } from '@byok-sdk/protocol';
 import { AuthManager } from './auth-manager.js';
 import type { CursorStore } from './cursor-store.js';
-import type { DaemonHaltReason } from './daemon-lifecycle.js';
+import type { DaemonHalt, DaemonHaltReason } from './daemon-lifecycle.js';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter.js';
 import { LongPollClient, type CorrelatedOutcome, type MessageBatchPostResult, type MessageBatchRefusal } from './long-poll-transport.js';
 
@@ -40,6 +40,9 @@ export type ConnectionState = 'connecting' | 'open';
 
 /** The remote conditions that end a session for good. */
 export type ConnectionHaltReason = Extract<DaemonHaltReason, 'device_revoked' | 'handshake_rejected' | 'protocol_negotiation_failed' | 'replay_cursor_too_old' | 'store_not_bound' | 're_pair_required'>;
+export type ConnectionHalt =
+  | { reason: Exclude<ConnectionHaltReason, 'protocol_negotiation_failed'> }
+  | Extract<DaemonHalt, { reason: 'protocol_negotiation_failed' }>;
 
 /**
  * Server work requiring durable handler completion before acknowledgement.
@@ -111,7 +114,7 @@ export interface ConnectionManagerOptions {
   fleetJitter?: FleetJitter;
   onOperationalOutcome?: (outcome: 'success' | 'failure', source: 'reconnect' | 'upload') => void;
   /** The session ended for good; nothing reconnects after this. Called once. */
-  onHalted?: (reason: ConnectionHaltReason) => void;
+  onHalted?: (halt: ConnectionHalt) => void;
   /**
    * An observer callback ({@link onStateChange})
    * or the reconnect loop itself threw. The session ends for good, as for a
@@ -258,10 +261,10 @@ export class ConnectionManager {
       onIngress: (ingress) => { this.ingressBudget = ingress; },
       onLoopFailure: () => this.breakSession(),
       onRetryAfter: (delayMs) => { this.retryAfterMs = Math.max(this.retryAfterMs, delayMs); },
-      onRevoked: () => this.halt('device_revoked'),
+      onRevoked: () => this.halt({ reason: 'device_revoked' }),
       onReplayCursorTooOld: (error) => {
         console.error(`[byok/client] ${error.message}`);
-        this.halt('replay_cursor_too_old');
+        this.halt({ reason: 'replay_cursor_too_old' });
       },
       // Unknown and malformed executable work use the same ordered stall.
       onValidationFailedSeq: (seq) => this.noteValidationFailure(seq),
@@ -327,7 +330,7 @@ export class ConnectionManager {
       }
       if (answer !== undefined && (answer.rejected ?? 0) > 0) {
         console.error('[byok/client] the server rejected this device\'s conn.hello; the daemon halts (re-pair, or check product and protocol version)');
-        this.halt('handshake_rejected');
+        this.halt({ reason: 'handshake_rejected' });
         return;
       }
       if (answer === undefined) {
@@ -400,7 +403,7 @@ export class ConnectionManager {
   private haltOnNegotiation(refusal: MessageBatchRefusal): void {
     const error = new ProtocolNegotiationError({ localVersion: PROTOCOL_VERSION, httpStatus: refusal.refusedStatus });
     console.error(`[byok/client] ${error.message}; the daemon halts`);
-    this.halt(error.code);
+    this.halt({ reason: error.code, httpStatus: error.httpStatus });
   }
 
   private setState(state: ConnectionState): void {
@@ -545,7 +548,7 @@ export class ConnectionManager {
           .find((outcome) => outcome?.outcome === 'rejected');
         if (refusedHello?.outcome === 'rejected') {
           if (refusedHello.reason === 'protocol_version_unsupported') this.haltOnNegotiation({ refusedStatus: 200 });
-          else this.halt('handshake_rejected');
+          else this.halt({ reason: 'handshake_rejected' });
         }
         return undefined;
       } catch (error) {
@@ -654,12 +657,12 @@ export class ConnectionManager {
 
   /** The device was found revoked outside this session's own requests (proactive token renewal). */
   noteDeviceRevoked(): void {
-    this.halt('device_revoked');
+    this.halt({ reason: 'device_revoked' });
   }
 
   /** A renewal found the OS entry no longer holds this store's enrollment (#2034). */
   noteBindingLost(reason: 'store_not_bound' | 're_pair_required'): void {
-    this.halt(reason);
+    this.halt({ reason });
   }
 
   /**
@@ -906,15 +909,15 @@ export class ConnectionManager {
    * reports the reason once. The outbox keeps whatever it held and takes
    * nothing more, so `outboxLength()` stays an honest count of what never left.
    */
-  private halt(reason: ConnectionHaltReason): void {
+  private halt(halt: ConnectionHalt): void {
     if (this.isEnded()) return;
-    this.haltReason = reason;
+    this.haltReason = halt.reason;
     this.unsupportedTypes.clear();
     this.lifetime.abort();
     this.longPoll.stop();
     this.cancelPendingDrainRetry?.();
     this.endSession?.();
-    this.opts.onHalted?.(reason);
+    this.opts.onHalted?.(halt);
   }
 
   /** The defined end for an unexpected error: stop like a halt, then report it once. */

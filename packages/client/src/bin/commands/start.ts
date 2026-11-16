@@ -99,6 +99,7 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
   // Issue #394: a halt the server causes (revocation, a rejected hello, a
   // lost replay cursor) ends this process too: nothing reconnects after it.
   let haltReason: DaemonHaltReason | undefined;
+  let haltHttpStatus: number | undefined;
   // A crash after start (`lifecycle` `crashed`) also ends this process, as a
   // crash: exit 1, so the supervisor restarts it.
   let crashed = false;
@@ -112,6 +113,7 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
     }
     if (event.kind === 'lifecycle' && event.lifecycle.phase === 'halted') {
       haltReason = event.lifecycle.reason;
+      if (event.lifecycle.reason === 'protocol_negotiation_failed') haltHttpStatus = event.lifecycle.httpStatus;
       wake?.();
     }
     if (event.kind === 'lifecycle' && event.lifecycle.phase === 'crashed') {
@@ -121,7 +123,7 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
   });
 
   const halted = async (reason: DaemonHaltReason): Promise<StartOutcome> => {
-    error(`daemon halted: reason=${reason} — ${formatHaltRemedy(reason)}`);
+    error(`daemon halted: reason=${reason}${haltHttpStatus === undefined ? '' : ` httpStatus=${haltHttpStatus}`} — ${formatHaltRemedy(reason, haltHttpStatus)}`);
     await audit.flush();
     return { kind: 'halted', reason };
   };

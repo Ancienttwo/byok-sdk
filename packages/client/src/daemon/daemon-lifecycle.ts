@@ -51,11 +51,20 @@ export function isDaemonHaltReason(value: unknown): value is DaemonHaltReason {
  *   supervisor restarts it. It stays crashed (also after `stop()`) until the
  *   next `start()`.
  */
+/**
+ * A halt and its evidence. A refused wire major keeps the HTTP status of the
+ * answer that refused the hello (200 for a `rejected` outcome), so an
+ * operator can tell a peer of another major from a missing route.
+ */
+export type DaemonHalt =
+  | { reason: Exclude<DaemonHaltReason, 'protocol_negotiation_failed'> }
+  | { reason: 'protocol_negotiation_failed'; httpStatus: number };
+
 export type DaemonLifecycle =
   | { phase: 'stopped' }
   | { phase: 'awaiting-enrollment' }
   | { phase: 'running'; connection: 'connecting' | 'open' }
-  | { phase: 'halted'; reason: DaemonHaltReason; at: string }
+  | ({ phase: 'halted'; at: string } & DaemonHalt)
   | { phase: 'crashed'; at: string };
 
 /**
@@ -102,8 +111,10 @@ export function parseDaemonLifecycle(value: unknown): DaemonLifecycle | undefine
         ? { phase: 'running', connection: raw.connection }
         : undefined;
     case 'halted':
-      return isDaemonHaltReason(raw.reason) && typeof raw.at === 'string'
-        ? { phase: 'halted', reason: raw.reason, at: raw.at }
+      if (!isDaemonHaltReason(raw.reason) || typeof raw.at !== 'string') return undefined;
+      if (raw.reason !== 'protocol_negotiation_failed') return { phase: 'halted', reason: raw.reason, at: raw.at };
+      return Number.isInteger(raw.httpStatus)
+        ? { phase: 'halted', reason: raw.reason, httpStatus: raw.httpStatus as number, at: raw.at }
         : undefined;
     case 'crashed':
       return typeof raw.at === 'string' ? { phase: 'crashed', at: raw.at } : undefined;
