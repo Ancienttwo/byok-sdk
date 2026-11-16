@@ -430,7 +430,7 @@ describe('SqliteLocalTaskJournal', () => {
       expect(await fs.readdir(storeDir)).toEqual([JOURNAL_DB_FILENAME]);
     });
 
-    // A file the read-only check cannot open (a Windows path past MAX_PATH; here, no read permission) is not corruption.
+    // A file the read-only check cannot open (here, no read permission) is not corruption.
     it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('refuses a journal it cannot open read-only without quarantining it', async () => {
       const storeDir = await tmpStore();
       const dbPath = path.join(storeDir, JOURNAL_DB_FILENAME);

@@ -533,7 +533,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/core` | Shared contracts and validation | `zod` | allowed | 100930 B |
 | `@byok-sdk/core/package.json` | Package metadata | — | forbidden | 1680 B |
 | `@byok-sdk/core/sealed-payload` | Sealed payload v1 byte rules | `zod` | allowed | 160513 B |
-| `@byok-sdk/core/sqlite-node` | Read-only SQLite format admission for Node stores | — | forbidden | 1135 B |
+| `@byok-sdk/core/sqlite-node` | Read-only SQLite format admission for Node stores | — | forbidden | 1529 B |
 | `@byok-sdk/core/system-tool` | Trusted system tools for Node hosts | — | forbidden | 2710 B |
 | `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 250084 B |
 | `@byok-sdk/keys/model-route` | Headless Pi model route: choices, linkage, field errors and submission | `zod` | allowed | 323552 B |

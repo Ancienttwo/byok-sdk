@@ -1,10 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
 
 /**
- * An existing file could not be opened read-only for its format check, for
- * example a Windows path past MAX_PATH, which a SQLite file URI cannot carry
- * in its extended-length form. Nothing has read or written the file; a store
- * refuses to start rather than treat the file as damaged.
+ * An existing file could not be opened read-only for its format check.
+ * Nothing has read or written the file; a store refuses to start rather than
+ * treat the file as damaged.
  */
 export class SqliteReadOnlyOpenError extends Error {
   constructor(readonly path: string, options: { cause: unknown }) {
@@ -45,15 +44,11 @@ export function readSqliteFileUnchanged<T>(
     throw new SqliteReadOnlyOpenError(path, { cause: error });
   }
   if (size === 0) return undefined;
-  const { pathToFileURL } = process.getBuiltinModule('node:url');
-  const url = pathToFileURL(path);
-  url.searchParams.set('mode', 'ro');
-  url.searchParams.set('immutable', '1');
   const sqlite = process.getBuiltinModule('node:sqlite');
   if (!sqlite) throw new Error('node:sqlite is not available in this runtime');
   let db: DatabaseSync;
   try {
-    db = new sqlite.DatabaseSync(url, { readOnly: true });
+    db = new sqlite.DatabaseSync(`${fileUri(path)}?mode=ro&immutable=1`, { readOnly: true });
   } catch (error) {
     throw new SqliteReadOnlyOpenError(path, { cause: error });
   }
@@ -63,3 +58,24 @@ export function readSqliteFileUnchanged<T>(
     db.close();
   }
 }
+
+/**
+ * A SQLite `file:` URI naming `path`. SQLite's Windows VFS does not add the
+ * extended-length prefix itself, so past the legacy MAX_PATH the path is
+ * given as `\\?\<absolute>`, the form the stores' writable opens use; a
+ * `file:///` URL cannot carry it. Every byte outside the unreserved set is
+ * percent-encoded, so `?`, `#` and `%` in a path stay part of the name.
+ */
+function fileUri(path: string): string {
+  const { resolve, win32 } = process.getBuiltinModule('node:path');
+  let absolute = process.platform === 'win32' ? win32.resolve(path) : resolve(path);
+  if (process.platform === 'win32' && !absolute.startsWith('\\\\?\\') && absolute.length >= 240) absolute = `\\\\?\\${absolute}`;
+  const bytes = new TextEncoder().encode(absolute);
+  let encoded = '';
+  for (const byte of bytes) {
+    const char = String.fromCharCode(byte);
+    encoded += /[A-Za-z0-9._~/-]/.test(char) ? char : `%${byte.toString(16).toUpperCase().padStart(2, '0')}`;
+  }
+  return `file:${encoded}`;
+}
+

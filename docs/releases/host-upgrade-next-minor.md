@@ -51,13 +51,10 @@ entries never load it.
   no longer moved to `quarantine/`. A file that SQLite cannot read is still
   quarantined.
 - A journal that the read-only check cannot open is refused with
-  `JournalUnavailableError` and stays in place; it is not quarantined. On
-  Windows this can happen when the journal path is longer than `MAX_PATH`: the
-  writable open uses the `\\?\` extended-length form, but the read-only check
-  opens a SQLite file URI, which cannot carry it. Keep the store directory short
-  enough that `<storeDir>\daemon.db` stays under 240 characters, or move the
-  store. Other stores that call `readSqliteFileUnchanged` get
-  `SqliteReadOnlyOpenError` in the same case.
+  `JournalUnavailableError` and stays in place; it is not quarantined. Other
+  stores that call `readSqliteFileUnchanged` get `SqliteReadOnlyOpenError` in
+  the same case. On Windows the check opens a path past `MAX_PATH` in the
+  same `\\?\` extended-length form as the writable open.
 - A durable replica written in another pi-durable schema version than the
   pinned one is refused instead of migrated forward.
 - A replica lock path that holds another database, such as the replica of a

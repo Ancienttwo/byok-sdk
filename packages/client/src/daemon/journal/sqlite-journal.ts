@@ -460,7 +460,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
 
     // The format is decided on the unchanged main file before the writable open
     // and its pragmas. A format refusal, or a file the read-only check cannot
-    // open (such as a Windows path past MAX_PATH), is not corruption: the file
+    // open, is not corruption: the file
     // stays where it is. A main file SQLite cannot read is left to the writable
     // open below, which also sees the WAL and quarantines only what it cannot open.
     try {
