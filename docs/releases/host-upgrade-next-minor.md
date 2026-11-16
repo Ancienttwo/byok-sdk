@@ -475,7 +475,10 @@ Removed with it: `DaemonConfigFieldRemovedError` (and its setup-catalog code
 `byok-agent config check --strict`, which now prints usage. A config that
 rolls back to an older daemon no longer starts with fields that release does
 not know; remove them first. Run `byok-agent config check` against each config
-file before upgrading and delete every field it reports.
+file before upgrading and delete every field it reports. The published
+`daemon-config.schema.json` now closes every object (`additionalProperties:
+false`) and declares the root `$schema`, so an editor that applies it flags
+the same unknown fields.
 
 ## MCP frame ceiling has one authority
 

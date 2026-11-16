@@ -11,7 +11,8 @@ export interface DaemonConfigJsonSchema {
   readonly anyOf?: readonly DaemonConfigJsonSchema[];
   readonly properties?: Readonly<Record<string, DaemonConfigJsonSchema>>;
   readonly required?: readonly string[];
-  readonly additionalProperties?: DaemonConfigJsonSchema;
+  /** `false`: the object is closed; any key outside `properties` is unknown. */
+  readonly additionalProperties?: DaemonConfigJsonSchema | false;
   readonly items?: DaemonConfigJsonSchema;
   readonly prefixItems?: readonly DaemonConfigJsonSchema[];
   readonly minItems?: number;

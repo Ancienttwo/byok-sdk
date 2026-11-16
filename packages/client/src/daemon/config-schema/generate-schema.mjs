@@ -31,8 +31,10 @@
 //   an error. (No `DaemonConfig` field has such a union today.)
 // - `localAgentRelease` is `x-byok-surface: "distribution-owned"`: the
 //   distribution (the `byok-agent` bin) supplies it, a config file must not.
-// - Objects carry no `additionalProperties: false`; the runtime validator
-//   (`validate.ts`) rejects every unknown field.
+// - An object without a string index signature is closed
+//   (`additionalProperties: false`), as the runtime validator (`validate.ts`)
+//   refuses every unknown field. The root declares `$schema`, so a config
+//   file may name this schema for editors.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -202,11 +204,12 @@ class SchemaBuilder {
     const callable = checker.getSignaturesOfType(type, 0).length > 0 || checker.getSignaturesOfType(type, 1).length > 0;
     if (!root && (callable || requiresEmbedded || (symbols.length > 0 && dataMembers === 0))) return undefined;
     const hasProperties = Object.keys(properties).length > 0;
+    const declared = root ? { $schema: { type: 'string', description: 'The JSON schema this config file names for editors.' }, ...properties } : properties;
     return {
       type: 'object',
-      ...(hasProperties || additionalProperties === undefined ? { properties } : {}),
+      ...(hasProperties || additionalProperties === undefined ? { properties: declared } : {}),
       ...(required.length === 0 ? {} : { required }),
-      ...(additionalProperties === undefined ? {} : { additionalProperties }),
+      additionalProperties: additionalProperties ?? false,
     };
   }
 }
@@ -219,12 +222,13 @@ function normalizeDoc(text) {
   return text.split('\n').map((line) => line.trimEnd()).join('\n').trim();
 }
 
-function stripDescriptions(value) {
-  if (Array.isArray(value)) return value.map(stripDescriptions);
+/** Documentation removed; the root's `$schema` and `title` meta keys too, not a property of that name. */
+function stripDescriptions(value, root = true) {
+  if (Array.isArray(value)) return value.map((child) => stripDescriptions(child, false));
   if (value === null || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(value)
-    .filter(([key]) => key !== 'description' && key !== '$schema' && key !== 'title')
-    .map(([key, child]) => [key, stripDescriptions(child)]));
+    .filter(([key]) => key !== 'description' && !(root && (key === '$schema' || key === 'title')))
+    .map(([key, child]) => [key, stripDescriptions(child, false)]));
 }
 
 export function renderSchemaFiles(schema) {

@@ -85,6 +85,10 @@ describe('generated DaemonConfig schema (#1094)', () => {
     expect(schema.properties.agentHome.properties.projection).toMatchObject({ 'x-byok-surface': 'embedded-only' });
     expect(schema.properties.localAgentRelease).toMatchObject({ 'x-byok-surface': 'distribution-owned', not: {} });
     expect(schema.properties.codexSandbox).toMatchObject({ enum: ['danger-full-access', 'inherit', 'read-only', 'workspace-write'] });
+    // Closed like the validator: every object without an index signature refuses other keys.
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.properties.agentHome.additionalProperties).toBe(false);
+    expect(schema.properties.toolAuthorization.properties.byRuntime.additionalProperties).toEqual({ enum: ['all', 'auto'] });
   });
 });
 

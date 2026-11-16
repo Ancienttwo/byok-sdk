@@ -146,10 +146,8 @@ function validateObject(
   const properties = schema.properties ?? {};
   for (const key of Object.keys(value)) {
     const child = path === '' ? key : `${path}.${key}`;
-    // A config file may name its schema for editors.
-    if (root && key === '$schema') continue;
     const propertySchema = Object.hasOwn(properties, key) ? properties[key] : schema.additionalProperties;
-    if (propertySchema === undefined) {
+    if (propertySchema === undefined || propertySchema === false) {
       const suggestion = closest(key, Object.keys(properties));
       issues.push({
         code: 'unknown_field', path: child,

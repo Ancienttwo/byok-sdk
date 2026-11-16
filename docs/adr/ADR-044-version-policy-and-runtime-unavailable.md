@@ -481,7 +481,7 @@ Owner 2026-10-31 批准修订方向：**缺省行为逐字不变；版本在缺�
 - 非法策略：新增 `DaemonConfigIssueCode` `invalid_version_policy`，覆盖空 exact/prefix、prefix 不以 `.` 结尾、重复 spec、缺 `qualifiedVersion`/`unqualified`、descriptor 层出现 block（`block_requires_host`）；并加 `setup-error-catalog.json` 条目与 `device-setup.md` 锚点。`config check` 报错、运行时构造失败（这是配置错误，不是 task decline）。
 - 迁移节：默认策略不改变行为 → **无需动作**；只有 Host 主动加 block 才有行为变化。升级清单新增一条 additive 条目（见 §5）。
 - 未知字段仍按 Q4' warn；不要为了策略引入新的“拒绝未知字段”路径。
-  - 2026-11-16 修订：兼容清扫（C1）按 owner「旧数据拒绝」裁定撤销 Q4'：`DaemonConfig` 的未知字段在 CLI 与内嵌构造中都是 `unknown_field` 错误，warning 与 `config check --strict` 一并删除。本条不再成立。
+  - 2026-11-16 修订（兼容清扫 C1 的 M03，[#2288](https://github.com/Ancienttwo/byok-sdk/pull/2288)）：按 owner「旧数据拒绝」裁定改为 fail closed，撤销 Q4'：`DaemonConfig` 的未知字段在 CLI 与内嵌构造中都是 `unknown_field` 错误，warning 与 `config check --strict` 一并删除，生成的 schema 也对每层对象关闭（`additionalProperties: false`）。本条不再成立。
 
 ### 4.4 AiphaBee `runtime-executables.ts` 的收回契约
 

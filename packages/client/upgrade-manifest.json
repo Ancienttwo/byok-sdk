@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "c343a1773caa721560cac7efe7ef76abc63280a1297ca96759e3c91e59766d9f"
+    "snapshotSha256": "061e0097ee09d792461eeb5df8f1c1a17181e35287921a602160b08b3574d1e8"
   },
   "configFields": {
     "status": "tracked",
@@ -421,13 +421,29 @@
     {
       "id": "daemon-config-unknown-fields-fail-closed",
       "impact": "breaking",
-      "summary": "@byok-sdk/client removes DaemonConfigFieldRemovedError, the removed_field issue code, DaemonConfigIssue.severity and .migration, DaemonEffectiveConfig.warnings and byok-agent config check --strict; every DaemonConfig issue is an error.",
+      "summary": "@byok-sdk/client removes DaemonConfigFieldRemovedError, the removed_field issue code, DaemonConfigIssue.severity and .migration, DaemonEffectiveConfig.warnings and byok-agent config check --strict; every DaemonConfig issue is an error. The generated daemon-config.schema.json closes every object (additionalProperties: false) and declares the root $schema, so editors refuse the unknown fields the daemon refuses.",
       "migration": "docs/releases/host-upgrade-next-minor.md#daemonconfig-rejects-unknown-fields",
       "items": [
         "export:@byok-sdk/client#DaemonConfigFieldRemovedError",
         "export:@byok-sdk/client#DaemonConfigIssue",
         "export:@byok-sdk/client#DaemonConfigIssueCode",
-        "export:@byok-sdk/client#DaemonEffectiveConfig"
+        "export:@byok-sdk/client#DaemonEffectiveConfig",
+        "config:$schema",
+        "config:agentEgress",
+        "config:agentHome",
+        "config:agentMemory",
+        "config:artifactLimits",
+        "config:branding",
+        "config:deviceAssertion",
+        "config:deviceCredentials",
+        "config:mcpToolsets",
+        "config:piByokLauncher",
+        "config:presence",
+        "config:progressBatch",
+        "config:runtimeEnvironment",
+        "config:sdkHelperHost",
+        "config:serviceEnrollment",
+        "config:toolAuthorization"
       ]
     },
     {
@@ -478,18 +494,129 @@
   ],
   "changes": [
     {
+      "item": "config:$schema",
+      "change": "added",
+      "after": "optional schema-sha256=00404e686415370f",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:agentEgress",
+      "change": "changed",
+      "before": "optional schema-sha256=0fe1bb45b19bbe3f",
+      "after": "optional schema-sha256=7c33d7337649acb5",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:agentHome",
+      "change": "changed",
+      "before": "optional schema-sha256=66edf8f80ce054e9",
+      "after": "optional schema-sha256=8c5a867aec8e8f93",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:agentMemory",
+      "change": "changed",
+      "before": "optional schema-sha256=0355ed29f3569663",
+      "after": "optional schema-sha256=b194debb42611ec2",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:artifactLimits",
+      "change": "changed",
+      "before": "optional schema-sha256=92efb10e4b237352",
+      "after": "optional schema-sha256=b63ced141cf6b9d4",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:branding",
+      "change": "changed",
+      "before": "optional schema-sha256=f5eaf56d7a1d0cc8",
+      "after": "optional schema-sha256=30b1cfd028418632",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:deviceAssertion",
+      "change": "changed",
+      "before": "optional schema-sha256=67738e44d544c345",
+      "after": "optional schema-sha256=8e4b67cd4089ef2e",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:deviceCredentials",
+      "change": "changed",
+      "before": "optional schema-sha256=f92318979ea72557",
+      "after": "optional schema-sha256=d355d1a17b00b7b8",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:mcpToolsets",
+      "change": "changed",
+      "before": "optional schema-sha256=c398321f7555b326",
+      "after": "optional schema-sha256=fba615fff84b94e3",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:piByokLauncher",
+      "change": "changed",
+      "before": "optional schema-sha256=7c3012d0c95b15da",
+      "after": "optional schema-sha256=a5a36c0fd971f657",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:presence",
+      "change": "changed",
+      "before": "optional schema-sha256=ca5de1d109969e37",
+      "after": "optional schema-sha256=13088095a63c489a",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:progressBatch",
+      "change": "changed",
+      "before": "optional schema-sha256=3f9b54486eda932a",
+      "after": "optional schema-sha256=3e65c5db3b469541",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:runtimeEnvironment",
+      "change": "changed",
+      "before": "optional schema-sha256=25be0c05980d06a5",
+      "after": "optional schema-sha256=3a110b8636d2d43f",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
       "item": "config:runtimes",
       "change": "changed",
       "before": "optional schema-sha256=733c24d0d48a4795",
-      "after": "optional schema-sha256=d0c93f4b002b16c5",
+      "after": "optional schema-sha256=0274d0856fb11b28",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "config:sdkHelperHost",
+      "change": "changed",
+      "before": "optional schema-sha256=54a73cacf0ba88bb",
+      "after": "optional schema-sha256=fe299de91ee27fe1",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:serviceEnrollment",
+      "change": "changed",
+      "before": "optional schema-sha256=2c6116713313cb4b",
+      "after": "optional schema-sha256=19e8773d76c24dc3",
+      "entry": "daemon-config-unknown-fields-fail-closed"
     },
     {
       "item": "config:storage",
       "change": "changed",
       "before": "optional schema-sha256=e89f34f2223d0907",
-      "after": "optional schema-sha256=0e2b685e4a3635ba",
+      "after": "optional schema-sha256=0044d659c81fe859",
       "entry": "grok-session-store"
+    },
+    {
+      "item": "config:toolAuthorization",
+      "change": "changed",
+      "before": "optional schema-sha256=1e3298b66ffff519",
+      "after": "optional schema-sha256=58f8a89f7ff38710",
+      "entry": "daemon-config-unknown-fields-fail-closed"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
