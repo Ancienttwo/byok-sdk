@@ -288,7 +288,10 @@
 //   PROTOCOL_VERSION -> dist/version.d.ts
 //   PROVIDER_MODEL_CAPABILITIES -> dist/provider-profile-binding.d.ts
 //   PROVIDER_PROVISIONING_CAPABILITY -> dist/capability-constants.d.ts
+//   PROVIDER_PROVISIONING_HOST_TERMINAL_CODES -> dist/provider-provisioning.d.ts
+//   PROVIDER_PROVISIONING_KEY_CHECK_RESULTS -> dist/provider-provisioning.d.ts
 //   PROVIDER_PROVISIONING_OPERATIONS -> dist/provider-provisioning.d.ts
+//   PROVIDER_PROVISIONING_REJECTION_CODES -> dist/provider-provisioning.d.ts
 //   PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION -> dist/provider-provisioning.d.ts
 //   PairDeviceDigestInput -> dist/pair-device-digest.d.ts
 //   PairDeviceDigestSchema -> dist/pair-device-digest.d.ts
@@ -3446,7 +3449,7 @@ export { SEALED_DECLINE_CODES, SEALED_INLINE_MAX_PADDED_LENGTH, SEALED_PAYLOAD_C
 export type { SealedDeclineCode, SealedDigestRule, SealableMessageType, SealedPayload, SealedPayloadCategory, SealedSplitEntry, TaskSealing, } from './sealed-payload.js';
 export { PROVIDER_MODEL_CAPABILITIES, ProviderProfileRefSchema, ProviderModelCapabilitySchema, ProviderProfileBindingSchema, } from './provider-profile-binding.js';
 export type { ProviderProfileRef, ProviderModelCapability, ProviderProfileBinding, } from './provider-profile-binding.js';
-export { PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION, PROVIDER_PROVISIONING_OPERATIONS, ProviderProvisioningAvailablePayloadSchema, ProviderProvisioningReadbackSchema, } from './provider-provisioning.js';
+export { PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_REJECTION_CODES, PROVIDER_PROVISIONING_KEY_CHECK_RESULTS, PROVIDER_PROVISIONING_HOST_TERMINAL_CODES, ProviderProvisioningAvailablePayloadSchema, ProviderProvisioningReadbackSchema, } from './provider-provisioning.js';
 export type { ProviderProvisioningAvailablePayload, ProviderProvisioningOperation, ProviderProvisioningCompletion, ProviderProvisioningReadback, } from './provider-provisioning.js';
 export { AGENT_MEMORY_INTENT_REJECTION_CODES, AgentMemoryIntentRevisionSchema, AgentMemoryIntentOperationDigestSchema, AgentMemoryIntentPathSchema, AgentMemoryIntentApprovalRefSchema, AgentMemoryIntentV1Schema, AgentMemoryIntentCompletionSchema, AgentMemoryIntentReadbackSchema, AgentMemoryIntentFetchRequestSchema, agentMemoryIntentFetchResponseSchemaFor, } from './agent-memory-intent.js';
 export type { AgentMemoryIntentOperation, AgentMemoryIntentV1, AgentMemoryIntentHostTerminalCode, AgentMemoryIntentRejectionCode, AgentMemoryIntentFileObservation, AgentMemoryIntentCompletion, AgentMemoryIntentReadbackDisposition, AgentMemoryIntentReadback, AgentMemoryIntentReservation, AgentMemoryIntentFetchResponse, } from './agent-memory-intent.js';
@@ -6681,6 +6684,9 @@ export declare const ProviderProvisioningOperationSchema: z.ZodEnum<{
     update_model: "update_model";
 }>;
 export type ProviderProvisioningOperation = z.infer<typeof ProviderProvisioningOperationSchema>;
+export declare const PROVIDER_PROVISIONING_REJECTION_CODES: readonly ['request_invalid', 'request_conflict', 'request_expired', 'request_not_yet_valid', 'request_window_invalid', 'sealing_key_rotated', 'enrollment_mismatch', 'agent_not_placed', 'config_digest_mismatch', 'operation_generation_stale', 'profile_changed', 'profile_not_found', 'credential_scope_mismatch', 'provider_kind_unsupported', 'pi_model_invalid', 'capabilities_invalid', 'seal_open_failed', 'secret_invalid', 'local_commit_interrupted', 'secret_store_unavailable'];
+export declare const PROVIDER_PROVISIONING_HOST_TERMINAL_CODES: readonly ["request_expired", "sealing_key_rotated"];
+export declare const PROVIDER_PROVISIONING_KEY_CHECK_RESULTS: readonly ['ok', 'credential_rejected', 'rate_limited', 'quota_or_billing', 'model_not_permitted', 'provider_error', 'unreachable', 'timeout', 'not_run'];
 // support
 export declare const ProviderProvisioningCompletionSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     requestId: z.ZodUUID;

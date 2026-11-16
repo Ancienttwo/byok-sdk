@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "bee388999a7a1399887792fa7b0c1bdb80171a0aec0eba99cc162e04cca90241"
+    "snapshotSha256": "02acb11fcaecad14a241237c46867dc187c0128384f198ca9b9b9f00c5217ddf"
   },
   "configFields": {
     "status": "tracked",
@@ -4539,22 +4539,7 @@
       "entry": "narrow-protocol-core-public-api"
     },
     {
-      "item": "export:@byok-sdk/protocol#PROVIDER_PROVISIONING_HOST_TERMINAL_CODES",
-      "change": "removed",
-      "entry": "narrow-protocol-core-public-api"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#PROVIDER_PROVISIONING_KEY_CHECK_RESULTS",
-      "change": "removed",
-      "entry": "narrow-protocol-core-public-api"
-    },
-    {
       "item": "export:@byok-sdk/protocol#PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM",
-      "change": "removed",
-      "entry": "narrow-protocol-core-public-api"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#PROVIDER_PROVISIONING_REJECTION_CODES",
       "change": "removed",
       "entry": "narrow-protocol-core-public-api"
     },
