@@ -1287,6 +1287,10 @@ true.
   own `triggerMessageId`, else the root). A Host tells a mentioned seat from a
   `room_call` seat by this field and does not derive it from the seat id. A
   seat opened before the release that added the field is not backfilled.
+  A `cancelTurn` of a seat Turn that has no intent ends its seat `failed`
+  with reason `cancelled` in the same commit, so the next seat queues at
+  once; the seat deadline never changes the Turn's `cancelled` conclusion
+  (#2247).
 - `room-root:<roomId>:<root>` with `{ roomId, root, seats }`, when every seat
   of every round of the root is terminal, the seats that a `room_call` added
   included. `seats` lists their ids in reservation order; each has its

@@ -3,7 +3,8 @@ import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { addBatchTurns, addTurn, json, type Json, type Turn } from './turn.js';
 import { activeBot, archiveBot, inactive, profileRevision, refuseExternalRooms, refuseExternalTeam, refuseSuspended, requireMain, roomId, teamSnapshot, TeamModeError,
   type ExternalTeam, type TeamSnapshot, type TeamSnapshotBot } from './team.js';
-import { applyRoomSnapshot, createRoom, roomInput, setMemberMentions, updateRoom, type MemberMentions, type Mentions } from './rooms.js';
+import { applyRoomSnapshot, createRoom, publishSettled, roomInput, seatSettled, setMemberMentions, updateRoom, type MemberMentions,
+  type Mentions } from './rooms.js';
 import { sealBatchForCancel, type InputFields } from './coalesce.js';
 import { abandonDelegation, arbitrateCancel, type IntentFacts, type Publish } from './delegation.js';
 import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcome.js';
@@ -463,6 +464,12 @@ function cancelTurn(state: CommandState, turnId: string, ports: CommandPorts, pu
   if (!turn.conclusion) {
     turn.status = 'failed'; turn.conclusion = 'cancelled';
     delete turn.blockedReason;
+    // Seat facts come only from intents, so a seat Turn without one settles its seat here, as `blockTurn` does (#2247).
+    const seat = state.team.seats[target];
+    if (seat && !seatSettled(seat)) {
+      seat.status = 'failed'; seat.released = true; seat.reason = 'cancelled';
+      publishSettled(state.team, [seat.id], publish);
+    }
     publish(`bot-turn:${target}`, json({ owner: turn.botId, ...turn }));
     turn.reported = true;
   }

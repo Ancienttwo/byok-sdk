@@ -1,5 +1,8 @@
 import { expect, it } from 'vitest';
-import { commandBots, decideCommand, MissingPortError, type Command, type CommandScopeState, type CommandState } from './commands';
+import { commandBots, decideCommand, MissingPortError, type Command, type CommandPorts, type CommandScopeState, type CommandState } from './commands';
+import { advanceRoomSeats, roomInput, ROOM_GRACE_MS, seatTurn, type RoomsState } from './rooms';
+import { addTurn, type TurnsState } from './turn';
+import { turnCancelAnswer } from './delegation';
 
 /** A plain state slice: two Bots, a room with them and a person, a question and a card of Bot `b`. */
 function state(): CommandScopeState {
@@ -59,4 +62,23 @@ it('refuses an outcome with a typed missing_port error when the Host passes no o
   expect(error).toMatchObject({ code: 'missing_port', kind: 'outcome', name: 'MissingPortError', message: 'The Host has no port for outcome' });
   expect(slice).toEqual(before);
   expect(out).toEqual([]);
+});
+
+it('#2247: a cancel of a seat Turn without an intent settles its seat at once, and the deadline keeps its cancelled answer', () => {
+  const published: string[] = [], publish = (id: string) => { published.push(id); };
+  const team: RoomsState = { bots: { a: { archived: false }, b: { archived: false } }, rounds: {}, seats: {}, roots: {},
+    rooms: { r: { id: 'r', name: 'Room', members: ['a', 'b'], mode: 'mention', announcement: '', visibleFrom: { a: 0, b: 0 }, messages: [] } } };
+  const root = roomInput(team, 'key', 'r', 'Review', ['a', 'b'], publish), [first, second] = team.rounds[root]!.seats;
+  const slice = { team, turns: {}, budgets: {}, delegations: {} } as unknown as CommandState & TurnsState & { team: RoomsState };
+  const add = (id: string, botId: string, request: string) => { addTurn(slice, seatTurn(id, botId, request)); };
+  advanceRoomSeats(slice, {}, 0, add, publish);
+  const intents = { intent: () => undefined }, ports = { now: () => 1, publish, intents } as unknown as CommandPorts;
+  decideCommand(slice, { kind: 'cancel_turn', turnId: first! }, ports, () => {});
+  expect(team.seats[first!]).toMatchObject({ status: 'failed', released: true, reason: 'cancelled' });
+  expect(published).toContain(`room-seat:r:${first}`);
+  advanceRoomSeats(slice, {}, 1, add, publish);
+  expect(team.seats[second!]!.status).toBe('queued');
+  advanceRoomSeats(slice, {}, ROOM_GRACE_MS, add, publish);
+  expect([slice.turns[first!]!.status, slice.turns[first!]!.conclusion]).toEqual(['failed', 'cancelled']);
+  expect(turnCancelAnswer(slice, intents, first!)).toEqual({ result: 'already_settled', conclusion: 'cancelled' });
 });
