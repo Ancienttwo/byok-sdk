@@ -580,7 +580,6 @@
       "summary": "@byok-sdk/cloud DeviceRegistration and PairingEnrollmentInput require expectedDeviceDigest. DeviceDirectory.register returns DeviceRegistrationResult (registered or conflict) and PairingEnrollment.redeemAndRegister returns PairingEnrollmentResult (registered, conflict, or code_invalid in place of undefined). A custom store checks the fence, supersedes and inserts in one atomic section per (tenant, product, machineId); a conflict writes nothing and consumes no code, and a consumed code with the same binding replays before the fence is read. Run the cloud conformance suite.",
       "migration": "docs/releases/host-upgrade-next-minor.md#pairing-registration-fence-2045",
       "items": [
-        "export:@byok-sdk/cloud#AuthPlane",
         "export:@byok-sdk/cloud#InMemoryPairingCodeStore",
         "export:@byok-sdk/cloud#DeviceDirectory",
         "export:@byok-sdk/cloud#DeviceRegistration",
@@ -588,7 +587,6 @@
         "export:@byok-sdk/cloud#PairingEnrollment",
         "export:@byok-sdk/cloud#PairingEnrollmentInput",
         "export:@byok-sdk/cloud#PairingEnrollmentResult",
-        "export:@byok-sdk/cloud#PairInput",
         "export:@byok-sdk/cloud-dataplane#PostgresDeviceDirectory",
         "export:@byok-sdk/cloud-dataplane#PostgresPairingCodeStore",
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceDirectory",
