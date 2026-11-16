@@ -363,22 +363,36 @@ Additive: `CloudStores.e2eeMember`, `DeviceScopedStores.e2eeMember`, the
 
 ## Service uninstall stops before it removes `current` (#2274)
 
-This corrects a 0.43.0 regression by restoring the 0.42.0 order.
-`@byok-sdk/client` `ServiceInstallation.uninstall()` runs the lifecycle's
-uninstall, which stops the service, while `current` still points at the
-installed payload, and only then removes `current`, `previous`, `versions/`,
-`snapshots/` and the receipt. 0.43.0 removed `current` first (#2011), so a
-Windows stop program under `current` was gone when the stop ran, and every
-uninstall failed with `service_stop_failed`.
+This corrects a 0.43.0 regression. `@byok-sdk/client`
+`ServiceInstallation.uninstall()` now stops and unregisters the service while
+`current` still points at the installed payload, then removes `current`, then
+the unit and launcher, then `previous`, `versions/`, `snapshots/` and the
+receipt. 0.43.0 removed `current` before the stop (#2011), so a Windows stop
+program under `current` was gone when the stop ran, and every uninstall failed
+with `service_stop_failed`.
 
 - A stop that fails, times out or is refused (a stop program that exits
-  non-zero, a refused or timed-out `launchctl bootout`) throws as is and
-  removes nothing: the unit and `current` both stay, so the service can start
-  again, for example at the next login, and `uninstall()` can be retried.
-- The cost narrows the 0.43.0 guarantee that a unit an uninstall leaves
-  behind starts no payload (#2011). When the stop succeeds and the unit's
-  removal then fails, the unit stays with `current`, as in 0.42.0, so a boot
-  or login can start the installed payload until `uninstall()` is retried.
-  Retry `uninstall()` after any failure.
+  non-zero, a refused or timed-out `launchctl bootout`) throws as is, without
+  a retry, and removes nothing: the unit and `current` both stay, so the
+  service can start again, for example at the next login, until `uninstall()`
+  is retried.
+- A unit whose removal fails after the stop stays without `current`, so a
+  boot or login starts no payload, as in 0.43.0 (#2011, #2279). A timed-out
+  `daemon-reload` after the unit files are removed is thrown the same way.
+- A Windows `user` scope lifecycle's `stop()`, and the stop inside
+  `uninstall()`, now run the Host's `stop` program only while a launcher
+  runs. With none running they write the stop marker and return. A retried
+  `uninstall()` therefore finishes after `current` is gone, instead of
+  failing with `service_stop_failed` because a stop program under `current`
+  no longer exists (#2279).
+- A first install that fails to activate, start or pass its health check
+  cleans up in the same order: stop and unregister, remove `current`, then
+  the unit and launcher. A leftover unit can no longer start the payload that
+  failed its health check. When the unit cannot be removed, the
+  `install_health_check_failed` message lists `service unit and launcher`
+  first among the remaining artifacts; when the stop fails, it lists
+  `service registration, current pointer` before it.
 
-No Host change is needed for a stop program that runs from under `current`.
+Retry `uninstall()` after any failure; a retry finishes once the cause is
+fixed. No Host change is needed for a stop program that runs from under
+`current`.

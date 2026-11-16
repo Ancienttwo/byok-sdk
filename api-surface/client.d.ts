@@ -11371,10 +11371,23 @@ export interface PlatformUnit {
     /** Whether what `prepare()` puts in place is already exact; asked only once `files()` classify exact. */
     preparedArtifactsExact?(): Promise<boolean>;
 }
-/** install and uninstall for an operation already inside `owned()`, which holds the owner gate they would take. */
+/**
+ * install and the two uninstall steps for an operation already inside
+ * `owned()`, which holds the owner gate they would take. Uninstall is
+ * `deactivate()`, then `removeFiles()`: what the service runs is still in
+ * place while it stops, and the caller can take that away (a `current`
+ * pointer) before the unit goes, so a unit whose removal fails starts nothing.
+ */
 export interface HeldServiceLifecycle {
     install(opts?: ServiceInstallOptions): Promise<void>;
-    uninstall(): Promise<void>;
+    /**
+     * Stops and unregisters the service. Refuses a `foreign` unit and another
+     * owner. The unit, launcher and owner record stay; a failure throws, and
+     * then nothing may be removed.
+     */
+    deactivate(): Promise<void>;
+    /** Removes the unit, the launcher and the owner record. Call it only after `deactivate()` resolved. */
+    removeFiles(): Promise<void>;
 }
 /** A lifecycle whose owner check other installation steps run behind (#1097). */
 export interface ManagedServiceLifecycle extends ServiceLifecycle {
@@ -11661,9 +11674,10 @@ export interface ServiceUpgradeReceipt {
  *   `upgrade_pending` with it in `cause`. A timed-out start is not thrown:
  *   recover() resolves with a `failed` receipt (`switch_unhealthy` or
  *   `rollback_unhealthy`).
- * - `uninstall()`: a timed-out stop, unregistration or `daemon-reload` is
- *   thrown as is; `current` and everything under the install root stay, and
- *   so do the unit files when the stop or unregistration timed out.
+ * - `uninstall()`: a timed-out stop or unregistration is thrown as is and
+ *   removes nothing: the unit files and `current` stay. A timed-out
+ *   `daemon-reload` is thrown as is after `current` and the unit files are
+ *   removed; the rest of the install root stays.
  * - `lifecycle`: each of its operations rejects with it as is.
  *
  * A payload starts only through `current` (#2011): while a pending receipt
@@ -11792,7 +11806,7 @@ export interface ServiceInstallation {
      * failures follow the same rule as on `rollback()`.
      */
     recover(): Promise<ServiceUpgradeReceipt | undefined>;
-    /** Uninstalls the service while `current` still holds its payload, then removes the pointers, `versions/`, `snapshots/` and the receipt. A failed stop throws as is and removes nothing, so the unit and `current` stay; a unit whose removal fails after its stop stays with `current`, so a boot or login can start it until `uninstall()` is retried. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
+    /** Stops and unregisters the service while `current` still holds its payload, removes `current`, then the unit files, then `previous`, `versions/`, `snapshots/` and the receipt. A failed stop throws as is and removes nothing, so the unit and `current` stay and the service can start again until `uninstall()` is retried. A unit whose removal fails after the stop stays without `current`, so it starts no payload (#2011); retry `uninstall()`. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
     uninstall(): Promise<void>;
     /** The last receipt, or `undefined`. */
     receipt(): Promise<ServiceUpgradeReceipt | undefined>;
@@ -12004,7 +12018,9 @@ export declare function nodeAgentProgram(opts: NodeAgentProgramOptions): Service
  *   `<storeDir>\service\<name>.launcher.cmd`, which reruns the program
  *   after a non-zero exit. `stop` is the Host's own program that makes the
  *   running service exit (for the byok-agent daemon, a control `shutdown`);
- *   it must exit 0 once the service is stopping or already gone.
+ *   it must exit 0 once the service is stopping or already gone. It runs only
+ *   while a launcher runs, so it is never run once the launcher has exited,
+ *   for example on an uninstall retried after `current` was removed.
  */
 export type ServiceWindowsOptions = {
     scope?: 'machine';
@@ -12493,9 +12509,11 @@ export declare function generateWindowsStartupUnit(launcherPath: string): string
  *
  * - `start()` removes the stop marker and runs the unit, unless a launcher
  *   is already running.
- * - `stop()` writes the stop marker, runs the Host's `stop` program (a
- *   non-zero exit is `service_stop_failed` and the marker stays), then
- *   waits for the launcher to exit (`service_unload_timeout`).
+ * - `stop()` writes the stop marker; while a launcher runs, it runs the
+ *   Host's `stop` program (a non-zero exit is `service_stop_failed` and the
+ *   marker stays), then waits for the launcher to exit
+ *   (`service_unload_timeout`). With no launcher running it runs nothing
+ *   more, so `stop()` and `uninstall()` work without the program (#2279).
  * - `status()` reports the launcher process, found by its command line.
  */
 export declare function createWindowsUserLifecycle(def: ServiceDefinition, deps?: WindowsUserDeps, gateRoot?: string): ManagedServiceLifecycle;
