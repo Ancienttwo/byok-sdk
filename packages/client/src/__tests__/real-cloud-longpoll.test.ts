@@ -80,9 +80,10 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     await vi.waitFor(async () => {
       expect((await cloud.readTaskAttempt(offer.taskId))?.ownerDeviceId).toBe(record.deviceId);
     });
+    // The runtime starts only after the claim's answer (#2294): one more round trip.
     await vi.waitFor(async () => {
       expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('running');
-    });
+    }, { timeout: 5_000 });
     expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE); // stays connected across the long-poll task lifecycle
 
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 5_000 });
@@ -141,9 +142,10 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
       expect(offer).toBeDefined();
     }, { timeout: 5000, interval: 20 });
 
+    // The runtime starts only after the claim's answer (#2294): one more round trip.
     await vi.waitFor(async () => {
       expect((await cloud.readTaskAttempt(offer!.taskId))?.status).toBe('running');
-    });
+    }, { timeout: 5_000 });
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 5_000 });
     const expectedCwd = path.join(await fs.realpath(hostStorageRoot), 'agents', 'agent-hosted-longpoll');
     expect(adapter.startCalls[0]?.ctx.workspaceDir).toBe(expectedCwd);
@@ -183,9 +185,10 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     await daemon.start();
 
     const offer = await cloud.submitFreshAgent(record.deviceId, { instruction: 'cancel this task' });
+    // The runtime starts only after the claim's answer (#2294): one more round trip.
     await vi.waitFor(async () => {
       expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('running');
-    });
+    }, { timeout: 5_000 });
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 5_000 });
 
     const cancellation = await cloud.cancelTask(offer.taskId, 'operator stopped it');

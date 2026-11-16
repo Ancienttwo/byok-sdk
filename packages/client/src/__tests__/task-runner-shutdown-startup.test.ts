@@ -30,7 +30,8 @@ describe('TaskRunner shutdown admission/start ownership barrier', () => {
       instruction: 'blocked startup', ...FRESH_OFFER
     }, { taskId: 'starting-task', seq: 1 }));
     try {
-      await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
+      // The start follows the claim's settlement (#2294).
+      await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1), { timeout: 5_000 });
       runner.stopAcceptingOffers();
       const shutdown = runner.shutdownActiveTasks('operator');
       // This runtime deliberately has not returned a receipt yet. Shutdown
