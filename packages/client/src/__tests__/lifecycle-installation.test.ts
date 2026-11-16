@@ -17,7 +17,7 @@ import {
 } from '../lifecycle/service-installation';
 import { installationHoldsStart, readServiceInstallationRecord } from '../util/service-installation-record';
 import { collisionKey, SERVICE_PAYLOAD_MANIFEST, sha256File, writeServicePayloadManifest, type ServicePayloadManifest } from '../service-payload-manifest';
-import { createManagedLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
+import { createManagedLifecycle, type HeldServiceLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
 import { createLaunchdLifecycle } from '../lifecycle/launchd';
 import type { Runner } from '../util/exec-runner';
 import { PlatformCommandTimeoutError } from '../util/command-timeouts';
@@ -75,11 +75,13 @@ let unhealthy: Set<string>;
 let onHealth: (version: string) => Promise<void>;
 let installation: ServiceInstallation;
 
+const record = (event: string) => async () => { events.push(event); };
+const fakeHeld = (): HeldServiceLifecycle => ({ install: record('install'), deactivate: record('deactivate'), removeFiles: record('removeFiles') });
+
 function fakeLifecycle(): ManagedServiceLifecycle {
-  const record = (event: string) => async () => { events.push(event); };
   return {
     install: record('install'), uninstall: record('uninstall'), start: record('start'), stop: record('stop'),
-    owned: (operation) => withServiceOwnerGate(() => operation({ install: record('install'), uninstall: record('uninstall') })),
+    owned: (operation) => withServiceOwnerGate(() => operation(fakeHeld())),
     repair: async () => ({ status: 'not-needed', state: 'exact' }),
     inspect: async () => ({ state: 'exact', unitPath: 'unit', launcherPath: 'launcher' }),
     status: async () => { throw new Error('not used'); },
@@ -477,7 +479,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await installation.currentVersion()).toBeUndefined();
       expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
       expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
-      expect(events.at(-1)).toBe('uninstall');
+      expect(events.slice(-2)).toEqual(['deactivate', 'removeFiles']);
       expect(signal?.aborted).toBe(mode === 'ignores abort forever');
     } finally {
       release();
@@ -541,7 +543,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       const installing = installation.install(candidate);
       await began;
       await vi.advanceTimersByTimeAsync(51);
-      expect(events).not.toContain('uninstall');
+      expect(events).not.toContain('removeFiles');
       release();
       await installing;
       expect(await installation.currentVersion()).toBe('1.0.0');
@@ -560,7 +562,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       const error = await installation.install(candidate).catch((caught: unknown) => caught);
       expect(fault.fired()).toBe(true);
       expect(error).toMatchObject({ code: 'install_health_check_failed', cause: { code: 'EIO' } });
-      expect(events).toContain('uninstall');
+      expect(events).toContain('removeFiles');
       expect(await installation.currentVersion()).toBeUndefined();
       expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
       expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
@@ -569,23 +571,19 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     }
   });
 
-  it('reports an install removal failure with both errors and names the remaining artifacts (#1966)', async () => {
+  it.each(['deactivate', 'removeFiles'] as const)('reports an install removal failure with both errors and names the remaining artifacts; a failed %s keeps no current once the stop succeeded (#1966, #2279)', async (step) => {
     const removalError = new Error('service manager refused removal');
     const base = fakeLifecycle();
-    installation = installationOver({
-      ...base,
-      owned: (operation) => withServiceOwnerGate(() => operation({
-        install: base.install,
-        uninstall: async () => { throw removalError; },
-      })),
-    });
+    installation = installationOver({ ...base, owned: (operation) => withServiceOwnerGate(() => operation({ ...fakeHeld(), [step]: async () => { throw removalError; } })) });
     unhealthy.add('1.0.0');
     const error = await installation.install(await payload('1.0.0')).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ServiceInstallationError);
     expect(error).toMatchObject({ code: 'install_health_check_failed', cause: { errors: [expect.objectContaining({ message: 'unhealthy' }), removalError] } });
     expect((error as Error).cause).toBeInstanceOf(AggregateError);
-    expect((error as Error).message).toContain('Remaining: service unit and launcher, current pointer, installation record, staged version directory, prepared store snapshot restoration, store lease release, install snapshot directory');
-    expect(await pointer('current')).toBe('1.0.0');
+    const remaining = 'service unit and launcher, installation record, staged version directory, prepared store snapshot restoration, store lease release, install snapshot directory';
+    expect((error as Error).message).toContain(`Remaining: ${step === 'deactivate' ? 'service registration, current pointer, ' : ''}${remaining}`);
+    // The unit left after a stop has no current to start: the payload failed its health check.
+    expect(await pointer('current')).toBe(step === 'deactivate' ? '1.0.0' : undefined);
     expect(await readServiceInstallationRecord(storeDir)).toBeDefined();
     expect(await fs.readFile(path.join(installRoot, 'versions', '1.0.0', 'host.js'), 'utf8')).toBe('// 1.0.0');
   });
@@ -1033,20 +1031,22 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await expect(installation.upgrade(relabeled)).rejects.toMatchObject({ code: 'version_conflict' });
   });
 
-  const uninstallVia = (uninstall: () => Promise<void>) => {
+  const uninstallVia = (deactivate: () => Promise<void>, removeFiles: () => Promise<void> = async () => undefined) => {
     const base = fakeLifecycle();
-    installation = installationOver({ ...base, owned: (operation) => withServiceOwnerGate(() => operation({ install: base.install, uninstall })) });
+    installation = installationOver({ ...base, owned: (operation) => withServiceOwnerGate(() => operation({ ...fakeHeld(), deactivate, removeFiles })) });
   };
   const layout = async () => [await pointer('current'), await pointer('previous'), await fs.readdir(path.join(installRoot, 'versions'))];
 
-  it.each([false, true])('uninstall stops the service while current is present, then removes the versions, pointers, snapshots, receipt and record, and leaves the store (upgraded: %s, #2274)', async (upgraded) => {
+  it.each([false, true])('uninstall stops the service while current is present, removes current before the unit files, then removes the versions, pointers, snapshots, receipt and record, and leaves the store (upgraded: %s, #2274, #2279)', async (upgraded) => {
     // The Host's stop program runs from under current, as the Windows lifecycle's deactivate does.
-    let seen: unknown[] = [];
-    uninstallVia(async () => { seen = await layout(); });
+    const seen: unknown[] = [];
+    uninstallVia(async () => { seen.push(await layout()); }, async () => { seen.push(await layout()); });
     await installation.install(await payload('1.0.0'));
     if (upgraded) await installation.upgrade(await payload('2.0.0'));
     await installation.uninstall();
-    expect(seen).toEqual(upgraded ? ['2.0.0', '1.0.0', ['1.0.0', '2.0.0']] : ['1.0.0', undefined, ['1.0.0']]);
+    const versions = upgraded ? ['1.0.0', '2.0.0'] : ['1.0.0'];
+    const previous = upgraded ? '1.0.0' : undefined;
+    expect(seen).toEqual([[upgraded ? '2.0.0' : '1.0.0', previous, versions], [undefined, previous, versions]]);
     expect(await fs.readdir(installRoot)).toEqual([]);
     expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
     expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
@@ -1055,12 +1055,24 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
   it('uninstall throws a failed stop as is and removes nothing (#2274)', async () => {
     const failed = new ServiceUnitError('service_stop_failed');
     const stop = vi.fn(async () => { throw failed; });
-    uninstallVia(stop);
+    const removeFiles = vi.fn(async () => undefined);
+    uninstallVia(stop, removeFiles);
     await installation.install(await payload('1.0.0'));
     await installation.upgrade(await payload('2.0.0'));
     const receipt = await installation.receipt();
     await expect(installation.uninstall()).rejects.toBe(failed);
-    expect([stop.mock.calls.length, ...await layout(), await installation.receipt()]).toEqual([1, '2.0.0', '1.0.0', ['1.0.0', '2.0.0'], receipt]);
+    expect([stop.mock.calls.length, removeFiles.mock.calls.length, ...await layout(), await installation.receipt()]).toEqual([1, 0, '2.0.0', '1.0.0', ['1.0.0', '2.0.0'], receipt]);
+  });
+
+  it('uninstall whose unit removal fails after the stop leaves no current, so the unit starts no payload; a retry finishes (#2279)', async () => {
+    const failed = new Error('unit removal failed');
+    uninstallVia(async () => undefined, vi.fn<() => Promise<void>>().mockRejectedValueOnce(failed).mockResolvedValue(undefined));
+    await installation.install(await payload('1.0.0'));
+    await installation.upgrade(await payload('2.0.0'));
+    await expect(installation.uninstall()).rejects.toBe(failed);
+    expect(await layout()).toEqual([undefined, '1.0.0', ['1.0.0', '2.0.0']]);
+    await installation.uninstall();
+    expect(await fs.readdir(installRoot)).toEqual([]);
   });
   describe('install store preparation (#1983)', () => {
     const migrating = (verdict = 'accepted') => installationOver(fakeLifecycle(), {
@@ -1146,7 +1158,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       const error = await installation.install(await payload('2.0.0')).catch((caught: unknown) => caught);
       expect(error).toMatchObject({ code: 'upgrade_pending' });
       for (const name of repairs) expect((error as Error).message).toContain(path.join(installRoot, 'snapshots', name));
-      expect(events).toEqual(['uninstall']);
+      expect(events).toEqual(['deactivate', 'removeFiles']);
       expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
       expect((await snapshotNames()).sort()).toEqual(repairs.sort());
       expect(existsSync(path.join(installRoot, 'versions'))).toBe(false);
@@ -1163,7 +1175,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
 
       // Owner gates under different gate roots do not exclude each other; owned() without the gate models that.
       // The install-root gate does: while A holds it, every operation of B is lifecycle_owner_busy and writes nothing.
-      const ungated = (base: ManagedServiceLifecycle): ManagedServiceLifecycle => ({ ...base, owned: (operation) => operation({ install: base.install, uninstall: base.uninstall }) });
+      const ungated = (base: ManagedServiceLifecycle): ManagedServiceLifecycle => ({ ...base, owned: (operation) => operation(fakeHeld()) });
       // The root does not exist yet. On a case-insensitive volume B also spells it in another case.
       await fs.rm(installRoot, { recursive: true, force: true });
       const alias = installRoot.toUpperCase();
@@ -1385,7 +1397,7 @@ print(json.dumps(result))
         fault.mockRestore();
       }
       expect(await tree(outside)).toEqual(before);
-      expect(events).not.toContain('uninstall');
+      expect(events).not.toContain('deactivate');
       expect(await pointer('current')).toBe('1.0.0');
     });
 
@@ -1471,7 +1483,7 @@ print(json.dumps(result))
         await fs.writeFile(`${db}-journal`, 'candidate journal');
       };
       await expect(installation.install(await payload('2.0.0', { 'migrate.cjs': MIGRATE }))).rejects.toMatchObject({ code: 'install_health_check_failed' });
-      expect(events).toContain('uninstall');
+      expect(events).toContain('removeFiles');
       expect(await pointer('current')).toBeUndefined();
       expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
       expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
@@ -1485,9 +1497,7 @@ print(json.dumps(result))
       const removal = new Error('service is still running');
       installation = installationOver({
         ...base,
-        owned: (operation) => withServiceOwnerGate(() => operation({
-          install: base.install, uninstall: async () => { throw removal; },
-        })),
+        owned: (operation) => withServiceOwnerGate(() => operation({ ...fakeHeld(), deactivate: async () => { throw removal; } })),
       }, {
         migrate: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] }),
       });
@@ -1653,11 +1663,11 @@ print(json.dumps(result))
       const unitPath = path.join(root, 'foreign.unit');
       await fs.writeFile(unitPath, 'operator unit');
       const base = fakeLifecycle();
-      const uninstall = vi.fn(async () => { throw new ServiceUnitError('service_unit_unmarked'); });
+      const deactivate = vi.fn(async () => { throw new ServiceUnitError('service_unit_unmarked'); });
       installation = installationOver({
         ...base,
         inspect: async () => ({ state: 'foreign', unitPath, launcherPath: unitPath }),
-        owned: (operation) => withServiceOwnerGate(() => operation({ install: base.install, uninstall })),
+        owned: (operation) => withServiceOwnerGate(() => operation({ ...fakeHeld(), deactivate })),
       }, {
         migrate: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, 'accepted'] }),
       });
@@ -1670,7 +1680,7 @@ print(json.dumps(result))
       } finally {
         fault.restore();
       }
-      expect(uninstall).not.toHaveBeenCalled();
+      expect(deactivate).not.toHaveBeenCalled();
       expect(await fs.readFile(unitPath, 'utf8')).toBe('operator unit');
       expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
       expect(await fs.readFile(`${db}-wal`, 'utf8')).toBe('v1 wal');
@@ -1758,7 +1768,7 @@ print(json.dumps(result))
       expect(error).toMatchObject({ code: 'upgrade_pending' });
       expect(causes(error)).toEqual([expect.objectContaining({ code: 'store_migration_failed' }), fault.restoreError]);
       expect((error as Error).message).toContain(path.join(installRoot, 'snapshots', repair!));
-      expect(events).toEqual(['stop', 'uninstall']);
+      expect(events).toEqual(['stop', 'deactivate', 'removeFiles']);
       expect(existsSync(db)).toBe(false);
       await expect(fs.lstat(path.join(installRoot, 'current'))).rejects.toMatchObject({ code: 'ENOENT' });
       expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);
@@ -1771,7 +1781,7 @@ print(json.dumps(result))
       expect(stopped).toMatchObject({ code: 'upgrade_pending' });
       expect(causes(stopped)).toEqual([stopError]);
       expect((stopped as Error).message).toContain(path.join(installRoot, 'snapshots', repair!));
-      expect(events).toEqual(['stop', 'uninstall']);
+      expect(events).toEqual(['stop', 'deactivate', 'removeFiles']);
       expect(await snapshotNames()).toEqual([repair]);
       expect(existsSync(db)).toBe(false);
 
@@ -1787,7 +1797,7 @@ print(json.dumps(result))
       }
       expect(retire.fired()).toBe(true);
       expect((unretired as Error).message).toContain(path.join(installRoot, 'snapshots', repair!));
-      expect(events).toEqual(['stop', 'uninstall']);
+      expect(events).toEqual(['stop', 'deactivate', 'removeFiles']);
       expect(await snapshotNames()).toEqual([repair]);
 
       // A retry whose repair restore fails again changes nothing else and starts nothing.
@@ -1810,7 +1820,7 @@ print(json.dumps(result))
         again.restore();
       }
       expect(seen).toEqual([]);
-      expect(events).toEqual(['stop', 'uninstall']);
+      expect(events).toEqual(['stop', 'deactivate', 'removeFiles']);
       expect(await snapshotNames()).toEqual([repair]);
       expect(existsSync(path.join(installRoot, 'versions', '2.0.0'))).toBe(false);
 
@@ -1927,7 +1937,7 @@ print(json.dumps(result))
       expect(causes(error)).toEqual([expect.anything(), fault.restoreError, releaseError]);
       expect((error as Error).message).toContain('Remaining: prepared store snapshot restoration, store lease release, install snapshot directory.');
       expect((error as Error).message).toContain(path.join(installRoot, 'snapshots', repair!));
-      expect(events.slice(-2)).toEqual(['health 2.0.0', 'uninstall']);
+      expect(events.slice(-3)).toEqual(['health 2.0.0', 'deactivate', 'removeFiles']);
       expect(await pointer('current')).toBeUndefined();
       expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
       expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual([]);

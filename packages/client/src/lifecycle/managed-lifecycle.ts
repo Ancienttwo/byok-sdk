@@ -39,10 +39,23 @@ export interface PlatformUnit {
   preparedArtifactsExact?(): Promise<boolean>;
 }
 
-/** install and uninstall for an operation already inside `owned()`, which holds the owner gate they would take. */
+/**
+ * install and the two uninstall steps for an operation already inside
+ * `owned()`, which holds the owner gate they would take. Uninstall is
+ * `deactivate()`, then `removeFiles()`: what the service runs is still in
+ * place while it stops, and the caller can take that away (a `current`
+ * pointer) before the unit goes, so a unit whose removal fails starts nothing.
+ */
 export interface HeldServiceLifecycle {
   install(opts?: ServiceInstallOptions): Promise<void>;
-  uninstall(): Promise<void>;
+  /**
+   * Stops and unregisters the service. Refuses a `foreign` unit and another
+   * owner. The unit, launcher and owner record stay; a failure throws, and
+   * then nothing may be removed.
+   */
+  deactivate(): Promise<void>;
+  /** Removes the unit, the launcher and the owner record. Call it only after `deactivate()` resolved. */
+  removeFiles(): Promise<void>;
 }
 
 /** A lifecycle whose owner check other installation steps run behind (#1097). */
@@ -125,11 +138,14 @@ export function createManagedLifecycle(def: ServiceDefinition, platform: Platfor
     await unit.activate();
   }
 
-  async function heldUninstall(): Promise<void> {
+  async function deactivate(): Promise<void> {
     const { state } = await inspect();
     if (state === 'foreign') throw new ServiceUnitError('service_unit_unmarked');
     await requireOwner();
     await unit.deactivate();
+  }
+
+  async function removeFiles(): Promise<void> {
     await unit.removeFiles();
     await releaseHeldServiceLifecycleOwner({ storeDir: def.storeDir, owner }, fs);
   }
@@ -137,7 +153,7 @@ export function createManagedLifecycle(def: ServiceDefinition, platform: Platfor
   function owned<T>(operation: (held: HeldServiceLifecycle) => Promise<T>): Promise<T> {
     return gated(async () => {
       await requireOwner();
-      return operation({ install: heldInstall, uninstall: heldUninstall });
+      return operation({ install: heldInstall, deactivate, removeFiles });
     });
   }
 
@@ -176,7 +192,10 @@ export function createManagedLifecycle(def: ServiceDefinition, platform: Platfor
   return {
     install: (opts) => gated(() => heldInstall(opts)),
     repair,
-    uninstall: () => gated(heldUninstall),
+    uninstall: () => gated(async () => {
+      await deactivate();
+      await removeFiles();
+    }),
     start,
     stop,
     status,
