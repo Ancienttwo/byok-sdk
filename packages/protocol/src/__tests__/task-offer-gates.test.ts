@@ -40,7 +40,7 @@ const corpusOffers = corpusOfferLines.map((line) => line.payload);
 /**
  * The v6 offer lines the oracle's release shipped: the corpus prefix its
  * `golden/v6.releases.json` entry pins. The v7 corpus keeps each one's
- * envelope id (scripts/generate-v7-corpus.mjs), so each pairs with its v7 form.
+ * envelope id (generate-v7-corpus.mjs), so each pairs with its v7 form.
  */
 const oracleVersion = (JSON.parse(readFileSync(createRequire(import.meta.url).resolve('byok-protocol-previous/package.json'), 'utf8')) as { version: string }).version;
 const oracleLines = (JSON.parse(readFileSync(new URL('golden/v6.releases.json', import.meta.url), 'utf8')) as {

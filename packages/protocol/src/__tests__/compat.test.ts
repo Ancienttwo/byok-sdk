@@ -59,7 +59,7 @@ import {
  *    protocol version.
  * 6. v7 self-consistency. `golden/v7.envelopes.ndjson` and
  *    `golden/v7.http.ndjson` were generated from the frozen v6 corpora by
- *    `scripts/generate-v7-corpus.mjs`, are append-only from now on, and the
+ *    `generate-v7-corpus.mjs`, are append-only from now on, and the
  *    current decoder reads them exactly. `golden/v7.releases.json` registers
  *    no release yet and has no floor.
  * 7. Published rejection oracle. `byok-protocol-previous` (0.43.0, the

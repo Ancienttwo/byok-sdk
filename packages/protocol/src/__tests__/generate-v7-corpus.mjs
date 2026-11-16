@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const goldenDir = fileURLToPath(new URL('../src/__tests__/golden/', import.meta.url));
+const goldenDir = fileURLToPath(new URL('./golden/', import.meta.url));
 const V7 = 7;
 
 /**

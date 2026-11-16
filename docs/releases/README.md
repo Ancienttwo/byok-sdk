@@ -54,7 +54,7 @@ rejects every v6 envelope. Lines appended to the v6 corpora after 0.43.0 were
 never released; their cases are in the v7 corpus.
 
 v7 evidence. `golden/v7.envelopes.ndjson` and `golden/v7.http.ndjson` are
-produced by `packages/protocol/scripts/generate-v7-corpus.mjs` from the frozen
+produced by `packages/protocol/src/__tests__/generate-v7-corpus.mjs` from the frozen
 v6 corpora plus the v7 lines it appends. Until the first v7 release is
 registered, edit the generator and regenerate; after that the lines a
 release covers are immutable and the rest stays append-only.
