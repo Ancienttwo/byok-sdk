@@ -15,8 +15,15 @@ export declare class RuntimeFailureError extends Error {
 }
 /** The runtime refused a session option at open: the vendored typed error, never matched by name or message. */
 export declare class UnsupportedOptionError extends Error {
-  readonly name: 'UnsupportedOptionError';
+  readonly name: string;
   readonly option: string;
+}
+/** The open could not confirm the requested model from the runtime's readback: the vendored typed error. */
+export declare class ModelConfirmationError extends Error {
+  readonly name: 'ModelConfirmationError';
+  readonly requested: string;
+  readonly reported: string | null;
+  readonly catalogSelectorIds?: readonly string[];
 }
 export interface AcpControl {
   // ControlResult also permits an exit response with a numeric or null code.

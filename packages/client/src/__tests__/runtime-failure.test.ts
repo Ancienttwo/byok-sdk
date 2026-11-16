@@ -10,10 +10,11 @@ import type { RuntimeFailurePhase } from '../runtime-failure';
 import { promises as fs } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { oarStartClassifier, runtimeStartFailure } from '../adapters/runtime-start-failure';
-import { SessionNotFoundError } from '../../vendor/oar/2f81b34/contracts/session-not-found-error';
-import { SessionUnavailableError } from '../../vendor/oar/2f81b34/contracts/session-unavailable-error';
-import { UnsupportedOptionError } from '../../vendor/oar/2f81b34/contracts/errors';
-import { RuntimeFailureError } from '../../vendor/oar/2f81b34/contracts/runtime-failure-error';
+import { SessionNotFoundError } from '../../vendor/oar/4eb5919/contracts/session-not-found-error';
+import { SessionUnavailableError } from '../../vendor/oar/4eb5919/contracts/session-unavailable-error';
+import { UnsupportedOptionError } from '../../vendor/oar/4eb5919/contracts/errors';
+import { ModelConfirmationError } from '../../vendor/oar/4eb5919/contracts/model-confirmation-error';
+import { RuntimeFailureError } from '../../vendor/oar/4eb5919/contracts/runtime-failure-error';
 
 const teardownIsNotExecutionPhase = (): RuntimeFailurePhase => {
   // @ts-expect-error teardown evidence belongs to Sprint Row 3, not the execution failure union.
@@ -116,7 +117,7 @@ describe('RuntimeExecutionFailure', () => {
 });
 
 describe('runtime start failures', () => {
-  const classify = oarStartClassifier({ SessionNotFoundError, SessionUnavailableError, UnsupportedOptionError, RuntimeFailureError });
+  const classify = oarStartClassifier({ SessionNotFoundError, SessionUnavailableError, UnsupportedOptionError, ModelConfirmationError, RuntimeFailureError });
   const details = { method: 'resume', native: {} };
   const typed = new RuntimeExecutionFailure({ phase: 'run', retry: 'retryable', reason: 'typed', failure: { class: 'quota' } });
   it.each([
@@ -125,6 +126,7 @@ describe('runtime start failures', () => {
     [new SessionUnavailableError('id', 'archived', { ...details, reason: 'archived' }), 'non-retryable', 'unknown', 'archived'],
     [new SessionUnavailableError('id', 'in use', { ...details, reason: 'in_use' }), 'retryable', 'unknown', 'in use'],
     [new UnsupportedOptionError('model', 'unsupported'), 'non-retryable', 'unknown', 'unsupported'],
+    [new ModelConfirmationError('kept', { requested: 'a', reported: 'b' }), 'non-retryable', 'unknown', 'kept'],
     [new RuntimeFailureError('auth', 'login'), 'non-retryable', 'auth', 'login'],
     [new Error('exit'), 'retryable', 'runtime_exited', 'exit'],
   ])('classifies %s', (error, retry, failureClass, message) => {

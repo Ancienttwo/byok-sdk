@@ -20,12 +20,13 @@ export interface OarStartErrorClasses {
   readonly SessionNotFoundError: abstract new (...args: never[]) => OarErrors.SessionNotFoundError;
   readonly SessionUnavailableError: abstract new (...args: never[]) => OarErrors.SessionUnavailableError;
   readonly UnsupportedOptionError: abstract new (...args: never[]) => OarErrors.UnsupportedOptionError;
+  readonly ModelConfirmationError: abstract new (...args: never[]) => OarErrors.ModelConfirmationError;
   readonly RuntimeFailureError: abstract new (...args: never[]) => OarErrors.RuntimeFailureError;
 }
 
 export function oarStartClassifier(classes: OarStartErrorClasses): RuntimeStartClassifier {
   return (error) => {
-    if (error instanceof classes.SessionNotFoundError || error instanceof classes.UnsupportedOptionError || error instanceof classes.SessionUnavailableError) {
+    if (error instanceof classes.SessionNotFoundError || error instanceof classes.UnsupportedOptionError || error instanceof classes.ModelConfirmationError || error instanceof classes.SessionUnavailableError) {
       const retryable = error instanceof classes.SessionUnavailableError && error.reason === 'in_use';
       return { retry: retryable ? 'retryable' : 'non-retryable' };
     }
