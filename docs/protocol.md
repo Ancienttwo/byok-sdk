@@ -1249,10 +1249,12 @@ enqueue as described in §2.1.
 
 The device switch `DaemonConfig.nativeSessions` defaults to `false`. Declaration
 requires that switch, macOS or Linux, `piByokLauncher.sessionDir`, and a Pi
-adapter declaring `PI_MEMORY_LANE`. Windows never declares it in 0.40. A device
-without the capability, a non-Pi selection, or a Pi adapter without the lane
-refuses before claim with `reason` and `code` both `native_sessions_unsupported`,
-non-retryably. This closed plaintext decline also applies when `task-output` is
+adapter declaring `PI_MEMORY_LANE`. Windows never declares it in 0.40. An
+offer without an explicit Pi target breaks selection rule 3 and declines with
+`native_sessions_selection_invalid` (§3.2 **Offer selection rules**). A device
+without the capability, or a Pi adapter without the lane, refuses an offer that
+passes the selection rules before claim with `reason` and `code` both
+`native_sessions_unsupported`, non-retryably. This closed plaintext decline also applies when `task-output` is
 sealed, including when the owner disables the capability after Host enqueue.
 The `native_sessions_unsupported` decline code is baseline in v6: the server's
 `native-sessions` advertisement and the `task.decline` wire row it gated are
@@ -2653,8 +2655,14 @@ v7 deleted the rules `runtime_selection_mismatch` and
 caught cannot be expressed. A native-sessions offer needs an explicit Pi
 target first, because native sessions run only a fresh memory-only Pi task.
 
-The device runs the capability and `native_sessions_unsupported` gates before
-the predicate, so those codes win over these rules. The wire decoder does not
+**Order on the device.** The device evaluates these rules before any
+native-sessions support check. `native_sessions_unsupported` answers only an
+offer the rules accept, so it never hides a selection violation: an offer that
+breaks a rule declines with the rule's code even on a device without native
+sessions. The capability self-check for every other flag still runs before the
+rules (`offer_capability_missing`). Phase 1 makes the client follow this order:
+today `daemon/task-runner/offer.ts:140-146` and the `native-sessions` mapping in
+`offer-admission.ts:210-215` run before the predicate. The wire decoder does not
 run these rules; a structural `task.offer` rule (prepared shape, `egressPolicy`,
 `routineRef`) still fails decoding. A Host can check before it enqueues:
 `HostOfferPlainPayloadSchema.safeParse(payload)` gives the same answer as the

@@ -231,6 +231,9 @@ Upgrade both sides to resolve it.
   three model lanes still need the device flag `dispatch-selection`.
 - `nativeSessions` needs an explicit Pi target (lane `runtime`, `byok` or
   `byok-profile` with `runtimeId: 'pi'`).
+  Without one the offer declines with `native_sessions_selection_invalid`.
+  `native_sessions_unsupported` no longer hides a selection violation: a
+  device checks the selection rules first (client order: phase 1).
 - `task.claim` takes one required `executor`
   (`{ kind: 'runtime', runtimeId }` or `{ kind: 'harness', harnessId }`) in
   place of `runtime`, `harnessId` and `agentId`. `task.complete` requires it;
