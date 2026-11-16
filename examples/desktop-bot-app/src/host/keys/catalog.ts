@@ -9,14 +9,14 @@ import { exactProviderProfileBinding, inspectProviderProfileStore, SqliteProvide
  * profile Pi cannot launch (no `pi_model`) yields no entry.
  */
 export function catalogEntryFor(profile: ModelProviderProfile, base: ExecutionTemplate): ExecutionTemplate | undefined {
-  if (base.payload.runtime !== 'pi') throw new Error(`A provider profile pins only Pi entries, not ${base.payload.runtime}`);
+  const { target } = base.payload;
+  if (target.lane !== 'runtime' || target.runtimeId !== 'pi') throw new Error(`A provider profile pins only Pi entries, not ${JSON.stringify(target)}`);
   if (profile.pi_model === undefined) return undefined;
   const binding = exactProviderProfileBinding(profile);
-  const dispatchSelection = {
+  return { ...base, payload: { ...base.payload, target: {
     lane: 'byok-profile' as const, runtimeId: 'pi' as const,
     providerProfile: { ...binding, requiredCapabilities: [...binding.requiredCapabilities] },
-  };
-  return { ...base, payload: { ...base.payload, dispatchSelection } };
+  } } };
 }
 
 /**

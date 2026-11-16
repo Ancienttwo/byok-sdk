@@ -32,7 +32,7 @@ function template(tenant: string, instruction = 'Check the watchlist.') {
     routineRef, agentRef, instruction });
 }
 async function sealedInput(taskId: string, deviceId: string, tenant = 'tenant-k4'): Promise<SealedAgentExecutionInput> {
-  return { taskId, deviceId, payload: { runtime: 'pi', session: { mode: 'fresh' }, agentRef, egressPolicy, terminalProjection, sealing, sealed: await template(tenant), routineRef } };
+  return { taskId, deviceId, payload: { target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, agentRef, egressPolicy, terminalProjection, sealing, sealed: await template(tenant), routineRef } };
 }
 function plain(input: SealedAgentExecutionInput): FrozenInput {
   const { sealing: _, sealed: __, routineRef: ___, ...payload } = input.payload;

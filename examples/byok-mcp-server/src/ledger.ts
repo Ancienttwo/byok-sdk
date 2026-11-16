@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import type { ByokServer } from '@byok-sdk/server';
 import { AgentRefSchema } from '@byok-sdk/protocol';
-import { BetaError, WINDOW_MS, agentScope, canonicalJson, freeze, hash, invalid, keySpec, taskArguments, text,
+import { BetaError, WINDOW_MS, agentScope, canonicalJson, freeze, hash, invalid, keySpec, runtimeTarget, taskArguments, text,
   type Caller, type KeyInfo, type KeySpec, type QuotaSnapshot, type RoutineReservation, type Scope, type TaskArguments,
   type TaskBinding, type TaskReservation } from './model';
 
@@ -237,7 +237,7 @@ export class BetaLedger {
     const instruction = 'instruction' in offer.payload ? offer.payload.instruction : undefined;
     const offeredAgent = 'agentRef' in offer.payload ? offer.payload.agentRef : undefined;
     if (offer.taskId !== taskId || offer.deviceId !== saved.binding.deviceId || instruction !== saved.binding.arguments.instruction
-      || offer.payload.runtime !== saved.binding.arguments.runtime
+      || canonicalJson(offer.payload.target) !== canonicalJson(runtimeTarget(saved.binding.arguments.runtime))
       || offeredAgent === undefined || saved.binding.agentRef === undefined || canonicalJson(offeredAgent) !== canonicalJson(saved.binding.agentRef)
       || terminal.envelope.task_id !== taskId || !['task.complete', 'task.fail', 'task.cancelled', 'task.decline'].includes(terminal.envelope.type)) {
       throw new Error('SDK task binding or terminal mismatch');

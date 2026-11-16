@@ -58,7 +58,7 @@ export function executionCatalog(brand: Pick<ConversationBrand, 'instruction' | 
   const template = (runtime: ModelEntry['runtime']): ExecutionTemplate => ({
     deviceId, agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'desktop' },
     payload: {
-      runtime, session: { mode: 'fresh' }, instruction: brand.instruction, agentRef: { agentId: 'host', profileRevision: '1' },
+      target: { lane: 'runtime', runtimeId: runtime }, session: { mode: 'fresh' }, instruction: brand.instruction, agentRef: { agentId: 'host', profileRevision: '1' },
       egressPolicy: AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 },
       terminalProjection: { mode: 'result-document', contract: 'desktop-turn-v1', schema: { type: 'object' } },

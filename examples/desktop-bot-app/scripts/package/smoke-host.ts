@@ -4,9 +4,9 @@
 // asset root. Two Pi dispatches against an OpenAI-compatible endpoint inside this
 // process, no provider key and no OS credential store:
 //
-// 1. Keys launcher lane (dispatchSelection pinned): the model calls memory_recall,
+// 1. Keys launcher lane (byok target): the model calls memory_recall,
 //    then replies. Under a BYOK keys profile Pi registers no subagent tool.
-// 2. Pi auth store lane (no dispatchSelection, PI_CODING_AGENT_DIR passed): the
+// 2. Pi auth store lane (runtime target, PI_CODING_AGENT_DIR passed): the
 //    model asks for a background subagent, which the SEA refuses with
 //    pi_background_unavailable (#1499 R2); the task still completes.
 //
@@ -128,11 +128,11 @@ async function smoke(): Promise<void> {
     const { deviceId } = await daemon.pair(code);
     await daemon.start();
     await daemon.whenOpen({ signal: AbortSignal.timeout(120_000) });
-    const run = async (dispatch: object) => {
+    const run = async (target: { lane: 'runtime'; runtimeId: 'pi' } | { lane: 'byok'; runtimeId: 'pi'; providerId: string; modelId: string }) => {
       const { taskId } = await byok.executions.submit({
         taskId: randomUUID(), deviceId,
-        payload: { instruction: 'reply once', runtime: 'pi', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY,
-          terminalProjection: { mode: 'none' }, ...dispatch },
+        payload: { instruction: 'reply once', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY,
+          terminalProjection: { mode: 'none' }, target },
       });
       const task = await until(async () => {
         const snapshot = await byok.tasks.get(taskId);
@@ -141,8 +141,8 @@ async function smoke(): Promise<void> {
       const reply = task.result && 'finalMessage' in task.result ? task.result.finalMessage : undefined;
       return task.state === 'Complete' ? { state: task.state, reply } : { state: task.state, result: task.result };
     };
-    const keys = await run({ dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'smoke', modelId: MODEL } });
-    const piAuth = await run({});
+    const keys = await run({ lane: 'byok', runtimeId: 'pi', providerId: 'smoke', modelId: MODEL });
+    const piAuth = await run({ lane: 'runtime', runtimeId: 'pi' });
     const memory = log.toolResults.some(result => result.includes('"revision"'));
     const refused = log.toolResults.some(result => result.includes('pi_background_unavailable'));
     const ok = [keys, piAuth].every(task => task.state === 'Complete' && task.reply === MODEL_REPLY) && memory && refused;

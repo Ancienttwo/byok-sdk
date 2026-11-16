@@ -103,8 +103,8 @@ async function host(): Promise<void> {
     await daemon.whenOpen({ signal: AbortSignal.timeout(60_000) });
     const { taskId } = await byok.executions.submit({
       taskId: randomUUID(), deviceId,
-      payload: { instruction: 'reply once', runtime: 'pi', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY,
-        terminalProjection: { mode: 'none' }, dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'packaging', modelId: 'packaging-model' } },
+      payload: { instruction: 'reply once', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY,
+        terminalProjection: { mode: 'none' }, target: { lane: 'byok', runtimeId: 'pi', providerId: 'packaging', modelId: 'packaging-model' } },
     });
     const task = await until(async () => {
       const snapshot = await byok.tasks.get(taskId);
