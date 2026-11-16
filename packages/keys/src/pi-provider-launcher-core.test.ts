@@ -61,7 +61,7 @@ describe('Pi provider launcher core', () => {
     const mcp = path.join(os.tmpdir(), 'task-mcp.json');
     const env = buildPiProviderChildEnvironment({
       ambient: { BYOK_PI_MCP_CONFIG_PATH: mcp, BYOK_PI_PERMISSION_MODE: 'readonly', BYOK_PI_UNTRUSTED: 'discard', ZAI_API_KEY: CANARY },
-      projectionDir: '/projection', sessionDir: '/sessions', secret: undefined,
+      projectionDir: '/projection', sessionDir: '/sessions',
     });
     expect(env.BYOK_PI_MCP_CONFIG_PATH).toBeUndefined();
     expect(env.BYOK_PI_PERMISSION_MODE).toBeUndefined();
@@ -72,7 +72,7 @@ describe('Pi provider launcher core', () => {
     { BYOK_PI_MCP_CONFIG_PATH: './relative' }, { BYOK_PI_MCP_CONFIG_PATH: '/bad\npath' },
     { BYOK_PI_PERMISSION_MODE: 'auto\n' }, { BYOK_PI_PERMISSION_MODE: 'confirm' },
   ])('discards obsolete SDK extension context', (ambient) => {
-    expect(buildPiProviderChildEnvironment({ ambient, projectionDir: '/projection', sessionDir: '/sessions', secret: undefined })).toEqual({PI_CODING_AGENT_DIR:'/projection', PI_CODING_AGENT_SESSION_DIR:'/sessions'});
+    expect(buildPiProviderChildEnvironment({ ambient, projectionDir: '/projection', sessionDir: '/sessions' })).toEqual({PI_CODING_AGENT_DIR:'/projection', PI_CODING_AGENT_SESSION_DIR:'/sessions'});
   });
   it('parses only the closed launcher contract and requires absolute custody paths', () => {
     const profileDbPath = path.join(os.tmpdir(), 'providers.sqlite');
@@ -208,7 +208,7 @@ describe('Pi provider launcher core', () => {
     expect(`${(error as Error).message} ${(error as Error).stack}`).not.toContain(CANARY);
   });
 
-  it('builds the Pi child environment from a closed baseline plus only the resolved key', () => {
+  it('builds the Pi child environment from a closed credential-free baseline', () => {
     expect(buildPiProviderChildEnvironment({
       ambient: {
         PATH: '/usr/bin',
@@ -220,14 +220,12 @@ describe('Pi provider launcher core', () => {
       },
       projectionDir: '/private/projection',
       sessionDir: '/private/sessions',
-      secret: 'exact-custody-key',
       platform: 'darwin',
     })).toEqual({
       PATH: '/usr/bin',
       HTTPS_PROXY: 'http://proxy.example',
       PI_CODING_AGENT_DIR: '/private/projection',
       PI_CODING_AGENT_SESSION_DIR: '/private/sessions',
-      PI_PROVIDER_API_KEY: 'exact-custody-key',
     });
   });
 
@@ -340,7 +338,7 @@ describe('committed Pi spawn boundary', () => {
   });
 
   it('sets the launch-owned Pi directories, ignores ambient ones and keeps the product Pi asset root', () => {
-    const env = buildPiProviderChildEnvironment({ ambient:{PI_PACKAGE_DIR:'/product/pi-assets', PI_CODING_AGENT_DIR:'/ambient', PI_CODING_AGENT_SESSION_DIR:'/ambient'}, projectionDir:'/projection', sessionDir:'/sessions', secret:undefined });
+    const env = buildPiProviderChildEnvironment({ ambient:{PI_PACKAGE_DIR:'/product/pi-assets', PI_CODING_AGENT_DIR:'/ambient', PI_CODING_AGENT_SESSION_DIR:'/ambient'}, projectionDir:'/projection', sessionDir:'/sessions' });
     expect(env.PI_PACKAGE_DIR).toBe('/product/pi-assets');
     expect(env.PI_CODING_AGENT_DIR).toBe('/projection');
     expect(env.PI_CODING_AGENT_SESSION_DIR).toBe('/sessions');

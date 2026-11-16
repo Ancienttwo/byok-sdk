@@ -1254,15 +1254,13 @@ export declare const KEYS_PI_WINDOWS_ENV_NAMES: readonly ["SystemRoot", "COMSPEC
 export declare function projectKeysPiInheritedEnvironment(ambient: Readonly<Record<string, string | undefined>>, platform?: NodeJS.Platform): Record<string, string>;
 /**
  * The Pi child environment: the inherited names (with `PI_PACKAGE_DIR`), then
- * the two Pi directories this launch owns, then the projected key when one is
- * given. Only a prepared host is given one; the rpc and durable entries take
- * theirs over IPC. No ambient agent or session directory survives.
+ * the two Pi directories this launch owns. No ambient agent or session
+ * directory survives.
  */
 export declare function buildPiProviderChildEnvironment(options: {
     ambient: NodeJS.ProcessEnv;
     projectionDir: string;
     sessionDir: string;
-    secret: string | undefined;
     platform?: NodeJS.Platform;
 }): Record<string, string>;
 /**
