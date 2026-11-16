@@ -928,6 +928,7 @@ export declare class BotCollaboration {
     private chain;
     private timer?;
     private closed;
+    private passQueued;
     private readonly now;
     private readonly connectorTimeoutMs;
     private readonly deliveryTimeoutMs;
@@ -1067,6 +1068,12 @@ export declare class BotCollaboration {
         outcome: 'accepted' | 'refused';
         reasonCode?: string;
     }>;
+    /**
+     * One coalesced K8 pass after a K4 settlement or an accepted message. The caller never awaits it: a K8 pass calls
+     * `core.drain()`, so a K4 callback that waited for it would wait on itself. A pass that is queued and not started reads
+     * the ledger when it starts, so later notices join it. After `close()` the ledger keeps the work for `recover()`.
+     */
+    private schedulePass;
     private applyMessage;
     /**
      * Owner API ("Cancel", §8.8), from A's delegation chip or from B's `bot_request` Turn. Idempotent (#1405): an earlier cancel

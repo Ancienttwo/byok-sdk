@@ -297,6 +297,24 @@ it('parks a queue head behind a restore without hot wake polling', async () => {
 });
 
 
+it('#2244: a memory reconciliation that fails a parked intent sends the settlement notice', async () => {
+  const onSettled = vi.fn();
+  const host = await openHost({ memory: page, reconcileMs: 60_000, onSettled });
+  try {
+    const port = page.projectionPort(host.deviceId);
+    await port.publish({ mutation: projection('resident') });
+    holdQueue(host.deviceId);
+    await host.core.enqueue(host.intent('stale'));
+    expect(onSettled).not.toHaveBeenCalled();
+    // The publish checks `isCurrent` before its first await; the reconciliation it starts then finds the profile changed.
+    const published = port.publish({ mutation: projection('changed', { sourceSeq: 2 }) });
+    current = false;
+    await published;
+    await vi.waitFor(() => expect(host.core.intent('stale')?.conclusion).toBe('failed'), { timeout: 5000 });
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  } finally { await host.close(); }
+});
+
 it('offers a blob instruction with memory on', async () => {
   const host = await openHost({ memory: page });
   try {

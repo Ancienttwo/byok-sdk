@@ -30,6 +30,17 @@ it('settles from terminal events and notifies after commit under 100ms without a
   } finally { await observer.return?.(); }
 });
 
+it('#2244: sends one settlement notice per drain that settles an intent, and none for a drain that settles nothing', async () => {
+  const seen: unknown[] = [];
+  host = await openHost({ reconcileMs: 60_000, onSettled: () => { seen.push(host!.core.intent('settle')?.conclusion); } });
+  await host.core.enqueue(host.intent('settle'));
+  expect(seen).toEqual([]);
+  (await running('settle')).finish({ text: 'settle' });
+  await vi.waitFor(() => expect(seen).toEqual(['succeeded']), { timeout: 5000 });
+  await host.core.drain();
+  expect(seen).toEqual(['succeeded']);
+});
+
 it('allows a postcommit callback to flush projections and enqueue follow-up work reentrantly', async () => {
   let done!: () => void;
   const followed = new Promise<void>(resolve => { done = resolve; });

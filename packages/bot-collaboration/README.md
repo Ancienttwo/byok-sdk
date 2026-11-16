@@ -715,6 +715,11 @@ backup made before this change, or start a new ledger.
 
 The Host drains application commands until all new turns have a K4 intent.
 An immediate terminal cannot leave a continuation without a wake.
+K4 also settles intents in drains that the Host did not start: a terminal
+event, a cancel probe or a retry timer (#2244). Through `HostOptions.onSettled`,
+each such settlement queues one coalesced pass behind the Host's serial calls,
+so the Turn, its successors and its deliveries advance with no Host call.
+A settlement that commits while the Host closes waits for `recover()`.
 K4 schedules and cancels routine wakes through its outbox. A resume of the
 same key replaces a pending cancel with the schedule, so the SDK holds one
 wake. A failed SDK wake call rejects the K4 drain, and the Host call that

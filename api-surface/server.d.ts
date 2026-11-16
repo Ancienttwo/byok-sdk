@@ -83,6 +83,12 @@ export interface HostOptions {
     nextOccurrence?: NextOccurrence;
     /** Coalesced post-commit hint. May enqueue/flush reentrantly; failures retain projections. */
     onOutbox?: (signal: AbortSignal) => void | Promise<void>;
+    /**
+     * Coalesced post-commit hint that one or more intents settled. Called synchronously, at most once per drain cycle and once
+     * per memory reconciliation, outside any transaction, and never after `close()` begins. The return value is ignored and a
+     * throw is swallowed; the ledger stays the authority. Only schedule work here: awaiting a core call from it can deadlock.
+     */
+    onSettled?: () => void;
     applyMessage?: (input: AgentMessageInput, transaction: MessageTransaction) => MessageDecision;
     applyOutcome?: (document: unknown, transaction: OutcomeTransaction) => void;
     /**
@@ -160,6 +166,9 @@ export declare class HostExecutionCore {
     recover(): Promise<void>;
     drain(): Promise<void>;
     close(): Promise<void>;
+    /** The concluded intent ids before one drain cycle or one memory reconciliation. Only read when a Host takes `onSettled`. */
+    private concluded;
+    private noticeSettled;
     private notifyOutbox;
     private watchEvents;
     private armLiveScan;

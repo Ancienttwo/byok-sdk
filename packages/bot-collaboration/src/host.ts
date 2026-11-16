@@ -230,6 +230,7 @@ export class BotCollaboration {
   private chain: Promise<unknown> = Promise.resolve();
   private timer?: ReturnType<typeof setTimeout>;
   private closed = false;
+  private passQueued = false;
   private readonly now: () => number;
   private readonly connectorTimeoutMs: number;
   private readonly deliveryTimeoutMs: number;
@@ -356,6 +357,8 @@ export class BotCollaboration {
       } },
       applyMessage: (input, tx) => this.applyMessage(input, tx),
       applyOutcome: (document, tx) => this.applyOutcome(document, tx),
+      // #2244: K4 settles intents in drains that K8 did not start (events, cancel probes, retry timers).
+      onSettled: () => this.schedulePass(),
       // #957: K4 sends nothing to a device that is frozen or owned by H: not the timer drain, not a `bot.core` call.
       // #1229: the Host also reserves one slot of each device for user-source work.
       admitSubmit: (intent, state) => !deviceRefusal(stateOf(state.application as LedgerState['application']), intent.execution.deviceId)
@@ -725,8 +728,18 @@ export class BotCollaboration {
     if (this.closed) throw new Error('Bot Host is closed');
     refuseExported(this.snapshot());
     const result = await this.core.consumeMessage(input);
-    if (result.outcome === 'accepted') queueMicrotask(() => { if (!this.closed) void this.drain().catch(() => {}); });
+    if (result.outcome === 'accepted') this.schedulePass();
     return result;
+  }
+  /**
+   * One coalesced K8 pass after a K4 settlement or an accepted message. The caller never awaits it: a K8 pass calls
+   * `core.drain()`, so a K4 callback that waited for it would wait on itself. A pass that is queued and not started reads
+   * the ledger when it starts, so later notices join it. After `close()` the ledger keeps the work for `recover()`.
+   */
+  private schedulePass(): void {
+    if (this.closed || this.passQueued) return;
+    this.passQueued = true;
+    queueMicrotask(() => { void this.exclusive(async () => { this.passQueued = false; await this.process(); }).catch(() => {}); });
   }
   private applyMessage(input: AgentMessageInput, tx: MessageTransaction): { outcome: 'accepted' | 'refused'; reasonCode?: string } {
     const state = stateOf(tx.application);
