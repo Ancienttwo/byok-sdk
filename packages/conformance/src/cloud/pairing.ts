@@ -55,8 +55,6 @@ export function runPairingConformance(factory: CloudCompositionFactory): void {
         await stores.devices.register(TENANT_A, registration('f-unobserved'));
         await stores.devices.register(TENANT_A, registration('revoked'));
         await stores.devices.revoke(TENANT_A, 'revoked');
-        // Works around a known divergence: revoke deletes presence hints on Postgres but not on in-memory or SQLite (#2237).
-        await presence.publish(TENANT_A, { deviceId: 'revoked', level: 'online', ttlMs: 60_000, minimumIntervalMs: 0 });
         await presence.publish(TENANT_A, { deviceId: 'orphan', level: 'thinking', ttlMs: 60_000, minimumIntervalMs: 0 });
         await stores.devices.register(TENANT_B, registration('foreign'));
         await presence.publish(TENANT_B, { deviceId: 'foreign', level: 'error', ttlMs: 60_000, minimumIntervalMs: 0 });
@@ -84,7 +82,6 @@ export function runPairingConformance(factory: CloudCompositionFactory): void {
           },
         });
         expect(readiness.devices[5]).not.toHaveProperty('presence');
-        expect(await presence.read(TENANT_A, 'revoked')).toBeDefined();
 
         await advanceTime(60_000);
         const expired = await stores.devices.readiness(TENANT_A, presence);

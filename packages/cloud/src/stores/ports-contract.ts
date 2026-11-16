@@ -23,8 +23,8 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
   devices: ['register', 'get', 'revoke', 'list', 'readiness', 'recordCapabilities', 'resolveByDeviceId'],
   pairingCodes: ['issue', 'collectExpired'],
   pairing: ['redeemAndRegister'],
-  nonces: ['issue', 'consumeIfValid', 'collectExpired'],
-  dedup: ['checkAndRecord', 'checkAndRecordAgent'],
+  nonces: ['issue', 'consumeIfValid', 'collectExpired', 'deleteDevice'],
+  dedup: ['checkAndRecord', 'checkAndRecordAgent', 'deleteDevice'],
   tasks: [
     'reserveAgentOffer',
     'reserveAgentMessage',

@@ -36,6 +36,9 @@ import type { Pool, PoolClient } from 'pg';
 import type { ByokPool } from '../pool.js';
 import { BEGIN_OUTBOX_WRITE, reopenDeviceStream } from './core/outbox-writer.js';
 import { retireDevices } from './task-retirement.js';
+import { DELETE_DEVICE_PRESENCE } from './core/presence.js';
+import { DELETE_DEVICE_DEDUP } from './dedup.js';
+import { DELETE_DEVICE_NONCES } from './nonces.js';
 
 interface DeviceRow {
   readonly tenant_id: string;
@@ -77,9 +80,11 @@ const SELECT_COLUMNS =
   'tenant_id, device_id, product_id, device_name, device_public_key, proof_key_id, proof_key_epoch, revoked, machine_id, capabilities, harnesses';
 
 /**
- * The device-scoped state a device row is the only reason to keep, deleted
- * alongside it. Every entry is keyed by `(tenant_id, device_id, …)`, so the
- * delete addresses the same key space the row itself lived in.
+ * The device-scoped state the `DeviceDirectory` retirement contract deletes
+ * (presence, nonces, dedup), through the same statements the stores'
+ * `deleteDevice` runs, but in the retirement's own transaction. Every entry is
+ * keyed by `(tenant_id, device_id, …)`, so the delete addresses the same key
+ * space the row itself lived in.
  *
  * Deliberately NOT here:
  *
@@ -103,19 +108,21 @@ const SELECT_COLUMNS =
  *   same key would restore every other input the check reads (#2264). Its
  *   entries expire within the assertion TTL and `collectExpired` removes them.
  *
- * Every statement below is index-covered by its table's primary key, except
- * `e2ee_scope_key_package`, which deletes through its `(tenant_id, recipient)`
- * index.
+ * Every statement here and in `E2EE_MEMBER_STATE_DELETES` is index-covered
+ * by its table's primary key, except `e2ee_scope_key_package`, which deletes
+ * through its `(tenant_id, recipient)` index.
  */
-const DEVICE_STATE_DELETES = [
-  'DELETE FROM device_presence WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
-  'DELETE FROM auth_nonce WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
-  'DELETE FROM inbound_dedup WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
-  // #654 E2c: the device's member state. Packages go first, while the
-  // registration still names the device's member. Security does not rest on
-  // this cleanup: the remaining members rotate (design §7.6). The package
-  // rows are locked in the order a put locks them, (scope_id, epoch,
-  // recipient) in code point order, so a racing put cannot deadlock.
+const DEVICE_STATE_DELETES = [DELETE_DEVICE_PRESENCE, DELETE_DEVICE_NONCES, DELETE_DEVICE_DEDUP] as const;
+
+/**
+ * #654 E2c: the device's member state, deleted only with a row this
+ * transaction removed. Packages go first, while the registration still names
+ * the device's member. Security does not rest on this cleanup: the remaining
+ * members rotate (design §7.6). The package rows are locked in the order a put
+ * locks them, (scope_id, epoch, recipient) in code point order, so a racing
+ * put cannot deadlock.
+ */
+const E2EE_MEMBER_STATE_DELETES = [
   `DELETE FROM e2ee_scope_key_package p USING (
      SELECT scope_id, epoch, recipient FROM e2ee_scope_key_package
       WHERE tenant_id = $1 AND recipient IN (
@@ -127,18 +134,14 @@ const DEVICE_STATE_DELETES = [
   'DELETE FROM e2ee_member_key WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
 ] as const;
 
-/**
- * Removes the device-scoped state for ids whose rows have already been deleted
- * in this transaction. Callers pass the ids `DELETE … RETURNING device_id`
- * actually removed, so a no-op revoke deletes nothing at all.
- */
-async function deleteDeviceState(
+async function runDeletes(
   client: PoolClient,
+  statements: readonly string[],
   tenant: TenantId,
   deviceIds: readonly string[],
 ): Promise<void> {
   if (deviceIds.length === 0) return;
-  for (const statement of DEVICE_STATE_DELETES) {
+  for (const statement of statements) {
     await client.query(statement, [tenant, [...deviceIds]]);
   }
 }
@@ -194,7 +197,8 @@ export async function registerDeviceOnClient(
       [tenant, input.productId, input.machineId, input.deviceId],
     );
     const supersededIds = superseded.rows.map((row) => row.device_id);
-    await deleteDeviceState(client, tenant, supersededIds);
+    await runDeletes(client, DEVICE_STATE_DELETES, tenant, supersededIds);
+    await runDeletes(client, E2EE_MEMBER_STATE_DELETES, tenant, supersededIds);
     await retireDevices(client, tenant, supersededIds, 'device_superseded', now);
   }
   const result = await client.query<DeviceRow>(
@@ -296,7 +300,10 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
         [tenant, deviceId],
       );
       const removedIds = removed.rows.map((row) => row.device_id);
-      await deleteDeviceState(client, tenant, removedIds);
+      // Whether or not a row went: a repeated revoke recovers a failed one and
+      // clears state a racing write recreated (see `DeviceDirectory.revoke`).
+      await runDeletes(client, DEVICE_STATE_DELETES, tenant, [deviceId]);
+      await runDeletes(client, E2EE_MEMBER_STATE_DELETES, tenant, removedIds);
       await retireDevices(client, tenant, removedIds, 'device_revoked', this.#clock.now().toISOString());
       await client.query('COMMIT');
     } catch (cause) {

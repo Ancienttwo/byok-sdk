@@ -19,6 +19,9 @@ import type { AgentRef } from '@byok-sdk/protocol';
 import type { Pool } from 'pg';
 import type { ByokPool } from '../pool.js';
 
+/** Device retirement's dedup delete, every ledger of the device; `devices.ts` runs it in its own transaction. */
+export const DELETE_DEVICE_DEDUP = 'DELETE FROM inbound_dedup WHERE tenant_id = $1 AND device_id = ANY($2::text[])';
+
 export class PostgresInboundDedupStore implements InboundDedupStore {
   readonly #pool: Pool;
   readonly #capacity: number;
@@ -39,6 +42,10 @@ export class PostgresInboundDedupStore implements InboundDedupStore {
     envelopeId: string,
   ): Promise<boolean> {
     return this.#checkAndRecord(tenant, deviceId, agentRef.agentId, agentRef.profileRevision, envelopeId);
+  }
+
+  async deleteDevice(tenant: TenantId, deviceId: string): Promise<void> {
+    await this.#pool.query(DELETE_DEVICE_DEDUP, [tenant, [deviceId]]);
   }
 
   async #checkAndRecord(

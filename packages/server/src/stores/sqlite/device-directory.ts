@@ -6,7 +6,7 @@ import {
   type TenantReadiness,
   type TenantReadinessDevice,
 } from '@byok-sdk/core';
-import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
+import type { DeviceDirectory, DeviceRecord, DeviceRegistration, DeviceScopedStores } from '@byok-sdk/cloud';
 import { HarnessInventorySchema, type HarnessInfo } from '@byok-sdk/protocol';
 import type { DatabaseSync } from 'node:sqlite';
 import { reopenMailboxStream, retireDevice } from './task-retirement.js';
@@ -32,6 +32,7 @@ CREATE UNIQUE INDEX device_directory_machine
 interface Coordinator {
   run<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T>;
   transaction<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T>;
+  transactionSync<T>(body: (db: DatabaseSync) => T, afterCommit: (result: T) => void | Promise<void>): Promise<T>;
 }
 
 type Row = Record<string, unknown>;
@@ -74,19 +75,27 @@ function fromRow(row: Row): DeviceRecord {
  * Enrollment, capability admission and pre-tenant auth read the same durable
  * row. The task and mailbox tables live in the same database, so retiring a
  * device settles its attempts and dead-letters its pending rows in the
- * transaction that deletes the row.
+ * transaction that deletes the row. Presence, nonces and dedup are process
+ * memory, so their state for a retired device is deleted after COMMIT, in the
+ * same coordinator slot: a rolled-back retirement deletes none of it, and no
+ * later registration of the id can start before the deletes finish.
  */
 export class SqliteDeviceDirectory implements DeviceDirectory {
-  constructor(private readonly coordinator: Coordinator, private readonly clock: Clock) {}
+  constructor(
+    private readonly coordinator: Coordinator,
+    private readonly clock: Clock,
+    private readonly state: DeviceScopedStores,
+  ) {}
 
   register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord> {
-    return this.coordinator.transaction(db => {
+    return this.coordinator.transactionSync(db => {
       // Global device IDs resolve a tenant before authentication. A collision must
       // fail rather than replacing another tenant's authentication authority.
       const owner = db.prepare('SELECT tenant_id FROM device_directory WHERE device_id = ?').get(input.deviceId);
       if (owner !== undefined && owner.tenant_id !== tenant) throw new Error('Device ID already belongs to another tenant');
+      let superseded: readonly { device_id: string }[] = [];
       if (input.machineId !== undefined) {
-        const superseded = db.prepare(
+        superseded = db.prepare(
           'DELETE FROM device_directory WHERE tenant_id = ? AND product_id = ? AND machine_id = ? AND device_id <> ? RETURNING device_id',
         ).all(tenant, input.productId, input.machineId, input.deviceId) as unknown as { device_id: string }[];
         const now = this.clock.now().toISOString();
@@ -103,8 +112,13 @@ export class SqliteDeviceDirectory implements DeviceDirectory {
         .run(tenant, input.deviceId, input.productId, input.machineId ?? null,
           input.deviceName, input.devicePublicKey, input.proofKeyId, input.proofKeyEpoch);
       reopenMailboxStream(db, tenant, input.deviceId);
-      return fromRow(db.prepare('SELECT * FROM device_directory WHERE tenant_id = ? AND device_id = ?').get(tenant, input.deviceId)!);
-    });
+      return {
+        record: fromRow(db.prepare('SELECT * FROM device_directory WHERE tenant_id = ? AND device_id = ?').get(tenant, input.deviceId)!),
+        superseded: superseded.map(row => row.device_id),
+      };
+    }, async ({ superseded }) => {
+      for (const deviceId of superseded) await this.#deleteDeviceState(tenant, deviceId);
+    }).then(({ record }) => record);
   }
 
   get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined> {
@@ -114,11 +128,18 @@ export class SqliteDeviceDirectory implements DeviceDirectory {
     });
   }
 
+  /** Deletes the device-scoped state whether or not a row was removed, so a retry recovers a failed cleanup. */
   revoke(tenant: TenantId, deviceId: string): Promise<void> {
-    return this.coordinator.transaction(db => {
+    return this.coordinator.transactionSync(db => {
       const removed = db.prepare('DELETE FROM device_directory WHERE tenant_id = ? AND device_id = ?').run(tenant, deviceId);
       if (Number(removed.changes) === 1) retireDevice(db, tenant, deviceId, 'device_revoked', this.clock.now().toISOString());
-    });
+    }, () => this.#deleteDeviceState(tenant, deviceId));
+  }
+
+  async #deleteDeviceState(tenant: TenantId, deviceId: string): Promise<void> {
+    await this.state.presence.deleteDevice(tenant, deviceId);
+    await this.state.nonces.deleteDevice(tenant, deviceId);
+    await this.state.dedup.deleteDevice(tenant, deviceId);
   }
 
   list(tenant: TenantId): Promise<readonly DeviceRecord[]> {

@@ -735,10 +735,13 @@ import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/c
  */
 import { type Clock, type PresenceHint, type PresenceHintInput, type PresenceStore, type TenantId } from '@byok-sdk/core';
 import type { ByokPool } from '../../pool.js';
+/** Device retirement's presence delete; `devices.ts` runs it in its own transaction. */
+export declare const DELETE_DEVICE_PRESENCE = "DELETE FROM device_presence WHERE tenant_id = $1 AND device_id = ANY($2::text[])";
 export declare class PostgresPresenceStore implements PresenceStore {
     #private;
     constructor(pool: ByokPool, clock: Clock);
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
+    deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
     publish(tenant: TenantId, input: PresenceHintInput): Promise<PresenceHint>;
     read(tenant: TenantId, deviceId: string): Promise<PresenceHint | undefined>;
     list(tenant: TenantId): Promise<readonly PresenceHint[]>;
@@ -895,11 +898,14 @@ import { type InboundDedupStore } from '@byok-sdk/cloud';
 import type { TenantId } from '@byok-sdk/core';
 import type { AgentRef } from '@byok-sdk/protocol';
 import type { ByokPool } from '../pool.js';
+/** Device retirement's dedup delete, every ledger of the device; `devices.ts` runs it in its own transaction. */
+export declare const DELETE_DEVICE_DEDUP = "DELETE FROM inbound_dedup WHERE tenant_id = $1 AND device_id = ANY($2::text[])";
 export declare class PostgresInboundDedupStore implements InboundDedupStore {
     #private;
     constructor(pool: ByokPool, capacity?: number);
     checkAndRecord(tenant: TenantId, deviceId: string, envelopeId: string): Promise<boolean>;
     checkAndRecordAgent(tenant: TenantId, deviceId: string, agentRef: AgentRef, envelopeId: string): Promise<boolean>;
+    deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/device-assertion-replay.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
@@ -984,7 +990,7 @@ import type { ByokPool } from '../pool.js';
  * Postgres E2EE member store (`deploy/sql/0027_e2ee_member.sql`,
  * `0028_e2ee_scope_shred.sql`, `0029_e2ee_member_kem_floor.sql`). Device
  * revocation and machine supersession delete a device's rows in the device
- * transaction (`DEVICE_STATE_DELETES` in `devices.ts`). A shred receipt goes to `device_request_receipts`, the
+ * transaction (`E2EE_MEMBER_STATE_DELETES` in `devices.ts`). A shred receipt goes to `device_request_receipts`, the
  * request receipt store, in the append transaction.
  */
 export declare class PostgresE2eeMemberStore implements E2eeMemberStore {
@@ -1170,12 +1176,15 @@ import { type NonceStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { CloudCrypto } from '@byok-sdk/cloud';
 import type { ByokPool } from '../pool.js';
+/** Device retirement's nonce delete; `devices.ts` runs it in its own transaction. */
+export declare const DELETE_DEVICE_NONCES = "DELETE FROM auth_nonce WHERE tenant_id = $1 AND device_id = ANY($2::text[])";
 export declare class PostgresNonceStore implements NonceStore {
     #private;
     constructor(pool: ByokPool, clock: Clock, crypto: CloudCrypto, ttlMs?: number);
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     issue(tenant: TenantId, deviceId: string): Promise<string>;
     consumeIfValid(tenant: TenantId, deviceId: string, nonce: string): Promise<boolean>;
+    deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/pairing-codes.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';

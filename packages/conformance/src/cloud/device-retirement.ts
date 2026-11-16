@@ -127,6 +127,38 @@ async function expectRetired(
   expect(after.recoverableFrom).toBe(Math.max(...pendingBefore.map((message) => message.seq)) + 1);
 }
 
+/**
+ * Writes one of each kind of device-scoped state #2237 retires: a presence
+ * hint, two challenge nonces (one for each later check, since a check spends
+ * the nonce it consumes) and an entry in both inbound dedup ledgers.
+ */
+async function seedDeviceState(handle: CloudCompositionHandle, deviceId: string): Promise<readonly [string, string]> {
+  const { stores, presence } = handle;
+  await presence.publish(TENANT, { deviceId, level: 'online', ttlMs: 60_000, minimumIntervalMs: 0 });
+  const nonces = [await stores.nonces.issue(TENANT, deviceId), await stores.nonces.issue(TENANT, deviceId)] as const;
+  expect(await stores.dedup.checkAndRecord(TENANT, deviceId, 'envelope-1')).toBe(false);
+  expect(await stores.dedup.checkAndRecordAgent(TENANT, deviceId, AGENT_REF, 'envelope-2')).toBe(false);
+  return nonces;
+}
+
+/** Each read answers as for state never written. Asserted before any clock advance, so expiry cannot stand in for deletion. */
+async function expectDeviceStateDeleted(handle: CloudCompositionHandle, deviceId: string, nonce: string): Promise<void> {
+  const { stores, presence } = handle;
+  await expect(presence.read(TENANT, deviceId)).resolves.toBeUndefined();
+  expect((await presence.list(TENANT)).map((hint) => hint.deviceId)).not.toContain(deviceId);
+  await expect(stores.nonces.consumeIfValid(TENANT, deviceId, nonce)).resolves.toBe(false);
+  await expect(stores.dedup.checkAndRecord(TENANT, deviceId, 'envelope-1')).resolves.toBe(false);
+  await expect(stores.dedup.checkAndRecordAgent(TENANT, deviceId, AGENT_REF, 'envelope-2')).resolves.toBe(false);
+}
+
+async function expectDeviceStateKept(handle: CloudCompositionHandle, deviceId: string, nonce: string): Promise<void> {
+  const { stores, presence } = handle;
+  await expect(presence.read(TENANT, deviceId)).resolves.toBeDefined();
+  await expect(stores.nonces.consumeIfValid(TENANT, deviceId, nonce)).resolves.toBe(true);
+  await expect(stores.dedup.checkAndRecord(TENANT, deviceId, 'envelope-1')).resolves.toBe(true);
+  await expect(stores.dedup.checkAndRecordAgent(TENANT, deviceId, AGENT_REF, 'envelope-2')).resolves.toBe(true);
+}
+
 export function runDeviceRetirementConformance(factory: CloudCompositionFactory): void {
   describe('device retirement', () => {
     it('revocation settles the device tasks and frees the mailbox quota its rows held', async () => {
@@ -311,6 +343,38 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         });
       });
     }
+    for (const retire of ['revoke', 'supersession'] as const) {
+      it(`${retire} deletes the retired device's presence, nonces and dedup ledgers and keeps a sibling's`, async () => {
+        await withCloudComposition(factory, async (handle) => {
+          const { stores } = handle;
+          await stores.devices.register(TENANT, registration('stateful', { machineId: MACHINE }));
+          await stores.devices.register(TENANT, registration('sibling'));
+          const [, retired] = await seedDeviceState(handle, 'stateful');
+          const [kept] = await seedDeviceState(handle, 'sibling');
+
+          if (retire === 'revoke') await stores.devices.revoke(TENANT, 'stateful');
+          else await stores.devices.register(TENANT, registration('successor', { machineId: MACHINE }));
+
+          await expectDeviceStateDeleted(handle, 'stateful', retired);
+          await expectDeviceStateKept(handle, 'sibling', kept);
+        });
+      });
+    }
+
+    it('revoking an id with no row still deletes its state, so a repeated revoke recovers', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores } = handle;
+        await stores.devices.register(TENANT, registration('rerevoked'));
+        await stores.devices.revoke(TENANT, 'rerevoked');
+        // State a write admitted before the first revoke can recreate after it.
+        const [, nonce] = await seedDeviceState(handle, 'rerevoked');
+
+        await stores.devices.revoke(TENANT, 'rerevoked');
+
+        await expectDeviceStateDeleted(handle, 'rerevoked', nonce);
+      });
+    });
+
     it('a retirement whose mailbox expiry fails changes nothing, and a retry completes it', async () => {
       await withCloudComposition(factory, async (handle) => {
         const { stores, mailbox, failMailboxExpiry } = handle;
@@ -321,6 +385,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         const before = await seedDevice(handle, 'faulted');
         const rowsBefore = await mailbox.inspect(TENANT, 'faulted');
         const registered = await stores.devices.get(TENANT, 'faulted');
+        const [kept, deleted] = await seedDeviceState(handle, 'faulted');
 
         const restore = await failMailboxExpiry();
         try {
@@ -334,9 +399,12 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
           await expect(stores.tasks.get(TENANT, `faulted-${position}`), position).resolves.toEqual(before[position]);
         }
         await expect(mailbox.inspect(TENANT, 'faulted')).resolves.toEqual(rowsBefore);
+        // A device that is still registered keeps its dedup ledger and the rest.
+        await expectDeviceStateKept(handle, 'faulted', kept);
 
         await stores.devices.revoke(TENANT, 'faulted');
         await expectRetired(handle, 'faulted', before, rowsBefore.pending, 'device_revoked');
+        await expectDeviceStateDeleted(handle, 'faulted', deleted);
         await expect(stores.devices.get(TENANT, 'faulted')).resolves.toBeUndefined();
       });
     });

@@ -272,6 +272,7 @@ function cloudWith(options: { readonly capabilities: CapabilityDeclaration; read
     crypto,
     core.objects,
     core.mailbox,
+    core.presence,
     objectBytes,
   );
   return createByokCloud({

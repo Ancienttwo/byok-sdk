@@ -62,6 +62,14 @@ export class InMemoryNonceStore implements NonceStore {
     record.used = true;
     return true;
   }
+
+  async deleteDevice(tenant: TenantId, deviceId: string): Promise<void> {
+    const owner = tenantKey(tenant, deviceId);
+    for (const [nonce, record] of this.#nonces) {
+      if (record.owner === owner) this.#nonces.delete(nonce);
+    }
+  }
+
   async collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult> {
     assertCollectExpiredInput(input);
     const prefix = tenantKey(tenant, '');

@@ -21,7 +21,8 @@ const inMemoryFactory: CloudCompositionFactory = {
       crypto,
       core.objects,
       core.mailbox,
-    objectBytes,
+      core.presence,
+      objectBytes,
     );
     return {
       presence: core.presence,

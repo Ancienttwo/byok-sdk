@@ -259,9 +259,6 @@ export class InMemoryBlobBytes {
 export function createInMemoryBlobBytes(clock: Clock, crypto: CloudCrypto, options: InMemoryBlobStoreOptions = {}): InMemoryBlobBytes {
   return new InMemoryBlobBytes(clock, crypto, options);
 }
-export function createInMemoryBlobs(objects: ObjectStore, bytes: InMemoryBlobBytes): InMemoryBlobs {
-  return bytes.bind(objects);
-}
 
 function assertReservedObject(tenant: TenantId, reservation: StorageReservation): void {
   if (

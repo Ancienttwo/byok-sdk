@@ -3363,8 +3363,8 @@ export { TruthCommitError, isTruthCommitError } from './truth/errors.js';
 export type { TruthCommitErrorCode } from './truth/errors.js';
 export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ABANDON_CAUSES, TASK_ATTEMPT_STATUSES, TASK_ATTEMPT_ACTIVE_STATUSES, TASK_ATTEMPT_UNFINISHED_STATUSES, } from './stores/ports.js';
 export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract.js';
-export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskAbandonCause, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports.js';
-export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryE2eeMemberStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index.js';
+export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, DeviceScopedStores, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskAbandonCause, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports.js';
+export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryE2eeMemberStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index.js';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index.js';
 export type { DeviceTerminal } from './terminal-result.js';
 export { AgentExecutionInputSchema, SealedAgentExecutionInputSchema, type AgentExecutionInput, type SealedAgentExecutionInput, } from './agent-execution.js';
@@ -3895,7 +3895,6 @@ export declare class InMemoryBlobBytes {
     bind(objects: ObjectStore): InMemoryBlobs;
 }
 export declare function createInMemoryBlobBytes(clock: Clock, crypto: CloudCrypto, options?: InMemoryBlobStoreOptions): InMemoryBlobBytes;
-export declare function createInMemoryBlobs(objects: ObjectStore, bytes: InMemoryBlobBytes): InMemoryBlobs;
 export {};
 // ==== @byok-sdk/cloud dist/stores/in-memory/dedup.d.ts ====
 /**
@@ -3917,6 +3916,7 @@ export declare class InMemoryInboundDedupStore implements InboundDedupStore {
     constructor(capacity?: number);
     checkAndRecord(tenant: TenantId, deviceId: string, envelopeId: string): Promise<boolean>;
     checkAndRecordAgent(tenant: TenantId, deviceId: string, agentRef: AgentRef, envelopeId: string): Promise<boolean>;
+    deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/device-directory.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
@@ -3946,16 +3946,16 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  * the SQL stores' one transaction (#1119).
  */
 import { type MailboxStore, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
-import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '../ports.js';
+import type { DeviceDirectory, DeviceRecord, DeviceRegistration, DeviceScopedStores } from '../ports.js';
 import type { InMemoryTaskAttemptState } from './task-attempts.js';
 export declare class InMemoryDeviceDirectory implements DeviceDirectory {
     #private;
-    constructor(tasks: InMemoryTaskAttemptState, mailbox: MailboxStore);
+    constructor(tasks: InMemoryTaskAttemptState, mailbox: MailboxStore, state: DeviceScopedStores);
     register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
     get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
     /**
-     * Revocation removes the registration. A no-op for a device this tenant does
-     * not own: revoking what you cannot address changes nothing.
+     * Revocation removes the registration, then deletes the device-scoped state
+     * whether or not there was one, so a retry recovers a failed cleanup.
      */
     revoke(tenant: TenantId, deviceId: string): Promise<void>;
     recordCapabilities(tenant: TenantId, input: {
@@ -4027,15 +4027,15 @@ export { InMemoryE2eeMemberStore } from './e2ee-member.js';
  * without a database — which is what makes those same assertions meaningful
  * when a durable composition (S3b's journal, S4A's schema) runs them later.
  */
-import type { Clock, MailboxStore, ObjectStore, TenantId } from '@byok-sdk/core';
+import type { Clock, MailboxStore, ObjectStore, PresenceStore, TenantId } from '@byok-sdk/core';
 import type { CloudCrypto } from '../../crypto/port.js';
 import type { ProofReceiptRetentionAuthority } from '../../maintenance.js';
 import type { TaskArchiveStore } from '../../task-archive.js';
 import type { BlobContentProxy, CloudStores } from '../ports.js';
-import { type InMemoryBlobBytes } from './blobs.js';
+import type { InMemoryBlobBytes } from './blobs.js';
 import type { TaskEventsWake } from '../../task-events-wake.js';
 export { AllowAllRateLimiter } from './rate-limiter.js';
-export { BLOB_URL_TTL_MS, InMemoryBlobContentProxy, InMemoryCloudBlobStore, createInMemoryBlobs, createInMemoryBlobBytes, InMemoryBlobBytes, } from './blobs.js';
+export { BLOB_URL_TTL_MS, InMemoryBlobContentProxy, InMemoryCloudBlobStore, createInMemoryBlobBytes, InMemoryBlobBytes, } from './blobs.js';
 export type { InMemoryBlobs, InMemoryBlobStoreOptions } from './blobs.js';
 export { DEDUP_RING_CAPACITY, InMemoryInboundDedupStore } from './dedup.js';
 export { InMemoryDeviceDirectory } from './device-directory.js';
@@ -4073,13 +4073,14 @@ export interface InMemoryEphemeralTaskRows {
 }
 /** Builds the Host task archive for a core that is not the in-memory one. */
 export type InMemoryTaskArchiveFactory = (rows: InMemoryEphemeralTaskRows) => TaskArchiveStore;
-export declare function createInMemoryCloudStores(clock: Clock, crypto: CloudCrypto, objects: ObjectStore, mailbox: MailboxStore, objectBytes: InMemoryBlobBytes, 
 /**
- * Absent, the archive rewrites the in-memory core `mailbox` and `objects`,
- * and construction throws when they are another core's. A host with another
- * core supplies the archive that owns its rows.
+ * @param presence The core presence store; device retirement deletes the
+ *   retired device's hint from it.
+ * @param taskArchive Absent, the archive rewrites the in-memory core `mailbox`
+ *   and `objects`, and construction throws when they are another core's. A
+ *   host with another core supplies the archive that owns its rows.
  */
-taskArchive?: InMemoryTaskArchiveFactory): InMemoryCloudComposition;
+export declare function createInMemoryCloudStores(clock: Clock, crypto: CloudCrypto, objects: ObjectStore, mailbox: MailboxStore, presence: PresenceStore, objectBytes: InMemoryBlobBytes, taskArchive?: InMemoryTaskArchiveFactory): InMemoryCloudComposition;
 // ==== @byok-sdk/cloud dist/stores/in-memory/mailbox-wake.d.ts ====
 import type { MailboxWake } from '../../mailbox-wake.js';
 import type { TaskEventsWake } from '../../task-events-wake.js';
@@ -4124,6 +4125,7 @@ export declare class InMemoryNonceStore implements NonceStore {
     get size(): number;
     issue(tenant: TenantId, deviceId: string): Promise<string>;
     consumeIfValid(tenant: TenantId, deviceId: string, nonce: string): Promise<boolean>;
+    deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/pairing-codes.d.ts ====
@@ -4487,9 +4489,29 @@ export interface DeviceRegistration {
  *    the rows stop holding mailbox quota and raise the device's
  *    `recoverableFrom`, nothing is deleted, and no later append for that id
  *    commits until the id is registered again, which reopens the stream.
+ * 3. The device's presence hint, challenge nonces and inbound dedup ledgers
+ *    are deleted through `deleteDevice` on {@link DeviceScopedStores}, only
+ *    once the registration change is durable: in the same transaction where
+ *    those stores share its storage, otherwise after it commits and before
+ *    the next registration change starts. A registration change that fails
+ *    or rolls back deletes none of it, so a device that is still registered
+ *    never loses its dedup ledger. When the call resolves, `PresenceStore`
+ *    reads omit the device, `NonceStore.consumeIfValid` is `false` for every
+ *    nonce issued to it before, and every earlier envelope id reads as unseen.
  *
  * Neither the task history nor the mailbox rows go away: what the device did
  * and what it was sent stay readable after its grant is gone.
+ *
+ * Assertion-replay entries are not device-scoped state: retirement leaves
+ * them until the assertion expires and `collectExpired` removes them. They are
+ * a deny-list guarding authentication, so deleting one would let an assertion
+ * spent before the retirement authenticate again once the same id registers
+ * with the same key (#2264).
+ *
+ * The device-scoped stores do not check the registration on write, so a
+ * write admitted just before a retirement can recreate state just after it.
+ * Presence and nonces then expire by TTL; a recreated dedup entry stays until
+ * the id is revoked again, which clears it (see `revoke`).
  */
 export interface DeviceDirectory {
     /** Registers the device. With `input.machineId` set this ALSO deletes this tenant/product's prior rows carrying that same machine identity — one physical machine, one row — and retires each under `device_superseded`. In the same transaction it reopens the registered id's mailbox stream (`MailboxStore.reopenStream`), so a fresh grant for a retired id receives mail again. */
@@ -4497,28 +4519,22 @@ export interface DeviceDirectory {
     /** The row `tenant` owns under `deviceId` — `undefined` including when the device exists under a DIFFERENT tenant. */
     get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
     /**
-     * Deletes the registration and the device-scoped state it owned (presence,
-     * challenge nonces, inbound dedup), and retires the device under
-     * `device_revoked` in the same transaction (see above). A no-op for a device
-     * this tenant cannot address. Afterwards every read answers exactly as it
-     * does for a device that was never registered.
+     * Deletes the registration and retires the device under `device_revoked`
+     * (see above). Afterwards every read answers exactly as it does for a device
+     * that was never registered.
      *
-     * Assertion-replay entries are not deleted: they stay until the assertion
-     * expires and `collectExpired` removes them. Revocation and machine
-     * supersession must leave them in place, because an assertion spent before
-     * the retirement would otherwise authenticate again once the same id
-     * registers with the same key.
+     * The device-scoped state of `(tenant, deviceId)` is deleted whether or not
+     * a row was removed; tasks and mailbox rows are retired only when one was.
+     * So a revoke whose state cleanup failed (the call rejects) is recovered by
+     * calling it again, and a repeated revoke also clears state a racing write
+     * recreated. For an id this tenant does not own it changes nothing another
+     * tenant can see: every device-scoped store is keyed by tenant first.
      *
-     * How far the device-state deletion physically reaches is driver-scoped.
-     * The durable (Postgres) driver deletes the registration and every
-     * dependent device-scoped row in the same transaction, so the state is gone
-     * the moment `revoke` resolves. The in-memory reference directory deletes
-     * only the registration: presence, nonces and dedup are separate maps it
-     * does not own, so a presence hint expires on its own `expiresAt` TTL and,
-     * until then, is excluded from every projection by the readiness
-     * active-device filter (`activeDeviceIds`, built from the surviving rows).
-     * The observable contract above holds either way — no read path can see a
-     * revoked device. Retirement of tasks and mailbox rows is not driver-scoped.
+     * Machine supersession has no such retry, because the caller of `register`
+     * does not know the superseded ids. When a custom device-scoped store
+     * rejects after the registration committed, `register` rejects; the
+     * superseded id's presence and nonces then expire by TTL, and its dedup
+     * entries stay until that id is revoked or its tenant is erased.
      */
     revoke(tenant: TenantId, deviceId: string): Promise<void>;
     list(tenant: TenantId): Promise<readonly DeviceRecord[]>;
@@ -4594,6 +4610,8 @@ export interface NonceStore {
      * for the sole winner; every other case returns `false`.
      */
     consumeIfValid(tenant: TenantId, deviceId: string, nonce: string): Promise<boolean>;
+    /** Deletes every nonce issued to (tenant, deviceId), used or not. Called by device retirement. */
+    deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
 }
 export interface InboundDedupStore {
     /**
@@ -4608,6 +4626,18 @@ export interface InboundDedupStore {
      * Retention remains bounded per exact (tenant, device, AgentRef).
      */
     checkAndRecordAgent(tenant: TenantId, deviceId: string, agentRef: AgentRef, envelopeId: string): Promise<boolean>;
+    /**
+     * Deletes the device-physical ledger and every Agent-bound ledger of
+     * (tenant, deviceId), so each earlier envelope id reads as unseen. Called by
+     * device retirement.
+     */
+    deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
+}
+/** The stores whose state for one device retirement deletes (see {@link DeviceDirectory}). */
+export interface DeviceScopedStores {
+    readonly presence: Pick<PresenceStore, 'deleteDevice'>;
+    readonly nonces: Pick<NonceStore, 'deleteDevice'>;
+    readonly dedup: Pick<InboundDedupStore, 'deleteDevice'>;
 }
 export declare const TASK_ATTEMPT_STATUSES: readonly ['offered', 'claimed', 'running', 'cancel_requested', 'complete', 'failed', 'cancelled'];
 export type TaskAttemptStatus = (typeof TASK_ATTEMPT_STATUSES)[number];

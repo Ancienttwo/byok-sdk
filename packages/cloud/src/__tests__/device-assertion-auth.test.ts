@@ -20,6 +20,13 @@ import { createWebCrypto } from '../crypto/web-crypto';
 import { InMemoryDeviceDirectory } from '../stores/in-memory/device-directory';
 import { InMemoryTaskAttemptState } from '../stores/in-memory/task-attempts';
 
+/** Retirement's device-scoped state is not under test here. */
+const NO_DEVICE_STATE = {
+  presence: { deleteDevice: async () => undefined },
+  nonces: { deleteDevice: async () => undefined },
+  dedup: { deleteDevice: async () => undefined },
+};
+
 const TENANT = tenantId('tenant-a');
 const ISSUER = 'https://api.example.com';
 const NOW = '2026-08-12T04:45:01.000Z';
@@ -34,7 +41,7 @@ describe('hosted device assertion authentication', () => {
 
   beforeEach(async () => {
     clock.set(new Date(NOW));
-    devices = new InMemoryDeviceDirectory(new InMemoryTaskAttemptState(clock), new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }));
+    devices = new InMemoryDeviceDirectory(new InMemoryTaskAttemptState(clock), new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }), NO_DEVICE_STATE);
     await devices.register(TENANT, {
       productId: 'product-a',
       deviceId: 'device-a',
@@ -98,7 +105,7 @@ describe('hosted device assertion authentication', () => {
     await devices.revoke(TENANT, 'device-a');
     await expect(authenticate(assertion)).resolves.toBeUndefined();
 
-    devices = new InMemoryDeviceDirectory(new InMemoryTaskAttemptState(clock), new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }));
+    devices = new InMemoryDeviceDirectory(new InMemoryTaskAttemptState(clock), new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }), NO_DEVICE_STATE);
     await devices.register(TENANT, {
       productId: 'product-b',
       deviceId: 'device-a',
@@ -155,7 +162,7 @@ describe('hosted task assertion authentication', () => {
 
   beforeEach(async () => {
     clock.set(new Date(NOW));
-    devices = new InMemoryDeviceDirectory(new InMemoryTaskAttemptState(clock), new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }));
+    devices = new InMemoryDeviceDirectory(new InMemoryTaskAttemptState(clock), new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }), NO_DEVICE_STATE);
     await devices.register(TENANT, {
       productId: 'product-a',
       deviceId: 'device-a',

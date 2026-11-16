@@ -77,6 +77,40 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     await composition.close();
   });
 
+  it('keeps a device\'s presence and dedup state when its revoke rolls back (#2237)', async () => {
+    const path = databasePath();
+    const clock = createMutableClock();
+    const crypto = createWebCrypto();
+    await createSqliteEmbeddedStores({ path }, { clock, crypto }).close();
+    const fault = new DatabaseSync(path);
+    fault.exec(`
+      CREATE TRIGGER fail_retirement
+      BEFORE UPDATE ON task_attempt
+      BEGIN
+        SELECT RAISE(ABORT, 'injected retirement failure');
+      END;
+    `);
+    fault.close();
+    const composition = createSqliteEmbeddedStores({ path }, { clock, crypto });
+    try {
+      await composition.cloud.devices.register(TENANT, {
+        productId: 'product-1', deviceId: 'device-1', deviceName: 'device-1',
+        devicePublicKey: 'pk-device-1', proofKeyId: 'identity', proofKeyEpoch: 0,
+      });
+      await composition.cloud.tasks.reserveAgentOffer(TENANT, { taskId: 'task-retire', deviceId: 'device-1', agentRef: AGENT_REF });
+      await composition.core.presence.publish(TENANT, { deviceId: 'device-1', level: 'online', ttlMs: 60_000, minimumIntervalMs: 0 });
+      await composition.cloud.dedup.checkAndRecord(TENANT, 'device-1', 'envelope-1');
+
+      await expect(composition.cloud.devices.revoke(TENANT, 'device-1')).rejects.toThrow('injected retirement failure');
+
+      await expect(composition.cloud.devices.get(TENANT, 'device-1')).resolves.toBeDefined();
+      await expect(composition.core.presence.read(TENANT, 'device-1')).resolves.toBeDefined();
+      await expect(composition.cloud.dedup.checkAndRecord(TENANT, 'device-1', 'envelope-1')).resolves.toBe(true);
+    } finally {
+      await composition.close();
+    }
+  });
+
   it('fails closed on an unsupported schema version', () => {
     const path = databasePath();
     const db = new DatabaseSync(path);
