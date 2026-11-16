@@ -20,6 +20,7 @@ import {
   SEALED_PAYLOAD_MAX_PADDED_LENGTH,
   SEALED_SPLIT_TABLE,
   SealedPayloadSchema,
+  TASK_STEER_TEXT_MAX_BYTES,
   TaskOfferPlainPayloadSchema,
   WIRE_ADDITIONS,
   isSealedPayload,
@@ -35,7 +36,7 @@ import {
 
 type Json = { [key: string]: unknown };
 
-const corpus = readFileSync(new URL('golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; ts: string; payload: Json });
@@ -131,6 +132,13 @@ describe('sealed payload v1: the sealed member', () => {
   it('accepts the corpus members, inline and by reference', () => {
     expect(SealedPayloadSchema.safeParse(sealedMember('task.offer', true)).success).toBe(true);
     expect(SealedPayloadSchema.safeParse(sealedMember('task.complete', false)).success).toBe(true);
+  });
+
+  it('leaves a sealed task.steer outside the plaintext steer text bound (wire v7): its text is opened after delivery', () => {
+    const steer = sealedLine('task.steer');
+    const paddedLength = sealedPayloadPaddedLength(TASK_STEER_TEXT_MAX_BYTES + 1);
+    const large = { ...steer, sealed: { ...(steer.sealed as Json), paddedLength, ciphertext: zeros(paddedLength + 16) } };
+    expect(MESSAGE_PAYLOAD_SCHEMAS['task.steer'].safeParse(large).success).toBe(true);
   });
 
   it('carries inline ciphertext exactly up to 256 KiB, and a ciphertext blob above', () => {
@@ -415,7 +423,7 @@ describe('sealed payload v1: capability gates (§8.4)', () => {
       const toDevice = isServerToDaemonType(type);
       const capability = markerFlag(type);
       expect(WIRE_ADDITIONS.filter((entry) => entry.surface === type && entry.capability === capability), type)
-        .toEqual(toDevice ? [{ kind: 'envelope', rule: 'gated', surface: type, field: marker, capability, advertisedBy: 'device' }] : []);
+        .toEqual(toDevice ? [{ surface: type, field: marker, capability }] : []);
       for (const line of corpus.filter((candidate) => candidate.type === type && isSealedPayload(type, candidate.payload))) {
         if (toDevice) expect(requiredReceiverCapabilities(type, line.payload), type).toContain(capability);
         else expect(requiredReceiverCapabilities(type, line.payload), type).toEqual([]);

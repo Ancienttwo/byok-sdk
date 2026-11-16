@@ -19,7 +19,7 @@ describe('requiredToolsets on an Agent offer', () => {
         instruction: 'find qualified leads',
         agentRef: AGENT_REF,
         session: RESUME_SESSION,
-        runtime: 'claude',
+        target: { lane: 'runtime', runtimeId: 'claude' },
         requiredToolsets: ['salesko', 'crm.readonly'],
       },
       { taskId: 'task-toolsets-1', seq: 1 },

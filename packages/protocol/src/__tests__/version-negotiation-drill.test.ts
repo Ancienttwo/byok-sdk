@@ -111,6 +111,7 @@ describe('M4 Phase 4 version-negotiation drill', () => {
         {
           agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
           session: { mode: 'resume', sessionRef: 'session-1' },
+          target: { lane: 'auto' },
           instruction: {
             blobRef: { blobId: 'blob-1', contentHash: `sha256:${'a'.repeat(64)}`, size: 10, contentType: 'text/plain' },
           },
@@ -131,7 +132,7 @@ describe('M4 Phase 4 version-negotiation drill', () => {
     it('sanity: the identical offer WITHOUT the unknown field still decodes fine through the same real entrypoint (isolates the rejection to the unknown field, not something else in the fixture)', () => {
       const envelope = createEnvelope(
         'task.offer',
-        { instruction: 'do it', agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' }, session: { mode: 'resume', sessionRef: 'session-1' } },
+        { instruction: 'do it', agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' }, session: { mode: 'resume', sessionRef: 'session-1' }, target: { lane: 'auto' } },
         { taskId: 'task-1', seq: 1 },
       );
       const wireLine = `${JSON.stringify(envelope)}\n`;

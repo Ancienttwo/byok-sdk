@@ -91,6 +91,7 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'task.fail': { taskId: 'required', seq: 'optional' },
     'task.cancelled': { taskId: 'required', seq: 'optional' },
     'task.approval_resolved': { taskId: 'required', seq: 'optional' },
+    'task.steer_refused': { taskId: 'required', seq: 'optional' },
   };
 }
 
@@ -188,6 +189,10 @@ type CodecRequirednessMatrix = {
     taskId: FieldRequiredness<'task.approval_resolved', 'taskId'>;
     seq: FieldRequiredness<'task.approval_resolved', 'seq'>;
   };
+  'task.steer_refused': {
+    taskId: FieldRequiredness<'task.steer_refused', 'taskId'>;
+    seq: FieldRequiredness<'task.steer_refused', 'seq'>;
+  };
 };
 
 // ---------------------------------------------------------------------------
@@ -248,6 +253,7 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
     const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse({
       agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
       session: { mode: 'resume', sessionRef: 'session-1' },
+      target: { lane: 'auto' },
       instruction: { someFutureShape: true }, // neither a plain string nor { blobRef }
     });
     expect(result.success).toBe(false);
@@ -257,6 +263,7 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
     const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse({
       agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
       session: { mode: 'resume', sessionRef: 'session-1' },
+      target: { lane: 'auto' },
       instruction: {
         blobRef: {
           blobId: 'blob-1',
@@ -270,12 +277,12 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
     expect(result.success).toBe(false);
   });
 
-  it('the current wire major is 6', () => {
-    expect(PROTOCOL_VERSION).toBe(6);
-    expect(createEnvelope('task.started', {}, { taskId: 'task-1' }).v).toBe(6);
+  it('the current wire major is 7', () => {
+    expect(PROTOCOL_VERSION).toBe(7);
+    expect(createEnvelope('task.started', {}, { taskId: 'task-1' }).v).toBe(7);
   });
 
-  it.each([1, 2, 3, 4, 5])('a v%i envelope is REJECTED: there is no v1, v2, v3, v4 or v5 reader', (v) => {
+  it.each([1, 2, 3, 4, 5, 6])('a v%i envelope is REJECTED: there is no v1, v2, v3, v4, v5 or v6 reader', (v) => {
     const envelope = createEnvelope('task.started', {}, { taskId: 'task-1' });
     expect(() => parseMessage({ ...envelope, v })).toThrow(EnvelopeValidationError);
   });
@@ -335,9 +342,9 @@ function offerProbePayload(variant: (typeof OFFER_PROBE_VARIANTS)[number]): Reco
   };
   switch (variant) {
     case 'resume':
-      return { instruction: 'run for agent', agentRef, session: { mode: 'resume', sessionRef: 'session-1' } };
+      return { instruction: 'run for agent', agentRef, session: { mode: 'resume', sessionRef: 'session-1' }, target: { lane: 'auto' } };
     case 'fresh':
-      return { instruction: 'start with egress', agentRef, session: { mode: 'fresh' }, egressPolicy };
+      return { instruction: 'start with egress', agentRef, session: { mode: 'fresh' }, egressPolicy, target: { lane: 'auto' } };
     case 'prepared':
       return {
         agentMemory: 'none',
@@ -345,6 +352,7 @@ function offerProbePayload(variant: (typeof OFFER_PROBE_VARIANTS)[number]): Reco
         agentRef,
         session: { mode: 'fresh' },
         preparation: { reference: 'prep-record-1', requestDigest: 'request-digest-1' },
+        target: { lane: 'auto' },
       };
   }
 }
@@ -484,7 +492,7 @@ function minimalPayloadForProbe(type: MessageType): unknown {
     case 'task.steer':
       return { text: 'hi' };
     case 'task.claim':
-      return { deviceId: 'device-1' };
+      return { deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' } };
     case 'task.started':
       return {};
     case 'task.decline':
@@ -496,13 +504,15 @@ function minimalPayloadForProbe(type: MessageType): unknown {
     case 'task.await_approval':
       return { summary: 'about to do a thing', approvalId: 'approval-1' };
     case 'task.complete':
-      return { summary: 'done', sessionRef: 'sess-1' };
+      return { executor: { kind: 'runtime', runtimeId: 'pi' }, summary: 'done', sessionRef: 'sess-1' };
     case 'task.fail':
       return { reason: 'boom' };
     case 'task.cancelled':
       return {};
     case 'task.approval_resolved':
       return { approvalId: 'appr-1', decision: 'approve', resolvedBy: 'local', at: '2026-01-01T00:00:00.000Z' };
+    case 'task.steer_refused':
+      return { steerMessageId: '00000000-0000-4000-8000-000000000028', reason: 'task_not_active' };
     default: {
       const exhaustive: never = type;
       throw new Error(`no minimal payload fixture for message type: ${String(exhaustive)}`);
