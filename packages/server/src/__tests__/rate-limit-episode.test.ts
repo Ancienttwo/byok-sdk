@@ -2,7 +2,7 @@ import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { createByokServer, type ByokServer, type ByokServerEvent } from '../index';
-import { connectFakeDaemonLongPoll, startServer, stopServer, type FakeLongPollDaemon, TEST_AGENT_DISPATCH, TEST_AGENT_REF } from './test-support';
+import { connectFakeDaemonLongPoll, startServer, stopServer, type FakeLongPollDaemon, TEST_AGENT_DISPATCH, TEST_AGENT_REF, TEST_CLAIMED_EXECUTOR } from './test-support';
 
 const PRODUCT_ID = 'acme';
 /** Short injected hold so a long-poll in this file never waits out the real ~50s default. */
@@ -31,7 +31,7 @@ async function rateLimitedEventsUpTo(byok: ByokServer, barrierTaskId: string): P
 
 /** One over-budget send: a claim for a task id nothing owns, which the gate debits at step 0 before it looks anything up. */
 function floodEnvelope(daemon: FakeLongPollDaemon): Envelope {
-  return createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: 'bogus-task-coalesce-2' });
+  return createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: 'bogus-task-coalesce-2' });
 }
 
 describe('M4 Phase 4: rate-limit episode recovery', () => {
@@ -81,7 +81,7 @@ describe('M4 Phase 4: rate-limit episode recovery', () => {
     // answer — never a fixed sleep, and every refusal it absorbs stays inside
     // episode 1.
     for (;;) {
-      const attempt = await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: 'bogus-task-recovery' }));
+      const attempt = await daemon.send(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: 'bogus-task-recovery' }));
       if (attempt.status === 200) break;
       expect(attempt.status).toBe(429);
     }

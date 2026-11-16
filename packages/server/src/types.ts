@@ -11,9 +11,10 @@ import type {
   AgentMessagePublishPlainPayload,
   AgentRef,
   BlobRef,
-  DispatchSelection,
+  ClaimedExecutor,
+  ExecutionTarget,
   RuntimeCapabilities,
-  RuntimeId,
+  SteerRefusalReasonReading,
   TaskApprovalResolvedPayload,
   TaskArtifactPayload,
   TaskDeclineCodeReading,
@@ -138,12 +139,10 @@ interface DispatchInputBase {
   taskId?: string;
   instruction: string;
   /**
-   * Authoritative web-selected target. The device selects the adapter from
-   * `runtimeId`; a `runtime` that differs is refused.
+   * What the device runs: a built-in runtime, a model lane, a custom harness,
+   * or `{ lane: 'auto' }` for the device's own preference order.
    */
-  dispatchSelection?: DispatchSelection;
-  runtime?: RuntimeId;
-  harnessId?: string;
+  target: ExecutionTarget;
   /** Explicit target; registered offline devices may receive queued work. */
   deviceId: string;
   /** Logical device-local MCP toolsets required for this task; never executable definitions. */
@@ -295,6 +294,13 @@ export type ServerTaskEvent =
   | { kind: 'agent'; event: AgentEventOrUnknown }
   | { kind: 'artifact'; artifact: Extract<TaskArtifactPayload, { sealed?: undefined }> }
   | { kind: 'await_approval'; summary: string; approvalId: string }
+  /**
+   * The device did not deliver the steer `messageId` (the id
+   * {@link TaskHandle.steer} resolved with) to the runtime. A refusal the
+   * device reports after the feed ended reads only from
+   * `ByokServer.tasks.readSteerRefusal` / `listSteerRefusals`.
+   */
+  | { kind: 'steer_refused'; messageId: string; reason: SteerRefusalReasonReading; at: string }
   | { kind: 'error'; reason: string; retryable?: boolean };
 
 /**
@@ -331,6 +337,18 @@ export class TaskEventsUnavailableError extends Error {
   }
 }
 
+/**
+ * A device's refusal of one steer (`task.steer_refused`), as the kernel
+ * recorded its first report. `revision` counts the task's refusals from 1 in
+ * commit order; `ByokServer.tasks.listSteerRefusals` pages by it.
+ */
+export interface SteerRefusal {
+  readonly messageId: string;
+  readonly reason: SteerRefusalReasonReading;
+  readonly at: string;
+  readonly revision: number;
+}
+
 /** Handle returned by {@link ByokServer.dispatch} for one in-flight task. */
 export interface TaskHandle {
   readonly taskId: string;
@@ -358,7 +376,13 @@ export interface TaskHandle {
   approve(opts?: { approvalId?: string }): Promise<void>;
   /** M5: same `opts.approvalId` targeting semantics as {@link approve} above. */
   reject(reason?: string, opts?: { approvalId?: string }): Promise<void>;
-  steer(text: string): Promise<void>;
+  /**
+   * Enqueue a `task.steer` and resolve with its envelope id, the id a
+   * `steer_refused` event names. The kernel refuses text over
+   * `TASK_STEER_TEXT_MAX_BYTES` UTF-8 bytes with `ByokCloudError`
+   * `coordination_input_invalid` before anything is enqueued.
+   */
+  steer(text: string): Promise<{ readonly messageId: string }>;
   result(): Promise<TaskResult>;
 }
 
@@ -424,23 +448,15 @@ export interface TaskSnapshot {
    */
   pendingApprovalId?: string;
   /**
-   * M5 (claimed runtime, docs/protocol.md §3.1): the ACTUAL adapter the
-   * daemon reports having selected for this task (`task.claim.runtime`,
-   * snapshotted by the kernel's inbound gate at the `offered -> claimed`
-   * ownership CAS) — covers both the explicit-runtime
-   * path (echoes {@link runtime}) and the auto-select/pi-first path (a value
-   * where {@link runtime} is `undefined`, since no preference was ever
-   * requested). `undefined` until the first `task.claim` for this task
-   * arrives, and forever after for a legacy daemon that predates this field
-   * (an old daemon's `task.claim` simply omits it). Set exactly once, at the
-   * `Offered -> Claimed` transition, and never modified again afterward — a
-   * retried/idempotent claim from the same device is a no-op that never
-   * reaches `onClaim`'s patch at all (see `onClaim`'s own doc comment), so
-   * this can never be silently overwritten by a redelivered claim. Read
-   * straight off `TaskAttempt.claimedRuntime` (`@byok-sdk/cloud`).
+   * What the device reported running for this task on its winning
+   * `task.claim` (`task.claim.executor`): a built-in runtime or a custom
+   * harness, never a model. For `{ lane: 'auto' }` it is the runtime the
+   * device chose. `undefined` until a claim wins; written once, at the
+   * `Offered -> Claimed` transition, and never again: a redelivered claim does
+   * not reach the write. Read straight off `TaskAttempt.claimedExecutor`
+   * (`@byok-sdk/cloud`).
    */
-  claimedRuntime?: RuntimeId;
-  claimedHarnessId?: string;
+  claimedExecutor?: ClaimedExecutor;
   /**
    * S0/D-4 (runtime-honest control surface): the capability block the
    * CLAIMING adapter reported for itself on its own `task.claim`
@@ -468,7 +484,7 @@ export interface TaskSnapshot {
    * every task record written before S0 existed. Both are treated as a refusal
    * by the steer gate rather than filled in with a guessed default.
    *
-   * Written exactly once, alongside {@link claimedRuntime}, on the first
+   * Written exactly once, alongside {@link claimedExecutor}, on the first
    * real claim — a retried/idempotent claim returns from `onClaim` before
    * the patch, so this can never be silently rewritten later.
    */
@@ -501,16 +517,11 @@ export type ByokServerEvent =
       state: TaskState;
       at: string;
       /**
-       * M5 (claimed runtime): mirrors {@link TaskSnapshot.claimedRuntime} at
-       * the moment of this transition — `undefined` until (and unless) the
-       * daemon's `task.claim` reported one, so it first appears on the
-       * `Offered -> Claimed` event and stays whatever value it had from then
-       * on for every later transition of the same task. See that field's own
-       * doc comment for the requested-vs-claimed distinction
-       * (docs/protocol.md §3.1).
+       * Mirrors {@link TaskSnapshot.claimedExecutor} at this transition:
+       * absent until a claim wins, so it first appears on the
+       * `Offered -> Claimed` event and keeps that value afterwards.
        */
-      claimedRuntime?: RuntimeId;
-  claimedHarnessId?: string;
+      claimedExecutor?: ClaimedExecutor;
     }
   /**
    * The daemon reported a locally-resolved approval with the wire

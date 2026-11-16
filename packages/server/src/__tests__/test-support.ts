@@ -8,9 +8,10 @@ import {
   parseMessage,
   PROTOCOL_VERSION,
   type AgentRef,
+  type ClaimedExecutor,
   type Envelope,
+  type HarnessInfo,
   type RuntimeCapabilities,
-  type RuntimeId,
   type RuntimeInfo,
   type ToolsetId,
 } from '@byok-sdk/protocol';
@@ -26,11 +27,16 @@ import type {
 
 /**
  * Wire v4 has no runtime-only offer, so every dispatch names an Agent and the
- * session it resumes. Tests that do not exercise Agent identity use these.
+ * session it resumes. Tests that do not exercise Agent identity use these;
+ * they leave the runtime to the device (`{ lane: 'auto' }`), and a test that
+ * names one overrides `target` after the spread.
  */
 export const TEST_AGENT_REF: AgentRef = { agentId: 'agent-test', profileRevision: 'rev-1' };
 export const TEST_SESSION_REF = 'sess-test';
-export const TEST_AGENT_DISPATCH = { agentRef: TEST_AGENT_REF, sessionRef: TEST_SESSION_REF } as const;
+export const TEST_AGENT_DISPATCH = { agentRef: TEST_AGENT_REF, sessionRef: TEST_SESSION_REF, target: { lane: 'auto' } } as const;
+
+/** The executor a test claim reports when the test does not care which runtime ran. */
+export const TEST_CLAIMED_EXECUTOR: ClaimedExecutor = { kind: 'runtime', runtimeId: 'pi' };
 
 /**
  * Start `byok.hono` on an ephemeral port.
@@ -269,6 +275,8 @@ export interface FakeLongPollDaemonOptions {
   capabilities?: string[];
   /** Connection-level runtime discovery block — see {@link PI_RUNTIME_INFO} and friends. */
   runtimes?: RuntimeInfo[];
+  /** Custom harnesses the device declares; a harness claim names one of them. */
+  harnesses?: HarnessInfo[];
   configuredToolsets?: ToolsetId[];
   /**
    * Publish the `conn.hello` snapshot over `POST /byok/messages` (the
@@ -334,6 +342,7 @@ export async function connectFakeDaemonLongPoll(
         productId: opts.productId,
         clientVersion: opts.clientVersion,
         runtimes: opts.runtimes,
+        harnesses: opts.harnesses,
         configuredToolsets: opts.configuredToolsets,
       }),
     );
@@ -485,22 +494,21 @@ export async function expectNoMoreEnvelopes(daemon: FakeLongPollDaemon): Promise
  * file is a frozen pin and must not depend on a shared fixture that could drift
  * under it.
  *
- * `runtime` (S0) is the actual adapter the claim reports and `capabilities`
- * (S0/D-4) is that adapter's own self-report — the ONLY input the steer gate
- * reads.
+ * `executor` is what the claim reports running and `capabilities` (S0/D-4)
+ * is that adapter's own self-report — the ONLY input the steer gate reads.
  */
 export async function claimAndStart(
   byok: ByokServer,
   daemon: FakeLongPollDaemon,
   handle: TaskHandle,
-  runtime?: RuntimeId,
+  executor: ClaimedExecutor = TEST_CLAIMED_EXECUTOR,
   capabilities?: RuntimeCapabilities,
 ): Promise<void> {
   // An Agent task's claim echoes the Agent the offer named.
   const agentRef = (await byok.tasks.get(handle.taskId))?.agentRef;
   const claim = await sendOne(
     daemon,
-    createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime, capabilities, agentRef }, { taskId: handle.taskId }),
+    createEnvelope('task.claim', { deviceId: daemon.deviceId, executor, capabilities, agentRef }, { taskId: handle.taskId }),
   );
   expect(claim).toMatchObject({ status: 200, body: { accepted: 1 } });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('Claimed');
@@ -544,37 +552,4 @@ export async function runMaintenanceAt(server: ByokServer, now: string) {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date(now));
   try { return await server.maintenance.runNow(); } finally { vi.useRealTimers(); }
-}
-
-/**
- * Rewinds a v8 file to v7, the schema this build upgrades in place: v7 had no
- * activity log and no output closure, and its approval timeline carried an
- * idle deadline on every row. Each retained row gets `idleExpiresAt`.
- */
-export function rewindToV7(idleExpiresAt: string): string {
-  return `DROP TRIGGER task_output_closed; DROP TABLE activity_log_entry; DROP TABLE activity_log_head;
-    ALTER TABLE approval_timeline_tail RENAME TO approval_timeline_tail_v8;
-    DROP INDEX approval_timeline_expiry;
-    CREATE TABLE approval_timeline_tail (
-      tenant_id TEXT NOT NULL,
-      task_id TEXT NOT NULL,
-      entries_json TEXT NOT NULL,
-      next_revision INTEGER NOT NULL CHECK (next_revision > 0),
-      dropped INTEGER NOT NULL CHECK (dropped >= 0),
-      capacity INTEGER NOT NULL CHECK (capacity > 0),
-      expires_at TEXT NOT NULL,
-      PRIMARY KEY (tenant_id, task_id)
-    );
-    CREATE INDEX approval_timeline_expiry ON approval_timeline_tail (tenant_id, expires_at, task_id);
-    INSERT INTO approval_timeline_tail SELECT tenant_id, task_id, entries_json, next_revision, dropped, capacity, '${idleExpiresAt}'
-      FROM approval_timeline_tail_v8 WHERE entries_json <> '[]';
-    DROP TABLE approval_timeline_tail_v8;
-    UPDATE byok_sqlite_meta SET value = '7' WHERE key = 'schema_version';`;
-}
-
-/** Rewinds a v8 file to v6: the v7 rewind, then without v7's mailbox stream tombstone. */
-export function rewindToV6(idleExpiresAt: string): string {
-  return `${rewindToV7(idleExpiresAt)}
-    ALTER TABLE mailbox_cursor DROP COLUMN closed_cause; ALTER TABLE mailbox_cursor DROP COLUMN closed_at;
-    UPDATE byok_sqlite_meta SET value = '6' WHERE key = 'schema_version';`;
 }

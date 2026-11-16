@@ -39,11 +39,11 @@ const fields = {
   get: {
     taskId: true, state: true, deviceId: false, sessionRef: false, agentRef: true,
     createdAt: true, updatedAt: true, result: false, pendingApprovalId: false,
-    claimedRuntime: false, claimedHarnessId: false, claimedRuntimeCapabilities: false,
+    claimedExecutor: false, claimedRuntimeCapabilities: false,
   },
   attempt: {
     tenantId: true, taskId: true, deviceId: true, agentRef: true, ownerDeviceId: false,
-    status: true, claimedRuntime: false, claimedHarnessId: false, claimedRuntimeCapabilities: false,
+    status: true, claimedExecutor: false, claimedRuntimeCapabilities: false,
     terminalCause: false, cancellation: false, offeredAt: false, claimedAt: false,
     firstOutputAt: false, terminalAt: false, archivedAt: false, updatedAt: true,
   },
@@ -51,16 +51,16 @@ const fields = {
   offerPayload: {
     sealed: false, sealing: false, routineRef: false, instruction: false, agentRef: true,
     nativeSessions: false, session: true, preparation: false, agentMemory: false, agentMemoryCommit: false, homeAccess: false, requiredToolsets: false,
-    runtime: false, harnessId: false, dispatchSelection: false, terminalProjection: false,
+    target: true, terminalProjection: false,
     limits: false, egressPolicy: false, messageEgress: false,
   },
   'task.complete': {
-    sealed: false, sealing: false, harnessId: false, summary: true, finalMessage: false,
+    sealed: false, sealing: false, executor: true, summary: true, finalMessage: false,
     sessionRef: true, artifactRefs: false, document: false, usage: false, preparedObservation: false,
     agentRef: false, agentHomeProjection: false, agentHomeMemoryChange: false, residentMemoryOverLimit: false,
   },
   'task.fail': {
-    sealed: false, sealing: false, recovery: false, harnessId: false, reason: true,
+    sealed: false, sealing: false, recovery: false, executor: false, reason: true,
     retryable: false, failure: false, usage: false, preparedObservation: false,
     agentRef: false, agentHomeProjection: false, agentHomeMemoryChange: false, residentMemoryOverLimit: false,
   },
@@ -69,7 +69,7 @@ const fields = {
     runtimeUnavailable: false, admission: false,
   },
   'task.cancelled': {
-    sealed: false, sealing: false, harnessId: false, reason: false, usage: false,
+    sealed: false, sealing: false, executor: false, reason: false, usage: false,
     agentRef: false, agentHomeProjection: false, agentHomeMemoryChange: false, residentMemoryOverLimit: false,
   },
   message: {
@@ -122,13 +122,14 @@ function resultFields(payload: object): object {
   type Terminal = NonNullable<Awaited<ReturnType<ByokServer['tasks']['deviceTerminal']>>>;
   type Snapshot = NonNullable<Awaited<ReturnType<ByokServer['tasks']['get']>>>;
   const evidenceOnly = {
-    agentRef: true, harnessId: true, recovery: true, agentHomeProjection: true,
+    agentRef: true, executor: true, recovery: true, agentHomeProjection: true,
     agentHomeMemoryChange: true, residentMemoryOverLimit: true, usage: true, preparedObservation: true,
     sealed: true, sealing: true, runtimeUnavailable: true, admission: true,
   } satisfies Record<Exclude<Keys<Terminal['envelope']['payload']>, keyof NonNullable<Snapshot['result']>>, true>;
   return Object.fromEntries(Object.entries(payload).filter(([key]) => !Object.hasOwn(evidenceOnly, key)));
 }
 
+const PI = { kind: 'runtime', runtimeId: 'pi' } as const;
 const usage = {
   runtime: 'pi' as const, provider: 'observed-provider', model: 'observed-model',
   promptTokens: 17, completionTokens: 5, durationMs: 123,
@@ -136,18 +137,18 @@ const usage = {
 };
 const terminals = [
   { name: 'complete', state: 'Complete', type: 'task.complete', payload: {
-    agentRef: TEST_AGENT_REF, summary: 'commentary and answer', finalMessage: 'answer',
+    executor: PI, agentRef: TEST_AGENT_REF, summary: 'commentary and answer', finalMessage: 'answer',
     sessionRef: TEST_SESSION_REF, artifactRefs: [], usage,
   } },
   { name: 'failure', state: 'Failed', type: 'task.fail', payload: {
-    agentRef: TEST_AGENT_REF, reason: 'quota reached', retryable: false,
+    executor: PI, agentRef: TEST_AGENT_REF, reason: 'quota reached', retryable: false,
     failure: { class: 'quota', resetsAt: '2026-10-30T00:00:00.000Z' }, usage,
   } },
   { name: 'decline', state: 'Failed', type: 'task.decline', payload: {
     agentRef: TEST_AGENT_REF, reason: 'writer occupied', retryable: true, code: 'agent_home_writer_busy',
   } },
   { name: 'cancelled', state: 'Cancelled', type: 'task.cancelled', payload: {
-    agentRef: TEST_AGENT_REF, reason: 'device stopped', usage,
+    executor: PI, agentRef: TEST_AGENT_REF, reason: 'device stopped', usage,
   } },
 ] as const;
 
@@ -187,7 +188,7 @@ describe('ByokServer.tasks projection contract (#1113)', () => {
     });
     const { taskId } = handle;
     // Decline is a pre-claim terminal. Other scenarios exercise claim metadata.
-    if (terminal.name !== 'decline') await claimAndStart(instance, daemon, handle, 'pi');
+    if (terminal.name !== 'decline') await claimAndStart(instance, daemon, handle, PI);
     const body = 'projection answer';
     const publish = createEnvelope('agent.message.publish', {
       agentRef: TEST_AGENT_REF, sessionRef: TEST_SESSION_REF, contract: 'projection.v1',

@@ -18,20 +18,20 @@ const PRODUCT_ID = 'acme';
 const SHORT_HOLD_MS = 200;
 
 /**
- * M5 (claimed runtime, docs/protocol.md §3.1): `task.claim` optionally carries
- * `runtime` — the ACTUAL adapter the daemon selected — snapshotted by the cloud
- * kernel's inbound gate at the `offered -> claimed` ownership CAS and read back
- * through `TaskSnapshot.claimedRuntime`.
+ * Claimed executor (wire v7, docs/protocol.md §3.1): `task.claim` carries
+ * `executor` — what the daemon ACTUALLY runs the task with — snapshotted by the
+ * cloud kernel's inbound gate at the `offered -> claimed` ownership CAS and
+ * read back through `TaskSnapshot.claimedExecutor`.
  *
  * The pre-fold counterpart `TaskSnapshot.runtime` (the merely REQUESTED
  * runtime) is gone: it was dispatch INPUT the host already holds and the kernel
  * does not persist (ADR-028), so the "requested field stays untouched" half of
  * each case below has no field left to assert on. What survives — that the
  * claim's own report is recorded independently of what was requested — is
- * pinned by the two dispatch shapes below, one with a requested runtime and one
- * without.
+ * pinned by the two dispatch targets below, one naming a runtime and one
+ * `auto`.
  */
-describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntime', () => {
+describe('claimed executor: task.claim.executor -> TaskSnapshot.claimedExecutor', () => {
   let server: HttpServer | undefined;
   let byok: ByokServer | undefined;
 
@@ -51,60 +51,43 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
     return { byok: instance, daemon };
   }
 
-  it('an offer dispatched with NO requested runtime (auto-select): task.claim.runtime sets claimedRuntime', async () => {
+  it('an offer dispatched with an auto target: task.claim.executor sets claimedExecutor', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
     const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'auto-select this' });
 
     const claim = await sendOne(
       daemon,
-      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, runtime: 'pi' }, { taskId: handle.taskId }),
+      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: handle.taskId }),
     );
     expect(claim).toMatchObject({ status: 200, body: { accepted: 1 } });
 
     const snapshot = await instance.tasks.get(handle.taskId);
     expect(snapshot?.state).toBe('Claimed');
-    expect(snapshot?.claimedRuntime).toBe('pi');
+    expect(snapshot?.claimedExecutor).toEqual({ kind: 'runtime', runtimeId: 'pi' });
   });
 
-  it('an offer dispatched WITH a requested runtime: task.claim.runtime is recorded independently as claimedRuntime', async () => {
+  it('an offer dispatched WITH a runtime target: task.claim.executor is recorded independently as claimedExecutor', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'explicit runtime', runtime: 'claude' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'explicit runtime', target: { lane: 'runtime', runtimeId: 'claude' } });
 
     const claim = await sendOne(
       daemon,
-      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, runtime: 'claude' }, { taskId: handle.taskId }),
+      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, executor: { kind: 'runtime', runtimeId: 'claude' } }, { taskId: handle.taskId }),
     );
     expect(claim).toMatchObject({ status: 200, body: { accepted: 1 } });
 
-    expect((await instance.tasks.get(handle.taskId))?.claimedRuntime).toBe('claude');
+    expect((await instance.tasks.get(handle.taskId))?.claimedExecutor).toEqual({ kind: 'runtime', runtimeId: 'claude' });
   });
 
-  it("compat: a legacy daemon's task.claim with NO runtime field leaves claimedRuntime absent and the claim still succeeds normally", async () => {
-    const { byok: instance, daemon } = await startWithDaemon();
-
-    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'legacy daemon claim' });
-
-    // A pre-M5-batch-2 daemon's task.claim payload never had a `runtime` key.
-    const claim = await sendOne(
-      daemon,
-      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }),
-    );
-    expect(claim).toMatchObject({ status: 200, body: { accepted: 1 } });
-
-    const snapshot = await instance.tasks.get(handle.taskId);
-    expect(snapshot?.state).toBe('Claimed'); // nothing breaks
-    expect(snapshot?.claimedRuntime).toBeUndefined();
-  });
-
-  it('the task.state ByokServerEvent fired on Offered -> Claimed carries claimedRuntime, mirroring the snapshot', async () => {
+  it('the task.state ByokServerEvent fired on Offered -> Claimed carries claimedExecutor, mirroring the snapshot', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
     const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'observe the server event' });
     await sendOne(
       daemon,
-      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, runtime: 'codex' }, { taskId: handle.taskId }),
+      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId: handle.taskId }),
     );
 
     const event = await waitForServerEvent(
@@ -112,7 +95,7 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
       (e) => e.kind === 'task.state' && e.taskId === handle.taskId && e.state === 'Claimed',
     );
     if (event.kind !== 'task.state') throw new Error('unreachable');
-    expect(event.claimedRuntime).toBe('codex');
-    expect(event.claimedRuntime).toBe((await instance.tasks.get(handle.taskId))?.claimedRuntime);
+    expect(event.claimedExecutor).toEqual({ kind: 'runtime', runtimeId: 'codex' });
+    expect(event.claimedExecutor).toEqual((await instance.tasks.get(handle.taskId))?.claimedExecutor);
   });
 });
