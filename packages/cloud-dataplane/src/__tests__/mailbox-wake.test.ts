@@ -291,7 +291,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres task events wake (#1113 A4)', () => {
       expect(performance.now() - started).toBeLessThan(1_000);
     };
     await woken(() => tasks.reserveAgentOffer(tenant, { taskId: 'task-wake', deviceId: device, agentRef: AGENT_REF }));
-    await woken(() => tasks.claim(tenant, { taskId: 'task-wake', deviceId: device }));
+    await woken(() => tasks.claim(tenant, { taskId: 'task-wake', deviceId: device, executor: { kind: 'runtime', runtimeId: 'pi' } }));
     await woken(() => activity.append(tenant, {
       taskId: 'task-wake', sourceEnvelopeId: 'progress', batchSeq: 1, events: [{ type: 'progress', text: 'one' }], dropped: 0, ttlMs: 600_000,
     }));

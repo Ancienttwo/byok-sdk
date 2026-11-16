@@ -37,7 +37,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres 0030 and the attempts stored before it
       expect(old).toMatchObject({ status: 'offered', updatedAt: '2026-01-01T00:00:00.000Z' });
       for (const field of ['offeredAt', 'claimedAt', 'firstOutputAt', 'terminalAt']) expect(old).not.toHaveProperty(field);
 
-      await store.claim(TENANT, { taskId: 'old', deviceId: 'device-1' });
+      await store.claim(TENANT, { taskId: 'old', deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' } });
       const claimed = await store.get(TENANT, 'old');
       expect(claimed).toMatchObject({ claimedAt: clock.now().toISOString() });
       expect(claimed).not.toHaveProperty('offeredAt');
