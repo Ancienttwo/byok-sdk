@@ -218,8 +218,8 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
         expect(await stores.tasks.get(TENANT_A, 'task-1')).toMatchObject({
           status: 'offered',
           deviceId: 'device-1',
-          executor: PI_EXECUTOR,
         });
+        expect(await stores.tasks.get(TENANT_A, 'task-1')).not.toHaveProperty('claimedExecutor');
         expect(await stores.tasks.get(TENANT_B, 'task-1')).toBeUndefined();
       });
     });
