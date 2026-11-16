@@ -123,7 +123,7 @@ export class MacOsKeychainSecretStore<TName extends string = string>
       );
     }
     const stored = result.stdout.replace(/\r?\n$/u, '');
-    if (!stored.startsWith(this.#storagePrefix)) throw new ByokKeysError('KEYCHAIN_LEGACY', 'Unsupported legacy Keychain entry');
+    if (!stored.startsWith(this.#storagePrefix)) throw new ByokKeysError('KEYCHAIN_LEGACY', 'Legacy Keychain entry');
     return stored;
   }
 
@@ -222,7 +222,7 @@ export class MacOsKeychainSecretStore<TName extends string = string>
     if (decoded === undefined || decoded.length === 0) {
       throw new ByokKeysError(
         'KEYCHAIN_SECRET_CORRUPTED',
-        'macOS Keychain returned a secret that is not valid base64-encoded UTF-8',
+        'Corrupt macOS Keychain secret',
       );
     }
     return decoded;
