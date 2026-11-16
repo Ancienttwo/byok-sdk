@@ -1,12 +1,10 @@
 import { checkDaemonConfig, type DaemonConfigCheck } from '../../daemon/config-schema/check.js';
 import type { DaemonEffectiveConfig } from '../../daemon/config-schema/effective.js';
-import { formatConfigIssue, readConfigFile } from '../config.js';
+import { readConfigFile } from '../config.js';
 import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../official-release.js';
 import { assertRuntimeEnvironmentPolicy, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 
 export interface ConfigCheckOptions {
-  /** Fail on warnings (unknown fields) too, for CI. */
-  readonly strict: boolean;
   readonly json: boolean;
 }
 
@@ -17,8 +15,8 @@ export interface ConfigCheckDeps {
 /**
  * `byok-agent config check` (#1094): validates a config file with the shared
  * validator, as `start` would load it, and prints the effective values the
- * daemon would run with. Returns the exit code: 1 on any error, and with
- * `--strict` on any warning; otherwise 0.
+ * daemon would run with. Returns the exit code: 1 on any issue, an unknown
+ * field included; otherwise 0.
  *
  * #1095: the check prints the file's top-level `runtimeEnvironment` policy,
  * the default of every runtime `start` builds; #1759: it also prints each
@@ -30,28 +28,26 @@ export function runConfigCheckCommand(configPath: string, options: ConfigCheckOp
   const log = deps.log ?? ((line: string) => console.log(line));
   const { $schema: _schema, ...input } = readConfigFile(configPath);
   const check = checkDaemonConfig(input, { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE });
-  const ok = check.ok && !(options.strict && check.issues.length > 0);
+  const { ok } = check;
   const runtimeEnvironment = check.effective === undefined ? undefined : effectiveRuntimeEnvironmentPolicy(input.runtimeEnvironment);
   if (options.json) {
     log(JSON.stringify({
-      ok, strict: options.strict, config: configPath, issues: check.issues,
+      ok, config: configPath, issues: check.issues,
       ...(check.effective === undefined ? {} : { effective: check.effective }),
       ...(runtimeEnvironment === undefined ? {} : { runtimeEnvironment }),
     }, null, 2));
   } else {
-    for (const line of formatConfigCheck(configPath, check, options.strict, ok)) log(line);
+    for (const line of formatConfigCheck(configPath, check)) log(line);
     if (runtimeEnvironment !== undefined) log(`  runtime environment: ${formatRuntimeEnvironmentPolicy(runtimeEnvironment)}`);
   }
   return ok ? 0 : 1;
 }
 
-export function formatConfigCheck(configPath: string, check: DaemonConfigCheck, strict: boolean, ok: boolean): string[] {
+export function formatConfigCheck(configPath: string, check: DaemonConfigCheck): string[] {
   const lines = [`config: ${configPath}`];
-  for (const issue of check.issues) lines.push(`  ${issue.severity.padEnd(7)} ${issue.path === '' ? '(root)' : issue.path}: ${formatConfigIssue(issue)}`);
-  const errors = check.issues.filter((issue) => issue.severity === 'error').length;
-  const warnings = check.issues.length - errors;
-  const counts = `${errors} error${errors === 1 ? '' : 's'}, ${warnings} warning${warnings === 1 ? '' : 's'}`;
-  lines.push(`result: ${ok ? 'ok' : 'invalid'} (${counts}${strict ? '; --strict fails on warnings' : ''})`);
+  for (const issue of check.issues) lines.push(`  ${issue.path === '' ? '(root)' : issue.path}: ${issue.message}`);
+  const errors = check.issues.length;
+  lines.push(`result: ${check.ok ? 'ok' : 'invalid'} (${errors} error${errors === 1 ? '' : 's'})`);
   if (check.effective !== undefined) lines.push(...formatEffectiveConfig(check.effective));
   return lines;
 }

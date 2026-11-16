@@ -14,6 +14,7 @@ interface WorkerPlan {
   crash?: boolean;
   exitBeforeReceipt?: boolean;
   exitOnToolAck?: boolean;
+  holdStart?: boolean;
   refuseStart?: boolean;
   retiredResultFrame?: boolean;
   projectionDigest?: string;
@@ -30,7 +31,7 @@ async function fixture(plan: WorkerPlan[]) {
   return started;
 }
 /** Starts the durable lane over the inert worker; a start failure is returned, not thrown. */
-async function start(plan: WorkerPlan[], options: { blockConfigWrite?: boolean } = {}) {
+async function start(plan: WorkerPlan[], options: { blockConfigWrite?: boolean; signal?: AbortSignal } = {}) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'fix-pi-durable-recovery-')));
   roots.push(root);
   const home = path.join(root, 'home');
@@ -44,7 +45,7 @@ async function start(plan: WorkerPlan[], options: { blockConfigWrite?: boolean }
   const release = vi.fn(() => scratch.release());
   // The injected spawn launches only our inert fixture, never Pi.
   const starting = startDurablePi({
-    input: { scratch,
+    input: { scratch, signal: options.signal,
       instruction: 'synthetic instruction', mcpEnv: {},
       manifest: { taskId: 'task', cwd: home,
         agentRef: { agentId: 'agent', profileRevision: 'revision' },
@@ -197,6 +198,23 @@ describe.skipIf(process.platform === 'win32')('durable start contract', () => {
     });
     expect(children).toHaveLength(0);
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('fails a start the worker never answers once the start is aborted, and reaps the worker (#2308)', async () => {
+    const deadline = new AbortController();
+    const starting = start([{ holdStart: true }], { signal: deadline.signal });
+    // The abort stands in for the daemon's startup deadline, after the worker took the start.
+    await vi.waitFor(async () => expect(await readFile(path.join(roots.at(-1)!, 'starts.jsonl'), 'utf8')).not.toBe(''), { timeout: 10_000 });
+    deadline.abort();
+    const { startError, children, release } = await starting as { startError: Error; children: ChildProcess[]; release: () => unknown };
+    expect(startError).toMatchObject({
+      phase: 'start', retry: 'non-retryable',
+      message: 'durable runtime start failed', failure: { class: 'unknown' },
+    });
+    expect((startError.cause as Error).message).toBe('the start was aborted before pi answered');
+    expect(release).toHaveBeenCalledOnce();
+    expect(children).toHaveLength(1);
+    expect(children[0]!.exitCode !== null || children[0]!.signalCode !== null).toBe(true);
   });
 
   it('reports a refused start as unknown', async () => {

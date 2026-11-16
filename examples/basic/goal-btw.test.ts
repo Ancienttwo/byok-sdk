@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { readFileSync, readdirSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { validateResultOutcome } from '@byok-sdk/protocol';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -8,7 +11,7 @@ import { createByokServer, type ByokServer } from '@byok-sdk/server';
 import { createDaemonWithAdapters, type Daemon, type AgentEgressPolicy } from '@byok-sdk/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GoalBtwHost, GOAL_RESULT_CONTRACT, BTW_RESULT_CONTRACT, GOAL_RESULT_SCHEMA, BTW_RESULT_SCHEMA, type BotTarget } from './goal-btw';
-import { SqliteGoalBtwStore, HostRevisionConflict } from './goal-btw-store';
+import { SqliteGoalBtwStore, HostFormatError, HostRevisionConflict } from './goal-btw-store';
 import { BotStubAdapter, waitForReady, waitForTaskCleanup } from './goal-btw.test-support';
 
 const policy: AgentEgressPolicy = {
@@ -346,5 +349,23 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     expect(other.read('goal:goal')).toBeUndefined();
     expect(() => newGoal()).toThrow(HostRevisionConflict);
     expect(host.goal('goal').value.steps).toBe(0);
+  });
+});
+
+describe('goal/btw Host database format', () => {
+  it('refuses a store from before host_format without writing to it', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'goal-btw-format-'));
+    try {
+      const file = path.join(dir, 'host.sqlite');
+      const old = new DatabaseSync(file);
+      old.exec(`CREATE TABLE bot_state (host_id TEXT NOT NULL, key TEXT NOT NULL, revision INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(host_id, key));
+        CREATE TABLE bot_execution_ids (host_id TEXT NOT NULL, task_id TEXT NOT NULL, PRIMARY KEY(host_id, task_id));`);
+      old.close();
+      const sha = () => createHash('sha256').update(readFileSync(file)).digest('hex');
+      const before = sha();
+      expect(() => new SqliteGoalBtwStore(file, 'host')).toThrow(HostFormatError);
+      expect(sha()).toBe(before);
+      expect(readdirSync(dir)).toEqual(['host.sqlite']);
+    } finally { await rm(dir, { recursive: true, force: true }); }
   });
 });

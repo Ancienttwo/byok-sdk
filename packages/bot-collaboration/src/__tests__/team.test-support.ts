@@ -13,7 +13,7 @@ import { policy, template } from '../k4-fixtures.test-support.js';
 import { BotCollaboration, type AgentMessageInput, type BotOptions } from '../host.js';
 import { createBotPersonaProjection } from '../persona.js';
 import { enrollSecondDevice } from './second-device.test-support.js';
-import { botCompactVeto } from '../compaction.js';
+import { botLedgerOptions } from '../compaction.js';
 
 /**
  * Real embedded server, HTTP, daemon, persona writes, and submit_result helper.
@@ -34,7 +34,7 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
   bot?: Pick<BotOptions, 'team' | 'rooms' | 'history' | 'coalesce' | 'deviceConcurrency'> } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'k8b-'));
   const productId = 'k8b-test';
-  let ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`, { compactVeto: botCompactVeto });
+  let ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`, botLedgerOptions);
   let host!: BotCollaboration;
   const received: AgentMessageInput[] = [];
   const server = createByokServer({ productId, storage: { kind: 'sqlite', path: join(root, 'server.sqlite') },
@@ -92,7 +92,7 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
     async online() { http = await listen(address.port); await waitForReady(daemon); },
     async reopen() {
       await host.close(); ledger.close();
-      ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`, { compactVeto: botCompactVeto });
+      ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`, botLedgerOptions);
       host = new BotCollaboration(port, ledger, botOptions);
       if (mainAutonomy === 'auto' && stateOf(ledger.snapshot().application).team.bots.main) setMain('main');
       await host.recover();

@@ -89,9 +89,9 @@ test('a bin API entry selects the package that declares the bin; an undeclared b
   assert.throws(() => selectImpact(['api-surface/entries.json'], f), /unmapped API entry bin:byok-unknown/);
 });
 test('reviewed vendor and registry paths map explicitly, siblings still refuse', () => {
-  assert.ok(selectImpact(['packages/client/vendor/oar/4eb5919/runtimes/grok/session.ts']).dirs.includes('packages/client'));
+  assert.ok(selectImpact(['packages/client/vendor/oar/552a4f9/runtimes/grok/session.ts']).dirs.includes('packages/client'));
   assert.deepEqual(selectImpact(['scripts/release/registry-contract.test.mjs', 'scripts/release/registry-expectations.json']).dirs, []);
-  assert.throws(() => selectImpact(['packages/client/vendor/oar/4eb5919/unreviewed.ts']));
+  assert.throws(() => selectImpact(['packages/client/vendor/oar/552a4f9/unreviewed.ts']));
   assert.throws(() => selectImpact(['scripts/release/registry-contract.mjs']));
 });
 test('CLI and aggregate revalidate content against the same trusted comparison base', t => {
@@ -399,6 +399,25 @@ function rebase(f, message) {
   f.base = git('rev-parse', 'HEAD').trim();
 }
 
+test('#2286: core admits exactly its sqlite-node entry', t => {
+  const f = fixture(t), path = 'packages/core/package.json';
+  const manifest = { name: '@byok-sdk/core', version: '0.43.0', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } } };
+  f.write(path, manifest); rebase(f, 'core before sqlite-node');
+  const entry = { types: './dist/sqlite-node.d.ts', default: './dist/sqlite-node.js' };
+  const write = value => f.write(path, { ...manifest, exports: { ...manifest.exports, './sqlite-node': value } });
+  write(entry);
+  assert.doesNotThrow(() => selectImpact([path], f));
+  // Part A shipped a node-only shape first; exactly that shape may move to this one.
+  const partA = { types: entry.types, node: { import: './dist/sqlite-node.js' } };
+  write(partA); rebase(f, 'core with the part A entry');
+  write(entry);
+  assert.doesNotThrow(() => selectImpact([path], f));
+  for (const invalid of [{ ...entry, types: './dist/other.d.ts' }, { ...entry, default: './dist/other.js' }, { ...partA, default: entry.default }]) {
+    write(invalid);
+    assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
+  }
+});
+
 test('the K4 example stays private', t => {
   const f = fixture(t), path = 'examples/host-execution-core/package.json';
   const manifest = { name: '@byok-sdk/example-host-execution-core', private: true, version: '0.0.1',
@@ -584,7 +603,7 @@ test('the desktop browser command is admitted exactly and an altered command is 
 test('new graph-registered private workspaces and matching lock rows are admitted; unregistered additions fail', t => {
   const f = fixture(t);
   // #1808: the desktop example's ui-runtime edge needs ui-runtime declared in the base.
-  for (const id of ['protocol', 'server', 'keys', 'ui-runtime']) {
+  for (const id of ['core', 'protocol', 'server', 'keys', 'ui-runtime']) {
     const manifest = { name: `@byok-sdk/${id}`, version: '0.28.0' };
     f.write(`packages/${id}/package.json`, manifest); f.lock.workspaces[`packages/${id}`] = manifest;
   }
@@ -594,8 +613,8 @@ test('new graph-registered private workspaces and matching lock rows are admitte
   f.write('bun.lock', f.lock); rebase(f, 'base dependency declarations');
   const dir = 'examples/basic';
   const manifest = { name: '@byok-sdk/example-basic', version: '0.0.1', private: true, type: 'module',
-    scripts: { typecheck: 'tsc --noEmit', test: 'vitest run' },
-    dependencies: { '@byok-sdk/client': 'workspace:*', '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/server': 'workspace:*' } };
+    scripts: { dev: 'tsx server.ts', typecheck: 'tsc --noEmit', test: 'vitest run' },
+    dependencies: { '@byok-sdk/client': 'workspace:*', '@byok-sdk/core': 'workspace:*', '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/server': 'workspace:*' } };
   f.write(`${dir}/package.json`, manifest);
   f.lock.workspaces[dir] = { name: manifest.name, version: manifest.version, dependencies: manifest.dependencies };
   f.lock.packages[manifest.name] = [`${manifest.name}@workspace:${dir}`];

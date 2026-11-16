@@ -38,13 +38,10 @@ export function recordWouldDo(state: AutonomyState, row: Omit<WouldDo, 'id'>): W
   (state.wouldDo ??= {})[id] = record;
   return record;
 }
-/**
- * Refuses a state that still holds a would-do row from before #1756, which has no `turnId`. Only the one-shot migration
- * links such a row to its Turn, so a store that skipped it fails here instead of keeping the row forever.
- */
+/** Refuse would-do rows written before turn identities were required. */
 export function refuseUnmigratedWouldDo(state: AutonomyState): void {
   if (Object.values(state.wouldDo ?? {}).some(row => typeof row.turnId !== 'string')) {
-    throw new Error('A would-do row has no turnId: run migrateWouldDo (local) or HostedCollaborationStore.migrate() (hosted) first');
+    throw Object.assign(new Error('A would-do row has no turnId'), { code: 'would_do_unsupported_old' as const });
   }
 }
 /** The would-do rows of one Bot, or of every Bot, oldest first. A row of the same instant keeps a stable id order. */

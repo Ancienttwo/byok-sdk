@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { closeSync, lstatSync, mkdirSync, openSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { readSqliteFileUnchanged, sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
 import type { ByokServer } from '@byok-sdk/server';
 import { AgentRefSchema } from '@byok-sdk/protocol';
 import { BetaError, WINDOW_MS, agentScope, canonicalJson, freeze, hash, invalid, keySpec, runtimeTarget, taskArguments, text,
@@ -40,6 +41,22 @@ function number(value: unknown): number {
   return value;
 }
 
+/** A file that is not this tenant's current beta ledger. It is refused before any write and left as it is. */
+export class BetaLedgerRefusedError extends Error {
+  constructor(message: string) { super(message); this.name = 'BetaLedgerRefusedError'; }
+}
+
+const LEDGER_TABLES = ['beta_meta', 'beta_keys', 'beta_tasks', 'beta_routines', 'beta_status'];
+/** The ledger's one admission check: `'empty'` for a new file, otherwise the current version for `tenant` or a refusal. */
+function assertCurrentLedger(db: DatabaseSync, tenant: string): 'empty' | 'current' {
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT GLOB 'sqlite_*'").all().map(row => row.name);
+  if (!tables.length) return 'empty';
+  if (tables.length !== LEDGER_TABLES.length || LEDGER_TABLES.some(name => !tables.includes(name))) throw new BetaLedgerRefusedError('Not a beta ledger');
+  const meta = db.prepare('SELECT version, tenant FROM beta_meta WHERE id=1').get();
+  if (meta?.version !== 1 || meta.tenant !== tenant) throw new BetaLedgerRefusedError('Beta ledger version or tenant mismatch');
+  return 'current';
+}
+
 /** One Host process owns one tenant's file. All commands are in-process. */
 export class BetaLedger {
   private readonly db: DatabaseSync;
@@ -48,15 +65,17 @@ export class BetaLedger {
   private closed = false;
   constructor(filename: string, readonly tenant: string, private readonly options: LedgerOptions = {}) {
     text(tenant);
-    this.db = new DatabaseSync(privateFile(filename));
+    const path = privateFile(filename);
+    // Decided on the unchanged main file before the writable open; inside the
+    // exclusive transaction again, where a not-yet-checkpointed WAL is visible.
+    readSqliteFileUnchanged(path, db => assertCurrentLedger(db, tenant));
+    this.db = new DatabaseSync(sqliteOpenPath(path));
     try {
       this.db.exec('PRAGMA locking_mode=EXCLUSIVE; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; BEGIN EXCLUSIVE');
-      const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT GLOB 'sqlite_*'").all().map(row => row.name);
-      const expected = ['beta_meta', 'beta_keys', 'beta_tasks', 'beta_routines', 'beta_status'];
-      if (tables.length && (tables.length !== expected.length || expected.some(name => !tables.includes(name)))) throw new Error('Not a beta ledger');
-      if (!tables.length) this.initialize();
-      const meta = this.db.prepare('SELECT version, tenant FROM beta_meta WHERE id=1').get();
-      if (meta?.version !== 1 || meta.tenant !== tenant) throw new Error('Beta ledger version or tenant mismatch');
+      if (assertCurrentLedger(this.db, tenant) === 'empty') {
+        this.initialize();
+        assertCurrentLedger(this.db, tenant);
+      }
       this.db.exec('COMMIT; PRAGMA journal_mode=WAL');
     } catch (error) { this.db.close(); throw error; }
   }

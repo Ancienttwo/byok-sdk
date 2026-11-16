@@ -4,7 +4,7 @@ import type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { HostLedger, hash, occurrenceIntentKey, setLifecycle, type ExecutionTemplate, type Routine } from '@byok-sdk/server/execution-core';
 import { openHost, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { template } from './k4-fixtures.test-support';
-import { botCompactVeto } from './compaction';
+import { botLedgerOptions } from './compaction';
 import { DEFAULT_DREAM_MAX_DURATION_MS, DREAM_WAIT_MS, dreamPolicy, reconcileDreamRoutines, syncDreams } from './dream';
 import { DEFAULT_INSTRUCTION_MAX_BYTES } from './delegation';
 import { BotCollaboration, type BotOptions } from './host';
@@ -46,7 +46,7 @@ it('promotes a valid harness-only Bot template without a native session request'
   expect(HostOfferPlainPayloadSchema.safeParse(payload).success).toBe(true);
 });
 async function open(rest: Partial<BotOptions> = {}): Promise<BotCollaboration> {
-  fixture ??= await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
+  fixture ??= await openHost({ externalCore: true, ledgerOptions: botLedgerOptions, consume: (wake, signal) => bot!.consume(wake, signal) });
   clock ||= Date.now();
   bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', execution: template(fixture.deviceId), connector: async () => null,
     now: () => clock, dreaming: { timeZone: ZONE }, ...rest });
@@ -182,7 +182,7 @@ it('omits native sessions from the cloud offer when the device does not advertis
 });
 
 it('takes the first listed template on the Bot device, falls back to the Bot template, and skips without one', async () => {
-  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
+  fixture = await openHost({ externalCore: true, ledgerOptions: botLedgerOptions, consume: (wake, signal) => bot!.consume(wake, signal) });
   const own = template(fixture.deviceId), cheap = { ...own, payload: { ...own.payload, target: { lane: 'runtime', runtimeId: 'claude' } as const } };
   await open({ models: { default: own, far: template('other-device'), cheap }, dreaming: { timeZone: ZONE, models: ['gone', 'far', 'cheap'] } });
   await completedTurn('one');

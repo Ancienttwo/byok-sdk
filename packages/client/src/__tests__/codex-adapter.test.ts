@@ -24,7 +24,7 @@ import {
 import * as processTree from '../adapters/process-tree';
 import { observationOf } from './fixtures/mcp-observation';
 import { CodexProjection } from '../adapters/codex/projection';
-import * as vendoredProjection from '../../vendor/oar/4eb5919/runtimes/codex/projection';
+import * as vendoredProjection from '../../vendor/oar/552a4f9/runtimes/codex/projection';
 
 const CODEX_TARGET = { lane: 'runtime', runtimeId: 'codex' } as const;
 const fixture = fileURLToPath(
@@ -145,22 +145,19 @@ describe('Codex persistent app-server adapter', () => {
     // Codex reads MCP tools itself; the daemon takes no tools/list observation for it.
     expect(adapter().descriptor.requiresMcpToolsetToolObservation).not.toBe(true);
   });
-  it.each(['codex-cli 0.161.0', 'codex-cli 1.0.0', 'codex-cli 0.159.1', 'codex-cli 0.160.0-alpha.1', 'codex 0.161.0'])('detect admits unqualified version %j with an advisory, never a refusal', async (output) => {
+  it.each(['codex-cli 0.161.0', 'codex-cli 1.0.0', 'codex-cli 0.159.1', 'codex-cli 0.160.0-alpha.1', 'codex 0.161.0'])('detect admits unqualified version %j with a warn verdict, never a refusal', async (output) => {
     vi.stubEnv('FAKE_CODEX_VERSION', output);
     expect(await adapter().detect()).toMatchObject({
       kind: 'available',
       version: output,
-      advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '0.160.0' },
       versionVerdict: { state: 'warn', qualifiedVersion: '0.160.0' },
     });
   });
-  it('detect admits the qualified version without an advisory', async () => {
-    const detected = await adapter().detect();
-    expect(detected).toMatchObject({
+  it('detect admits the qualified version with an allow verdict', async () => {
+    expect(await adapter().detect()).toMatchObject({
       kind: 'available', version: 'codex-cli 0.160.0',
       versionVerdict: { state: 'allow', qualifiedVersion: '0.160.0' },
     });
-    expect(detected).not.toHaveProperty('advisory');
   });
   it('keeps the Host policy as the whole effective descriptor policy, replacing the default', async () => {
     const versionPolicy = {

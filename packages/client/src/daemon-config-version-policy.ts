@@ -21,7 +21,6 @@ export function versionPolicyConfigIssues(config: unknown): DaemonConfigIssue[] 
     const path = `runtimes.${id}.versionPolicy`;
     for (const issue of runtimeVersionPolicyIssues(policy, { path, hostLayer: true })) {
       issues.push({
-        severity: 'error',
         code: 'invalid_version_policy',
         path: issue.path,
         message: `DaemonConfig.${issue.message}`,

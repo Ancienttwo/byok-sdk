@@ -221,7 +221,7 @@ describe('a promoted sealed occurrence (#953)', () => {
   beforeAll(async () => { for (const ref of Object.values(refs)) templates.set(ref, await sealedTemplate('device-1', ref)); });
   /** An open `hostOccurrence` occurrence of routine `watch` version 3. */
   function occurrence() {
-    const state: LedgerState = { version: 1, sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {}, slots: {},
+    const state: LedgerState = { sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {}, slots: {},
       outbox: {}, applied: {}, application: {}, scanWake: null };
     const commands = routineCommands(state, { now: () => now, nextTime: nextIntervalOccurrence, hostJobs: new Map(), occurrenceHooks: new Map([['bot', () => {}]]) });
     commands.create({ id: 'watch', version: 3, timeZone: 'UTC', rule: { anchorMs: now + 10, everyMs: 86_400_000 }, waitMs: 60_000, lateAfterMs: 1000,

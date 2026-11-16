@@ -14,8 +14,8 @@ import type { AuthManager } from '../daemon/auth-manager';
 import { authedFetch } from '../daemon/http-client';
 import {
   installSkillPacks,
-  listInstalledSkillPacks,
   projectSkillPack,
+  readInstalledSkillPack,
   SKILL_PACK_AUDIT_FILENAME,
   SKILL_PACK_LOCK_FILENAME,
   skillPacksRoot,
@@ -75,9 +75,9 @@ afterEach(async () => {
 });
 
 describe('14-1 skill-pack filesystem boundaries', () => {
-  it('installs, lists, projects nested files, and preserves unchanged installation', async () => {
+  it('installs, reads, projects nested files, and preserves unchanged installation', async () => {
     expect((await install()).installed).toHaveLength(1);
-    expect(await listInstalledSkillPacks(dataDir)).toHaveLength(1);
+    expect(await readInstalledSkillPack(dataDir, name)).toBeDefined();
     expect((await project()).files).toEqual([...contents.keys()]);
     for (const [relative, content] of contents) {
       expect(await fs.readFile(path.join(target, relative), 'utf8')).toBe(content);
@@ -113,7 +113,7 @@ describe('14-1 skill-pack filesystem boundaries', () => {
     expect(await fs.readFile(path.join(installed.installed[0]!.directory, relative), 'utf8')).toBe(files.get(relative));
     expect((await project()).files).toContain(relative);
     expect(await fs.readFile(path.join(target, relative), 'utf8')).toBe(files.get(relative));
-    expect(await listInstalledSkillPacks(dataDir)).toHaveLength(1);
+    expect(await readInstalledSkillPack(dataDir, name)).toBeDefined();
     expect(await install()).toEqual({ installed: [], unchanged: [name] });
   });
 
@@ -189,7 +189,7 @@ describe('14-1 skill-pack filesystem boundaries', () => {
     await fs.rename(lock, moved);
     await fs.symlink(moved, lock);
     await expect(project()).rejects.toThrowError(unsafe);
-    await expect(listInstalledSkillPacks(dataDir)).rejects.toThrowError(unsafe);
+    await expect(readInstalledSkillPack(dataDir, name)).rejects.toThrowError(unsafe);
   });
 
   it('refuses a symlinked audit file without appending outside the store', async () => {

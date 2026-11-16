@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { connectControlClient } from '../daemon/control-client';
 import type { ControlStatusResult } from '../daemon/control-protocol';
+import { parseRuntimeObservations } from '../runtime-detection';
 import { runStatusCommand } from '../bin/commands/status';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { createSupportBundle } from '../diagnostics/support-bundle';
@@ -107,8 +108,7 @@ describe('#1103 restart version change notices', () => {
     if (!connection.ok) throw new Error('expected an online daemon');
     try {
       const live = await connection.client.request<ControlStatusResult>('status');
-      expect(JSON.stringify(live.runtimes)).not.toContain('versionChange');
-      expect(live.runtimeVersionChanges).toEqual([{ id: 'pi', versionChange: expected }]);
+      expect(parseRuntimeObservations(live.runtimes, 'status')?.[0]?.versionChange).toEqual(expected);
     } finally {
       connection.client.close();
     }

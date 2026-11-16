@@ -1,5 +1,7 @@
-import { afterEach, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -259,14 +261,88 @@ it('isolates retirement and expiration by tenant in a shared database', () => {
   expect(other.hasTombstone('slot', 'routine:1:same', policy.now + 100)).toBe(true);
 });
 
-it('adds retirement storage to a version-1 ledger without changing its existing JSON', () => {
-  const { ledger, filename } = open(); seed(ledger, 'existing'); const before = ledger.snapshot();
-  ledger.close(); ledgers.splice(ledgers.indexOf(ledger), 1);
-  const db = new DatabaseSync(filename);
-  try { db.exec('DROP TABLE host_retired_identity'); } finally { db.close(); }
-  const reopened = open('test', filename).ledger;
-  expect(reopened.snapshot()).toEqual(before);
-  expect(reopened.compact({ ...policy, acknowledgedIntentKeys: ['existing'] }).compactedIntents).toBe(1);
+// #2286: a ledger is refused before any write unless its host_store_format rows are exactly the expected formats.
+describe('Host ledger format', () => {
+  const released = fileURLToPath(new URL('../../../scripts/release/fixtures/stores/0.43.0/bot-collaboration-ledger.sqlite', import.meta.url));
+  const state = (file: string) => ({ files: readdirSync(join(file, '..')).sort(), sha: createHash('sha256').update(readFileSync(file)).digest('hex') });
+  const refused = (file: string, expectedFormats?: Record<string, number>) => {
+    const before = state(file);
+    expect(() => new HostLedger(file, 'test', { expectedFormats })).toThrow(expect.objectContaining({ code: 'host_store_format_unsupported' }));
+    expect(state(file)).toEqual(before);
+  };
+  const created = (expectedFormats?: Record<string, number>) => {
+    const { filename } = open();
+    ledgers.pop()!.close();
+    if (expectedFormats) { rmSync(filename); new HostLedger(filename, 'test', { expectedFormats }).close(); }
+    return filename;
+  };
+
+  it('refuses a released ledger, written before format metadata, unchanged', () => {
+    const { filename } = open(); ledgers.pop()!.close(); rmSync(filename);
+    copyFileSync(released, filename);
+    refused(filename);
+    refused(filename, { k8: 3 });
+  });
+
+  it('refuses a missing, different or unknown owner unchanged', () => {
+    refused(created(), { k8: 3 });
+    refused(created({ k8: 3 }), { k8: 4 });
+    refused(created({ k8: 3 }));
+    const current = new HostLedger(created({ k8: 3 }), 'test', { expectedFormats: { k8: 3 } }); ledgers.push(current);
+    expect(current.formats).toEqual({ k4: 1, k8: 3 });
+  });
+
+  it('decides on the writable connection when the schema is only in the WAL, before any DDL', () => {
+    const { filename } = open(); ledgers.pop()!.close(); rmSync(filename);
+    const writer = new DatabaseSync(filename);
+    writer.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE host_ledger (tenant TEXT PRIMARY KEY, body TEXT NOT NULL)');
+    const copy = join(filename, '..', 'copy.sqlite');
+    for (const suffix of ['', '-wal']) copyFileSync(filename + suffix, copy + suffix);
+    writer.close();
+    // Decided before any persistent pragma or DDL runs on the writable connection.
+    const exec = vi.spyOn(DatabaseSync.prototype, 'exec');
+    try {
+      expect(() => new HostLedger(copy, 'test')).toThrow(expect.objectContaining({ code: 'host_store_format_unsupported' }));
+      expect(exec.mock.calls.map(([sql]) => sql).filter(sql => /journal_mode|CREATE|INSERT/i.test(sql))).toEqual([]);
+    } finally { exec.mockRestore(); }
+    const read = new DatabaseSync(copy, { readOnly: true });
+    try { expect(read.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all().map(row => row.name)).toEqual(['host_ledger']); }
+    finally { read.close(); }
+  });
+
+  it('refuses a malformed host_store_format: duplicate owners, other columns', () => {
+    for (const ddl of ['CREATE TABLE host_store_format (owner TEXT, version INTEGER NOT NULL); INSERT INTO host_store_format VALUES (\'k4\', 999), (\'k4\', 1)',
+      'CREATE TABLE host_store_format (owner TEXT PRIMARY KEY); INSERT INTO host_store_format VALUES (\'k4\')']) {
+      const file = created();
+      const db = new DatabaseSync(file);
+      try { db.exec(`DROP TABLE host_store_format; ${ddl}`); } finally { db.close(); }
+      refused(file);
+    }
+  });
+
+  it('decides on the live connection when the WAL holds a newer format than the main file', () => {
+    const file = created({ k8: 3 });
+    const writer = new DatabaseSync(file);
+    writer.exec("PRAGMA wal_autocheckpoint=0; UPDATE host_store_format SET version = 4 WHERE owner = 'k8'");
+    const copy = join(file, '..', 'live.sqlite');
+    for (const suffix of ['', '-wal']) copyFileSync(file + suffix, copy + suffix);
+    writer.close();
+    expect(() => new HostLedger(copy, 'test', { expectedFormats: { k8: 3 } })).toThrow(expect.objectContaining({ code: 'host_store_format_unsupported' }));
+  });
+
+  it('writes the format into the main file when it creates a ledger', () => {
+    // The schema commits in the transaction that decided the file was empty; journal_mode changes only after it.
+    const exec = vi.spyOn(DatabaseSync.prototype, 'exec');
+    let filename = '';
+    try {
+      filename = open().filename;
+      const steps = exec.mock.calls.map(([sql]) => sql.trim().split(/\s+/).slice(0, 2).join(' '));
+      expect(steps.filter(step => /^(BEGIN|COMMIT|ROLLBACK|PRAGMA journal_mode)/.test(step))).toEqual(['BEGIN IMMEDIATE', 'COMMIT', 'PRAGMA journal_mode=WAL']);
+    } finally { exec.mockRestore(); }
+    const read = new DatabaseSync(`file:${filename}?mode=ro&immutable=1`, { readOnly: true });
+    try { expect(read.prepare('SELECT owner, version FROM host_store_format').all()).toEqual([{ owner: 'k4', version: 1 }]); }
+    finally { read.close(); }
+  });
 });
 
 it('does not recreate a completed routine or reapply its SDK terminal on replay before or after expiry', async () => {

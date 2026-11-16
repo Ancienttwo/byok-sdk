@@ -1,29 +1,14 @@
-import { DaemonConfigFieldRemovedError } from '../daemon-errors.js';
-import { removedDaemonConfigField, validateDaemonConfig, type DaemonConfigIssue } from './validate.js';
+import { validateDaemonConfig } from './validate.js';
 import { versionPolicyConfigIssues } from '../../daemon-config-version-policy.js';
 import { DaemonConfigInvalidError } from '../../daemon-config-invalid-error.js';
 
-/** The typed error for a removed field `path` (config or overrides). */
-export function removedFieldError(path: string): DaemonConfigFieldRemovedError {
-  const removed = removedDaemonConfigField(path);
-  if (removed === undefined) throw new Error(`${path} is not a removed DaemonConfig field`);
-  return new DaemonConfigFieldRemovedError(removed.path, removed.message, removed.migration);
-}
-
 /**
- * Construction-time validation (#1094): throws on the first removed field,
- * then on any other error, and returns the unknown-field warnings (Q4':
- * never rejected). Daemon construction logs them once and reports them in
- * `Daemon.status().config`; `checkDaemonConfig` only reports them.
+ * Construction-time validation (#1094): throws a {@link DaemonConfigInvalidError}
+ * on any schema issue, unknown fields included, then on any version-policy issue.
  */
-export function assertDaemonConfigValid(config: unknown): readonly DaemonConfigIssue[] {
+export function assertDaemonConfigValid(config: unknown): void {
   const { issues } = validateDaemonConfig(config, { source: 'embedded' });
-  const removed = issues.find((issue) => issue.code === 'removed_field');
-  if (removed !== undefined) throw removedFieldError(removed.path);
   // Semantic policy checks only make sense once the JSON shape is valid.
-  const semantic = issues.some((issue) => issue.severity === 'error') ? [] : versionPolicyConfigIssues(config);
-  const all = [...issues, ...semantic];
-  const errors = all.filter((issue) => issue.severity === 'error');
+  const errors = issues.length > 0 ? issues : versionPolicyConfigIssues(config);
   if (errors.length > 0) throw new DaemonConfigInvalidError(errors);
-  return all.filter((issue) => issue.severity === 'warning');
 }

@@ -11,13 +11,13 @@ import type { DaemonEvent, DaemonEventListener } from '../daemon/observer';
 import type { DaemonRecord } from '../daemon/daemon-record';
 import {
   AUDIT_LOG_TRIM_TARGET_LINES,
-  appendAuditRecord,
   auditLogPath,
   MAX_AUDIT_LOG_BYTES,
   createAuditAppender,
   readAuditRecords,
   readLastEnvironmentRecord,
 } from '../daemon/audit-log';
+import { appendAuditRecord } from './fixtures/audit-records';
 import { runStartCommand } from '../bin/commands/start';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { runStatusCommand } from '../bin/commands/status';

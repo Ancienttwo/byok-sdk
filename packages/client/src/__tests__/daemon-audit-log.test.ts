@@ -4,7 +4,6 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { DaemonRecord } from '../index';
 import {
-  appendAuditRecord,
   AUDIT_LOG_TRIM_TARGET_LINES,
   auditLogPath,
   createAuditAppender,
@@ -15,6 +14,7 @@ import {
   readLastEnvironmentRecord,
   readLastLifecycleRecord,
 } from '../daemon/audit-log';
+import { appendAuditRecord } from './fixtures/audit-records';
 import { atomicWriteFile } from '../util/atomic-write';
 import { deriveTasksFromRecords } from '../diagnostics/tasks-view';
 
@@ -26,7 +26,7 @@ function lifecycleRecord(connection: 'open' | 'connecting', ts: string): DaemonR
   return { kind: 'lifecycle', ts, lifecycle: { phase: 'running', connection } };
 }
 
-describe('daemon/audit-log: appendAuditRecord / readAuditRecords', () => {
+describe('daemon/audit-log: createAuditAppender / readAuditRecords', () => {
   it('reads back a retention failure for the agent-result class', async () => {
     const storeDir = await tmpDir('byok-audit-retention-');
     const record: DaemonRecord = { kind: 'retention-failure', ts: '2026-10-14T00:00:00.000Z', trigger: 'periodic', classId: 'agent-result', code: 'sweep_failed', count: 1 };

@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { readFileSync, readdirSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,7 +10,7 @@ import { createByokServer, type ByokServer } from '@byok-sdk/server';
 import { createDaemonWithAdapters, type Daemon, type AgentEgressPolicy, type DaemonConfig } from '@byok-sdk/client';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { BotStubAdapter, waitForReady, waitForTaskCleanup } from './goal-btw.test-support';
-import { HostRevisionConflict } from './goal-btw-store';
+import { HostFormatError, HostRevisionConflict, SqliteGoalBtwStore } from './goal-btw-store';
 import type { BotTarget } from './goal-btw';
 import { SqliteClarificationStore } from './clarification-store';
 import { ClarificationHost, CLARIFICATION_CONTRACT, CLARIFICATION_SCHEMA, parseClarification, type QuestionBinding } from './clarification';
@@ -313,5 +316,24 @@ describe('strict clarification parser / contract dispatch', () => {
   it('rejects non-document text and unknown contracts', () => {
     expect(() => parseClarification('prefix '+JSON.stringify(result('complete')))).toThrow();
     expect(() => parseClarification({ contract: 'another.v1', outcome: 'complete' })).toThrow();
+  });
+});
+
+describe('clarification Host database format', () => {
+  it('shares a Host database with goal/btw and refuses another clarification format without writing to it', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cq-format-'));
+    try {
+      const file = path.join(dir, 'host.sqlite');
+      new SqliteGoalBtwStore(file, 'host').close();
+      new SqliteClarificationStore(file, 'tenant-a').close();
+      const old = new DatabaseSync(file);
+      old.exec("PRAGMA journal_mode=DELETE; UPDATE host_format SET version=0 WHERE owner='clarification'");
+      old.close();
+      const sha = () => createHash('sha256').update(readFileSync(file)).digest('hex');
+      const before = sha();
+      expect(() => new SqliteClarificationStore(file, 'tenant-a')).toThrow(HostFormatError);
+      expect(sha()).toBe(before);
+      expect(readdirSync(dir)).toEqual(['host.sqlite']);
+    } finally { await rm(dir, { recursive: true, force: true }); }
   });
 });

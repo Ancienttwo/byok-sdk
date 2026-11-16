@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -11,7 +12,7 @@ import { createBotPersonaProjection, type AgentMessageInput } from '@byok-sdk/bo
 import { ResultStubAdapter } from '@byok-sdk/bot-collaboration/testing';
 import { ConversationService } from '../conversation/service.ts';
 import { botViews, conversationItems, turnEnd } from '../conversation/view.ts';
-import { HostStore } from '../store/store.ts';
+import { HostStore, StoreFormatError } from '../store/store.ts';
 import { Conversation } from './conversation.ts';
 
 const productId = 'desktop-k8-test';
@@ -274,4 +275,22 @@ it('refuses a created or re-pointed Bot whose model is not in the catalog before
   await refused(fx, { ...WRITER, model: 'missing' }, /Unavailable model: missing/);
   await fx.conversation.saveBot(WRITER);
   await refused(fx, { ...WRITER, model: 'missing' }, /Unavailable model: missing/);
+});
+
+it('refuses an older Host store before any write, leaving the file and its directory unchanged', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'desktop-store-'));
+  try {
+    const file = path.join(root, 'store.sqlite');
+    HostStore.open(file).close();
+    const old = new DatabaseSync(file);
+    old.exec(`PRAGMA journal_mode = DELETE; UPDATE meta SET value = 0 WHERE key = 'schema';`);
+    old.close();
+    const sha = async () => createHash('sha256').update(await readFile(file)).digest('hex');
+    const before = await sha(), entries = await readdir(root);
+    expect(() => HostStore.open(file)).toThrow(StoreFormatError);
+    expect(await sha()).toBe(before);
+    expect(await readdir(root)).toEqual(entries);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -357,7 +357,7 @@ function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig
 function buildDshAdapter(config: DaemonRuntimeAdaptersConfig, environment: Pick<DshAdapterOptions, 'runtimeEnvironment'>): DshAdapter {
   const dsh = config.runtimes?.dsh;
   if (dsh === undefined) {
-    throw new DaemonConfigInvalidError([{ severity: 'error', code: 'missing_required', path: 'runtimes.dsh', message: 'DaemonConfig.runtimes.dsh is required when runtimeAllowlist lists dsh' }]);
+    throw new DaemonConfigInvalidError([{ code: 'missing_required', path: 'runtimes.dsh', message: 'DaemonConfig.runtimes.dsh is required when runtimeAllowlist lists dsh' }]);
   }
   try {
     return new DshAdapter({
@@ -375,7 +375,7 @@ function buildDshAdapter(config: DaemonRuntimeAdaptersConfig, environment: Pick<
 function buildAgyAdapter(config: DaemonRuntimeAdaptersConfig, environment: Pick<AgyAdapterOptions, 'runtimeEnvironment'>): AgyAdapter {
   const agy = config.runtimes?.agy;
   if (agy === undefined) {
-    throw new DaemonConfigInvalidError([{ severity: 'error', code: 'missing_required', path: 'runtimes.agy', message: 'DaemonConfig.runtimes.agy is required when runtimeAllowlist lists agy' }]);
+    throw new DaemonConfigInvalidError([{ code: 'missing_required', path: 'runtimes.agy', message: 'DaemonConfig.runtimes.agy is required when runtimeAllowlist lists agy' }]);
   }
   try {
     return new AgyAdapter({
@@ -478,7 +478,7 @@ function runtimeAdaptersConfigIssues(config: RuntimeAdaptersConfig): DaemonConfi
 }
 
 function invalid(path: string, message: string): DaemonConfigIssue {
-  return { severity: 'error', code: 'invalid_value', path, message };
+  return { code: 'invalid_value', path, message };
 }
 
 function isString(value: unknown): value is string {

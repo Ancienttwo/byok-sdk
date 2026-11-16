@@ -131,8 +131,8 @@ export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
       }
       continue;
     }
-    if (detected.advisory !== undefined) {
-      console.warn(`[byok/client] ${adapter.descriptor.id} ${detected.version ?? '(unknown version)'} is not the qualified ${detected.advisory.qualifiedVersion}; continuing`);
+    if (detected.versionVerdict?.state === 'warn') {
+      console.warn(`[byok/client] ${adapter.descriptor.id} ${detected.version ?? '(unknown version)'} is not the qualified ${detected.versionVerdict.qualifiedVersion}; continuing`);
     }
     // Absence of a verdict means the adapter declares no policy: omit the
     // field rather than inventing `allow` (#1103 D8/D9).
@@ -317,7 +317,7 @@ export function duplicateAdapterIdIssues(adapters: readonly RuntimeAdapter[]): D
   for (const [index, adapter] of adapters.entries()) {
     const id = adapter.descriptor.id;
     if (ids.has(id)) return [{
-      severity: 'error', code: 'invalid_value', path: `adapters[${index}].descriptor.id`,
+      code: 'invalid_value', path: `adapters[${index}].descriptor.id`,
       message: `duplicate adapter descriptor.id: ${id}`,
     }];
     ids.add(id);

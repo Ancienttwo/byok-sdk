@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { PACKAGES } from './check-api-surface.mjs';
+import { inventoryFailures, PACKAGES } from './check-api-surface.mjs';
+import { publicPackageDirectories } from '../public-packages.mjs';
 import { manifestEntries } from './entry-closure.mjs';
 
 const script = path.join(path.dirname(fileURLToPath(import.meta.url)), 'check-api-surface.mjs');
@@ -332,7 +333,7 @@ test('--package rejects a name outside the publishable set', (t) => {
   assert.match(result.stderr, /unknown package: not-a-package/);
 });
 
-test('a full run fails when the gated inventory is not the published package set', (t) => {
+test('a full run discovers every public package and rejects orphan goldens', (t) => {
   const root = makeRoot(t);
   writePackage(root, 'core', { exports: singleEntry, dist: { 'index.d.ts': 'export declare const a: 1;\n' } });
   writePackage(root, 'retired', { exports: singleEntry, dist: { 'index.d.ts': 'export declare const r: 1;\n' } });
@@ -340,7 +341,8 @@ test('a full run fails when the gated inventory is not the published package set
   writeFileSync(goldenPath(root, 'testkit'), 'export declare const t: 1;\n');
   const result = spawnSync(process.execPath, [script, '--root', root], { encoding: 'utf8' });
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /inventory: the published \(non-private\) packages under packages\/ are \[core, retired\]/);
+  assert.deepEqual(publicPackageDirectories(root), ['core', 'retired']);
+  assert.match(result.stderr, /retired/);
   assert.match(result.stderr, /inventory: api-surface\/testkit\.d\.ts is an orphan golden/);
 });
 
@@ -351,7 +353,6 @@ test('a private workspace package is outside the gated inventory', (t) => {
     path.join(packageDir, 'package.json'),
     `${JSON.stringify({ name: '@byok-sdk/testkit', version: '0.0.0', private: true, exports: singleEntry }, null, 2)}\n`,
   );
-  const result = spawnSync(process.execPath, [script, '--root', root], { encoding: 'utf8' });
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /inventory: the published \(non-private\) packages under packages\/ are \[\]/);
+  assert.deepEqual(publicPackageDirectories(root), []);
+  assert.deepEqual(inventoryFailures(root), []);
 });

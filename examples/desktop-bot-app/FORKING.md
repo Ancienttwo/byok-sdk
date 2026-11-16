@@ -14,7 +14,7 @@ Then replace the workspace dependencies:
 
 K8 is a dependency, not code you copy: you take its fixes by bumping the version with the rest of the SDK. `@byok-sdk/bot-collaboration` reaches npm with the first release the repository owner publishes after #1845. Until then no version of it exists on npm to pin. The app imports K8 through its entries only:
 
-- `@byok-sdk/bot-collaboration`: `BotCollaboration`, `teamSnapshot` and `TeamModeError`, `createBotPersonaProjection`, `botCompactVeto`, and the message types.
+- `@byok-sdk/bot-collaboration`: `BotCollaboration`, `teamSnapshot` and `TeamModeError`, `createBotPersonaProjection`, `botLedgerOptions`, and the message types.
 - `./host-kit`: Host adapter types and `historyRowFromTurn`, `RetentionRefused`.
 - `./testing`: tests only. The synthetic `ResultStubAdapter`. Import `InMemoryDeviceCredentialBackend` from `@byok-sdk/client/testing` and inject it as `deviceCredentials` into the daemon. A test using `openLTestHost` must also pass `deviceCredentials: new InMemoryDeviceCredentialBackend()`; that fixture supplies no default.
 - `./rules`: the app does not import it.

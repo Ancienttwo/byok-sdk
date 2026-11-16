@@ -14,6 +14,7 @@ import { promises as fs, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { createEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
@@ -68,16 +69,6 @@ function readRows(storeDir: string, sql: string): Array<Record<string, unknown>>
 
 function countRows(storeDir: string, table: string): number {
   return Number(readRows(storeDir, `SELECT count(*) AS n FROM ${table}`)[0]?.n ?? -1);
-}
-
-function stableDbBytes(bytes: Buffer): Buffer {
-  const copy = Buffer.from(bytes);
-  // SQLite updates these header change counters when opening a database. They
-  // are runtime bookkeeping, not a journal rewrite; normalize them so the
-  // refusal oracle compares the durable file content and its hash.
-  copy.fill(0, 24, 28);
-  copy.fill(0, 92, 96);
-  return copy;
 }
 
 /** Throws once, at exactly one named step. Later passes through the same step proceed — so a test can inject a failure and then prove the NEXT attempt succeeds. */
@@ -421,32 +412,46 @@ describe('SqliteLocalTaskJournal', () => {
   });
 
   describe('restart', () => {
-    it('refuses a hash-only predecessor terminal schema without altering its bytes', async () => {
+    // A released 0.43.0 journal in rollback-journal mode, reshaped into each refused format.
+    it.each([
+      ['a hash-only terminal table', 'ALTER TABLE journal_terminal DROP COLUMN bytes'],
+      ['an envelope table from before #826', 'ALTER TABLE journal_envelope DROP COLUMN withheld_bytes'],
+      ['a table this build does not have', 'CREATE TABLE local_storage_usage (category TEXT PRIMARY KEY)'],
+    ])('refuses %s before any write, leaving the file and its directory unchanged', async (_label, reshape) => {
       const storeDir = await tmpStore();
-      const journal = build(storeDir);
-      await journal.appendEnvelope(envelopeRecord());
-      const terminalBytes = JSON.stringify({ v: 1, id: 'terminal-1', type: 'task.fail', task_id: 'task-1', payload: { reason: 'legacy' } });
-      await journal.recordTerminal({ taskId: 'task-1', terminalType: 'failed', bytes: terminalBytes, payloadHash: journalHash(terminalBytes), truthState: 'pending', attempt: 1, recordedAt: '2026-08-07T00:00:00.000Z' });
-      await journal.close();
-      const db = openJournalDatabase(path.join(storeDir, JOURNAL_DB_FILENAME), DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
-      db.prepare('ALTER TABLE journal_terminal DROP COLUMN bytes').run();
-      // A real predecessor predates the task index; refusal must not build it.
-      db.prepare('DROP INDEX journal_envelope_task').run();
-      db.close();
       const dbPath = path.join(storeDir, JOURNAL_DB_FILENAME);
-      const before = readRows(storeDir, "SELECT task_id, payload_hash, truth_state FROM journal_terminal");
-      const beforeRefusalBytes = await fs.readFile(dbPath);
+      await fs.copyFile(new URL('../../../../scripts/release/fixtures/stores/0.43.0/daemon-store/daemon.db', import.meta.url), dbPath);
+      const fixture = new DatabaseSync(dbPath);
+      fixture.exec(reshape);
+      fixture.close();
+      const before = createHash('sha256').update(await fs.readFile(dbPath)).digest('hex');
       expect(() => build(storeDir)).toThrow(JournalUnavailableError);
-      expect(readRows(storeDir, "SELECT task_id, payload_hash, truth_state FROM journal_terminal")).toEqual(before);
-      const afterRefusalBytes = await fs.readFile(dbPath);
-      // The first open may advance SQLite's header change counters; the
-      // normalized bytes/hash prove no schema or durable row content changed.
-      expect(stableDbBytes(afterRefusalBytes)).toEqual(stableDbBytes(beforeRefusalBytes));
-      expect(createHash('sha256').update(stableDbBytes(afterRefusalBytes)).digest('hex'))
-        .toBe(createHash('sha256').update(stableDbBytes(beforeRefusalBytes)).digest('hex'));
-      expect(readRows(storeDir, "SELECT name FROM sqlite_master WHERE name = 'journal_envelope_task'")).toEqual([]);
-      expect(await fs.stat(dbPath)).toBeTruthy();
-      await expect(fs.stat(path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(createHash('sha256').update(await fs.readFile(dbPath)).digest('hex')).toBe(before);
+      expect(await fs.readdir(storeDir)).toEqual([JOURNAL_DB_FILENAME]);
+    });
+
+    // A file the read-only check cannot open (here, no read permission) is not corruption.
+    it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('refuses a journal it cannot open read-only without quarantining it', async () => {
+      const storeDir = await tmpStore();
+      const dbPath = path.join(storeDir, JOURNAL_DB_FILENAME);
+      await fs.copyFile(new URL('../../../../scripts/release/fixtures/stores/0.43.0/daemon-store/daemon.db', import.meta.url), dbPath);
+      await fs.chmod(dbPath, 0o000);
+      expect(() => build(storeDir)).toThrow(JournalUnavailableError);
+      expect(await fs.readdir(storeDir)).toEqual([JOURNAL_DB_FILENAME]);
+      await fs.chmod(dbPath, 0o600);
+    });
+
+    it('checkpoints a new journal so its main file holds the format at once', async () => {
+      const storeDir = await tmpStore();
+      build(storeDir);
+      const url = pathToFileURL(path.join(storeDir, JOURNAL_DB_FILENAME));
+      url.searchParams.set('immutable', '1');
+      const main = new DatabaseSync(url, { readOnly: true });
+      try {
+        expect(main.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name = 'journal_envelope'").get()).toEqual({ n: 1 });
+      } finally {
+        main.close();
+      }
     });
 
     it('recovers everything it committed after a clean close and reopen', async () => {

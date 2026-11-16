@@ -7,6 +7,7 @@ import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-ide
 import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import { startDurablePi } from '../pi-durable/session.js';
+import { startAborted, untilStartAborted } from './start-signal.js';
 import { serializePiHostConfig } from './runtime-host-binding.js';
 import { parsePiMcpEnvironment, projectPiMcpEnvironment } from './mcp-environment.js';
 import { PI_PREPARED_ENV_ALLOW, piLaunchCommand, resolvePiRuntimeLaunch, type PiRuntimeLaunchResources } from './runtime-launch.js';
@@ -603,6 +604,7 @@ export class PiAdapter implements RuntimeAdapter {
               ...(startInput.toolAuthorization === undefined ? {} : { toolAuthorization: startInput.toolAuthorization }),
               nativeAssetRoot: this.options.nativeAssetRoot,
               ...(this.options.spawnFn === undefined ? {} : { spawnFn: this.options.spawnFn }),
+              ...(startInput.signal === undefined ? {} : { signal: startInput.signal }),
             });
           }
           if (typeof startInput.instruction !== 'string') {
@@ -781,7 +783,7 @@ export class PiAdapter implements RuntimeAdapter {
           // retains admission too, before allowing the first prompt.
           let sessionRef: string;
           try {
-            sessionRef = await resolveAuthoritativeSessionId(rpc);
+            sessionRef = await resolveAuthoritativeSessionId(rpc, startInput.signal);
             await readiness;
             if (memoryLane && (readyCount !== 1 || readySessionId !== sessionRef)) throw authorityFailure('memory_lane_tool_set_mismatch');
             if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
@@ -793,20 +795,24 @@ export class PiAdapter implements RuntimeAdapter {
             throw cause;
           }
           let response: PiRpcMessage;
+          let promptFrames = 0;
           try {
             startInput.signal?.throwIfAborted();
             let onAbort: (() => void) | undefined;
             try {
               const interrupted = new Promise<never>((_resolve, reject) => {
-                if (!memoryLane || startInput.signal === undefined) return;
-                onAbort = () => { void abortMemoryLane().then(
+                if (startInput.signal === undefined) return;
+                onAbort = memoryLane ? () => { void abortMemoryLane().then(
                   () => reject(authorityFailure('Pi memory startup aborted')),
                   reject,
-                ); };
+                ); } : () => reject(startAborted());
                 startInput.signal.addEventListener('abort', onAbort, { once: true });
                 if (startInput.signal.aborted) onAbort();
               });
-              response = await Promise.race([rpc.send({ type: 'prompt', message: startInput.instruction }), interrupted]);
+              // `followUp`: a run an extension started is not a refusal; the
+              // input joins that run, and its settlement ends this turn.
+              response = await Promise.race([rpc.send({ type: 'prompt', message: startInput.instruction, streamingBehavior: 'followUp' },
+                count => { promptFrames = count; }), interrupted]);
               if (memoryLane && startInput.signal?.aborted) {
                 await abortMemoryLane();
                 throw authorityFailure('Pi memory startup aborted');
@@ -827,8 +833,17 @@ export class PiAdapter implements RuntimeAdapter {
               reason: typeof response.error === 'string' ? response.error : 'pi rejected the initial prompt',
             });
           }
+          const disposition = piPromptDisposition(response);
+          if (disposition === undefined) {
+            await disposePiStartup(rpc, scratch);
+            throw new RuntimeExecutionFailure({
+              phase: 'start', retry: 'non-retryable',
+              reason: 'pi accepted the initial prompt without a started, queued or handled disposition',
+            });
+          }
 
-          return new PiSession(sessionRef, rpc, manifestSelection, scratch, undefined, mcpEventIdentities(startInput.mcpToolsetTools), memoryLane ? abortMemoryLane : undefined);
+          return new PiSession(sessionRef, rpc, manifestSelection, scratch, disposition === 'handled' ? 'handled' : promptFrames,
+            undefined, mcpEventIdentities(startInput.mcpToolsetTools), memoryLane ? abortMemoryLane : undefined);
         },
       },
     };
@@ -897,6 +912,8 @@ interface PreparedPiLaunchInput {
   };
   readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
   readonly mcpToolsetTools?: McpToolsetToolObservation;
+  /** The start's cancellation; see {@link untilStartAborted}. */
+  readonly signal?: AbortSignal;
   /**
    * The task's `auto` gate. The prepared session has no native file tools, so
    * a file-scoped task needs only the gate: its scope floor asks for every
@@ -1121,7 +1138,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     // RPC frame cap (`daemon/input-preparation-service.ts`). The id is stated,
     // not left to the transport, so the frame that was admitted is the frame
     // that is written.
-    response = await rpc.send(buildPreparedPromptCommand(envelope, preparation.expected, PREPARED_PROMPT_COMMAND_ID));
+    response = await untilStartAborted(rpc.send(buildPreparedPromptCommand(envelope, preparation.expected, PREPARED_PROMPT_COMMAND_ID)), input.signal);
   } catch (cause) {
     const failure = startupExit(rpc);
     await disposePiStartup(rpc, scratch);
@@ -1155,7 +1172,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
 
   let state: PiRpcMessage;
   try {
-    state = await rpc.send({ type: 'get_state' });
+    state = await untilStartAborted(rpc.send({ type: 'get_state' }), input.signal);
   } catch (cause) {
     const failure = startupExit(rpc);
     await disposePiStartup(rpc, scratch);
@@ -1170,7 +1187,9 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     throw authorityFailure('pi reported a different session id than the one that admitted the prepared request');
   }
 
-  return new PiSession(sessionRef, rpc, input.manifestSelection, scratch, preparation.expected.model.contextWindow, mcpEventIdentities(input.mcpToolsetTools));
+  // The prepared host writes its own response and starts the run itself, so
+  // every frame of this process belongs to the task.
+  return new PiSession(sessionRef, rpc, input.manifestSelection, scratch, 0, preparation.expected.model.contextWindow, mcpEventIdentities(input.mcpToolsetTools));
 }
 
 /**
@@ -1271,10 +1290,10 @@ function sameModelTarget(
  * `PiRpcClient.buildExitError`), exactly like any other adapter start()
  * failure `task-runner.ts` already knows how to report as `task.fail`.
  */
-async function resolveAuthoritativeSessionId(rpc: PiRpcClient): Promise<string> {
+async function resolveAuthoritativeSessionId(rpc: PiRpcClient, signal: AbortSignal | undefined): Promise<string> {
   let state: PiRpcMessage;
   try {
-    state = await rpc.send({ type: 'get_state' });
+    state = await untilStartAborted(rpc.send({ type: 'get_state' }), signal);
   } catch (err) {
     if (isRuntimeExecutionFailure(err)) throw err;
     throw new RuntimeExecutionFailure({
@@ -1308,9 +1327,43 @@ async function resolveAuthoritativeSessionId(rpc: PiRpcClient): Promise<string> 
   });
 }
 
+/** How Pi accepted a `prompt`; undefined for a response that names none of the three. */
+function piPromptDisposition(response: PiRpcMessage): 'started' | 'queued' | 'handled' | undefined {
+  const disposition = (response.data as { disposition?: unknown } | undefined)?.disposition;
+  return disposition === 'started' || disposition === 'queued' || disposition === 'handled' ? disposition : undefined;
+}
+
+/**
+ * One Pi process can carry runs this task did not start: an extension may
+ * start one from `session_start`, a timer or its own hooks. Pi RPC events
+ * name no run and no prompt, so a turn is the window from this task's own
+ * `prompt` response to the first `agent_settled` read after it; frames outside
+ * that window belong to another run and are not the task's.
+ *
+ * The window rests on Pi 1.5.2's implementation order, not on a documented
+ * contract, and `pi-rpc-bootstrap.test.ts` pins it against the installed Pi:
+ * - runs never overlap: `isStreaming` is `_isAgentRunActive`
+ *   (dist/core/agent-session.js:1127-1129); `prompt()` while a run is active
+ *   queues into it or refuses (:1745-1756), and `prompt()` and a triggered
+ *   `sendCustomMessage` during settlement are deferred until after the
+ *   `agent_settled` event (:1696-1699, :1966-1970, :744-749);
+ * - a `started` response is written after the run is marked active and
+ *   before its `agent_start` (`_startRun` :1487-1506 calls the preflight
+ *   callback that writes it, dist/modes/rpc/rpc-mode.js:325-328), on the same
+ *   ordered stdout as every event (rpc-mode.js:272-273);
+ * - a `queued` response is written while the run it joined is active, so that
+ *   run's settlement ends the turn, with the rest of that run's output.
+ */
 class PiSession implements Session {
-  private pendingTurnEnd = false;
+  private pendingTurnEnd: boolean;
   private closeAttempt: Promise<void> | undefined;
+  /** Whether the frames being read belong to one of this task's turns. */
+  private turnOpen = false;
+  /** Index in `rpc.events` of each accepted prompt's first frame, oldest first. */
+  private readonly turnStarts: number[] = [];
+  private framesRead = 0;
+  /** Tool calls that started inside the current turn. */
+  private readonly turnToolCalls = new Set<string>();
 
   constructor(
     public readonly sessionRef: string,
@@ -1318,10 +1371,32 @@ class PiSession implements Session {
     private readonly selection: ModelLaneTarget | undefined,
     /** Task-scoped isolated MCP extension configuration, removed in close(). */
     private readonly scratch: ExecutionScratch,
+    /** Where the first turn starts in `rpc.events`, or `handled` when Pi consumed the input without a run. */
+    firstTurn: number | 'handled',
     private readonly hostContextWindow?: number,
     private readonly identities?: McpEventIdentities,
     private readonly abortMemoryLane?: () => Promise<void>,
-  ) {}
+  ) {
+    this.pendingTurnEnd = firstTurn === 'handled';
+    if (firstTurn !== 'handled') this.turnStarts.push(firstTurn);
+  }
+
+  /** Is the frame at `index` this task's? Opens the oldest accepted prompt's turn once its first frame is read. */
+  private owns(index: number): boolean {
+    const start = this.turnStarts[0];
+    if (!this.turnOpen && start !== undefined && start <= index) {
+      this.turnStarts.shift();
+      this.turnOpen = true;
+    }
+    return this.turnOpen;
+  }
+
+  /** The task's run settled at `index`: prompts accepted before it were queued into that run. */
+  private closeTurn(index: number): void {
+    this.turnOpen = false;
+    this.turnToolCalls.clear();
+    while (this.turnStarts[0] !== undefined && this.turnStarts[0] <= index) this.turnStarts.shift();
+  }
 
   get events(): AsyncIterable<AgentEvent> {
     const rpc = this.rpc;
@@ -1348,6 +1423,14 @@ class PiSession implements Session {
                 }, { cause });
               }
               const { value, done } = result;
+              const index = session.framesRead;
+              if (!done) {
+                session.framesRead += 1;
+                // Pi names neither the prompt nor the run of an extension_error; one
+                // from this task's own preflight (its input or before_agent_start
+                // hooks) is written before the prompt response, so none is dropped.
+                if (!session.owns(index) && value.type !== 'extension_error') continue; // another run's frame
+              }
               if (done) {
                 throw new RuntimeExecutionFailure({
                   phase: 'run',
@@ -1357,6 +1440,7 @@ class PiSession implements Session {
                 }, { cause: rpc.terminalError });
               }
               if (value.type === 'agent_settled') {
+                session.closeTurn(index);
                 // Native abort is terminal authority before optional statistics.
                 // A failed statistics read must not make an aborted run retryable.
                 const abortFailure = value.aborted === true ? new RuntimeExecutionFailure({
@@ -1385,6 +1469,10 @@ class PiSession implements Session {
                 return { value: mapPiContextUsage(stats?.success === false ? undefined : stats?.data, hostContextWindow), done: false };
               }
               const mapped = mapPiMessageToAgentEvent(value, session.identities);
+              if (mapped?.type === 'tool_use' && mapped.toolCallId !== undefined) session.turnToolCalls.add(mapped.toolCallId);
+              // A queued prompt joins a run mid-way: a call that started before the
+              // turn opened belongs to that run's earlier part, and so does its result.
+              if (mapped?.type === 'tool_result' && mapped.toolCallId !== undefined && !session.turnToolCalls.has(mapped.toolCallId)) continue;
               if (value.type === 'message_end' && mapped?.type === 'usage') providerError = piAssistantError(value);
               if (value.type === 'auto_retry_end' && value.success === false) {
                 terminalFailure = new RuntimeExecutionFailure({
@@ -1431,7 +1519,13 @@ class PiSession implements Session {
       );
     }
     if (this.abortMemoryLane !== undefined) throw authorityFailure('memory lane cannot follow up');
-    await this.rpc.send({ type: 'prompt', message: task.instruction, streamingBehavior: 'followUp' });
+    await this.rpc.send({ type: 'prompt', message: task.instruction, streamingBehavior: 'followUp' },
+      (count, message) => {
+        // Recorded as the response is decoded, before any later frame is read. A
+        // `handled` follow-up starts no run, so it opens no turn.
+        const disposition = message.success === false ? undefined : piPromptDisposition(message);
+        if (disposition === 'started' || disposition === 'queued') this.turnStarts.push(count);
+      });
   }
 
   async interrupt(): Promise<void> {

@@ -6,7 +6,7 @@ import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, type AgentMessageInput, type Ex
 import { template } from './k4-fixtures.test-support';
 import { BotCollaboration, type BotOptions, type HostIntentHandler } from './index';
 import { IntentOutcomeError } from './host-kit';
-import { botCompactVeto } from './compaction';
+import { botLedgerOptions } from './compaction';
 import type { HostIntentMessageHandler } from './index';
 import type { MessageDisposition } from './host-kit';
 import { sealLedger } from './switch';
@@ -58,7 +58,7 @@ afterEach(async () => {
 });
 function openBot(hostIntents: Record<string, HostIntentHandler>, extra: Partial<BotOptions> = {}): BotCollaboration {
   root ??= mkdtempSync(join(tmpdir(), 'k8-host-intents-'));
-  ledger ??= new HostLedger(join(root, 'host.sqlite'), 'tenant', { compactVeto: botCompactVeto });
+  ledger ??= new HostLedger(join(root, 'host.sqlite'), 'tenant', botLedgerOptions);
   return new BotCollaboration(server as never, ledger, { botId: 'main', execution: template('device'), connector: async () => null, hostIntents, ...extra });
 }
 async function restart(hostIntents: Record<string, HostIntentHandler>, extra: Partial<BotOptions> = {}): Promise<BotCollaboration> {

@@ -166,14 +166,6 @@ export type PiCatalogModelListing =
     readonly unrepresentable: readonly string[];
   };
 
-/**
- * The pinned catalog entries of a vendor, for one api or for all of them.
- * The catalog has no display names; the model id is the default label.
- */
-export function listPiCatalogModels(selection: { readonly provider: string; readonly api?: PiModelApi }): PiCatalogModelListing[] {
-  return catalogListing(PI_MODEL_CATALOG, selection.provider, selection.api);
-}
-
 export type ModelRouteChoice = { readonly value: string; readonly label: string | null };
 
 /** A model choice; `source` says whether the catalog or the Host policy supplied it. */

@@ -72,7 +72,7 @@ the end of the turn. A turn that ends with nothing staged fails with
 `result_not_submitted` (`retryable: false`); failure, cancellation and restart
 never deliver a staged outcome. Result-document offers need an Agent home;
 `DaemonConfig.resultDocument` no longer exists and is
-refused with `DaemonConfigFieldRemovedError`.
+refused as an unknown field.
 Provider
 credentials are not read by the dispatch plane; `@byok-sdk/keys` is a separate
 install and keeps a zero dependency edge to this package.
@@ -394,8 +394,8 @@ task's `auto | all` mode and the runtime's own guardrails:
   app-server support and uses `approval_policy=never` with sandbox
   `danger-full-access` by default (`DaemonConfig.codexSandbox`). Detection
   refuses an unavailable app-server. It never refuses a version: an
-  auto-updated Codex is admitted with a `runtime_version_unqualified`
-  advisory, shown by `byok-agent runtimes`.
+  auto-updated Codex is admitted with a `warn` version verdict, shown by
+  `byok-agent runtimes`.
 - Pi: before admission, the daemon starts each projected server and reads its
   own `tools/list` answer. Pi registers one tool per observed tool.
 
@@ -433,17 +433,17 @@ creates missing `MEMORY.md` and `notes/` without overwriting existing bytes,
 and binds the resulting Agent home as runtime cwd.
 
 ```ts
-import { createAgentHomeProjection, createDaemon } from '@byok-sdk/client';
+import { createDaemon } from '@byok-sdk/client';
 
 createDaemon({
   // ...normal device and transport configuration
   agentHome: {
     hostStorageRoot: '/Users/alice/.salesko',
-    projection: createAgentHomeProjection(async ({ agentRef, cwd }) => {
+    projection: { prepare: async ({ agentRef, cwd }) => {
       // Host code receives the canonical home. It supplies redacted profile
       // content but never joins `agents/<agentId>` and never writes secrets.
       await profileProjection.write({ agentRef, canonicalAgentHome: cwd });
-    }),
+    } },
   },
 });
 ```
@@ -484,12 +484,11 @@ Startup materializes and write-probes the canonical root before publishing
 Successful startup with this configuration advertises `agent-home-contract`.
 Since wire v4 every offer is an Agent offer, and the daemon runs Agent offers
 only: a daemon without `agentHome` advertises no `agent-home-contract` and
-declines every offer. `DaemonConfig.strictAgentOnly` is removed and raises
-`DaemonConfigFieldRemovedError`. Wire v4 also removed Git workspace mode
-(#925): `DaemonConfig.gitWorkspace` and `DaemonConfig.workspaceRoot` raise
-`DaemonConfigFieldRemovedError`, and the `byok-agent workspaces` command is
-gone. Agent offers fail closed when identity, profile
-revision, or session/runtime/cwd evidence does not match. Within one daemon process,
+declines every offer. `DaemonConfig.strictAgentOnly` is removed and refused
+as an unknown field. Wire v4 also removed Git workspace mode (#925):
+`DaemonConfig.gitWorkspace` and `DaemonConfig.workspaceRoot` are refused as
+unknown fields, and the `byok-agent workspaces` command is gone. Agent offers
+fail closed when identity, profile revision, or session/runtime/cwd evidence does not match. Within one daemon process,
 execution leases are scoped to `(agentId, sessionRef)`: different sessions of
 one Agent may run concurrently in the same canonical home, while the same
 session remains serialized. Fresh
@@ -897,8 +896,7 @@ read their `productId`/`storeDir` the same way and reject anything else with a `
 An operation outside `operations` is refused before the key is read; each
 signature re-reads the enrollment and refuses (`enrollment_changed`) if tenant,
 device or proof key no longer equal `identity`. Failures are
-`DeviceProofSignerError` closed codes. The signer also satisfies
-`TruthMemoryClient`'s `signer` option.
+`DeviceProofSignerError` closed codes.
 
 ```ts
 createDaemon({
