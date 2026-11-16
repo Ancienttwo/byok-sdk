@@ -16,6 +16,63 @@
   },
   "entries": [
     {
+      "id": "retire-compatibility-apis",
+      "impact": "breaking",
+      "summary": "The keys and bot-collaboration Host APIs remove compatibility migrators, unused helpers, the TruthStore provider adapter and local Host switch import. Remove their calls and use a supported provider store; local Host export remains available.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "export:@byok-sdk/keys#scopeSecretStore",
+        "export:@byok-sdk/keys/model-route#listPiCatalogModels",
+        "export:@byok-sdk/keys#migrateProviderProfileStore",
+        "export:@byok-sdk/keys#ProviderProfileStoreMigration",
+        "export:@byok-sdk/keys#TruthStoreProviderProfileStore",
+        "export:@byok-sdk/keys#TruthStoreProviderProfileStoreOptions",
+        "export:@byok-sdk/keys#PROVIDER_PROFILE_TRUTH_RECORD_KEY",
+        "export:@byok-sdk/keys#MacOsKeychainSecretStoreOptions",
+        "export:@byok-sdk/bot-collaboration/host-kit#migrateWouldDo",
+        "export:@byok-sdk/bot-collaboration/host-kit#WouldDoMigration",
+        "export:@byok-sdk/bot-collaboration/host-kit#sealedRoutineInstruction",
+        "export:@byok-sdk/bot-collaboration/host-kit#importForSwitch",
+        "export:@byok-sdk/bot-collaboration/host-kit#commitImport",
+        "export:@byok-sdk/bot-collaboration/host-kit#discardImport"
+      ]
+    },
+    {
+      "id": "reject-unprefixed-keychain-records",
+      "impact": "breaking",
+      "summary": "@byok-sdk/keys MacOsKeychainSecretStore.get refuses an unprefixed record with KEYCHAIN_SECRET_DECODE_FAILED; the allowUnprefixedRead option is removed. Configure a current-format credential separately.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": ["behavior:reject-unprefixed-keychain-records"]
+    },
+    {
+      "id": "reject-older-provider-kind-store",
+      "impact": "breaking",
+      "summary": "@byok-sdk/keys SqliteProviderProfileStore and inspectProviderProfileStore refuse an earlier provider-kind schema with PROVIDER_STORE_SCHEMA_STALE instead of offering migration; preserve the old store and explicitly configure a separate current store.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": ["behavior:reject-older-provider-kind-store"]
+    },
+    {
+      "id": "reject-local-old-would-do",
+      "impact": "breaking",
+      "summary": "@byok-sdk/bot-collaboration stateOf and inspectLedger refuse local would-do rows lacking turnId with would_do_unsupported_old. Preserve the old ledger and use a separate current ledger.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": ["behavior:reject-local-old-would-do"]
+    },
+    {
+      "id": "reject-hosted-frame-would-do",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example refuses would-do rows held in an old scope frame with would_do_unsupported_old rather than relocating them; preserve the old hosted store and provision separately.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": ["behavior:reject-hosted-frame-would-do"]
+    },
+    {
+      "id": "reject-hosted-old-would-do-row",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example refuses would-do entity rows without turnId with would_do_unsupported_old rather than backfilling or archiving them; preserve the old hosted store and provision separately.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": ["behavior:reject-hosted-old-would-do-row"]
+    },
+    {
       "id": "pi-agent-skill-paths-config",
       "impact": "additive",
       "summary": "DaemonConfig.runtimes.pi.agentSkillPaths and PiRuntimeConfig.agentSkillPaths, default [], project to PiAdapterOptions.agentSkillPaths, so createDaemon and createRuntimeAdapters hand Pi the Host's skill files or directories without a hand-built PiAdapter. Config check refuses a relative, duplicated or NUL-carrying path, and a non-empty list with runtimes.pi.durableLane, as DaemonConfigInvalidError at runtimes.pi.agentSkillPaths. A skill path that is missing or unreadable when an Agent task starts now fails the start before Pi spawns as a non-retryable RuntimeExecutionFailure, for an embedded PiAdapter too; it used to surface as a retryable runtime_exited start failure. No Host action is required.",

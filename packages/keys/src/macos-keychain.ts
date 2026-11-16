@@ -24,18 +24,6 @@ const SECURITY_ITEM_NOT_FOUND = 44;
 export interface MacOsKeychainSecretStoreOptions {
   /** Keychain account field; entries are addressed by (account, service). */
   account?: string;
-  /**
-   * Return a stored value that lacks {@link MacOsKeychainSecretStoreOptions.storagePrefix}
-   * instead of throwing. Defaults to `false`.
-   *
-   * The source returned such values unconditionally
-   * (`decodeMacOsKeychainSecret`, `index.ts:536-545`), which meant any
-   * unrelated item at the same service name was handed back as if this package
-   * had written it. Reading is fail-closed here, and the tolerant behavior is
-   * demoted to something a caller must ask for by name — it exists only for a
-   * migration that has read an unprefixed value it already knows it wrote.
-   */
-  allowUnprefixedRead?: boolean;
   commandRunner?: CommandRunner;
   /** Explicit macOS keychain file; omitted means the user default keychain. */
   keychainPath?: string;
@@ -56,7 +44,6 @@ export class MacOsKeychainSecretStore<TName extends string = string>
 {
   readonly providerLabel = 'macOS Keychain';
   readonly #account: string;
-  readonly #allowUnprefixedRead: boolean;
   readonly #commandRunner: CommandRunner;
   readonly #keychainPath: string | undefined;
   readonly #platform: NodeJS.Platform;
@@ -65,7 +52,6 @@ export class MacOsKeychainSecretStore<TName extends string = string>
 
   constructor(options: MacOsKeychainSecretStoreOptions = {}) {
     this.#account = options.account ?? 'local-device';
-    this.#allowUnprefixedRead = options.allowUnprefixedRead ?? false;
     this.#commandRunner = options.commandRunner ?? runCommand;
     this.#keychainPath = assertKeychainPath(options.keychainPath);
     this.#platform = options.platform ?? process.platform;
@@ -139,7 +125,6 @@ export class MacOsKeychainSecretStore<TName extends string = string>
   scope(namespace: string): SecretStore<TName> {
     return new MacOsKeychainSecretStore<TName>({
       account: this.#account,
-      allowUnprefixedRead: this.#allowUnprefixedRead,
       commandRunner: this.#commandRunner,
       keychainPath: this.#keychainPath,
       platform: this.#platform,
@@ -226,7 +211,6 @@ export class MacOsKeychainSecretStore<TName extends string = string>
    */
   #decode(storedSecret: string): string {
     if (!storedSecret.startsWith(this.#storagePrefix)) {
-      if (this.#allowUnprefixedRead) return storedSecret;
       throw new ByokKeysError(
         'KEYCHAIN_SECRET_DECODE_FAILED',
         'macOS Keychain returned a value without this store\'s storage prefix',

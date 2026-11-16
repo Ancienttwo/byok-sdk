@@ -4,6 +4,24 @@ Draft checklist for changes after 0.43.0. Earlier Hosts must first apply the [0.
 
 Add future Host-visible changes here; do not amend the 0.43.0 cut's upgrade-manifest entries. The 0.43.0 release record archived that manifest unchanged and established the 0.43.0 release snapshot as the next baseline.
 
+## Retired compatibility paths
+
+Remove calls to `migrateProviderProfileStore` and `migrateWouldDo`, including
+AiphaBee's installer and toolset migration integrations and their re-exports.
+Provider profile stores with an earlier provider-kind schema are refused with
+`PROVIDER_STORE_SCHEMA_STALE`; would-do ledger rows without `turnId` are refused
+with `would_do_unsupported_old`. Keep the old files intact and explicitly
+configure a separate current store. Hosted stores also reject would-do rows
+held in an old frame or lacking `turnId` without converting or archiving them.
+
+`scopeSecretStore`, `listPiCatalogModels`, `sealedRoutineInstruction`, the
+TruthStore provider profile adapter, and the local Host switch importer and its
+commit/discard APIs are removed. Use `SecretStore.scope(secretScopeId(scope))`,
+read model choices from `modelRouteView`, and construct the instruction at the
+member endpoint. Hosts using the TruthStore adapter must configure a supported
+profile store. Local Host switch export remains available and is to be evaluated
+separately; there is no local import path for its peer's exported document.
+
 ## Bot collaboration inbound conversation identity (#2250)
 
 `@byok-sdk/bot-collaboration` `inboundKey(message)` now hashes channel,
