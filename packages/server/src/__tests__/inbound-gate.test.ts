@@ -272,7 +272,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       expect(await started.byok.tasks.get('task_forged')).toBeUndefined(); // never reached the task store at all
     });
 
-    it('a conn.ack, which is not a v4 message type, is rejected on its own as payload_invalid and has no side effect', async () => {
+    it('a conn.ack, which is not a daemon-to-server type, is rejected on its own as type_unsupported and has no side effect', async () => {
       const started = await start();
       const { code } = await started.byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
       const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
@@ -296,7 +296,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       // #1121: each entry is decoded on its own, so an undecodable one is
       // answered in its outcome rather than failing the batch.
       expect(res.status).toBe(200);
-      expect((await res.json() as MessagesSendResponse).outcomes).toEqual([{ id: connAck.id, outcome: 'rejected', reason: 'payload_invalid' }]);
+      expect((await res.json() as MessagesSendResponse).outcomes).toEqual([{ id: connAck.id, outcome: 'rejected', reason: 'type_unsupported' }]);
       expect((await started.byok.stats()).taskCountsByState.Offered).toBe(0);
     });
 

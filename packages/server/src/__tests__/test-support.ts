@@ -10,6 +10,7 @@ import {
   type AgentRef,
   type ClaimedExecutor,
   type Envelope,
+  type HarnessInfo,
   type RuntimeCapabilities,
   type RuntimeInfo,
   type ToolsetId,
@@ -274,6 +275,8 @@ export interface FakeLongPollDaemonOptions {
   capabilities?: string[];
   /** Connection-level runtime discovery block — see {@link PI_RUNTIME_INFO} and friends. */
   runtimes?: RuntimeInfo[];
+  /** Custom harnesses the device declares; a harness claim names one of them. */
+  harnesses?: HarnessInfo[];
   configuredToolsets?: ToolsetId[];
   /**
    * Publish the `conn.hello` snapshot over `POST /byok/messages` (the
@@ -339,6 +342,7 @@ export async function connectFakeDaemonLongPoll(
         productId: opts.productId,
         clientVersion: opts.clientVersion,
         runtimes: opts.runtimes,
+        harnesses: opts.harnesses,
         configuredToolsets: opts.configuredToolsets,
       }),
     );

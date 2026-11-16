@@ -222,9 +222,10 @@ describe('agent-home-contract reference server', () => {
       body: JSON.stringify({ messages: [hello] }),
     });
     expect(response.status).toBe(200);
-    // The accepted hello's answer carries the poll's capability advertisement (#391 Phase 2), empty in v6.
-    const answer = (await response.json()) as { accepted: number; capabilities?: string[] };
-    expect(answer).toMatchObject({ accepted: 1, capabilities: [] });
+    // Wire v7 (B2): the accepted hello's answer advertises no server capabilities.
+    const answer = (await response.json()) as { accepted: number };
+    expect(answer).toMatchObject({ accepted: 1 });
+    expect(answer).not.toHaveProperty('capabilities');
     await expect(
       started.byok.dispatch({ target: { lane: 'auto' }, deviceId: daemon.deviceId, instruction: 'agent over long-poll', agentRef, sessionRef: SESSION_REF }),
     ).resolves.toMatchObject({ taskId: expect.any(String) });

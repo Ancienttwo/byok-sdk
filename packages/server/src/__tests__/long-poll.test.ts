@@ -71,11 +71,11 @@ describe('long-poll transport (§8)', () => {
     const elapsedMs = Date.now() - triggeredAt;
 
     expect(pollRes.status).toBe(200);
-    const body = (await pollRes.json()) as { events: Envelope[]; cursor: number; capabilities?: string[] };
+    const body = (await pollRes.json()) as { events: Envelope[]; cursor: number };
     expect(body.events.map((e) => e.type)).toEqual(['task.offer']);
     expect(body.events[0]?.task_id).toBe(handle.taskId);
-    // Wire v6 has no server-flag gate.
-    expect(body.capabilities).toEqual([]);
+    // Wire v7 (B2): the server advertises no capabilities.
+    expect(body).not.toHaveProperty('capabilities');
     expect(elapsedMs).toBeLessThan(SHORT_HOLD_MS);
   });
 

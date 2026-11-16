@@ -53,13 +53,11 @@ describe('additive-minor: task.complete.document projection', () => {
     return { byok: instance, baseUrl: started.baseUrl, daemon };
   }
 
-  it('no longer advertises the retired result-document capability flag on the long-poll transport', async () => {
+  it('advertises no server capability flag, the retired result-document one included, on the long-poll transport', async () => {
     const { daemon } = await startWithDaemon();
     const res = await daemon.replay(0);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { capabilities?: string[] };
-    expect(body.capabilities).toBeInstanceOf(Array);
-    expect(body.capabilities).not.toContain('result-document');
+    expect(await res.json()).not.toHaveProperty('capabilities');
   });
 
   it('projects payload.document verbatim into TaskResult.document', async () => {

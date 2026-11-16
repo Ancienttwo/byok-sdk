@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEnvelope, TASK_STEER_TEXT_MAX_BYTES, type ClaimedExecutor, type RuntimeCapabilities, type RuntimeInfo } from '@byok-sdk/protocol';
+import { createEnvelope, TASK_STEER_TEXT_MAX_BYTES, type ClaimedExecutor, type HarnessInfo, type RuntimeCapabilities, type RuntimeInfo } from '@byok-sdk/protocol';
 import { createByokServer, SteerRejectedError, type ByokServer, type TaskHandle } from '../index';
 import {
   announceHello,
@@ -60,10 +60,10 @@ interface Harness {
  * independent of what any claim below reports; most tests here pass the
  * realistic set purely so the fixture resembles a real device.
  */
-async function startHarness(runtimes: RuntimeInfo[] | undefined): Promise<Harness> {
+async function startHarness(runtimes: RuntimeInfo[] | undefined, harnesses?: HarnessInfo[]): Promise<Harness> {
   const byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
   const started = await startServer(byok);
-  const daemon = await connectFakeDaemonLongPoll(started.baseUrl, byok, { productId: PRODUCT_ID, runtimes });
+  const daemon = await connectFakeDaemonLongPoll(started.baseUrl, byok, { productId: PRODUCT_ID, runtimes, harnesses });
   return { byok, server: started.server, daemon };
 }
 
@@ -267,7 +267,8 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
     // but capabilities are a self-report any adapter can make honestly, and
     // the client sends them ungated for exactly this reason. The gate reads
     // capabilities, never the executor, so this must steer.
-    harness = await startHarness([]);
+    // The kernel admits a harness claim only for a harness the device declared.
+    harness = await startHarness([], [{ id: 'acme.custom', capabilities: { steer: true, resume: false } }]);
     const custom: ClaimedExecutor = { kind: 'harness', harnessId: 'acme.custom' };
     const handle = await dispatchClaimedRunning(harness, custom, { steer: true, resume: false });
 
