@@ -4,7 +4,7 @@ SDK-owned integration of the frozen public npm tarball; MIT LICENSE retained ver
 
 ## Local deltas
 
-- config.ts: Load only `configPath("rpiv-todo")` through the same package's `loadJsonConfig`. Upstream `loadJsonConfigWithLegacyFallback` (`@juicesharp/rpiv-config` 2.15.0 `config.ts:132-138`) reads `~/.config/rpiv-todo/config.json` when the `XDG_CONFIG_HOME` file is absent; the SDK keeps one config location.
+- config.ts: Load only `configPath("rpiv-todo")` through the same package's `loadJsonConfig`. Upstream `loadJsonConfigWithLegacyFallback` (`@juicesharp/rpiv-config` 2.15.0 `config.ts:132-138`) reads `~/.config/rpiv-todo/config.json` when the `XDG_CONFIG_HOME` file is absent; the SDK keeps one config location. When the XDG-resolved file is absent and `~/.config/rpiv-todo/config.json` exists (only possible with `XDG_CONFIG_HOME` set elsewhere), `loadConfig()` throws `TodoConfigLegacyLocationError` naming both paths, so the user moves the file instead of silently getting defaults. The check only stats the legacy file and never reads it.
 - index.ts: Move eager locale registration to preverified SDK entry; derive shortcut key from explicit native API declaration. Overlay dynamic imports unchanged.
 - state/i18n-bridge.ts: Use real i18n dependency without optional import fallback.
 - state/state-reducer.ts: Type-only proven-index non-null assertions.

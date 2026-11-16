@@ -474,12 +474,12 @@
       ]
     },
     {
-      "id": "todo-config-legacy-location-ignored",
+      "id": "todo-config-legacy-location-refused",
       "impact": "breaking",
-      "summary": "@byok-sdk/client bundled Pi todo extension reads only $XDG_CONFIG_HOME/rpiv-todo/config.json and no longer falls back to ~/.config/rpiv-todo/config.json when XDG_CONFIG_HOME points elsewhere. Move the file under XDG_CONFIG_HOME.",
+      "summary": "@byok-sdk/client bundled Pi todo extension reads only $XDG_CONFIG_HOME/rpiv-todo/config.json. When XDG_CONFIG_HOME points elsewhere and that file is absent while ~/.config/rpiv-todo/config.json exists, it throws TodoConfigLegacyLocationError naming both paths instead of reading the old file or running on defaults. Move the file under XDG_CONFIG_HOME.",
       "migration": "docs/releases/host-upgrade-next-minor.md#todo-extension-reads-one-config-location",
       "items": [
-        "behavior:todo-config-legacy-location-ignored"
+        "behavior:todo-config-legacy-location-refused"
       ]
     },
     {

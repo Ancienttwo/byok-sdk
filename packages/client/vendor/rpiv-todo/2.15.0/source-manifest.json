@@ -8,8 +8,8 @@
     {
       "path": "config.ts",
       "upstreamSha256": "3fe24b3d3b128cabcbafc80a41f72b20907fd0edbdd84c8c57c391e27ffd76db",
-      "vendoredSha256": "6070ece661f36570a23b15ed20dd6dfd80bc4ca185364bfe8fddcc419036add9",
-      "delta": "Read only the XDG-resolved config path; no fallback to the pre-XDG ~/.config location."
+      "vendoredSha256": "1694434ed747400f13cd0a4af0d81f8043946a3586272a606fb4e5671f076056",
+      "delta": "Read only the XDG-resolved config path; no fallback to the pre-XDG ~/.config location. A config present only at that location is refused with TodoConfigLegacyLocationError after an existence check; its content is never read."
     },
     {
       "path": "index.ts",

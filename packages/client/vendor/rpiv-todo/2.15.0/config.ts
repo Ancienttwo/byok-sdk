@@ -1,3 +1,6 @@
+import { statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { GuidanceFields } from "@juicesharp/rpiv-config";
 import { configPath, loadJsonConfig, validateGuidanceFields } from "@juicesharp/rpiv-config";
 
@@ -26,8 +29,25 @@ export const DEFAULT_COLLAPSE_KEY: CollapseKeySpec = "ctrl+shift+t";
 /** Sentinel value for `collapseKey` that disables the collapse shortcut entirely. */
 export const COLLAPSE_KEY_OFF: CollapseKeySpec = "off";
 
+/** A config left only at the pre-XDG `~/.config` location, which this build does not read. */
+export class TodoConfigLegacyLocationError extends Error {
+	constructor(
+		readonly legacyPath: string,
+		readonly path: string,
+	) {
+		super(`rpiv-todo config at ${legacyPath} is not read; move it to ${path}`);
+		this.name = "TodoConfigLegacyLocationError";
+	}
+}
+
 export function loadConfig(): TodoConfig {
-	return loadJsonConfig<TodoConfig>(configPath("rpiv-todo"));
+	const path = configPath("rpiv-todo");
+	// Only the file's existence is checked; its content is never read.
+	const legacyPath = join(homedir(), ".config", "rpiv-todo", "config.json");
+	if (legacyPath !== path && !statSync(path, { throwIfNoEntry: false }) && statSync(legacyPath, { throwIfNoEntry: false })) {
+		throw new TodoConfigLegacyLocationError(legacyPath, path);
+	}
+	return loadJsonConfig<TodoConfig>(path);
 }
 
 /** Content-row budget for the overlay, read fresh on every call (per-render —

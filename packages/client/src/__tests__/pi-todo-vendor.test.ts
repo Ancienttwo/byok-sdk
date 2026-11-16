@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -67,4 +68,27 @@ it('keeps all six licensed upstream UI JavaScript files byte-identical', () => {
     expect(readFileSync(path.join(base, 'LICENSE'), 'utf8')).toContain('MIT');
   }
   expect(count).toBe(6);
+});
+
+it('refuses a todo config left only at the legacy ~/.config location without reading it', async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'todo-home-'));
+  const xdg = mkdtempSync(path.join(os.tmpdir(), 'todo-xdg-'));
+  mkdirSync(path.join(home, '.config/rpiv-todo'), { recursive: true });
+  // Unparseable on purpose: a read would warn and fall back to defaults instead of refusing.
+  writeFileSync(path.join(home, '.config/rpiv-todo/config.json'), '{ legacy');
+  vi.stubEnv('HOME', home);
+  vi.stubEnv('XDG_CONFIG_HOME', xdg);
+  try {
+    const { loadConfig, TodoConfigLegacyLocationError } = await import('../../vendor/rpiv-todo/2.15.0/config.ts');
+    expect(() => loadConfig()).toThrow(TodoConfigLegacyLocationError);
+    mkdirSync(path.join(xdg, 'rpiv-todo'));
+    writeFileSync(path.join(xdg, 'rpiv-todo/config.json'), '{"maxWidgetLines":30}');
+    expect(loadConfig()).toEqual({ maxWidgetLines: 30 });
+    // Without XDG_CONFIG_HOME both locations are one file, which is read.
+    vi.stubEnv('XDG_CONFIG_HOME', '');
+    writeFileSync(path.join(home, '.config/rpiv-todo/config.json'), '{"collapseKey":"off"}');
+    expect(loadConfig()).toEqual({ collapseKey: 'off' });
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });
