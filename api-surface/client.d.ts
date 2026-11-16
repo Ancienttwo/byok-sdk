@@ -3302,7 +3302,7 @@ export type RequestTaskAssertionResult = {
 export declare function requestTaskAssertion(options: RequestTaskAssertionOptions): Promise<RequestTaskAssertionResult>;
 // ==== @byok-sdk/client dist/daemon/auth-manager.d.ts ====
 import { DeviceStore, type DeviceRecord } from './store.js';
-import type { DeviceCredentialBackend } from './device-credential-store.js';
+import { type DeviceCredentialBackend } from './device-credential-store.js';
 /**
  * Thrown when the server has revoked this device (protocol §6.3): a
  * `/byok/challenge` or `/byok/token` 401 with the typed
@@ -3422,26 +3422,38 @@ export declare class AuthManager {
      */
     loadExisting(): Promise<DeviceRecord | undefined>;
     /**
-     * `POST /byok/pair` (v2): generates a device keypair on first pair, reuses
-     * it on any subsequent (e.g. post-revocation) re-pair of this store. It
-     * refuses with {@link DeviceStoreBindingMismatchError} while the OS entry
-     * holds an enrollment this storeDir did not pair, unless
-     * `replaceOtherStore` states the operator's intent to replace it; the
-     * replacement never reuses that enrollment's key. A staged first-pairing
-     * attempt is reused only when it names this store; otherwise it refuses
-     * with {@link FirstPairingAttemptRefusedError}, and `replaceOtherStore`
-     * discards another store's attempt (#2033).
+     * `POST /byok/pair` (v2) with the registration fence (#2045). It refuses
+     * with {@link DeviceStoreBindingMismatchError} while the OS entry holds an
+     * enrollment this storeDir did not pair, unless `replaceOtherStore` states
+     * the operator's intent to replace it, and with
+     * {@link PairingAttemptRefusedError} while another storeDir's attempt is
+     * staged, unless `replaceOtherStore` discards it (#2033).
      *
-     * The whole pairing is one critical section of the enrollment gate: it
-     * rereads the OS entry, `device.json` and the staged attempt after taking
-     * the gate, never trusting a cached record, and releases the gate only
-     * after `custody` has run.
+     * The enrollment gate is never held across the network:
+     * 1. Under the gate it rereads the slot and stages an attempt: a retry with
+     *    the same code resumes this store's staged attempt unchanged (#1767);
+     *    any other pairing stages a new one, keyed by this store's enrollment
+     *    key on a re-pair of its own enrollment and by a fresh key otherwise,
+     *    with the fence digest of the slot's current enrollment.
+     * 2. It sends the request.
+     * 3. On a typed `409` it adopts the server's current device digest and
+     *    resends once, only while the slot still holds exactly its attempt; a
+     *    second `409` is {@link PairingBusyError}.
+     * 4. On success it persists the enrollment under the gate, only while the
+     *    slot still holds exactly its attempt, else {@link PairingSupersededError}.
+     * A request that ends without a decisive answer leaves the attempt staged
+     * for an exact retry with the same code.
      */
     pair(pairingCode: string, options?: {
         readonly replaceOtherStore?: boolean;
-        /** Internal daemon seam: runs once the enrollment is persisted, before the gate is released; the daemon writes its E2EE member custody here (#2030 F2). */
-        readonly custody?: (record: DeviceRecord) => Promise<void>;
     }): Promise<DeviceRecord>;
+    /**
+     * One `POST /byok/pair`. A typed `401` is {@link PairingCodeRejectedError}
+     * and a typed `409` a conflict. Any other answer, including an untyped
+     * `409`, leaves the outcome unknown and throws a fixed message: no server
+     * text enters an error.
+     */
+    private sendPairRequest;
     /** The current, non-expired access token — renews first if it's expired or close to it. Throws {@link DeviceRevokedError} if the device has been revoked. */
     getValidAccessToken(): Promise<string>;
     /** Force a renewal regardless of the cached token's remaining lifetime — the reactive path, used after a caller sees a 401. */
@@ -3460,15 +3472,23 @@ export declare class AuthManager {
     /** The OS entry no longer holds this store's enrollment: drop the cached record, stop renewing and report it. Always throws `error`. */
     private loseBinding;
     private underEnrollmentGate;
-    /** Under the enrollment gate: the key and request facts a pairing proves, staging a new first-pairing attempt when this store has none. */
-    private pairingKey;
+    /** Under the enrollment gate: this store's attempt for `pairingCode`, resumed or newly staged. */
+    private stagePairingAttempt;
+    /**
+     * Under the enrollment gate: the slot still holds exactly `attempt`, the
+     * one this invocation staged or resumed. Otherwise another pairing replaced
+     * it, and this one must neither resend nor persist.
+     */
+    private assertOwnsAttempt;
+    /** Under the enrollment gate: deletes the OS entry only while it still holds the wire v6 format. */
+    private deleteLegacyEntry;
     /**
      * Under the enrollment gate, reread from the OS entry and `device.json`:
-     * this store's bound enrollment, or else its own staged first-pairing
-     * attempt (undefined when none, or when `replaceOtherStore` discards another
-     * store's). Another store's enrollment or attempt, or an attempt that names
-     * no store, is refused, also beside this store's enrollment: the pairing
-     * would consume that attempt (#2033, #2030 F1).
+     * this store's bound enrollment, and its own staged attempt (undefined when
+     * none, or when `replaceOtherStore` discards another store's). A wire v6
+     * entry is deleted first, so the store pairs as a first pairing. Another
+     * store's enrollment or attempt is refused, also beside this store's
+     * enrollment: the pairing would consume that attempt (#2033, #2030 F1).
      */
     private pairingAuthority;
     /** Always throws — `never` return type lets call sites use `if (x === 401) this.markRevoked();` without an explicit `return`/`throw` of their own. */
@@ -5896,21 +5916,41 @@ export declare class DeviceStoreBindingMismatchError extends Error {
     } | undefined;
     constructor(stored: DeviceMetadata, bound: DeviceMetadata | undefined);
 }
-declare const PAIRING_ATTEMPT_MESSAGES: {
-    readonly store_not_bound: 'another storeDir staged the first-pairing attempt of this productId; nothing was written. Pair with replaceOtherStore (--replace-other-store) to discard it';
-    readonly pairing_attempt_unattributed: 'the first-pairing attempt of this productId names no storeDir; nothing was written. Clear it with clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }), then pair';
-};
 /**
- * A pairing refused to reuse a staged first-pairing attempt this storeDir
- * cannot prove it staged (#1964, #2033), by the same rule as an enrollment
- * clear: `store_not_bound` when another storeDir staged it (pairing with
- * `replaceOtherStore` discards it), `pairing_attempt_unattributed` when it
- * names no storeDir (staged by 0.42.0; clear it with
- * `clearUnattributedAttempt`, then pair). Nothing was written.
+ * A pairing refused to reuse a staged pairing attempt another storeDir of
+ * this productId staged (#1964, #2033), by the same rule as an enrollment
+ * clear. Nothing was written; pairing with `replaceOtherStore`
+ * (`--replace-other-store`) discards that attempt.
  */
-export declare class FirstPairingAttemptRefusedError extends Error {
-    readonly code: keyof typeof PAIRING_ATTEMPT_MESSAGES;
-    constructor(code: keyof typeof PAIRING_ATTEMPT_MESSAGES);
+export declare class PairingAttemptRefusedError extends Error {
+    constructor();
+}
+/**
+ * Another pairing of this productId replaced this pairing's attempt while its
+ * request was in flight (#2045). This pairing wrote nothing and does not
+ * retry; the slot belongs to the pairing that replaced it. Pair again to take
+ * it back.
+ */
+export declare class PairingSupersededError extends Error {
+    constructor();
+}
+/**
+ * The server refused the pairing code: unknown, expired or already used,
+ * which it does not tell apart (`pairing_code_invalid`, protocol §6.1).
+ * The current enrollment is unchanged. Pair with a new code.
+ */
+export declare class PairingCodeRejectedError extends Error {
+    constructor();
+}
+/**
+ * The server refused this pairing twice because another pairing of the same
+ * machine registered in between (#2045). It happens only while two pairings
+ * of one machine run at once. Nothing was written and the staged attempt is
+ * kept, so retrying with the same code resumes it.
+ */
+export declare class PairingBusyError extends Error {
+    readonly retryable = true;
+    constructor();
 }
 /**
  * Why `Daemon.pairEmbedded` refused. Each reason leaves the local
@@ -5926,7 +5966,6 @@ export declare class EmbeddedPairingError extends Error {
         cause?: unknown;
     });
 }
-export {};
 // ==== @byok-sdk/client dist/daemon/daemon-lifecycle.d.ts ====
 /**
  * The daemon's one lifecycle model (issues #391 and #394).
@@ -6318,22 +6357,26 @@ export interface DeviceMetadata {
  */
 export type DeviceRecord = DeviceMetadata & DeviceCredentials;
 /**
- * The one durable authority allowed before a first pairing response is
- * received. It keeps the generated key immutable across a lost response, so
- * an exact server-side retry can prove the same public-key binding.
+ * One pairing, staged before its request is sent (#2045). Every pairing
+ * stages one, including a re-pair of this store's own enrollment. It keeps
+ * the request immutable across a lost response, so an exact retry with the
+ * same code (#1767) proves the same binding, and it is what a pairing
+ * compares under the enrollment gate to know it still owns the slot.
  */
-export interface FirstPairingAttempt {
-    readonly kind: 'first-pairing-attempt-v1';
+export interface PairingAttempt {
+    readonly kind: 'pairing-attempt-v2';
+    /** Random, minted when the attempt is staged. */
+    readonly attemptId: string;
+    /** `pairingCodeDigest` of the code this attempt sends; a retry with the same code resumes the attempt. */
+    readonly codeDigest: string;
+    /** `DeviceStore.identity` of the store that staged the attempt. */
+    readonly storeIdentity: string;
     readonly deviceName: string;
-    readonly devicePublicKey: string;
-    readonly devicePrivateKeyPem: string;
     readonly machineId?: string;
-    /**
-     * `DeviceStore.identity` of the store that staged the attempt. An attempt
-     * staged by 0.42.0 has none; a clear refuses it as
-     * `pairing_attempt_unattributed` unless told to delete it (#1964).
-     */
-    readonly storeIdentity?: string;
+    /** The public key is derived from it; storing it too would cost entry bytes (the 2,400-byte bound). */
+    readonly devicePrivateKeyPem: string;
+    /** The `PairRequest` fence: `pairDeviceDigest` of the slot's enrollment when staged, or `null`. */
+    readonly expectedDeviceDigest: string | null;
 }
 /** A real provider-command outcome; signal termination has null exitCode and carries signal. */
 export interface DeviceCommandResult {
@@ -6361,6 +6404,15 @@ export declare class DeviceCredentialStoreUnavailableError extends Error {
 export declare class DeviceCredentialStoreError extends Error {
     constructor(message: string);
 }
+/**
+ * The OS entry holds a wire v6 enrollment or attempt. It is recognized by its
+ * format version alone; nothing in it is decoded, including its private key.
+ * Its credentials are void on a v7 cloud: `clear()` deletes the entry, and
+ * the store pairs as a first pairing.
+ */
+export declare class DeviceCredentialLegacyEntryError extends DeviceCredentialStoreError {
+    constructor();
+}
 /** macOS refused an operation that requires unavailable user interaction. */
 export declare class DeviceCredentialInteractionRequiredError extends DeviceCredentialStoreError {
     constructor();
@@ -6376,21 +6428,22 @@ export declare class DeviceCredentialCommandAbortedError extends DeviceCredentia
     constructor(reason: 'deadline' | 'cancelled');
 }
 /**
- * Complete enrollment custody. An injected implementation owns secret storage
+ * Complete enrollment custody: one slot holding an enrollment, a staged
+ * pairing attempt, or both. An injected implementation owns secret storage
  * and its lifetime. `signal` cancels the operation (daemon shutdown); an
  * implementation must stop and reject once it aborts.
- * Staging an attempt preserves the current enrollment returned by `read()`.
- * `replace()` retains that attempt when renewing the same deviceId, tenantId
- * and devicePublicKey; a different authenticated enrollment promotes the
- * replacement and discards the attempt. `clear()` removes both authorities.
- * An attempt is kept with every field, including `storeIdentity`.
+ * Staging an attempt replaces any staged attempt and preserves the current
+ * enrollment returned by `read()`. `replace()` retains the attempt when
+ * renewing the same deviceId, tenantId and devicePublicKey; a different
+ * authenticated enrollment promotes the pairing and discards the attempt.
+ * `clear()` removes both. An attempt is kept with every field.
  * An error it throws reaches the Host unchanged, as the `cause` of a public
  * error such as `DeviceEnrollmentClearError`, so it must not carry a secret.
  */
 export interface DeviceCredentialBackend {
     read(signal?: AbortSignal): Promise<DeviceRecord | undefined>;
-    readFirstPairingAttempt(signal?: AbortSignal): Promise<FirstPairingAttempt | undefined>;
-    saveFirstPairingAttempt(attempt: FirstPairingAttempt, signal?: AbortSignal): Promise<void>;
+    readPairingAttempt(signal?: AbortSignal): Promise<PairingAttempt | undefined>;
+    savePairingAttempt(attempt: PairingAttempt, signal?: AbortSignal): Promise<void>;
     replace(record: DeviceRecord, signal?: AbortSignal): Promise<void>;
     clear(signal?: AbortSignal): Promise<boolean>;
 }
@@ -6438,10 +6491,14 @@ export declare class DeviceCredentialStore implements DeviceCredentialBackend {
     #private;
     constructor(options: OsCredentialEntryOptions);
     read(signal?: AbortSignal): Promise<DeviceRecord | undefined>;
-    readFirstPairingAttempt(signal?: AbortSignal): Promise<FirstPairingAttempt | undefined>;
-    saveFirstPairingAttempt(attempt: FirstPairingAttempt, signal?: AbortSignal): Promise<void>;
+    readPairingAttempt(signal?: AbortSignal): Promise<PairingAttempt | undefined>;
+    savePairingAttempt(attempt: PairingAttempt, signal?: AbortSignal): Promise<void>;
     replace(record: DeviceRecord, signal?: AbortSignal): Promise<void>;
-    /** Returns true only after the sole secret authority is confirmed absent. */
+    /**
+     * Returns true only after the sole secret authority is confirmed absent. A
+     * wire v6 entry is deleted unread. The caller holds the enrollment gate, so
+     * no v7 write lands between the read and the deletion.
+     */
     clear(signal?: AbortSignal): Promise<boolean>;
 }
 /**
@@ -6563,11 +6620,10 @@ export declare function createStoredDeviceProofSigner(options: CreateStoredDevic
 export {};
 // ==== @byok-sdk/client dist/daemon/enrollment-clear.d.ts ====
 import { DeviceStore, type DeviceEnrollmentStatusOptions, type DeviceRecord } from './store.js';
-import type { DeviceCredentialBackend } from './device-credential-store.js';
+import { type DeviceCredentialBackend } from './device-credential-store.js';
 declare const CLEAR_MESSAGES: {
     readonly store_owned: 'another process holds this store\'s owner lease (a daemon, doctor or installer); the enrollment is unchanged';
     readonly store_not_bound: 'the OS credential entry for this productId holds an enrollment or pairing attempt of another storeDir; nothing was cleared';
-    readonly pairing_attempt_unattributed: 'the OS credential entry for this productId holds a first-pairing attempt that names no storeDir; nothing was cleared. If no other store of this productId is pairing, clear it with clearDeviceEnrollment({ ..., clearUnattributedAttempt: true })';
     readonly clear_failed: 'the device enrollment could not be cleared; see the cause';
 };
 export type DeviceEnrollmentClearErrorCode = keyof typeof CLEAR_MESSAGES;
@@ -6576,12 +6632,8 @@ export type DeviceEnrollmentClearErrorCode = keyof typeof CLEAR_MESSAGES;
  * - `store_owned`: another process holds the store's owner lease. It may be a
  *   running daemon, a doctor or an installer; nothing was read or cleared.
  * - `store_not_bound`: the OS entry holds an enrollment another storeDir
- *   paired, or a first-pairing attempt another storeDir staged; nothing was
+ *   paired, or a pairing attempt another storeDir staged; nothing was
  *   cleared.
- * - `pairing_attempt_unattributed`: the OS entry holds a first-pairing
- *   attempt that names no storeDir (staged by 0.42.0), so nothing proves it is
- *   this store's; nothing was cleared. `clearUnattributedAttempt: true`
- *   deletes it.
  * - `clear_failed`: `cause` holds the error. A `device.json` that cannot be
  *   parsed or is empty (`DeviceRecordRePairRequiredError`) is refused before
  *   anything is deleted; the store needs a re-pair. The clear deletes the
@@ -6620,10 +6672,9 @@ export interface EnrollmentCustody {
  * `DeviceRecordRePairRequiredError`: nothing proves the productId-wide OS
  * entry is this store's, and `remove()` could never delete that file. A valid
  * projection without its credential (left by a failed metadata removal) is
- * cleared. A staged first-pairing attempt is deleted only when it names this
- * store; another store's attempt is refused as `store_not_bound`, and one
- * that names no store as `pairing_attempt_unattributed` unless
- * `clearUnattributedAttempt` is set. The member entries
+ * cleared. A staged pairing attempt is deleted only when this store staged
+ * it; another store's attempt is refused as `store_not_bound`. A wire v6
+ * entry is void and deleted unread. The member entries
  * go first, each read back after deletion, then the credential, also read
  * back. A failure leaves the device paired if its credential is still there,
  * possibly with some member entries deleted, and otherwise leaves
@@ -6631,7 +6682,7 @@ export interface EnrollmentCustody {
  * credential is gone, before `device.json` is removed. Returns the cleared
  * enrollment, or undefined when the store held no readable one.
  */
-export declare function clearEnrollmentUnderLease(custody: EnrollmentCustody, readCurrent: () => Promise<DeviceRecord | undefined>, onCredentialCleared?: () => void, clearUnattributedAttempt?: boolean): Promise<DeviceRecord | undefined>;
+export declare function clearEnrollmentUnderLease(custody: EnrollmentCustody, readCurrent: () => Promise<DeviceRecord | undefined>, onCredentialCleared?: () => void): Promise<DeviceRecord | undefined>;
 /**
  * Clears one store's device enrollment without a daemon: its member
  * entries, its OS credential (read back after deletion) and `device.json`,
@@ -6643,13 +6694,11 @@ export declare function clearEnrollmentUnderLease(custody: EnrollmentCustody, re
  * enrollment of the account it runs as. The OS credential entry is shared by
  * every store of one productId: the clear never deletes another store's
  * enrollment or staged first pairing, and it excludes their pairing and
- * renewal writes while it runs (#1964, #2034). `clearUnattributedAttempt: true` also deletes a
- * first-pairing attempt that names no store; set it only when no other store
- * of this productId is pairing.
+ * renewal writes while it runs (#1964, #2034). A wire v6 entry is deleted
+ * unread.
  */
 export declare function clearDeviceEnrollment(options: DeviceEnrollmentStatusOptions & {
     readonly storeDir: string;
-    readonly clearUnattributedAttempt?: boolean;
 }, overrides?: {
     readonly deviceCredentials?: DeviceCredentialBackend;
 }): Promise<void>;
@@ -9941,7 +9990,7 @@ export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartu
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure.js';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon.js';
 export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema/index.js';
-export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, FirstPairingAttemptRefusedError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
+export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, PairingAttemptRefusedError, PairingBusyError, PairingCodeRejectedError, PairingSupersededError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals.js';
 export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals.js';
@@ -14148,7 +14197,7 @@ export declare function writeServicePayloadManifest(dir: string, options: {
     meta?: JsonObject;
 }): Promise<Uint8Array>;
 // ==== @byok-sdk/client dist/testing/device-credentials.d.ts ====
-import type { DeviceCredentialBackend, DeviceRecord, FirstPairingAttempt } from '../daemon/device-credential-store.js';
+import type { DeviceCredentialBackend, DeviceRecord, PairingAttempt } from '../daemon/device-credential-store.js';
 /**
  * A `DeviceCredentialBackend` held in memory, so a test never reaches the
  * operating system's credential store. Product source never imports it and
@@ -14157,8 +14206,8 @@ import type { DeviceCredentialBackend, DeviceRecord, FirstPairingAttempt } from 
 export declare class InMemoryDeviceCredentialBackend implements DeviceCredentialBackend {
     #private;
     read(): Promise<DeviceRecord | undefined>;
-    readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined>;
-    saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void>;
+    readPairingAttempt(): Promise<PairingAttempt | undefined>;
+    savePairingAttempt(attempt: PairingAttempt): Promise<void>;
     replace(record: DeviceRecord): Promise<void>;
     clear(): Promise<boolean>;
 }

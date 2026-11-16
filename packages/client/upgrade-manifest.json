@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "0b495b4a1a4a0435e3fdf5df092a510d74722f58724f66452ab47aa58294e32f"
+    "snapshotSha256": "5cb257ffd6a29805b56d49c475bababd54dac80a8639c16d1ffc8a8b5783af3f"
   },
   "configFields": {
     "status": "tracked",
@@ -415,6 +415,77 @@
         "export:@byok-sdk/cloud#PairingEnrollmentInput",
         "export:@byok-sdk/cloud#PairingEnrollmentResult"
       ]
+    },
+    {
+      "id": "wire-v7-client-pairing-errors",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client pairing rejects with PairingSupersededError (another pairing of this productId replaced this one while its request was in flight; nothing written), PairingBusyError (retryable; two pairings of one machine at once; retry with the same code) and PairingCodeRejectedError (code unknown, expired or used). FirstPairingAttemptRefusedError is renamed PairingAttemptRefusedError and has no code.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "export:@byok-sdk/client#PairingSupersededError",
+        "export:@byok-sdk/client#PairingBusyError",
+        "export:@byok-sdk/client#PairingCodeRejectedError",
+        "export:@byok-sdk/client#PairingAttemptRefusedError",
+        "export:@byok-sdk/client#FirstPairingAttemptRefusedError"
+      ]
+    },
+    {
+      "id": "wire-v7-device-credential-attempt",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client DeviceCredentialBackend implements readPairingAttempt and savePairingAttempt (PairingAttempt) in place of the first-pairing methods; InMemoryDeviceCredentialBackend follows. clearDeviceEnrollment loses clearUnattributedAttempt and DeviceEnrollmentClearErrorCode loses pairing_attempt_unattributed: a v7 attempt always names its store.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "export:@byok-sdk/client#DeviceCredentialBackend",
+        "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
+        "export:@byok-sdk/client#clearDeviceEnrollment",
+        "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode"
+      ]
+    },
+    {
+      "id": "wire-v7-auth-manager-pair",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client AuthManager.pair, reached through BlobClient and InstallSkillPacksOptions, no longer takes the internal custody option; nothing to change unless a Host passed it.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "export:@byok-sdk/client#BlobClient",
+        "export:@byok-sdk/client#InstallSkillPacksOptions"
+      ]
+    },
+    {
+      "id": "wire-v7-pair-gate-split",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client Daemon.pair no longer holds the productId enrollment lock across its request or its E2EE member custody; re-pairing a running daemon shuts it down outside the lock, and member entries are written only while the new enrollment holds. Hosts that relied on another store's pairing waiting for this one get the server fence instead.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-pair-gate-split"
+      ]
+    },
+    {
+      "id": "wire-v7-pair-new-code-fresh-key",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client Daemon.pair stages an attempt on every pairing: the same code resumes it, a new code stages a fresh device key, except a re-pair of the store's own enrollment, which keeps its key.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-pair-new-code-fresh-key"
+      ]
+    },
+    {
+      "id": "wire-v7-v6-enrollment-entry-deleted",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client deletes a wire v6 device-enrollment OS entry, recognized by its format version without reading its key: start deletes it and reports re-pair required, pair deletes it and pairs as a first pairing, clearDeviceEnrollment deletes it. Re-pair every device after the cloud upgrade.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-v6-enrollment-entry-deleted"
+      ]
+    },
+    {
+      "id": "wire-v7-auth-errors-without-server-text",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client pairing and token renewal errors carry only the HTTP status, never the server's response text; read the typed errors instead of parsing messages.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-auth-errors-without-server-text"
+      ]
     }
   ],
   "changes": [
@@ -453,6 +524,11 @@
       "entry": "remove-task-terminal-read"
     },
     {
+      "item": "export:@byok-sdk/client#BlobClient",
+      "change": "changed",
+      "entry": "wire-v7-auth-manager-pair"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonEvent",
       "change": "changed",
       "entry": "grok-agent-user-context"
@@ -468,14 +544,34 @@
       "entry": "grok-agent-user-context"
     },
     {
+      "item": "export:@byok-sdk/client#DeviceCredentialBackend",
+      "change": "changed",
+      "entry": "wire-v7-device-credential-attempt"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
+      "change": "changed",
+      "entry": "wire-v7-device-credential-attempt"
+    },
+    {
       "item": "export:@byok-sdk/client#ExpiringClassId",
       "change": "changed",
       "entry": "grok-session-store"
     },
     {
+      "item": "export:@byok-sdk/client#FirstPairingAttemptRefusedError",
+      "change": "removed",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
       "item": "export:@byok-sdk/client#GrokAdapterOptions",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#InstallSkillPacksOptions",
+      "change": "changed",
+      "entry": "wire-v7-auth-manager-pair"
     },
     {
       "item": "export:@byok-sdk/client#LocalTeamWorkspace",
@@ -488,6 +584,26 @@
       "entry": "remove-unused-team-workspace-methods"
     },
     {
+      "item": "export:@byok-sdk/client#PairingAttemptRefusedError",
+      "change": "added",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#PairingBusyError",
+      "change": "added",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#PairingCodeRejectedError",
+      "change": "added",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#PairingSupersededError",
+      "change": "added",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
@@ -496,6 +612,11 @@
       "item": "export:@byok-sdk/client#ServiceExitDisposition",
       "change": "removed",
       "entry": "remove-service-exit-disposition"
+    },
+    {
+      "item": "export:@byok-sdk/client#clearDeviceEnrollment",
+      "change": "changed",
+      "entry": "wire-v7-device-credential-attempt"
     },
     {
       "item": "export:@byok-sdk/client#openDaemonLog",
@@ -531,6 +652,11 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeDetectionRefusalReason",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
+      "change": "changed",
+      "entry": "wire-v7-device-credential-attempt"
     },
     {
       "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
