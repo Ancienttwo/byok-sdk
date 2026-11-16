@@ -38,7 +38,7 @@ function makeDeps(sent: Envelope[], adapter: StubRuntimeAdapter): TaskRunnerDeps
 }
 
 function offer(taskId: string, agentRef: AgentRef): Envelope {
-  return createEnvelope('task.offer', { ...FRESH_OFFER, agentRef, instruction: 'do work' }, { taskId, seq: 1 });
+  return createEnvelope('task.offer', { target: { lane: 'auto' }, ...FRESH_OFFER, agentRef, instruction: 'do work' }, { taskId, seq: 1 });
 }
 
 function terminal(sent: Envelope[], taskId: string): Envelope[] {

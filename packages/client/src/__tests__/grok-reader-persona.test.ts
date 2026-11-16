@@ -52,7 +52,7 @@ async function harness() {
       return home;
     },
     offerReader: (taskId: string, agentId: string, sessionRef?: string) => runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'hello', harnessId: 'grok', agentRef: { agentId, profileRevision: 'r1' }, homeAccess: 'memory-reader' as const,
+      instruction: 'hello', target: { lane: 'harness', harnessId: 'grok' }, agentRef: { agentId, profileRevision: 'r1' }, homeAccess: 'memory-reader' as const,
       ...(sessionRef === undefined ? FRESH_OFFER : { session: { mode: 'resume' as const, sessionRef } }),
     }, { taskId, seq: ++seq })),
     terminal: async (taskId: string) => {

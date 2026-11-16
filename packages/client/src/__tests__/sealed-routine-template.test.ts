@@ -35,7 +35,7 @@ type Payload = Record<string, unknown> & {
 };
 type Line = { type: MessageType; task_id: string; ts: string; payload: Payload };
 
-const routineLines = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
+const routineLines = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as Line)
@@ -104,9 +104,9 @@ async function device(keyring: SealedScopeKeyring = new GoldenKeyring()) {
   });
   runners.push(runner);
   let seq = 0;
-  /** Offers `payload` as the Host would, on the stub runtime. The AAD does not bind `runtime`. */
+  /** Offers `payload` as the Host would, on the stub runtime. The AAD does not bind `target`. */
   const offer = (taskId: string, payload: Payload) =>
-    runner.handleEnvelope(createEnvelope(TYPE, { ...structuredClone(payload), runtime: 'pi' } as never, { taskId, seq: ++seq }));
+    runner.handleEnvelope(createEnvelope(TYPE, { ...structuredClone(payload), target: { lane: 'runtime', runtimeId: 'pi' } } as never, { taskId, seq: ++seq }));
   const declines = (taskId: string) => sent.filter((envelope) => envelope.type === 'task.decline' && envelope.task_id === taskId).map((envelope) => envelope.payload);
   return { adapter, offer, declines, sent };
 }

@@ -284,7 +284,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
 
     // An ordinary task still runs end to end.
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'do work' }, { taskId: 't-ordinary', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'do work' }, { taskId: 't-ordinary', seq: server.nextSeq() }),
     );
     await server.waitFor((envelope) => envelope.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));

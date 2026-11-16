@@ -105,7 +105,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     server.send(createEnvelope('task.offer', {
       instruction: `work for ${agentId}`,
       agentRef: { agentId, profileRevision: 'r1' },
-      runtime: 'pi',
+      target: { lane: 'runtime', runtimeId: 'pi' },
       ...(options.reader === true ? { homeAccess: 'memory-reader' as const } : {}),
       ...(options.agentMemory === undefined ? {} : { agentMemory: options.agentMemory }),
       ...(options.sessionRef === undefined ? FRESH_OFFER : { session: { mode: 'resume' as const, sessionRef: options.sessionRef } }),
@@ -919,7 +919,7 @@ describe('durable Pi and memory-reader Attempts (#317)', () => {
     });
 
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'read on durable Pi', runtime: 'pi', agentRef: { agentId: 'durable-agent', profileRevision: 'r1' }, ...FRESH_OFFER,
+      instruction: 'read on durable Pi', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: { agentId: 'durable-agent', profileRevision: 'r1' }, ...FRESH_OFFER,
       homeAccess: 'memory-reader',
     }, { taskId: 'durable-reader', seq: 1 }));
 
@@ -956,7 +956,7 @@ describe('reader admission after a published reader terminal (#476)', () => {
       maxConcurrentReaderAttemptsPerAgentHome: 4,
     });
     const readerOffer = (taskId: string, seq: number): Envelope => createEnvelope('task.offer', {
-      instruction: 'read', runtime: 'pi', agentRef: { agentId: 'finishing-readers', profileRevision: 'r1' }, ...FRESH_OFFER,
+      instruction: 'read', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: { agentId: 'finishing-readers', profileRevision: 'r1' }, ...FRESH_OFFER,
       homeAccess: 'memory-reader',
     }, { taskId, seq });
     const declinesOf = (taskId: string) => sent.filter((entry) => entry.type === 'task.decline' && entry.task_id === taskId);

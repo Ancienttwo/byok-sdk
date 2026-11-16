@@ -57,7 +57,6 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
     fetchMock.mockResolvedValue(jsonResponse(body));
     const onEnvelope = vi.fn();
     const onValidationFailedSeq = vi.fn();
-    const onServerCapabilities = vi.fn();
     const outcomes: string[] = [];
     let loopFailures = 0;
     const client: LongPollClient = new LongPollClient({
@@ -66,7 +65,6 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
       getCursor: () => undefined,
       onEnvelope,
       onValidationFailedSeq,
-      onServerCapabilities,
       onOperationalOutcome: (outcome) => outcomes.push(outcome),
       onLoopFailure: () => {
         loopFailures += 1;
@@ -78,7 +76,7 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
     client.start();
     await vi.waitFor(() => expect(loopFailures).toBe(1));
     client.stop();
-    return { onEnvelope, onValidationFailedSeq, onServerCapabilities, outcomes, error: warnedRouteErrors()[0] };
+    return { onEnvelope, onValidationFailedSeq, outcomes, error: warnedRouteErrors()[0] };
   }
 
   const validOffer = {
@@ -88,34 +86,31 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
     type: 'task.offer',
     task_id: 'good-task',
     seq: 1,
-    payload: { agentRef: { agentId: 'agent-long-poll', profileRevision: 'rev-1' }, instruction: 'do it', ...FRESH_OFFER },
+    payload: { agentRef: { agentId: 'agent-long-poll', profileRevision: 'rev-1' }, instruction: 'do it', ...FRESH_OFFER, target: { lane: 'auto' } },
   };
 
   it.each([
-    ['events is not an array', { events: { 0: validOffer }, cursor: 1, capabilities: [], ingress }, ['events']],
-    ['events is missing', { cursor: 1, capabilities: [], ingress }, ['events']],
-    ['cursor is not an integer', { events: [validOffer], cursor: 1.5, capabilities: [], ingress }, ['cursor']],
-    ['cursor is a string', { events: [validOffer], cursor: '1', capabilities: [], ingress }, ['cursor']],
-    ['cursor is not a safe integer', { events: [], cursor: Number.MAX_SAFE_INTEGER + 1, capabilities: [], ingress }, ['cursor']],
-    ['capabilities is not a string array', { events: [validOffer], cursor: 1, capabilities: [7], ingress }, ['capabilities', 0]],
-    // Wire v3: the capability and activity ingress advertisements are required on every page.
-    ['capabilities is missing', { events: [validOffer], cursor: 1, ingress }, ['capabilities']],
-    ['ingress is missing', { events: [validOffer], cursor: 1, capabilities: [] }, ['ingress']],
-    ['ingress is malformed', { events: [validOffer], cursor: 1, capabilities: [], ingress: { activityMaxEvents: 0, activityMaxBytes: 65536 } }, ['ingress', 'activityMaxEvents']],
+    ['events is not an array', { events: { 0: validOffer }, cursor: 1, ingress }, ['events']],
+    ['events is missing', { cursor: 1, ingress }, ['events']],
+    ['cursor is not an integer', { events: [validOffer], cursor: 1.5, ingress }, ['cursor']],
+    ['cursor is a string', { events: [validOffer], cursor: '1', ingress }, ['cursor']],
+    ['cursor is not a safe integer', { events: [], cursor: Number.MAX_SAFE_INTEGER + 1, ingress }, ['cursor']],
+    // Wire v3: the activity ingress advertisement is required on every page.
+    ['ingress is missing', { events: [validOffer], cursor: 1 }, ['ingress']],
+    ['ingress is malformed', { events: [validOffer], cursor: 1, ingress: { activityMaxEvents: 0, activityMaxBytes: 65536 } }, ['ingress', 'activityMaxEvents']],
   ])('rejects a page whose %s through the outer schema, as a route failure on its 200', async (_case, body, issuePath) => {
-    const { onEnvelope, onValidationFailedSeq, onServerCapabilities, outcomes, error } = await pollOnce(body);
+    const { onEnvelope, onValidationFailedSeq, outcomes, error } = await pollOnce(body);
     expect(error?.endpoint.path).toBe('/byok/events');
     expect(error?.status).toBe(200);
     expect(error?.cause).toMatchObject({ name: 'ZodError', issues: [expect.objectContaining({ path: issuePath })] });
     // Nothing from a rejected page is consumed, not even its valid entry.
     expect(onEnvelope).not.toHaveBeenCalled();
     expect(onValidationFailedSeq).not.toHaveBeenCalled();
-    expect(onServerCapabilities).not.toHaveBeenCalled();
     expect(outcomes).toEqual(['failure']);
   });
 
   it('keeps the client-local nonnegative cursor check: the schema admits a negative integer, the client refuses it', async () => {
-    const { onEnvelope, outcomes, error } = await pollOnce({ events: [], cursor: -1, capabilities: [], ingress });
+    const { onEnvelope, outcomes, error } = await pollOnce({ events: [], cursor: -1, ingress });
     expect(error?.status).toBe(200);
     expect((error?.cause as Error).message).toBe('events poll response.cursor is not a safe nonnegative integer');
     expect(onEnvelope).not.toHaveBeenCalled();
@@ -123,10 +118,10 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
   });
 
   it('keeps the client-local no-regression check: a page cursor below the requested cursor is refused', async () => {
-    // First page advances navigation to 2 with read-ahead advertised; the next
+    // First page advances navigation to 2; the next
     // page claims cursor 1, below the afterSeq=2 the client requested.
-    const first = { events: [{ ...validOffer, seq: 2 }], cursor: 2, capabilities: ['mailbox-read-ahead'], ingress };
-    const regressed = { events: [], cursor: 1, capabilities: ['mailbox-read-ahead'], ingress };
+    const first = { events: [{ ...validOffer, seq: 2 }], cursor: 2, ingress };
+    const regressed = { events: [], cursor: 1, ingress };
     let call = 0;
     fetchMock.mockImplementation(async () => {
       call += 1;
@@ -170,8 +165,7 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
     let call = 0;
     fetchMock.mockImplementation(async () => {
       call += 1;
-      const capabilities = ['mailbox-read-ahead'];
-      return jsonResponse(call === 1 ? { events: [unknownType], cursor: 1, capabilities, ingress } : { events: [], cursor: 1, capabilities, ingress });
+      return jsonResponse(call === 1 ? { events: [unknownType], cursor: 1, ingress } : { events: [], cursor: 1, ingress });
     });
     const onEnvelope = vi.fn();
     const onValidationFailedSeq = vi.fn();

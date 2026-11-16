@@ -43,7 +43,6 @@ describe('a revoked device stops draining its outbox instead of retrying forever
 
   it('drainOutbox stops calling postBatch once revocation is discovered, even with envelopes still queued', async () => {
     server = await TestServer.start();
-    server.setAckCapabilities(['approval_resolved', 'mailbox-read-ahead']);
 
     const storeDir = await tmpDir('byok-revoke-outbox-store-');
     const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
@@ -67,18 +66,16 @@ describe('a revoked device stops draining its outbox instead of retrying forever
 
     await connection.start();
     await waitForOpen(connection);
-    expect(connection.getServerCapabilities()).toEqual(['approval_resolved', 'mailbox-read-ahead']);
 
     // Revoke server-side, THEN queue outbound envelopes — the drain's very
     // first attempt discovers revocation (401 on the send, then on the
     // renewal it triggers), exactly like a real mid-session revocation.
     server.revokeDevice(record.deviceId);
-    connection.send(createEnvelope('task.claim', { deviceId: record.deviceId }, { taskId: 'task-revoked-1' }));
-    connection.send(createEnvelope('task.claim', { deviceId: record.deviceId }, { taskId: 'task-revoked-2' }));
+    connection.send(createEnvelope('task.claim', { deviceId: record.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'task-revoked-1' }));
+    connection.send(createEnvelope('task.claim', { deviceId: record.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'task-revoked-2' }));
 
     await vi.waitFor(() => expect(connection?.getHaltReason()).toBe('device_revoked'), { timeout: 2000 });
     await vi.waitFor(() => expect(postBatchSpy.mock.calls.length).toBeGreaterThanOrEqual(1));
-    expect(connection.getServerCapabilities()).toEqual([]);
 
     const callsAfterRevocationDetected = postBatchSpy.mock.calls.length;
 

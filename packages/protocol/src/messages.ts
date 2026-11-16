@@ -340,8 +340,9 @@ const DispatchTargetIdSchema = z
 
 /**
  * What a `task.offer` asks the device to run (wire v7): one discriminated
- * union, so no two selectors can disagree. `auto` lets the device pick a
- * built-in runtime by its own preference; `runtime` names a built-in runtime
+ * union, so no two selectors can disagree. `auto` lets the device pick by its
+ * own preference, a built-in runtime or an advertised custom harness (a claim
+ * may name either, docs/protocol.md §3.1); `runtime` names a built-in runtime
  * with the device's model; the three model lanes carry a model selection and
  * fix which runtime may hold it (subscription credentials belong to the
  * vendor CLIs, a BYOK provider runs only through Pi); `harness` names a
@@ -1628,10 +1629,11 @@ const TaskFailPlainPayloadSchema = z.object({
   /** Local interruption observation bound to the immutable offer; does not assert a cloud claim. */
   recovery: z.object({ kind: z.literal('daemon_interrupted'), offerId: z.uuid() }).strict().optional(),
   /**
-   * Wire v7: the claimed executor, echoed. Optional on the wire: a device that
-   * restarts after acknowledging an offer it never claimed reports that
-   * interruption with no executor. The server requires it, equal to the
-   * claimed executor, on a failure after a claim.
+   * Wire v7: the claimed executor, echoed. Optional on the wire. The server
+   * requires it, equal to the claimed executor, on a failure after a claim. A
+   * `recovery` report may name the executor its device admitted before a claim
+   * the cloud never recorded; the server then only checks it against the
+   * offer's target and records no claim (docs/protocol.md §3.1).
    */
   executor: ClaimedExecutorSchema.optional(),
   /**

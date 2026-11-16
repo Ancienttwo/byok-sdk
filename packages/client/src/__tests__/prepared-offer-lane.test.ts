@@ -10,7 +10,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, TaskOfferPlainPayloadSchema, type Envelope, type InputPreparationOfferBinding, type TaskOfferPlainPayload } from '@byok-sdk/protocol';
+import { createEnvelope, TaskOfferPlainPayloadSchema, type Envelope, type InputPreparationOfferBinding, type PreparedOfferDeclineCode, type TaskOfferPlainPayload } from '@byok-sdk/protocol';
 import { AgentHomeManager } from '../agent-home';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
@@ -408,7 +408,7 @@ function preparedOffer(
     {
       session: { mode: 'fresh' },
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-      runtime: 'pi',
+      target: { lane: 'runtime', runtimeId: 'pi' },
       agentRef: AGENT_REF,
       preparation,
       agentMemory: 'none',
@@ -430,10 +430,18 @@ function reference(built: Lane, overrides: Partial<InputPreparationOfferBinding>
   };
 }
 
-function declineReason(sent: readonly Envelope[]): string {
+function declineOf(sent: readonly Envelope[]): { readonly code: string | undefined; readonly reason: string } {
   const declined = sent.find((envelope) => envelope.type === 'task.decline');
   if (declined === undefined || declined.type !== 'task.decline' || declined.payload.sealed !== undefined) throw new Error('no task.decline was sent');
-  return declined.payload.reason;
+  return { code: declined.payload.code, reason: declined.payload.reason };
+}
+
+function declineReason(sent: readonly Envelope[]): string {
+  return declineOf(sent).reason;
+}
+
+function declineCode(sent: readonly Envelope[]): string | undefined {
+  return declineOf(sent).code;
 }
 
 async function memoryOnlyRecord(mode: 'read' | 'read-write' = 'read'): Promise<{
@@ -736,7 +744,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       offeredAgentMemory: 'read', memory: MEMORY,
       observation: {}, servers: [], toolsetDefinitionRevisions: {}, nowMs: Date.now(),
     });
-    if (!admitted.ok) throw new Error(`${admitted.reason}: ${admitted.detail}`);
+    if (!admitted.ok) throw new Error(`${admitted.code}: ${admitted.detail}`);
     expect(admitted.launch.agentMemory).toBe('read');
     expect(admitted.launch.memory).toBe(MEMORY);
   });
@@ -800,7 +808,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
         inputPreparationLane: preparationLane,
       });
       await loser.handleEnvelope(offer('task-memory-only-loser', 2));
-      expect(declineReason(loserSent)).toMatch(/^preparation_already_pinned: /u);
+      expect(declineCode(loserSent)).toBe('preparation_already_pinned');
       expect(loserAdapter.preparedStartCalls).toHaveLength(0);
       expect((loser as unknown as { memoryContextByToken: Map<string, unknown> }).memoryContextByToken.size).toBe(0);
       await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-memory-only-winner', seq: 3 }));
@@ -827,7 +835,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       }, 1, { homeAccess: 'memory-reader', agentMemory: 'read-write', requiredToolsets: undefined }));
       expect(sent.filter((e) => e.type === 'task.decline').map((e) => e.payload)).toEqual([
         expect.objectContaining({
-          reason: 'agent_memory_selection_invalid: agentMemory read-write requires a writer; a memory-reader Attempt reads memory only',
+          reason: 'agentMemory read-write requires a writer; a memory-reader Attempt reads memory only',
           code: 'agent_memory_selection_invalid', retryable: false, agentRef: AGENT_REF,
         }),
       ]);
@@ -845,7 +853,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
 
     await runner.handleEnvelope(preparedOffer('task-memory-selection-mismatch', reference(built), 1, { agentMemory: 'read' }));
 
-    expect(declineReason(sent)).toBe('agent_memory_mismatch: the offered Agent memory selection differs from the named preparation');
+    expect(declineOf(sent)).toEqual({ code: 'agent_memory_mismatch', reason: 'the offered Agent memory selection differs from the named preparation' });
     expect(built.store.get(built.recordId)?.pin).toBeUndefined();
     expect(adapter.preparedStartCalls).toHaveLength(0);
   });
@@ -1078,7 +1086,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     expect(dispatched).toBe(1);
 
     const loser = left.preparedStartCalls.length === 0 ? leftSent : rightSent;
-    expect(declineReason(loser)).toContain('preparation_already_pinned');
+    expect(declineCode(loser)).toBe('preparation_already_pinned');
     // The winner's pin is the one that survives, and it names the winner.
     const winnerTaskId = claims[0]!.task_id;
     expect(built.store.get(built.recordId)?.pin?.taskId).toBe(winnerTaskId);
@@ -1296,7 +1304,7 @@ describe('daemon shutdown waits for a prepared offer that is still inside start(
 describe('every compared item declines by its own name, with no claim and no pin', () => {
   interface Case {
     readonly name: string;
-    readonly reason: string;
+    readonly code: PreparedOfferDeclineCode;
     readonly build: () => Promise<{
       readonly built: Lane;
       readonly offered: InputPreparationOfferBinding;
@@ -1308,7 +1316,7 @@ describe('every compared item declines by its own name, with no claim and no pin
   const cases: Case[] = [
     {
       name: 'a reference no record on this device answers to',
-      reason: 'preparation_not_found',
+      code: 'preparation_not_found',
       build: async () => {
         const built = await lane();
         return { built, offered: reference(built, { reference: 'f'.repeat(64) }) };
@@ -1316,7 +1324,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
     {
       name: 'a record that was never counted',
-      reason: 'preparation_not_ready',
+      code: 'preparation_not_ready',
       build: async () => {
         const built = await lane({ counted: false });
         return { built, offered: reference(built) };
@@ -1324,7 +1332,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
     {
       name: 'a record whose compiler proved nothing about P(D)',
-      reason: 'preparation_not_ready',
+      code: 'preparation_not_ready',
       build: async () => {
         const built = await lane({
           summaryOverrides: { projection: { version: 3, kind: 'unknown', digest: PROJECTION.digest }, residual: [] },
@@ -1334,7 +1342,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
     {
       name: 'a record carrying a residual key the Host ruling never covered',
-      reason: 'preparation_not_ready',
+      code: 'preparation_not_ready',
       build: async () => {
         const built = await lane({
           summaryOverrides: { residual: [{ key: 'stream_options', valueClass: 'object_shape' }] },
@@ -1344,7 +1352,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
     {
       name: 'a record whose accounting ruling was made for another runtime',
-      reason: 'preparation_not_ready',
+      code: 'preparation_not_ready',
       build: async () => {
         const built = await lane({
           bindingOverrides: {
@@ -1356,7 +1364,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
     {
       name: 'a record counted on another device row',
-      reason: 'preparation_device_mismatch',
+      code: 'preparation_device_mismatch',
       build: async () => {
         const built = await lane({ bindingOverrides: { deviceId: 'device-somewhere-else' } });
         return { built, offered: reference(built) };
@@ -1364,7 +1372,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
     {
       name: 'a record counted for another Agent',
-      reason: 'preparation_agent_mismatch',
+      code: 'preparation_agent_mismatch',
       build: async () => {
         const built = await lane({ bindingOverrides: { agentRef: 'agent-somewhere-else' } });
         return { built, offered: reference(built) };
@@ -1372,7 +1380,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
     {
       name: 'a record counted under another profile revision',
-      reason: 'preparation_profile_revision_mismatch',
+      code: 'preparation_profile_revision_mismatch',
       build: async () => {
         const built = await lane({ bindingOverrides: { profileRevision: 'profile-rev-0' } });
         return { built, offered: reference(built) };
@@ -1380,7 +1388,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
     {
       name: 'a limits-policy revision that moved since the count',
-      reason: 'preparation_policy_revision_mismatch',
+      code: 'preparation_policy_revision_mismatch',
       build: async () => {
         const built = await lane({ bindingOverrides: { policyRevision: 'limits-policy-r0' } });
         return { built, offered: reference(built) };
@@ -1388,7 +1396,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
     {
       name: 'a re-presented request digest the record does not carry',
-      reason: 'preparation_request_digest_mismatch',
+      code: 'preparation_request_digest_mismatch',
       build: async () => {
         const built = await lane();
         return { built, offered: reference(built, { requestDigest: 'request-digest-from-another-request' }) };
@@ -1396,7 +1404,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
     {
       name: 'a re-presented envelope digest the record does not carry',
-      reason: 'preparation_artifact_digest_mismatch',
+      code: 'preparation_artifact_digest_mismatch',
       build: async () => {
         const built = await lane();
         return { built, offered: reference(built, { artifactDigest: 'envelope-digest-from-another-count' }) };
@@ -1404,7 +1412,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
     {
       name: 'an artifact compiled against a native closure this device no longer has',
-      reason: 'preparation_runtime_identity_mismatch',
+      code: 'preparation_runtime_identity_mismatch',
       build: async () => {
         const runtime = { ...RUNTIME, provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64), packageVersion: '0.85.1001' };
         // The accounting ruling moves WITH the runtime it was ruled for, so the
@@ -1424,7 +1432,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
     {
       name: 'a model-visible tool set that is not the counted one',
-      reason: 'preparation_tool_set_mismatch',
+      code: 'preparation_tool_set_mismatch',
       build: async () => {
         const built = await lane({
           summaryOverrides: {
@@ -1436,7 +1444,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
     {
       name: 'a live toolset with no executor definition revision',
-      reason: 'preparation_tool_surface_unfingerprintable',
+      code: 'preparation_tool_surface_unfingerprintable',
       build: async () => {
         const built = await lane();
         return { built, offered: reference(built), runnerOverrides: {
@@ -1450,7 +1458,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
     {
       name: 'a definition revision or argv the record did not bind',
-      reason: 'preparation_tool_binding_digest_mismatch',
+      code: 'preparation_tool_binding_digest_mismatch',
       build: async () => {
         const built = await lane({ summaryOverrides: { toolBindingDigest: 'e'.repeat(64) } });
         return { built, offered: reference(built) };
@@ -1458,7 +1466,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
     {
       name: 'a schema surface the record did not count',
-      reason: 'preparation_observation_digest_mismatch',
+      code: 'preparation_observation_digest_mismatch',
       build: async () => {
         const built = await lane({ summaryOverrides: { observationDigest: 'a'.repeat(64) } });
         return { built, offered: reference(built) };
@@ -1466,16 +1474,16 @@ describe('every compared item declines by its own name, with no claim and no pin
     },
   ];
 
-  it.each(cases)('declines $name as $reason', async ({ reason, build }) => {
+  it.each(cases)('declines $name as $code', async ({ code, build }) => {
     const { built, offered, runnerOverrides } = await build();
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
     const sent: Envelope[] = [];
     const runner = await makeRunner(built, adapter, sent, runnerOverrides ?? {});
 
-    await runner.handleEnvelope(preparedOffer(`task-${reason}`, offered));
+    await runner.handleEnvelope(preparedOffer(`task-${code}`, offered));
 
-    expect(declineReason(sent)).toContain(reason);
-    expect(declineReason(sent).split(':', 1)[0]).toBe(reason);
+    expect(declineCode(sent)).toBe(code);
+    expect(declineReason(sent)).not.toContain(code);
     const declined = sent.find((envelope) => envelope.type === 'task.decline');
     expect(declined?.type === 'task.decline' ? declined.payload.retryable : undefined).toBe(false);
     expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
@@ -1492,7 +1500,7 @@ describe('every compared item declines by its own name, with no claim and no pin
 
     await runner.handleEnvelope(preparedOffer('task-no-lane', reference(built)));
 
-    expect(declineReason(sent)).toContain('preparation_lane_unconfigured');
+    expect(declineCode(sent)).toBe('preparation_lane_unconfigured');
     expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
     expect(built.store.get(built.recordId)?.pin).toBeUndefined();
   });
@@ -1522,7 +1530,7 @@ describe('every compared item declines by its own name, with no claim and no pin
 
     const declines = sent.filter((envelope) => envelope.type === 'task.decline');
     expect(declines).toHaveLength(1);
-    expect(declineReason(sent).startsWith('preparation_store_unavailable')).toBe(true);
+    expect(declineCode(sent)).toBe('preparation_store_unavailable');
     expect(declineReason(sent)).toContain('disk gone');
     const declined = declines[0]!;
     expect(declined.type === 'task.decline' ? declined.payload.retryable : undefined).toBe(false);
@@ -1559,9 +1567,10 @@ describe('every compared item declines by its own name, with no claim and no pin
 
     await runner.handleEnvelope(preparedOffer('task-store-path', reference(built)));
 
-    expect(declineReason(sent)).toBe(
-      "preparation_store_unavailable: the preparation store could not be opened: ENOTDIR: not a directory, mkdir '<local path>'",
-    );
+    expect(declineOf(sent)).toEqual({
+      code: 'preparation_store_unavailable',
+      reason: "the preparation store could not be opened: ENOTDIR: not a directory, mkdir '<local path>'",
+    });
     expect(declineReason(sent)).not.toContain(brokenStoreDir);
     expect(declineReason(sent)).not.toContain(path.basename(brokenStoreDir));
   });
@@ -1580,10 +1589,11 @@ describe('every compared item declines by its own name, with no claim and no pin
 
     await runner.handleEnvelope(preparedOffer('task-pin-path', reference(built)));
 
-    expect(declineReason(sent)).toBe(
-      'preparation_not_ready: the preparation pin could not be written: '
+    expect(declineOf(sent)).toEqual({
+      code: 'preparation_not_ready',
+      reason: 'the preparation pin could not be written: '
         + 'the input-preparation record could not be durably written; the log is quarantined until it is revalidated',
-    );
+    });
     expect(declineReason(sent)).not.toContain(built.storeDir);
     expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
     expect(adapter.preparedStartCalls).toHaveLength(0);
@@ -1661,7 +1671,7 @@ describe('prepared Agent memory admission declines with its exact typed reason',
 
       await runner.handleEnvelope(fixture.offer('task-memory-ceiling'));
 
-      expect(declineReason(fixture.sent)).toBe('scope_denied: agent_memory_denied');
+      expect(declineOf(fixture.sent)).toEqual({ code: 'scope_denied', reason: 'agent_memory_denied' });
       expect(fixture.memoryRecord.store.get(fixture.memoryRecord.recordId)?.pin).toBeUndefined();
       expect(observe).not.toHaveBeenCalled();
       nothingCommitted(fixture.sent, fixture.adapter, runner);
@@ -1679,7 +1689,7 @@ describe('prepared Agent memory admission declines with its exact typed reason',
     try {
       const fixture = await memoryOnlyRunner();
       await fixture.runner.handleEnvelope(fixture.offer('task-memory-unavailable'));
-      expect(declineReason(fixture.sent)).toBe('unsupported_input: agent_memory_unavailable');
+      expect(declineOf(fixture.sent)).toEqual({ code: 'unsupported_input', reason: 'agent_memory_unavailable' });
       expect(available).toHaveBeenCalled();
       expect(observe).not.toHaveBeenCalled();
       nothingCommitted(fixture.sent, fixture.adapter, fixture.runner);
@@ -1695,7 +1705,7 @@ describe('prepared Agent memory admission declines with its exact typed reason',
     try {
       const fixture = await memoryOnlyRunner();
       await fixture.runner.handleEnvelope(fixture.offer('task-memory-descriptor-unobservable'));
-      expect(declineReason(fixture.sent)).toBe('toolsets_unobservable: agent_memory_descriptor_unobservable');
+      expect(declineOf(fixture.sent)).toEqual({ code: 'toolsets_unobservable', reason: 'agent_memory_descriptor_unobservable' });
       expect(fixture.memoryRecord.store.get(fixture.memoryRecord.recordId)?.pin).toBeUndefined();
       nothingCommitted(fixture.sent, fixture.adapter, fixture.runner);
     } finally {
@@ -1710,7 +1720,7 @@ describe('prepared Agent memory admission declines with its exact typed reason',
     try {
       const fixture = await memoryOnlyRunner();
       await fixture.runner.handleEnvelope(fixture.offer('task-memory-drift'));
-      expect(declineReason(fixture.sent)).toMatch(new RegExp(`^${reason}: `, 'u'));
+      expect(declineCode(fixture.sent)).toBe(reason);
       expect(fixture.memoryRecord.store.get(fixture.memoryRecord.recordId)?.pin).toBeUndefined();
       nothingCommitted(fixture.sent, fixture.adapter, fixture.runner);
     } finally {
@@ -1785,7 +1795,7 @@ describe('ordinary offers are untouched by the prepared lane', () => {
       'task.offer',
       {
         instruction: 'an ordinary instruction',
-        runtime: 'pi',
+        target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef: AGENT_REF,
         ...FRESH_OFFER,
         requiredToolsets: [TOOLSET_ID],
@@ -1983,7 +1993,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
       offeredAgentMemory: 'none', memory: null, terminalProjection: SUMMARY_SELECTION,
       observation: {}, servers: [], toolsetDefinitionRevisions: {}, nowMs: Date.now(),
     });
-    if (!admitted.ok) throw new Error(`${admitted.reason}: ${admitted.detail}`);
+    if (!admitted.ok) throw new Error(`${admitted.code}: ${admitted.detail}`);
     expect(admitted.launch.agentMemory).toBe('none');
     expect(admitted.launch.memory).toBeNull();
     expect(admitted.launch.toolsetDefinitionRevisions).toEqual({});
@@ -2005,14 +2015,14 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
       servers: [{ serverName: SERVER_NAME, toolsetId: TOOLSET_ID, command: built.serverCommand, args: ['--stdio'] }],
       toolsetDefinitionRevisions: { [TOOLSET_ID]: TOOLSET_REVISION }, nowMs: Date.now(),
     });
-    expect(declined).toMatchObject({ ok: false, reason: 'preparation_tool_set_mismatch' });
+    expect(declined).toMatchObject({ ok: false, code: 'preparation_tool_set_mismatch' });
   });
 
   it('declines a tool-bearing record for a tool-less offer (preparation_tool_set_mismatch), before any pin', async () => {
     const built = await lane();
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
     const { sent, pin } = await run(built, (id) => toollessOffer(id, 'task-toolbearing-for-toolless', { terminalProjection: undefined }), { adapter, support: built });
-    expect(declineReason(sent)).toContain('preparation_tool_set_mismatch');
+    expect(declineCode(sent)).toBe('preparation_tool_set_mismatch');
     expectNothingCommitted(sent, adapter, built);
     expect(pin).not.toHaveBeenCalled();
   });
@@ -2024,7 +2034,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
       adapter,
       revisions: new Map([[TOOLSET_ID, TOOLSET_REVISION], ['unrelated', 'unrelated-definition-r1']]),
     });
-    expect(declineReason(sent)).toContain('preparation_tool_set_mismatch');
+    expect(declineCode(sent)).toBe('preparation_tool_set_mismatch');
     expectNothingCommitted(sent, adapter, record);
     expect(pin).not.toHaveBeenCalled();
   });
@@ -2033,19 +2043,19 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
     const record = await toollessRecord();
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
     const wantsMemory = await run(record, (id) => toollessOffer(id, 'task-toolless-wants-memory', { agentMemory: 'read' }), { adapter });
-    expect(declineReason(wantsMemory.sent)).toBe('agent_memory_mismatch: the offered Agent memory selection differs from the named preparation');
+    expect(declineOf(wantsMemory.sent)).toEqual({ code: 'agent_memory_mismatch', reason: 'the offered Agent memory selection differs from the named preparation' });
     expectNothingCommitted(wantsMemory.sent, adapter, record);
 
     const memoryRecord = await memoryOnlyRecord();
     const memoryAdapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
     const wantsNone = await run(memoryRecord, (id) => toollessOffer(id, 'task-memory-record-wants-none', { agentMemory: 'none' }), { adapter: memoryAdapter });
-    expect(declineReason(wantsNone.sent)).toBe('agent_memory_mismatch: the offered Agent memory selection differs from the named preparation');
+    expect(declineOf(wantsNone.sent)).toEqual({ code: 'agent_memory_mismatch', reason: 'the offered Agent memory selection differs from the named preparation' });
     expectNothingCommitted(wantsNone.sent, memoryAdapter, memoryRecord);
   });
 
   it('is rejected by the protocol schema when an offer names an empty requiredToolsets', () => {
     const parsed = TaskOfferPlainPayloadSchema.safeParse({
-      session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, runtime: 'pi',
+      session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, target: { lane: 'runtime', runtimeId: 'pi' },
       agentRef: AGENT_REF, preparation: { reference: 'r', requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST },
       agentMemory: 'none', requiredToolsets: [], terminalProjection: selector,
     });
@@ -2073,7 +2083,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
     const { sent, adapter, pin } = await run(record, id => toollessOffer(id, 'task-schema-drift', {
       terminalProjection: { ...selector, schema: { ...selector.schema, required: ['schemaVersion'] } },
     }));
-    expect(declineReason(sent)).toContain('preparation_result_schema_mismatch');
+    expect(declineCode(sent)).toBe('preparation_result_schema_mismatch');
     expectNothingCommitted(sent, adapter, record);
     expect(pin).not.toHaveBeenCalled();
   });

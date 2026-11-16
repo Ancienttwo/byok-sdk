@@ -269,9 +269,9 @@ How the SDK uses the port:
   The hold ends at `longPollHoldMs` (`packages/cloud/src/handlers/events.ts:133`).
   The route closes the subscription when it returns (`packages/cloud/src/handlers/events.ts:198-200`).
 
-The dataplane README gives the Workers composition (`packages/cloud-dataplane/README.md:416-420`):
+The dataplane README gives the Workers composition (`packages/cloud-dataplane/README.md:504-509`):
 
-- The Postgres listener wake is Node-only. Hyperdrive cannot carry LISTEN/NOTIFY.
+- The SDK ships no Postgres listener wake. Hyperdrive cannot carry LISTEN/NOTIFY.
 - A Workers Host injects a new `createInProcessMailboxWake({ fallbackMs: 1_000 })` for each invocation.
   It sees writes from other isolates within that interval.
 - A low-latency Durable Object wake is outside the current scope of the package.
@@ -346,7 +346,7 @@ Defaults and settings:
 | Item | Default | Setting | Source |
 | --- | --- | --- | --- |
 | Long-poll hold | 50 s | Host `longPollHoldMs`. The SDK does not check its range. | `packages/cloud/src/cloud.ts:216`, `packages/cloud/src/cloud.ts:338`, `packages/cloud/src/cloud.ts:900` |
-| Wake fallback | 1 s on Workers (README). The SDK default is 5 s. | `createInProcessMailboxWake({ fallbackMs })` | `packages/cloud-dataplane/README.md:416-420`, `packages/cloud/src/stores/in-memory/mailbox-wake.ts:4` |
+| Wake fallback | 1 s on Workers (README). The SDK default is 5 s. | `createInProcessMailboxWake({ fallbackMs })` | `packages/cloud-dataplane/README.md:504-509`, `packages/cloud/src/stores/in-memory/mailbox-wake.ts:4` |
 | Daemon wait after an empty poll | 250 ms | Daemon override `longPoll.idleDelayMs` | `packages/client/src/daemon/long-poll-transport.ts:524-530`, `packages/client/src/daemon/create-daemon.ts:873-877` |
 | Presence heartbeat | 30 s | Daemon `config.presence.intervalMs`. It must stay above the minimum interval and below the TTL. | `packages/client/src/daemon/presence-publisher.ts:45-52`, `packages/client/src/daemon/create-daemon.ts:1454-1459` |
 | Presence TTL | 90 s | Host `presenceTtlMs`. The daemon `config.presence.ttlMs` only checks the cadence. | `packages/cloud/src/coordination.ts:15`, `packages/cloud/src/cloud.ts:1000`, `packages/client/src/daemon/presence-publisher.ts:87-88` |
@@ -406,12 +406,12 @@ Current behavior:
 - With `DEFAULT_RETENTION_POLICY` (`packages/cloud/src/maintenance.ts:23-29`), the `mailbox` step deletes acked rows after 1 day.
   It marks pending rows older than 7 days as `expired`. An expired row keeps its body
   (`packages/cloud/src/maintenance.ts:153-155`, `packages/cloud/src/maintenance.ts:162`,
-  `packages/cloud-dataplane/src/stores/core/mailbox.ts:320-371`).
+  `packages/cloud-dataplane/src/stores/core/mailbox.ts:321-372`).
 - Automatic retention deletes an expired row (a dead letter) once it is older than
   `mailboxUnackedRetentionMs + mailboxDeadLetterRetentionMs` (7 + 30 days by default), except the
   highest-seq dead letter of each device, which stays as its `recoverableFrom` floor (#1115).
   Before that, only the operator call `discardDeadLetter` or tenant erasure deletes it
-  (`packages/cloud-dataplane/src/cleanup.ts:262-286`, `packages/cloud-dataplane/src/tenant-erasure.ts:44`).
+  (`packages/cloud-dataplane/src/cleanup.ts:244-277`, `packages/cloud-dataplane/src/tenant-erasure.ts:41`).
   `discardDeadLetter` refuses the floor row with `cleanup_dead_letter_is_recovery_floor`; tenant erasure removes it with the rest of the tenant.
   `PostgresCloudCleanup` ships from the package root, not from `./runtime`
   (`packages/cloud-dataplane/src/index.ts:56-59`, `packages/cloud-dataplane/README.md:94-97`).
@@ -469,7 +469,7 @@ Deletion paths:
   A failed or refused call can leave the objects deleted and the bodies in place; call it again.
   Known limit: a late progress or approval report can add a row after a call. A second call deletes it, and the row TTL bounds it.
   The limits are in [security.md](security.md) (Deletion paths).
-  It needs the `taskRedactionStore` option. `createPostgresTaskRedactionStore` ships from `./runtime`, so it runs on Workers.
+  It needs the `taskRedactionStore` option. `PostgresTaskRedactionStore` ships from `./runtime`, so it runs on Workers.
 - A `shred` member chain entry deletes the key packages and scope epochs of one sealed scope, in the append that stores it
   (`packages/cloud/src/e2ee-member.ts`, `packages/cloud-dataplane/src/stores/e2ee-member.ts`).
   It records the scope in `e2ee_scope_shred` (`deploy/sql/0028_e2ee_scope_shred.sql`)
@@ -478,9 +478,9 @@ Deletion paths:
   The Host deletes without verifying the signer, and the ciphertext rows stay.
   Backup copies of the packages stay openable until each member rotates its KEM key and deletes the old private key.
   The limits are in [security.md](security.md) (Scope shred).
-- `createPostgresTenantErasure` is the only path that deletes task receipt rows
+- `PostgresTenantErasure` is the only path that deletes task receipt rows
   (`task-offer:`, `task-offer-delivered:`, `task:` and `agent-message-offer:`), `task` rows and `agent_message_admission` rows.
-  It deletes the whole tenant (`packages/cloud-dataplane/src/tenant-erasure.ts:25-59`).
+  It deletes the whole tenant (`packages/cloud-dataplane/src/tenant-erasure.ts:24-67`).
 - The only other receipt delete removes a `pairing-completion:v1:` receipt when a pairing code is issued again
   (`packages/cloud-dataplane/src/stores/pairing-codes.ts:145-151`).
 - Tenant erasure is Node-only. It imports `node:crypto` (`packages/cloud-dataplane/src/tenant-erasure.ts:9`).

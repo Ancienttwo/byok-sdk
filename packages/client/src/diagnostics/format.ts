@@ -60,7 +60,7 @@ export function formatLifecycle(lifecycle: DaemonLifecycle): string {
     case 'running':
       return `phase=running connection=${lifecycle.connection}`;
     case 'halted':
-      return `phase=halted reason=${lifecycle.reason}`;
+      return `phase=halted reason=${lifecycle.reason}${lifecycle.reason === 'protocol_negotiation_failed' ? ` httpStatus=${lifecycle.httpStatus}` : ''}`;
     default:
       return `phase=${lifecycle.phase}`;
   }
@@ -68,13 +68,13 @@ export function formatLifecycle(lifecycle: DaemonLifecycle): string {
 
 /** What an operator does about a run that ended (`halted` or `crashed`); `undefined` otherwise. */
 export function formatLifecycleRemedy(lifecycle: DaemonLifecycle): string | undefined {
-  if (lifecycle.phase === 'halted') return formatHaltRemedy(lifecycle.reason);
+  if (lifecycle.phase === 'halted') return formatHaltRemedy(lifecycle.reason, lifecycle.reason === 'protocol_negotiation_failed' ? lifecycle.httpStatus : undefined);
   if (lifecycle.phase === 'crashed') return 'the run crashed on an unexpected error: see the daemon log (a supervised service is restarted)';
   return undefined;
 }
 
 /** Issue #394: what an operator does about each halt. A restart alone fixes none of them. */
-export function formatHaltRemedy(reason: DaemonHaltReason): string {
+export function formatHaltRemedy(reason: DaemonHaltReason, httpStatus?: number): string {
   switch (reason) {
     case 'unpaired':
       return 'this device is not paired: run `byok-agent pair <code> --server <url>`, then start again';
@@ -88,6 +88,10 @@ export function formatHaltRemedy(reason: DaemonHaltReason): string {
       return 'device revoked — re-pair needed: the server confirmed this device is no longer registered. Run `byok-agent pair <code> --server <url>`, then start again; pairing registers a new device id';
     case 'handshake_rejected':
       return 'the server rejected this device\'s hello: check productId and the SDK version, or pair again, then start again';
+    case 'protocol_negotiation_failed':
+      return httpStatus === 404
+        ? 'the server answered this device\'s hello with HTTP 404: check the server base URL and that the Host mounts the messages route, then start again'
+        : `the server refused this device's hello${httpStatus === undefined ? '' : ` (HTTP ${httpStatus})`} as another wire protocol major: upgrade the server side and the daemons to the same major, then start again`;
     case 'replay_cursor_too_old':
       return 'the server no longer holds this device\'s undelivered history: pair again (or run operator recovery), then start again';
     case 'cursor_unreadable':

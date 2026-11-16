@@ -216,14 +216,14 @@ describe('daemon wiring', () => {
     daemon = createDaemonWithAdapters(await config(), [adapter]);
     await daemon.pair('code');
     await daemon.start();
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'go' }, { taskId: 'env-task', seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' }, instruction: 'go' }, { taskId: 'env-task', seq: server.nextSeq() }));
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'env-task');
     expect(adapter.startCalls).toHaveLength(1);
     expect(adapter.startCalls[0]!.ctx.env).toMatchObject({ PATH: '/usr/bin', ADAPTER_ENV_SENTINEL: '1' });
     expect(adapter.startCalls[0]!.ctx.env).not.toHaveProperty('HOST_ONLY_SENTINEL');
 
     adapter.runtimeEnvironment = async () => { throw new RuntimeEnvironmentUnavailableError('timeout'); };
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'go' }, { taskId: 'env-declined', seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' }, instruction: 'go' }, { taskId: 'env-declined', seq: server.nextSeq() }));
     const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === 'env-declined');
     expect(decline.payload).toMatchObject({
       reason: 'runtime environment unavailable: timeout',

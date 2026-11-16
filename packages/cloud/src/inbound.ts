@@ -756,10 +756,14 @@ async function applyInboundGate(
     if (rejected !== undefined) return rejected;
   }
   // Wire v7 (§3.1): after a claim every terminal echoes exactly the claimed
-  // executor; before one (a cancel, an unclaimed interruption) it carries
-  // none. A complete needs a claim, so an unclaimed complete fails here too.
+  // executor; before one, a cancel carries none. A complete needs a claim, so an
+  // unclaimed complete fails here too. An unclaimed interruption may name the
+  // executor its device admitted before a claim that never reached the cloud:
+  // `checkOfferBinding` held it to the offer, and it records no ownership.
+  const unclaimedRecovery = envelope.type === 'task.fail' && envelope.payload.recovery !== undefined
+    && attempt.ownerDeviceId === undefined;
   if ((envelope.type === 'task.complete' || envelope.type === 'task.fail' || envelope.type === 'task.cancelled')
-    && !sameExecutor(envelope.payload.executor, attempt.claimedExecutor)) return refuse('terminal_executor_mismatch');
+    && !unclaimedRecovery && !sameExecutor(envelope.payload.executor, attempt.claimedExecutor)) return refuse('terminal_executor_mismatch');
 
   // Agent identity is an exact-match boundary. A missing echo is a mismatch
   // just like a different id or profile revision; accepting it would let an
@@ -1110,9 +1114,9 @@ function sameExecutor(left: ClaimedExecutor | undefined, right: ClaimedExecutor 
 
 /**
  * Check a claim or recovery against its sealed offer, retaining each report's
- * missing-offer and archive rules. A harness target binds the claim to that
- * harness, and a harness claim needs a harness or `auto` target. A recovery
- * names only the offer: its executor, when claimed, is fenced by the caller.
+ * missing-offer and archive rules. A claim's executor, and the executor an
+ * unclaimed recovery names, must be one the offer's target allows; a claimed
+ * recovery's executor is fenced by the caller.
  */
 async function checkOfferBinding(
   stores: TenantStores,
@@ -1142,10 +1146,24 @@ async function checkOfferBinding(
     }
     return;
   }
-  if (executor === undefined) return;
   const { target } = (JSON.parse(offer.body) as { payload: { target: ExecutionTarget } }).payload;
-  if (target.lane === 'harness' && (executor.kind !== 'harness' || executor.harnessId !== target.harnessId)) return refuse(reason);
-  if (executor.kind === 'harness' && target.lane !== 'harness' && target.lane !== 'auto') return refuse(reason);
+  if (envelope.type === 'task.claim') return offerAllowsExecutor(target, envelope.payload.executor) ? undefined : refuse(reason);
+  // An unclaimed interruption may name the executor its device admitted. It is
+  // only compared here; after a claim the caller requires the claimed one.
+  const reported = envelope.payload.executor;
+  return attempt.ownerDeviceId !== undefined || reported === undefined || offerAllowsExecutor(target, reported)
+    ? undefined : refuse('terminal_executor_mismatch');
+}
+
+/**
+ * Whether an executor is one the offer's target lets the device run (wire v7
+ * §3.1): any under `auto`, else exactly the named runtime or harness. A claim
+ * and an unclaimed interruption are held to the same rule.
+ */
+function offerAllowsExecutor(target: ExecutionTarget, executor: ClaimedExecutor): boolean {
+  if (target.lane === 'auto') return true;
+  if (target.lane === 'harness') return executor.kind === 'harness' && executor.harnessId === target.harnessId;
+  return executor.kind === 'runtime' && executor.runtimeId === target.runtimeId;
 }
 
 /** The archive (#1120) removed the content, and no explicit redaction did: redaction's refusals take precedence. */

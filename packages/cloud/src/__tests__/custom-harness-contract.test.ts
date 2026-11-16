@@ -127,14 +127,13 @@ describe('custom harness protocol authority', () => {
     const { h, stores, deviceId } = await setup();
     await stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY], harnesses: inventory });
     const offer = await h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), target: { lane: 'harness', harnessId: 'acme-harness' } } });
-    // Wire v7: before any claim the recovery carries no executor.
+    // Wire v7: before any claim the recovery may name an executor the offer allows.
     const valid = { reason: 'daemon_interrupted', retryable: false, agentRef: TEST_AGENT_REF,
       recovery: { kind: 'daemon_interrupted' as const, offerId: offer.envelope.id } };
     for (const payload of [
       { ...valid, recovery: undefined, executor: ACME },
       { ...valid, recovery: { ...valid.recovery, offerId: crypto.randomUUID() } },
       { ...valid, executor: OTHER },
-      { ...valid, executor: ACME },
       { ...valid, reason: 'ordinary_failure' },
       { ...valid, retryable: true },
       { ...valid, retryable: undefined },
@@ -143,12 +142,12 @@ describe('custom harness protocol authority', () => {
     }
     const other = await h.pairDevice(TENANT_A);
     expect(await handleInboundEnvelope(stores, other.deviceId, createEnvelope('task.fail', valid, { taskId: offer.taskId })).then((result) => result.outcome)).toBe('rejected');
-    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', valid, { taskId: offer.taskId })).then((result) => result.outcome)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', { ...valid, executor: ACME }, { taskId: offer.taskId })).then((result) => result.outcome)).toBe('accepted');
     expect(await stores.tasks.get(offer.taskId)).toMatchObject({ status: 'failed' });
     expect((await stores.tasks.get(offer.taskId))?.ownerDeviceId).toBeUndefined();
     expect((await stores.tasks.get(offer.taskId))?.claimedExecutor).toBeUndefined();
     const receipt = (await h.cloud.readTerminalReceipt(TENANT_A, offer.taskId))!;
-    const projected = projectTerminalResult(offer.taskId, receipt);
+    const projected = projectTerminalResult(offer.taskId, receipt, undefined);
     expect(projected).toMatchObject({ recovery: valid.recovery, state: 'failed' });
     expect(projected).not.toHaveProperty('executor');
     // Recovery never fabricates an execution claim, including on replay.

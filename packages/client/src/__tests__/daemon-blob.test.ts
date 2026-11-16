@@ -56,7 +56,7 @@ describe('blob client (protocol §7)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },
           instruction: {
             blobRef: {
               blobId: 'instr-blob-1',
@@ -88,7 +88,7 @@ describe('blob client (protocol §7)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'runtime', runtimeId: 'claude' },
           instruction: {
             blobRef: {
               blobId: 'instr-blob-bundled-prepared',
@@ -97,7 +97,6 @@ describe('blob client (protocol §7)', () => {
               contentType: 'text/plain',
             },
           },
-          runtime: 'claude',
         },
         { taskId, seq: server.nextSeq() },
       ),
@@ -121,7 +120,7 @@ describe('blob client (protocol §7)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },
           instruction: {
             blobRef: {
               blobId: 'no-such-blob',
@@ -152,7 +151,7 @@ describe('blob client (protocol §7)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },
           instruction: {
             blobRef: {
               blobId: 'instr-blob-tampered',
@@ -178,7 +177,7 @@ describe('blob client (protocol §7)', () => {
     await setupDaemon(adapter);
 
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' }, { taskId: 'task-artifact-small', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },  instruction: 'x' }, { taskId: 'task-artifact-small', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -202,7 +201,7 @@ describe('blob client (protocol §7)', () => {
     await setupDaemon(adapter);
 
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' }, { taskId: 'task-artifact-big', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },  instruction: 'x' }, { taskId: 'task-artifact-big', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -249,7 +248,7 @@ describe('blob client (protocol §7)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' },
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },  instruction: 'x' },
           { taskId: 'task-artifact-traversal', seq: server.nextSeq() },
         ),
       );
@@ -290,7 +289,7 @@ describe('blob client (protocol §7)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' },
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },  instruction: 'x' },
           { taskId: 'task-artifact-absolute', seq: server.nextSeq() },
         ),
       );
@@ -330,7 +329,7 @@ describe('blob client (protocol §7)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' },
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },  instruction: 'x' },
           { taskId: 'task-artifact-upload-fail', seq: server.nextSeq() },
         ),
       );
@@ -372,7 +371,7 @@ describe('blob client (protocol §7)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' },
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },  instruction: 'x' },
           { taskId: 'task-artifact-regular-ok', seq: server.nextSeq() },
         ),
       );
@@ -417,7 +416,7 @@ describe('blob client (protocol §7)', () => {
         server.send(
           createEnvelope(
             'task.offer',
-            { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' },
+            { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },  instruction: 'x' },
             { taskId: 'task-artifact-symlink-outside', seq: server.nextSeq() },
           ),
         );
@@ -456,7 +455,7 @@ describe('blob client (protocol §7)', () => {
         server.send(
           createEnvelope(
             'task.offer',
-            { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' },
+            { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },  instruction: 'x' },
             { taskId: 'task-artifact-intermediate-symlink', seq: server.nextSeq() },
           ),
         );
@@ -515,7 +514,7 @@ describe('blob client (protocol §7)', () => {
         server.send(
           createEnvelope(
             'task.offer',
-            { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' },
+            { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },  instruction: 'x' },
             { taskId: 'task-artifact-toctou-swap', seq: server.nextSeq() },
           ),
         );

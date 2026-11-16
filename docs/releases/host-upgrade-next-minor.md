@@ -446,6 +446,16 @@ A v7 daemon that reaches a v6 cloud gets HTTP 400 on its hello and halts with
 `localVersion`, `httpStatus`; `peerVersion` only when the peer stated it).
 Upgrade both sides to resolve it.
 
+In `@byok-sdk/client` this is the halt reason `protocol_negotiation_failed`
+(new in `DAEMON_HALT_REASONS`). The daemon takes it when its lone hello gets a
+`rejected` outcome with `protocol_version_unsupported` (`httpStatus` 200) or a
+4xx other than 401, 403, 409, 413 and 429. `DaemonLifecycle`'s `halted` phase
+carries `httpStatus` for it, `byok-agent start`, diagnostics and the support
+bundle print it, and `whenOpen()` rejects with a `DaemonHaltError` whose `cause`
+is the `ProtocolNegotiationError`. A 404 usually means a wrong server base URL
+or a Host that does not mount the messages route. Add the reason wherever a
+Host switches on halt reasons.
+
 ### Offer `target` and claim `executor`
 
 - `task.offer` takes one required `target` in place of `runtime`,
@@ -456,11 +466,17 @@ Upgrade both sides to resolve it.
   `byok-profile` with `runtimeId: 'pi'`).
   Without one the offer declines with `native_sessions_selection_invalid`.
   `native_sessions_unsupported` no longer hides a selection violation: a
-  device checks the selection rules first (client order: phase 1).
+  device checks the selection rules first.
 - `task.claim` takes one required `executor`
   (`{ kind: 'runtime', runtimeId }` or `{ kind: 'harness', harnessId }`) in
   place of `runtime`, `harnessId` and `agentId`. `task.complete` requires it;
   `task.fail` and `task.cancelled` carry it after a claim.
+- `@byok-sdk/client`: `RuntimeTaskInput` takes `target`, and
+  `RuntimeOperationManifest.modelTarget` (the model-lane target) replaces
+  `dispatchSelection`; a custom adapter reads the model selection from
+  `manifest.modelTarget`. `taskRuntimeTarget(descriptor)` returns
+  `{ lane: 'runtime', runtimeId }` or `{ lane: 'harness', harnessId }`: pass it
+  as the offer `target`.
 - Cloud `TaskAttempt.claimedExecutor` replaces `claimedRuntime` and
   `claimedHarnessId`. Host offer and task APIs that took `runtime`,
   `harnessId` or `dispatchSelection`: phase 1.
@@ -496,6 +512,9 @@ input, selection rules, offer admission (for example
 stays optional and open: read it with `readDeclineCode`, and expect
 `unknown` with `reportedCode`. Codes stay plaintext on sealed tasks.
 `task.decline.reason` is now bounded and redacted like `task.fail.reason`.
+A v7 device puts the code only in `code`: `reason` is the detail and no longer
+starts with `<code>: ` (for example `offer_capability_missing` and the offer
+selection rules). A Host that parsed a code out of `reason` reads `code`.
 See [Decline codes](../protocol.md#decline-codes).
 
 ### Steer text bound
@@ -593,12 +612,15 @@ machine's current device. See
 
 - **Claim and terminal executor.** The cloud records the winning claim's
   `executor` as `TaskAttempt.claimedExecutor`. A replayed claim must name the
-  same executor. A harness claim needs a `harness` or `auto` target, and a
-  `harness` target needs a claim of that harness. After a claim, every
-  terminal must echo exactly that executor. Before a claim, a terminal carries
-  none: a cancel or an unclaimed `daemon_interrupted` recovery. A
-  `task.complete` with no claim is rejected. An unclaimed recovery is no
-  longer checked against the offer's target.
+  same executor. A claim's executor must be one the offer's target allows:
+  any under `auto`, otherwise exactly the named runtime or harness. After a
+  claim, every terminal must echo exactly that executor. Before a claim, a
+  cancel carries none, and a `task.complete` is rejected. An unclaimed
+  `daemon_interrupted` recovery may name the executor its device admitted
+  before a claim that never reached the cloud; it must be one the offer's
+  target allows, and it records no claim or owner. `TerminalResult.executor`
+  (and the third argument of `projectTerminalResult`) is the claimed
+  executor, so a task that was never claimed has none.
 - **Renamed inbound refusal reasons** (`INBOUND_REFUSAL_REASONS`, as an
   observer reports them; the wire codes are unchanged). Rename these strings
   if your observer matches them:
@@ -696,3 +718,75 @@ machine's current device. See
 
 - Host APIs for steer refusals and their cursors (te2): phase 1.
 - Upgrade-manifest entries for the cloud, server, client and store changes, and their API surface: phase 1 and 2. Phase 0 lists the protocol and port entries.
+
+## Removed cloud and data-plane APIs
+
+These names had no caller in the SDK or its known Hosts. Remove the import and
+use the replacement named here.
+
+### `@byok-sdk/cloud`
+
+- **Board feed client.** `BoardFeedClient`, `BoardFeedRetryableError`,
+  `BoardFeedStoppedError` and the `BoardFeed*` types are removed. Read the
+  board through the device routes or `TenantStores.board`.
+- **Host facade methods.** `ByokCloud` no longer has these methods:
+  - `completeAgentHomeProjection` and `completeInputPreparation`. The device
+    completion routes still complete both.
+  - `listBoardItems` and `acceptBoardItem`. Use the tenant board store
+    (`list`, `updateStatus`).
+  - `enqueueSealedAgentOffer` and `enqueueSealedAgentEgressOffer`, with
+    `SealedAgentDispatchInput` and `SealedAgentEgressDispatchInput`.
+    `submitSealedAgentExecution` is the hosted sealed lane. The plaintext
+    resume lanes still refuse `sealing` and `sealed` with
+    `coordination_input_invalid`.
+  - `enqueueProviderProvisioningNotice`, with
+    `ProviderProvisioningNoticeInput`.
+- **Constants and aliases.** These are removed:
+  - `CLOUD_PORT_INTERFACES`; `CLOUD_PORT_METHODS` stays.
+  - `TRUTH_RECORD_CAPABILITY` and `TRUTH_INLINE_CONTENT_TYPE`. Use
+    `CLOUD_CAPABILITIES.truthRecords`.
+  - `CapabilitiesResponseSchema` and `CapabilitiesResponse`. Use
+    `CapabilityDeclarationSchema` and `CapabilityDeclaration` from
+    `@byok-sdk/core`.
+  - `receiptRetentionClass`.
+- **In-memory projection adapters.** `InMemoryAgentMemoryProjectionStore`
+  and `InMemoryAgentMemoryProjectionAuthorizer` are no longer exported. A
+  hosted composition supplies its own projection ports.
+- **Approval identity.** Every approval observation names its `approvalId`:
+  `approval_requested`, a local `approval_resolved`, and a host approve or
+  reject. `ApprovalObservationSchema`, `ApprovalTimelineEventSchema` and
+  `PendingApproval` now require the field. A stored timeline that holds an
+  observation without one is refused when read; no id is synthesized.
+  Wire v7 starts on new stores, so a v7 store never holds one.
+- **Archive input.** `taskArchiveInput` requires `agentRef`.
+- **Error code.** `task_attempt_agent_ref_missing` is removed from
+  `CLOUD_ERROR_CODES`. Migration 0039 makes the Agent columns `NOT NULL`, so
+  the read that raised it cannot fail.
+
+### `@byok-sdk/cloud-dataplane`
+
+- **Resident Postgres wakes.** `createPostgresMailboxWake`,
+  `createPostgresTaskEventsWake`, `MailboxWakeProbeMissedError`,
+  `TaskEventsWakeProbeMissedError` and their types are removed. Use the
+  cloud's in-process wake with its bounded `fallbackMs` reread. The SQL
+  triggers stay.
+- **Composition factories.** These are removed; construct the class instead:
+  - `createPostgresCloudMaintenance` and `PostgresCloudMaintenanceOptions`:
+    use `PostgresCloudCleanup`.
+  - `createPostgresTenantErasure` and
+    `PostgresTenantErasureCompositionOptions`: use `PostgresTenantErasure`.
+  - `createPostgresTaskRedactionStore`: use `PostgresTaskRedactionStore`.
+  - `createPostgresAgentMemoryProjectionStore`: use
+    `PostgresAgentMemoryProjectionStore`.
+- **Retention policy store.** `PostgresRetentionPolicyStore`,
+  `TenantRetentionPolicy` and `TenantRetentionPolicyInput` are removed. The
+  `tenant_retention_policy` table and `runMaintenance` are unchanged: the
+  Host writes and reads the policy with SQL and passes it to maintenance.
+- **Mailbox rows.** Every outbox read validates the row's tenant with
+  `tenantId()`, so a row with an invalid `tenant_id` fails the read with
+  `ByokCoreError` `tenant_id_invalid`. Rows the SDK wrote are unaffected.
+- **Agentless retirement.** `retireAgentlessTasks` and its option and result
+  types are removed. It moved pre-0039 rows that had no Agent identity, and
+  wire v7 starts on a new database. The retired-id fence stays: a task id in
+  `task_agentless_retired` still refuses a new offer with
+  `agent_task_already_exists`.

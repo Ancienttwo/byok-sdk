@@ -16,6 +16,8 @@ import { resolveFileScopeGrant, type FileScopeGrant } from '../file-scope-guard'
 import { observationOf } from './fixtures/mcp-observation';
 import type { Session } from '../types';
 
+const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
+
 const roots: string[] = [];
 const sessions: Session[] = [];
 const servers: Server[] = [];
@@ -148,7 +150,7 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
     const g = gate(f.cwd, undefined, { home: f.root, rules: { allowWithoutAsking: [
       { id: 'allow-push', match: { toolName: 'bash', commandGlob: 'git push origin *' } },
     ] } });
-    const session = await startPreparedOperation(adapter(), { instruction: 'Run the requested shell command, then finish.' }, {
+    const session = await startPreparedOperation(adapter(), { target: PI_TARGET, instruction: 'Run the requested shell command, then finish.' }, {
       workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization,
     });
     sessions.push(session);
@@ -174,7 +176,7 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
     const rule = { id: `owner-${mode}`, description: 'Host display text only', match: { toolName: 'write', pathGlob: f.target } };
     const g = gate(f.cwd, undefined, { home: f.root, rules: mode === 'ask'
       ? { alwaysAsk: [rule] } : { allowWithoutAsking: [rule] } });
-    const session = await startPreparedOperation(adapter(), { instruction: 'write the file' }, {
+    const session = await startPreparedOperation(adapter(), { target: PI_TARGET, instruction: 'write the file' }, {
       workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization,
     });
     sessions.push(session);
@@ -212,7 +214,7 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
         ? { fileScope: await resolveFileScopeGrant({ fileScope: { mode: 'home' }, attempt: { homeAccess: 'writer' }, home: { path: f.cwd, identity: { dev: cwdIdentity.dev, ino: cwdIdentity.ino } } }) }
         : { rules: { alwaysAsk: [{ id: 'ask-salesko', match: { mcpServer: 'salesko' } }] } }),
     });
-    const session = await startPreparedOperation(adapter(), { instruction: 'Run the scripted call, then finish.' }, {
+    const session = await startPreparedOperation(adapter(), { target: PI_TARGET, instruction: 'Run the scripted call, then finish.' }, {
       workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization,
       mcpServers: { salesko: { command: process.execPath, args: [server, JSON.stringify({ recordTo })] } },
       mcpToolsetTools: observationOf({ salesko: ['echo'] }),
@@ -233,7 +235,7 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
     const allowed = gate(f.cwd, undefined, { rules: { allowWithoutAsking: [
       { id: 'allow-first-write', match: { toolName: 'write', pathGlob: f.target } },
     ] } });
-    const first = await startPreparedOperation(runtime, { instruction: 'write the file' }, {
+    const first = await startPreparedOperation(runtime, { target: PI_TARGET, instruction: 'write the file' }, {
       workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: allowed.toolAuthorization,
     });
     sessions.push(first);
@@ -247,7 +249,7 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
     const ask = gate(f.cwd, undefined, { rules: { alwaysAsk: [
       { id: 'ask-resumed-write', match: { toolName: 'write', pathGlob: f.target } },
     ] } });
-    const resumed = await startPreparedOperation(runtime, { instruction: 'write the file again', sessionRef }, {
+    const resumed = await startPreparedOperation(runtime, { target: PI_TARGET, instruction: 'write the file again', sessionRef }, {
       workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: ask.toolAuthorization,
     });
     sessions.push(resumed);
@@ -270,7 +272,7 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
     await fs.writeFile(path.join(f.agentDir, 'extensions', 'capture-env.js'),
       `import { writeFileSync } from 'node:fs'; export default () => { writeFileSync(${JSON.stringify(snapshotPath)}, JSON.stringify(process.env)); };`);
     const runtime = adapter();
-    const first = await startPreparedOperation(runtime, { instruction: 'write the file' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
+    const first = await startPreparedOperation(runtime, { target: PI_TARGET, instruction: 'write the file' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
     sessions.push(first);
     await finish(first);
     await expect(fs.stat(f.target)).rejects.toMatchObject({ code: 'ENOENT' });
@@ -294,14 +296,14 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
     expect(readToolAuthorizationGateEnv).toThrow();
     expect(await requestToolAuthorization(config, g.calls[0]!)).toMatchObject({ decision: 'deny', code: 'tool_authorization_unavailable' });
     vi.unstubAllEnvs();
-    const resumed = await startPreparedOperation(runtime, { instruction: 'write the file again', sessionRef }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
+    const resumed = await startPreparedOperation(runtime, { target: PI_TARGET, instruction: 'write the file again', sessionRef }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
     sessions.push(resumed);
     await finish(resumed);
     expect(g.summaries).toHaveLength(2);
     await expect(fs.stat(f.target)).rejects.toMatchObject({ code: 'ENOENT' });
     await resumed.close();
     approved = true;
-    const authorized = await startPreparedOperation(runtime, { instruction: 'write the file once more', sessionRef }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
+    const authorized = await startPreparedOperation(runtime, { target: PI_TARGET, instruction: 'write the file once more', sessionRef }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
     sessions.push(authorized);
     await finish(authorized);
     expect(await fs.readFile(f.target, 'utf8')).toBe('actual file content');
@@ -311,7 +313,7 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
     const f = await fixture();
     f.target = path.join(f.cwd, 'notes.md');
     const g = gate(f.cwd);
-    const session = await startPreparedOperation(adapter(), { instruction: 'write the file' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
+    const session = await startPreparedOperation(adapter(), { target: PI_TARGET, instruction: 'write the file' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
     sessions.push(session);
     await finish(session);
     expect(g.calls).toHaveLength(1);
@@ -327,7 +329,7 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
     await fs.writeFile(path.join(f.agentDir, 'extensions', 'rewrite.js'),
       `export default pi => { pi.on('tool_call', event => { if (event.toolName === 'write') event.input.path = ${JSON.stringify(rewritten)}; }); };`);
     const g = gate(f.cwd);
-    const session = await startPreparedOperation(adapter(), { instruction: 'write the file' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
+    const session = await startPreparedOperation(adapter(), { target: PI_TARGET, instruction: 'write the file' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
     sessions.push(session);
     await finish(session);
     expect(g.calls[0]).toMatchObject({ toolName: 'write', input: { path: rewritten } });
@@ -337,7 +339,7 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
 
   it('all mode passes no gate: the write runs unchanged', async () => {
     const f = await fixture();
-    const session = await startPreparedOperation(adapter(), { instruction: 'write the file' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env });
+    const session = await startPreparedOperation(adapter(), { target: PI_TARGET, instruction: 'write the file' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env });
     sessions.push(session);
     await finish(session);
     expect(await fs.readFile(f.target, 'utf8')).toBe('actual file content');
@@ -346,7 +348,7 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
   it('carries the parent gate through the real subagent scheduler into the child write', async () => {
     const f = await fixture(true);
     const g = gate(f.cwd);
-    const session = await startPreparedOperation(adapter(), { instruction: 'Delegate the file operation to hook-child' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
+    const session = await startPreparedOperation(adapter(), { target: PI_TARGET, instruction: 'Delegate the file operation to hook-child' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
     sessions.push(session);
     await finish(session);
     expect(g.calls.some(call => call.toolName === 'subagent')).toBe(true);
@@ -360,7 +362,7 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
   it('carries the parent gate into a background child in the pi-subagents runner process', async () => {
     const f = await fixture(true, 'hook-child', true);
     const g = gate(f.cwd);
-    const session = await startPreparedOperation(adapter(), { instruction: 'Delegate the file operation to hook-child in the background' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
+    const session = await startPreparedOperation(adapter(), { target: PI_TARGET, instruction: 'Delegate the file operation to hook-child in the background' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
     sessions.push(session);
     await finish(session);
     // The background runner outlives the parent turn; wait for its gated write.
@@ -385,7 +387,7 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
   it('refuses an external CLI subagent runner before it starts while the parent gate is present', async () => {
     const f = await fixture(true, 'external-child');
     const g = gate(f.cwd);
-    const session = await startPreparedOperation(adapter(), { instruction: 'Delegate the file operation to external-child' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
+    const session = await startPreparedOperation(adapter(), { target: PI_TARGET, instruction: 'Delegate the file operation to external-child' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
     sessions.push(session);
     await finish(session);
     expect(g.calls.some(call => call.toolName === 'subagent')).toBe(true);
@@ -430,7 +432,7 @@ describe('Pi workflow child launch check (subagent_launch, #1589)', () => {
     const f = await workflowFixture();
     const g = gate(f.cwd, () => ({ approved: true }), { home: f.root,
       rules: { alwaysAsk: [{ id: 'owner-subagent', description: 'Host display text only', match: { toolName: 'subagent' } }] } });
-    const session = await startPreparedOperation(adapter(), { instruction: 'Run the workflow' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
+    const session = await startPreparedOperation(adapter(), { target: PI_TARGET, instruction: 'Run the workflow' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
     sessions.push(session);
     await finish(session);
     expect(g.calls.map(call => [call.toolName, call.parentToolCallId])).toEqual([['subagent', undefined], ['subagent_launch', 'call-workflow']]);

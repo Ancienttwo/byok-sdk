@@ -12,6 +12,8 @@ import type { Session, MessageDraftDelta } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { memoryClaude } from './fixtures/memory-claude';
 
+const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
+
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 const SALESKO_MCP_FIXTURE = fileURLToPath(new URL('./fixtures/fake-salesko-mcp.mjs', import.meta.url));
 
@@ -147,7 +149,7 @@ describe('ordinary ClaudeAdapter MCP event identity against fake-claude', () => 
     const receipt = path.join(workspaceDir, 'mcp-status.ndjson');
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }) });
     // No `mcpToolsetTools`: the ordinary daemon takes no tools/list observation for Claude.
-    const session = await startPreparedOperation(adapter, { instruction }, {
+    const session = await startPreparedOperation(adapter, { target: CLAUDE_TARGET, instruction }, {
       workspaceDir,
       env: { ...process.env, ...env, FAKE_CLAUDE_MCP_STATUS_RECEIPT: receipt },
       mcpServers: { salesko: { command: process.execPath, args: [SALESKO_MCP_FIXTURE] } },

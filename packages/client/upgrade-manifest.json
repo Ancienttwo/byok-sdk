@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "956b6984cd7498c19f77348bfbf84cfe711bd835de963497ae99530e58a95925"
+    "snapshotSha256": "0658a2801057b0a6c193103b94cf57345540d8b3d3d4dd28921d097b6e8d3a53"
   },
   "configFields": {
     "status": "tracked",
@@ -657,14 +657,15 @@
     {
       "id": "wire-v7-cloud-executor",
       "impact": "breaking",
-      "summary": "@byok-sdk/cloud reads the v7 claim executor: InMemoryTaskAttemptStore.claim and TenantBoundTaskAttempts.claim take executor, SteerRejectedError.executor replaces runtime and TerminalResult.executor replaces harnessId. INBOUND_REFUSAL_REASONS renames claim_harness_mismatch to claim_executor_mismatch and terminal_harness_mismatch to terminal_executor_mismatch, removes claim_harness_and_runtime_conflict, and adds steer_refusal_id_mismatch, steer_refusal_unknown_steer and task_not_claimed. Rename the reason strings an observer matches.",
+      "summary": "@byok-sdk/cloud reads the v7 claim executor: InMemoryTaskAttemptStore.claim and TenantBoundTaskAttempts.claim take executor, SteerRejectedError.executor replaces runtime, and TerminalResult.executor replaces harnessId and is the attempt's claimed executor (absent when the task was never claimed); projectTerminalResult takes that claimed executor as a third argument. INBOUND_REFUSAL_REASONS renames claim_harness_mismatch to claim_executor_mismatch and terminal_harness_mismatch to terminal_executor_mismatch, removes claim_harness_and_runtime_conflict, and adds steer_refusal_id_mismatch, steer_refusal_unknown_steer and task_not_claimed. Rename the reason strings an observer matches.",
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
       "items": [
         "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
         "export:@byok-sdk/cloud#TenantBoundTaskAttempts",
         "export:@byok-sdk/cloud#SteerRejectedError",
         "export:@byok-sdk/cloud#TerminalResult",
-        "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS"
+        "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+        "export:@byok-sdk/cloud#projectTerminalResult"
       ]
     },
     {
@@ -673,7 +674,6 @@
       "summary": "@byok-sdk/cloud ByokCloud.readSteerRefusal and listSteerRefusals read a task's steer refusals by steer id or by revision; TenantStores.steerRefusals and TenantBoundMailbox.readMessage carry them, and @byok-sdk/core InMemoryMailboxStore implements readMessage.",
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
       "items": [
-        "export:@byok-sdk/cloud#ByokCloud",
         "export:@byok-sdk/cloud#TenantStores",
         "export:@byok-sdk/cloud#TenantBoundMailbox",
         "export:@byok-sdk/core#InMemoryMailboxStore"
@@ -682,7 +682,7 @@
     {
       "id": "wire-v7-cloud-terminal-executor",
       "impact": "breaking",
-      "summary": "@byok-sdk/cloud handleInboundEnvelope and POST /byok/messages reject a task.complete, task.fail or task.cancelled whose executor differs from TaskAttempt.claimedExecutor, including one that carries an executor before any claim and a task.complete with no claim (terminal_executor_mismatch, wire not_permitted). An unclaimed daemon_interrupted recovery is no longer compared with the offer target. Devices on v7 echo the claimed executor; nothing for the Host to change beyond the reason rename.",
+      "summary": "@byok-sdk/cloud handleInboundEnvelope and POST /byok/messages hold the executor to the claim and the offer. A task.claim whose executor the offer target does not allow is rejected (claim_offer_mismatch): any executor under auto, otherwise exactly the named runtime or harness. After a claim, a task.complete, task.fail or task.cancelled whose executor differs from TaskAttempt.claimedExecutor is rejected (terminal_executor_mismatch, wire not_permitted), and so is a task.complete with no claim and an unclaimed cancel or ordinary failure that carries an executor. An unclaimed daemon_interrupted recovery may name the executor its device admitted: it must be one the offer target allows (terminal_executor_mismatch otherwise), and it records no claim or owner. Devices on v7 echo the claimed executor; nothing for the Host to change beyond the reason rename.",
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
       "items": [
         "behavior:wire-v7-cloud-terminal-executor"
@@ -746,6 +746,171 @@
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresMailboxStore",
         "export:@byok-sdk/cloud-dataplane#TENANT_ERASURE_TABLES"
       ]
+    },
+    {
+      "id": "cloud-unused-exports-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud removes exports with no caller: BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError and the BoardFeed* types; CLOUD_PORT_INTERFACES; TRUTH_RECORD_CAPABILITY and TRUTH_INLINE_CONTENT_TYPE (use CLOUD_CAPABILITIES.truthRecords); CapabilitiesResponseSchema and CapabilitiesResponse (use CapabilityDeclarationSchema and CapabilityDeclaration from @byok-sdk/core); receiptRetentionClass; InMemoryAgentMemoryProjectionStore and InMemoryAgentMemoryProjectionAuthorizer.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#BoardFeedClient",
+        "export:@byok-sdk/cloud#BoardFeedClientOptions",
+        "export:@byok-sdk/cloud#BoardFeedItem",
+        "export:@byok-sdk/cloud#BoardFeedMode",
+        "export:@byok-sdk/cloud#BoardFeedPage",
+        "export:@byok-sdk/cloud#BoardFeedRead",
+        "export:@byok-sdk/cloud#BoardFeedRetryableError",
+        "export:@byok-sdk/cloud#BoardFeedStoppedError",
+        "export:@byok-sdk/cloud#CLOUD_PORT_INTERFACES",
+        "export:@byok-sdk/cloud#TRUTH_RECORD_CAPABILITY",
+        "export:@byok-sdk/cloud#TRUTH_INLINE_CONTENT_TYPE",
+        "export:@byok-sdk/cloud#CapabilitiesResponseSchema",
+        "export:@byok-sdk/cloud#CapabilitiesResponse",
+        "export:@byok-sdk/cloud#receiptRetentionClass",
+        "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionStore",
+        "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionAuthorizer"
+      ]
+    },
+    {
+      "id": "cloud-host-facade-methods-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud ByokCloud removes completeAgentHomeProjection and completeInputPreparation (the device completion routes still complete both), listBoardItems and acceptBoardItem (use the tenant board store), enqueueSealedAgentOffer and enqueueSealedAgentEgressOffer with SealedAgentDispatchInput and SealedAgentEgressDispatchInput (submitSealedAgentExecution is the hosted sealed lane), and enqueueProviderProvisioningNotice with ProviderProvisioningNoticeInput. ByokCloud also gains readSteerRefusal and listSteerRefusals (wire-v7-cloud-steer-refusal-reads).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#ByokCloud",
+        "export:@byok-sdk/cloud#SealedAgentDispatchInput",
+        "export:@byok-sdk/cloud#SealedAgentEgressDispatchInput",
+        "export:@byok-sdk/cloud#ProviderProvisioningNoticeInput"
+      ]
+    },
+    {
+      "id": "cloud-approval-identity-required",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud ApprovalObservationSchema, ApprovalTimelineEventSchema and PendingApproval require approvalId on approval_requested, a local approval_resolved and a host approve or reject. Every producer already sets it: the wire payloads require it and host decisions copy the pending request's id.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#ApprovalObservationSchema",
+        "export:@byok-sdk/cloud#ApprovalTimelineEventSchema",
+        "export:@byok-sdk/cloud#PendingApproval"
+      ]
+    },
+    {
+      "id": "cloud-approval-unnamed-observation-refused",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud approval timeline stores (in-memory, Postgres, SQLite) refuse to read or append an observation without approvalId instead of folding it as the single outstanding request; ByokCloud.approve and reject no longer refuse a pre-v4 unnamed request specially. No id is synthesized. Wire v7 starts on new stores, so a v7 store holds none.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "behavior:cloud-approval-unnamed-observation-refused"
+      ]
+    },
+    {
+      "id": "cloud-agentless-archive-input-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud taskArchiveInput requires agentRef. @byok-sdk/cloud-dataplane removes retireAgentlessTasks, RetireAgentlessTasksOptions and RetireAgentlessTasksResult: wire v7 starts on a new database, so no pre-0039 agentless row exists. The retired-id fence stays: a task id in task_agentless_retired refuses a new offer with agent_task_already_exists.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#taskArchiveInput",
+        "export:@byok-sdk/cloud-dataplane#retireAgentlessTasks",
+        "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksOptions",
+        "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksResult"
+      ]
+    },
+    {
+      "id": "cloud-error-agent-ref-missing-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud CLOUD_ERROR_CODES removes task_attempt_agent_ref_missing. Migration 0039 makes the task Agent columns NOT NULL, so the read that raised it cannot fail; drop any match on the code.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#CLOUD_ERROR_CODES"
+      ]
+    },
+    {
+      "id": "dataplane-unused-exports-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud-dataplane removes the resident Postgres wakes (createPostgresMailboxWake, createPostgresTaskEventsWake, MailboxWakeProbeMissedError, TaskEventsWakeProbeMissedError and their types; use the cloud's in-process wake with fallbackMs; the SQL triggers stay) and the composition factories createPostgresCloudMaintenance, createPostgresTenantErasure, createPostgresTaskRedactionStore and createPostgresAgentMemoryProjectionStore with their option types (construct PostgresCloudCleanup, PostgresTenantErasure, PostgresTaskRedactionStore or PostgresAgentMemoryProjectionStore).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud-dataplane#createPostgresMailboxWake",
+        "export:@byok-sdk/cloud-dataplane#createPostgresTaskEventsWake",
+        "export:@byok-sdk/cloud-dataplane#MailboxWakeProbeMissedError",
+        "export:@byok-sdk/cloud-dataplane#TaskEventsWakeProbeMissedError",
+        "export:@byok-sdk/cloud-dataplane#PostgresMailboxWake",
+        "export:@byok-sdk/cloud-dataplane#PostgresMailboxWakeOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWake",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWakeOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresWakeOptions",
+        "export:@byok-sdk/cloud-dataplane#createPostgresCloudMaintenance",
+        "export:@byok-sdk/cloud-dataplane#PostgresCloudMaintenanceOptions",
+        "export:@byok-sdk/cloud-dataplane#createPostgresTenantErasure",
+        "export:@byok-sdk/cloud-dataplane#PostgresTenantErasureCompositionOptions",
+        "export:@byok-sdk/cloud-dataplane#createPostgresTaskRedactionStore",
+        "export:@byok-sdk/cloud-dataplane#createPostgresAgentMemoryProjectionStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#createPostgresTaskRedactionStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#createPostgresAgentMemoryProjectionStore"
+      ]
+    },
+    {
+      "id": "dataplane-retention-policy-store-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud-dataplane removes PostgresRetentionPolicyStore, TenantRetentionPolicy and TenantRetentionPolicyInput. The tenant_retention_policy table and runMaintenance are unchanged: the Host writes and reads the policy with SQL and passes it to maintenance.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud-dataplane#PostgresRetentionPolicyStore",
+        "export:@byok-sdk/cloud-dataplane#TenantRetentionPolicy",
+        "export:@byok-sdk/cloud-dataplane#TenantRetentionPolicyInput",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresRetentionPolicyStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicy",
+        "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicyInput"
+      ]
+    },
+    {
+      "id": "dataplane-mailbox-row-tenant-validated",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud-dataplane maps every outbox row through one projection (PostgresMailboxStore reads, task cancellation and PostgresCloudCleanup dead-letter pages and replay), and it brands the row's tenant with @byok-sdk/core tenantId(). A stored row whose tenant_id is not a valid tenant id now fails that read with ByokCoreError tenant_id_invalid instead of being passed through unchecked. Rows the SDK wrote always carry a valid tenant id.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "behavior:dataplane-mailbox-row-tenant-validated"
+      ]
+    },
+    {
+      "id": "wire-v7-client-negotiation-halt",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client DAEMON_HALT_REASONS adds protocol_negotiation_failed, and DaemonLifecycle's halted phase carries httpStatus for it. The daemon halts instead of reconnecting when its lone conn.hello is refused as another wire major: a rejected outcome with protocol_version_unsupported (httpStatus 200) or a 4xx other than 401, 403, 409, 413 and 429. whenOpen() rejects with a DaemonHaltError whose cause is a ProtocolNegotiationError. Handle the new halt reason wherever halts are switched on.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/client#DAEMON_HALT_REASONS",
+        "export:@byok-sdk/client#DaemonLifecycle"
+      ]
+    },
+    {
+      "id": "wire-v7-client-execution-target",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client RuntimeTaskInput takes the offer's required target in place of runtime, harnessId and dispatchSelection, and RuntimeOperationManifest.modelTarget (the model-lane target) replaces dispatchSelection. taskRuntimeTarget returns { lane: 'runtime', runtimeId } or { lane: 'harness', harnessId }: use it as the offer target. Custom adapters read the model selection from manifest.modelTarget.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/client#RuntimeTaskInput",
+        "export:@byok-sdk/client#RuntimeOperationManifest",
+        "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
+        "export:@byok-sdk/client/adapters#taskRuntimeTarget"
+      ]
+    },
+    {
+      "id": "wire-v7-client-decline-reason-detail",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client declines carry the decline code only in task.decline code; reason is the detail alone and no longer starts with '<code>: ' (for example offer_capability_missing and the offer selection rules). Hosts that parsed a code out of reason read code instead.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-client-decline-reason-detail"
+      ]
+    },
+    {
+      "id": "wire-v7-client-selection-before-native-sessions",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client checks the offer selection rules before native-sessions support, so an offer that breaks a rule declines with the rule's code (for example native_sessions_selection_invalid for nativeSessions without an explicit Pi target) even on a device without native sessions; native_sessions_unsupported answers only an offer the rules accept.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-client-selection-before-native-sessions"
+      ]
     }
   ],
   "changes": [
@@ -784,19 +949,19 @@
       "entry": "remove-task-terminal-read"
     },
     {
-      "item": "export:@byok-sdk/client#AuthResponseInvalidError",
+      "item": "export:@byok-sdk/client#DAEMON_HALT_REASONS",
       "change": "changed",
-      "entry": "wire-v7-client-pairing-errors"
-    },
-    {
-      "item": "export:@byok-sdk/client#BlobClient",
-      "change": "changed",
-      "entry": "wire-v7-auth-manager-pair"
+      "entry": "wire-v7-client-negotiation-halt"
     },
     {
       "item": "export:@byok-sdk/client#DaemonEvent",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonLifecycle",
+      "change": "changed",
+      "entry": "wire-v7-client-negotiation-halt"
     },
     {
       "item": "export:@byok-sdk/client#DaemonLog",
@@ -809,34 +974,14 @@
       "entry": "grok-agent-user-context"
     },
     {
-      "item": "export:@byok-sdk/client#DeviceCredentialBackend",
-      "change": "changed",
-      "entry": "wire-v7-device-credential-attempt"
-    },
-    {
-      "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
-      "change": "changed",
-      "entry": "wire-v7-device-credential-attempt"
-    },
-    {
       "item": "export:@byok-sdk/client#ExpiringClassId",
       "change": "changed",
       "entry": "grok-session-store"
     },
     {
-      "item": "export:@byok-sdk/client#FirstPairingAttemptRefusedError",
-      "change": "removed",
-      "entry": "wire-v7-client-pairing-errors"
-    },
-    {
       "item": "export:@byok-sdk/client#GrokAdapterOptions",
       "change": "changed",
       "entry": "grok-agent-user-context"
-    },
-    {
-      "item": "export:@byok-sdk/client#InstallSkillPacksOptions",
-      "change": "changed",
-      "entry": "wire-v7-auth-manager-pair"
     },
     {
       "item": "export:@byok-sdk/client#LocalTeamWorkspace",
@@ -849,44 +994,24 @@
       "entry": "remove-unused-team-workspace-methods"
     },
     {
-      "item": "export:@byok-sdk/client#PairingAttemptRefusedError",
-      "change": "added",
-      "entry": "wire-v7-client-pairing-errors"
-    },
-    {
-      "item": "export:@byok-sdk/client#PairingBusyError",
-      "change": "added",
-      "entry": "wire-v7-client-pairing-errors"
-    },
-    {
-      "item": "export:@byok-sdk/client#PairingCodeRejectedError",
-      "change": "added",
-      "entry": "wire-v7-client-pairing-errors"
-    },
-    {
-      "item": "export:@byok-sdk/client#PairingInputInvalidError",
-      "change": "added",
-      "entry": "wire-v7-client-pairing-errors"
-    },
-    {
-      "item": "export:@byok-sdk/client#PairingSupersededError",
-      "change": "added",
-      "entry": "wire-v7-client-pairing-errors"
-    },
-    {
       "item": "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
     },
     {
+      "item": "export:@byok-sdk/client#RuntimeOperationManifest",
+      "change": "changed",
+      "entry": "wire-v7-client-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeTaskInput",
+      "change": "changed",
+      "entry": "wire-v7-client-execution-target"
+    },
+    {
       "item": "export:@byok-sdk/client#ServiceExitDisposition",
       "change": "removed",
       "entry": "remove-service-exit-disposition"
-    },
-    {
-      "item": "export:@byok-sdk/client#clearDeviceEnrollment",
-      "change": "changed",
-      "entry": "wire-v7-device-credential-attempt"
     },
     {
       "item": "export:@byok-sdk/client#openDaemonLog",
@@ -924,9 +1049,14 @@
       "entry": "agent-user-context-unavailable-cause"
     },
     {
-      "item": "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
+      "item": "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
       "change": "changed",
-      "entry": "wire-v7-device-credential-attempt"
+      "entry": "wire-v7-client-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#taskRuntimeTarget",
+      "change": "changed",
+      "entry": "wire-v7-client-execution-target"
     },
     {
       "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
@@ -934,14 +1064,59 @@
       "entry": "wire-v7-execution-target"
     },
     {
-      "item": "export:@byok-sdk/cloud#AuthPlane",
+      "item": "export:@byok-sdk/cloud#ApprovalObservationSchema",
       "change": "changed",
-      "entry": "wire-v7-pairing-enrollment-port"
+      "entry": "cloud-approval-identity-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ApprovalTimelineEventSchema",
+      "change": "changed",
+      "entry": "cloud-approval-identity-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedClient",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedClientOptions",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedItem",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedMode",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedPage",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedRead",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedRetryableError",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedStoppedError",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#ByokCloud",
       "change": "changed",
-      "entry": "wire-v7-cloud-steer-refusal-reads"
+      "entry": "cloud-host-facade-methods-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#ByokCloudOptions",
@@ -951,12 +1126,27 @@
     {
       "item": "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
       "change": "changed",
-      "entry": "wire-v7-pairing-product-id-bound"
+      "entry": "cloud-error-agent-ref-missing-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CLOUD_PORT_INTERFACES",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#CLOUD_STORE_NAMES",
       "change": "changed",
       "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CapabilitiesResponse",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CapabilitiesResponseSchema",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#CapabilityPorts",
@@ -967,21 +1157,6 @@
       "item": "export:@byok-sdk/cloud#CloudStores",
       "change": "changed",
       "entry": "e2ee-member-store-in-cloud-stores"
-    },
-    {
-      "item": "export:@byok-sdk/cloud#DeviceDirectory",
-      "change": "changed",
-      "entry": "wire-v7-pairing-enrollment-port"
-    },
-    {
-      "item": "export:@byok-sdk/cloud#DeviceRegistration",
-      "change": "changed",
-      "entry": "wire-v7-pairing-enrollment-port"
-    },
-    {
-      "item": "export:@byok-sdk/cloud#DeviceRegistrationResult",
-      "change": "added",
-      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud#DeviceScopedStores",
@@ -997,6 +1172,16 @@
       "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
       "change": "changed",
       "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionAuthorizer",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionStore",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#InMemoryByokCloudOptions",
@@ -1024,11 +1209,6 @@
       "entry": "device-state-delete-ports"
     },
     {
-      "item": "export:@byok-sdk/cloud#InMemoryPairingCodeStore",
-      "change": "changed",
-      "entry": "wire-v7-pairing-enrollment-port"
-    },
-    {
       "item": "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
       "change": "changed",
       "entry": "wire-v7-cloud-executor"
@@ -1044,29 +1224,24 @@
       "entry": "device-state-delete-ports"
     },
     {
-      "item": "export:@byok-sdk/cloud#PAIRING_CODE_PRODUCT_ID_MAX_LENGTH",
-      "change": "added",
-      "entry": "wire-v7-pairing-product-id-bound"
-    },
-    {
-      "item": "export:@byok-sdk/cloud#PairInput",
+      "item": "export:@byok-sdk/cloud#PendingApproval",
       "change": "changed",
-      "entry": "wire-v7-pairing-enrollment-port"
+      "entry": "cloud-approval-identity-required"
     },
     {
-      "item": "export:@byok-sdk/cloud#PairingEnrollment",
-      "change": "changed",
-      "entry": "wire-v7-pairing-enrollment-port"
+      "item": "export:@byok-sdk/cloud#ProviderProvisioningNoticeInput",
+      "change": "removed",
+      "entry": "cloud-host-facade-methods-removed"
     },
     {
-      "item": "export:@byok-sdk/cloud#PairingEnrollmentInput",
-      "change": "changed",
-      "entry": "wire-v7-pairing-enrollment-port"
+      "item": "export:@byok-sdk/cloud#SealedAgentDispatchInput",
+      "change": "removed",
+      "entry": "cloud-host-facade-methods-removed"
     },
     {
-      "item": "export:@byok-sdk/cloud#PairingEnrollmentResult",
-      "change": "added",
-      "entry": "wire-v7-pairing-enrollment-port"
+      "item": "export:@byok-sdk/cloud#SealedAgentEgressDispatchInput",
+      "change": "removed",
+      "entry": "cloud-host-facade-methods-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
@@ -1082,6 +1257,16 @@
       "item": "export:@byok-sdk/cloud#SteerRejectedError",
       "change": "changed",
       "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TRUTH_INLINE_CONTENT_TYPE",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TRUTH_RECORD_CAPABILITY",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#TaskAttempt",
@@ -1129,6 +1314,26 @@
       "entry": "in-memory-directory-device-state"
     },
     {
+      "item": "export:@byok-sdk/cloud#projectTerminalResult",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#receiptRetentionClass",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#taskArchiveInput",
+      "change": "changed",
+      "entry": "cloud-agentless-archive-input-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#MailboxWakeProbeMissedError",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED",
       "change": "removed",
       "entry": "wire-v7-dataplane-store-epoch"
@@ -1139,14 +1344,14 @@
       "entry": "wire-v7-dataplane-store-epoch"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudMaintenanceOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudStoreOptions",
       "change": "changed",
       "entry": "e2ee-composition-opt-ins"
-    },
-    {
-      "item": "export:@byok-sdk/cloud-dataplane#PostgresDeviceDirectory",
-      "change": "changed",
-      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresE2eeMemberStore",
@@ -1169,19 +1374,29 @@
       "entry": "wire-v7-dataplane-stores"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxWakeOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresNonceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
     },
     {
-      "item": "export:@byok-sdk/cloud-dataplane#PostgresPairingCodeStore",
-      "change": "changed",
-      "entry": "wire-v7-pairing-enrollment-port"
-    },
-    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresPresenceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresRetentionPolicyStore",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresStoreEpochUnsupportedError",
@@ -1194,14 +1409,94 @@
       "entry": "wire-v7-dataplane-stores"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWakeOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskSteerRefusalStore",
       "change": "added",
       "entry": "wire-v7-dataplane-stores"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTenantErasureCompositionOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresWakeOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksOptions",
+      "change": "removed",
+      "entry": "cloud-agentless-archive-input-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksResult",
+      "change": "removed",
+      "entry": "cloud-agentless-archive-input-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#TENANT_ERASURE_TABLES",
       "change": "changed",
       "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TaskEventsWakeProbeMissedError",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TenantRetentionPolicy",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TenantRetentionPolicyInput",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresAgentMemoryProjectionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresCloudMaintenance",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresMailboxWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresTaskEventsWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresTaskRedactionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresTenantErasure",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#retireAgentlessTasks",
+      "change": "removed",
+      "entry": "cloud-agentless-archive-input-removed"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED",
@@ -1217,11 +1512,6 @@
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
       "change": "changed",
       "entry": "e2ee-composition-opt-ins"
-    },
-    {
-      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceDirectory",
-      "change": "changed",
-      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresE2eeMemberStore",
@@ -1249,14 +1539,14 @@
       "entry": "postgres-device-state-delete"
     },
     {
-      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPairingCodeStore",
-      "change": "changed",
-      "entry": "wire-v7-pairing-enrollment-port"
-    },
-    {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPresenceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresRetentionPolicyStore",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresStoreEpochUnsupportedError",
@@ -1272,6 +1562,26 @@
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskSteerRefusalStore",
       "change": "added",
       "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicy",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicyInput",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#createPostgresAgentMemoryProjectionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#createPostgresTaskRedactionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/core#InMemoryMailboxStore",
@@ -1404,31 +1714,6 @@
       "entry": "wire-v7-execution-target"
     },
     {
-      "item": "export:@byok-sdk/protocol#PAIRING_CODE_INVALID_CODE",
-      "change": "added",
-      "entry": "wire-v7-pair-fencing"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#PAIRING_SUPERSEDED_CODE",
-      "change": "added",
-      "entry": "wire-v7-pair-fencing"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#PAIR_DEVICE_DIGEST_NAMESPACE",
-      "change": "added",
-      "entry": "wire-v7-pair-fencing"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH",
-      "change": "added",
-      "entry": "wire-v7-pair-field-bounds"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH",
-      "change": "added",
-      "entry": "wire-v7-pair-field-bounds"
-    },
-    {
       "item": "export:@byok-sdk/protocol#PREPARED_OFFER_DECLINE_CODES",
       "change": "added",
       "entry": "wire-v7-decline-codes"
@@ -1442,41 +1727,6 @@
       "item": "export:@byok-sdk/protocol#PROVIDER_PROFILE_BINDING_CAPABILITY",
       "change": "removed",
       "entry": "wire-v7-retired-flags-and-bounds"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#PairDeviceDigestInput",
-      "change": "added",
-      "entry": "wire-v7-pair-fencing"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#PairDeviceDigestSchema",
-      "change": "added",
-      "entry": "wire-v7-pair-fencing"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#PairRequestSchema",
-      "change": "changed",
-      "entry": "wire-v7-pair-fencing"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#PairSupersededResponse",
-      "change": "added",
-      "entry": "wire-v7-pair-fencing"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#PairSupersededResponseSchema",
-      "change": "added",
-      "entry": "wire-v7-pair-fencing"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#PairingCodeInvalidResponse",
-      "change": "added",
-      "entry": "wire-v7-pair-fencing"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#PairingCodeInvalidResponseSchema",
-      "change": "added",
-      "entry": "wire-v7-pair-fencing"
     },
     {
       "item": "export:@byok-sdk/protocol#PreparedOfferDeclineCode",
@@ -1614,19 +1864,9 @@
       "entry": "wire-v7"
     },
     {
-      "item": "export:@byok-sdk/protocol#isPairingText",
-      "change": "added",
-      "entry": "wire-v7-pair-field-bounds"
-    },
-    {
       "item": "export:@byok-sdk/protocol#offerSelectionViolation",
       "change": "changed",
       "entry": "wire-v7-execution-target"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#pairDeviceDigest",
-      "change": "added",
-      "entry": "wire-v7-pair-fencing"
     },
     {
       "item": "export:@byok-sdk/protocol#readSteerRefusalReason",

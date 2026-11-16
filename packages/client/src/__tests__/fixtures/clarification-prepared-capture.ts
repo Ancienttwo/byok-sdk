@@ -278,6 +278,7 @@ export async function startPrepared(prepared: Prepared, overrides: { taskId: str
   const offer: RuntimeTaskInput = {
     taskId: overrides.taskId,
     instruction: 'unused on the prepared lane',
+    target: { lane: 'auto' },
   } as unknown as RuntimeTaskInput;
   const result = await adapter.prepare({
     offer,

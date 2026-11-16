@@ -11,11 +11,7 @@ import { tenantId, type Clock, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 import type { ByokPool } from './pool.js';
 import { assertByokPool } from './pool-brand.js';
-import {
-  R2ObjectMaintenanceStore,
-  type R2BlobStoreOptions,
-  type R2ObjectMaintenance,
-} from './stores/r2-blobs.js';
+import type { R2ObjectMaintenance } from './stores/r2-blobs.js';
 
 const DEFAULT_BATCH_SIZE = 100;
 const DEFAULT_MAX_PAGES_PER_RUN = 10;
@@ -130,15 +126,6 @@ export interface PostgresTenantErasureOptions {
   /** Maximum R2/SQL pages one operator invocation may advance; valid range is 1..100. */
   readonly maxPagesPerRun?: number;
   /** Crash-recovery lease; a retry may take an expired lease using the operation CAS. */
-  readonly leaseMs?: number;
-}
-
-export interface PostgresTenantErasureCompositionOptions {
-  readonly pool: ByokPool;
-  readonly clock: Clock;
-  readonly objectStorage: Omit<R2BlobStoreOptions, 'objects'>;
-  readonly batchSize?: number;
-  readonly maxPagesPerRun?: number;
   readonly leaseMs?: number;
 }
 
@@ -574,20 +561,6 @@ export class PostgresTenantErasure {
     }
     return { status: 'conflict', tenantId: tenant, operationId, activeOperationId: winner.operation_id };
   }
-}
-
-/** Build the Node maintenance composition against the same direct Postgres/R2 authorities. */
-export function createPostgresTenantErasure(
-  options: PostgresTenantErasureCompositionOptions,
-): PostgresTenantErasure {
-  return new PostgresTenantErasure({
-    pool: options.pool,
-    clock: options.clock,
-    objectStorage: new R2ObjectMaintenanceStore(options.objectStorage),
-    ...(options.batchSize === undefined ? {} : { batchSize: options.batchSize }),
-    ...(options.maxPagesPerRun === undefined ? {} : { maxPagesPerRun: options.maxPagesPerRun }),
-    ...(options.leaseMs === undefined ? {} : { leaseMs: options.leaseMs }),
-  });
 }
 
 function toReadback(row: OperationRow): TenantErasureReadback {

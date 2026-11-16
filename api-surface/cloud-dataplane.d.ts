@@ -18,7 +18,6 @@
 //   DeadLetterReplayInput -> dist/cleanup.d.ts
 //   MAX_PRESIGN_TTL_SECONDS -> dist/stores/r2-blobs.d.ts
 //   MIN_PRESIGN_TTL_SECONDS -> dist/stores/r2-blobs.d.ts
-//   MailboxWakeProbeMissedError -> dist/mailbox-wake.d.ts
 //   MigrationChecksumMismatchError -> dist/migrate.d.ts
 //   MigrationFile -> dist/migrate.d.ts
 //   MigrationFilenameError -> dist/migrate.d.ts
@@ -39,7 +38,6 @@
 //   PostgresBoardStore -> dist/stores/core/board.d.ts
 //   PostgresCloudCleanup -> dist/cleanup.d.ts
 //   PostgresCloudCleanupOptions -> dist/cleanup.d.ts
-//   PostgresCloudMaintenanceOptions -> dist/cleanup.d.ts
 //   PostgresCloudStoreOptions -> dist/stores/index.d.ts
 //   PostgresCloudStores -> dist/stores/index.d.ts
 //   PostgresCoreStoreOptions -> dist/stores/core/index.d.ts
@@ -48,8 +46,6 @@
 //   PostgresE2eeMemberStore -> dist/stores/e2ee-member.d.ts
 //   PostgresInboundDedupStore -> dist/stores/dedup.d.ts
 //   PostgresMailboxStore -> dist/stores/core/mailbox.d.ts
-//   PostgresMailboxWake -> dist/mailbox-wake.d.ts
-//   PostgresMailboxWakeOptions -> dist/mailbox-wake.d.ts
 //   PostgresNonceStore -> dist/stores/nonces.d.ts
 //   PostgresObjectStorageOptions -> dist/stores/index.d.ts
 //   PostgresObjectStore -> dist/stores/core/objects.d.ts
@@ -60,23 +56,18 @@
 //   PostgresQuotaStore -> dist/stores/core/quota.d.ts
 //   PostgresRateLimitOptions -> dist/stores/rate-limiter.d.ts
 //   PostgresRequestReceiptStore -> dist/stores/receipts.d.ts
-//   PostgresRetentionPolicyStore -> dist/stores/retention-policy.d.ts
 //   PostgresSkillPackStore -> dist/stores/core/skill-pack.d.ts
 //   PostgresStoreEpochUnsupportedError -> dist/stores/store-epoch.d.ts
 //   PostgresTaskAttemptStore -> dist/stores/task-attempts.d.ts
 //   PostgresTaskCancellationStore -> dist/stores/task-cancellations.d.ts
-//   PostgresTaskEventsWake -> dist/task-events-wake.d.ts
-//   PostgresTaskEventsWakeOptions -> dist/task-events-wake.d.ts
 //   PostgresTaskRedactionStore -> dist/stores/task-redaction.d.ts
 //   PostgresTaskRedactionStoreOptions -> dist/stores/task-redaction.d.ts
 //   PostgresTaskSteerRefusalStore -> dist/stores/steer-refusals.d.ts
 //   PostgresTenantErasure -> dist/tenant-erasure.d.ts
-//   PostgresTenantErasureCompositionOptions -> dist/tenant-erasure.d.ts
 //   PostgresTenantErasureOptions -> dist/tenant-erasure.d.ts
 //   PostgresTruthCommitter -> dist/truth-committer.d.ts
 //   PostgresTruthCommitterOptions -> dist/truth-committer.d.ts
 //   PostgresTruthStore -> dist/stores/core/truth.d.ts
-//   PostgresWakeOptions -> dist/postgres-wake.d.ts
 //   R2BlobErrorCode -> dist/stores/r2-blobs.d.ts
 //   R2BlobStoreError -> dist/stores/r2-blobs.d.ts
 //   R2BlobStoreOptions -> dist/stores/r2-blobs.d.ts
@@ -88,32 +79,20 @@
 //   R2ObjectMaintenanceStore -> dist/stores/r2-blobs.d.ts
 //   R2ObjectPage -> dist/stores/r2-blobs.d.ts
 //   R2_BLOB_ERROR_CODES -> dist/stores/r2-blobs.d.ts
-//   RetireAgentlessTasksOptions -> dist/retire-agentless-tasks.d.ts
-//   RetireAgentlessTasksResult -> dist/retire-agentless-tasks.d.ts
 //   TENANT_ERASURE_ERROR_CODES -> dist/tenant-erasure.d.ts
 //   TENANT_ERASURE_TABLES -> dist/tenant-erasure.d.ts
-//   TaskEventsWakeProbeMissedError -> dist/task-events-wake.d.ts
 //   TenantErasureConflict -> dist/tenant-erasure.d.ts
 //   TenantErasureError -> dist/tenant-erasure.d.ts
 //   TenantErasureErrorCode -> dist/tenant-erasure.d.ts
 //   TenantErasureReadback -> dist/tenant-erasure.d.ts
 //   TenantErasureResult -> dist/tenant-erasure.d.ts
 //   TenantErasureStatus -> dist/tenant-erasure.d.ts
-//   TenantRetentionPolicy -> dist/stores/retention-policy.d.ts
-//   TenantRetentionPolicyInput -> dist/stores/retention-policy.d.ts
 //   createByokPool -> dist/pool.d.ts
-//   createPostgresAgentMemoryProjectionStore -> dist/stores/agent-memory-projection.d.ts
-//   createPostgresCloudMaintenance -> dist/cleanup.d.ts
 //   createPostgresCloudStores -> dist/stores/index.d.ts
 //   createPostgresCoreStores -> dist/stores/core/index.d.ts
-//   createPostgresMailboxWake -> dist/mailbox-wake.d.ts
-//   createPostgresTaskEventsWake -> dist/task-events-wake.d.ts
-//   createPostgresTaskRedactionStore -> dist/stores/task-redaction.d.ts
-//   createPostgresTenantErasure -> dist/tenant-erasure.d.ts
 //   migrate -> dist/migrate.d.ts
 //   migrationsDir -> dist/migrations-dir.d.ts
 //   readMigrationFiles -> dist/migrate.d.ts
-//   retireAgentlessTasks -> dist/retire-agentless-tasks.d.ts
 //   verifyMigrations -> dist/migrate.d.ts
 // entry @byok-sdk/cloud-dataplane/runtime
 //   ByokPool -> dist/pool.d.ts
@@ -153,7 +132,6 @@
 //   PostgresQuotaStore -> dist/stores/core/quota.d.ts
 //   PostgresRateLimitOptions -> dist/stores/rate-limiter.d.ts
 //   PostgresRequestReceiptStore -> dist/stores/receipts.d.ts
-//   PostgresRetentionPolicyStore -> dist/stores/retention-policy.d.ts
 //   PostgresSkillPackStore -> dist/stores/core/skill-pack.d.ts
 //   PostgresStoreEpochUnsupportedError -> dist/stores/store-epoch.d.ts
 //   PostgresTaskAttemptStore -> dist/stores/task-attempts.d.ts
@@ -175,17 +153,13 @@
 //   R2ObjectMaintenanceStore -> dist/stores/r2-blobs.d.ts
 //   R2ObjectPage -> dist/stores/r2-blobs.d.ts
 //   R2_BLOB_ERROR_CODES -> dist/stores/r2-blobs.d.ts
-//   TenantRetentionPolicy -> dist/stores/retention-policy.d.ts
-//   TenantRetentionPolicyInput -> dist/stores/retention-policy.d.ts
 //   createByokPool -> dist/pool.d.ts
-//   createPostgresAgentMemoryProjectionStore -> dist/stores/agent-memory-projection.d.ts
 //   createPostgresCloudStores -> dist/stores/index.d.ts
 //   createPostgresCoreStores -> dist/stores/core/index.d.ts
-//   createPostgresTaskRedactionStore -> dist/stores/task-redaction.d.ts
 // ==== @byok-sdk/cloud-dataplane dist/cleanup.d.ts ====
 import { type Clock, type MailboxMessage, type TenantId } from '@byok-sdk/core';
 import type { ByokPool } from './pool.js';
-import { type R2ObjectMaintenance, type R2ObjectMaintenanceOptions } from './stores/r2-blobs.js';
+import type { R2ObjectMaintenance } from './stores/r2-blobs.js';
 export interface ObjectStorageReconcileResult {
     readonly objectsDeleted: bigint;
     readonly objectReleasedBytes: bigint;
@@ -224,12 +198,6 @@ export interface PostgresCloudCleanupOptions {
     readonly objectStorage: R2ObjectMaintenance;
     readonly batchSize?: number;
 }
-export interface PostgresCloudMaintenanceOptions {
-    readonly pool: ByokPool;
-    readonly clock: Clock;
-    readonly objectStorage: R2ObjectMaintenanceOptions;
-    readonly batchSize?: number;
-}
 export declare class PostgresCloudCleanup {
     #private;
     constructor(options: PostgresCloudCleanupOptions);
@@ -239,34 +207,15 @@ export declare class PostgresCloudCleanup {
     discardDeadLetter(tenant: TenantId, ref: DeadLetterRef): Promise<MailboxMessage>;
     rebuildObjectUsage(tenant: TenantId): Promise<ObjectUsageRebuildResult>;
 }
-export declare function createPostgresCloudMaintenance(options: PostgresCloudMaintenanceOptions): PostgresCloudCleanup;
 // ==== @byok-sdk/cloud-dataplane dist/index.d.ts ====
 export * from './runtime.js';
 export { MigrationChecksumMismatchError, MigrationFilenameError, MigrationStateMismatchError, migrate, readMigrationFiles, verifyMigrations, } from './migrate.js';
 export type { MigrationFile, MigrationResult, MigrationStateIssue, MigrationVerificationRow, } from './migrate.js';
 export { migrationsDir } from './migrations-dir.js';
-export { PostgresCloudCleanup, createPostgresCloudMaintenance, } from './cleanup.js';
-export type { ObjectStorageReconcileResult, DeadLetterPage, DeadLetterQuery, DeadLetterRef, DeadLetterReplayInput, ObjectUsageRebuildResult, PostgresCloudCleanupOptions, PostgresCloudMaintenanceOptions, } from './cleanup.js';
-export { TENANT_ERASURE_ERROR_CODES, TENANT_ERASURE_TABLES, PostgresTenantErasure, TenantErasureError, createPostgresTenantErasure, } from './tenant-erasure.js';
-export type { PostgresTenantErasureCompositionOptions, PostgresTenantErasureOptions, TenantErasureConflict, TenantErasureErrorCode, TenantErasureReadback, TenantErasureResult, TenantErasureStatus, } from './tenant-erasure.js';
-export { retireAgentlessTasks } from './retire-agentless-tasks.js';
-export type { RetireAgentlessTasksOptions, RetireAgentlessTasksResult } from './retire-agentless-tasks.js';
-export { createPostgresMailboxWake, MailboxWakeProbeMissedError } from './mailbox-wake.js';
-export type { PostgresMailboxWake, PostgresMailboxWakeOptions } from './mailbox-wake.js';
-export { createPostgresTaskEventsWake, TaskEventsWakeProbeMissedError } from './task-events-wake.js';
-export type { PostgresTaskEventsWake, PostgresTaskEventsWakeOptions } from './task-events-wake.js';
-export type { PostgresWakeOptions } from './postgres-wake.js';
-// ==== @byok-sdk/cloud-dataplane dist/mailbox-wake.d.ts ====
-import { type MailboxWake } from '@byok-sdk/cloud';
-import { type PostgresWakeOptions } from './postgres-wake.js';
-export type PostgresMailboxWakeOptions = PostgresWakeOptions;
-export declare class MailboxWakeProbeMissedError extends Error {
-    readonly name = "MailboxWakeProbeMissedError";
-}
-export interface PostgresMailboxWake extends MailboxWake {
-    close(): Promise<void>;
-}
-export declare function createPostgresMailboxWake(options: PostgresMailboxWakeOptions): PostgresMailboxWake;
+export { PostgresCloudCleanup } from './cleanup.js';
+export type { ObjectStorageReconcileResult, DeadLetterPage, DeadLetterQuery, DeadLetterRef, DeadLetterReplayInput, ObjectUsageRebuildResult, PostgresCloudCleanupOptions, } from './cleanup.js';
+export { TENANT_ERASURE_ERROR_CODES, TENANT_ERASURE_TABLES, PostgresTenantErasure, TenantErasureError, } from './tenant-erasure.js';
+export type { PostgresTenantErasureOptions, TenantErasureConflict, TenantErasureErrorCode, TenantErasureReadback, TenantErasureResult, TenantErasureStatus, } from './tenant-erasure.js';
 // ==== @byok-sdk/cloud-dataplane dist/maintenance-errors.d.ts ====
 export declare const CLOUD_CLEANUP_ERROR_CODES: {
     readonly cleanup_invalid_input: 'cleanup_invalid_input';
@@ -344,30 +293,10 @@ export type ByokPool = Pool & {
     readonly [byokPoolBrand]: true;
 };
 export declare function createByokPool(options: ByokPoolOptions): ByokPool;
-// ==== @byok-sdk/cloud-dataplane dist/postgres-wake.d.ts ====
-export interface PostgresWakeOptions {
-    readonly connectionString: string;
-    readonly fallbackMs?: number;
-    readonly onError?: (error: Error) => void;
-    readonly probeTimeoutMs?: number;
-    readonly probeIntervalMs?: number;
-}
-// ==== @byok-sdk/cloud-dataplane dist/retire-agentless-tasks.d.ts ====
-import { type CloudCrypto } from '@byok-sdk/cloud';
-import { type Clock } from '@byok-sdk/core';
-import type { ByokPool } from './pool.js';
-export interface RetireAgentlessTasksOptions {
-    readonly clock: Clock;
-    readonly crypto: Pick<CloudCrypto, 'sha256'>;
-}
-export interface RetireAgentlessTasksResult {
-    readonly retired: Readonly<Record<string, number>>;
-}
-export declare function retireAgentlessTasks(pool: ByokPool, options: RetireAgentlessTasksOptions): Promise<RetireAgentlessTasksResult>;
 // ==== @byok-sdk/cloud-dataplane dist/runtime.d.ts ====
 export { createByokPool } from './pool.js';
 export type { ByokPool, ByokPoolOptions } from './pool.js';
-export { PostgresDeviceDirectory, PostgresInboundDedupStore, PostgresNonceStore, PostgresPairingCodeStore, PostgresProofReceiptRetentionAuthority, PostgresProofRequestReceiptStore, PostgresRequestReceiptStore, PostgresTaskAttemptStore, PostgresTaskSteerRefusalStore, PostgresTaskCancellationStore, PostgresActivityStore, PostgresAgentMessageDraftStore, PostgresApprovalTimelineStore, PostgresDeviceAssertionReplayAuthority, PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, PostgresTaskRedactionStore, createPostgresTaskRedactionStore, PostgresE2eeMemberStore, createPostgresCloudStores, POSTGRES_STORE_EPOCH_UNSUPPORTED, PostgresStoreEpochUnsupportedError, } from './stores/index.js';
+export { PostgresDeviceDirectory, PostgresInboundDedupStore, PostgresNonceStore, PostgresPairingCodeStore, PostgresProofReceiptRetentionAuthority, PostgresProofRequestReceiptStore, PostgresRequestReceiptStore, PostgresTaskAttemptStore, PostgresTaskSteerRefusalStore, PostgresTaskCancellationStore, PostgresActivityStore, PostgresAgentMessageDraftStore, PostgresApprovalTimelineStore, PostgresDeviceAssertionReplayAuthority, PostgresAgentMemoryProjectionStore, PostgresTaskRedactionStore, PostgresE2eeMemberStore, createPostgresCloudStores, POSTGRES_STORE_EPOCH_UNSUPPORTED, PostgresStoreEpochUnsupportedError, } from './stores/index.js';
 export type { PostgresCloudStoreOptions, PostgresCloudStores, PostgresObjectStorageOptions, PostgresRateLimitOptions, PostgresAgentMemoryProjectionStoreOptions, PostgresTaskRedactionStoreOptions, } from './stores/index.js';
 export { DEFAULT_MAX_ATTEMPTS, DEFAULT_PRESIGN_TTL_SECONDS, DEFAULT_RETRY_DELAY_MS, MAX_PRESIGN_TTL_SECONDS, MIN_PRESIGN_TTL_SECONDS, ObjectStoreRequestError, R2_BLOB_ERROR_CODES, R2BlobStoreError, R2CloudBlobStore, R2ObjectMaintenanceStore, } from './stores/index.js';
 export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './stores/index.js';
@@ -376,8 +305,6 @@ export { PostgresBoardStore, PostgresMailboxStore, PostgresObjectStore, Postgres
 export type { PostgresCoreStoreOptions } from './stores/core/index.js';
 export { PostgresTruthCommitter } from './truth-committer.js';
 export type { PostgresTruthCommitterOptions } from './truth-committer.js';
-export { PostgresRetentionPolicyStore } from './stores/retention-policy.js';
-export type { TenantRetentionPolicy, TenantRetentionPolicyInput } from './stores/retention-policy.js';
 export { CLOUD_CLEANUP_ERROR_CODES, CloudCleanupError } from './maintenance-errors.js';
 export type { CloudCleanupErrorCode } from './maintenance-errors.js';
 // ==== @byok-sdk/cloud-dataplane dist/stores/activity.d.ts ====
@@ -413,7 +340,6 @@ export declare class PostgresAgentMemoryProjectionStore implements AgentMemoryPr
         readonly agentId: string;
     }): Promise<AgentMemoryProjectionEraseResult>;
 }
-export declare function createPostgresAgentMemoryProjectionStore(options: PostgresAgentMemoryProjectionStoreOptions): AgentMemoryProjectionStore;
 // ==== @byok-sdk/cloud-dataplane dist/stores/agent-message-draft.d.ts ====
 import type { Clock, TenantId } from '@byok-sdk/core';
 import { type AgentMessageDraftStore, type AgentMessageDraftApplyInput, type AgentMessageDraftApplyResult, type AgentMessageDraftRow } from '@byok-sdk/cloud';
@@ -677,9 +603,9 @@ export { PostgresApprovalTimelineStore } from './approval-timeline.js';
 export type { PostgresRateLimitOptions } from './rate-limiter.js';
 export { POSTGRES_STORE_EPOCH_UNSUPPORTED, PostgresStoreEpochUnsupportedError, } from './store-epoch.js';
 export { PostgresTaskSteerRefusalStore } from './steer-refusals.js';
-export { PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, } from './agent-memory-projection.js';
+export { PostgresAgentMemoryProjectionStore } from './agent-memory-projection.js';
 export type { PostgresAgentMemoryProjectionStoreOptions } from './agent-memory-projection.js';
-export { PostgresTaskRedactionStore, createPostgresTaskRedactionStore } from './task-redaction.js';
+export { PostgresTaskRedactionStore } from './task-redaction.js';
 export { PostgresE2eeMemberStore } from './e2ee-member.js';
 export type { PostgresTaskRedactionStoreOptions } from './task-redaction.js';
 export { PostgresDeviceAssertionReplayAuthority } from './device-assertion-replay.js';
@@ -840,24 +766,6 @@ export declare class PostgresRequestReceiptStore implements RequestReceiptStore 
     }>;
     get(tenant: TenantId, key: string): Promise<RequestReceipt | undefined>;
 }
-// ==== @byok-sdk/cloud-dataplane dist/stores/retention-policy.d.ts ====
-import type { RetentionPolicy } from '@byok-sdk/cloud';
-import { type Clock, type TenantId } from '@byok-sdk/core';
-import type { ByokPool } from '../pool.js';
-export interface TenantRetentionPolicyInput extends RetentionPolicy {
-    readonly policyId: string;
-}
-export interface TenantRetentionPolicy extends TenantRetentionPolicyInput {
-    readonly tenantId: TenantId;
-    readonly updatedAt: string;
-}
-export declare class PostgresRetentionPolicyStore {
-    #private;
-    private readonly clock;
-    constructor(pool: ByokPool, clock: Clock);
-    writeRetentionPolicy(tenant: TenantId, input: TenantRetentionPolicyInput): Promise<TenantRetentionPolicy>;
-    readRetentionPolicy(tenant: TenantId): Promise<TenantRetentionPolicy>;
-}
 // ==== @byok-sdk/cloud-dataplane dist/stores/steer-refusals.d.ts ====
 import type { SteerRefusalRecord, TaskSteerRefusalStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
@@ -974,22 +882,10 @@ export declare class PostgresTaskRedactionStore implements TaskRedactionStore {
     constructor(options: PostgresTaskRedactionStoreOptions);
     redactTask(input: TaskRedactionStoreInput): Promise<TaskRedactionTaskResult>;
 }
-export declare function createPostgresTaskRedactionStore(options: PostgresTaskRedactionStoreOptions): TaskRedactionStore;
-// ==== @byok-sdk/cloud-dataplane dist/task-events-wake.d.ts ====
-import { type TaskEventsWake } from '@byok-sdk/cloud';
-import { type PostgresWakeOptions } from './postgres-wake.js';
-export type PostgresTaskEventsWakeOptions = PostgresWakeOptions;
-export declare class TaskEventsWakeProbeMissedError extends Error {
-    readonly name = "TaskEventsWakeProbeMissedError";
-}
-export interface PostgresTaskEventsWake extends TaskEventsWake {
-    close(): Promise<void>;
-}
-export declare function createPostgresTaskEventsWake(options: PostgresTaskEventsWakeOptions): PostgresTaskEventsWake;
 // ==== @byok-sdk/cloud-dataplane dist/tenant-erasure.d.ts ====
 import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { ByokPool } from './pool.js';
-import { type R2BlobStoreOptions, type R2ObjectMaintenance } from './stores/r2-blobs.js';
+import type { R2ObjectMaintenance } from './stores/r2-blobs.js';
 export declare const TENANT_ERASURE_TABLES: readonly ['object_reference', 'object_manifest', 'storage_reservation', 'storage_usage', 'storage_entitlement', 'gc_cursor', 'cleanup_job', 'tenant_retention_policy', 'skill_pack_file', 'skill_pack', 'approval_timeline_tail', 'activity_log_entry', 'activity_log_head', 'attested_record', 'board_item', 'tenant_stream', 'outbox', 'agent_memory_projection_metering_receipt', 'agent_memory_projection_head', 'agent_memory_projection_erase_fence', 'agent_egress_event', 'device_request_receipts', 'proof_request_receipt', 'agent_message_draft', 'e2ee_scope_key_package', 'e2ee_scope_epoch', 'e2ee_scope_shred', 'e2ee_member_kem_floor', 'e2ee_member_chain_entry', 'e2ee_pairing_mac', 'e2ee_member_key', 'agent_message_admission', 'task_steer_refusal', 'task', 'task_agentless_retired', 'device_presence', 'device_assertion_replay', 'device_stream', 'inbound_dedup', 'auth_nonce', 'pairing_code', 'device'];
 export declare const TENANT_ERASURE_ERROR_CODES: {
     readonly tenant_erasure_invalid_input: 'tenant_erasure_invalid_input';
@@ -1033,21 +929,12 @@ export interface PostgresTenantErasureOptions {
     readonly maxPagesPerRun?: number;
     readonly leaseMs?: number;
 }
-export interface PostgresTenantErasureCompositionOptions {
-    readonly pool: ByokPool;
-    readonly clock: Clock;
-    readonly objectStorage: Omit<R2BlobStoreOptions, 'objects'>;
-    readonly batchSize?: number;
-    readonly maxPagesPerRun?: number;
-    readonly leaseMs?: number;
-}
 export declare class PostgresTenantErasure {
     #private;
     constructor(options: PostgresTenantErasureOptions);
     readTenantErasure(tenant: TenantId, operationId: string): Promise<TenantErasureReadback | undefined>;
     eraseTenant(tenant: TenantId, operationId: string): Promise<TenantErasureResult>;
 }
-export declare function createPostgresTenantErasure(options: PostgresTenantErasureCompositionOptions): PostgresTenantErasure;
 // ==== @byok-sdk/cloud-dataplane dist/truth-committer.d.ts ====
 import { type CloudCrypto, type TruthCommitInput, type TruthCommitResult, type TruthCommitter } from '@byok-sdk/cloud';
 import { type Clock, type TenantId, type TruthRecord } from '@byok-sdk/core';

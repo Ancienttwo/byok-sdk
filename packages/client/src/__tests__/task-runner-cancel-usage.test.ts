@@ -49,7 +49,7 @@ describe('TaskRunner metering at the cancellation boundary', () => {
       maxInlineEventBytes: 4096,
     });
     await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
-      instruction: 'cancel while metering settles', runtime,
+      instruction: 'cancel while metering settles', target: { lane: 'runtime', runtimeId: runtime },
     }, { taskId: 'metered-task', seq: 1 }));
     const session = adapter.sessions[0]!;
     // Trace recorded inside the real interrupt boundary, before its receipt:

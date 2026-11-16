@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, HostOfferPlainPayloadSchema } from '@byok-sdk/protocol';
+import { createEnvelope } from '@byok-sdk/protocol';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import type { RuntimeAdapter, RuntimeOperationStartInput } from '../types';
@@ -77,7 +77,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     const prepare = vi.spyOn(adapter, 'prepare');
     await setup([adapter]);
     const taskId = 'unsupported-resume';
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'prior' }, instruction: 'x', ...(id === 'pi' ? { runtime: id } : { harnessId: id }) }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { target: { lane: 'runtime', runtimeId: id }, agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'prior' }, instruction: 'x' }, { taskId, seq: server.nextSeq() }));
     const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
     expect(decline.payload).toMatchObject({ reason: `runtime "${id}" cannot resume a session`, retryable: false });
     expect(decline.payload).not.toHaveProperty('runtimeUnavailable');
@@ -92,7 +92,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     const prepare = vi.spyOn(adapter, 'prepare');
     await setup([adapter]);
     const taskId = 'auto-unsupported-resume';
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'prior' }, instruction: 'x', agentMemory: 'none' }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'prior' }, instruction: 'x', agentMemory: 'none' }, { taskId, seq: server.nextSeq() }));
     const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
     expect(decline.payload).toMatchObject({ reason: 'no available runtime on this device can resume a session', retryable: true });
     expect(decline.payload).not.toHaveProperty('runtimeUnavailable');
@@ -108,9 +108,9 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     try {
       await setup([claude, pi]);
       const taskId = 'auto-resume-capable';
-      server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'prior' }, instruction: 'x' }, { taskId, seq: server.nextSeq() }));
+      server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'prior' }, instruction: 'x' }, { taskId, seq: server.nextSeq() }));
       const claim = await server.waitFor((e) => e.type === 'task.claim' && e.task_id === taskId);
-      expect(claim.payload).toMatchObject({ runtime: 'pi' });
+      expect(claim.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'pi' } });
       await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
       expect(prepare).not.toHaveBeenCalled();
       expect(pi.startCalls).toHaveLength(1);
@@ -124,7 +124,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     await setup([adapter]);
     supportsSelection = false;
     const taskId = 'unsupported-selection';
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', dispatchSelection: { lane: 'subscription', runtimeId: 'claude', providerId: null, modelId: 'model' } }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'subscription', runtimeId: 'claude', modelId: 'model' } }, { taskId, seq: server.nextSeq() }));
     const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
     expect(decline.payload).toMatchObject({ reason: 'runtime "claude" cannot take a dispatch selection', retryable: false });
     expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === taskId)).toBe(false);
@@ -139,11 +139,11 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       await setup([pi, claude]);
 
       server.send(
-        createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' }, { taskId: 'task-order-1', seq: server.nextSeq() }),
+        createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' }, { taskId: 'task-order-1', seq: server.nextSeq() }),
       );
 
       const claim = await server.waitFor((e) => e.type === 'task.claim');
-      expect(claim.payload).toMatchObject({ runtime: 'claude' });
+      expect(claim.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'claude' } });
       // `task.claim` is sent before `adapter.start()` is actually invoked
       // (workspace-dir creation awaits in between — see `handleOffer`) —
       // wait for `task.started` too before asserting on `startCalls`,
@@ -159,11 +159,11 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       await setup([pi]);
 
       server.send(
-        createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' }, { taskId: 'task-order-2', seq: server.nextSeq() }),
+        createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' }, { taskId: 'task-order-2', seq: server.nextSeq() }),
       );
 
       const claim = await server.waitFor((e) => e.type === 'task.claim');
-      expect(claim.payload).toMatchObject({ runtime: 'pi' });
+      expect(claim.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'pi' } });
       await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-order-2');
       expect(pi.startCalls).toHaveLength(1);
     });
@@ -176,11 +176,11 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     await setup([pi, claude, codex], { runtimePreference: ['codex', 'claude', 'pi'] });
 
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' }, { taskId: 'task-preference-1', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' }, { taskId: 'task-preference-1', seq: server.nextSeq() }),
     );
 
     const claim = await server.waitFor((e) => e.type === 'task.claim');
-    expect(claim.payload).toMatchObject({ runtime: 'codex' });
+    expect(claim.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'codex' } });
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-preference-1');
     expect(codex.startCalls).toHaveLength(1);
     expect(claude.startCalls).toHaveLength(0);
@@ -201,7 +201,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'codex' },
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'codex' } },
           { taskId, seq: server.nextSeq() },
         ),
       );
@@ -222,12 +222,12 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
+          { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
           { taskId, seq: server.nextSeq() },
         ),
       );
       const claim = await server.waitFor((e) => e.type === 'task.claim' && e.task_id === taskId);
-      expect(claim.payload).toMatchObject({ runtime: 'claude' });
+      expect(claim.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'claude' } });
       await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
       expect(blocked.startCalls).toHaveLength(0);
       expect(claude.startCalls).toHaveLength(1);
@@ -250,7 +250,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x', runtime: 'pi' },
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x', target: { lane: 'runtime', runtimeId: 'pi' } },
           { taskId: 'task-unavailable-1', seq: server.nextSeq() },
         ),
       );
@@ -305,7 +305,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
         await setup([adapter]);
         const taskId = 'task-descriptor-snapshot';
         server.send(
-          createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x', runtime: 'pi' }, { taskId, seq: server.nextSeq() }),
+          createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x', target: { lane: 'runtime', runtimeId: 'pi' } }, { taskId, seq: server.nextSeq() }),
         );
         const claim = await server.waitFor((envelope) => envelope.type === 'task.claim' && envelope.task_id === taskId);
         await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === taskId);
@@ -355,7 +355,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
           'task.offer',
           { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
             instruction: 'x',
-            dispatchSelection: {
+            target: {
               lane: 'byok',
               runtimeId: 'pi',
               providerId: 'openai',
@@ -376,12 +376,12 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       }).toEqual({ declined: true, claimed: false, prepares: 1, started: false, spawns: 0 });
     });
 
-    it('selects the adapter from dispatchSelection when the legacy runtime field is absent', async () => {
+    it('selects the adapter from a byok target', async () => {
       const pi = new StubRuntimeAdapter('pi');
       const claude = new StubRuntimeAdapter('claude');
       await setup([claude, pi]);
 
-      const dispatchSelection = {
+      const target = {
         lane: 'byok' as const,
         runtimeId: 'pi' as const,
         providerId: 'openai',
@@ -390,43 +390,16 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x', dispatchSelection },
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x', target },
           { taskId: 'task-selection-1', seq: server.nextSeq() },
         ),
       );
 
       const claim = await server.waitFor((e) => e.type === 'task.claim');
-      expect(claim.payload).toMatchObject({ runtime: 'pi' });
+      expect(claim.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'pi' } });
       await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-selection-1');
-      expect(pi.startCalls[0]?.task.dispatchSelection).toEqual(dispatchSelection);
+      expect(pi.startCalls[0]?.task.target).toEqual(target);
       expect(claude.startCalls).toHaveLength(0);
-    });
-
-    it.each(['writer', 'memory-reader'] as const)('declines a contradictory legacy runtime before %s home-busy admission', async (access) => {
-      const homeAccess = access === 'writer' ? undefined : access;
-      const pi = new StubRuntimeAdapter('pi');
-      const claude = new StubRuntimeAdapter('claude');
-      await setup([claude, pi], { maxConcurrentReaderAttemptsPerAgentHome: 1 });
-      const agentRef = freshTestAgentRef();
-      server.send(createEnvelope('task.offer', {
-        agentRef, ...FRESH_OFFER, instruction: 'hold home', homeAccess,
-      }, { taskId: 'task-selection-holder', seq: server.nextSeq() }));
-      await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-selection-holder');
-
-      // The runtime mismatch and the harness conflict both fail; the first rule wins on Host and device alike.
-      const contradictory = { agentRef, ...FRESH_OFFER, homeAccess, instruction: 'x', runtime: 'claude', harnessId: 'acme-harness',
-        dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'gpt-5.2' } } as const;
-      server.send(createEnvelope('task.offer', contradictory, { taskId: 'task-selection-2', seq: server.nextSeq() }));
-
-      const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === 'task-selection-2');
-      expect(decline.payload).toMatchObject({ retryable: false, agentRef, code: 'runtime_selection_mismatch',
-        reason: 'runtime_selection_mismatch: runtime claude does not match dispatchSelection.runtimeId pi' });
-      expect(HostOfferPlainPayloadSchema.safeParse(contradictory).error?.issues.map((issue) => (issue as { params?: unknown }).params))
-        .toEqual([{ rule: 'runtime_selection_mismatch' }]);
-      expect(server.received.filter((e) => e.type === 'task.decline' && e.task_id === 'task-selection-2')).toHaveLength(1);
-      expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === 'task-selection-2')).toBe(false);
-      expect(pi.startCalls).toHaveLength(0);
-      expect(claude.startCalls).toHaveLength(1);
     });
   });
 });

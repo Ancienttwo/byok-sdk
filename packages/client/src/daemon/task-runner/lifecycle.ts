@@ -1,6 +1,6 @@
 // `TaskRunner` members for shutdown, teardown, limits, cancel and steer
 // (see ./support.ts for how a member module runs).
-import { createEnvelope } from '@byok-sdk/protocol';
+import { createEnvelope, steerRefusalEnvelopeId, type SteerRefusalReason } from '@byok-sdk/protocol';
 import { SteerUnsupportedError } from '../../types.js';
 import { RuntimeDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
 import { DAEMON_TASK_FAILURE } from '../task-failure.js';
@@ -288,13 +288,27 @@ export async function handleCancel(this: TaskRunner, taskId: string, reason: str
   await receipt;
 }
 
-export async function handleSteer(this: TaskRunner, taskId: string, text: string): Promise<void> {
+/**
+ * Reports a steer this device received and did not deliver to the runtime
+ * (wire v7, #2009). The envelope id derives from the steer's id, so every
+ * replay of one refusal is the same envelope; it carries no content, so it is
+ * plaintext on a sealed task too.
+ */
+export async function refuseSteer(this: TaskRunner, taskId: string, steerMessageId: string, reason: SteerRefusalReason): Promise<void> {
+  this['deps'].send(createEnvelope('task.steer_refused', { steerMessageId, reason }, { taskId, id: await steerRefusalEnvelopeId(steerMessageId) }));
+}
+
+export async function handleSteer(this: TaskRunner, taskId: string, steerMessageId: string, text: string): Promise<void> {
   const active = this['tasks'].get(taskId);
-  if (!active) return;
+  if (!active) {
+    await refuseSteer.call(this, taskId, steerMessageId, 'task_not_active');
+    return;
+  }
   if (active.adapter.descriptor.capabilities.steer !== true) {
     console.error(
       `[byok/client] inbound task.steer for task ${taskId} rejected: runtime "${active.adapter.descriptor.id}" declares no steering channel — acked without retry; this envelope should have been gated server-side`,
     );
+    await refuseSteer.call(this, taskId, steerMessageId, 'steer_unsupported');
     return;
   }
   try {
@@ -304,6 +318,7 @@ export async function handleSteer(this: TaskRunner, taskId: string, text: string
       console.error(
         `[byok/client] inbound task.steer for task ${taskId} rejected: runtime "${err.runtimeId}" has no steering channel (${err.message}) — acked without retry; this envelope should have been gated server-side`,
       );
+      await refuseSteer.call(this, taskId, steerMessageId, 'steer_unsupported');
       return;
     }
     // OAR refuses an input over the runtime's byte bound (agy) before sending it; a redelivery would be refused the same way.
@@ -311,6 +326,7 @@ export async function handleSteer(this: TaskRunner, taskId: string, text: string
       console.error(
         `[byok/client] inbound task.steer for task ${taskId} dropped: runtime "${active.adapter.descriptor.id}" refused it before delivery (${err.message}) — acked without retry`,
       );
+      await refuseSteer.call(this, taskId, steerMessageId, 'input_too_large');
       return;
     }
     throw err;

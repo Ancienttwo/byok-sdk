@@ -3,7 +3,7 @@
 import { awaitAdmission } from '../admission-wait.js';
 import { observeRuntimeDetection } from '../../runtime-detection.js';
 import { AGENT_USER_CONTEXT_WINDOWS_REMEDY, runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable.js';
-import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../../types.js';
+import { freezeRuntimeAdapterDescriptor, modelLaneTarget, type RuntimeAdapter } from '../../types.js';
 import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment.js';
 import type { McpStdioServerConfig } from '../../types.js';
 import type { ExecutionScratch } from '../retention/scratch.js';
@@ -22,7 +22,10 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     readerAttempt, requiredToolsets, resolvedMcp, blobAbort,
   } = input;
   const offered = runtimeTaskInput(payload);
-  const requestedRuntime = payload.nativeSessions === undefined ? payload.harnessId ?? payload.dispatchSelection?.runtimeId ?? payload.runtime : 'pi';
+  // `auto` leaves the pick to device preference. A native-sessions offer
+  // reached here only with an explicit Pi target (selection rule 3).
+  const { target } = payload;
+  const requestedRuntime = target.lane === 'auto' ? undefined : target.lane === 'harness' ? target.harnessId : target.runtimeId;
   const requiresAgentMemoryMcp = preparation === undefined && ordinaryMemoryMcp;
   const mcpToolApprovals = resolvedMcp?.ok ? resolvedMcp.mcpToolApprovals : undefined;
   let pick: PickResult;
@@ -34,13 +37,13 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
           || (preparation === undefined && (messageRequirement !== undefined || terminalProjection?.mode === 'result-document'))
           || requiresAgentMemoryMcp || preparedMemorySelected,
         resume: offered.sessionRef !== undefined,
-        dispatchSelection: payload.dispatchSelection !== undefined,
+        dispatchSelection: modelLaneTarget(target) !== undefined,
         preparedInput: preparation !== undefined,
       },
       blobAbort.signal,
     );
   } catch (error) {
-    if (!admissionWithdrawn()) decline(`runtime detection failed: ${outboundErrorMessage(error)}`, true);
+    if (!admissionWithdrawn()) decline({ reason: `runtime detection failed: ${outboundErrorMessage(error)}`, retryable: true });
     return undefined;
   }
   if (admissionWithdrawn()) return undefined;
@@ -48,22 +51,26 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     // The open code names the family; the nested cause is the machine-readable
     // classification (#1103 D6). An older server strips the nested field and
     // still records the code.
-    decline(pick.reason, pick.retryable, pick.runtimeUnavailable === undefined ? undefined : 'runtime_unavailable', pick.runtimeUnavailable);
+    decline({
+      reason: pick.reason,
+      retryable: pick.retryable,
+      ...(pick.runtimeUnavailable === undefined ? {} : { code: 'runtime_unavailable', runtimeUnavailable: pick.runtimeUnavailable }),
+    });
     return undefined;
   }
   if (payload.nativeSessions !== undefined && pick.descriptor.memoryLane === undefined) {
-    decline('native_sessions_unsupported', false, 'native_sessions_unsupported');
+    decline({ reason: 'native_sessions_unsupported', retryable: false, code: 'native_sessions_unsupported' });
     return undefined;
   }
   if (readerAttempt && pick.descriptor.capabilities.durableLane === true) {
     // Durable Pi binds its replica to the canonical home as its cwd.
-    decline('durable Pi runs only in the canonical Agent home; it does not run memory-reader Attempts', false);
+    decline({ reason: 'durable Pi runs only in the canonical Agent home; it does not run memory-reader Attempts', retryable: false });
     return undefined;
   }
   if (payload.agentMemoryCommit !== undefined && pick.descriptor.capabilities.durableLane === true) {
     // A durable Attempt runs on after a daemon restart, where the crash
     // recovery of the copy would roll it back while it is alive.
-    decline('agent_memory_commit_unavailable: agentMemoryCommit does not run on the durable lane', false);
+    decline({ reason: 'agentMemoryCommit does not run on the durable lane', retryable: false, code: 'agent_memory_commit_unavailable' });
     return undefined;
   }
   // The environment EVERY child process of this task receives, under the
@@ -76,9 +83,11 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     ({ env: runtimeEnv } = await pick.adapter.runtimeEnvironment());
   } catch (error) {
     if (!(error instanceof RuntimeEnvironmentUnavailableError)) throw error;
-    decline(`runtime environment unavailable: ${error.reason}`, false, 'runtime_unavailable', {
-      cause: 'environment_unavailable',
-      code: error.reason,
+    decline({
+      reason: `runtime environment unavailable: ${error.reason}`,
+      retryable: false,
+      code: 'runtime_unavailable',
+      runtimeUnavailable: { cause: 'environment_unavailable', code: error.reason },
     });
     return undefined;
   }
@@ -96,7 +105,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   try {
     scratch = await input.acquireScratch();
   } catch (error) {
-    if (!admissionWithdrawn()) decline(`execution scratch unavailable: ${outboundErrorMessage(error)}`, true);
+    if (!admissionWithdrawn()) decline({ reason: `execution scratch unavailable: ${outboundErrorMessage(error)}`, retryable: true });
     return undefined;
   }
   if (admissionWithdrawn()) return undefined;
@@ -121,7 +130,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     }
     taskMcpServers = await this['withAgentResultMcp'](taskMcpServers, taskId, terminalProjection, scratch);
   } catch (error) {
-    if (!admissionWithdrawn()) decline(`execution scratch unavailable: ${outboundErrorMessage(error)}`, true);
+    if (!admissionWithdrawn()) decline({ reason: `execution scratch unavailable: ${outboundErrorMessage(error)}`, retryable: true });
     return undefined;
   }
   // Only the adapters that register projected toolset tools themselves
@@ -136,7 +145,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
       const preflight = this['deps'].agentMessageMcpPreflight;
       await phase.admission.time('messageHelperPreflightMs', () => preflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, mcpEnv));
     } catch (error) {
-      decline(`required Agent message helper preflight failed: ${outboundErrorMessage(error)}`, false);
+      decline({ reason: `required Agent message helper preflight failed: ${outboundErrorMessage(error)}`, retryable: false });
       return undefined;
     }
   }
@@ -145,7 +154,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
       const preflight = this['deps'].agentResultMcpPreflight;
       await phase.admission.time('resultHelperPreflightMs', () => preflight(taskMcpServers![AGENT_RESULT_MCP_SERVER_NAME]!, mcpEnv));
     } catch (error) {
-      decline(`required Agent result helper preflight failed: ${outboundErrorMessage(error)}`, false);
+      decline({ reason: `required Agent result helper preflight failed: ${outboundErrorMessage(error)}`, retryable: false });
       return undefined;
     }
   }
@@ -154,7 +163,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
       // A `read` task, which includes every reader, is sealed `read` and its helper lists only `memory_recall`.
       taskMcpServers = await this['withAgentMemoryMcp'](taskMcpServers, taskId, agentRef, ordinaryMemoryMode, this['deps'].agentMemoryMcpBin!, 'granted', scratch);
     } catch (error) {
-      decline(`Agent memory MCP configuration failed: ${errorMessage(error)}`, false);
+      decline({ reason: `Agent memory MCP configuration failed: ${errorMessage(error)}`, retryable: false });
       return undefined;
     }
   }
@@ -206,10 +215,10 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
       else if (failure === undefined) failure = { serverName, error: result.reason };
     }
     if (failure !== undefined) {
-      decline(
-        `required MCP toolset server "${failure.serverName}" could not be observed: ${outboundErrorMessage(failure.error)}`,
-        !(failure.error instanceof McpAuthorityError),
-      );
+      decline({
+        reason: `required MCP toolset server "${failure.serverName}" could not be observed: ${outboundErrorMessage(failure.error)}`,
+        retryable: !(failure.error instanceof McpAuthorityError),
+      });
       return undefined;
     }
     mcpToolsetTools = Object.freeze(observed);
@@ -225,12 +234,12 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
       ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
     }), blobAbort.signal);
   } catch (error) {
-    if (!admissionWithdrawn()) decline(`runtime preparation failed: ${outboundErrorMessage(error)}`, true);
+    if (!admissionWithdrawn()) decline({ reason: `runtime preparation failed: ${outboundErrorMessage(error)}`, retryable: true });
     return undefined;
   }
   if (admissionWithdrawn()) return undefined;
   if (prepared.kind === 'reject') {
-    decline(prepared.reason, prepared.retryable);
+    decline({ reason: prepared.reason, retryable: prepared.retryable });
     return undefined;
   }
   // `approveTools` is a grant, projected only to a runtime that declares

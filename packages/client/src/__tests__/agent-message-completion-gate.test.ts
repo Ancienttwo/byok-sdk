@@ -66,7 +66,7 @@ describe('required Agent message completion gate', () => {
     const agentRef = { agentId: 'missing-result-agent', profileRevision: '1' };
     try {
       await runner.handleEnvelope(createEnvelope('task.offer', {
-        instruction: 'reply', runtime: 'pi', agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
         terminalProjection: { mode: 'result-document', contract: 'outcome.v1', schema: { type: 'object' } },
       }, { taskId, seq: 1 }));
@@ -107,7 +107,7 @@ describe('required Agent message completion gate', () => {
     const taskId = `missing-result-${mode}`;
     try {
       await runner.handleEnvelope(createEnvelope('task.offer', {
-        instruction: 'reply', runtime: 'pi', agentRef: { agentId: 'missing-result-agent', profileRevision: '1' }, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: { agentId: 'missing-result-agent', profileRevision: '1' }, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
         terminalProjection: { mode: 'result-document', contract: 'outcome.v1', schema: { type: 'object' } },
       }, { taskId, seq: 1 }));
@@ -128,7 +128,7 @@ describe('required Agent message completion gate', () => {
     const { runner, adapter, sent, deps } = await cancellationFixture();
     const taskId = 'cancel-publish-task';
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'reply', runtime: 'pi',
+      instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' },
       agentRef: { agentId: 'cancel-agent', profileRevision: '1' }, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId, seq: 1 }));
@@ -189,7 +189,7 @@ describe('required Agent message completion gate', () => {
       });
       const taskId = `pre-active-${index}`;
       const offer = runner.handleEnvelope(createEnvelope('task.offer', {
-        instruction: 'reply', runtime: 'pi',
+        instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef: { agentId: 'pre-active-agent', profileRevision: '1' }, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       }, { taskId, seq: index * 2 + 1 }));
@@ -279,7 +279,7 @@ describe('required Agent message completion gate', () => {
     let restoreRevoke = () => {};
     try {
       offer = runner.handleEnvelope(createEnvelope('task.offer', {
-        instruction: 'reply', runtime: 'pi',
+        instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef: { agentId: 'revoke-failure-agent', profileRevision: '1' }, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       }, { taskId, seq: 1 }));
@@ -343,7 +343,7 @@ describe('required Agent message completion gate', () => {
     let restoreActivate = () => {};
     try {
       offer = runner.handleEnvelope(createEnvelope('task.offer', {
-        instruction: 'reply', runtime: 'pi',
+        instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef: { agentId: 'startup-agent', profileRevision: '1' }, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       }, { taskId, seq: 1 }));
@@ -380,7 +380,7 @@ describe('required Agent message completion gate', () => {
     const { runner, adapter, sent } = await cancellationFixture();
     const taskId = 'activation-sync-cancel';
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'reply', runtime: 'pi',
+      instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' },
       agentRef: { agentId: 'sync-agent', profileRevision: '1' }, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId, seq: 1 }));
@@ -421,7 +421,7 @@ describe('required Agent message completion gate', () => {
   it('ordinary failure preserves admission recovery for a message already handed to transport', async () => {
     const { runner, adapter } = await cancellationFixture();
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'reply', runtime: 'pi',
+      instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' },
       agentRef: { agentId: 'failure-agent', profileRevision: '1' }, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId: 'failure-after-send', seq: 1 }));
@@ -497,7 +497,7 @@ describe('required Agent message completion gate', () => {
       const taskId = 'refused-task';
       const agentRef = { agentId: 'refused-agent', profileRevision: '1' };
       await runner.handleEnvelope(createEnvelope('task.offer', {
-        instruction: 'reply', runtime: 'pi', agentRef,
+        instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef,
         session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       }, { taskId, seq: 1 }));
@@ -584,7 +584,7 @@ describe('required Agent message completion gate', () => {
       agentMessageMcpPreflight: async () => { throw new Error('unknown command'); },
     });
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'send one reply', runtime: 'codex',
+      instruction: 'send one reply', target: { lane: 'runtime', runtimeId: 'codex' },
       agentRef: { agentId: 'agent-message', profileRevision: 'profile-r1' },
       session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
@@ -621,7 +621,7 @@ describe('required Agent message completion gate', () => {
     const taskId = 'message-task';
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'send one reply', runtime: 'pi', agentRef,
+      instruction: 'send one reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef,
       session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId, seq: 1 }));
@@ -681,7 +681,7 @@ describe('required Agent message completion gate', () => {
 
     const refusedTaskId = 'message-task-refused';
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'send one refused reply', runtime: 'pi', agentRef,
+      instruction: 'send one refused reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef,
       session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId: refusedTaskId, seq: 4 }));
@@ -738,7 +738,7 @@ describe('required Agent message completion gate', () => {
     const taskId = 'message-task-auto';
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'send one reply', runtime: 'pi', agentRef,
+      instruction: 'send one reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef,
       session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId, seq: 1 }));
@@ -781,7 +781,7 @@ describe('required Agent message completion gate', () => {
     const taskId = 'message-task-empty';
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'send one reply', runtime: 'pi', agentRef,
+      instruction: 'send one reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef,
       session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId, seq: 1 }));
@@ -816,7 +816,7 @@ describe('required Agent message completion gate', () => {
     const taskId = 'message-task-cap';
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'send one reply', runtime: 'pi', agentRef,
+      instruction: 'send one reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef,
       session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 8 },
     }, { taskId, seq: 1 }));
@@ -866,7 +866,7 @@ describe('required Agent message completion gate', () => {
     });
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'send one reply', runtime: 'pi', agentRef,
+      instruction: 'send one reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef,
       session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId, seq: 1 }));

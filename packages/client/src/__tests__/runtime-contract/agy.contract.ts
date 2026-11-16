@@ -119,11 +119,11 @@ async function resumed() {
   try {
     const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home: await ownedHome(), resolveBin }), provider.origin);
     const resources = { workspaceDir: box.workspace, env: { ...baseEnv(box.home), GEMINI_API_KEY: REAL_KEY, ...recorder.env } };
-    const opened: Session = await startPreparedOperation(runtime, { instruction: 'First.' }, resources);
+    const opened: Session = await startPreparedOperation(runtime, { target: { lane: 'harness', harnessId: 'agy' }, instruction: 'First.' }, resources);
     for await (const event of opened.events) if (event.type === 'turn_end') break;
     const sessionRef = opened.sessionRef;
     await opened.close();
-    const again = await startPreparedOperation(runtime, { instruction: 'Second.', sessionRef }, resources);
+    const again = await startPreparedOperation(runtime, { target: { lane: 'harness', harnessId: 'agy' }, instruction: 'Second.', sessionRef }, resources);
     const events: AgentEvent[] = [];
     for await (const event of again.events) {
       events.push(event as AgentEvent);

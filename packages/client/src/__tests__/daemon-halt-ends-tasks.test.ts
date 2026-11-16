@@ -62,7 +62,7 @@ describe('#1119 a halted daemon ends its active tasks', () => {
     const record = await daemon!.pair('pairing-code');
     await daemon!.start();
     server.send(createEnvelope('task.offer', {
-      instruction: 'long work', agentRef: { agentId: 'halt-agent', profileRevision: 'r1' }, ...FRESH_OFFER,
+      instruction: 'long work', agentRef: { agentId: 'halt-agent', profileRevision: 'r1' }, ...FRESH_OFFER, target: { lane: 'auto' },
     }, { taskId, seq: server.nextSeq() }));
     await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === taskId);
     expect(adapter.sessions).toHaveLength(1);

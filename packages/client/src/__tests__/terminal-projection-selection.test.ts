@@ -79,7 +79,7 @@ async function harness(overrides: Partial<TaskRunnerDeps> = {}) {
 
 async function offerResult(runner: TaskRunner, taskId: string, terminalProjection: unknown = SELECTION): Promise<void> {
   await runner.handleEnvelope(createEnvelope('task.offer', {
-    ...FRESH_OFFER, instruction: 'review', runtime: 'pi', agentRef: AGENT_REF,
+    ...FRESH_OFFER, instruction: 'review', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF,
     terminalProjection: terminalProjection as typeof SELECTION,
   }, { taskId, seq: 1 }));
 }
@@ -318,7 +318,7 @@ describe('submit_result with a required Agent message (R10)', () => {
     });
     const taskId = 'message-and-result';
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      session: { mode: 'fresh' }, instruction: 'reply and review', runtime: 'pi', agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      session: { mode: 'fresh' }, instruction: 'reply and review', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       terminalProjection: SELECTION,
     }, { taskId, seq: 1 }));
@@ -351,7 +351,7 @@ describe('submit_result with a required Agent message (R10)', () => {
     });
     const taskId = 'message-no-result';
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      session: { mode: 'fresh' }, instruction: 'reply', runtime: 'pi', agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      session: { mode: 'fresh' }, instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       terminalProjection: SELECTION,
     }, { taskId, seq: 1 }));

@@ -70,7 +70,7 @@ function makeRunner(
 
 async function offer(runner: TaskRunner, taskId: string): Promise<void> {
   await runner.handleEnvelope(createEnvelope(
-    'task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId, seq: 1 },
+    'task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId, seq: 1 },
   ));
 }
 
@@ -333,7 +333,7 @@ describe('fileScope fail-closed admission through the task runner', () => {
     const adapter = new GateCapturingAdapter(AUTO_CAPABLE, 'claude');
     const sent: Envelope[] = [];
     await offer(makeRunner(adapter, sent, homePolicy), 'scope-claude');
-    expect(declineReason(sent)).toMatch(/^file_scope_unsupported: runtime claude /);
+    expect(sent.find((envelope) => envelope.type === 'task.decline')?.payload).toMatchObject({ code: 'file_scope_unsupported', reason: expect.stringMatching(/^runtime claude /) });
     expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(false);
     expect(adapter.inputs).toEqual([]);
   });
@@ -354,7 +354,7 @@ describe('fileScope fail-closed admission through the task runner', () => {
     const sent: Envelope[] = [];
     await offer(makeRunner(adapter, sent,
       () => ({ default: 'auto', byRuntime: { pi: 'all' }, fileScope: { mode: 'home' } })), 'scope-all');
-    expect(declineReason(sent)).toMatch(/^file_scope_conflicts_with_all: /);
+    expect(sent.find((envelope) => envelope.type === 'task.decline')?.payload).toMatchObject({ code: 'file_scope_conflicts_with_all', reason: expect.not.stringContaining('file_scope_conflicts_with_all') });
     expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(false);
     expect(adapter.inputs).toEqual([]);
   });
@@ -491,7 +491,7 @@ describe('fileScope for memory-reader attempts (#1422)', () => {
       { onFileScopeAudit: (event) => audits.push(event) });
     const agentRef = freshTestAgentRef();
     const readerOffer = (taskId: string, session: typeof FRESH_OFFER | { session: { mode: 'resume'; sessionRef: string } }) => runner.handleEnvelope(createEnvelope(
-      'task.offer', { agentRef, ...session, instruction: 'read memory', homeAccess: 'memory-reader' }, { taskId, seq: 1 }));
+      'task.offer', { target: { lane: 'auto' }, agentRef, ...session, instruction: 'read memory', homeAccess: 'memory-reader' }, { taskId, seq: 1 }));
     await readerOffer('reader-fresh', FRESH_OFFER);
     const fresh = fileScopeGateBinding(adapter.inputs[0]!.toolAuthorization!)!.grant;
     expect(fresh).toMatchObject({ home: { access: 'read' }, run: { id: 'run', access: 'write', path: adapter.inputs[0]!.manifest.cwd } });

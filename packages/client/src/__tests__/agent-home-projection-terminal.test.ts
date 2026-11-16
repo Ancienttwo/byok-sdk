@@ -61,6 +61,7 @@ describe('terminal evidence of the applied Agent-home projection (#318)', () => 
 
   function offer(taskId: string, agentId: string, profileRevision: string): void {
     server.send(createEnvelope('task.offer', {
+      target: { lane: 'auto' },
       ...FRESH_OFFER, instruction: 'agent work', agentRef: { agentId, profileRevision },
     }, { taskId, seq: server.nextSeq() }));
   }

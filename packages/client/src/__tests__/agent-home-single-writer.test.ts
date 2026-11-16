@@ -106,10 +106,10 @@ describe('canonical Agent home single writer (WP0)', () => {
     runtime?: RuntimeId,
   ): Envelope {
     return createEnvelope('task.offer', {
+      target: runtime === undefined ? { lane: 'auto' } : { lane: 'runtime', runtimeId: runtime },
       instruction: `work for ${agentId}`,
       agentRef: { agentId, profileRevision: 'r1' },
       ...FRESH_OFFER,
-      ...(runtime === undefined ? {} : { runtime }),
     }, { taskId, seq: server.nextSeq() });
   }
 
@@ -378,7 +378,7 @@ describe('canonical Agent home single writer (WP0)', () => {
       const declined = await server.waitFor(declineFor('veto-task'));
 
       // Declined by the host, not by the single-writer gate.
-      expect(declined.payload).not.toHaveProperty('code');
+      expect(['agent_home_writer_busy', 'agent_home_reader_busy']).not.toContain((declined.payload as { code?: string }).code);
       await expect(fs.stat(path.join(agentsRoot, 'veto-agent'))).rejects.toMatchObject({ code: 'ENOENT' });
       expect(pi.prepareCalls).toBe(0);
       expect(pi.startCalls).toHaveLength(0);

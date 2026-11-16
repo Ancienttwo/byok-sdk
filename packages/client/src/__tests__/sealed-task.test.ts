@@ -53,7 +53,7 @@ describe('SealedTasks send order (#654 E3c)', () => {
       blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
     });
     const opened = await tasks.openOffer(createEnvelope('task.offer', {
-      agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+      target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
     } as never, { taskId: 'ordered', seq: 1 }));
     expect(opened.ok).toBe(true);
 
@@ -90,11 +90,11 @@ describe('SealedTasks memory after a terminal (#654 E3c)', () => {
       blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
     });
     await tasks.openOffer(createEnvelope('task.offer', {
-      agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+      target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
     } as never, { taskId: 'finished', seq: 1 }));
 
     const sendTerminal = async (): Promise<WeakRef<Envelope>> => {
-      const sealed = await tasks.sealOutbound(createEnvelope('task.complete', { summary: 'r'.repeat(100_000), sessionRef: 'session' }, { taskId: 'finished' }));
+      const sealed = await tasks.sealOutbound(createEnvelope('task.complete', { summary: 'r'.repeat(100_000), sessionRef: 'session', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'finished' }));
       expect(sealed?.type).toBe('task.complete');
       expect(sealed?.payload).toHaveProperty('sealed');
       tasks.plainOf(sealed!);
@@ -146,7 +146,7 @@ describe('Agent message drafts of a sealed task (#654 D9)', () => {
     });
     runners.push(runner);
     const payload = {
-      session: { mode: 'fresh' }, instruction: 'reply', runtime: 'pi', agentRef: { agentId: 'draft-agent', profileRevision: '1' }, egressPolicy: policy,
+      session: { mode: 'fresh' }, instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: { agentId: 'draft-agent', profileRevision: '1' }, egressPolicy: policy,
       messageEgress: { mode: 'required', contract: 'draft.v1', contentType: 'text/plain', maxBytes: 4096 },
     };
     await runner.handleEnvelope(sealing === undefined
@@ -174,7 +174,7 @@ describe('admission timings on a sealed task\'s decline (#1014)', () => {
   const sealedTasks = async (keyring: SealedScopeKeyring, taskId: string) => {
     const tasks = new SealedTasks({ keyring, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } } });
     await tasks.openOffer(createEnvelope('task.offer', {
-      agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+      target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
     } as never, { taskId, seq: 1 }));
     return tasks;
   };
@@ -201,7 +201,7 @@ describe('the failure class of a sealed task (#869)', () => {
   const sealedTasks = async (keyring: SealedScopeKeyring, taskId: string) => {
     const tasks = new SealedTasks({ keyring, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } } });
     await tasks.openOffer(createEnvelope('task.offer', {
-      agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+      target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
     } as never, { taskId, seq: 1 }));
     return tasks;
   };
@@ -233,8 +233,8 @@ describe('the failure class of a sealed task (#869)', () => {
     const keyless: SealedScopeKeyring = new GatedKeyring();
     const tasks = await sealedTasks(keyless, 'complete-unsealable');
     keyless.sealingKey = async () => undefined;
-    const complete = createEnvelope('task.complete', { summary: 'done', sessionRef: 'session' }, { taskId: 'complete-unsealable' });
-    expect((await tasks.sealOutbound(complete))?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' } });
+    const complete = createEnvelope('task.complete', { summary: 'done', sessionRef: 'session', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'complete-unsealable' });
+    expect((await tasks.sealOutbound(complete))?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' }, executor: { kind: 'runtime', runtimeId: 'pi' } });
   });
 });
 
@@ -244,7 +244,7 @@ describe('a terminal built for a sealed task in a run that may not seal it (#866
     blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
   });
   const sealedOffer = createEnvelope('task.offer', {
-    agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+    target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
   } as never, { taskId: 'recovered', seq: 1 });
 
   it.each([
@@ -267,7 +267,7 @@ describe('a terminal built for a sealed task in a run that may not seal it (#866
   });
 
   it('keeps every terminal of a task whose offer does not seal output', async () => {
-    const plainOffer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction' }, { taskId: 'recovered', seq: 1 });
+    const plainOffer = createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction' }, { taskId: 'recovered', seq: 1 });
     const fail = createEnvelope('task.fail', { reason: 'plain reason', retryable: false }, { taskId: 'recovered' });
     expect(await tasks().sealRecovered(plainOffer, fail, false)).toBe(fail);
   });
@@ -284,7 +284,7 @@ describe('sealed payload v2 on the device (#1045 S2)', () => {
     const tasks = sealedTasks(keyring);
     const agentRef = freshTestAgentRef();
     expect((await tasks.openOffer(createEnvelope('task.offer', {
-      agentRef, ...FRESH_OFFER, instruction: 'plain instruction', sealing: MESSAGE,
+      target: { lane: 'auto' }, agentRef, ...FRESH_OFFER, instruction: 'plain instruction', sealing: MESSAGE,
     } as never, { taskId, seq: 1 }))).ok).toBe(true);
     return { tasks, agentRef };
   }

@@ -48,7 +48,7 @@ function makeRunner(
 function offerEnvelope(taskId: string, seq = 1): Envelope {
   return createEnvelope(
     'task.offer',
-    { agentRef: freshTestAgentRef(), instruction: 's4 claim/start', ...FRESH_OFFER },
+    { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction: 's4 claim/start', ...FRESH_OFFER },
     { taskId, seq },
   );
 }

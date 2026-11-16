@@ -213,7 +213,7 @@ describe('conn.hello.capabilities', () => {
     const hello = await server.waitFor((e) => e.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
 
-    expect(hello.payload.capabilities).toEqual(['steer', 'dispatch-selection', 'toolset-selection']);
+    expect(hello.payload.capabilities).toEqual(['dispatch-selection', 'toolset-selection']);
   });
 
   it('withholds dispatch-selection when a custom built-in-id adapter has not opted into exact target semantics', async () => {

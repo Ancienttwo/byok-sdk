@@ -337,7 +337,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     this.startCalls.push({
       task: {
         instruction: startInput.instruction,
-        ...(startInput.manifest.dispatchSelection === undefined ? {} : { dispatchSelection: startInput.manifest.dispatchSelection }),
+        target: startInput.manifest.modelTarget ?? { lane: 'auto' },
         ...(startInput.manifest.sessionRef === undefined ? {} : { sessionRef: startInput.manifest.sessionRef }),
       },
       ctx: {

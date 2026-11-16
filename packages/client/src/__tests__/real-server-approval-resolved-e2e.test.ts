@@ -73,7 +73,7 @@ describe('M4 (additive-minor) end-to-end: local CLI approve -> task.approval_res
       payload: {
         session: { mode: 'fresh' },
         instruction: 'do a thing that needs approval',
-        runtime: 'pi',
+        target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef: { agentId: 'agent-approval-resolved', profileRevision: 'rev-1' },
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         terminalProjection: { mode: 'none' },

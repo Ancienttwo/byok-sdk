@@ -73,16 +73,14 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
 
     const machines = await real.byok.machines.list();
     expect(machines.find(m => m.deviceId === record.deviceId)?.harnesses).toEqual([expect.objectContaining({ id: 'acme-harness', version: '0.0.0' })]);
-    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, harnessId: 'acme-harness', instruction: 'run over long-poll' });
+    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, target: { lane: 'harness', harnessId: 'acme-harness' }, instruction: 'run over long-poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 
     // The claim really did carry the adapter's self-report across the long-poll
     // round trip — and it is the adapter's own value, not a server-side guess:
-    // `runtime` is undefined here (a custom adapter id has no `RuntimeId` to
-    // name it), so there was nothing for the server to infer a default from.
+    // the claimed executor is the custom harness, never a built-in runtime.
     const snapshot = await real.byok.tasks.get(handle.taskId);
-    expect(snapshot?.claimedRuntime).toBeUndefined();
-    expect(snapshot?.claimedHarnessId).toBe('acme-harness');
+    expect(snapshot?.claimedExecutor).toEqual({ kind: 'harness', harnessId: 'acme-harness' });
     expect(snapshot?.claimedRuntimeCapabilities).toEqual({
       steer: true,
       resume: true,
@@ -92,7 +90,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
 
     // The gate opens: no SteerRejectedError, and the envelope survives the
     // long-poll delivery all the way into the session.
-    await expect(handle.steer('keep going')).resolves.toBeUndefined();
+    await expect(handle.steer('keep going')).resolves.toEqual({ messageId: expect.any(String) });
 
     await vi.waitFor(() => expect(session.steerCalls).toEqual(['keep going']));
     expect(session.steerAttempts).toBe(1);
@@ -140,7 +138,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
 
     const machines = await real.byok.machines.list();
     expect(machines.find(m => m.deviceId === record.deviceId)?.harnesses).toEqual([expect.objectContaining({ id: 'acme-harness', version: '0.0.0' })]);
-    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, harnessId: 'acme-harness', instruction: 'run over long-poll' });
+    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, target: { lane: 'harness', harnessId: 'acme-harness' }, instruction: 'run over long-poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 
     expect((await real.byok.tasks.get(handle.taskId))?.claimedRuntimeCapabilities?.steer).toBe(false);

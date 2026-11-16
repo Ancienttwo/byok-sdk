@@ -64,7 +64,7 @@ class FixedSessionAdapter extends StubRuntimeAdapter {
 function readerOffer(taskId: string, seq: number, sessionRef?: string): Envelope {
   return createEnvelope('task.offer', {
     instruction: 'outbound reason work',
-    runtime: 'pi',
+    target: { lane: 'runtime', runtimeId: 'pi' },
     agentRef: AGENT,
     homeAccess: 'memory-reader' as const,
     ...(sessionRef === undefined ? FRESH_OFFER : resumeSession(sessionRef)),

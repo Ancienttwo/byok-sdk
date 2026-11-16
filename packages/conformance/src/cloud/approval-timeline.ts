@@ -30,12 +30,8 @@ async function withComposition(
   }
 }
 
-function requested(approvalId: string | undefined, summary = 'Allow mutation') {
-  return {
-    type: 'approval_requested' as const,
-    summary,
-    ...(approvalId === undefined ? {} : { approvalId }),
-  };
+function requested(approvalId: string, summary = 'Allow mutation') {
+  return { type: 'approval_requested' as const, summary, approvalId };
 }
 
 export function runApprovalTimelineConformance(
@@ -275,18 +271,16 @@ export function runApprovalTimelineConformance(
       });
     });
 
-    it('preserves missing request identity without inventing one and isolates tenants', async () => {
+    it('refuses an observation without approval identity and isolates tenants', async () => {
       await withComposition(factory, async ({ store }) => {
-        const tail = await store.append(TENANT_A, {
+        await expect(store.append(TENANT_A, {
           taskId: 'task-unpaired',
           sourceEnvelopeId: 'envelope-unpaired',
-          event: requested(undefined),
-        });
-        expect(tail.entries[0]?.event).toEqual({
-          type: 'approval_requested',
-          summary: 'Allow mutation',
-        });
-        expect(await store.read(TENANT_B, 'task-unpaired')).toBeUndefined();
+          event: { type: 'approval_requested', summary: 'Allow mutation' } as never,
+        })).rejects.toThrow();
+        expect(await store.read(TENANT_A, 'task-unpaired')).toBeUndefined();
+        await store.append(TENANT_A, { taskId: 'task-paired', sourceEnvelopeId: 'envelope-paired', event: requested('approval-1') });
+        expect(await store.read(TENANT_B, 'task-paired')).toBeUndefined();
       });
     });
 

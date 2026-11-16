@@ -44,7 +44,7 @@ async function setup(reply: Reply) {
         ingress: TEST_ACTIVITY_INGRESS,
       });
     }
-    return reply('events') ?? Response.json({ events: [], cursor: 0, capabilities: [], ingress: TEST_ACTIVITY_INGRESS });
+    return reply('events') ?? Response.json({ events: [], cursor: 0, ingress: TEST_ACTIVITY_INGRESS });
   }));
   const attempts: number[] = [];
   const fleetJitter: FleetJitter = {

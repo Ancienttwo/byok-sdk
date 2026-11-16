@@ -46,14 +46,13 @@ async function setup(scenario: Scenario, onOperationalOutcome: ConnectionManager
       return Response.json({
         accepted: messages.length,
         outcomes: messages.map((envelope) => ({ id: envelope.id, outcome: 'accepted' })),
-        capabilities: ['result-document'],
         ...(hello ? { ingress: TEST_ACTIVITY_INGRESS } : {}),
       });
     }
     expect(url.pathname).toBe('/byok/events');
     expect(url.searchParams.get('cursor')).toBe('7');
     if (scenario === 'poll-failure') return new Response('', { status: 503 });
-    return Response.json({ events: [], cursor: 7, capabilities: ['result-document'], ingress: TEST_ACTIVITY_INGRESS });
+    return Response.json({ events: [], cursor: 7, ingress: TEST_ACTIVITY_INGRESS });
   });
   vi.stubGlobal('fetch', fetch);
   const post = vi.spyOn(LongPollClient.prototype, 'postBatch');
@@ -109,7 +108,6 @@ describe('ConnectionManager operational observer exception boundary (#384)', () 
       expect(observer.mock.calls.filter(([, channel]) => channel === source)).toEqual([[outcome, source]]);
       expect(onHalted).not.toHaveBeenCalled();
       expect(manager.isOpen()).toBe(false);
-      expect(manager.getServerCapabilities()).toEqual([]);
       expect(await cursorStore.load(serverUrl, deviceId)).toBe(7);
 
       const retained = source === 'upload' && outcome === 'failure';

@@ -12,6 +12,8 @@ import { sealRuntimeOperationManifest, type Session } from '../types';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 
+const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
+
 const FAKE_PI = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 const roots: string[] = [];
 const sessions: Session[] = [];
@@ -40,7 +42,7 @@ describe('Pi Agent resources', () => {
       }) as typeof realSpawn,
     });
     for (const agent of [false,true]) {
-      const session = await startPreparedOperation(adapter,{instruction:'hello'}, {
+      const session = await startPreparedOperation(adapter,{ target: PI_TARGET, instruction:'hello'}, {
         workspaceDir:root,env:process.env,...(agent?{agentHome:root}:{}),
       });
       sessions.push(session);
@@ -75,7 +77,7 @@ describe('Pi Agent resources', () => {
     roots.push(root);
     let spawned = false;
     const adapter = new PiAdapter({agentUserContext:'excluded',resolveBin:()=>({command:FAKE_PI,source:'env'}),spawnFn:(()=>{spawned=true;throw new Error('unexpected spawn');}) as never});
-    const prepared = await adapter.prepare({offer:{instruction:'hello'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
+    const prepared = await adapter.prepare({offer:{ target: PI_TARGET, instruction:'hello'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
     const scratch = await testExecutionScratch();
     try {
@@ -96,7 +98,7 @@ describe('Pi Agent resources', () => {
     roots.push(root);
     let spawned = false;
     const adapter = new PiAdapter({agentSkillPaths:[path.join(root,'missing')],resolveBin:()=>({command:FAKE_PI,source:'env'}),spawnFn:(()=>{spawned=true;throw new Error('unexpected spawn');}) as never});
-    const prepared = await adapter.prepare({offer:{instruction:'hello'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
+    const prepared = await adapter.prepare({offer:{ target: PI_TARGET, instruction:'hello'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
     const scratch = await testExecutionScratch();
     try {
@@ -117,7 +119,7 @@ describe('Pi Agent resources', () => {
     roots.push(root);
     let spawned = false;
     const adapter = new PiAdapter({...options,resolveBin:()=>({command:FAKE_PI,source:'env'}),spawnFn:(()=>{spawned=true;throw new Error('unexpected spawn');}) as never});
-    const prepared = await adapter.prepare({offer:{instruction:'hello'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
+    const prepared = await adapter.prepare({offer:{ target: PI_TARGET, instruction:'hello'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
     const scratch = await testExecutionScratch();
     try {

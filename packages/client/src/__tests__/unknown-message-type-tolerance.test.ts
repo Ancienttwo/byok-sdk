@@ -101,7 +101,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
   it('long-poll (a): a batch [known, unknown-type, known] processes both known entries in order, never fails the whole batch, and keeps the cursor before unknown executable work', async () => {
     const { record, cursorStore, received } = await startLongPollOnly('byok-unknown-type-lp-mixed-store-');
 
-    const before = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'before', ...FRESH_OFFER }, { taskId: 'known-before', seq: 1 });
+    const before = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'before', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'known-before', seq: 1 });
     const unknown = {
       v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff01',
@@ -111,7 +111,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       seq: 2,
       payload: {},
     };
-    const after = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'after', ...FRESH_OFFER }, { taskId: 'known-after', seq: 3 });
+    const after = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'after', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'known-after', seq: 3 });
 
     server.pushLongPollEvent(before);
     server.pushRawLongPollEvent(unknown);
@@ -166,8 +166,8 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // and the cursor moves past it so the mailbox does not stall.
     const { received } = await startLongPollOnly('byok-unknown-type-prepared-store-');
 
-    const before = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'before', ...FRESH_OFFER }, { taskId: 'prepared-before', seq: 1 });
-    const after = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'after', ...FRESH_OFFER }, { taskId: 'prepared-after', seq: 3 });
+    const before = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'before', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'prepared-before', seq: 1 });
+    const after = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'after', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'prepared-after', seq: 3 });
 
     server.pushLongPollEvent(before);
     server.pushRawLongPollEvent({
@@ -208,7 +208,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // malformed (not just unrecognized) entry is never silently acknowledged.
     const { record, cursorStore, received } = await startLongPollOnly('byok-unknown-type-lp-malformed-store-');
 
-    const before = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'before', ...FRESH_OFFER }, { taskId: 'known-before-2', seq: 1 });
+    const before = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'before', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'known-before-2', seq: 1 });
     server.pushLongPollEvent(before);
 
     await vi.waitFor(() => {
@@ -248,7 +248,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // normally and the cursor finally advances past it.
     const corrected = createEnvelope(
       'task.offer',
-      { agentRef: TOLERANCE_AGENT, instruction: 'corrected', ...FRESH_OFFER },
+      { agentRef: TOLERANCE_AGENT, instruction: 'corrected', ...FRESH_OFFER, target: { lane: 'auto' } },
       { taskId: 'malformed-task', seq: 2 },
     );
     server.pushLongPollEvent(corrected);
@@ -273,7 +273,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // successfully-processed LATER envelope in the very same batch.
     const { record, cursorStore, received } = await startLongPollOnly('byok-r1-stall-store-');
 
-    const before = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'before', ...FRESH_OFFER }, { taskId: 'r1-before', seq: 1 });
+    const before = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'before', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'r1-before', seq: 1 });
     server.pushLongPollEvent(before);
     await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(1));
 
@@ -288,7 +288,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     };
     const validAfter = createEnvelope(
       'task.offer',
-      { agentRef: TOLERANCE_AGENT, instruction: 'after', ...FRESH_OFFER },
+      { agentRef: TOLERANCE_AGENT, instruction: 'after', ...FRESH_OFFER, target: { lane: 'auto' } },
       { taskId: 'r1-valid-3', seq: 3 },
     );
     // Pushed together, synchronously, so both land in the SAME poll
@@ -339,7 +339,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // as-is rather than inventing a second, divergent recovery path.
     const { record, cursorStore, received } = await startLongPollOnly('byok-r1-unstall-store-');
 
-    const before = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'before', ...FRESH_OFFER }, { taskId: 'r1b-before', seq: 1 });
+    const before = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'before', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'r1b-before', seq: 1 });
     server.pushLongPollEvent(before);
     await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(1));
 
@@ -354,7 +354,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     };
     const validAfter = createEnvelope(
       'task.offer',
-      { agentRef: TOLERANCE_AGENT, instruction: 'after', ...FRESH_OFFER },
+      { agentRef: TOLERANCE_AGENT, instruction: 'after', ...FRESH_OFFER, target: { lane: 'auto' } },
       { taskId: 'r1b-valid-3', seq: 3 },
     );
     server.pushRawLongPollEvent(bad);
@@ -367,7 +367,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // advances through the already-successful tail at 3.
     const corrected = createEnvelope(
       'task.offer',
-      { agentRef: TOLERANCE_AGENT, instruction: 'corrected', ...FRESH_OFFER },
+      { agentRef: TOLERANCE_AGENT, instruction: 'corrected', ...FRESH_OFFER, target: { lane: 'auto' } },
       { taskId: 'r1b-bad', seq: 2 },
     );
     server.pushLongPollEvent(corrected);
@@ -380,7 +380,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     expect(await cursorStore.load(server.url, record.deviceId)).toBe(3);
     expect(received).toHaveLength(3);
 
-    const fresh = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'fresh', ...FRESH_OFFER }, { taskId: 'r1b-fresh-4', seq: 4 });
+    const fresh = createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'fresh', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'r1b-fresh-4', seq: 4 });
     server.pushLongPollEvent(fresh);
     await vi.waitFor(() => expect(received.some((e) => e.task_id === 'r1b-fresh-4')).toBe(true));
     await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(4));
@@ -454,7 +454,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(received).toEqual([]);
     expect(await cursorStore.load(server.url, record.deviceId)).toBeUndefined();
-    server.pushLongPollEvent(createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'x', ...FRESH_OFFER }, { taskId: 'known', seq: 2 }));
+    server.pushLongPollEvent(createEnvelope('task.offer', { agentRef: TOLERANCE_AGENT, instruction: 'x', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'known', seq: 2 }));
     await vi.waitFor(() => expect(received.some((e) => e.task_id === 'known')).toBe(true));
     expect(await cursorStore.load(server.url, record.deviceId)).toBe(0);
     server.pushRawLongPollEvent(poison);
@@ -510,7 +510,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
 
     const realSeq1 = createEnvelope(
       'task.offer',
-      { agentRef: TOLERANCE_AGENT, instruction: 'x', ...FRESH_OFFER },
+      { agentRef: TOLERANCE_AGENT, instruction: 'x', ...FRESH_OFFER, target: { lane: 'auto' } },
       { taskId: 'critical-seq1', seq: 1 },
     );
     const unknownSeq2 = {

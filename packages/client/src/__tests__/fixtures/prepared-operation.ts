@@ -1,4 +1,4 @@
-import type { RuntimeTaskInput } from '../../types';
+import { modelLaneTarget, type RuntimeTaskInput } from '../../types';
 import { isRuntimeStartupDisposalFailure } from '../../runtime-failure';
 import { projectPiMcpEnvironment } from '../../adapters/pi/mcp-environment';
 import { testExecutionScratch } from './execution-scratch';
@@ -55,7 +55,7 @@ export async function startPreparedOperation(
     runtimeId: adapter.descriptor.id,
     descriptor: adapter.descriptor,
     requiredToolsetIds: [],
-    ...(offer.dispatchSelection === undefined ? {} : { dispatchSelection: offer.dispatchSelection }),
+    ...(modelLaneTarget(offer.target) === undefined ? {} : { modelTarget: modelLaneTarget(offer.target) }),
     ...(offer.sessionRef === undefined ? {} : { sessionRef: offer.sessionRef }),
     ...(resources.agentHome === undefined ? {} : {
       agentRef: { agentId: 'adapter-unit-agent', profileRevision: 'r1' },

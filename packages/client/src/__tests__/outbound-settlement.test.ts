@@ -90,13 +90,104 @@ describe('outbound settlement contract #397', () => {
       settled.push(...batch);
     });
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    const envelope = createEnvelope('task.complete', { summary: 'exact bytes', sessionRef: 'session' }, { taskId: 'task' });
+    const envelope = createEnvelope('task.complete', { summary: 'exact bytes', sessionRef: 'session', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'task' });
     connection.send(envelope);
     await vi.waitFor(() => expect(connection.outboxLength()).toBe(0));
     expect(business).toHaveLength(2);
     expect(business[0]![0]).toBe(envelope); expect(business[1]![0]).toBe(envelope);
     expect(settled).toEqual([{ envelope, outcome: 'duplicate' }]);
     expect(post).toHaveBeenCalledTimes(3);
+  });
+
+  it('settles a type the session answered type_unsupported locally until a new hello opens the next session', async () => {
+    const hellos: Envelope[] = [];
+    const business: Envelope[][] = [];
+    let failClaim = true;
+    vi.spyOn(LongPollClient.prototype, 'postBatch').mockImplementation(async (batch) => {
+      if (batch[0]?.type === 'conn.hello') { hellos.push(batch[0]); return helloAccepted(batch[0]); }
+      business.push([...batch]);
+      // The claim's route failure breaks the first session.
+      if (batch[0]?.type === 'task.claim' && failClaim) { failClaim = false; return undefined; }
+      const refused = (envelope: Envelope) => envelope.type === 'task.started' && hellos.length === 1;
+      return {
+        accepted: batch.filter((envelope) => !refused(envelope)).length,
+        rejected: batch.filter(refused).length,
+        outcomes: batch.map((envelope): CorrelatedOutcome => refused(envelope)
+          ? { id: envelope.id, outcome: 'rejected', reason: 'type_unsupported' }
+          : { id: envelope.id, outcome: 'accepted' }),
+      };
+    });
+    const settled: OutboundSettlement[] = [];
+    const connection = await open(async (batch) => { settled.push(...batch.filter((item) => item.envelope.type !== 'conn.hello')); });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const first = createEnvelope('task.started', {}, { taskId: 'task-1' });
+    const second = createEnvelope('task.started', {}, { taskId: 'task-2' });
+    const claim = createEnvelope('task.claim', { deviceId: 'settlement-device', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'task-3' });
+    const third = createEnvelope('task.started', {}, { taskId: 'task-3' });
+
+    connection.send(first);
+    await vi.waitFor(() => expect(settled).toHaveLength(1));
+    connection.send(second);
+    await vi.waitFor(() => expect(settled).toHaveLength(2));
+    expect(business).toEqual([[first]]);
+
+    connection.send(claim);
+    await vi.waitFor(() => expect(settled).toHaveLength(3));
+    expect(hellos).toHaveLength(2);
+    connection.send(third);
+    await vi.waitFor(() => expect(settled).toHaveLength(4));
+
+    expect(business).toEqual([[first], [claim], [claim], [third]]);
+    expect(settled).toEqual([
+      { envelope: first, outcome: 'rejected', reason: 'type_unsupported' },
+      { envelope: second, outcome: 'rejected', reason: 'type_unsupported' },
+      { envelope: claim, outcome: 'accepted' },
+      { envelope: third, outcome: 'accepted' },
+    ]);
+  });
+
+  it.each([
+    ['HTTP 400', () => new Response('messages must be an array of envelopes with UUID ids', { status: 400 }), { reason: 'protocol_negotiation_failed', httpStatus: 400 }],
+    ['HTTP 404', () => new Response('', { status: 404 }), { reason: 'protocol_negotiation_failed', httpStatus: 404 }],
+    ['a rejected protocol_version_unsupported', (id: string) => Response.json({ accepted: 0, rejected: 1, outcomes: [{ id, outcome: 'rejected', reason: 'protocol_version_unsupported' }] }), { reason: 'protocol_negotiation_failed', httpStatus: 200 }],
+    ['a rejection for another reason', (id: string) => Response.json({ accepted: 0, rejected: 1, outcomes: [{ id, outcome: 'rejected', reason: 'not_permitted' }] }), { reason: 'handshake_rejected' }],
+  ] as const)('halts on %s to the lone hello', async (_label, answer, halt) => {
+    const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const { messages } = JSON.parse(String(init?.body)) as { messages: Envelope[] };
+      return answer(messages[0]!.id);
+    });
+    vi.stubGlobal('fetch', fetch);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(LongPollClient.prototype, 'start').mockImplementation(() => {});
+    const onHalted = vi.fn();
+    connection = new ConnectionManager({ serverUrl: 'http://example.invalid', deviceId: 'settlement-device', productId: 'test',
+      capabilities: [], runtimes: [], auth: await auth(), cursorStore: { load: async () => undefined, save: async () => {} } as never,
+      onEnvelope: () => {}, onHalted, longPollRetryDelayMs: 1,
+    });
+    await connection.start();
+    await vi.waitFor(() => expect(onHalted).toHaveBeenCalledExactlyOnceWith(halt));
+    expect(connection.getHaltReason()).toBe(halt.reason);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a hello answered HTTP 409 instead of halting', async () => {
+    const hello = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const { messages } = JSON.parse(String(init?.body)) as { messages: Envelope[] };
+      return hello.mock.calls.length === 1 ? new Response('storage_entitlement_missing', { status: 409 }) : Response.json(helloAccepted(messages[0]!));
+    });
+    vi.stubGlobal('fetch', hello);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(LongPollClient.prototype, 'start').mockImplementation(() => {});
+    const onHalted = vi.fn();
+    connection = new ConnectionManager({ serverUrl: 'http://example.invalid', deviceId: 'settlement-device', productId: 'test',
+      capabilities: [], runtimes: [], auth: await auth(), cursorStore: { load: async () => undefined, save: async () => {} } as never,
+      onEnvelope: () => {}, onHalted, longPollRetryDelayMs: 1,
+    });
+    await connection.start();
+    await vi.waitFor(() => expect(connection!.isOpen()).toBe(true));
+    expect(hello).toHaveBeenCalledTimes(2);
+    expect(onHalted).not.toHaveBeenCalled();
   });
 
   it('validates outcomes against ids, enums and counts, while tolerating unknown reasons', async () => {
@@ -123,7 +214,7 @@ describe('outbound settlement contract #397', () => {
     ['a counts-only answer without outcomes', 'business', (_id: string) => ({ accepted: 1 }), /outcomes/],
     ['a counts-only rejection without outcomes', 'business', (_id: string) => ({ accepted: 0, rejected: 1 }), /outcomes/],
     ['a rejected outcome without its reason', 'business', (id: string) => ({ accepted: 0, rejected: 1, outcomes: [{ id, outcome: 'rejected' }] }), /lacks its reason/],
-    ['an accepted conn.hello without ingress', 'hello', (id: string) => ({ accepted: 1, outcomes: [{ id, outcome: 'accepted' }], capabilities: [] }), /ingress/],
+    ['an accepted conn.hello without ingress', 'hello', (id: string) => ({ accepted: 1, outcomes: [{ id, outcome: 'accepted' }] }), /ingress/],
     ['a deduplicated conn.hello without ingress', 'hello', (id: string) => ({ accepted: 1, outcomes: [{ id, outcome: 'duplicate' }] }), /ingress/],
   ] as const)('rejects %s through the route-failure path (wire v3)', async (_label, kind, body, cause) => {
     const client = new LongPollClient({ serverUrl: 'http://example.invalid', auth: await auth(), getCursor: () => 0, onEnvelope: () => {} });

@@ -1,4 +1,4 @@
-import type { AgentRef, InputPreparationOfferBinding, PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
+import type { AgentRef, InputPreparationOfferBinding, PreparedAgentMemoryMode, PreparedOfferDeclineCode, TerminalProjectionSelection } from '@byok-sdk/protocol';
 import {
   inputPreparationDigest,
   inputPreparationRuntimeIdentityString,
@@ -50,49 +50,15 @@ import type { PreparedAgentMemoryState } from '../agent-memory/prepared-agent-me
  */
 
 /**
- * Every way a prepared offer is refused. All of them are terminal for this
- * offer: re-offering the same reference against the same device state reaches
- * the same answer, and a prepared failure never permits sending a DIFFERENT
- * input under the same accounting.
+ * One way a prepared offer is refused: its `task.decline` code (protocol
+ * `PREPARED_OFFER_DECLINE_CODES`). All of them are terminal for this offer:
+ * re-offering the same reference against the same device state reaches the
+ * same answer, and a prepared failure never permits sending a DIFFERENT input
+ * under the same accounting.
  */
-export type PreparedOfferDeclineReason =
-  /** This daemon has no input-preparation lane at all, so it can consume none. */
-  | 'preparation_lane_unconfigured'
-  | 'preparation_result_schema_mismatch'
-  /** No record under this reference in this daemon's durable store. */
-  | 'preparation_not_found'
-  /** The record exists but is not ready to admit an Execution; the detail names every reason. */
-  | 'preparation_not_ready'
-  /** The record was counted on a different device row. */
-  | 'preparation_device_mismatch'
-  /** The record was counted for a different Agent. */
-  | 'preparation_agent_mismatch'
-  /** The offer's Agent presents a different profile revision than the record was counted under. */
-  | 'preparation_profile_revision_mismatch'
-  /** The operator's limits-policy revision moved since the record was counted. */
-  | 'preparation_policy_revision_mismatch'
-  /** The Host re-presented a request digest the record does not carry. */
-  | 'preparation_request_digest_mismatch'
-  /** The Host re-presented an envelope digest the record's artifact does not carry. */
-  | 'preparation_artifact_digest_mismatch'
-  /** The Host re-presented a memory mode that differs from the durable binding. */
-  | 'agent_memory_mismatch'
-  /** The installed native closure is not the one that compiled the artifact. */
-  | 'preparation_runtime_identity_mismatch'
-  /** The live tool set is not the set of model-visible names that were counted. */
-  | 'preparation_tool_set_mismatch'
-  /** The live definition revisions or argv differ from the counted ones. */
-  | 'preparation_tool_binding_digest_mismatch'
-  /** Same names, but a different observed schema surface. */
-  | 'preparation_observation_digest_mismatch'
-  /** The live observation could not be projected or fingerprinted at all. */
-  | 'preparation_tool_surface_unfingerprintable'
-  /** Another Execution already consumed this record. The loser claims nothing. */
-  | 'preparation_already_pinned';
-
 export interface PreparedOfferDecline {
   readonly ok: false;
-  readonly reason: PreparedOfferDeclineReason;
+  readonly code: PreparedOfferDeclineCode;
   /** A stable, operator-actionable sentence naming the item that differed. */
   readonly detail: string;
 }
@@ -145,8 +111,8 @@ export interface PreparedOfferAdmissionInput {
   readonly nowMs: number;
 }
 
-function decline(reason: PreparedOfferDeclineReason, detail: string): PreparedOfferDecline {
-  return Object.freeze({ ok: false as const, reason, detail });
+function decline(code: PreparedOfferDeclineCode, detail: string): PreparedOfferDecline {
+  return Object.freeze({ ok: false as const, code, detail });
 }
 
 /** Byte order, so a name comparison does not depend on the host locale. */

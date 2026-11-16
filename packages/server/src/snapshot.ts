@@ -101,7 +101,7 @@ export function toTaskSnapshot(
     createdAt: offer?.recordedAt ?? attempt.updatedAt,
     updatedAt: attempt.updatedAt,
     ...(result === undefined ? {} : { result }),
-    ...(pending?.approvalId === undefined ? {} : { pendingApprovalId: pending.approvalId }),
+    ...(pending === undefined ? {} : { pendingApprovalId: pending.approvalId }),
     ...(attempt.claimedExecutor === undefined ? {} : { claimedExecutor: attempt.claimedExecutor }),
     ...(attempt.claimedRuntimeCapabilities === undefined
       ? {}

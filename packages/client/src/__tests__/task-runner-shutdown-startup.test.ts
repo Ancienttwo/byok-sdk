@@ -26,7 +26,7 @@ describe('TaskRunner shutdown admission/start ownership barrier', () => {
       },
       approvalRegistry: new ApprovalRegistry(), storeDir: dir, productId: 'shutdown-start',
     });
-    const offered = runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),
+    const offered = runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),
       instruction: 'blocked startup', ...FRESH_OFFER
     }, { taskId: 'starting-task', seq: 1 }));
     try {

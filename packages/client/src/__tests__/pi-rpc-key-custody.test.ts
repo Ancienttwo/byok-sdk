@@ -113,7 +113,7 @@ describe('pi-rpc BYOK key custody (#385)', () => {
     await fs.writeFile(path.join(ambientAgent, 'auth.json'), JSON.stringify({ 'opencode-go': { type: 'api_key', key: 'AMBIENT_AUTH_KEY' } }));
     const session = await startPreparedOperation(adapter, {
       instruction,
-      dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'probe', modelId: 'probe' },
+      target: { lane: 'byok', runtimeId: 'pi', providerId: 'probe', modelId: 'probe' },
     }, { workspaceDir: home, scratch, env: { ...testRuntimeEnv(), HOME: root, PI_CODING_AGENT_DIR: ambientAgent } });
     sessions.push(session);
     const events: Array<AgentEvent | MessageDraftDelta> = [];

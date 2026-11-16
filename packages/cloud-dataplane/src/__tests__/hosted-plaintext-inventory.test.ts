@@ -26,13 +26,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
 import {
   CLOUD_CAPABILITIES,
-  InMemoryAgentMemoryProjectionAuthorizer,
   createByokCloud,
   createHmacTokenSigner,
   createInProcessMailboxWake,
   createWebCrypto,
   fullCapabilityDeclaration,
 } from '@byok-sdk/cloud';
+import { InMemoryAgentMemoryProjectionAuthorizer } from '../../../cloud/src/__tests__/support/agent-memory-projection';
 import {
   BYOK_AGENT_MEMORY_PROJECTIONS_PATH,
   BYOK_BLOBS_PATH,

@@ -1,7 +1,7 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
 import { withCodexMcpToolGrants } from './reserved-mcp-tool-grants.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
-import type { RuntimeTaskInput } from '../../types.js';
+import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions.js';
 import { CodexNativeInteractions } from './native-interactions.js';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
@@ -230,7 +230,7 @@ export class CodexAdapter implements RuntimeAdapter {
   ): Promise<RuntimeAdapterPrepareResult> {
     let model: string | undefined;
     try {
-      model = subscriptionModel(input.offer.dispatchSelection);
+      model = subscriptionModel(modelLaneTarget(input.offer.target));
     } catch (error) {
       return {
         kind: 'reject',
@@ -266,7 +266,7 @@ export class CodexAdapter implements RuntimeAdapter {
   ): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string')
       throw authority('codex requires a resolved instruction');
-    if (subscriptionModel(input.manifest.dispatchSelection) !== model)
+    if (subscriptionModel(input.manifest.modelTarget) !== model)
       throw authority(
         'prepared codex operation received a manifest with different runtime selection',
       );
@@ -553,7 +553,7 @@ class CodexSession implements Session {
   async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string')
       throw new PolicyUnsupportedError('codex requires a string instruction');
-    const model = subscriptionModel(task.dispatchSelection);
+    const model = subscriptionModel(modelLaneTarget(task.target));
     if (model !== undefined && model !== this.model)
       throw new PolicyUnsupportedError(
         'codex persistent session cannot change model',
@@ -613,7 +613,7 @@ class CodexSession implements Session {
   }
 }
 function subscriptionModel(
-  selection: RuntimeTaskInput['dispatchSelection'],
+  selection: ModelLaneTarget | undefined,
 ): string | undefined {
   if (!selection) return undefined;
   if (selection.lane !== 'subscription' || selection.runtimeId !== 'codex')

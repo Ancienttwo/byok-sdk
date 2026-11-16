@@ -1,5 +1,5 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
-import type { RuntimeTaskInput } from '../../types.js';
+import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
 import { createClaudeMcpIdentityResolver } from './mcp-identity.js';
 import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities.js';
 import { claudeAgentUserContextSettings } from './agent-user-context.js';
@@ -229,7 +229,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     let modelId: string | undefined;
     try {
-      modelId = subscriptionModel(input.offer.dispatchSelection, 'claude');
+      modelId = subscriptionModel(modelLaneTarget(input.offer.target), 'claude');
     } catch (error) {
       return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: false };
     }
@@ -353,7 +353,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       const resumeSessionId = startInput.manifest.sessionRef;
       let manifestModelId: string | undefined;
       try {
-        manifestModelId = subscriptionModel(startInput.manifest.dispatchSelection, 'claude');
+        manifestModelId = subscriptionModel(startInput.manifest.modelTarget, 'claude');
       } catch (cause) {
         throw new RuntimeExecutionFailure({
           phase: 'start',
@@ -542,7 +542,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
 }
 
 function subscriptionModel(
-  selection: RuntimeTaskInput['dispatchSelection'],
+  selection: ModelLaneTarget | undefined,
   runtimeId: 'claude',
 ): string | undefined {
   if (selection === undefined) return undefined;
@@ -747,7 +747,7 @@ class ClaudeSession implements Session {
     if (typeof task.instruction !== 'string') {
       throw new PolicyUnsupportedError('claude adapter only supports string instructions in M2 (no blob-ref fetch yet)');
     }
-    const requestedModel = subscriptionModel(task.dispatchSelection, 'claude');
+    const requestedModel = subscriptionModel(modelLaneTarget(task.target), 'claude');
     if (requestedModel !== undefined && requestedModel !== this.modelId) {
       throw new PolicyUnsupportedError(
         `claude persistent session cannot change model from ${this.modelId ?? '(legacy default)'} to ${requestedModel}`,

@@ -357,7 +357,7 @@ describe('inbound lifecycle recovery', () => {
       await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope).then((result) => result.outcome)).rejects.toThrow(`fault after terminal ${faultPoint}`);
       await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope).then((result) => result.outcome)).resolves.toBe('accepted');
       expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.status).toBe('complete');
-      await expect(harness.cloud.listBoardItems(TENANT_A, {})).resolves.toMatchObject({
+      await expect(stores.board.list({})).resolves.toMatchObject({
         items: [{ itemId: taskId, status: 'in_review' }],
       });
       await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope).then((result) => result.outcome)).resolves.toBe('duplicate');

@@ -9,7 +9,7 @@ import {
   DEFAULT_PROOF_RECEIPT_RETENTION_MS, DEFAULT_RETENTION_POLICY, MAINTENANCE_STEPS, PROOF_RECEIPT_RETENTION_FLOOR_MS,
   resolveRetentionPolicy, type ProofReceiptRetentionAuthority,
 } from '../maintenance';
-import { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from '../receipt-retention';
+import { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES } from '../receipt-retention';
 
 const tenant = tenantId('maintenance-test');
 function setup() {
@@ -101,7 +101,7 @@ describe('cloud maintenance', () => {
     expect(result).toEqual({ removed: 0, expired: 0, releasedBytes: 0n, more: false });
     expect(REQUEST_RECEIPT_PREFIXES).toEqual([]);
     expect(Object.isFrozen(RECEIPT_RETENTION)).toBe(true);
-    for (const key of keys) { expect(receiptRetentionClass(key)).toBe('identity'); expect(await composition.stores.receipts.get(tenant, key)).toMatchObject({ body: key }); }
+    for (const key of keys) expect(await composition.stores.receipts.get(tenant, key)).toMatchObject({ body: key });
   });
 });
 

@@ -121,7 +121,7 @@ const __executionScratch = inertScratch();
 
   sandbox.frames.push({ type: 'agent_settled', aborted });
   const adapter = new PiAdapter({ resolveBin: () => sandbox.deny('resolve bin') });
-  const offer = { instruction: 'synthetic settlement only' };
+  const offer = { target: { lane: 'runtime', runtimeId: 'pi' } as const, instruction: 'synthetic settlement only' };
   const admitted = await adapter.prepare({ offer, descriptor: adapter.descriptor, requiredToolsetIds: [] });
   if (admitted.kind !== 'prepared') throw new Error('synthetic ordinary operation refused');
   const cwd = `${process.env.TMPDIR}/virtual-workspace`;

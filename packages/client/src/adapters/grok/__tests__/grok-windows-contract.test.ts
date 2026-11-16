@@ -20,6 +20,8 @@ import type { Session } from '../../../types';
 import { startPreparedOperation, type PreparedOperationResources } from '../../../__tests__/fixtures/prepared-operation';
 import { resolveBunBin } from '../../../__tests__/support/test-bun-bin';
 
+const GROK_TARGET = { lane: 'harness', harnessId: 'grok' } as const;
+
 const FAKE_AGENT = fileURLToPath(new URL('../../../__tests__/fixtures/fake-acp-agent.mjs', import.meta.url));
 const usage = { type: 'usage', inputTokens: 100, cachedInputTokens: 64, outputTokens: 7, contextTokens: 1001, contextSource: 'provider' } as const;
 // Windows process start and job assignment are slower than vi.waitFor's 1 s default.
@@ -106,7 +108,7 @@ describe('GrokAdapter fixture contract on the host platform', { timeout: 30_000 
 
   it('runs a turn in an owned agent tree and ends the tree on close', async () => {
     const resources = await ctx();
-    const s = await open(adapter(), { instruction: 'hello' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'hello' }, resources);
     expect(s.sessionRef).toBe('fake-grok-session');
     expect(await turn(s)).toEqual([{ type: 'progress', text: 'echo:hello' }, usage, { type: 'turn_end' }]);
     const [started] = facts(resources.log).filter(fact => fact.kind === 'start');
@@ -118,13 +120,13 @@ describe('GrokAdapter fixture contract on the host platform', { timeout: 30_000 
 
   it('runs a hosted terminal command with the task environment', async () => {
     const resources = await ctx();
-    const s = await open(adapter(), { instruction: 'terminal' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'terminal' }, resources);
     expect(await turn(s)).toEqual([{ type: 'progress', text: 'terminal:terminal-ok' }, usage, { type: 'turn_end' }]);
   });
 
   it('interrupts through session/cancel', async () => {
     const resources = await ctx();
-    const s = await open(adapter(), { instruction: 'hold' }, resources);
+    const s = await open(adapter(), { target: GROK_TARGET, instruction: 'hold' }, resources);
     await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'prompt')).toBe(true), WAIT);
     await s.interrupt();
     expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(true);
@@ -139,7 +141,7 @@ describe('GrokAdapter fixture contract on the host platform', { timeout: 30_000 
       return child;
     }) as typeof spawn;
     const resources = await ctx();
-    const s = await open(adapter({ spawnFn }), { instruction: 'terminal-hang' }, resources);
+    const s = await open(adapter({ spawnFn }), { target: GROK_TARGET, instruction: 'terminal-hang' }, resources);
     await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'terminal')).toBe(true), WAIT);
     await s.close();
     expect(terminals).toHaveLength(1);
