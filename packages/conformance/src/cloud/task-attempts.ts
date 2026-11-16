@@ -15,8 +15,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import { contentHash } from '@byok-sdk/core';
-import { TASK_ATTEMPT_STATUSES } from '@byok-sdk/cloud';
-import { PI_EXECUTOR, TENANT_A, TENANT_B } from './fixtures';
+import { createInMemoryByokCloud, handleInboundEnvelope, tenantStoresFor, TASK_ATTEMPT_STATUSES } from '@byok-sdk/cloud';
+import { AGENT_MESSAGE_EGRESS_CAPABILITY, createEnvelope } from '@byok-sdk/protocol';
+import { PI_EXECUTOR, registration, TENANT_A, TENANT_B } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
@@ -513,6 +514,54 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
         expect(await stores.tasks.get(TENANT_A, 'claimed')).not.toHaveProperty('terminalAt');
         await stores.tasks.recordStatus(TENANT_A, { taskId: 'claimed', status: 'cancelled', agentRef: AGENT_REF });
         expect(await stores.tasks.get(TENANT_A, 'claimed')).toMatchObject({ status: 'cancelled', terminalAt: handle.now() });
+      });
+    });
+
+    it('before a claim, refuses execution reports from the offered device and every report from another device (#2289)', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        // The inbound gate reads this composition's tasks, devices and receipts.
+        const base = createInMemoryByokCloud();
+        const inbound = tenantStoresFor({ kind: 'control-plane', tenantId: TENANT_A, operatorId: 'unclaimed' },
+          { core: base.core, cloud: { ...base.stores, ...stores }, mailboxWake: base.mailboxWake });
+        const taskId = 'unclaimed';
+        await stores.tasks.reserveAgentOffer(TENANT_A, { taskId, deviceId: 'device-a', agentRef: AGENT_REF });
+        for (const deviceId of ['device-a', 'device-b']) {
+          await stores.devices.register(TENANT_A, registration(deviceId));
+          await stores.devices.recordCapabilities(TENANT_A, { deviceId, capabilities: [AGENT_MESSAGE_EGRESS_CAPABILITY] });
+        }
+        const execution = [
+          createEnvelope('task.started', {}, { taskId }),
+          createEnvelope('task.progress', { seq: 1, events: [] }, { taskId }),
+          createEnvelope('task.artifact', { name: 'a.txt', contentType: 'text/plain', inline: 'aGk=' }, { taskId }),
+          createEnvelope('task.await_approval', { summary: 'ok?', approvalId: 'approval-1' }, { taskId }),
+          createEnvelope('task.complete', { agentRef: AGENT_REF, executor: PI_EXECUTOR, summary: 'done', sessionRef: 'session' }, { taskId }),
+          createEnvelope('task.fail', { agentRef: AGENT_REF, reason: 'boom' }, { taskId }),
+        ];
+        for (const report of execution) {
+          expect(await handleInboundEnvelope(inbound, 'device-a', report)).toMatchObject({ outcome: 'rejected', reason: 'task_not_claimed' });
+        }
+        const preClaim = [
+          createEnvelope('task.claim', { deviceId: 'device-b', agentRef: AGENT_REF, executor: PI_EXECUTOR }, { taskId }),
+          createEnvelope('task.decline', { agentRef: AGENT_REF, reason: 'busy' }, { taskId }),
+          createEnvelope('task.cancelled', { agentRef: AGENT_REF }, { taskId }),
+          createEnvelope('task.fail', { agentRef: AGENT_REF, reason: 'daemon_interrupted', retryable: false,
+            recovery: { kind: 'daemon_interrupted', offerId: '10000000-0000-4000-8000-000000000001' } }, { taskId }),
+        ];
+        for (const report of [...execution, ...preClaim]) {
+          expect(await handleInboundEnvelope(inbound, 'device-b', report)).toMatchObject({ outcome: 'rejected', reason: 'task_not_found_for_device' });
+        }
+        expect(await handleInboundEnvelope(inbound, 'device-b',
+          createEnvelope('agent.message.draft', { agentRef: AGENT_REF, revision: 1, offset: 0, text: 'hi' }, { taskId })))
+          .toMatchObject({ outcome: 'rejected', reason: 'agent_message_draft_invalid' });
+        expect(await handleInboundEnvelope(inbound, 'device-b', createEnvelope('agent.message.publish', {
+          agentRef: AGENT_REF, sessionRef: 'session', contract: 'example.chat.v1', messageId: '10000000-0000-4000-8000-000000000002',
+          cursor: 1, contentType: 'text/markdown', body: 'hello', byteCount: 5,
+          contentHash: 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+        }, { taskId }))).toMatchObject({ outcome: 'rejected', reason: 'task_not_found_for_device' });
+        const attempt = await stores.tasks.get(TENANT_A, taskId);
+        expect(attempt).toMatchObject({ status: 'offered' });
+        expect(attempt?.ownerDeviceId).toBeUndefined();
+        expect(await stores.agentMessageDraft.read(TENANT_A, taskId)).toBeUndefined();
       });
     });
 
