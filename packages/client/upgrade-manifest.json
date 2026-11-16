@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "7fdae87350df481f7b4f77a49984442d2e438964089db085c214343d85365996"
+    "snapshotSha256": "e923f1c3966fa7495d353c3f7eb26f4abe0fc293706a10a11fc40ae8ce414d0a"
   },
   "configFields": {
     "status": "tracked",
@@ -1799,7 +1799,7 @@
       "item": "example:host-execution-core",
       "change": "changed",
       "before": "K4 0.0.1 src-sha256=a62de5b4c4495e5e",
-      "after": "K4 0.0.1 src-sha256=8c1fbd81a7d14099",
+      "after": "K4 0.0.1 src-sha256=17c9ab1fc3785ffe",
       "entry": "wire-v7-execution-target"
     },
     {
