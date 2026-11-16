@@ -7,7 +7,7 @@ import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { HostLedger } from '@byok-sdk/server/execution-core';
 import { template } from './k4-fixtures.test-support';
 import type { ChannelPort, InboundMessage } from './channel';
-import { botCompactVeto } from './compaction';
+import { botLedgerOptions } from './compaction';
 import { FINAL_BODY, deliveryVectors, replyToken, type DeliverySubject } from './delivery-vectors.test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { openLTestHost, ResultStubAdapter, type LTestHost } from './l-test-host.test-support';
@@ -64,7 +64,7 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
   };
   const adapter = new DraftAdapter();
   const fixture: LTestHost = await openLTestHost({ deviceCredentials: new InMemoryDeviceCredentialBackend(),
-    ledgerOptions: { compactVeto: botCompactVeto }, adapter,
+    ledgerOptions: botLedgerOptions, adapter,
     consume: (wake, signal) => bot.consume(wake, signal), agentMessage: { consume: input => bot.consumeMessage(input) } });
   const ledger = () => reopened ?? fixture.ledger;
   // The crash boundary: the claim is committed, and this copy of the database is what a restarted Host opens.
@@ -94,7 +94,7 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
     checkpoint = undefined;
     await bot.close();
     reopened?.close();
-    reopened = new HostLedger(path, fixture.ledger.tenant, { compactVeto: botCompactVeto });
+    reopened = new HostLedger(path, fixture.ledger.tenant, botLedgerOptions);
     bot = new BotCollaboration(fixture.server, reopened, options);
     await bot.recover();
   };

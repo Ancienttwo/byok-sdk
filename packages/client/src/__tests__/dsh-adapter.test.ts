@@ -136,7 +136,7 @@ describe('DshAdapter detect and prepare', () => {
   it('reports a missing key and an unqualified version', async () => {
     const { adapter } = await setup();
     setAmbient('FAKE_DSH_VERSION', '0.2.2-alpha.2');
-    expect(await adapter.detect()).toMatchObject({ kind: 'available', version: '0.2.2-alpha.2', authPresent: false, advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: QUALIFIED_DSH_VERSION } });
+    expect(await adapter.detect()).toMatchObject({ kind: 'available', version: '0.2.2-alpha.2', authPresent: false, versionVerdict: { state: 'warn', qualifiedVersion: QUALIFIED_DSH_VERSION } });
   });
 
   it('refuses an installation whose acp profile does not resolve', async () => {

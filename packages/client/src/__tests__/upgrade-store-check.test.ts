@@ -226,8 +226,8 @@ describeSqlite('inspectDaemonStores', () => {
         await storage.close(BACKGROUND_CONTEXT);
       } finally { lock.release(); }
     }
-    // The writer can put owner in an existing replica; durable_schema still owns its verdict.
-    (await acquireReplicaLock(healthy, 'lease')).release();
+    // The lock path now holds the other task's replica: the writer refuses it rather than add owner to it.
+    await expect(acquireReplicaLock(healthy, 'lease')).rejects.toThrow('another database');
     const compatibleBefore = treeState(storeDir);
     expect((await inspectDaemonStores({ storeDir })).find((result) => result.path === collision)?.verdict).toBe('accepted');
     expect(treeState(storeDir)).toEqual(compatibleBefore);

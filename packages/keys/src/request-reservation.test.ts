@@ -9,7 +9,6 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { InMemoryTruthStore, tenantId } from '@byok-sdk/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DeviceSealingKeyStore, type DeviceSealingKey } from './device-sealing-key';
@@ -35,7 +34,6 @@ import {
 import { InMemorySecretStore, modelProviderSecretName } from './secret-store';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
-import { TruthStoreProviderProfileStore } from './truth-profile-store';
 
 const OTHER_AGENT = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
 const OTHER_REF = 'salesko-9a8b7c6d5e4f4a3b8c2d1e0f9a8b7c6d';
@@ -44,14 +42,7 @@ const enrollment = { tenantId: TENANT, deviceId: DEVICE };
 const STORES: Array<{ name: string; enabled: boolean; open: (dir: string) => ProviderProfileStore }> = [
   { name: 'sqlite', enabled: isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1', open: (dir) => new SqliteProviderProfileStore({ path: join(dir, 'provider-profile.sqlite') }) },
   { name: 'in-memory', enabled: true, open: () => new InMemoryProviderProfileStore() },
-  {
-    name: 'truth-store (process-local custody)',
-    enabled: true,
-    open: () => new TruthStoreProviderProfileStore({
-      tenant: tenantId('keys-reservation-test'),
-      truthStore: new InMemoryTruthStore({ now: () => new Date(NOW) }),
-    }),
-  },
+
 ];
 
 let dir: string;

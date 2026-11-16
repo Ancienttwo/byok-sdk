@@ -19,26 +19,8 @@
  *   see `JournalUnavailableError` in `journal.ts`.
  */
 import { chmodSync, existsSync } from 'node:fs';
-import { resolve, win32 } from 'node:path';
+import { sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
 import type { DatabaseSync } from 'node:sqlite';
-
-const EXTENDED = '\\\\?\\';
-
-/**
- * The path handed to SQLite, which is not always the path the rest of the code
- * uses. On Windows the SQLite VFS does not apply the extended-length prefix
- * itself: past the legacy MAX_PATH the open fails, and a failed open is
- * indistinguishable from a damaged file at the call site (the journal would
- * quarantine a healthy database and refuse to start). The prefix is applied
- * only when the path is long enough to need it, so ordinary installs keep the
- * plain path.
- */
-export function sqliteOpenPath(path: string, platform: NodeJS.Platform = process.platform): string {
-  if (platform !== 'win32') return path;
-  const absolute = platform === 'win32' ? win32.resolve(path) : resolve(path);
-  if (absolute.startsWith(EXTENDED) || absolute.length < 240) return absolute;
-  return EXTENDED + absolute;
-}
 
 /** Every post-construction boundary crossed before a journal handle is returned to its owner. */
 export type JournalOpenStep =
@@ -166,6 +148,10 @@ const SECURE_FILE_MODE = 0o600;
  * `busyTimeoutMs` bounds how long a write waits on the lock before throwing
  * `SQLITE_BUSY` — bounded on purpose, so contention surfaces as an error the
  * caller sees rather than an unbounded stall on the envelope path.
+ *
+ * `auto_vacuum` and `journal_mode` can rewrite an existing file's header, so
+ * the caller decides the file's format first, on the unchanged main file
+ * (`readSqliteFileUnchanged` from `@byok-sdk/core/sqlite-node`).
  *
  * Throws whatever `node:sqlite` throws (module load failure, a corrupt file,
  * an unreadable directory). Every caller is `SqliteLocalTaskJournal`'s

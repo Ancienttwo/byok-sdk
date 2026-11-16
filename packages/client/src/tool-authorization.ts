@@ -12,11 +12,9 @@ import type { AgentRef } from './agent-home.js';
  * Neither mode is an OS sandbox or a file-scope boundary.
  */
 export type ToolAuthorizationMode = 'auto' | 'all';
-export const TOOL_AUTHORIZATION_MODES: readonly ToolAuthorizationMode[] = Object.freeze(['auto', 'all']);
 
 /** The access one file-scope root grants. `write` implies `read`. */
 export type ToolFileAccess = 'read' | 'write';
-export const TOOL_FILE_ACCESS: readonly ToolFileAccess[] = Object.freeze(['read', 'write']);
 
 /**
  * One explicit additional workspace root of a file-scope policy. `id` is for

@@ -1,5 +1,5 @@
 import { inspectDaemonStores } from '@byok-sdk/client';
-import { inspectProviderProfileStore, migrateProviderProfileStore } from '@byok-sdk/keys';
+import { inspectProviderProfileStore } from '@byok-sdk/keys';
 import { inspectSqliteStore } from '@byok-sdk/server';
 
 type StoreCompatibility = Awaited<ReturnType<typeof inspectSqliteStore>>;
@@ -23,9 +23,8 @@ export class HostStoreRefusedError extends Error {
 
 /**
  * Runs the SDK store inspectors before any store opens. Every store is checked
- * before anything migrates, so a refusal leaves every file as it was. The keys
- * store is the only one with a Host-run migration (`migration-required`); any
- * other verdict than `accepted` or `absent` refuses.
+ * before any store opens, so a refusal leaves every file as it was. Any
+ * verdict other than `accepted` or `absent` refuses.
  */
 export async function precheckHostStores(paths: HostStorePaths): Promise<void> {
   const stores = [
@@ -33,11 +32,6 @@ export async function precheckHostStores(paths: HostStorePaths): Promise<void> {
     await inspectSqliteStore(paths.serverDb),
     await inspectProviderProfileStore(paths.keysDb),
   ];
-  const migrate = stores.filter(store => store.store === 'keys-profile-store' && store.verdict === 'migration-required');
-  const refused = stores.find(store => store.verdict !== 'accepted' && store.verdict !== 'absent' && !migrate.includes(store));
+  const refused = stores.find(store => store.verdict !== 'accepted' && store.verdict !== 'absent');
   if (refused) throw new HostStoreRefusedError(refused);
-  for (const store of migrate) {
-    const result = migrateProviderProfileStore(store.path);
-    if (result !== 'migrated') throw new HostStoreRefusedError({ ...store, reason: `the inspected migration did not run (${result})` });
-  }
 }

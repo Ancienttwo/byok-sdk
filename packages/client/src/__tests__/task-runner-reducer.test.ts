@@ -6,7 +6,6 @@ import {
   createTaskState,
   reduce,
   serialize,
-  stateBytes,
   transitionTable,
   type EffectEnvelope,
   type ReducerEvent,
@@ -430,7 +429,7 @@ describe('task-runner reducer core (#1099 S1)', () => {
     expect(deepFrozen(result.runner)).toBe(true);
     expect(result.task === undefined ? true : deepFrozen(result.task)).toBe(true);
     expect(JSON.parse(JSON.stringify(result))).toEqual(result);
-    expect(stateBytes(result.task)).toBeLessThanOrEqual(8 * 1024);
+    expect(new TextEncoder().encode(serialize(result.task)).length).toBeLessThanOrEqual(8 * 1024);
     expect(Object.isFrozen(transitionTable())).toBe(true);
     expect(transitionTable()).toBe(TRANSITIONS);
   });

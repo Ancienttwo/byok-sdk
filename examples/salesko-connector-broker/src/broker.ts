@@ -89,8 +89,6 @@ export const GmailSearchInputSchema = z
   })
   .strict();
 
-export type GmailSearchInput = z.infer<typeof GmailSearchInputSchema>;
-
 const OPAQUE_ID_SCHEMA = z.string().min(1).max(160).regex(/^[^\u0000\r\n]+$/u);
 const DISPLAY_NAME_SCHEMA = z.string().min(1).max(160).regex(/^[^\u0000\r\n]+$/u);
 

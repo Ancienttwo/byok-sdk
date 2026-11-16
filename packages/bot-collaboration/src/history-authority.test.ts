@@ -4,7 +4,7 @@ import { openHost, type TestHost } from '@byok-sdk/example-host-execution-core/t
 import { template } from './k4-fixtures.test-support';
 import { BotCollaboration } from './host';
 import type { ContextTurn } from './schema';
-import { botCompactVeto } from './compaction';
+import { botLedgerOptions } from './compaction';
 
 let fixture: TestHost | undefined, bot: BotCollaboration | undefined;
 afterEach(async () => { await bot?.close(); await fixture?.close(); bot = fixture = undefined; });
@@ -18,7 +18,7 @@ const PACKED = INJECTED.map(({ id, root, source, request, hop, status, conclusio
   lines: [{ speaker: source, text: request }, ...(reply === undefined ? [] : [{ speaker: 'bot', text: reply }])],
   meta: { id, root, hop, status, ...(conclusion === undefined ? {} : { conclusion }), outcomeSummary } }));
 async function open(history: (input: { botId: string; turnId: string }) => Promise<readonly ContextTurn[]>, historyTimeoutMs?: number) {
-  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
+  fixture = await openHost({ externalCore: true, ledgerOptions: botLedgerOptions, consume: (wake, signal) => bot!.consume(wake, signal) });
   bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', connector: async () => null, execution: template(fixture.deviceId), history, historyTimeoutMs });
   return { fixture, bot };
 }
@@ -86,7 +86,7 @@ it('counts a history read still open after historyTimeoutMs as failed, so the Tu
 });
 
 it('refuses a history timeout outside 1 ms to 2^31 - 1 ms', async () => {
-  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
+  fixture = await openHost({ externalCore: true, ledgerOptions: botLedgerOptions, consume: (wake, signal) => bot!.consume(wake, signal) });
   for (const historyTimeoutMs of [0, 2_147_483_648, 1.5]) {
     expect(() => new BotCollaboration(fixture!.server, fixture!.ledger, { botId: 'main', connector: async () => null, execution: template(fixture!.deviceId),
       historyTimeoutMs })).toThrow(/Invalid history timeout|nonnegative safe integer/);

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { BotCollaboration, botCompactVeto, TeamModeError, teamSnapshot as checkTeamSnapshot, type AgentMessageInput, type MessageServer,
+import { BotCollaboration, botLedgerOptions, TeamModeError, teamSnapshot as checkTeamSnapshot, type AgentMessageInput, type MessageServer,
   type TeamSnapshot } from '@byok-sdk/bot-collaboration';
 import { historyRowFromTurn, RetentionRefused, type ContextTurn } from '@byok-sdk/bot-collaboration/host-kit';
 import type { DueWake } from '@byok-sdk/server';
@@ -67,7 +67,7 @@ export class Conversation {
       if (!conversation) throw new Error('Conversation is not open yet');
       return conversation;
     };
-    const ledger = new HostLedger(options.ledgerFile, `product:${options.productId}`, { compactVeto: botCompactVeto });
+    const ledger = new HostLedger(options.ledgerFile, `product:${options.productId}`, botLedgerOptions);
     let bot: BotCollaboration;
     try {
       bot = new BotCollaboration(options.server, ledger, {

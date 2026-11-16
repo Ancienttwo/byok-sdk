@@ -86,12 +86,11 @@ afterEach(async () => {
 });
 
 describe('GrokAdapter detection', () => {
-  it('reports the version, an unqualified-version advisory and the API-key login signal', async () => {
+  it('reports the version, an unqualified-version warning and the API-key login signal', async () => {
     vi.stubEnv('XAI_API_KEY', 'xai-fixture-key');
     expect(await adapter().detect()).toEqual({
       kind: 'available', version: 'grok 1.0.62 (fixture)', authPresent: true,
       executablePath: fixture, executableSource: 'config',
-      advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '1.0.77' },
       versionVerdict: { state: 'warn', qualifiedVersion: '1.0.77' },
     });
   });

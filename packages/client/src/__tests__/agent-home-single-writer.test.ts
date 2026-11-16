@@ -298,22 +298,6 @@ describe('canonical Agent home single writer (WP0)', () => {
     expect(restarted.daemon.status().agentHomeExecution.activeAttempts).toBe(1);
   });
 
-  it('refuses the removed maxConcurrentMutableSessionsPerAgentHome at construction, whatever its value', async () => {
-    const storeDir = await temp('byok-single-writer-removed-store-');
-    const hostStorageRoot = await temp('byok-single-writer-removed-home-');
-    for (const limit of [1, 2]) {
-      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...({
-        localAgentRelease: { version: '0.0.0-test' },
-        productName: 'Single writer',
-        productId: `single-writer-removed-${limit}`,
-        serverUrl: server.url,
-        storeDir,
-        agentHome: { hostStorageRoot },
-        maxConcurrentMutableSessionsPerAgentHome: limit,
-      } as DaemonConfig) }, [new LaneAdapter('pi')])).toThrow(/maxConcurrentMutableSessionsPerAgentHome was removed/);
-    }
-  });
-
   it('never lets a pre-cancelled or duplicate offer consume a slot', async () => {
     const harness = await start();
 

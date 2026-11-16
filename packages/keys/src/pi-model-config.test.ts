@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { InMemoryTruthStore, tenantId } from '@byok-sdk/core';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import { parseModelProviderProfile } from './provider-profile';
 import { exactProviderProfileBinding, assertExactProviderProfileBinding } from './provider-profile-binding';
@@ -7,7 +6,6 @@ import { assertPiLaunchArgs, buildPiProviderArgs, buildPiProviderProjection } fr
 import { assertPiPreparedProviderProfile } from './pi-provider-launcher-core';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { InMemoryProviderProfileStore } from './profile-store';
-import { TruthStoreProviderProfileStore } from './truth-profile-store';
 import { ProviderRegistry } from './registry';
 import { InMemorySecretStore } from './secret-store';
 import { ModelProviderProfileSchema } from './provider-profile';
@@ -118,10 +116,8 @@ describe('explicit Pi model authority', () => {
     expect(() => assertExactProviderProfileBinding(changed, binding)).toThrow(/hash mismatch/);
   });
 
-  it.each(['memory', 'sqlite', 'truth'] as const)('persists and returns Pi configuration through %s registry', async (kind) => {
-    const store = kind === 'memory' ? new InMemoryProviderProfileStore()
-      : kind === 'sqlite' ? new SqliteProviderProfileStore({ path: ':memory:' })
-      : new TruthStoreProviderProfileStore({ tenant: tenantId('pi-model-test'), truthStore: new InMemoryTruthStore({ now: () => new Date(profileInput.updated_at) }) });
+  it.each(['memory', 'sqlite'] as const)('persists and returns Pi configuration through %s registry', async (kind) => {
+    const store = kind === 'memory' ? new InMemoryProviderProfileStore() : new SqliteProviderProfileStore({ path: ':memory:' });
     try {
       const registry = new ProviderRegistry({ profileStore: store, secretStore: new InMemorySecretStore(), now: () => new Date(profileInput.updated_at) });
       const original = parseModelProviderProfile(profileInput);
@@ -239,10 +235,8 @@ describe('Pi configuration without a thinkingLevelMap', () => {
       .toBe(JSON.stringify(buildPiProviderProjection(absent, 'pi-rpc')));
   });
 
-  it.each(['memory', 'sqlite', 'truth'] as const)('persists it through %s registry unchanged, with the same hash', async (kind) => {
-    const store = kind === 'memory' ? new InMemoryProviderProfileStore()
-      : kind === 'sqlite' ? new SqliteProviderProfileStore({ path: ':memory:' })
-      : new TruthStoreProviderProfileStore({ tenant: tenantId('pi-model-test'), truthStore: new InMemoryTruthStore({ now: () => new Date(profileInput.updated_at) }) });
+  it.each(['memory', 'sqlite'] as const)('persists it through %s registry unchanged, with the same hash', async (kind) => {
+    const store = kind === 'memory' ? new InMemoryProviderProfileStore() : new SqliteProviderProfileStore({ path: ':memory:' });
     try {
       const registry = new ProviderRegistry({ profileStore: store, secretStore: new InMemorySecretStore(), now: () => new Date(profileInput.updated_at) });
       const original = parseModelProviderProfile({ ...profileInput, pi_model: NO_MAP });

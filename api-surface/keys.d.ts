@@ -58,7 +58,6 @@
 //   PROVIDER_KEY_CHECK_OUTCOMES -> dist/custody.d.ts
 //   PROVIDER_KEY_CHECK_TIMEOUT_MS -> dist/provider-key-check.d.ts
 //   PROVIDER_MODEL_CAPABILITIES -> dist/provider-profile.d.ts
-//   PROVIDER_PROFILE_TRUTH_RECORD_KEY -> dist/truth-profile-store.d.ts
 //   PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS -> dist/sealed-provisioning.d.ts
 //   PROVIDER_PROVISIONING_REJECTIONS -> dist/custody.d.ts
 //   PROVIDER_PROVISIONING_SECRET_MAX_BYTES -> dist/secret-value.d.ts
@@ -88,7 +87,6 @@
 //   ProviderProfileRef -> dist/provider-profile.d.ts
 //   ProviderProfileRefSchema -> dist/provider-profile.d.ts
 //   ProviderProfileStore -> dist/profile-store.d.ts
-//   ProviderProfileStoreMigration -> dist/sqlite-profile-store.d.ts
 //   ProviderProvisioningBinding -> dist/custody.d.ts
 //   ProviderProvisioningCutPoint -> dist/sealed-provisioning.d.ts
 //   ProviderProvisioningFaultSeam -> dist/sealed-provisioning.d.ts
@@ -105,8 +103,6 @@
 //   SecretStore -> dist/secret-store.d.ts
 //   SqliteProviderProfileStore -> dist/sqlite-profile-store.d.ts
 //   SqliteProviderProfileStoreOptions -> dist/sqlite-profile-store.d.ts
-//   TruthStoreProviderProfileStore -> dist/truth-profile-store.d.ts
-//   TruthStoreProviderProfileStoreOptions -> dist/truth-profile-store.d.ts
 //   WindowsCredentialManagerSecretStore -> dist/windows-credential-manager.d.ts
 //   WindowsCredentialManagerSecretStoreOptions -> dist/windows-credential-manager.d.ts
 //   anthropicMessageText -> dist/anthropic-client.d.ts
@@ -130,7 +126,6 @@
 //   isPrivateNetworkLiteral -> dist/url.d.ts
 //   isSqliteAvailable -> dist/sqlite-support.d.ts
 //   loadSqliteModule -> dist/sqlite-support.d.ts
-//   migrateProviderProfileStore -> dist/sqlite-profile-store.d.ts
 //   modelApiUrl -> dist/http.d.ts
 //   modelMessageText -> dist/http.d.ts
 //   modelProviderSecretName -> dist/secret-store.d.ts
@@ -147,7 +142,6 @@
 //   requiredProviderSecret -> dist/headers.d.ts
 //   runCommand -> dist/command-runner.d.ts
 //   runPiProviderLauncher -> dist/pi-provider-launcher-core.d.ts
-//   scopeSecretStore -> dist/secret-scope.d.ts
 //   secretScopeId -> dist/secret-scope.d.ts
 //   secureSqliteFilePermissions -> dist/sqlite-support.d.ts
 //   withConfigurationLock -> dist/custody.d.ts
@@ -191,7 +185,6 @@
 //   ProviderSecretIdentity -> dist/model-route.d.ts
 //   applyModelRouteChange -> dist/model-route.d.ts
 //   createModelRouteDraft -> dist/model-route.d.ts
-//   listPiCatalogModels -> dist/model-route.d.ts
 //   modelRouteContext -> dist/model-route.d.ts
 //   modelRouteSubmission -> dist/model-route.d.ts
 //   modelRouteView -> dist/model-route.d.ts
@@ -374,7 +367,6 @@ export declare const BYOK_KEYS_ERROR_CODES: {
     readonly PROVIDER_SECRET_STORE_FAILED: 'PROVIDER_SECRET_STORE_FAILED';
     readonly PROVIDER_STORE_SCHEMA_STALE: 'PROVIDER_STORE_SCHEMA_STALE';
     readonly PROVIDER_STORE_UNAVAILABLE: 'PROVIDER_STORE_UNAVAILABLE';
-    readonly PROVIDER_TRUTH_INVALID: 'PROVIDER_TRUTH_INVALID';
     readonly PROVIDER_URL_INVALID: 'PROVIDER_URL_INVALID';
     readonly SECRET_ENVELOPE_INVALID: 'SECRET_ENVELOPE_INVALID';
     readonly SECRET_NAME_INVALID: 'SECRET_NAME_INVALID';
@@ -434,16 +426,14 @@ export { LinuxSecretServiceSecretStore } from './linux-secret-service.js';
 export type { LinuxSecretServiceSecretStoreOptions } from './linux-secret-service.js';
 export { WindowsCredentialManagerSecretStore } from './windows-credential-manager.js';
 export type { WindowsCredentialManagerSecretStoreOptions } from './windows-credential-manager.js';
-export { DEFAULT_SECRET_ENVELOPE_PREFIX, EnvelopeScopedSecretStore, scopeSecretStore, secretScopeId, } from './secret-scope.js';
+export { DEFAULT_SECRET_ENVELOPE_PREFIX, EnvelopeScopedSecretStore, secretScopeId, } from './secret-scope.js';
 export type { SecretScope } from './secret-scope.js';
 export { InMemoryProviderProfileStore } from './profile-store.js';
 export type { ProviderProfileStore } from './profile-store.js';
 export { isSqliteAvailable, loadSqliteModule, openSqliteDatabase, secureSqliteFilePermissions, } from './sqlite-support.js';
-export { SqliteProviderProfileStore, migrateProviderProfileStore } from './sqlite-profile-store.js';
-export type { ProviderProfileStoreMigration, SqliteProviderProfileStoreOptions } from './sqlite-profile-store.js';
+export { SqliteProviderProfileStore } from './sqlite-profile-store.js';
+export type { SqliteProviderProfileStoreOptions } from './sqlite-profile-store.js';
 export { inspectProviderProfileStore } from './store-compatibility.js';
-export { PROVIDER_PROFILE_TRUTH_RECORD_KEY, TruthStoreProviderProfileStore, } from './truth-profile-store.js';
-export type { TruthStoreProviderProfileStoreOptions } from './truth-profile-store.js';
 export { PROVIDER_CONFIGURATION_LOCK_WAIT_MS, PROVIDER_CUSTODY_RECEIPT_LIMIT, PROVIDER_KEY_CHECK_OUTCOMES, PROVIDER_PROVISIONING_REJECTIONS, withConfigurationLock, } from './custody.js';
 export type { ProviderConfigurationLock, ProviderCustodyCommit, ProviderCustodyOperation, ProviderCustodyPending, ProviderCustodyReceipt, ProviderKeyCheckOutcome, ProviderProvisioningBinding, ProviderProvisioningRejection, ProviderProvisioningResult, } from './custody.js';
 export { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key.js';
@@ -484,7 +474,6 @@ import { type SecretStore } from './secret-store.js';
 export declare const DEFAULT_KEYCHAIN_SECRET_STORAGE_PREFIX = "byok-b64-v1:";
 export interface MacOsKeychainSecretStoreOptions {
     account?: string;
-    allowUnprefixedRead?: boolean;
     commandRunner?: CommandRunner;
     keychainPath?: string;
     platform?: NodeJS.Platform;
@@ -584,10 +573,6 @@ export type PiCatalogModelListing = {
     readonly status: 'unrepresentable';
     readonly unrepresentable: readonly string[];
 };
-export declare function listPiCatalogModels(selection: {
-    readonly provider: string;
-    readonly api?: PiModelApi;
-}): PiCatalogModelListing[];
 export type ModelRouteChoice = {
     readonly value: string;
     readonly label: string | null;
@@ -1259,7 +1244,6 @@ export interface SecretScope {
 }
 export declare const DEFAULT_SECRET_ENVELOPE_PREFIX = "byok-scoped-secrets-v1:";
 export declare function secretScopeId(scope: SecretScope): string;
-export declare function scopeSecretStore<TName extends string>(store: SecretStore<TName>, scope: SecretScope): SecretStore<TName>;
 export declare class EnvelopeScopedSecretStore<TName extends string = string> implements SecretStore<TName> {
     #private;
     readonly providerLabel: string;
@@ -1333,8 +1317,6 @@ export declare class SqliteProviderProfileStore implements ProviderProfileStore 
     recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean>;
     setEnabled(profileRef: ProviderProfileRef): Promise<ModelProviderProfile>;
 }
-export type ProviderProfileStoreMigration = 'migrated' | 'unchanged';
-export declare function migrateProviderProfileStore(path: string): ProviderProfileStoreMigration;
 // ==== @byok-sdk/keys dist/sqlite-support.d.ts ====
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 // support
@@ -1357,35 +1339,6 @@ export declare function secureSqliteFilePermissions(databasePath: string): void;
 // ==== @byok-sdk/keys dist/store-compatibility.d.ts ====
 import type { StoreCompatibility } from '@byok-sdk/core';
 export declare function inspectProviderProfileStore(path: string): Promise<StoreCompatibility>;
-// ==== @byok-sdk/keys dist/truth-profile-store.d.ts ====
-import { type TenantId, type TruthStore } from '@byok-sdk/core';
-import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderCustodyReservation, type ProviderKeyCheckOutcome } from './custody.js';
-import { type ProviderProfileStore } from './profile-store.js';
-import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile.js';
-export declare const PROVIDER_PROFILE_TRUTH_RECORD_KEY = "byok-sdk.keys/model-provider-registry-v1";
-export interface TruthStoreProviderProfileStoreOptions {
-    tenant: TenantId;
-    truthStore: TruthStore;
-}
-export declare class TruthStoreProviderProfileStore implements ProviderProfileStore {
-    #private;
-    constructor(options: TruthStoreProviderProfileStoreOptions);
-    close(): Promise<void>;
-    acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
-    getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined>;
-    getReservation(requestId: string): Promise<ProviderCustodyReservation | undefined>;
-    markPending(pending: ProviderCustodyPending): Promise<void>;
-    getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined>;
-    getReceipt(requestId: string): Promise<ProviderCustodyReceipt | undefined>;
-    commitCustody(commit: ProviderCustodyCommit): Promise<void>;
-    recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean>;
-    delete(profileRef: ProviderProfileRef): Promise<boolean>;
-    get(profileRef: ProviderProfileRef): Promise<ModelProviderProfile | undefined>;
-    getEnabled(): Promise<ModelProviderProfile | undefined>;
-    list(): Promise<ModelProviderProfile[]>;
-    save(profile: ModelProviderProfile): Promise<ModelProviderProfile>;
-    setEnabled(profileRef: ProviderProfileRef): Promise<ModelProviderProfile>;
-}
 // ==== @byok-sdk/keys dist/url.d.ts ====
 export declare function normalizeProviderUrl(value: string): string;
 export declare function isLoopbackProviderUrl(value: string): boolean;

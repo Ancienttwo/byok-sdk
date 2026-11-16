@@ -24,7 +24,7 @@ async function check(runtimeEnvironment: unknown, json = false, extra: object = 
     ...(runtimeEnvironment === undefined ? {} : { runtimeEnvironment }), ...extra,
   }));
   const lines: string[] = [];
-  const code = runConfigCheckCommand(file, { strict: false, json }, { log: (line) => lines.push(line) });
+  const code = runConfigCheckCommand(file, { json }, { log: (line) => lines.push(line) });
   return { code, out: lines.join('\n') };
 }
 

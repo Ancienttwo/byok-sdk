@@ -48,6 +48,19 @@ export class AgentMemorySnapshotLimitError extends AgentMemoryValidationError {
 export class AgentMemoryIoError extends AgentMemoryError {
   constructor(message: string) { super(message); this.name = 'AgentMemoryIoError'; }
 }
+/**
+ * The Agent home's redacted projection outbox is in a state format this build
+ * does not read, such as the version 2 state of 0.32.0. The file is left as it
+ * is: nothing reads, rewrites or deletes it, and projection stays refused until
+ * an operator disposes of `.byok/` + {@link AGENT_MEMORY_OUTBOX_FILENAME}.
+ */
+export class AgentMemoryOutboxVersionUnsupportedError extends AgentMemoryError {
+  constructor(readonly stateVersion: unknown) {
+    // Only a numeric version enters the message; the file's other content stays out of logs.
+    super(`Agent memory outbox state ${typeof stateVersion === 'number' ? `version ${stateVersion}` : 'without a numeric version'} is not supported; this build reads version 3 only and leaves the file untouched`);
+    this.name = 'AgentMemoryOutboxVersionUnsupportedError';
+  }
+}
 export class AgentMemoryRevisionConflictError extends AgentMemoryError {
   constructor(readonly expectedRevision: string, readonly actualRevision: string) {
     super(`Agent memory revision conflict: expected ${expectedRevision}, current ${actualRevision}`);
@@ -1089,10 +1102,7 @@ function freezeOutboxSealing(value: unknown): OutboxSealing {
   return Object.freeze({ scopeId: value.scopeId, epoch: value.epoch });
 }
 function freezeOutboxState(value: unknown): OutboxState {
-  // 0.32.0 wrote version 2 without a binding. It had no sealing grant, so
-  // every version 2 epoch is plaintext; turning sealing on takes a higher
-  // writer epoch, as for any change of form.
-  if (isPlainRecord(value) && value.version === 2 && !('sealing' in value)) return freezeOutboxState({ ...value, version: 3, sealing: null });
+  if (isPlainRecord(value) && value.version !== 3) throw new AgentMemoryOutboxVersionUnsupportedError(value.version);
   if (!isPlainRecord(value) || !exactKeys(value, ['version', 'currentWriterEpoch', 'sealing', 'highWater', 'pending']) || value.version !== 3 || !validOrderingValue(value.currentWriterEpoch) || !Array.isArray(value.highWater) || !Array.isArray(value.pending)) throw new AgentMemoryError('Agent memory outbox state is invalid');
   const sealing = freezeOutboxSealing(value.sealing);
   if (value.highWater.length > 1 || value.pending.length > 1) throw new AgentMemoryError('Agent memory outbox state is invalid');
@@ -1219,7 +1229,10 @@ export class AgentMemoryRedactedOutbox {
   }
   private loadBody(body: string): OutboxState {
     try { return freezeOutboxState(JSON.parse(body) as unknown); }
-    catch { throw new AgentMemoryError('Agent memory outbox state is invalid'); }
+    catch (error) {
+      if (error instanceof AgentMemoryOutboxVersionUnsupportedError) throw error;
+      throw new AgentMemoryError('Agent memory outbox state is invalid');
+    }
   }
   private async admitGrant(): Promise<void> {
     if (this.grant.writerEpoch < this.state.currentWriterEpoch) throw new AgentMemoryError('Agent memory outbox writer epoch is stale');

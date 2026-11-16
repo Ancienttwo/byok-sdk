@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { InMemoryTruthStore, tenantId } from '@byok-sdk/core';
 
 import { InMemoryProviderProfileStore } from './profile-store';
 import type { ProviderProfileStore } from './profile-store';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
-import { TruthStoreProviderProfileStore } from './truth-profile-store';
 import type {
   ModelProviderKind,
   ModelProviderProfile,
@@ -68,17 +66,7 @@ const implementations: ReadonlyArray<{
     label: 'Sqlite',
     ready: sqliteReady,
   },
-  {
-    factory: () =>
-      new TruthStoreProviderProfileStore({
-        tenant: tenantId('profile-contract-tenant'),
-        truthStore: new InMemoryTruthStore({
-          now: () => new Date('2026-08-05T00:00:00.000Z'),
-        }),
-      }),
-    label: 'TruthStore',
-    ready: true,
-  },
+
 ];
 
 for (const { factory, label, ready } of implementations) {

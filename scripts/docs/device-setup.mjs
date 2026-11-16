@@ -1,7 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { REMOVED_DAEMON_CONFIG_FIELDS } from '../../packages/client/src/daemon/config-schema/removed-fields.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const read = (file) => readFileSync(path.join(root, file), 'utf8');
@@ -49,7 +48,6 @@ export function generateGuide(current, manifest = JSON.parse(read('packages/clie
   const sections = {
     fields: table('| Field | Tier | Shape |', fields(schema.properties, schema.required)),
     errors: table('| Code / halt reason | Retryable unchanged | Next step | Guide |', Object.entries(catalog).sort(([a], [b]) => a.localeCompare(b)).map(([code, entry]) => [`\`${code}\``, entry.retryable ? 'yes' : 'no', entry.nextStep, `[guide](${entry.anchor})`])),
-    removed: table('| Removed field | Migration |', REMOVED_DAEMON_CONFIG_FIELDS.map((field) => [`\`${field.path}\``, field.message])),
     migrations: `Manifest transition: **${manifest.from.version} → ${manifest.to.version}**. Versions and entries below come from the current package manifest; they are not a release announcement.\n\n` + table('| Entry | Impact | Change and migration |', manifest.entries.filter((entry) => entry.items.some((item) => item.startsWith('config:')) || /local-tool-approval|wire-v4/.test(entry.id) || entry.id === 'capability-ports-two-way' || entry.migration === 'docs/spec.md#recommended-host-layout').map((entry) => [entry.id, entry.impact, `${entry.summary} [Migration](../${entry.migration})`])),
   };
   let result = current;

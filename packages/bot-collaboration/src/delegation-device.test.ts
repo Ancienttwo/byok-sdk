@@ -8,7 +8,7 @@ import type { AutonomyGate } from './rules/autonomy';
 const auto: AutonomyGate = { autonomy: 'auto', record: () => { throw new Error('auto records nothing'); } };
 
 function setup() {
-  const s: LedgerState = { version: 1, sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {}, slots: {}, outbox: {},
+  const s: LedgerState = { sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {}, slots: {}, outbox: {},
     applied: {}, application: {}, scanWake: null };
   const state = stateOf(s.application);
   for (const id of ['a', 'b']) state.team.bots[id] = { id, name: id, role: 'Member', persona: '', model: 'default', mainBot: false,

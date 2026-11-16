@@ -1,4 +1,4 @@
-import { assertDaemonConfigValid, removedFieldError } from '../config-schema/errors.js';
+import { assertDaemonConfigValid } from '../config-schema/errors.js';
 import { DaemonConfigInvalidError } from '../../daemon-config-invalid-error.js';
 import type { DaemonMemoryHelperResolution } from '../config-schema/effective.js';
 import { resolveAgentMemoryFilesystemHelper } from '../../util/agent-memory-helper-release.js';
@@ -28,7 +28,7 @@ function admitToolAuthorizationPolicy(value: unknown): ToolAuthorizationPolicy {
     if (!(error instanceof TypeError)) throw error;
     const fileScope = error instanceof FileScopePolicyError;
     throw new DaemonConfigInvalidError([{
-      severity: 'error', code: fileScope ? error.code : 'invalid_value',
+      code: fileScope ? error.code : 'invalid_value',
       path: fileScope ? 'toolAuthorization.fileScope' : 'toolAuthorization', message: error.message,
     }]);
   }
@@ -45,9 +45,10 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   if (overrides.deviceCredentials !== undefined && config.deviceCredentials !== undefined) {
     throw new TypeError('configure OS deviceCredentials or inject a credential backend, not both');
   }
-  const configWarnings = assertDaemonConfigValid(config);
-  if (Object.hasOwn(overrides, 'hostedJournal')) throw removedFieldError('hostedJournal');
-  if (Object.hasOwn(overrides, 'gitWorkspace')) throw removedFieldError('gitWorkspace');
+  assertDaemonConfigValid(config);
+  for (const key of ['hostedJournal', 'gitWorkspace']) {
+    if (Object.hasOwn(overrides, key)) throw new TypeError(`overrides.${key} is not a DaemonOverrides field`);
+  }
   // The one parser admits both a config file's object and an embedded Host's
   // object at construction; the task runner receives only the derived
   // resolver, so no offer can see an invalid policy.
@@ -197,7 +198,7 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   return {
     agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, agentMemoryMcpBin,
     agentMemoryDescribeBin, agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, piByokLauncher,
-    memoryHelper, configWarnings, toolAuthorizationResolver,
+    memoryHelper, toolAuthorizationResolver,
   };
 }
 

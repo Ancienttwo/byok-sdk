@@ -33,6 +33,8 @@ export interface PreparedOperationResources {
   reader?: { canonicalHome: string };
   /** Seals a canonical writer Agent manifest. */
   agentHome?: string;
+  /** The start's cancellation, as the daemon's startup deadline passes it. */
+  signal?: AbortSignal;
 }
 
 /** Exercise the public descriptor → prepare → sealed-manifest → operation path in adapter unit tests. */
@@ -91,6 +93,7 @@ export async function startPreparedOperation(
         : resources.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: resources.mcpToolsetTools }),
       ...(resources.approvalChannel === undefined ? {} : { approvalChannel: resources.approvalChannel }),
       ...(resources.toolAuthorization === undefined ? {} : { toolAuthorization: resources.toolAuthorization }),
+      ...(resources.signal === undefined ? {} : { signal: resources.signal }),
     });
   } catch (error) {
     if (!isRuntimeStartupDisposalFailure(error)) await scratch.release();

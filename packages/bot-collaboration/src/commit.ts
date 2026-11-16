@@ -1,6 +1,6 @@
-import { enqueue, hash, project, promoteOccurrence, taskId, type ApplicationRows, type HostLedger, type Intent, type LedgerState } from '@byok-sdk/server/execution-core';
+import { enqueue, hash, project, promoteOccurrence, type ApplicationRows, type HostLedger, type Intent, type LedgerState } from '@byok-sdk/server/execution-core';
 import { stateOf, type Card, type CollaborationState, type Turn } from './model.js';
-import type { Json } from './rules/turn.js';
+import { admitLedgerWouldDo } from './ledger-compatibility.js';
 import { intentFacts } from './delegation.js';
 import { turnIntentRetired } from './compaction.js';
 import { concludeRoutineTurn, routineOccurrence, type BotRoutine } from './routines.js';
@@ -29,6 +29,7 @@ export type { Command, CommandPorts } from './rules/commands.js';
  */
 export function writeLedger<T>(ledger: Pick<HostLedger, 'transaction'>, apply: (state: LedgerState, rows: ApplicationRows) => T): T {
   return ledger.transaction((s, rows) => {
+    admitLedgerWouldDo(ledger, stateOf(s.application));
     refuseImported(stateOf(s.application));
     const result = apply(s, rows);
     refuseExported(stateOf(s.application));
@@ -60,37 +61,6 @@ export function retainInLedger(ledger: HostLedger, input: RetentionInput, limits
     hasIntent: turnId => !!s.intents[hash(turnId)],
     occurrenceOpen: turnId => { const occurrence = s.occurrences[routineOccurrence({ id: turnId })]; return !!occurrence && !occurrence.conclusion; },
   }, rows));
-}
-const wouldDoRowNeedsMigration = (row: { turnId?: string }): boolean => row.turnId === undefined;
-export function wouldDoNeedsMigration(state: CollaborationState): boolean {
-  return Object.values(state.wouldDo ?? {}).some(wouldDoRowNeedsMigration);
-}
-/** The result of `migrateWouldDo`: rows that got their `turnId`, and rows archived because no live Turn owns them. */
-export interface WouldDoMigration { backfilled: number; archived: number }
-/**
- * The one-shot migration of would-do rows written before #1756, which have no `turnId`. The operator runs it once before
- * the new code serves. Each Turn intent of K4 has the task id `taskId(turnId, generation)` for each of its generations, so
- * the row's task id names its Turn exactly. A row whose intent was compacted, or whose Turn left the state, has no live
- * owner: it moves to the `wouldDo` application rows, as retention would move it, and is counted.
- */
-export function migrateWouldDo(ledger: HostLedger): WouldDoMigration {
-  return writeLedger(ledger, (s, rows) => {
-    const state = stateOf(s.application), owners = new Map<string, string>(), result: WouldDoMigration = { backfilled: 0, archived: 0 };
-    for (const intent of Object.values(s.intents)) {
-      if (!Object.hasOwn(state.turns, intent.key)) continue;
-      for (let generation = 0; generation <= intent.generation; generation++) owners.set(taskId(intent.key, generation), intent.key);
-    }
-    for (const row of Object.values(state.wouldDo ?? {})) {
-      if (!wouldDoRowNeedsMigration(row)) continue;
-      const turnId = owners.get(row.taskId);
-      if (turnId !== undefined) { row.turnId = turnId; result.backfilled++; continue; }
-      // SAFETY: The persisted would-do row consists of JSON fields and can be stored as an application row.
-      rows.put('wouldDo', row.id, row as unknown as Json);
-      delete state.wouldDo![row.id];
-      result.archived++;
-    }
-    return result;
-  });
 }
 /**
  * The intents that user input goes ahead of (#1229): a Bot Turn whose source is a routine occurrence or another Bot's

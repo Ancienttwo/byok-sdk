@@ -313,8 +313,8 @@ function recordOf(event: Exclude<DaemonEvent, { kind: 'progress' }>): DaemonReco
     case 'unpaired':
       return { kind: 'unpaired', ts };
     case 'runtimes-detected':
-      // Actual runtime output is untrusted text; the advisory's qualified
-      // version is adapter configuration and preserves its warning offline.
+      // Actual runtime output is untrusted text; a warning's qualified
+      // version is adapter configuration and preserves the warning offline.
       // The policy verdict, restart comparison and executable are local
       // status/doctor evidence (#1103): like the installed version, none
       // enters audit or support sinks.

@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
-import { hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, occurrenceIntentKey, taskId, type FrozenSubmitPort, type Json,
+import { hash, MIN_TOMBSTONE_RETENTION_MS, occurrenceIntentKey, taskId, type FrozenSubmitPort, type Json,
   type RoutineDefinition } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { commitImport, importForSwitch, type InboundMessage, type IntentRecord, routineCalendar, sealLedger, sealSwitchExport, type SwitchContent,
+import { type InboundMessage, type IntentRecord, routineCalendar, sealSwitchExport, type SwitchContent,
   type SwitchExport, verifySwitchExport } from '@byok-sdk/bot-collaboration/host-kit';
 import { DEVICE_SWITCHING } from '@byok-sdk/bot-collaboration/rules';
 import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/bot-collaboration/testing';
@@ -203,7 +203,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch export on real Postgres (#
   });
   afterEach(async () => { await opened?.close(); });
 
-  it('moves a scope to a new L tenant: H exports it, L imports and reads it back, H commits away on the receipt and L commits', async () => {
+  it('exports a scope and commits H away on the receipt', async () => {
     const { scope, routineId } = await populated();
     const document = await exported(scope);
     expect(verifySwitchExport(document)).toEqual(document.manifest);
@@ -217,22 +217,16 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch export on real Postgres (#
     expect(document.routines).toEqual([expect.objectContaining({ id: routineId, ordinal: 0, lifecycle: 'active' })]);
     expect(document.collaboration.team.homeOperations).toEqual([expect.not.objectContaining({ sent: true })]);
 
-    const ledger = new HostLedger(':memory:', `l:${randomUUID()}`);
-    try {
-      const receipt = importForSwitch(ledger, document);
-      expect(receipt).toEqual({ digest: document.manifest.digest, devices: ['device'] });
-      // A receipt that is not this export's moves nothing.
-      await expect(store().commitSwitch(scope, 'device', 2, 'other')).rejects.toThrow(`The receipt other is not this scope's export ${receipt.digest}`);
-      expect(await store().commitSwitch(scope, 'device', 2, receipt.digest)).toEqual({ mode: 'L', revision: 3, revoked: false });
-      commitImport(ledger, receipt.digest);
-    } finally { ledger.close(); }
+    // A wrong receipt cannot move the old owner; the export digest commits it.
+    await expect(store().commitSwitch(scope, 'device', 2, 'other')).rejects.toThrow(`The receipt other is not this scope's export ${document.manifest.digest}`);
+    expect(await store().commitSwitch(scope, 'device', 2, document.manifest.digest)).toEqual({ mode: 'L', revision: 3, revoked: false });
     // The old scope keeps the exported state: H writes nothing to it, also after the commit.
     const kept = await store().dump(scope);
     await expect(store().audit(scope, 'after', clock)).rejects.toEqual(exportedError(document.manifest.digest));
     expect(await store().dump(scope)).toBe(kept);
   });
 
-  it('keeps a Host job summary of null in the export, and L reads it back to the same digest', async () => {
+  it('keeps a Host job summary of null in the export', async () => {
     // K4 accepts a handler's { summary: null } and stores the null.
     hosted = new HostedCollaborationStore(opened!.pool, opened!.store.schema, { host: TEST_HOST, hostJobs: { job: async () => ({ summary: null }) } });
     const scope = await plain(), slot = routineCalendar({ rule: schedule, timeZone: 'UTC' } as unknown as RoutineDefinition, NOW - 1)!;
@@ -244,10 +238,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch export on real Postgres (#
     expect(await query(`SELECT job FROM ${table('occurrence')} WHERE scope = $1`, [storedKey(scope)])).toEqual([{ job: { summary: null } }]);
     const document = await exported(scope);
     expect(document.occurrences).toEqual([expect.objectContaining({ job: { attempts: 1, summary: null } })]);
-    const ledger = new HostLedger(':memory:', `l:${randomUUID()}`);
-    try {
-      expect(importForSwitch(ledger, document)).toEqual({ digest: document.manifest.digest, devices: ['device'] });
-    } finally { ledger.close(); }
+    expect(verifySwitchExport(document)).toEqual(document.manifest);
   });
 
   it('refuses an export that a device or the scope is not ready for, and writes nothing', async () => {
@@ -487,19 +478,15 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch export on real Postgres (#
 
 const importedError = (digest: string) => expect.objectContaining({ name: 'SwitchImportedError', code: 'switch_imported', digest });
 /**
- * H exports `scope`, a new L tenant imports and commits it, and the L ledger is sealed as the L export of the domain. L's own
- * freeze and drain are not run: the ledger holds the drained domain that H moved, and is sealed as it stands.
+ * Build a sealed L-source fixture from an H export to exercise hosted import independently.
  */
 async function throughL(scope: string): Promise<{ fromH: SwitchExport; fromL: SwitchExport }> {
   const fromH = await exported(scope);
-  const ledger = new HostLedger(':memory:', `l:${randomUUID()}`);
-  try {
-    const receipt = importForSwitch(ledger, fromH);
-    await store().commitSwitch(scope, 'device', 2, receipt.digest);
-    commitImport(ledger, receipt.digest);
-    return { fromH, fromL: sealLedger(ledger, { source: 'L', domain: ledger.tenant, exportedAt: NOW + 1,
-      devices: fromH.devices.map(device => ({ deviceId: device.deviceId, frozenRevision: 3 })) }) };
-  } finally { ledger.close(); }
+  await store().commitSwitch(scope, 'device', 2, fromH.manifest.digest);
+  const { manifest: _manifest, ...content } = structuredClone(fromH);
+  const fromL = sealSwitchExport({ ...content, source: 'L', domain: `l:${randomUUID()}`, exportedAt: NOW + 1,
+    devices: fromH.devices.map(device => ({ deviceId: device.deviceId, frozenRevision: 3 })) });
+  return { fromH, fromL };
 }
 /** The document sealed again after `change` edits its content. */
 function resealed(document: SwitchExport, change: (content: SwitchContent) => void): SwitchExport {
@@ -554,11 +541,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch import on real Postgres (#
     const again = await store().exportScope(target, [{ deviceId: 'device', expectedRevision: 3 }], clock);
     expect(again.manifest.digests).toEqual(fromH.manifest.digests);
     expect(again.manifest.digests).toEqual(fromL.manifest.digests);
-    // L to H to L: a new L tenant reads H's export back to its digest.
-    const ledger = new HostLedger(':memory:', `l:${randomUUID()}`);
-    try {
-      expect(importForSwitch(ledger, again)).toEqual({ digest: again.manifest.digest, devices: ['device'] });
-    } finally { ledger.close(); }
+
   });
 
   it('runs the device\'s work once the import is committed: a new Turn freezes its intent, and the moved home write is sent', async () => {

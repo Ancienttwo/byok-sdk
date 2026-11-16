@@ -1,11 +1,45 @@
 import type { Pool, PoolClient } from 'pg';
 import { STORE_VERSION } from './ddl';
+import { MAPS } from './layout';
 import { exportMarkOf, SwitchExportedError, SwitchImportedError } from '@byok-sdk/bot-collaboration/host-kit';
 import { importMarkOf } from './switch';
 
 /** A stored scope row of a store version that this code does not support. Nothing was written. */
 export class HostedStoreVersionError extends Error {
   constructor(readonly version: number) { super(`Unsupported hosted collaboration store version ${version}`); this.name = 'HostedStoreVersionError'; }
+}
+
+/** An old would-do layout is unsupported and remains untouched. */
+export class HostedOldWouldDoError extends Error {
+  readonly code = 'would_do_unsupported_old' as const;
+  constructor() { super('Unsupported hosted would-do layout'); this.name = 'HostedOldWouldDoError'; }
+}
+
+/** Inspect layout markers only, before reading or writing any scope contents. */
+export async function refuseOldWouldDo(client: PoolClient, scopeKey?: string): Promise<void> {
+  const result = await client.query(`SELECT 1 FROM scope s WHERE ($1::text IS NULL OR s.scope = $1) AND (
+    (s.frame::jsonb -> 'wouldDo' IS NOT NULL AND s.frame::jsonb -> 'wouldDo' <> '{}'::jsonb) OR
+    EXISTS (SELECT 1 FROM entity e WHERE e.scope = s.scope AND e.kind = 'would_do' AND e.body::jsonb ->> 'turnId' IS NULL)
+  ) LIMIT 1`, [scopeKey ?? null]);
+  if (result.rows.length) throw new HostedOldWouldDoError();
+}
+
+/** An existing entity table must already have the current format marker. */
+export class HostedStoreSchemaError extends Error {
+  readonly code = 'hosted_schema_unsupported_old' as const;
+  constructor() { super('Unsupported hosted entity kind constraint'); this.name = 'HostedStoreSchemaError'; }
+}
+
+async function refuseOldEntityConstraint(client: PoolClient, schema: string): Promise<void> {
+  const result = await client.query<{ definition: string | null }>(`SELECT pg_get_constraintdef(c.oid) AS definition
+    FROM pg_class t JOIN pg_namespace n ON n.oid = t.relnamespace
+    LEFT JOIN pg_constraint c ON c.conrelid = t.oid AND c.conname = 'entity_kind_check' AND c.contype = 'c'
+    WHERE n.nspname = $1 AND t.relname = 'entity' AND t.relkind = 'r'`, [schema]);
+  if (!result.rows.length) return;
+  const kinds = MAPS.map(([kind]) => `'${kind}'::text`).join(', ');
+  if (result.rows.length !== 1 || result.rows[0]?.definition !== `CHECK ((kind = ANY (ARRAY[${kinds}])))`) {
+    throw new HostedStoreSchemaError();
+  }
 }
 
 export const SCHEMA = /^[a-z_][a-z0-9_]{0,62}$/;
@@ -18,6 +52,7 @@ export async function inSchema<T>(pool: Pool, schema: string, work: (client: Poo
   try {
     await client.query(readOnly ? 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY' : 'BEGIN');
     await client.query(`SET LOCAL search_path TO "${schema}"`);
+    await refuseOldEntityConstraint(client, schema);
     if (!readOnly) locks.set(client, { scopes: new Set(), switchStep: false });
     const value = await work(client);
     if (!readOnly) await refuseSwitched(client, locks.get(client)!);
@@ -64,5 +99,6 @@ export async function lockScope(client: PoolClient, scopeKey: string, step?: 'sw
     'SELECT state_version, frame::text AS frame FROM scope WHERE scope = $1 FOR UPDATE', [scopeKey]);
   if (!head.rows[0]) throw new Error('Unknown hosted collaboration scope');
   if (head.rows[0].state_version !== STORE_VERSION) throw new HostedStoreVersionError(head.rows[0].state_version);
+  await refuseOldWouldDo(client, scopeKey);
   return head.rows[0].frame;
 }

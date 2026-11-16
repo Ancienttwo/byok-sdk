@@ -123,7 +123,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H message consumer on real Postgres
 
   it('throws on a scope of an unknown store version and writes nothing, so the SDK admission stays pending', async () => {
     const f = await fixture();
-    await opened!.pool.query(`UPDATE "${store().schema}".scope SET state_version = 3 WHERE scope = $1`, [storedKey(f.scope)]);
+    await opened!.pool.query(`UPDATE "${store().schema}".scope SET state_version = 2 WHERE scope = $1`, [storedKey(f.scope)]);
     const stored = await f.stored();
     await expect(consumer().consume(f.input)).rejects.toBeInstanceOf(HostedStoreVersionError);
     expect(await f.stored()).toBe(stored);

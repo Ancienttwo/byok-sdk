@@ -1,9 +1,10 @@
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, chmodSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
-import { BetaLedger, BetaError, DEFAULT_QUOTA, MAX_INSTRUCTION_BYTES, WINDOW_MS, canonicalJson,
+import { BetaLedger, BetaLedgerRefusedError, BetaError, DEFAULT_QUOTA, MAX_INSTRUCTION_BYTES, WINDOW_MS, canonicalJson,
   type Caller, type KeySpec, type TaskArguments, type LedgerOptions } from './index';
 
 const cleanup: Array<() => void> = [];
@@ -67,6 +68,16 @@ describe('key custody, caller authority and durable identity', () => {
       chmodSync(f.path, 0o644);
       expect(() => new BetaLedger(f.path, 'tenant-a')).toThrow(/private/);
     }
+  });
+
+  it('refuses an older ledger before any write, leaving the file and its directory unchanged', () => {
+    const f = fixture(); f.ledger.close();
+    const old = new DatabaseSync(f.path); old.exec('PRAGMA journal_mode=DELETE; UPDATE beta_meta SET version=0'); old.close();
+    const sha = () => createHash('sha256').update(readFileSync(f.path)).digest('hex');
+    const before = sha(), entries = readdirSync(f.root);
+    expect(() => new BetaLedger(f.path, 'tenant-a')).toThrow(BetaLedgerRefusedError);
+    expect(sha()).toBe(before);
+    expect(readdirSync(f.root)).toEqual(entries);
   });
 
   it('refuses a persisted binding that no longer matches its immutable identity', () => {

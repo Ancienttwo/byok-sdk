@@ -5,7 +5,7 @@ import { hash, MIN_TOMBSTONE_RETENTION_MS } from '@byok-sdk/server/execution-cor
 import { openHost, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { template } from './k4-fixtures.test-support';
 import { BotCollaboration, type AgentMessageInput } from './host';
-import { botCompactVeto } from './compaction';
+import { botLedgerOptions } from './compaction';
 import { stateOf } from './model';
 
 let fixture: TestHost | undefined, bot: BotCollaboration | undefined;
@@ -14,7 +14,7 @@ afterEach(async () => { await bot?.close(); await fixture?.close(); bot = fixtur
 /** Real SQLite HostLedger, embedded server, HTTP and daemon. K4 drives the outcome and message callbacks. */
 async function open() {
   const received: AgentMessageInput[] = [];
-  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal),
+  fixture = await openHost({ externalCore: true, ledgerOptions: botLedgerOptions, consume: (wake, signal) => bot!.consume(wake, signal),
     agentMessage: { consume: input => { received.push(input); return bot!.consumeMessage(input); } } });
   const base = template(fixture.deviceId);
   bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', connector: async () => null, execution: { ...base,
