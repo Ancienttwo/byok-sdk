@@ -867,6 +867,8 @@ export function selectImpact(paths, context = {}) {
     }
     // The cloud-dataplane invariant suites run this file after migrating.
     if (path === 'tests/sql/control_plane_invariants.sql') { dirs.add('packages/cloud-dataplane'); continue; }
+    // The dataplane job's live workerd E2E serves this fixture over wrangler dev.
+    if (/^packages\/cloud-dataplane\/worker-smoke\/(?:src\.ts|wrangler\.jsonc)$/.test(path)) { dirs.add('packages/cloud-dataplane'); continue; }
     // #1322: the ArchContext model, its review policy and projection config, and
     // the projected archimap. They select no family. Every targeted run scans
     // .projection-manifest.json, docs/architecture/*.md, README.md and CHANGELOG.md
