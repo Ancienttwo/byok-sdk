@@ -215,9 +215,10 @@ describe('POST /byok/messages', () => {
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('full batch'),
     });
-    const batch: Envelope[] = Array.from({ length: MAX_MESSAGES_PER_BATCH }, () =>
-      createEnvelope('task.progress', { seq: 1, events: [] }, { taskId }),
-    );
+    const batch: Envelope[] = [
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }),
+      ...Array.from({ length: MAX_MESSAGES_PER_BATCH - 1 }, () => createEnvelope('task.progress', { seq: 1, events: [] }, { taskId })),
+    ];
 
     const response = await send(harness, device.authorization, batch);
     expect(response.status).toBe(200);

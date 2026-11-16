@@ -522,8 +522,20 @@ at most 64 capability flags.
   - `terminal_harness_mismatch` is now `terminal_executor_mismatch`;
   - `claim_harness_and_runtime_conflict` is removed: a claim can no longer
     express it.
-  - New: `steer_refusal_id_mismatch` (wire `payload_invalid`) and
-    `steer_refusal_unknown_steer` (wire `not_permitted`).
+  - New: `steer_refusal_id_mismatch` (wire `payload_invalid`),
+    `steer_refusal_unknown_steer` (wire `not_permitted`) and
+    `task_not_claimed` (wire `not_permitted`).
+- **Reports before a claim** (#2289). Before a task is claimed, the cloud
+  takes only `task.claim`, `task.decline`, `task.cancelled` and a
+  `task.fail` with `recovery` from the offered device. Every other task
+  report is rejected with `task_not_claimed` (wire `not_permitted`) and
+  changes nothing: `task.started`, `task.progress`, `task.artifact`,
+  `task.await_approval`, `task.approval_resolved`, `task.steer_refused`,
+  `task.complete`, and a `task.fail` without `recovery`. The previous
+  release took them, so an unclaimed task could become running, awaiting
+  approval or terminal with no owner. Reports from any other device were already rejected
+  (`task_not_found_for_device`). A device that claims before it reports
+  sees no change.
 - **Renamed fields.** `SteerRejectedError.executor` replaces `.runtime`, and
   `TerminalResult.executor` replaces `.harnessId`.
 - **Steer refusals.** Read them with
@@ -664,6 +676,9 @@ use the replacement named here.
   `TenantRetentionPolicy` and `TenantRetentionPolicyInput` are removed. The
   `tenant_retention_policy` table and `runMaintenance` are unchanged: the
   Host writes and reads the policy with SQL and passes it to maintenance.
+- **Mailbox rows.** Every outbox read validates the row's tenant with
+  `tenantId()`, so a row with an invalid `tenant_id` fails the read with
+  `ByokCoreError` `tenant_id_invalid`. Rows the SDK wrote are unaffected.
 - **Agentless retirement.** `retireAgentlessTasks` and its option and result
   types are removed. It moved pre-0039 rows that had no Agent identity, and
   wire v7 starts on a new database. The retired-id fence stays: a task id in

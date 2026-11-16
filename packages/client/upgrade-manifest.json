@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "7ac3258f4095f2714c7b0cd7d803af773482ba72eba885e0575659745005780e"
+    "snapshotSha256": "5e336f392e5b623867554849b3030ed3c7c7c98650ef12155fcac3409d7d0998"
   },
   "configFields": {
     "status": "tracked",
@@ -496,7 +496,7 @@
     {
       "id": "wire-v7-cloud-executor",
       "impact": "breaking",
-      "summary": "@byok-sdk/cloud reads the v7 claim executor: InMemoryTaskAttemptStore.claim and TenantBoundTaskAttempts.claim take executor, SteerRejectedError.executor replaces runtime and TerminalResult.executor replaces harnessId. INBOUND_REFUSAL_REASONS renames claim_harness_mismatch to claim_executor_mismatch and terminal_harness_mismatch to terminal_executor_mismatch, removes claim_harness_and_runtime_conflict, and adds steer_refusal_id_mismatch and steer_refusal_unknown_steer. Rename the reason strings an observer matches.",
+      "summary": "@byok-sdk/cloud reads the v7 claim executor: InMemoryTaskAttemptStore.claim and TenantBoundTaskAttempts.claim take executor, SteerRejectedError.executor replaces runtime and TerminalResult.executor replaces harnessId. INBOUND_REFUSAL_REASONS renames claim_harness_mismatch to claim_executor_mismatch and terminal_harness_mismatch to terminal_executor_mismatch, removes claim_harness_and_runtime_conflict, and adds steer_refusal_id_mismatch, steer_refusal_unknown_steer and task_not_claimed. Rename the reason strings an observer matches.",
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
       "items": [
         "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
@@ -524,6 +524,15 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
       "items": [
         "behavior:wire-v7-cloud-terminal-executor"
+      ]
+    },
+    {
+      "id": "wire-v7-cloud-unclaimed-task-reports",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud handleInboundEnvelope and POST /byok/messages accept only task.claim, task.decline, task.cancelled and a task.fail with recovery for a task that has no claim, and only from the offered device. Every other task report before a claim (task.started, task.progress, task.artifact, task.await_approval, task.approval_resolved, task.steer_refused, task.complete, task.fail without recovery) is rejected with task_not_claimed (wire not_permitted) and changes nothing. A device that claims before it reports sees no change.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-cloud-unclaimed-task-reports"
       ]
     },
     {
@@ -690,6 +699,15 @@
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresRetentionPolicyStore",
         "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicy",
         "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicyInput"
+      ]
+    },
+    {
+      "id": "dataplane-mailbox-row-tenant-validated",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud-dataplane maps every outbox row through one projection (PostgresMailboxStore reads, task cancellation and PostgresCloudCleanup dead-letter pages and replay), and it brands the row's tenant with @byok-sdk/core tenantId(). A stored row whose tenant_id is not a valid tenant id now fails that read with ByokCoreError tenant_id_invalid instead of being passed through unchecked. Rows the SDK wrote always carry a valid tenant id.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "behavior:dataplane-mailbox-row-tenant-validated"
       ]
     }
   ],
