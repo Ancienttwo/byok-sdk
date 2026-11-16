@@ -151,6 +151,42 @@ function readTemplate(source, index, emit) {
   throw new Error('unterminated template literal');
 }
 
+// Declaration text with string literal contents and template literal text
+// removed. Template `${...}` expressions are code and stay, so a type named
+// inside one is still a reference.
+function codeOnly(text) {
+  let out = '';
+  let depth = 0;
+  const templates = [];
+  let index = 0;
+  while (index < text.length) {
+    const char = text[index];
+    if (char === '"' || char === "'") {
+      let end = index + 1;
+      while (end < text.length && text[end] !== char) end += text[end] === '\\' ? 2 : 1;
+      out += '""';
+      index = end + 1;
+      continue;
+    }
+    if (char === '`' || (char === '}' && templates.at(-1) === depth)) {
+      if (char === '}') templates.pop();
+      let end = index + 1;
+      while (end < text.length && text[end] !== '`' && !(text[end] === '$' && text[end + 1] === '{')) end += text[end] === '\\' ? 2 : 1;
+      out += ' ';
+      if (text[end] === '$') {
+        templates.push(depth);
+        index = end + 2;
+      } else index = end + 1;
+      continue;
+    }
+    if (char === '{') depth += 1;
+    if (char === '}') depth -= 1;
+    out += char;
+    index += 1;
+  }
+  return out;
+}
+
 function parseSpecifierList(list) {
   return list
     .split(',')
@@ -223,7 +259,7 @@ function parseStatement(module, statement) {
   }
   if (/^(?:export\s+)?declare\s+global\b/.test(statement)) {
     addDeclaration(module, 'global', statement);
-    return { kind: 'declaration', name: 'global' };
+    return { kind: 'global' };
   }
   if ((match = DECLARATION.exec(statement))) {
     const name = match[2];
@@ -263,8 +299,8 @@ const isRelative = (specifier) => specifier === '.' || specifier === '..' || spe
  * inline `import()`; a whole-module `import('./x')` is a namespace. Every
  * export, star re-export and import binding a resolution passes through is
  * recorded in `routes` (per file: `export:<name>`, `star:<specifier>`,
- * `import:<local>`), which is what a renderer needs to print a self-consistent
- * subset of the files.
+ * `import:<local>`, and `module` on every file a resolution reads), which is
+ * what a renderer needs to print a self-consistent subset of the files.
  */
 export function declarationGraph({ files, entryFiles }) {
   const modules = new Map();
@@ -320,6 +356,7 @@ export function declarationGraph({ files, entryFiles }) {
         const target = resolveRelative(files, file, entry.specifier);
         if (!exportNames(target).has(name)) continue;
         route(file, `star:${entry.specifier}`);
+        route(target, 'module');
         ref = exportOf(target, name);
         break;
       }
@@ -330,10 +367,8 @@ export function declarationGraph({ files, entryFiles }) {
   const importRef = (file, specifier, imported) => {
     if (!isRelative(specifier)) return { kind: 'bare', key: `${specifier}#${imported}` };
     const target = resolveRelative(files, file, specifier);
-    if (imported === '*') {
-      for (const name of exportNames(target)) exportOf(target, name);
-      return { kind: 'namespace', key: target };
-    }
+    route(target, 'module');
+    if (imported === '*') return { kind: 'namespace', key: target };
     const ref = exportNames(target).has(imported) ? exportOf(target, imported) : undefined;
     if (!ref) throw new Error(`${file}: "${specifier}" does not export ${imported}`);
     return ref;
@@ -349,7 +384,10 @@ export function declarationGraph({ files, entryFiles }) {
   const namespaceMembers = (file) => new Map([...exportNames(file)].map((name) => [name, exportOf(file, name)]));
 
   const entries = new Map();
-  for (const [entry, file] of entryFiles) entries.set(entry, namespaceMembers(file));
+  for (const [entry, file] of entryFiles) {
+    route(file, 'module');
+    entries.set(entry, namespaceMembers(file));
+  }
   const publicKeys = new Set();
   for (const exported of entries.values()) for (const ref of exported.values()) publicKeys.add(ref.key);
 
@@ -366,10 +404,21 @@ export function declarationGraph({ files, entryFiles }) {
       const target = isRelative(match[1]) ? importRef(ref.file, match[1], '*') : { kind: 'bare', key: `${match[1]}#*` };
       found.set(target.key, target);
     }
-    for (const token of new Set(raw.replace(/(['"`])(?:\\.|(?!\1).)*\1/g, '""').match(IDENT) ?? [])) {
+    const code = codeOnly(raw);
+    for (const token of new Set(code.match(IDENT) ?? [])) {
       if (token === ref.name) continue;
       const target = bindingOf(ref.file, token);
-      if (target) found.set(target.key, target);
+      if (!target) continue;
+      if (target.kind !== 'namespace') {
+        found.set(target.key, target);
+        continue;
+      }
+      // `ns.Member` reaches that member only; a bare `ns` reaches the module.
+      for (const use of code.matchAll(new RegExp(`(?<![\\w$])${token.replace(/\$/g, '\\$')}(?:\\s*\\.\\s*([A-Za-z_$][\\w$]*))?(?![\\w$])`, 'g'))) {
+        const member = use[1] === undefined ? target : exportNames(target.key).has(use[1]) ? exportOf(target.key, use[1]) : null;
+        if (member === null) throw new Error(`${ref.file}: ${token}.${use[1]} is not exported by ${target.key}`);
+        found.set(member.key, member);
+      }
     }
     return [...found.values()];
   };

@@ -124,6 +124,43 @@ test('renders only exported names and the declarations their signatures reach', 
   assert.match(drifted.stderr, /\+export type Hidden = 'H';/);
 });
 
+test('template interpolations and namespace members are references; a read module keeps its section', (t) => {
+  const root = makeRoot(t);
+  writePackage(root, 'core', {
+    exports: singleEntry,
+    dist: {
+      'index.d.ts':
+        "import * as ns from './ns.js';\nexport * as Empty from './empty.js';\ntype Hidden = 'h';\nexport type Tag = `t-${Hidden}`;\nexport type Member = ns.Used;\n",
+      'ns.d.ts': "export type Used = 'u';\nexport type Unused = 'x';\n",
+      'empty.d.ts': 'export {};\n',
+    },
+  });
+  assert.equal(runCheck(root, ['--update']).status, 0);
+  assert.equal(
+    sections(readFileSync(goldenPath(root, 'core'), 'utf8')),
+    [
+      '// ==== @byok-sdk/core dist/empty.d.ts ====',
+      '// ==== @byok-sdk/core dist/index.d.ts ====',
+      "import * as ns from './ns.js';",
+      "export * as Empty from './empty.js';",
+      '// support',
+      "type Hidden = 'h';",
+      'export type Tag = `t-${Hidden}`;',
+      'export type Member = ns.Used;',
+      '// ==== @byok-sdk/core dist/ns.d.ts ====',
+      '// support',
+      "export type Used = 'u';",
+      '',
+    ].join('\n'),
+  );
+
+  // A global augmentation changes consumers without exporting a name.
+  writeFileSync(path.join(root, 'packages', 'core', 'dist', 'empty.d.ts'), 'export {};\ndeclare global { interface Window { api: number } }\n');
+  const refused = runCheck(root);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /dist\/empty\.d\.ts: global statement is not supported/);
+});
+
 test('drift against the committed golden exits 1 with a diff', (t) => {
   const root = makeRoot(t);
   writePackage(root, 'core', {

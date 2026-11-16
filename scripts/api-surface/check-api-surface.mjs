@@ -304,7 +304,9 @@ export function buildSurface(root, pkg) {
       .module(file)
       .statements.map((statement) => renderStatement(statement, file, routes, kept, exposed))
       .filter((text) => text !== null);
-    if (body.length === 0) continue;
+    // A module a resolution reads keeps its section even when nothing in it
+    // is printed, so the golden still resolves on its own.
+    if (body.length === 0 && !routes.has('module')) continue;
     lines.push(`// ==== @byok-sdk/${pkg} ${file} ====`, ...body);
   }
   return `${lines.join('\n')}\n`;

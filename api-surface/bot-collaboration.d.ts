@@ -1486,45 +1486,7 @@ export interface CoalesceState {
     inputs?: Record<string, UserInput>;
     inputBatches?: Record<string, InputBatch>;
 }
-// support
-export interface BotFacts {
-    busy: boolean;
-    configKey: readonly string[];
-    archived: boolean;
-}
-// support
-export interface BatchTurn {
-    id: string;
-    botId: string;
-    request: string;
-    authority: Authority;
-    inputIds: string[];
-}
-// support
-export interface Admission {
-    id: string;
-    turn: boolean;
-    sealed: BatchTurn[];
-}
 export declare function coalescePolicy(options: Partial<CoalescePolicy>, contextMaxBytes: number): CoalescePolicy;
-// support
-export declare function batchRequest(inputs: readonly UserInput[]): string;
-// support
-export declare function sealAtBoundary(state: CoalesceState, botId: string): BatchTurn | undefined;
-// support
-export declare function sealDueBatches(state: CoalesceState, bots: Readonly<Record<string, BotFacts>>, policy: CoalescePolicy | undefined, now: number): BatchTurn[];
-// support
-export declare function admitUserInput(state: CoalesceState, input: InputFields, facts: {
-    bot?: BotFacts;
-    turn?: {
-        request: string;
-    };
-}, policy: CoalescePolicy | undefined, now: number): Admission;
-// support
-export declare function sealBatchForCancel(state: CoalesceState, id: string): {
-    id: string;
-    sealed?: BatchTurn;
-};
 // ==== @byok-sdk/bot-collaboration dist/rules/commands.d.ts ====
 import type { RoomFields } from '@byok-sdk/protocol';
 import { type Json, type Turn } from './turn.js';
