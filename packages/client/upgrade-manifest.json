@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "374876deb68b845a7fb07f30e3e9c48bd07488a33001ac5eaea918c267ac0673"
+    "snapshotSha256": "7b5650077fa1c3308f04ada5cee9f6b37307c9e8260ff9bf681e81e1b47c3434"
   },
   "configFields": {
     "status": "tracked",
@@ -1081,6 +1081,11 @@
       "item": "export:@byok-sdk/cloud#createInMemoryCloudStores",
       "change": "changed",
       "entry": "in-memory-directory-device-state"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#projectTerminalResult",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
     },
     {
       "item": "export:@byok-sdk/cloud#receiptRetentionClass",
