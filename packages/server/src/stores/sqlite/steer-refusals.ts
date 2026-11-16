@@ -22,7 +22,7 @@ CREATE TABLE task_steer_refusal (
 );
 `;
 
-export const STEER_REFUSAL_PROJECTION = 'tenant_id, task_id, steer_message_id, reason, device_id, recorded_at, revision FROM task_steer_refusal';
+const STEER_REFUSAL_PROJECTION = 'tenant_id, task_id, steer_message_id, reason, device_id, recorded_at, revision FROM task_steer_refusal';
 
 interface Coordinator {
   run<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T>;

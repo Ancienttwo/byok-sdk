@@ -84,23 +84,18 @@ describeSqlite('SQLite proof request receipts', () => {
     }
   });
 
-  it('adds the table to an existing database without a version change', async () => {
+  it('refuses a current file missing the table without recreating it', async () => {
     const path = tempPath();
     const open = () => createSqliteEmbeddedStores({ path }, { clock: createMutableClock(), crypto: createWebCrypto() });
     await open().close();
     const raw = new DatabaseSync(path);
     raw.exec('DROP TABLE proof_request_receipt');
-    const version = raw.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get();
     raw.close();
 
-    const reopened = open();
+    expect(open).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID' }));
+    const check = new DatabaseSync(path, { readOnly: true });
     try {
-      expect(await reopened.cloud.proofReceipts.record(TENANT, binding('request-1'))).toMatchObject({ created: true });
-    } finally {
-      await reopened.close();
-    }
-    const check = new DatabaseSync(path);
-    expect(check.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual(version);
-    check.close();
+      expect(check.prepare("SELECT 1 FROM sqlite_master WHERE name = 'proof_request_receipt'").get()).toBeUndefined();
+    } finally { check.close(); }
   });
 });
