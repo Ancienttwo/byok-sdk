@@ -69,6 +69,7 @@ if (SKIP_DATAPLANE) {
           pairingCode: pairing.code,
           deviceName: 'Stage A host',
           devicePublicKey: 'stage-a-public-key',
+          expectedDeviceDigest: null,
           tenantId: OTHER_TENANT,
         });
         const response = await cloud.fetch(new Request('http://cloud.test/byok/pair', {
