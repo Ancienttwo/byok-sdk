@@ -2809,7 +2809,7 @@
     {
       "item": "export:@byok-sdk/core#BoardItem",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#CANONICAL_TIMESTAMP_PATTERN",
@@ -2839,7 +2839,7 @@
     {
       "item": "export:@byok-sdk/core#CoreErrorCode",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#DEVICE_ASSERTION_ALGORITHMS",
@@ -2869,7 +2869,7 @@
     {
       "item": "export:@byok-sdk/core#DeviceAssertionEnvelopeV1",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#DeviceAssertionEnvelopeV1Schema",
@@ -2879,7 +2879,7 @@
     {
       "item": "export:@byok-sdk/core#DeviceAssertionReplayConsumeInput",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#DeviceAssertionReplaySchemaId",
@@ -2889,7 +2889,7 @@
     {
       "item": "export:@byok-sdk/core#DeviceAssertionVerifier",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#DeviceAssertionVerifyDeps",
@@ -2909,7 +2909,7 @@
     {
       "item": "export:@byok-sdk/core#DeviceProofEnvelopeV1",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#DeviceProofEnvelopeV1Schema",
@@ -2919,7 +2919,7 @@
     {
       "item": "export:@byok-sdk/core#DeviceProofVerifier",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#DeviceProofVerifyInput",
@@ -2944,7 +2944,7 @@
     {
       "item": "export:@byok-sdk/core#JsonValue",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#MAILBOX_MESSAGE_STATES",
@@ -2954,7 +2954,7 @@
     {
       "item": "export:@byok-sdk/core#MailboxMessageState",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#MailboxStore",
@@ -2974,7 +2974,7 @@
     {
       "item": "export:@byok-sdk/core#ObjectState",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#ObservedSkillPackFile",
@@ -3044,7 +3044,7 @@
     {
       "item": "export:@byok-sdk/core#ProviderProvisioningExpectedProfile",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#ProviderProvisioningExpectedProfileSchema",
@@ -3069,7 +3069,7 @@
     {
       "item": "export:@byok-sdk/core#ProviderProvisioningRequestV1",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#ProviderProvisioningRequestV1Schema",
@@ -3179,12 +3179,12 @@
     {
       "item": "export:@byok-sdk/core#SkillPackCheck",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#SkillPackFile",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#SkillPackFileSchema",
@@ -3194,7 +3194,7 @@
     {
       "item": "export:@byok-sdk/core#SkillPackManifest",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#SkillPackManifestSchema",
@@ -3209,17 +3209,17 @@
     {
       "item": "export:@byok-sdk/core#StorageReservationState",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#StorageWriteKind",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#StorageWritePosture",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#TASK_ASSERTION_AGENT_REF_MAX_BYTES",
@@ -3244,7 +3244,7 @@
     {
       "item": "export:@byok-sdk/core#TaskAssertionEnvelopeV1",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#TaskAssertionEnvelopeV1Schema",
@@ -3254,22 +3254,22 @@
     {
       "item": "export:@byok-sdk/core#agentMemoryIntentOperationDigest",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#authenticateDeviceAssertion",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#authenticateTaskAssertion",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#checkSkillPackFileContent",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#deviceAssertionCanonicalClaims",
@@ -3299,12 +3299,12 @@
     {
       "item": "export:@byok-sdk/core#openProviderProvisioningSecret",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#parseSkillFrontmatter",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#providerProvisioningConfigDigest",
@@ -3319,12 +3319,12 @@
     {
       "item": "export:@byok-sdk/core#sealProviderProvisioningRequest",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#sealingKeyClaimCanonicalBytes",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#taskAssertionCanonicalClaims",
@@ -3339,12 +3339,12 @@
     {
       "item": "export:@byok-sdk/core#verifyDeviceAssertion",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core#verifyTaskAssertion",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#CLIENT_PAIRING_MAC_DOMAIN",
@@ -3404,7 +3404,7 @@
     {
       "item": "export:@byok-sdk/core/sealed-payload#MemberChainState",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#MemberChainWalkFailure",
@@ -3424,7 +3424,7 @@
     {
       "item": "export:@byok-sdk/core/sealed-payload#MemberKeyBundleV1",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#OpenScopeKeyPackageInput",
@@ -3464,7 +3464,7 @@
     {
       "item": "export:@byok-sdk/core/sealed-payload#SealedBinding",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#SealedContentOpenResult",
@@ -3489,22 +3489,22 @@
     {
       "item": "export:@byok-sdk/core/sealed-payload#applyMemberChainEntries",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#computeClientPairingMac",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#computeDevicePairingMac",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#createMemberKeyBundle",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#memberFingerprint",
@@ -3514,47 +3514,47 @@
     {
       "item": "export:@byok-sdk/core/sealed-payload#openScopeKeyPackage",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#openSealedContent",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#parsePairingInput",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#sealContent",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#sealScopeKeyPackage",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#verifyClientPairingMac",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#verifyDevicePairingMac",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#verifyMemberChainEntry",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#verifyMemberChainFromAnchor",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sqlite-node#SqliteReadOnlyOpenError",
@@ -3679,7 +3679,7 @@
     {
       "item": "export:@byok-sdk/protocol#ActivityIngress",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#ActivityIngressSchema",
@@ -3694,7 +3694,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentContentActorKind",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentContentActorKindSchema",
@@ -3709,7 +3709,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentContentReadDecision",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentContentReadDecisionSchema",
@@ -3734,7 +3734,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentEgressDropReason",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentEgressDropReasonSchema",
@@ -3754,7 +3754,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentEventSpill",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentEventSpillSchema",
@@ -3764,7 +3764,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentHomeAccess",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentHomeAccessSchema",
@@ -3829,7 +3829,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryIntentFetchResponse",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryIntentFetchResponseSchema",
@@ -3839,7 +3839,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryIntentFileObservation",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryIntentFileObservationSchema",
@@ -3849,7 +3849,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryIntentHostTerminalCode",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryIntentHostTerminalCodeSchema",
@@ -3859,7 +3859,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryIntentOperation",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryIntentOperationDigest",
@@ -3879,7 +3879,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryIntentReadbackDisposition",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryIntentReadbackDispositionSchema",
@@ -3889,7 +3889,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryIntentRejectionCode",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryIntentRejectionCodeSchema",
@@ -3899,7 +3899,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryIntentReservation",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryIntentReservationSchema",
@@ -3914,7 +3914,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryProjectionCommitResponse",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryProjectionCommitResponseSchema",
@@ -3934,7 +3934,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryProjectionMeteringReceipt",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentMemoryProjectionMeteringReceiptSchema",
@@ -4004,7 +4004,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentMemorySelection",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentMemorySelectionSchema",
@@ -4044,7 +4044,7 @@
     {
       "item": "export:@byok-sdk/protocol#AgentMessagePublishPlainPayload",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentMessagePublishPlainPayloadSchema",
@@ -4074,7 +4074,7 @@
     {
       "item": "export:@byok-sdk/protocol#BlobDownloadUrlResponse",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#BlobDownloadUrlResponseSchema",
@@ -4084,12 +4084,12 @@
     {
       "item": "export:@byok-sdk/protocol#BotTurnOutcome",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#BotTurnOutcomeFragments",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#BotTurnOutcomeKind",
@@ -4099,7 +4099,7 @@
     {
       "item": "export:@byok-sdk/protocol#BotTurnOutcomeSchemaError",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#BotTurnOutcomeSchemaErrorCode",
@@ -4139,7 +4139,7 @@
     {
       "item": "export:@byok-sdk/protocol#ConnHelloPayload",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
@@ -4154,7 +4154,7 @@
     {
       "item": "export:@byok-sdk/protocol#CreateBlobResponse",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#CreateBlobResponseSchema",
@@ -4274,7 +4274,7 @@
     {
       "item": "export:@byok-sdk/protocol#HandoffTurn",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#HarnessId",
@@ -4284,7 +4284,7 @@
     {
       "item": "export:@byok-sdk/protocol#HarnessInfo",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#HarnessInfoSchema",
@@ -4329,7 +4329,7 @@
     {
       "item": "export:@byok-sdk/protocol#InputPreparationMessage",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#InputPreparationMessageSchema",
@@ -4364,7 +4364,7 @@
     {
       "item": "export:@byok-sdk/protocol#InputPreparationReadinessReason",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#InputPreparationReadinessReasonSchema",
@@ -4479,7 +4479,7 @@
     {
       "item": "export:@byok-sdk/protocol#OfferAdmissionTimings",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#OfferAdmissionTimingsSchema",
@@ -4639,7 +4639,7 @@
     {
       "item": "export:@byok-sdk/protocol#ProviderProvisioningCompletion",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#ProviderProvisioningCompletionSchema",
@@ -4679,7 +4679,7 @@
     {
       "item": "export:@byok-sdk/protocol#ProviderProvisioningOperation",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#ProviderProvisioningOperationDigest",
@@ -4789,7 +4789,7 @@
     {
       "item": "export:@byok-sdk/protocol#ResultSchema",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#ResultSchemaCheck",
@@ -4834,7 +4834,7 @@
     {
       "item": "export:@byok-sdk/protocol#RuntimeFailureClass",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#RuntimeFailureClassSchema",
@@ -4844,7 +4844,7 @@
     {
       "item": "export:@byok-sdk/protocol#RuntimeInfo",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#RuntimeInfoSchema",
@@ -4859,7 +4859,7 @@
     {
       "item": "export:@byok-sdk/protocol#RuntimeUnavailableEntry",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#RuntimeUnavailableEntrySchema",
@@ -4984,7 +4984,7 @@
     {
       "item": "export:@byok-sdk/protocol#TaskDeclinePayload",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
@@ -5079,7 +5079,7 @@
     {
       "item": "export:@byok-sdk/protocol#TerminalInferenceUsage",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#TerminalInferenceUsageSchema",
@@ -5089,7 +5089,7 @@
     {
       "item": "export:@byok-sdk/protocol#TerminalPreparedObservation",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#TerminalPreparedObservationSchema",
@@ -5124,7 +5124,7 @@
     {
       "item": "export:@byok-sdk/protocol#WIRE_ADDITIONS",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#WireAddition",
@@ -5134,7 +5134,7 @@
     {
       "item": "export:@byok-sdk/protocol#buildDreamInstruction",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#canTransition",
@@ -5144,22 +5144,22 @@
     {
       "item": "export:@byok-sdk/protocol#checkResultDocument",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#checkResultSchema",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#checkRoutineSchedule",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#composeBotTurnOutcomeSchema",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#createEnvelope",
@@ -5184,7 +5184,7 @@
     {
       "item": "export:@byok-sdk/protocol#partitionAgentEvents",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#readRuntimeUnavailableCause",
@@ -5214,7 +5214,7 @@
     {
       "item": "export:@byok-sdk/protocol#validateResultOutcome",
       "change": "changed",
-      "entry": null
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
