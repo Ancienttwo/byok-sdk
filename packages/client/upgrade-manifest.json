@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "7b5650077fa1c3308f04ada5cee9f6b37307c9e8260ff9bf681e81e1b47c3434"
+    "snapshotSha256": "0658a2801057b0a6c193103b94cf57345540d8b3d3d4dd28921d097b6e8d3a53"
   },
   "configFields": {
     "status": "tracked",
@@ -788,9 +788,19 @@
       "entry": "remove-task-terminal-read"
     },
     {
+      "item": "export:@byok-sdk/client#DAEMON_HALT_REASONS",
+      "change": "changed",
+      "entry": "wire-v7-client-negotiation-halt"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonEvent",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonLifecycle",
+      "change": "changed",
+      "entry": "wire-v7-client-negotiation-halt"
     },
     {
       "item": "export:@byok-sdk/client#DaemonLog",
@@ -826,6 +836,16 @@
       "item": "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeOperationManifest",
+      "change": "changed",
+      "entry": "wire-v7-client-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeTaskInput",
+      "change": "changed",
+      "entry": "wire-v7-client-execution-target"
     },
     {
       "item": "export:@byok-sdk/client#ServiceExitDisposition",
@@ -866,6 +886,16 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeDetectionRefusalReason",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
+      "change": "changed",
+      "entry": "wire-v7-client-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#taskRuntimeTarget",
+      "change": "changed",
+      "entry": "wire-v7-client-execution-target"
     },
     {
       "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
