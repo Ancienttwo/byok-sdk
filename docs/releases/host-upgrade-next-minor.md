@@ -454,8 +454,9 @@ when `XDG_CONFIG_HOME` is unset). It no longer falls back to
 `~/.config/rpiv-todo/config.json` when `XDG_CONFIG_HOME` points elsewhere:
 if the `XDG_CONFIG_HOME` file is absent and the old one exists, loading the
 extension's config throws `TodoConfigLegacyLocationError` naming both paths.
-Only the old file's existence is checked; its content is never read. Move that
-file under `XDG_CONFIG_HOME` to keep its settings.
+Only the old file's existence is checked; its content is never read. With a
+todo config at the old location, Pi reports this error when it loads the todo
+extension; moving the file fixes it.
 
 ## DaemonConfig rejects unknown fields
 

@@ -222,13 +222,19 @@ function normalizeDoc(text) {
   return text.split('\n').map((line) => line.trimEnd()).join('\n').trim();
 }
 
-/** Documentation removed; the root's `$schema` and `title` meta keys too, not a property of that name. */
-function stripDescriptions(value, root = true) {
-  if (Array.isArray(value)) return value.map((child) => stripDescriptions(child, false));
-  if (value === null || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value)
+/**
+ * Documentation removed: each schema's `description` annotation, and the root's
+ * `$schema` and `title`. Keys of `properties` are field names, not annotations,
+ * so a field named `description` keeps its schema.
+ */
+function stripDescriptions(schema, root = true) {
+  if (Array.isArray(schema)) return schema.map((child) => stripDescriptions(child, false));
+  if (schema === null || typeof schema !== 'object') return schema;
+  return Object.fromEntries(Object.entries(schema)
     .filter(([key]) => key !== 'description' && !(root && (key === '$schema' || key === 'title')))
-    .map(([key, child]) => [key, stripDescriptions(child, false)]));
+    .map(([key, child]) => [key, key === 'properties'
+      ? Object.fromEntries(Object.entries(child).map(([name, property]) => [name, stripDescriptions(property, false)]))
+      : stripDescriptions(child, false)]));
 }
 
 export function renderSchemaFiles(schema) {

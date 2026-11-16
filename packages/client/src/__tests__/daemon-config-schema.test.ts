@@ -121,6 +121,12 @@ describe('validateDaemonConfig', () => {
     expect(embedded).toEqual({ ok: true, issues: [] });
   });
 
+  it('accepts a declared property named like a schema annotation', () => {
+    const rule = { id: 'r', description: 'Display text', match: { toolName: 'bash' } };
+    expect(validateDaemonConfig({ ...base, toolAuthorization: { default: 'auto', rules: { alwaysAsk: [rule] } } }, { source: 'cli' }))
+      .toEqual({ ok: true, issues: [] });
+  });
+
   it('accepts a $schema key at the root for editors', () => {
     expect(validateDaemonConfig({ $schema: './daemon-config.schema.json', ...base }, { source: 'cli' })).toEqual({ ok: true, issues: [] });
   });

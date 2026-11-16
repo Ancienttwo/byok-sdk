@@ -46,6 +46,9 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                   "id": {
                     "type": "string"
                   },
+                  "description": {
+                    "type": "string"
+                  },
                   "match": {
                     "type": "object",
                     "properties": {
@@ -81,6 +84,9 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "type": "object",
                 "properties": {
                   "id": {
+                    "type": "string"
+                  },
+                  "description": {
                     "type": "string"
                   },
                   "match": {
