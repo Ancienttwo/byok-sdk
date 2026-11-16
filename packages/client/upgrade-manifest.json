@@ -445,10 +445,9 @@
     {
       "id": "wire-v7-pairing-product-id-bound",
       "impact": "breaking",
-      "summary": "@byok-sdk/cloud createPairingCode (and the server's pairing.createPairingCode) refuses a productId longer than PAIRING_CODE_PRODUCT_ID_MAX_LENGTH (64) with ByokCloudError code pairing_product_id_invalid and mints nothing. The device keys its enrollment and every pairDeviceDigest by productId, so it is bounded where it enters. CLOUD_ERROR_CODES gains pairing_product_id_invalid.",
+      "summary": "@byok-sdk/cloud createPairingCode (and the server's pairing.createPairingCode) refuses a productId longer than PAIRING_CODE_PRODUCT_ID_MAX_LENGTH (64) with ByokCloudError code pairing_product_id_invalid and mints nothing. The device keys its enrollment and every pairDeviceDigest by productId, so it is bounded where it enters.",
       "migration": "docs/releases/host-upgrade-next-minor.md#pairing-registration-fence-2045",
       "items": [
-        "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
         "export:@byok-sdk/cloud#PAIRING_CODE_PRODUCT_ID_MAX_LENGTH"
       ]
     },
