@@ -5960,9 +5960,10 @@ export declare class PairingBusyError extends Error {
 }
 /**
  * A pairing input is out of its wire bound, checked before anything is staged
- * or sent (#2045): `deviceName` is empty or longer than
- * `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` (set `deviceName` when the hostname
- * is longer), or `machineId` is not lowercase hex SHA-256.
+ * or sent (#2045): `deviceName` is empty, longer than
+ * `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` or not `isPairingText` (set
+ * `deviceName` when the hostname is not), or `machineId` is not lowercase hex
+ * SHA-256.
  */
 export declare class PairingInputInvalidError extends Error {
     readonly field: 'deviceName' | 'machineId';
