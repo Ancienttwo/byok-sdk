@@ -121,7 +121,7 @@ import {
   type E2eeScopeKeyPackageSchema,
 } from '@byok-sdk/protocol';
 import type { SteerRejectedError } from './steer-control.js';
-import { createAuthPlane, type AuthPlane } from './auth/plane.js';
+import { createAuthPlane, PAIRING_CODE_PRODUCT_ID_MAX_LENGTH, type AuthPlane } from './auth/plane.js';
 import type { TokenSigner } from './auth/tokens.js';
 import { CAPABILITY_PORTS, CLOUD_CAPABILITIES, capabilityPort, declares, type CapabilityPortName, type CapabilityPorts, type CloudCapability } from './capabilities.js';
 import {
@@ -491,7 +491,11 @@ export interface ByokCloud {
    */
   readonly mountedRoutes: readonly { readonly method: string; readonly path: string }[];
   readonly capabilities: CapabilityDeclaration;
-  /** Host control plane: mint a single-use pairing code for a tenant/product. */
+  /**
+   * Host control plane: mint a single-use pairing code for a tenant/product.
+   * Rejects with `pairing_product_id_invalid` when `productId` is longer than
+   * `PAIRING_CODE_PRODUCT_ID_MAX_LENGTH`.
+   */
   createPairingCode(tenant: TenantId, input: { readonly productId: string; readonly ttlMs?: number }): Promise<PairingCodeInfo>;
   /**
    * Host control plane: enqueue a strict Agent resume offer to an explicit
@@ -1223,7 +1227,13 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     mountedRoutes: registry.mounted,
     capabilities: declaration,
 
-    createPairingCode(tenant, input) {
+    async createPairingCode(tenant, input) {
+      if (input.productId.length > PAIRING_CODE_PRODUCT_ID_MAX_LENGTH) {
+        throw new ByokCloudError(
+          'pairing_product_id_invalid',
+          `productId must be at most ${PAIRING_CODE_PRODUCT_ID_MAX_LENGTH} characters`,
+        );
+      }
       return auth.createPairingCode(tenant, input);
     },
 
