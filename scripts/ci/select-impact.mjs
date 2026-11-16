@@ -5,6 +5,10 @@ import { verifyReviewedContent, changedApiOwners, publicManifests } from './revi
 import { documentationChecks } from './documentation-checks.mjs';
 import { resolveScriptChecks, scriptTestInputs } from './script-test-inputs.mjs';
 
+// The golden description moved to README.md (#2284), so api-surface/ holds only
+// generated files. Only the deletion of this one path is reviewed.
+const RETIRED_API_SURFACE_README = 'api-surface/README.md';
+
 // #1959: archived cloud-do paths; a PR that deletes them still lists them.
 const ARCHIVED_CLOUD_DO_FILES = new Set([
   'api-surface/cloud-do.d.ts',
@@ -653,6 +657,10 @@ export function selectImpact(paths, context = {}) {
       verifyReviewedContent(path, context);
       for (const id of knownFamilies) if (id !== 'build-test' && id !== 'macos-client') families.add(id);
       continue;
+    }
+    if (path === RETIRED_API_SURFACE_README) {
+      if (existsSync(resolve(context.cwd ?? process.cwd(), path))) requireMapping(path);
+      scripts = true; continue;
     }
     if (ARCHIVED_CLOUD_DO_FILES.has(path)) {
       if (existsSync(resolve(context.cwd ?? process.cwd(), path))) requireMapping(path);
