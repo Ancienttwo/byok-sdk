@@ -71,7 +71,7 @@ const EXTENDED = '\\\\?\\';
  * read-only format check, names the file through this one rule.
  */
 export function sqliteOpenPath(path: string, platform: NodeJS.Platform = process.platform): string {
-  if (platform !== 'win32') return path;
+  if (platform !== 'win32' || path === ':memory:') return path;
   const absolute = process.getBuiltinModule('node:path').win32.resolve(path);
   if (absolute.startsWith(EXTENDED) || absolute.length < 240) return absolute;
   return EXTENDED + absolute;

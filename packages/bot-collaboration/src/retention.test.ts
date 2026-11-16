@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, occurrenceIntentKey, type ExecutionServer, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { template as baseTemplate } from './k4-fixtures.test-support';
 import { BotCollaboration } from './host';
-import { botCompactVeto } from './compaction';
+import { botLedgerOptions } from './compaction';
 import { RetentionRefused } from './retention';
 import { retainInLedger, writeLedger } from './commit';
 import { stateOf } from './model';
@@ -28,7 +28,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-it('opens published ledger fixtures including the exported domain without modifying their files (#2032)', () => {
+it('refuses published ledger fixtures, written before host_store_format, without modifying their files (#2032, #2286)', () => {
   const directory = fileURLToPath(new URL('../../../scripts/release/fixtures/stores/', import.meta.url));
   const index = JSON.parse(readFileSync(join(directory, 'index.json'), 'utf8')) as {
     fixtures: Record<string, { ledgerTenant?: string; stores: Record<string, string>; expected?: Record<string, string> }>;
@@ -38,10 +38,10 @@ it('opens published ledger fixtures including the exported domain without modify
   for (const [label, fixture] of Object.entries(index.fixtures)) {
     if (!fixture.stores[store]) continue;
     expect(fixture.ledgerTenant, label).toBe('store-fixture');
-    expect(fixture.expected?.[store], label).toBe('accepted');
+    expect(fixture.expected?.[store], label).toBe('rejected');
     const file = join(directory, fixture.stores[store]);
     const before = readFileSync(file), names = readdirSync(join(directory, label)).sort();
-    expect(inspectLedger(file, fixture.ledgerTenant!)).toMatchObject({ store, verdict: fixture.expected![store] });
+    expect(inspectLedger(file, fixture.ledgerTenant!)).toMatchObject({ store, verdict: fixture.expected![store], code: 'host_store_format_unsupported' });
     const database = new DatabaseSync(file, { readOnly: true });
     try {
       const row = database.prepare('SELECT body FROM host_ledger WHERE tenant = ?').get(fixture.ledgerTenant!) as { body: string };
@@ -56,7 +56,7 @@ it('opens published ledger fixtures including the exported domain without modify
 it('archives a settled root out of the window, replays its input, and refuses a root in use', async () => {
   let now = 1_000_000;
   const root = mkdtempSync(join(tmpdir(), 'k8-retain-')); roots.push(root);
-  const ledger = new HostLedger(join(root, 'host.sqlite'), 'tenant', { compactVeto: botCompactVeto });
+  const ledger = new HostLedger(join(root, 'host.sqlite'), 'tenant', botLedgerOptions);
   const bot = new BotCollaboration(server as never, ledger, { botId: 'main', execution: template, now: () => now, dreaming: false, contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 }, connector: async () => ({}) });
   closers.push(() => ledger.close(), () => bot.close());
   const first = await bot.input('k1', 'hello');
@@ -93,7 +93,7 @@ it('archives a settled root out of the window, replays its input, and refuses a 
 it('reads the root of an input whose drain threw, without a drain or a write, also after a restart (#1407)', async () => {
   const root = mkdtempSync(join(tmpdir(), 'k8-input-root-')), file = join(root, 'host.sqlite'); roots.push(root);
   const options = { botId: 'main', execution: template, connector: async () => ({}) };
-  const open = () => { const ledger = new HostLedger(file, 'tenant', { compactVeto: botCompactVeto });
+  const open = () => { const ledger = new HostLedger(file, 'tenant', botLedgerOptions);
     return { ledger, bot: new BotCollaboration(server as never, ledger, options) }; };
   const { ledger, bot } = open();
   const drain = vi.spyOn(bot as unknown as { process(): Promise<void> }, 'process').mockRejectedValueOnce(new Error('drain failed'));
@@ -135,7 +135,7 @@ it('L: refuses a Turn that still has its K4 intent and is not reported, and a ro
 
 it('L: refuses old would-do rows without changing the ledger (#1756)', () => {
   const root = mkdtempSync(join(tmpdir(), 'k8-would-do-')); roots.push(root);
-  const ledger = new HostLedger(join(root, 'host.sqlite'), 'tenant', { compactVeto: botCompactVeto }); closers.push(() => ledger.close());
+  const ledger = new HostLedger(join(root, 'host.sqlite'), 'tenant', botLedgerOptions); closers.push(() => ledger.close());
   ledger.transaction(s => {
     stateOf(s.application).wouldDo = { old: { id: 'old', botId: 'main', taskId: 'task', action: 'delegate', index: 0, at: 0, detail: null } } as never;
   });
@@ -171,16 +171,11 @@ it('L: refuses old would-do rows without changing the ledger (#1756)', () => {
   expect(open).toThrow('switch import');
   expect(inspectLedger(file, 'tenant')).toMatchObject({ verdict: 'rejected', code: 'switch_imported' });
   ledger.transaction(s => { delete stateOf(s.application).switchImport; });
-  for (const version of [1, 2, 999]) {
-    ledger.transaction(s => { (s.application.collaboration as { version: number }).version = version; });
-    const unsupported = files();
-    expect(inspectLedger(file, 'tenant')).toMatchObject(version < 3
-      ? { verdict: 'new-path-repair', code: 'collaboration_state_unsupported_old', reason: expect.stringContaining(`version ${version}`) }
-      : { verdict: 'rejected' });
-    expect(files()).toEqual(unsupported);
-  }
-  ledger.transaction(s => { s.version = 999 as 1; });
-  expect(inspectLedger(file, 'tenant').verdict).toBe('rejected');
+  // A ledger without the k8 format row is refused, and its files stay as they were.
+  const unformatted = join(root, 'unformatted.sqlite'); new HostLedger(unformatted, 'tenant').close();
+  const before2286 = files();
+  expect(inspectLedger(unformatted, 'tenant')).toMatchObject({ verdict: 'rejected', code: 'host_store_format_unsupported' });
+  expect(files()).toEqual(before2286);
   const damaged = join(root, 'damaged.sqlite'); writeFileSync(damaged, 'not sqlite');
   expect(inspectLedger(damaged, 'tenant').verdict).toBe('rejected');
 });

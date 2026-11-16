@@ -8,7 +8,7 @@ import { template } from './k4-fixtures.test-support';
 import { addTurn, stateOf, type CollaborationState } from './model';
 import { CONFIRMABLE_MAX, DEFAULT_CONFIRMABLE, outcomeOffer, outcomeSchema, TIME_ZONES_MAX, type OutcomeOffer } from './schema';
 import { BotCollaboration } from './host';
-import { botCompactVeto } from './compaction';
+import { botLedgerOptions } from './compaction';
 import { routineViews } from './routines.test-support';
 import { roomFields } from './rules/rooms';
 
@@ -127,7 +127,7 @@ afterEach(async () => {
 });
 function open(outcome?: OutcomeOffer): BotCollaboration {
   root ??= mkdtempSync(join(tmpdir(), 'k8-outcome-'));
-  ledger ??= new HostLedger(join(root, 'host.sqlite'), 'tenant', { compactVeto: botCompactVeto });
+  ledger ??= new HostLedger(join(root, 'host.sqlite'), 'tenant', botLedgerOptions);
   return new BotCollaboration(server as never, ledger, { botId: 'main', execution: template('device'), connector: async () => null, ...(outcome ? { outcome } : {}) });
 }
 

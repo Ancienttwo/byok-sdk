@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { autoBots, openTeam, settleOutsideK8, type TestTeam } from './__tests__/team.test-support';
 import { ROOM_GRACE_MS } from './rooms';
 import { stateOf } from './model';
+import { botLedgerOptions } from './compaction';
 import { HostLedger, MIN_TOMBSTONE_RETENTION_MS } from '@byok-sdk/server/execution-core';
 import { HISTORY_MAX_BYTES } from './rules/history';
 import type { BotProfile } from './team-model';
@@ -155,7 +156,7 @@ it('releases the seat of a room Turn whose intent a writer without the veto comp
   // K4 settles the seat intent outside a K8 pass, and a maintenance writer without the veto compacts it.
   await settleOutsideK8(host(), first.id);
   await host().core.flushProjections(async () => {});
-  const other = new HostLedger(join(fixture.root, 'host.sqlite'), fixture.ledger.tenant);
+  const other = new HostLedger(join(fixture.root, 'host.sqlite'), fixture.ledger.tenant, { expectedFormats: botLedgerOptions.expectedFormats });
   try {
     expect(other.compact({ acknowledgedIntentKeys: [first.id], now, tombstoneRetentionMs: MIN_TOMBSTONE_RETENTION_MS })).toMatchObject({ compactedIntents: 1 });
   } finally { other.close(); }

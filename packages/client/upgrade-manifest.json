@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "f93c5694c771919c1cfdec7abf6b90c9af631617c5de591f2a4d97969f618ec3"
+    "snapshotSha256": "3e4a718185699541a03fb20b9e686dc9b98e1be78571f780ac01d2b24c90cabb"
   },
   "configFields": {
     "status": "tracked",
@@ -86,7 +86,7 @@
     {
       "id": "core-sqlite-node-entry",
       "impact": "additive",
-      "summary": "@byok-sdk/core/sqlite-node is a new Node-only entry exporting readSqliteFileUnchanged(path, readMetadata). It opens an existing, non-empty SQLite file read-only and immutable, runs readMetadata on its main file and closes it, so a store can decide its format before any writable open, pragma or DDL; it returns undefined for :memory:, a missing path or a zero-length file, and throws SqliteReadOnlyOpenError when the file exists but cannot be stat'ed or opened read-only. sqliteOpenPath(path) and sqliteFileUri(path) name a store file for SQLite under one rule, with the Windows extended-length prefix past MAX_PATH; the client journal's writable open uses sqliteOpenPath, and the read-only check opens sqliteFileUri. The core root does not export it. No Host action is required.",
+      "summary": "@byok-sdk/core/sqlite-node is a new entry, whose functions need Node, exporting readSqliteFileUnchanged(path, readMetadata). It opens an existing, non-empty SQLite file read-only and immutable, runs readMetadata on its main file and closes it, so a store can decide its format before any writable open, pragma or DDL; it returns undefined for :memory:, a missing path or a zero-length file, and throws SqliteReadOnlyOpenError when the file exists but cannot be stat'ed or opened read-only. sqliteOpenPath(path) and sqliteFileUri(path) name a store file for SQLite under one rule, with the Windows extended-length prefix past MAX_PATH; the client journal's writable open uses sqliteOpenPath, and the read-only check opens sqliteFileUri. The core root does not export it. No Host action is required.",
       "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
       "items": [
         "entry:@byok-sdk/core/sqlite-node",
@@ -113,6 +113,50 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
       "items": [
         "store:client-journal"
+      ]
+    },
+    {
+      "id": "host-ledger-format-table",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server/execution-core HostLedger records its format in a host_store_format table, one row per layer (k4, and k8 for Bot collaboration ledgers), and decides an existing ledger's format on its unchanged main file before the writable open, pragmas or DDL. A ledger written by 0.43.0 or earlier has tables but no host_store_format and is refused with HostStoreFormatError (code host_store_format_unsupported); it is not migrated, repaired or deleted. Finish or abandon in-flight Bot collaboration work before upgrading, then open a new ledger file at a new path.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledgers-record-their-format-2286",
+      "acceptance": "reject",
+      "items": [
+        "store:bot-collaboration-ledger"
+      ]
+    },
+    {
+      "id": "host-ledger-format-api",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server/execution-core: HostLedgerOptions gains expectedFormats, HostLedger exposes formats, and HostStoreFormatError is new. LedgerState loses its version field, and LedgerDump moves to version 2, so a switch dump written by an earlier release is refused. @byok-sdk/bot-collaboration: open every Bot ledger with the new botLedgerOptions (compactVeto plus the k8 format) instead of { compactVeto: botCompactVeto }; BotCollaboration refuses a ledger opened without it. CollaborationState loses its version field and SWITCH_EXPORT_VERSION is 2, so an earlier switch export is refused.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledgers-record-their-format-2286",
+      "items": [
+        "export:@byok-sdk/server/execution-core#HostLedger",
+        "export:@byok-sdk/server/execution-core#HostLedgerOptions",
+        "export:@byok-sdk/server/execution-core#HostStoreFormatError",
+        "export:@byok-sdk/server/execution-core#LedgerState",
+        "export:@byok-sdk/server/execution-core#LedgerDump",
+        "export:@byok-sdk/bot-collaboration#botLedgerOptions",
+        "export:@byok-sdk/bot-collaboration/host-kit#CollaborationState",
+        "export:@byok-sdk/bot-collaboration/host-kit#SWITCH_EXPORT_VERSION"
+      ]
+    },
+    {
+      "id": "keys-store-refuse-before-write",
+      "impact": "breaking",
+      "summary": "@byok-sdk/keys SqliteProviderProfileStore decides an existing store's format on its unchanged main file before the writable open, journal_mode or DDL. A store that has provider_profile but lacks a custody table is refused with PROVIDER_STORE_SCHEMA_STALE instead of having the table created, and a store the read-only check cannot open is refused with PROVIDER_STORE_UNAVAILABLE. Every released store is still accepted; preserve a refused store and resolve it before starting this build.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledgers-record-their-format-2286",
+      "items": [
+        "behavior:keys-store-refuse-before-write"
+      ]
+    },
+    {
+      "id": "reject-hosted-store-version-2",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example's Postgres store moves to STORE_VERSION 3 because the collaboration state no longer carries a version field; a scope written by version 2 is refused at open with HostedStoreVersionError, under the scope lock and before any write, and the schedulers skip it. Finish or abandon in-flight collaboration work before upgrading, then provision a new hosted store.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledgers-record-their-format-2286",
+      "items": [
+        "behavior:reject-hosted-store-version-2"
       ]
     },
     {
@@ -738,6 +782,21 @@
       "entry": "k4-settlement-notice"
     },
     {
+      "item": "export:@byok-sdk/bot-collaboration#botLedgerOptions",
+      "change": "added",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#CollaborationState",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SWITCH_EXPORT_VERSION",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#WouldDoMigration",
       "change": "removed",
       "entry": "retire-compatibility-apis"
@@ -1273,9 +1332,41 @@
       "entry": "k4-settlement-notice"
     },
     {
+      "item": "export:@byok-sdk/server/execution-core#HostLedger",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostLedgerOptions",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
       "item": "export:@byok-sdk/server/execution-core#HostOptions",
       "change": "changed",
       "entry": "k4-settlement-notice"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostStoreFormatError",
+      "change": "added",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#LedgerDump",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#LedgerState",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "store:bot-collaboration-ledger",
+      "change": "changed",
+      "before": "ledger=1 collaboration=3 ddl-sha256=c5721e95abe5c4d1",
+      "after": "k4=1 k8=3 ddl-sha256=10c5abc21474e995",
+      "entry": "host-ledger-format-table"
     },
     {
       "item": "store:client-journal",

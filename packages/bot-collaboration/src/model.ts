@@ -18,11 +18,13 @@ export type { Budget, Card, Question, Rejection, ReplyEntry, Turn, TurnFields, V
 export type { AcceptedReply, Batch, Delegation, DelegationCancel, Unit } from './rules/delegation.js';
 
 /**
- * Version 3 (#798): retention moves settled rows out of this state into K4 application rows, so a version 2 writer
- * would read archived evidence as absent. Bot routines are K4 routines with the `bot-routine` occurrence hook.
+ * The K8 state. A Host ledger keeps it in its application body, and the ledger's `k8` format row (`botLedgerOptions`) is
+ * its format.
+ * Retention keeps settled rows in K4 application rows (#798). Bot routines are K4 routines with the `bot-routine`
+ * occurrence hook.
  */
 export interface CollaborationState extends AutonomyState {
-  version: 3; team: TeamState; turns: Record<string, Turn>; budgets: Record<string, Budget>;
+  team: TeamState; turns: Record<string, Turn>; budgets: Record<string, Budget>;
   delegations: Record<string, Delegation>; batches: Record<string, Batch>; units: Record<string, Unit>;
   replies: Record<string, AcceptedReply>;
   schemas: Record<string, ResultSchema>; questions: Record<string, Question>; cards: Record<string, Card>;
@@ -68,25 +70,13 @@ export interface CollaborationState extends AutonomyState {
    */
   dreams?: DreamState;
 }
-/** A state version this build cannot adopt without a new ledger. */
-export class OldCollaborationStateError extends Error {
-  readonly code = 'collaboration_state_unsupported_old' as const;
-  constructor(readonly foundVersion: 1 | 2, message: string) { super(message); this.name = 'OldCollaborationStateError'; }
-}
+/** The K8 state of an application body, created empty at its first use. */
 export function stateOf(application: Record<string, Json>): CollaborationState {
   if (application.collaboration === undefined) application.collaboration = json({
-    version: 3, team: emptyTeam(), turns: {}, budgets: {}, delegations: {}, batches: {}, units: {}, replies: {}, schemas: {}, questions: {}, cards: {},
+    team: emptyTeam(), turns: {}, budgets: {}, delegations: {}, batches: {}, units: {}, replies: {}, schemas: {}, questions: {}, cards: {},
     rejected: [], audit: [], sequence: 0,
   });
-  // SAFETY: Stored JSON may have any shape; optional access checks its version before it is treated as collaboration state.
-  const version = (application.collaboration as unknown as { version?: unknown } | null)?.version;
-  // No migration: version 1 kept Bot routines in this state, and K4 owns them now.
-  if (version === 1) throw new OldCollaborationStateError(version, 'Bot collaboration state version 1 is not supported. Bot routines moved to K4 routines. '
-    + 'Restore a ledger backup made before this change, or start a new ledger.');
-  // No migration: a version 2 writer cannot read archived rows, so the two versions never share a ledger.
-  if (version === 2) throw new OldCollaborationStateError(version, 'Bot collaboration state version 2 is not supported. Retention moved settled rows out of the state. '
-    + 'Restore a ledger backup made before this change, or start a new ledger.');
-  if (version !== 3) throw new Error(`Unsupported Bot collaboration state version: ${String(version)}`);
-  // SAFETY: The stored version was checked above; version 3 is the collaboration state this build writes.
+  // SAFETY: The store that holds this body admitted its format when it opened (a Host ledger's `k8` row), so the value is
+  // the state this build writes.
   return application.collaboration as unknown as CollaborationState;
 }

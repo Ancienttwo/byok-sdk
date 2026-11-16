@@ -29,7 +29,7 @@ import { botOutcomePorts, IntentOutcomeError, outcomeFailure, routeTerminal, run
 import { DEVICE_CONCURRENCY, admitDeviceSlot, type DispatchIntent } from './rules/priority.js';
 
 import { applyManagement, applyModels, updateBot, writeSnapshotBot } from './team.js';
-import { botCompactVeto } from './compaction.js';
+import { botCompactVeto, K8_FORMAT } from './compaction.js';
 import { teamSnapshot, TeamModeError, type TeamSnapshot } from './rules/team.js';
 import { advanceRoomsAndTurns, memberMentions, roomMessageProjection, roomMessages, type MemberMentions, type Mentions, type RoomMessage } from './rooms.js';
 import type { RoomFields } from '@byok-sdk/protocol';
@@ -258,8 +258,8 @@ export class BotCollaboration {
   private readonly auditedFailures = new Map<string, string>();
   constructor(readonly server: ExecutionServer & HomeServer & MessageServer & Partial<Pick<ByokServer, 'machines'>>, readonly ledger: HostLedger, private readonly options: BotOptions) {
     if (!options.botId || options.execution.payload.agentRef.agentId !== options.botId) throw new Error('Select this Bot Agent');
-    // #816: every compaction of this ledger must ask K8 first.
-    if (ledger.compactVeto !== botCompactVeto) throw new Error('Open the Host ledger with { compactVeto: botCompactVeto }');
+    // #816: every compaction of this ledger must ask K8 first. #2286: the ledger's k8 row is the format of the K8 state.
+    if (ledger.compactVeto !== botCompactVeto || ledger.formats.k8 !== K8_FORMAT) throw new Error('Open the Host ledger with botLedgerOptions');
     options = this.options = { ...options, execution: structuredClone(options.execution),
       ...(options.models === undefined ? {} : { models: structuredClone(options.models) }),
       readOnlyToolsets: ownReadOnlyToolsets(options.readOnlyToolsets) };

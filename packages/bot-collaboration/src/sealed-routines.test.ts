@@ -23,7 +23,7 @@ async function sealed(routineId: string, definitionVersion: number, prompt = 'Ch
   return { sealing, template, agentRef: { agentId: agentRef.agentId, profileRevision: agentRef.profileRevision }, notAfter };
 }
 function ledger() {
-  const state: LedgerState = { version: 1, sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {}, slots: {},
+  const state: LedgerState = { sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {}, slots: {},
     outbox: {}, applied: {}, application: {}, scanWake: null };
   return { state, commands: routineCommands(state, { now: () => Date.parse('2026-10-26T00:00:00.000Z'), nextTime: routineCalendar, hostJobs: new Map(),
     occurrenceHooks: new Map([[BOT_ROUTINE, routineTurn as never]]) }) };

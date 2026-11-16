@@ -92,6 +92,7 @@
 //   HostOccurrenceRoutineDefinition -> dist/execution-core/model.d.ts
 //   HostOccurrenceRun -> dist/execution-core/model.d.ts
 //   HostOptions -> dist/execution-core/core.d.ts
+//   HostStoreFormatError -> dist/execution-core/ledger.d.ts
 //   IGNORED_WAKE_AUDIT_LIMIT -> dist/execution-core/routines.d.ts
 //   IgnoredWakeAudit -> dist/execution-core/model.d.ts
 //   Intent -> dist/execution-core/model.d.ts
@@ -325,7 +326,7 @@ export declare class HostExecutionCore {
 // ==== @byok-sdk/server dist/execution-core/index.d.ts ====
 export { HostExecutionCore, WakeDispatchError } from './core.js';
 export type { ExecutionServer, HostOptions, OutcomeTransaction, OccurrenceHook, OccurrenceTransaction, AgentMessageInput, MessageDecision, MessageTransaction } from './core.js';
-export { CompactVetoError, HostLedger, OutboxFullError, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError } from './ledger.js';
+export { CompactVetoError, HostLedger, HostStoreFormatError, OutboxFullError, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError } from './ledger.js';
 export type { ApplicationRows, CompactionOptions, CompactionResult, CompactVeto, TombstoneKind, HostLedgerOptions, ProjectionOutboxLimits, ProjectionOutboxUsage, LedgerDump, LedgerDumpMemoryTombstone, LedgerDumpRow, LedgerDumpTombstone } from './ledger.js';
 export { nextIntervalOccurrence } from './schedule.js';
 export type { NextOccurrence } from './schedule.js';
@@ -354,6 +355,11 @@ export type CompactVeto = (state: Readonly<LedgerState>, intentKey: string) => s
 export interface HostLedgerOptions {
     projectionOutboxLimits?: ProjectionOutboxLimits;
     compactVeto?: CompactVeto;
+    expectedFormats?: Readonly<Record<string, number>>;
+}
+export declare class HostStoreFormatError extends Error {
+    readonly code: 'host_store_format_unsupported';
+    constructor(message: string);
 }
 export interface ProjectionOutboxUsage {
     count: number;
@@ -418,7 +424,7 @@ export interface LedgerDumpMemoryTombstone {
     expiresAt: number;
 }
 export interface LedgerDump {
-    version: 1;
+    version: 2;
     body: LedgerState;
     tombstones: LedgerDumpTombstone[];
     rows: LedgerDumpRow[];
@@ -431,6 +437,7 @@ export declare class HostLedger {
     onOutbox(listener: () => void): () => void;
     private readonly projectionLimits?;
     readonly compactVeto?: CompactVeto;
+    readonly formats: Readonly<Record<string, number>>;
     constructor(filename: string, tenant: string, options?: HostLedgerOptions);
     snapshot(): LedgerState;
     projectionOutboxUsage(): ProjectionOutboxUsage;
@@ -775,7 +782,6 @@ export interface IgnoredWakeAudit {
     wakeKeyHash: string;
 }
 export interface LedgerState {
-    version: 1;
     sequence: number;
     scanSequence: number;
     memory?: MemoryState;

@@ -105,13 +105,14 @@ function memorySubject(team?: SeedTeam): RetentionSubject & SyncSubject {
     state: () => structuredClone(stored.state),
   };
 }
-/** Every row of every table for the tenant, through a separate read handle. */
+/** Every row of every table for the tenant, and the file's format rows, through a separate read handle. */
 function tables(file: string, tenant: string): string {
   const db = new DatabaseSync(file, { readOnly: true });
   try {
     const dump: Record<string, unknown> = {};
     for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>) {
-      dump[name] = db.prepare(`SELECT * FROM ${name} WHERE tenant=?`).all(tenant).map(row => JSON.stringify(row)).sort();
+      const rows = name === 'host_store_format' ? db.prepare(`SELECT * FROM ${name}`).all() : db.prepare(`SELECT * FROM ${name} WHERE tenant=?`).all(tenant);
+      dump[name] = rows.map(row => JSON.stringify(row)).sort();
     }
     return JSON.stringify(dump);
   } finally { db.close(); }

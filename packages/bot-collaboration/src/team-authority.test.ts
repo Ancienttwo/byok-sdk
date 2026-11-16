@@ -6,7 +6,7 @@ import type { BotTurnOutcome } from '@byok-sdk/protocol';
 import { HostLedger, type ExecutionServer, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { template } from './k4-fixtures.test-support';
 import { BotCollaboration } from './host';
-import { botCompactVeto } from './compaction';
+import { botLedgerOptions } from './compaction';
 import { stateOf } from './model';
 import { CommitConflict } from './rules/commit';
 import { TeamModeError, type TeamSnapshot, type TeamSnapshotBot } from './rules/team';
@@ -129,7 +129,7 @@ const HOST_MAIN = { ...MAIN, profileRevision: '5' }, HELPER = bot('helper', { mo
 function personaHost(models: Record<string, ExecutionTemplate>): BotCollaboration {
   if (!persona) {
     const root = mkdtempSync(join(tmpdir(), 'k8-models-'));
-    persona = { root, ledger: new HostLedger(join(root, 'host.sqlite'), 'tenant', { compactVeto: botCompactVeto }) };
+    persona = { root, ledger: new HostLedger(join(root, 'host.sqlite'), 'tenant', botLedgerOptions) };
   }
   persona.host = undefined;
   return persona.host = new BotCollaboration(FAKE as never, persona.ledger, { botId: 'main', execution: OLD, connector: async () => null,

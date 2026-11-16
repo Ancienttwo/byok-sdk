@@ -88,7 +88,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
     it('refuses a callback command before it reads or locks the scope row: an unknown store version is not reached', async () => {
       const h = await hosted();
       await h.commit({ scope: h.scope, commandId: 'i1', command: input('k1') });
-      await opened!.pool.query(`UPDATE "${store().schema}".scope SET state_version = 3 WHERE scope = $1`, [JSON.stringify(h.scope)]);
+      await opened!.pool.query(`UPDATE "${store().schema}".scope SET state_version = 2 WHERE scope = $1`, [JSON.stringify(h.scope)]);
       await expect(store().commit(h.scope, { scope: h.scope, commandId: 'task-1', command: outcome }, vectorClock)).rejects.toBeInstanceOf(CallbackCommandError);
       await expect(store().commit(h.scope, { scope: h.scope, commandId: 'i2', command: input('k2') }, vectorClock)).rejects.toBeInstanceOf(HostedStoreVersionError);
     });
@@ -167,13 +167,13 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
     } finally { await pool.end(); }
   }, 30_000);
 
-  it('refuses a scope row of an unknown store version under the lock, and writes nothing', async () => {
+  it('refuses a scope row of an older store version under the lock, and writes nothing', async () => {
     const h = await hosted();
     await h.commit({ scope: h.scope, commandId: 'i1', command: input('k1') });
-    await opened!.pool.query(`UPDATE "${store().schema}".scope SET state_version = 3 WHERE scope = $1`, [JSON.stringify(h.scope)]);
+    await opened!.pool.query(`UPDATE "${store().schema}".scope SET state_version = 2 WHERE scope = $1`, [JSON.stringify(h.scope)]);
     const before = await h.stored();
     await expect(h.commit({ scope: h.scope, commandId: 'i2', command: input('k2') })).rejects.toBeInstanceOf(HostedStoreVersionError);
-    await expect(h.commit({ scope: h.scope, commandId: 'i1', command: input('k1') })).rejects.toThrow('Unsupported hosted collaboration store version 3');
+    await expect(h.commit({ scope: h.scope, commandId: 'i1', command: input('k1') })).rejects.toThrow('Unsupported hosted collaboration store version 2');
     await expect(h.state()).rejects.toBeInstanceOf(HostedStoreVersionError);
     expect(await h.stored()).toBe(before);
   });

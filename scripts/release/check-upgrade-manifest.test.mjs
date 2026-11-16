@@ -44,7 +44,7 @@ function fixture(t) {
   copy('api-surface');
   for (const pkg of publicPackageDirectories(repo)) copy(`packages/${pkg}/package.json`);
   for (const store of STORES) copy(store.source);
-  copy('packages/bot-collaboration/src/model.ts');
+  copy('packages/bot-collaboration/src/compaction.ts');
   for (const protocol of INTERPROCESS_PROTOCOLS) copy(protocol.source);
   copy('packages/keys/src');
   copy(CONFIG_SCHEMA_PATH);

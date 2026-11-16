@@ -1,6 +1,8 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -87,6 +89,16 @@ const expectSchemaStale = (open: () => SqliteProviderProfileStore): void => {
   }
   expect(thrown).toBeInstanceOf(ByokKeysError);
   expect((thrown as ByokKeysError).code).toBe('PROVIDER_STORE_SCHEMA_STALE');
+};
+
+const FIXTURE_0_43 = fileURLToPath(new URL('../../../scripts/release/fixtures/stores/0.43.0/keys-profile-store.db', import.meta.url));
+const sha256 = (file: string): string => createHash('sha256').update(readFileSync(file)).digest('hex');
+const sidecars = (file: string): string[] => ['-wal', '-shm', '-journal'].filter((suffix) => existsSync(`${file}${suffix}`));
+const tableNames = (file: string): string[] => {
+  const reader = openSqliteDatabase(file, { readOnly: true });
+  try {
+    return (reader.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as { name: string }[]).map((row) => row.name);
+  } finally { reader.close(); }
 };
 
 let directory: string;
@@ -244,6 +256,7 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
     const mode = statSync(databasePath).mode;
     expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath }));
     expect(readFileSync(databasePath)).toEqual(bytes);
+    expect(sidecars(databasePath)).toEqual([]);
     expect(statSync(databasePath).mode).toBe(mode);
     const reader = openSqliteDatabase(databasePath, { readOnly: true });
     expect(reader.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY name').all()).toEqual(schema);
@@ -333,5 +346,46 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
       'provider_kind',
       'updated_at',
     ]);
+  });
+  it('refuses a released store missing a custody table without writing to it', () => {
+    mkdirSync(join(directory, 'nested'));
+    copyFileSync(FIXTURE_0_43, databasePath);
+    const raw = openSqliteDatabase(databasePath);
+    raw.exec('DROP TABLE provider_custody_watermark');
+    raw.exec('PRAGMA journal_mode = DELETE');
+    raw.close();
+    const hash = sha256(databasePath);
+    expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath }));
+    expect(sha256(databasePath)).toBe(hash);
+    expect(sidecars(databasePath)).toEqual([]);
+    expect(tableNames(databasePath)).not.toContain('provider_custody_watermark');
+  });
+
+  it('refuses a stale schema held only in an un-checkpointed WAL before any DDL', async () => {
+    const source = join(directory, 'source.sqlite');
+    await new SqliteProviderProfileStore({ path: source }).close();
+    const reader = openSqliteDatabase(source, { readOnly: true });
+    const ddl = (reader.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name <> 'provider_custody_watermark' ORDER BY type DESC").all() as { sql: string }[]).map((row) => row.sql);
+    reader.close();
+    const walOnly = join(directory, 'wal-only.sqlite');
+    const writer = openSqliteDatabase(walOnly);
+    writer.exec('PRAGMA wal_autocheckpoint = 0');
+    for (const statement of ddl) writer.exec(statement);
+    mkdirSync(join(directory, 'nested'));
+    copyFileSync(walOnly, databasePath);
+    copyFileSync(`${walOnly}-wal`, `${databasePath}-wal`);
+    writer.close();
+    expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath }));
+    expect(tableNames(databasePath)).not.toContain('provider_custody_watermark');
+  });
+
+  it('checkpoints a new store so its main file holds the schema', async () => {
+    const store = new SqliteProviderProfileStore({ path: databasePath });
+    try {
+      const main = new (await import('node:sqlite')).DatabaseSync(`file:${databasePath}?mode=ro&immutable=1`, { readOnly: true });
+      try {
+        expect((main.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'provider_%'").all() as { name: string }[]).length).toBe(5);
+      } finally { main.close(); }
+    } finally { await store.close(); }
   });
 });

@@ -192,8 +192,7 @@ it('rolls the whole load back when a write fails, and refuses a malformed dump b
 
   const stale = `host-scan:${hash('target')}:1`;
   const malformed: Array<[string, (dump: LedgerDump) => void, string | (new () => Error)]> = [
-    ['version', d => { (d as { version: number }).version = 2; }, 'Unsupported switch dump version'],
-    ['body version', d => { (d.body as { version: number }).version = 2; }, 'Unsupported Host ledger version'],
+    ['version', d => { (d as { version: number }).version = 1; }, 'Unsupported switch dump version'],
     ['rows', d => { (d as { rows: unknown }).rows = {}; }, 'Invalid switch dump rows'],
     ['kind', d => { (d.tombstones[0] as { kind: string }).kind = 'memory'; }, 'Invalid switch dump tombstone kind'],
     ['identity', d => { d.tombstones[0]!.identity = ''; }, 'Invalid switch dump tombstone identity'],

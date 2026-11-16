@@ -111,7 +111,7 @@ export interface IgnoredWakeAudit {
   wakeKeyHash: string;
 }
 export interface LedgerState {
-  version: 1; sequence: number; scanSequence: number;
+  sequence: number; scanSequence: number;
   memory?: MemoryState;
   /** Bounded diagnostic history; absent until the first ignored delivery. */
   ignoredWakes?: IgnoredWakeAudit[];
