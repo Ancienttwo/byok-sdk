@@ -107,23 +107,15 @@ describe('approval timeline projection', () => {
     }]);
   });
 
-  it('keeps an id-less pre-M5 host resolution explicitly unpaired', () => {
-    const snapshot = replayApprovalTimeline(tail([
-      observation(1, { type: 'approval_requested', summary: 'Legacy approval' }),
-      observation(2, {
-        type: 'approval_resolved', decision: 'approve', resolvedBy: 'host',
-        at: '2026-08-16T12:01:00.000Z',
-      }),
-    ]));
-
-    expect(snapshot.items).toMatchObject([
-      { lifecycle: 'approval-requested', status: 'pending', correlation: 'unpaired-request' },
-      {
-        lifecycle: 'approval-responded', status: 'approved', correlation: 'unpaired-resolution',
-        decision: 'approve', resolvedBy: 'host',
-      },
-    ]);
-    expect(snapshot.items.every((item) => item.approvalId === undefined)).toBe(true);
+  it('refuses a stored observation without an approvalId instead of projecting it unpaired', () => {
+    // A pre-M5 store could hold one; #2297 made the id required and synthesizes none.
+    const idless = [
+      { type: 'approval_requested', summary: 'Legacy approval' },
+      { type: 'approval_resolved', decision: 'approve', resolvedBy: 'host', at: '2026-08-16T12:01:00.000Z' },
+    ] as unknown as ApprovalObservation['event'][];
+    for (const event of idless) {
+      expectCode(() => replayApprovalTimeline(tail([observation(1, event)])), 'approval_input_invalid');
+    }
   });
 
   it('converges for resolution-before-request and out-of-order incremental folding', () => {
@@ -147,24 +139,19 @@ describe('approval timeline projection', () => {
     }]);
   });
 
-  it('keeps every missing or unmatched native identity explicitly unpaired', () => {
+  it('keeps every unmatched native identity explicitly unpaired', () => {
     const snapshot = replayApprovalTimeline(tail([
-      observation(1, { type: 'approval_requested', summary: 'First without ID' }),
-      observation(2, { type: 'approval_requested', summary: 'Second without ID' }),
-      observation(3, { type: 'approval_requested', approvalId: 'pending', summary: 'Pending' }),
-      observation(4, {
+      observation(1, { type: 'approval_requested', approvalId: 'pending', summary: 'Pending' }),
+      observation(2, {
         type: 'approval_resolved', approvalId: 'orphan', decision: 'approve',
         resolvedBy: 'local', at: '2026-08-16T12:02:00.000Z',
       }),
     ]));
 
     expect(snapshot.items).toMatchObject([
-      { correlation: 'unpaired-request', status: 'pending', summary: 'First without ID' },
-      { correlation: 'unpaired-request', status: 'pending', summary: 'Second without ID' },
       { approvalId: 'pending', correlation: 'unpaired-request', status: 'pending' },
       { approvalId: 'orphan', correlation: 'unpaired-resolution', status: 'approved' },
     ]);
-    expect(snapshot.items.slice(0, 2).every((item) => item.approvalId === undefined)).toBe(true);
   });
 
   it('is idempotent for exact overlap and fails closed for every authority collision', () => {
