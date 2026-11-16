@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "5fcefaeb59129499a6a3de6f1c84bb65a89880fb7a9eb3556994b65cd47b9f05"
+    "snapshotSha256": "bf4a0d4b35d71091b47a36bf710801832a28be8e0961797bc7927411fe773308"
   },
   "configFields": {
     "status": "tracked",
@@ -205,6 +205,15 @@
       "items": [
         "export:@byok-sdk/bot-collaboration/host-kit#supersededDeliveryIds"
       ]
+    },
+    {
+      "id": "remove-create-in-memory-blobs",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud removes createInMemoryBlobs(objects, bytes). It only returned bytes.bind(objects); call objectBytes.bind(objects) on the InMemoryBlobBytes from createInMemoryBlobBytes() instead.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#in-memory-blob-factory",
+      "items": [
+        "export:@byok-sdk/cloud#createInMemoryBlobs"
+      ]
     }
   ],
   "changes": [
@@ -321,6 +330,11 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeDetectionRefusalReason",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#createInMemoryBlobs",
+      "change": "removed",
+      "entry": "remove-create-in-memory-blobs"
     },
     {
       "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",

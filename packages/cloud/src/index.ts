@@ -418,7 +418,6 @@ export {
   InMemoryTaskAttemptStore,
   InMemoryTaskCancellationStore,
   NONCE_TTL_MS,
-  createInMemoryBlobs,
   createInMemoryCloudStores,
   createInMemoryBlobBytes,
   InMemoryBlobBytes,

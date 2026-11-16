@@ -15,7 +15,7 @@ import type { ProofReceiptRetentionAuthority } from '../../maintenance.js';
 import type { TaskArchiveStore } from '../../task-archive.js';
 import type { BlobContentProxy, CloudStores } from '../ports.js';
 import { AllowAllRateLimiter } from './rate-limiter.js';
-import { createInMemoryBlobs, type InMemoryBlobBytes } from './blobs.js';
+import type { InMemoryBlobBytes } from './blobs.js';
 import { InMemoryDeviceDirectory } from './device-directory.js';
 import { InMemoryInboundDedupStore } from './dedup.js';
 import { InMemoryNonceStore } from './nonces.js';
@@ -37,7 +37,6 @@ export {
   BLOB_URL_TTL_MS,
   InMemoryBlobContentProxy,
   InMemoryCloudBlobStore,
-  createInMemoryBlobs,
   createInMemoryBlobBytes,
   InMemoryBlobBytes,
 } from './blobs.js';
@@ -95,7 +94,7 @@ export function createInMemoryCloudStores(
    */
   taskArchive?: InMemoryTaskArchiveFactory,
 ): InMemoryCloudComposition {
-  const blobs = createInMemoryBlobs(objects, objectBytes);
+  const blobs = objectBytes.bind(objects);
   const taskEventsWake = createInProcessTaskEventsWake();
   const activity = new InMemoryActivityStore(clock, taskEventsWake.changed);
   const approvals = new InMemoryApprovalTimelineStore(clock, taskEventsWake.changed);

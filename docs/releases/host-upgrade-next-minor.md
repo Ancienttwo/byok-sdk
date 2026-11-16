@@ -173,3 +173,9 @@ keeps the default `[]`; no Host action is required.
   granted roots (`outside_scope`), so the model cannot load it on its own;
   `/skill:<name>` still expands it. Symlinks are followed and the owner is not
   checked. See [Host-provided skills](../adapter-capabilities.md#host-provided-skills-by-runtime-1846).
+
+## In-memory blob factory
+
+`@byok-sdk/cloud` removes `createInMemoryBlobs(objects, bytes)`. It only
+returned `bytes.bind(objects)`. Call `bind(objects)` on the `InMemoryBlobBytes`
+from `createInMemoryBlobBytes()` instead; it returns the same `InMemoryBlobs`.
