@@ -64,7 +64,9 @@ async function createFixtureStores() {
   }
   try {
     const expected = realpathSync(config.dbPath);
+    // Construction may also open and close a short-lived connection; only a live one can own the store.
     const matches = [...handles].filter((handle) => {
+      if (!handle.isOpen) return false;
       if (handle.isTransaction !== false) throw new Error('fixture capture observed an open transaction');
       const main = prepare.call(handle, 'PRAGMA database_list').all().find((row) => row.name === 'main');
       return main?.file && realpathSync(String(main.file)) === expected;
