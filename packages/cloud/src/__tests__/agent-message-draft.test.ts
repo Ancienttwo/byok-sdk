@@ -63,14 +63,16 @@ describe('cloud Agent message draft readback', () => {
     expect(await read()).toMatchObject({ revision: 2, text: 'new', byteCount: 3, state: 'gap' });
   });
   it('keeps published state above a later device terminal after row deletion', async () => {
-    const { frame, send, read, h } = await setup();
+    const { frame, send, read, h, device } = await setup();
     await send(frame('hello'));
     const published = createEnvelope('agent.message.publish', { agentRef, sessionRef: 'session', contract: 'draft.v1',
       messageId: '10000000-0000-4000-8000-000000000510', cursor: 1, contentType: 'text/plain', body: 'hello', byteCount: 5,
       contentHash: `sha256:${'a'.repeat(64)}` }, { taskId });
     expect(await send(published)).toEqual({ outcome: 'accepted' });
     expect(await read()).toMatchObject({ state: 'ended', text: 'hello' });
-    expect(await send(createEnvelope('task.complete', { agentRef, summary: 'done', sessionRef: 'session' }, { taskId }))).toEqual({ outcome: 'accepted' });
+    const executor = { kind: 'runtime', runtimeId: 'pi' } as const;
+    expect(await send(createEnvelope('task.claim', { deviceId: device.deviceId, agentRef, executor }, { taskId }))).toEqual({ outcome: 'accepted' });
+    expect(await send(createEnvelope('task.complete', { agentRef, summary: 'done', sessionRef: 'session', executor }, { taskId }))).toEqual({ outcome: 'accepted' });
     expect(await h.stores.agentMessageDraft.read(TENANT_A, taskId)).toBeUndefined();
     expect(await read()).toEqual({ revision: 0, offset: 0, text: '', byteCount: 0, state: 'ended' });
   });

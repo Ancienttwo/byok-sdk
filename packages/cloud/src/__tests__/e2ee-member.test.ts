@@ -2,15 +2,18 @@
  * The E2EE member control plane (#654 E2c): shape and tenant checks, the
  * first-writer rules as Host errors, and fail-closed behavior without a store.
  */
-import { canonicalizeJson, createMutableClock, type JsonValue, type TenantId } from '@byok-sdk/core';
+import { canonicalizeJson, createInMemoryCoreStores, createMutableClock, type JsonValue, type TenantId } from '@byok-sdk/core';
 import { generateScopeKey, type MemberChainEntryV1 } from '@byok-sdk/core/sealed-payload';
 import { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_SCOPE_ID_MAX_LENGTH } from '@byok-sdk/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PAIRING_CODE_TTL_MS } from '../auth/plane';
 import { createHmacTokenSigner } from '../auth/tokens';
 import { fullCapabilityDeclaration } from '../capabilities';
 import { createByokCloud, type ByokCloud } from '../cloud';
-import { createInMemoryByokCloud } from '../composition/in-memory';
+import { createWebCrypto } from '../crypto/web-crypto';
+import { createInMemoryBlobBytes } from '../stores/in-memory/blobs';
+import { createInMemoryCloudStores } from '../stores/in-memory/index';
+import { createInProcessMailboxWake } from '../stores/in-memory/mailbox-wake';
 import { E2EE_SCOPE_SHRED_RECEIPT_PREFIX } from '../e2ee-member';
 import { isCloudError } from '../errors';
 import { RECEIPT_RETENTION } from '../receipt-retention';
@@ -20,21 +23,32 @@ import { chain, keyPackage, newMember, signedChain } from './support/e2ee-member
 import { applyMemberChainEntries, emptyMemberChainState } from '@byok-sdk/core/sealed-payload';
 import { TENANT_A, TENANT_B, createHarness } from './support/harness';
 
-function setup(withStore = true, makeStore = (receipts: RequestReceiptStore) => new InMemoryE2eeMemberStore(receipts)) {
+/**
+ * A cloud over an in-memory composition that opted in to `e2eeMember`, so its
+ * device directory retires the store the routes use. `makeStore` swaps in a
+ * spy store that the directory does not retire.
+ */
+function setup(withStore = true, makeStore?: (receipts: RequestReceiptStore) => InMemoryE2eeMemberStore) {
   const clock = createMutableClock();
-  const base = createInMemoryByokCloud({ clock });
-  const store = makeStore(base.stores.receipts);
+  const crypto = createWebCrypto();
+  const objectBytes = createInMemoryBlobBytes(clock, crypto);
+  const core = createInMemoryCoreStores({ clock, objectBytes }).stores;
+  const composition = createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, core.presence, objectBytes, undefined, {
+    e2eeMember: withStore && makeStore === undefined,
+  });
+  const stores = makeStore === undefined ? composition.stores : { ...composition.stores, e2eeMember: makeStore(composition.stores.receipts) };
+  const store = stores.e2eeMember as InMemoryE2eeMemberStore;
+  const base = { core, stores };
   const cloud: ByokCloud = createByokCloud({
-    proofReceiptRetention: base.proofReceiptRetention,
-    core: base.core,
-    cloud: base.stores,
-    mailboxWake: base.mailboxWake,
-    blobContentProxy: base.blobContentProxy,
-    crypto: base.crypto,
+    proofReceiptRetention: { authority: composition.proofReceiptAuthority },
+    core,
+    cloud: stores,
+    mailboxWake: createInProcessMailboxWake(),
+    blobContentProxy: composition.blobContentProxy,
+    crypto,
     tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(7), clock),
     clock,
     capabilities: fullCapabilityDeclaration(1, { includeE2eeMember: withStore }),
-    ...(withStore ? { e2eeMemberStore: store } : {}),
   });
   const registerDevice = (tenant: TenantId, deviceId: string, machineId?: string) => base.stores.devices.register(tenant, {
     productId: 'product', deviceId, deviceName: deviceId, devicePublicKey: `${deviceId}-key`, proofKeyId: 'identity', proofKeyEpoch: 0,
@@ -352,17 +366,18 @@ describe('E2EE member control plane', () => {
     expect(await harness.stores.devices.get(TENANT_A, first.deviceId)).toBeUndefined();
   });
 
-  // The in-memory device directory deletes no E2EE state. Its revoke and its
-  // machine supersession both delete the device row, so the active-device
-  // guard alone keeps the old device's registration and MACs unreachable.
+  // The in-memory directory retires the composition's own `e2eeMember` (#2267):
+  // the store the routes read is the one whose state revoke and machine
+  // supersession delete.
   const machineId = 'e'.repeat(64);
   const removals: ReadonlyArray<readonly [string, (env: ReturnType<typeof setup>) => Promise<unknown>]> = [
     ['revoke', env => env.base.stores.devices.revoke(TENANT_A, 'device-1')],
     ['machine supersession', env => env.registerDevice(TENANT_A, 'device-2', machineId)],
   ];
   for (const [event, remove] of removals) {
-    it(`serves and writes no member state for a device removed by ${event} on the memory backend`, async () => {
+    it(`deletes the member state of a device removed by ${event} on the memory backend`, async () => {
       const env = setup();
+      const deletes = vi.spyOn(InMemoryE2eeMemberStore.prototype, 'deleteDevice');
       const { cloud, store, clock, registerDevice } = env;
       const client = await newMember();
       const device = await newMember('device-1');
@@ -380,8 +395,10 @@ describe('E2EE member control plane', () => {
       expect(await env.base.stores.devices.get(TENANT_A, 'device-1')).toBeUndefined();
       expect(await cloud.readMemberKeyRegistration(TENANT_A, 'device-1')).toBeUndefined();
       expect(await code(cloud.relayClientPairingMac(TENANT_A, 'device-1', { ...relay, mac: 'A'.repeat(42) + 'I' }))).toBe('device_not_found');
-      expect(await store.readClientPairingMac(TENANT_A, { deviceId: 'device-1', now: clock.now().toISOString() }))
-        .toBe(canonicalizeJson(relay as unknown as JsonValue));
+      expect(await store.readClientPairingMac(TENANT_A, { deviceId: 'device-1', now: clock.now().toISOString() })).toBeUndefined();
+      expect(await store.readMemberRegistration(TENANT_A, { deviceId: 'device-1', now: clock.now().toISOString() })).toBeUndefined();
+      expect(deletes.mock.contexts[0]).toBe(env.base.stores.e2eeMember);
+      deletes.mockRestore();
     });
   }
 

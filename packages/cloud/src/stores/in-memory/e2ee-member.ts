@@ -232,6 +232,15 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
   async readClientPairingMac(tenant: TenantId, input: { readonly deviceId: string; readonly now: string }): Promise<string | undefined> {
     return live(this.#state(tenant).clientMacs.get(input.deviceId), input.now);
   }
+
+  async deleteDevice(tenant: TenantId, deviceId: string): Promise<void> {
+    const state = this.#state(tenant);
+    const memberId = state.registrations.get(deviceId)?.memberId;
+    for (const [key, row] of state.packages) if (row.recipient === memberId) state.packages.delete(key);
+    state.registrations.delete(deviceId);
+    state.deviceMacs.delete(deviceId);
+    state.clientMacs.delete(deviceId);
+  }
 }
 
 function live(value: Expiring | undefined, now: string): string | undefined {

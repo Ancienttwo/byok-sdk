@@ -23,9 +23,12 @@ const inMemoryFactory: CloudCompositionFactory = {
       core.mailbox,
       core.presence,
       objectBytes,
+      undefined,
+      { e2eeMember: true },
     );
     return {
       presence: core.presence,
+      e2eeMember: stores.e2eeMember!,
       replay: new InMemoryDeviceAssertionReplayAuthority(),
       // Exactly the certified ports, in `CLOUD_CONFORMANCE_PORTS` order: the
       // suite asserts the key set, so a composition cannot quietly hand over
@@ -42,6 +45,7 @@ const inMemoryFactory: CloudCompositionFactory = {
         tasks: stores.tasks,
         cancellations: stores.cancellations,
         receipts: stores.receipts,
+        steerRefusals: stores.steerRefusals,
         egress: stores.egress,
         proofReceipts: stores.proofReceipts,
         blobs: stores.blobs,

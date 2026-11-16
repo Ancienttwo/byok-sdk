@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "6ca84701803b949ae56c4d7c1e9db8aabce3a988949e3454116bc1ea51342b9d"
+    "snapshotSha256": "e14181842c50d78407d17fdaca37d85df0413a72c3dcd391f2d6e4689232740c"
   },
   "configFields": {
     "status": "tracked",
@@ -332,7 +332,6 @@
         "export:@byok-sdk/protocol#DAEMON_TO_SERVER_TYPES",
         "export:@byok-sdk/cloud#TaskSteerRefusalStore",
         "export:@byok-sdk/cloud#SteerRefusalRecord",
-        "export:@byok-sdk/cloud#CloudStores",
         "export:@byok-sdk/cloud#CLOUD_STORE_NAMES",
         "export:@byok-sdk/core#MailboxStore"
       ]
@@ -415,6 +414,126 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
       "items": [
         "store:server-sqlite"
+      ]
+    },
+    {
+      "id": "service-uninstall-stops-before-pointers",
+      "impact": "breaking",
+      "summary": "Corrects a 0.43.0 regression by restoring the 0.42.0 order: @byok-sdk/client ServiceInstallation.uninstall() runs the lifecycle's uninstall (stop, then unit removal) while current still points at the installed payload, then removes current, previous, versions/, snapshots/ and the receipt, so a Windows stop program under current runs instead of every uninstall failing with service_stop_failed. A failed, refused or timed-out stop throws as is and removes nothing: the unit and current both stay, so the service can start again until uninstall() is retried. This narrows the #2011 guarantee that a unit left behind starts no payload: when the stop succeeds and the unit's removal fails, the unit stays with current and a boot or login can start it. Retry uninstall() after any failure.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#service-uninstall-stops-before-it-removes-current-2274",
+      "items": [
+        "behavior:service-uninstall-stops-before-pointers"
+      ]
+    },
+    {
+      "id": "grok-task-autoupdate-off",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client and @byok-sdk/client/adapters GrokAdapter (DaemonConfig.runtimes.grok) now start every Grok agent process with GROK_DISABLE_AUTOUPDATER=1, replacing any value of that variable in the task environment. A task under agentUserContext 'inherit' on a managed Grok install no longer runs Grok's updater: it no longer writes the agent link into the install's bin/ and no longer checks for updates. Grok the user runs still updates itself; a Host that relied on SDK tasks to keep Grok current updates it outside the tasks.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#grok-tasks-no-longer-run-the-grok-updater-2269",
+      "items": [
+        "behavior:grok-task-autoupdate-off"
+      ]
+    },
+    {
+      "id": "e2ee-member-store-in-cloud-stores",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud ByokCloudOptions.e2eeMemberStore is removed; the E2EE member store is CloudStores.e2eeMember, so the routes and the device directory that retires it use one instance. Hosts drop the option and take the store from the composition's opt-in: createPostgresCloudStores({ ..., e2eeMember: true }), createInMemoryCloudStores(..., undefined, { e2eeMember: true }) or createInMemoryByokCloud({ e2eeMember: true }), then pass the stores as cloud.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#e2ee-member-store-moves-into-cloudstores",
+      "items": [
+        "export:@byok-sdk/cloud#ByokCloudOptions",
+        "export:@byok-sdk/cloud#CloudStores"
+      ]
+    },
+    {
+      "id": "e2ee-capability-port-in-cloud-stores",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud binds e2ee.member to cloud.e2eeMember: CapabilityPorts loses e2eeMemberStore and gains cloud?: Pick<CloudStores, 'e2eeMember'>. Declaring the capability without the store, or passing the store without declaring it, is still refused. Callers of capabilityDeclarationForPorts pass cloud: stores instead of e2eeMemberStore.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#capability-ports-read-cloude2eemember",
+      "items": [
+        "export:@byok-sdk/cloud#CapabilityPorts"
+      ]
+    },
+    {
+      "id": "remove-in-memory-e2ee-member-store",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud no longer exports InMemoryE2eeMemberStore. Hosts take the in-memory store from createInMemoryCloudStores(..., undefined, { e2eeMember: true }).stores.e2eeMember or createInMemoryByokCloud({ e2eeMember: true }), whose device directory retires it.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#inmemorye2eememberstore-is-no-longer-exported",
+      "items": [
+        "export:@byok-sdk/cloud#InMemoryE2eeMemberStore"
+      ]
+    },
+    {
+      "id": "e2ee-member-store-delete-device",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud E2eeMemberStore gains a required deleteDevice(tenant, deviceId): Promise<void> that deletes the packages addressed to the device's member, its registration and both pairing MACs, and keeps the chain, epochs, keyIds, shred records, KEM floor and proof requests. Hosts with their own E2eeMemberStore implement it.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#e2eememberstore-gains-deletedevice",
+      "items": [
+        "export:@byok-sdk/cloud#E2eeMemberStore"
+      ]
+    },
+    {
+      "id": "device-retirement-clears-e2ee-member-state",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud device revoke and machine supersession delete the retired device's E2EE member state through CloudStores.e2eeMember once the registration change is durable, and revoke does so on every call. The Host scope read omits the retired member's packages and the member id is free for another device in every composition; Postgres revoke now deletes those rows even when no device row is left. A Host with its own DeviceDirectory and E2EE store calls deleteDevice on both paths.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retirement-deletes-e2ee-member-state",
+      "items": [
+        "behavior:device-retirement-clears-e2ee-member-state"
+      ]
+    },
+    {
+      "id": "e2ee-composition-opt-ins",
+      "impact": "additive",
+      "summary": "CloudStores.e2eeMember and DeviceScopedStores.e2eeMember are new optional members; createInMemoryCloudStores, createInMemoryByokCloud and createPostgresCloudStores take an e2eeMember: true opt-in that builds one store for both stores and directory; PostgresE2eeMemberStore implements deleteDevice.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#e2ee-composition-opt-ins",
+      "items": [
+        "export:@byok-sdk/cloud#InMemoryByokCloudOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresCloudStoreOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresE2eeMemberStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresE2eeMemberStore"
+      ]
+    },
+    {
+      "id": "wire-v7-cloud-executor",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud reads the v7 claim executor: InMemoryTaskAttemptStore.claim and TenantBoundTaskAttempts.claim take executor, SteerRejectedError.executor replaces runtime and TerminalResult.executor replaces harnessId. INBOUND_REFUSAL_REASONS renames claim_harness_mismatch to claim_executor_mismatch and terminal_harness_mismatch to terminal_executor_mismatch, removes claim_harness_and_runtime_conflict, and adds steer_refusal_id_mismatch and steer_refusal_unknown_steer. Rename the reason strings an observer matches.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+        "export:@byok-sdk/cloud#TenantBoundTaskAttempts",
+        "export:@byok-sdk/cloud#SteerRejectedError",
+        "export:@byok-sdk/cloud#TerminalResult",
+        "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS"
+      ]
+    },
+    {
+      "id": "wire-v7-cloud-steer-refusal-reads",
+      "impact": "additive",
+      "summary": "@byok-sdk/cloud ByokCloud.readSteerRefusal and listSteerRefusals read a task's steer refusals by steer id or by revision; TenantStores.steerRefusals and TenantBoundMailbox.readMessage carry them, and @byok-sdk/core InMemoryMailboxStore implements readMessage.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/cloud#ByokCloud",
+        "export:@byok-sdk/cloud#TenantStores",
+        "export:@byok-sdk/cloud#TenantBoundMailbox",
+        "export:@byok-sdk/core#InMemoryMailboxStore"
+      ]
+    },
+    {
+      "id": "wire-v7-cloud-terminal-executor",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud handleInboundEnvelope and POST /byok/messages reject a task.complete, task.fail or task.cancelled whose executor differs from TaskAttempt.claimedExecutor, including one that carries an executor before any claim and a task.complete with no claim (terminal_executor_mismatch, wire not_permitted). An unclaimed daemon_interrupted recovery is no longer compared with the offer target. Devices on v7 echo the claimed executor; nothing for the Host to change beyond the reason rename.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-cloud-terminal-executor"
+      ]
+    },
+    {
+      "id": "wire-v7-cloud-steer-text-bound",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud ByokCloud.steerTask rejects a plaintext text over TASK_STEER_TEXT_MAX_BYTES (65,536 UTF-8 bytes) with coordination_input_invalid before it enqueues anything. Send longer follow-up input as a new task.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-cloud-steer-text-bound"
       ]
     }
   ],
@@ -539,14 +658,29 @@
       "entry": "wire-v7-execution-target"
     },
     {
+      "item": "export:@byok-sdk/cloud#ByokCloud",
+      "change": "changed",
+      "entry": "wire-v7-cloud-steer-refusal-reads"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ByokCloudOptions",
+      "change": "changed",
+      "entry": "e2ee-member-store-in-cloud-stores"
+    },
+    {
       "item": "export:@byok-sdk/cloud#CLOUD_STORE_NAMES",
       "change": "changed",
       "entry": "wire-v7-steer-refused"
     },
     {
+      "item": "export:@byok-sdk/cloud#CapabilityPorts",
+      "change": "changed",
+      "entry": "e2ee-capability-port-in-cloud-stores"
+    },
+    {
       "item": "export:@byok-sdk/cloud#CloudStores",
       "change": "changed",
-      "entry": "wire-v7-steer-refused"
+      "entry": "e2ee-member-store-in-cloud-stores"
     },
     {
       "item": "export:@byok-sdk/cloud#DeviceScopedStores",
@@ -554,9 +688,29 @@
       "entry": "in-memory-directory-device-state"
     },
     {
+      "item": "export:@byok-sdk/cloud#E2eeMemberStore",
+      "change": "changed",
+      "entry": "e2ee-member-store-delete-device"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryByokCloudOptions",
+      "change": "changed",
+      "entry": "e2ee-composition-opt-ins"
+    },
+    {
       "item": "export:@byok-sdk/cloud#InMemoryDeviceDirectory",
       "change": "changed",
       "entry": "in-memory-directory-device-state"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryE2eeMemberStore",
+      "change": "removed",
+      "entry": "remove-in-memory-e2ee-member-store"
     },
     {
       "item": "export:@byok-sdk/cloud#InMemoryInboundDedupStore",
@@ -567,6 +721,11 @@
       "item": "export:@byok-sdk/cloud#InMemoryNonceStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
     },
     {
       "item": "export:@byok-sdk/cloud#InboundDedupStore",
@@ -589,6 +748,11 @@
       "entry": "wire-v7-steer-refused"
     },
     {
+      "item": "export:@byok-sdk/cloud#SteerRejectedError",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
+    },
+    {
       "item": "export:@byok-sdk/cloud#TaskAttempt",
       "change": "changed",
       "entry": "wire-v7-execution-target"
@@ -604,6 +768,26 @@
       "entry": "wire-v7-steer-refused"
     },
     {
+      "item": "export:@byok-sdk/cloud#TenantBoundMailbox",
+      "change": "changed",
+      "entry": "wire-v7-cloud-steer-refusal-reads"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TenantBoundTaskAttempts",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TenantStores",
+      "change": "changed",
+      "entry": "wire-v7-cloud-steer-refusal-reads"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TerminalResult",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
+    },
+    {
       "item": "export:@byok-sdk/cloud#createInMemoryBlobs",
       "change": "removed",
       "entry": "remove-create-in-memory-blobs"
@@ -612,6 +796,16 @@
       "item": "export:@byok-sdk/cloud#createInMemoryCloudStores",
       "change": "changed",
       "entry": "in-memory-directory-device-state"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudStoreOptions",
+      "change": "changed",
+      "entry": "e2ee-composition-opt-ins"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresE2eeMemberStore",
+      "change": "changed",
+      "entry": "e2ee-composition-opt-ins"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresInboundDedupStore",
@@ -629,6 +823,16 @@
       "entry": "postgres-device-state-delete"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
+      "change": "changed",
+      "entry": "e2ee-composition-opt-ins"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresE2eeMemberStore",
+      "change": "changed",
+      "entry": "e2ee-composition-opt-ins"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresInboundDedupStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
@@ -642,6 +846,11 @@
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPresenceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/core#InMemoryMailboxStore",
+      "change": "changed",
+      "entry": "wire-v7-cloud-steer-refusal-reads"
     },
     {
       "item": "export:@byok-sdk/core#InMemoryPresenceStore",

@@ -285,10 +285,8 @@ import { z } from 'zod';
 /**
  * Persist this validated input before dispatch; the Host owns Turn/generation and outbox.
  *
- * `terminalProjection` is always required (#470). Execution targets either a built-in
- * `runtime` or a device-advertised `harnessId` (not both; harnessId also excludes
- * `dispatchSelection`), so corpus hosted entries that carry only `harnessId` stay
- * expressible through `submitAgentExecution`.
+ * `terminalProjection` is always required (#470). The execution target is the
+ * offer's required `target` (wire v7), validated by the protocol schema.
  */
 export declare const AgentExecutionInputSchema: z.ZodObject<{
     taskId: z.ZodString;
@@ -1352,6 +1350,7 @@ export declare function verifyNonceSignature(crypto: CloudCrypto, devicePublicKe
  */
 import { type CapabilityDeclaration } from '@byok-sdk/core';
 import type { ByokCloudOptions } from './cloud.js';
+import type { CloudStores } from './stores/ports.js';
 /** The hosted capability vocabulary this package knows how to serve. */
 export declare const CLOUD_CAPABILITIES: {
     /** `GET /byok/events` long-poll receive (§8). */
@@ -1439,8 +1438,8 @@ export declare const CLOUD_CAPABILITIES: {
      * The E2EE member device routes (#654): register a member key bundle,
      * append and read the member chain, put and read scope key packages, and
      * read the relayed client pairing MAC. Composition-bound like
-     * `truth.records`: declaring it without an `e2eeMemberStore`, or passing one
-     * without declaring it, is refused at construction.
+     * `truth.records`: declaring it without a `CloudStores.e2eeMember`, or
+     * passing one without declaring it, is refused at construction.
      */
     readonly e2eeMember: 'e2ee.member';
     /**
@@ -1485,7 +1484,7 @@ export interface FullCapabilityDeclarationOptions {
      * deployment does not hold — so it is off unless a composition says otherwise.
      */
     readonly includeHostMcpTaskContext?: boolean;
-    /** `e2ee.member` is default-off: the composition must supply an `e2eeMemberStore`. */
+    /** `e2ee.member` is default-off: the composition's `CloudStores` must carry an `e2eeMember`. */
     readonly includeE2eeMember?: boolean;
 }
 /**
@@ -1494,16 +1493,26 @@ export interface FullCapabilityDeclarationOptions {
  * `createByokCloud` refuses a capability declared without all of its ports and
  * a port passed without its capability, and `capabilityDeclarationForPorts`
  * declares exactly the capabilities whose ports are all present.
+ *
+ * A port is a `createByokCloud` option, except `cloud.e2eeMember`: the E2EE
+ * member store is a store of the composition, so the device directory that
+ * retires its state and the routes that serve it read the same one (#2267).
  */
 export declare const CAPABILITY_PORTS: {
     readonly "blobs.contentproxy": readonly ["blobContentProxy"];
     readonly "truth.records": readonly ["truthCommitter", "truthObjectDownloads"];
     readonly "skills.pack": readonly ["skillPacks"];
     readonly "agent.memory.projection": readonly ["agentMemoryProjectionAuthorizer", "agentMemoryProjectionStore"];
-    readonly "e2ee.member": readonly ["e2eeMemberStore"];
+    readonly "e2ee.member": readonly ["cloud.e2eeMember"];
 };
-/** The `createByokCloud` ports a capability is bound to. */
-export type CapabilityPorts = Pick<ByokCloudOptions, (typeof CAPABILITY_PORTS)[keyof typeof CAPABILITY_PORTS][number]>;
+/** The name of one capability port in {@link CAPABILITY_PORTS}. */
+export type CapabilityPortName = (typeof CAPABILITY_PORTS)[keyof typeof CAPABILITY_PORTS][number];
+/** The `createByokCloud` inputs a port-bound capability is bound to. */
+export type CapabilityPorts = Pick<ByokCloudOptions, Exclude<CapabilityPortName, 'cloud.e2eeMember'>> & {
+    readonly cloud?: Pick<CloudStores, 'e2eeMember'>;
+};
+/** The port `name` in `ports`, `undefined` when absent. */
+export declare function capabilityPort(ports: CapabilityPorts, name: CapabilityPortName): unknown;
 /**
  * The declaration a composition's ports back: every standard capability, each
  * port-bound capability exactly when all of its ports are present, and never
@@ -1549,11 +1558,10 @@ import type { AgentMessageConsumers } from './agent-message-disposition.js';
 import { type AgentHomeProjectionReceiptInput } from './agent-home-projections.js';
 import { type InputPreparationReceiptInput } from './input-preparations.js';
 import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from './agent-memory-projection.js';
-import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, TaskAbandonCause, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports.js';
+import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, SteerRefusalRecord, TaskAbandonCause, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports.js';
 import { type DeviceTerminal, type TerminalResult } from './terminal-result.js';
 import type { MailboxWake } from './mailbox-wake.js';
 import { type TaskRedactionResult, type TaskRedactionStore } from './task-redaction.js';
-import type { E2eeMemberStore } from './e2ee-member.js';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract.js';
 /** Matches the reference server's ceiling (§7). */
 export declare const DEFAULT_MAX_BLOB_SIZE_BYTES: number;
@@ -1648,8 +1656,6 @@ export interface ByokCloudOptions {
     readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
     /** Durable authority for {@link ByokCloud.redactTasks}. Without it, `redactTasks` fails closed. */
     readonly taskRedactionStore?: TaskRedactionStore;
-    /** Durable authority for the E2EE member chain, key packages and pairing MACs. Without it, those calls fail closed. */
-    readonly e2eeMemberStore?: E2eeMemberStore;
     readonly maxBlobSizeBytes?: number;
     readonly longPollHoldMs?: number;
     readonly eventsPageLimit?: number;
@@ -2103,6 +2109,8 @@ export interface ByokCloud {
      * in full before a mailbox row is allocated, so a refused call has
      * zero side effects:
      *
+     *   0. a text over `TASK_STEER_TEXT_MAX_BYTES` (65,536) UTF-8 bytes ->
+     *      `coordination_input_invalid` ({@link ByokCloudError});
      *   1. no such task for this tenant -> `task_not_found` ({@link ByokCloudError});
      *   2. terminal attempt -> {@link SteerRejectedError} `task_terminal`,
      *      checked BEFORE the running check so a steer racing a terminal
@@ -2114,8 +2122,9 @@ export interface ByokCloud {
      *      there is no snapshot at all.
      *
      * Delivery is the same best-effort notification every control message has:
-     * the enqueued envelope is durable, and whether the runtime acted on it is
-     * observable only through that task's own later messages.
+     * the enqueued envelope is durable. A device that does not deliver it to the
+     * runtime reports `task.steer_refused`; read that with
+     * {@link ByokCloud.readSteerRefusal} by the returned envelope's id.
      */
     steerTask(tenant: TenantId, taskId: string, payload: {
         readonly text: string;
@@ -2127,6 +2136,18 @@ export interface ByokCloud {
      * `sealed` and `steerId`.
      */
     steerSealedTask(tenant: TenantId, taskId: string, payload: TaskSteerSealedPayload): Promise<EnqueuedAgentControl>;
+    /**
+     * The device's refusal of one steer (wire v7, #2009), by the steer's
+     * envelope id, or `undefined` while none is recorded. The first refusal
+     * recorded wins; its `reason` reads through `readSteerRefusalReason`.
+     */
+    readSteerRefusal(tenant: TenantId, taskId: string, steerMessageId: string): Promise<SteerRefusalRecord | undefined>;
+    /** The task's steer refusals with `revision > afterRevision`, ascending, at most `limit`. */
+    listSteerRefusals(tenant: TenantId, query: {
+        readonly taskId: string;
+        readonly afterRevision: number;
+        readonly limit: number;
+    }): Promise<readonly SteerRefusalRecord[]>;
     readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
     /** Read the original executable offer; missing/corrupt authority never becomes a guessed payload. */
     readTaskOffer(tenant: TenantId, taskId: string): Promise<TaskOfferReadback | undefined>;
@@ -2253,6 +2274,8 @@ export interface InMemoryByokCloudOptions {
     readonly publicRouteLimiter?: ByokCloudOptions['publicRouteLimiter'];
     readonly agentMemoryProjectionAuthorizer?: AgentMemoryProjectionAuthorizer;
     readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
+    /** Adds `stores.e2eeMember` and declares `e2ee.member` (see `createInMemoryCloudStores`). */
+    readonly e2eeMember?: boolean;
 }
 export interface InMemoryByokCloud {
     readonly mailboxWake: MailboxWake;
@@ -2727,6 +2750,26 @@ export interface E2eeMemberStore {
         readonly deviceId: string;
         readonly now: string;
     }): Promise<string | undefined>;
+    /**
+     * Deletes the device's member state: the scope key packages addressed to the
+     * member the device registered, then that registration with its device
+     * pairing MAC, then the client pairing MAC relayed to it. The member chain,
+     * scope epochs and their `keyId`s, shred records, the member's KEM floor and
+     * recorded proof requests stay, so the member id is free for another device
+     * and keeps its floor. A device with no state is a no-op.
+     *
+     * A device directory calls it for the revoked id on every revoke and for
+     * each superseded id, once the registration change is durable
+     * (`DeviceDirectory`, retirement rule 3). A store that shares the
+     * directory's database may run the same deletes in the directory's
+     * transaction instead.
+     *
+     * A Host that assembles `CloudStores` and its directory itself, without a
+     * standard factory's `e2eeMember` opt-in, must give the same instance to
+     * `CloudStores.e2eeMember` and to the directory. Nothing checks it at run
+     * time; a second instance would serve routes that retirement never cleans.
+     */
+    deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
 }
 /**
  * The result a store recorded with a device write, read back for a replay.
@@ -2875,7 +2918,7 @@ export declare const CLOUD_ERROR_CODES: {
     readonly task_content_redacted: 'task_content_redacted';
     /** `redactTasks` was called on a deployment that has no `taskRedactionStore`. */
     readonly task_redaction_unavailable: 'task_redaction_unavailable';
-    /** An E2EE member call on a deployment that has no `e2eeMemberStore`. */
+    /** An E2EE member call on a deployment whose `CloudStores` has no `e2eeMember`. */
     readonly e2ee_member_store_unavailable: 'e2ee_member_store_unavailable';
     /** A different member chain entry is stored at that seq, or the first new entry does not follow the head. Read the chain again. */
     readonly e2ee_member_chain_conflict: 'e2ee_member_chain_conflict';
@@ -3218,7 +3261,7 @@ export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected';
  * exhaustively to coarse wire codes; the internal names never reach the wire
  * and may be refined without a protocol revision.
  */
-export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'sealed_payload_unsupported', 'sealed_output_required', 'sealed_ciphertext_invalid', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'task_settled_by_cloud', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid', 'terminal_receipt_not_canonical'];
+export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'sealed_payload_unsupported', 'sealed_output_required', 'sealed_ciphertext_invalid', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_executor_mismatch', 'claim_device_mismatch', 'claim_executor_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'task_settled_by_cloud', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid', 'terminal_receipt_not_canonical', 'steer_refusal_id_mismatch', 'steer_refusal_unknown_steer'];
 export type InboundRefusalReason = (typeof INBOUND_REFUSAL_REASONS)[number];
 /** The only way to build a rejection: the reason is required and closed. */
 interface Refused {
@@ -3372,7 +3415,7 @@ export type { TruthCommitErrorCode } from './truth/errors.js';
 export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ABANDON_CAUSES, TASK_ATTEMPT_STATUSES, TASK_ATTEMPT_ACTIVE_STATUSES, TASK_ATTEMPT_UNFINISHED_STATUSES, } from './stores/ports.js';
 export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract.js';
 export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, DeviceScopedStores, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, SteerRefusalRecord, TaskSteerRefusalStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskAbandonCause, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports.js';
-export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryE2eeMemberStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index.js';
+export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index.js';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index.js';
 export type { DeviceTerminal } from './terminal-result.js';
 export { AgentExecutionInputSchema, SealedAgentExecutionInputSchema, type AgentExecutionInput, type SealedAgentExecutionInput, } from './agent-execution.js';
@@ -3648,7 +3691,7 @@ export declare class CloudRouteRegistry {
  * it was claimed. Same pin the reference server holds in
  * `packages/server/src/__tests__/steer-runtime-capability-gate.test.ts`.
  */
-import type { RuntimeId } from '@byok-sdk/protocol';
+import type { ClaimedExecutor } from '@byok-sdk/protocol';
 import type { TaskAttemptStatus } from './stores/ports.js';
 /**
  * Stable strings a caller switches on (an operator UI, an HTTP surface mapping
@@ -3674,7 +3717,7 @@ export type SteerRejectionCode = 'steer_unsupported_runtime' | 'task_not_running
  * typed-error idiom as `StaleApprovalError` (`approval-control.ts`).
  *
  * A distinct class rather than a `CloudErrorCode`, for the same reason as
- * `StaleApprovalError`: it carries the state and the runtime the caller needs to
+ * `StaleApprovalError`: it carries the state and the executor the caller needs to
  * explain the refusal, and a code alone cannot.
  *
  * Thrown before any mailbox row is allocated — a refused steer is a NON-EVENT,
@@ -3685,13 +3728,13 @@ export declare class SteerRejectedError extends Error {
     readonly code: SteerRejectionCode;
     /** The attempt's status at the moment the steer was refused. */
     readonly status: TaskAttemptStatus;
-    /** {@link TaskAttempt.claimedRuntime} — `undefined` when nothing was ever recorded, which is itself a reason `steer_unsupported_runtime` can fire. */
-    readonly runtime: RuntimeId | undefined;
+    /** {@link TaskAttempt.claimedExecutor} — `undefined` before a claim wins. */
+    readonly executor: ClaimedExecutor | undefined;
     constructor(taskId: string, code: SteerRejectionCode, 
     /** The attempt's status at the moment the steer was refused. */
     status: TaskAttemptStatus, 
-    /** {@link TaskAttempt.claimedRuntime} — `undefined` when nothing was ever recorded, which is itself a reason `steer_unsupported_runtime` can fire. */
-    runtime: RuntimeId | undefined);
+    /** {@link TaskAttempt.claimedExecutor} — `undefined` before a claim wins. */
+    executor: ClaimedExecutor | undefined);
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/activity.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult, type Clock, type TenantId } from '@byok-sdk/core';
@@ -3975,58 +4018,8 @@ export declare class InMemoryDeviceDirectory implements DeviceDirectory {
     readiness(tenant: TenantId, presence: PresenceStore): Promise<TenantReadiness>;
     resolveByDeviceId(deviceId: string): Promise<DeviceRecord | undefined>;
 }
-// ==== @byok-sdk/cloud dist/stores/in-memory/e2ee-member.d.ts ====
-import type { TenantId } from '@byok-sdk/core';
-import type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeScopeKeyPackagePutInput, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow } from '../../e2ee-member.js';
-import type { RequestReceiptStore } from '../ports.js';
-/**
- * Reference E2EE member store. Each method checks and writes in one
- * synchronous step, so no other call interleaves with it. A shred receipt
- * goes to `receipts`, the composition's request receipt store, after that
- * step. Appends run one at a time through their receipt writes, so a later
- * shred of a scope cannot record its receipt before the first one.
- */
-export declare class InMemoryE2eeMemberStore implements E2eeMemberStore {
-    #private;
-    constructor(receipts: Pick<RequestReceiptStore, 'record'>);
-    appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult>;
-    readChainEntries(tenant: TenantId, input: {
-        readonly afterSeq: number;
-        readonly limit: number;
-    }): Promise<readonly E2eeMemberChainRow[]>;
-    putScopeKeyPackages(tenant: TenantId, { rows, proof }: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult>;
-    readOwnScopeKeyPackages(tenant: TenantId, input: {
-        readonly scopeId: string;
-        readonly recipient: string;
-        readonly afterEpoch: number;
-        readonly limit: number;
-    }): Promise<{
-        readonly rows: readonly E2eeScopeKeyPackageRow[];
-        readonly scopeHeadEpoch: number | undefined;
-    }>;
-    readScopeKeyPackages(tenant: TenantId, input: {
-        readonly scopeId: string;
-        readonly epoch?: number;
-        readonly recipient?: string;
-    }): Promise<readonly E2eeScopeKeyPackageRow[]>;
-    registerMember(tenant: TenantId, input: E2eeMemberRegistrationInput): Promise<E2eeMemberRegisterResult>;
-    readMemberRegistration(tenant: TenantId, input: {
-        readonly deviceId: string;
-        readonly now: string;
-    }): Promise<E2eeMemberRegistrationRow | undefined>;
-    putClientPairingMac(tenant: TenantId, input: {
-        readonly deviceId: string;
-        readonly body: string;
-        readonly expiresAt: string;
-    }): Promise<'stored' | 'not_registered'>;
-    readClientPairingMac(tenant: TenantId, input: {
-        readonly deviceId: string;
-        readonly now: string;
-    }): Promise<string | undefined>;
-}
 // ==== @byok-sdk/cloud dist/stores/in-memory/index.d.ts ====
 export { InMemoryAgentMessageDraftStore } from './agent-message-draft.js';
-export { InMemoryE2eeMemberStore } from './e2ee-member.js';
 /**
  * The in-memory reference implementation of every cloud-local port.
  *
@@ -4070,7 +4063,7 @@ export interface InMemoryCloudComposition {
     readonly blobContentProxy: BlobContentProxy;
     /** The owner of the used proof `requestId`s in `stores.proofReceipts`, for `proofReceiptRetention`. */
     readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
-    /** Hints after every write to a task's state, activity log or approval timeline in these stores (#1113 A4). */
+    /** Hints after every write to a task's state, activity log, approval timeline or steer refusals in these stores (#1113 A4). */
     readonly taskEventsWake: TaskEventsWake;
 }
 /** Deletes a task's ephemeral rows from the in-memory stores that `createInMemoryCloudStores` built; each returns the rows removed. */
@@ -4087,8 +4080,13 @@ export type InMemoryTaskArchiveFactory = (rows: InMemoryEphemeralTaskRows) => Ta
  * @param taskArchive Absent, the archive rewrites the in-memory core `mailbox`
  *   and `objects`, and construction throws when they are another core's. A
  *   host with another core supplies the archive that owns its rows.
+ * @param options `e2eeMember: true` adds `stores.e2eeMember`, for a deployment
+ *   that declares `e2ee.member`. The device directory retires the same
+ *   instance.
  */
-export declare function createInMemoryCloudStores(clock: Clock, crypto: CloudCrypto, objects: ObjectStore, mailbox: MailboxStore, presence: PresenceStore, objectBytes: InMemoryBlobBytes, taskArchive?: InMemoryTaskArchiveFactory): InMemoryCloudComposition;
+export declare function createInMemoryCloudStores(clock: Clock, crypto: CloudCrypto, objects: ObjectStore, mailbox: MailboxStore, presence: PresenceStore, objectBytes: InMemoryBlobBytes, taskArchive?: InMemoryTaskArchiveFactory, options?: {
+    readonly e2eeMember?: boolean;
+}): InMemoryCloudComposition;
 // ==== @byok-sdk/cloud dist/stores/in-memory/mailbox-wake.d.ts ====
 import type { MailboxWake } from '../../mailbox-wake.js';
 import type { TaskEventsWake } from '../../task-events-wake.js';
@@ -4244,7 +4242,7 @@ export declare class InMemoryRequestReceiptStore implements RequestReceiptStore 
  * unfalsifiable.
  */
 import { type Clock, type TenantId } from '@byok-sdk/core';
-import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { ClaimedExecutor, RuntimeCapabilities } from '@byok-sdk/protocol';
 import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptCounts, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '../ports.js';
 import { type TaskChanged } from './task-change-map.js';
 interface StoredAgentMessageAdmission extends AgentMessageAdmission {
@@ -4295,8 +4293,7 @@ export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
     claim(tenant: TenantId, input: {
         taskId: string;
         deviceId: string;
-        runtime?: RuntimeId;
-        harnessId?: string;
+        executor: ClaimedExecutor;
         capabilities?: RuntimeCapabilities;
     }): Promise<TaskAttempt | undefined>;
     recordStatus(tenant: TenantId, input: {
@@ -4386,6 +4383,7 @@ export declare const CLOUD_PORT_INTERFACES: Readonly<Record<CloudStoreName, stri
 // ==== @byok-sdk/cloud dist/stores/ports.d.ts ====
 import type { AgentMessageDraftStore } from '../agent-message-draft.js';
 import type { TaskArchiveStore } from '../task-archive.js';
+import type { E2eeMemberStore } from '../e2ee-member.js';
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
@@ -4506,6 +4504,9 @@ export interface DeviceRegistration {
  *    never loses its dedup ledger. When the call resolves, `PresenceStore`
  *    reads omit the device, `NonceStore.consumeIfValid` is `false` for every
  *    nonce issued to it before, and every earlier envelope id reads as unseen.
+ *    When the composition has an E2EE member store (`CloudStores.e2eeMember`),
+ *    the device's member state goes in the same step
+ *    (`E2eeMemberStore.deleteDevice`).
  *
  * Neither the task history nor the mailbox rows go away: what the device did
  * and what it was sent stay readable after its grant is gone.
@@ -4646,6 +4647,8 @@ export interface DeviceScopedStores {
     readonly presence: Pick<PresenceStore, 'deleteDevice'>;
     readonly nonces: Pick<NonceStore, 'deleteDevice'>;
     readonly dedup: Pick<InboundDedupStore, 'deleteDevice'>;
+    /** The composition's `CloudStores.e2eeMember`, the same instance; absent when it has none. */
+    readonly e2eeMember?: Pick<E2eeMemberStore, 'deleteDevice'>;
 }
 export declare const TASK_ATTEMPT_STATUSES: readonly ['offered', 'claimed', 'running', 'cancel_requested', 'complete', 'failed', 'cancelled'];
 export type TaskAttemptStatus = (typeof TASK_ATTEMPT_STATUSES)[number];
@@ -5187,6 +5190,11 @@ export interface InboundRateLimiter {
  * composition. {@link BlobContentProxy} is deliberately absent — it is an
  * optional input to `createByokCloud`, not a port, precisely so that the
  * bundle can stay all-or-nothing while byte proxying stays optional.
+ *
+ * `e2eeMember` is the one optional store: it is present exactly when the
+ * deployment declares `e2ee.member`. It lives here, not in the
+ * `createByokCloud` options, so the device directory that retires a device's
+ * member state and the routes that serve it use the same store (#2267).
  */
 export interface CloudStores {
     readonly activity: ActivityStore;
@@ -5206,8 +5214,9 @@ export interface CloudStores {
     readonly blobs: CloudBlobStore;
     readonly rateLimiter: InboundRateLimiter;
     readonly taskArchive: TaskArchiveStore;
+    readonly e2eeMember?: E2eeMemberStore;
 }
-/** Names of every port in {@link CloudStores}, in contract order. */
+/** Names of every required port in {@link CloudStores}, in contract order. */
 export declare const CLOUD_STORE_NAMES: readonly ['activity', 'approvals', 'agentMessageDraft', 'devices', 'pairingCodes', 'pairing', 'nonces', 'dedup', 'tasks', 'cancellations', 'receipts', 'steerRefusals', 'egress', 'proofReceipts', 'blobs', 'rateLimiter', 'taskArchive'];
 export type CloudStoreName = (typeof CLOUD_STORE_NAMES)[number];
 export interface ReceiptCollectExpiredInput extends CollectExpiredInput {
@@ -5521,17 +5530,22 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  * device-facing handler must not be able to reach them.
  */
 import { type BoardClaimInput, type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type BoardStatusUpdateInput, type BoardUnclaimInput, type ContentHash, type CoreStores, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type ObjectManifestEntry, type ObjectReferenceInput, type Principal, type PresenceHint, type PresenceHintInput, type TenantReadiness, type StorageFinalizeInput, type StorageFinalizeResult, type StorageReservation, type StorageReservationInput, type TenantId } from '@byok-sdk/core';
-import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { AgentRef, ClaimedExecutor, RuntimeCapabilities } from '@byok-sdk/protocol';
 import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake.js';
 import type { ActivityAppendInput, ActivityTail, ActivityReadOptions } from './activity.js';
 import type { ApprovalTimelineAppendInput, ApprovalTimelineTail } from './approval-timeline.js';
-import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, RateLimitDecision, RateLimitUnit, RequestReceipt, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports.js';
+import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, SteerRefusalRecord, TaskSteerRefusalStore, RateLimitDecision, RateLimitUnit, RequestReceipt, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports.js';
 export interface TenantBoundMailbox {
     /** Subscribe before reading; hints never replace durable mailbox reads. */
     watch(deviceId: string, signal: AbortSignal): MailboxWakeSubscription;
     append(input: MailboxAppendInput): Promise<MailboxMessage>;
     /** Pure read. Never advances the cursor — the daemon's next poll is the only ack. */
     readAfter(query: MailboxReadQuery): Promise<MailboxPage>;
+    /** Pure read of one retained row on this device's stream (wire v7, #2009). */
+    readMessage(input: {
+        readonly deviceId: string;
+        readonly messageId: string;
+    }): Promise<MailboxMessage | undefined>;
     recordDelivery(input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
     advanceCursor(input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
     readCursor(deviceId: string): Promise<MailboxCursorState>;
@@ -5612,8 +5626,7 @@ export interface TenantBoundTaskAttempts {
     claim(input: {
         readonly taskId: string;
         readonly deviceId: string;
-        readonly runtime?: RuntimeId;
-        readonly harnessId?: string;
+        readonly executor: ClaimedExecutor;
         readonly capabilities?: RuntimeCapabilities;
     }): Promise<TaskAttempt | undefined>;
     recordStatus(input: {
@@ -5642,6 +5655,11 @@ export interface TenantBoundReceipts {
         readonly created: boolean;
     }>;
     get(key: string): Promise<RequestReceipt | undefined>;
+}
+export interface TenantBoundSteerRefusals {
+    record(input: Parameters<TaskSteerRefusalStore['record']>[1]): ReturnType<TaskSteerRefusalStore['record']>;
+    get(taskId: string, steerMessageId: string): Promise<SteerRefusalRecord | undefined>;
+    list(query: Parameters<TaskSteerRefusalStore['list']>[1]): Promise<readonly SteerRefusalRecord[]>;
 }
 export interface TenantBoundAgentEgress {
     record(input: Omit<AgentEgressRecord, 'tenantId' | 'recordedAt'>): Promise<{
@@ -5692,6 +5710,7 @@ export interface TenantStores {
     readonly dedup: TenantBoundDedup;
     readonly receipts: TenantBoundReceipts;
     readonly egress: TenantBoundAgentEgress;
+    readonly steerRefusals: TenantBoundSteerRefusals;
     readonly blobs: TenantBoundBlobs;
     readonly objects: TenantBoundObjects;
     readonly quota: TenantBoundQuota;
@@ -5705,7 +5724,7 @@ export interface CloudRootStores {
 }
 export declare function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores;
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
-import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TaskFailPayload, type TaskFailureReading, type TaskDeclineCodeReading } from '@byok-sdk/protocol';
+import { type AgentRef, type BlobRef, type ClaimedExecutor, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TaskFailPayload, type TaskFailureReading, type TaskDeclineCodeReading } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports.js';
 declare const DEVICE_TERMINAL_TYPES: readonly ['task.complete', 'task.fail', 'task.decline', 'task.cancelled'];
 /**
@@ -5728,7 +5747,8 @@ export declare function readDeviceTerminalReceipt(taskId: string, receipt: Reque
  */
 export interface TerminalResult {
     readonly taskId: string;
-    readonly harnessId?: string;
+    /** The executor the terminal echoed (wire v7); absent on a decline and an unclaimed cancel or interruption. */
+    readonly executor?: ClaimedExecutor;
     /** Local interruption observation; claimed ownership remains on TaskAttempt. */
     readonly recovery?: TaskFailPayload['recovery'];
     readonly state: 'complete' | 'failed' | 'cancelled';

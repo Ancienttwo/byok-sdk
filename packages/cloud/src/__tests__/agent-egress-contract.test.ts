@@ -35,12 +35,13 @@ function egressOfferPayload() {
     agentRef: AGENT_REF,
     session: { mode: 'resume', sessionRef: 'session-egress' } as const,
     egressPolicy: POLICY,
+    target: { lane: 'auto' } as const,
   };
 }
 
 function freshEgressOfferPayload() {
   return {
-    runtime: 'codex' as const,
+    target: { lane: 'runtime', runtimeId: 'codex' } as const,
     terminalProjection: { mode: 'none' as const },
     instruction: 'start a fresh runtime with egress policy',
     agentRef: AGENT_REF,

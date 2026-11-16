@@ -80,10 +80,31 @@ async function lockEach(client: PoolClient, kind: 'e2ee-scope' | 'e2ee-member-ke
 }
 
 /**
+ * #2267: a device's member state, `$2` being its ids, as
+ * `E2eeMemberStore.deleteDevice` defines it. Device retirement runs the same
+ * statements in its own transaction (`devices.ts`). Packages go first, while
+ * the registration still names the device's member. Security does not rest on
+ * this cleanup: the remaining members rotate (design §7.6). The package rows
+ * are locked in the order a put locks them, (scope_id, epoch, recipient) in
+ * code point order, so a racing put cannot deadlock.
+ */
+export const E2EE_MEMBER_STATE_DELETES = [
+  `DELETE FROM e2ee_scope_key_package p USING (
+     SELECT scope_id, epoch, recipient FROM e2ee_scope_key_package
+      WHERE tenant_id = $1 AND recipient IN (
+        SELECT member_id FROM e2ee_member_key WHERE tenant_id = $1 AND device_id = ANY($2::text[]))
+      ORDER BY scope_id COLLATE "C", epoch, recipient COLLATE "C"
+      FOR UPDATE) locked
+    WHERE p.tenant_id = $1 AND p.scope_id = locked.scope_id AND p.epoch = locked.epoch AND p.recipient = locked.recipient`,
+  'DELETE FROM e2ee_pairing_mac WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
+  'DELETE FROM e2ee_member_key WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
+] as const;
+
+/**
  * Postgres E2EE member store (`deploy/sql/0027_e2ee_member.sql`,
  * `0028_e2ee_scope_shred.sql`, `0029_e2ee_member_kem_floor.sql`). Device
  * revocation and machine supersession delete a device's rows in the device
- * transaction (`E2EE_MEMBER_STATE_DELETES` in `devices.ts`). A shred receipt goes to `device_request_receipts`, the
+ * transaction ({@link E2EE_MEMBER_STATE_DELETES}). A shred receipt goes to `device_request_receipts`, the
  * request receipt store, in the append transaction.
  */
 export class PostgresE2eeMemberStore implements E2eeMemberStore {
@@ -343,5 +364,12 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
       `SELECT body FROM e2ee_pairing_mac WHERE tenant_id = $1 AND device_id = $2 AND kind = 'client' AND expires_at > $3`,
       [tenant, input.deviceId, input.now]);
     return result.rows[0]?.body;
+  }
+
+  async deleteDevice(tenant: TenantId, deviceId: string): Promise<void> {
+    await this.#transaction(async client => {
+      for (const statement of E2EE_MEMBER_STATE_DELETES) await client.query(statement, [tenant, [deviceId]]);
+      return true;
+    });
   }
 }

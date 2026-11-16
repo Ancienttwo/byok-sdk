@@ -293,16 +293,18 @@ credential-provider chain is installed.
 `PostgresE2eeMemberStore` is the store behind the E2EE member calls of
 `ByokCloud` (#654 E2c): `appendMemberChainEntries`, `readMemberChain`,
 `putScopeKeyPackages`, `readScopeKeyPackages`, `readMemberKeyRegistration` and
-`relayClientPairingMac`. It ships from `./runtime`. Pass it as the
-`e2eeMemberStore` option; without it, those calls throw
-`e2ee_member_store_unavailable`.
+`relayClientPairingMac`. `createPostgresCloudStores({ ..., e2eeMember: true })`
+adds it as `stores.e2eeMember`; declare `e2ee.member` with it. Without it,
+those calls throw `e2ee_member_store_unavailable`. Device revocation and
+machine supersession delete the retired device's member key, pairing MACs and
+the scope key packages addressed to its member, in the retirement transaction.
 
 ```ts
-import { PostgresE2eeMemberStore } from '@byok-sdk/cloud-dataplane/runtime';
-
+const stores = await createPostgresCloudStores({ pool, clock, crypto, objectStorage, rateLimit, e2eeMember: true });
 const cloud = createByokCloud({
-  // ...the usual stores...
-  e2eeMemberStore: new PostgresE2eeMemberStore(pool, clock),
+  cloud: stores,
+  capabilities: fullCapabilityDeclaration(1, { includeE2eeMember: true }),
+  // ...the rest of the options...
 });
 ```
 
