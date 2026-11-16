@@ -805,10 +805,13 @@ export class ConnectionManager {
     }
 
     // Startup owns its own lifetime. Controls for that task can reach it;
-    // controls among themselves retain arrival order.
+    // controls among themselves retain arrival order, except `task.cancel`:
+    // it never waits behind an earlier control, whose handler may wait on a
+    // runtime that never answers (#2304). Controls after it queue behind it.
     const controlKey = envelope.task_id !== undefined && envelope.type !== 'task.offer'
       ? envelope.task_id : undefined;
-    const prior = controlKey === undefined ? Promise.resolve() : (this.controlTails.get(controlKey) ?? Promise.resolve());
+    const prior = controlKey === undefined || envelope.type === 'task.cancel'
+      ? Promise.resolve() : (this.controlTails.get(controlKey) ?? Promise.resolve());
     const operation = prior.then(() => this.process(envelope, tracked));
     if (controlKey !== undefined) {
       this.controlTails.set(controlKey, operation);
