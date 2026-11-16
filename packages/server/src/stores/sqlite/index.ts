@@ -71,7 +71,7 @@ import {
   type TaskCancellationRequest,
   type TaskCancellationStore,
 } from '@byok-sdk/cloud';
-import { PROTOCOL_VERSION, byokBlobContentPath, type RuntimeCapabilities, type RuntimeId } from '@byok-sdk/protocol';
+import { PROTOCOL_VERSION, byokBlobContentPath, type ClaimedExecutor, type RuntimeCapabilities, type RuntimeId } from '@byok-sdk/protocol';
 import type { DatabaseSync } from 'node:sqlite';
 import {
   closeSqliteDatabaseAfterInitializationFailure,
@@ -85,15 +85,16 @@ const DEFAULT_MAILBOX_READ_LIMIT = 50;
 const DEFAULT_OBJECT_LIST_LIMIT = 100;
 const DEFAULT_BLOB_URL_TTL_MS = 15 * 60_000;
 const SIGNING_SECRET_BYTES = 32;
-const SQLITE_SCHEMA_VERSION = '9';
+const SQLITE_SCHEMA_VERSION = '10';
 const TASK_PHASE_COLUMNS = ['offered_at', 'claimed_at', 'first_output_at', 'terminal_at'] as const;
 /** Host retention instants (#1120): when a terminal task may be archived, when it was, and when its board item went. */
 const TASK_ARCHIVE_COLUMNS = ['archive_after', 'archived_at', 'archive_settled_at'] as const;
 
 import { SqliteWakeStore, WAKE_SCHEMA } from './wakes.js';
-import { APPROVAL_TIMELINE_SCHEMA, APPROVAL_TIMELINE_V7_REBUILD, SqliteApprovalTimelineStore } from './approval-timeline.js';
+import { APPROVAL_TIMELINE_SCHEMA, SqliteApprovalTimelineStore } from './approval-timeline.js';
 import { ACTIVITY_LOG_PROJECTIONS, ACTIVITY_LOG_SCHEMA, SqliteActivityStore } from './activity.js';
-import { OUTPUT_CLOSURE_BACKFILL, OUTPUT_CLOSURE_TRIGGER, OUTPUT_CLOSURE_TRIGGER_NAME } from './output-closure.js';
+import { OUTPUT_CLOSURE_TRIGGER, OUTPUT_CLOSURE_TRIGGER_NAME } from './output-closure.js';
+import { SqliteTaskSteerRefusalStore, STEER_REFUSAL_PROJECTION, STEER_REFUSAL_SCHEMA } from './steer-refusals.js';
 import type { WakeStore } from '../../wakes/store.js';
 import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types.js';
 
@@ -117,87 +118,10 @@ CREATE TABLE request_receipt (
 );
 `;
 
-/**
- * The retired-device stream tombstone (#1160), declared once for a new file
- * and for the v6 upgrade, so both end with the same columns.
- */
+/** The retired-device stream tombstone (#1160). */
 const MAILBOX_CURSOR_CLOSED_AT = 'closed_at TEXT';
 const MAILBOX_CURSOR_CLOSED_CAUSE = "closed_cause TEXT CHECK ((closed_cause IS NULL AND closed_at IS NULL) OR " +
   "(closed_cause IN ('device_revoked', 'device_superseded') AND closed_at IS NOT NULL))";
-
-/**
- * The task instants a v6 file may lack. The #980 phase instants are added
- * with no backfill: a NULL instant was never recorded. The #1120 archive
- * instants came during v6, so the 0.31.0 release has none; when they are
- * missing, a task that is already terminal becomes archivable from its
- * recorded terminal instant, or from its last update when none was recorded.
- * `terminal_at` itself stays NULL.
- */
-function upgradeTaskAttemptFromV6(db: DatabaseSync): void {
-  const taskColumns = new Set((db.prepare('PRAGMA table_info(task_attempt)').all() as unknown as { name: string }[])
-    .map((column) => column.name));
-  const archiveColumnsPresent = TASK_ARCHIVE_COLUMNS.every((column) => taskColumns.has(column));
-  for (const column of [...TASK_PHASE_COLUMNS, ...TASK_ARCHIVE_COLUMNS]) {
-    if (!taskColumns.has(column)) db.exec(`ALTER TABLE task_attempt ADD COLUMN ${column} TEXT`);
-  }
-  if (!archiveColumnsPresent) {
-    db.exec(`UPDATE task_attempt SET archive_after = COALESCE(terminal_at, updated_at)
-      WHERE archive_after IS NULL AND status IN ('complete', 'failed', 'cancelled')`);
-  }
-}
-
-/**
- * The in-place upgrade from v6 to v7, run inside the open transaction. It adds
- * the stream tombstone and closes the stream of every device the directory no
- * longer holds, which was retired before the upgrade, expiring its pending
- * rows as a retirement does. Revoke and supersede were not told apart then, so
- * those streams read as `device_revoked`.
- */
-function upgradeSchemaFromV6(db: DatabaseSync): void {
-  upgradeTaskAttemptFromV6(db);
-  db.exec(`ALTER TABLE mailbox_cursor ADD COLUMN ${MAILBOX_CURSOR_CLOSED_AT}`);
-  db.exec(`ALTER TABLE mailbox_cursor ADD COLUMN ${MAILBOX_CURSOR_CLOSED_CAUSE}`);
-  db.exec(`UPDATE mailbox_cursor SET closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), closed_cause = 'device_revoked'
-    WHERE NOT EXISTS (SELECT 1 FROM device_directory d
-      WHERE d.tenant_id = mailbox_cursor.tenant_id AND d.device_id = mailbox_cursor.device_id)`);
-  db.exec(`UPDATE mailbox_message SET state = 'expired' WHERE state = 'pending' AND EXISTS (SELECT 1 FROM mailbox_cursor c
-    WHERE c.tenant_id = mailbox_message.tenant_id AND c.device_id = mailbox_message.device_id AND c.closed_cause IS NOT NULL)`);
-  db.prepare("UPDATE byok_sqlite_meta SET value = '7' WHERE key = 'schema_version'").run();
-}
-
-/**
- * The in-place upgrade from v7 to v8 (#1113): the durable activity log starts
- * empty. Earlier builds kept activity only in process memory, so there is no
- * history to carry over.
- */
-function upgradeSchemaFromV7(db: DatabaseSync): void {
-  db.exec(ACTIVITY_LOG_SCHEMA);
-  db.exec(APPROVAL_TIMELINE_V7_REBUILD);
-  db.prepare("UPDATE byok_sqlite_meta SET value = '8' WHERE key = 'schema_version'").run();
-}
-
-/**
- * The in-place upgrade from v8 to v9 (#1780): every task attempt carries its
- * Agent identity. No build since v0.31.0 writes an attempt without one, so the
- * step only proves it. A file that still holds such a row is refused with the
- * count and left unchanged: no Agent identity is invented for it.
- */
-function upgradeSchemaFromV8(db: DatabaseSync): void {
-  const { missing } = db.prepare('SELECT count(*) AS missing FROM task_attempt WHERE agent_ref_json IS NULL').get() as { missing: number };
-  if (missing > 0) {
-    throw new SqliteSchemaError('SQLITE_SCHEMA_UNSUPPORTED',
-      `BYOK SQLite file holds ${missing} task attempt(s) without an Agent identity; this build cannot adopt it. ` +
-      'Start on a new database.', '8', SQLITE_SCHEMA_VERSION);
-  }
-  db.prepare("UPDATE byok_sqlite_meta SET value = '9' WHERE key = 'schema_version'").run();
-}
-
-/** Older versions this build upgrades in place, oldest first; a file runs every step from its own version. */
-const SCHEMA_UPGRADES: readonly (readonly [from: string, step: (db: DatabaseSync) => void])[] = [
-  ['6', upgradeSchemaFromV6],
-  ['7', upgradeSchemaFromV7],
-  ['8', upgradeSchemaFromV8],
-];
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS byok_sqlite_meta (
@@ -250,7 +174,9 @@ CREATE TABLE IF NOT EXISTS task_attempt (
   archive_after TEXT,
   archived_at TEXT,
   archive_settled_at TEXT,
-  PRIMARY KEY (tenant_id, task_id)
+  PRIMARY KEY (tenant_id, task_id),
+  -- One claimed executor (wire v7), kept as two queryable columns.
+  CHECK (claimed_runtime IS NULL OR claimed_harness_id IS NULL)
 );
 CREATE TABLE IF NOT EXISTS agent_message_admission (
   tenant_id TEXT NOT NULL,
@@ -321,7 +247,7 @@ const TASK_CHANGED_FUNCTION = 'byok_task_changed';
  * task's state, activity head or approval timeline names the task, and the
  * coordinator reports it after the commit (#1113 A4).
  */
-const TASK_EVENTS_WAKE_TRIGGERS = ['task_attempt', 'activity_log_head', 'approval_timeline_tail'].flatMap((table) =>
+const TASK_EVENTS_WAKE_TRIGGERS = ['task_attempt', 'activity_log_head', 'approval_timeline_tail', 'task_steer_refusal'].flatMap((table) =>
   (['INSERT', 'UPDATE', 'DELETE'] as const).map((event) => {
     const row = event === 'DELETE' ? 'OLD' : 'NEW';
     return `CREATE TEMP TRIGGER byok_task_events_wake_${table}_${event.toLowerCase()} AFTER ${event} ON main.${table}
@@ -355,8 +281,6 @@ class SqliteCoordinator {
       // openSqliteDatabase holds EXCLUSIVE ownership before this schema transaction.
       this.db.exec('BEGIN IMMEDIATE');
       try {
-        // Set when this open created the v8 logs, so the output closure is installed once with them.
-        let createdOutputLogs = false;
         const hasMetadata = this.db
           .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'byok_sqlite_meta'")
           .get();
@@ -364,15 +288,10 @@ class SqliteCoordinator {
           const version = this.db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'")
             .get() as { value: string } | undefined;
           foundVersion = version?.value;
-          const firstStep = SCHEMA_UPGRADES.findIndex(([from]) => from === version?.value);
-          if (firstStep >= 0) {
-            const steps = SCHEMA_UPGRADES.slice(firstStep);
-            for (const [, step] of steps) step(this.db);
-            // The v7 step is the one that creates the logs.
-            createdOutputLogs = steps.some(([from]) => from === '7');
-          } else if (version?.value !== SQLITE_SCHEMA_VERSION) {
+          // Wire v7 starts on a new store: no older file is upgraded in place.
+          if (version?.value !== SQLITE_SCHEMA_VERSION) {
             throw schemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
-              `this build requires ${SQLITE_SCHEMA_VERSION} and upgrades only ${SCHEMA_UPGRADES.map(([from]) => from).join(', ').replace(/, (?=[^,]*$)/, ' and ')} in place. ` +
+              `this build requires ${SQLITE_SCHEMA_VERSION}. ` +
               'An older file is not adopted: start on a new database. A newer file needs a newer build.');
           }
           for (const projection of [
@@ -395,7 +314,9 @@ class SqliteCoordinator {
           this.db.exec(WAKE_SCHEMA);
           this.db.exec(APPROVAL_TIMELINE_SCHEMA);
           this.db.exec(ACTIVITY_LOG_SCHEMA);
-          createdOutputLogs = true;
+          this.db.exec(STEER_REFUSAL_SCHEMA);
+          // The closure reads the phase columns, so it follows them.
+          this.db.exec(OUTPUT_CLOSURE_TRIGGER);
           this.db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)").run(SQLITE_SCHEMA_VERSION);
         }
         assertProjection('claimed_harness_id FROM task_attempt');
@@ -411,12 +332,7 @@ class SqliteCoordinator {
         }
         assertProjection(`${TASK_PHASE_COLUMNS.join(', ')} FROM task_attempt`);
         assertProjection(`${TASK_ARCHIVE_COLUMNS.join(', ')} FROM task_attempt`);
-        // The closure reads the phase columns, so it follows them. An upgraded
-        // file's already-closed tasks keep their original deadline.
-        if (createdOutputLogs) {
-          this.db.exec(OUTPUT_CLOSURE_TRIGGER);
-          this.db.exec(OUTPUT_CLOSURE_BACKFILL);
-        }
+        assertProjection(STEER_REFUSAL_PROJECTION);
         if (this.db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(OUTPUT_CLOSURE_TRIGGER_NAME) === undefined) {
           throw schemaError('SQLITE_SCHEMA_INVALID', 'Missing BYOK SQLite task output closure');
         }
@@ -554,6 +470,12 @@ interface TaskRow extends Record<string, unknown> {
   updated_at: string;
 }
 
+function claimedExecutorOf(row: TaskRow): { claimedExecutor?: ClaimedExecutor } {
+  if (row.claimed_runtime !== null) return { claimedExecutor: { kind: 'runtime', runtimeId: row.claimed_runtime as RuntimeId } };
+  if (row.claimed_harness_id !== null) return { claimedExecutor: { kind: 'harness', harnessId: row.claimed_harness_id } };
+  return {};
+}
+
 function taskRow(row: TaskRow): TaskAttempt {
   return {
     tenantId: row.tenant_id as TenantId,
@@ -561,8 +483,7 @@ function taskRow(row: TaskRow): TaskAttempt {
     deviceId: row.device_id,
     agentRef: JSON.parse(row.agent_ref_json) as AgentRef,
     ...(row.owner_device_id === null ? {} : { ownerDeviceId: row.owner_device_id }),
-    ...(row.claimed_runtime === null ? {} : { claimedRuntime: row.claimed_runtime as RuntimeId }),
-    ...(row.claimed_harness_id === null ? {} : { claimedHarnessId: row.claimed_harness_id }),
+    ...claimedExecutorOf(row),
     ...(row.claimed_runtime_capabilities_json === null
       ? {}
       : { claimedRuntimeCapabilities: JSON.parse(row.claimed_runtime_capabilities_json) as RuntimeCapabilities }),
@@ -813,7 +734,7 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
 
   claim(
     tenant: TenantId,
-    input: { taskId: string; deviceId: string; runtime?: RuntimeId; harnessId?: string; capabilities?: RuntimeCapabilities },
+    input: { taskId: string; deviceId: string; executor: ClaimedExecutor; capabilities?: RuntimeCapabilities },
   ): Promise<TaskAttempt | undefined> {
     return this.coordinator.run((db) => {
       const now = this.#now();
@@ -824,8 +745,8 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
            AND cancellation_requested_at IS NULL AND status = 'offered'`,
       ).run(
         input.deviceId,
-        input.runtime ?? null,
-        input.harnessId ?? null,
+        input.executor.kind === 'runtime' ? input.executor.runtimeId : null,
+        input.executor.kind === 'harness' ? input.executor.harnessId : null,
         input.capabilities === undefined ? null : JSON.stringify(input.capabilities),
         now,
         now,
@@ -1018,6 +939,14 @@ export class SqliteMailboxStore implements MailboxStore {
 
   readUsage(tenant: TenantId): Promise<MailboxUsage> {
     return this.coordinator.run((db) => ({ bytes: mailboxUsedBytes(db, tenant) }));
+  }
+
+  readMessage(tenant: TenantId, input: { readonly deviceId: string; readonly messageId: string }): Promise<MailboxMessage | undefined> {
+    return this.coordinator.run((db) => {
+      const row = db.prepare('SELECT * FROM mailbox_message WHERE tenant_id = ? AND device_id = ? AND message_id = ?')
+        .get(tenant, input.deviceId, input.messageId) as MailboxRow | undefined;
+      return row === undefined ? undefined : mailboxMessage(row);
+    });
   }
 
   readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage> {
@@ -1636,6 +1565,7 @@ export function createSqliteEmbeddedStores(
     pairingCodes: { issue: pairing.issue.bind(pairing), collectExpired: pairing.collectExpired.bind(pairing) },
     pairing: { redeemAndRegister: pairing.redeemAndRegister.bind(pairing) },
     tasks,
+    steerRefusals: new SqliteTaskSteerRefusalStore(coordinator, dependencies.clock),
     receipts: new SqliteRequestReceiptStore(coordinator, dependencies.clock),
     proofReceipts: new SqliteProofRequestReceiptStore(coordinator, dependencies.clock),
     cancellations,
