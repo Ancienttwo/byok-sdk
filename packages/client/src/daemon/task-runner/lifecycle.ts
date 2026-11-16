@@ -314,9 +314,12 @@ export async function handleSteer(this: TaskRunner, taskId: string, steerMessage
   try {
     await active.session.steer(text);
   } catch (err) {
-    // A cancel runs ahead of this steer (#2304). Its teardown closed the
-    // session under the steer, so the steer never reached the runtime.
-    if (this['tasks'].get(taskId) !== active || taskFinalizing(this, taskId)) {
+    // A cancel runs ahead of this steer (#2304). Its teardown, from the
+    // terminal it selects to retirement, closed the session under the steer,
+    // so the steer never reached the runtime.
+    const current = hostFor(this).current(taskId);
+    if (this['tasks'].get(taskId) !== active || current?.terminal !== undefined
+      || current?.phase === 'terminalizing' || current?.phase === 'retiring') {
       await refuseSteer.call(this, taskId, steerMessageId, 'task_not_active');
       return;
     }

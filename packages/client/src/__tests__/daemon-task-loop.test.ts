@@ -9,6 +9,7 @@ import { createEnvelope, steerRefusalEnvelopeId } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { RuntimeExecutionFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON } from '../runtime-failure';
 import { TestServer } from './fixtures/test-server';
+import { CursorStore } from '../daemon/cursor-store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { resumeSession } from './fixtures/fresh-offer';
@@ -431,9 +432,10 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
   });
 
   // #2304: a cancel does not queue behind a steer the runtime has not answered.
-  it.each(['rejects', 'resolves'] as const)('a cancel runs ahead of an unanswered steer, which then %s without a second terminal', async (outcome) => {
+  it.each(['rejects during the cancel teardown', 'rejects', 'resolves'] as const)('a cancel runs ahead of an unanswered steer, which then %s without a second terminal', async (outcome) => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true });
-    await setupDaemon(adapter);
+    const storeDir = await tmpDir('byok-client-store-');
+    await setupDaemon(adapter, { storeDir });
     const taskId = `task-steer-held-${outcome}`;
     server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
       { taskId, seq: server.nextSeq() }));
@@ -441,23 +443,35 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const session = adapter.sessions[0]!;
     const release = session.blockSteer();
+    const diagnostics = vi.spyOn(console, 'error');
+    // A runtime rejects a pending steer once the cancel's teardown stops it,
+    // here while the task is still active and its terminal not yet sent.
+    if (outcome === 'rejects during the cancel teardown') {
+      const interrupt = session.interrupt.bind(session);
+      session.interrupt = async () => { release(new Error('session closed')); await interrupt(); };
+    }
     const steer = createEnvelope('task.steer', { text: 'focus on tests' }, { taskId, seq: server.nextSeq() });
     server.send(steer);
     await vi.waitFor(() => expect(session.steerAttempts).toBe(1));
-    server.send(createEnvelope('task.cancel', { reason: 'user stopped it' }, { taskId, seq: server.nextSeq() }));
+    const cancel = createEnvelope('task.cancel', { reason: 'user stopped it' }, { taskId, seq: server.nextSeq() });
+    server.send(cancel);
     await server.waitFor((e) => e.type === 'task.cancelled' && e.task_id === taskId);
     expect(session.interruptCalled).toBe(true);
     expect(session.closeCalled).toBe(true);
     const settled = server.received.length;
-    // A runtime rejects a pending steer once its session closed; one that answers late delivered nothing the task can use.
-    release(outcome === 'rejects' ? new Error('session closed') : undefined);
-    if (outcome === 'rejects') {
+    // Or later; one the runtime answers late delivered nothing the task can use.
+    if (outcome === 'rejects') release(new Error('session closed'));
+    if (outcome === 'resolves') release();
+    if (outcome !== 'resolves') {
       const refused = await server.waitFor((e) => e.type === 'task.steer_refused' && e.task_id === taskId);
       expect(refused.payload).toEqual({ steerMessageId: steer.id, reason: 'task_not_active' });
     } else await vi.waitFor(() => expect(session.steerCalls).toEqual(['focus on tests']));
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(server.received.slice(settled).filter((e) => e.task_id === taskId).map((e) => e.type))
-      .toEqual(outcome === 'rejects' ? ['task.steer_refused'] : []);
+    // Both envelopes are handled on first delivery: the cursor passes them, with no failed gap.
+    await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, 'device-1')).toBe(cancel.seq));
+    expect(diagnostics.mock.calls.flat().filter((line) => String(line).includes('envelope handler failed for task.steer'))).toEqual([]);
+    expect(server.received.filter((e) => e.task_id === taskId && e.type === 'task.cancelled')).toHaveLength(1);
+    expect(server.received.filter((e) => e.task_id === taskId && e.type === 'task.steer_refused')).toHaveLength(outcome === 'resolves' ? 0 : 1);
+    expect(server.received.slice(settled).filter((e) => e.task_id === taskId && e.type !== 'task.steer_refused')).toEqual([]);
   });
 
   describe('task.claim reports the actually-selected runtime (M5, requested vs. claimed)', () => {
