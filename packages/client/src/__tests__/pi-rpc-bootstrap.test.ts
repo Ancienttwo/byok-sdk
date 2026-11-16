@@ -55,15 +55,15 @@ async function turnText(session: Session): Promise<string> {
   }
 }
 
-async function startTask(extension: string, loopback: LoopbackProvider) {
+async function startTask(extension: string, loopback: LoopbackProvider, instruction = `${TASK} reply briefly.`) {
   const { box, env } = await piHome(extension, loopback);
   const adapter = new PiAdapter({ resolveBin: () => ({ command: rpcHost, source: 'package' }), agentUserContext: 'inherit' });
-  return { box, session: await startPreparedOperation(adapter, { instruction: `${TASK} reply briefly.` }, { workspaceDir: box.workspace, env }) };
+  return { box, session: await startPreparedOperation(adapter, { instruction }, { workspaceDir: box.workspace, env }) };
 }
 
-async function firstTurn(extension: string, loopback: LoopbackProvider): Promise<string> {
+async function firstTurn(extension: string, loopback: LoopbackProvider, instruction?: string): Promise<string> {
   try {
-    const { session } = await startTask(extension, loopback);
+    const { session } = await startTask(extension, loopback, instruction);
     try { return await turnText(session); } finally { await session.close(); }
   } finally { await loopback.close(); }
 }
@@ -90,6 +90,14 @@ describe('pi-rpc lane with a user extension that runs Pi itself (#2299)', () => 
 }\n`, await provider());
     expect(text).toContain(`${TASK} reply`);
     expect(text).not.toContain('extension reply');
+  }, 60_000);
+
+  it('a first prompt Pi handles without a run ends the turn at once', async () => {
+    const loopback = await provider();
+    expect(await firstTurn(`export default function(pi) {
+  pi.registerCommand('noop-2299', { description: 'no run', handler: async () => {} });
+}\n`, loopback, '/noop-2299')).toBe('');
+    expect(loopback.requests.filter(request => request.model)).toHaveLength(0);
   }, 60_000);
 
   it('a run an extension starts after the task run ended is not the next turn', async () => {
