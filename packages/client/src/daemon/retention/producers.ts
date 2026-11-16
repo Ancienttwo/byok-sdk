@@ -13,7 +13,8 @@ import { acquirePathMutationGate, PathMutationGateBusyError, withGateReleaseFail
 import { readInstalledSkillPack, skillPacksRoot } from '../skill-pack-installer.js';
 import { LocalStorageConfigError, type ResolvedStorageConfig } from './config.js';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_BOUNDS, PROTECTED_CLASS_IDS, RetentionRegistry, type ClassAuthority, type ProtectedClassId, type ClassUsage, type ExpiringClassId, type RetentionClassId, type SweepBudget } from './registry.js';
-import { heldLogin, type ScratchRoot } from './scratch.js';
+import { heldLogin } from '../../adapters/grok/held-login.js';
+import type { ScratchRoot } from './scratch.js';
 import { authorityBudget, classBudget, registryPassInspections, RETENTION_LIMITS, type RetentionLimits } from './runtime-accounting.js';
 import { TreeCleanup } from './tree-cleanup.js';
 import { selectReaderRuns } from '../../agent-home-reader-retention.js';

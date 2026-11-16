@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { GROK_HOME_DIRECTORY } from '../../daemon/retention/scratch.js';
+import { GROK_HOME_DIRECTORY } from './held-login.js';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 import { createOwnedRuntimeHome } from '../owned-runtime-home.js';
 import { objectRecord as record } from '../shared-rules.js';

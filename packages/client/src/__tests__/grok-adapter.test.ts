@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
 import { createGrokAgentHome, grokUserInstructionsRefusal } from '../adapters/grok/agent-user-context';
-import { HELD_LOGIN_RESOLUTION } from '../daemon/retention/scratch';
+import { HELD_LOGIN_RESOLUTION } from '../adapters/grok/held-login';
 import { PolicyUnsupportedError, SteerUnsupportedError, type McpToolsetToolObservation, type RuntimeAdapter, type Session } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import * as processTree from '../adapters/process-tree';

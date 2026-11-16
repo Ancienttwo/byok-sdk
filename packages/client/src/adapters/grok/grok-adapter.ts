@@ -8,7 +8,8 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
-import { HELD_LOGIN_RESOLUTION, heldLogins, type ExecutionScratch } from '../../daemon/retention/scratch.js';
+import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
+import { HELD_LOGIN_RESOLUTION, heldLogins } from './held-login.js';
 import {
   freezeRuntimeAdapterDescriptor,
   PolicyUnsupportedError,
