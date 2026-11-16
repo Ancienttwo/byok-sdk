@@ -851,7 +851,7 @@
     {
       "item": "export:@byok-sdk/cloud#projectTerminalResult",
       "change": "changed",
-      "entry": null
+      "entry": "wire-v7-cloud-executor"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED",
