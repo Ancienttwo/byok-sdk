@@ -17,6 +17,7 @@
  */
 import { CapabilityDeclarationSchema, hasCapability, type CapabilityDeclaration } from '@byok-sdk/core';
 import type { ByokCloudOptions } from './cloud.js';
+import type { CloudStores } from './stores/ports.js';
 
 /** The hosted capability vocabulary this package knows how to serve. */
 export const CLOUD_CAPABILITIES = {
@@ -105,8 +106,8 @@ export const CLOUD_CAPABILITIES = {
    * The E2EE member device routes (#654): register a member key bundle,
    * append and read the member chain, put and read scope key packages, and
    * read the relayed client pairing MAC. Composition-bound like
-   * `truth.records`: declaring it without an `e2eeMemberStore`, or passing one
-   * without declaring it, is refused at construction.
+   * `truth.records`: declaring it without a `CloudStores.e2eeMember`, or
+   * passing one without declaring it, is refused at construction.
    */
   e2eeMember: 'e2ee.member',
   /**
@@ -150,7 +151,7 @@ export interface FullCapabilityDeclarationOptions {
    * deployment does not hold — so it is off unless a composition says otherwise.
    */
   readonly includeHostMcpTaskContext?: boolean;
-  /** `e2ee.member` is default-off: the composition must supply an `e2eeMemberStore`. */
+  /** `e2ee.member` is default-off: the composition's `CloudStores` must carry an `e2eeMember`. */
   readonly includeE2eeMember?: boolean;
 }
 
@@ -160,24 +161,35 @@ export interface FullCapabilityDeclarationOptions {
  * `createByokCloud` refuses a capability declared without all of its ports and
  * a port passed without its capability, and `capabilityDeclarationForPorts`
  * declares exactly the capabilities whose ports are all present.
+ *
+ * A port is a `createByokCloud` option, except `cloud.e2eeMember`: the E2EE
+ * member store is a store of the composition, so the device directory that
+ * retires its state and the routes that serve it read the same one (#2267).
  */
 export const CAPABILITY_PORTS = {
   [CLOUD_CAPABILITIES.blobsContentProxy]: ['blobContentProxy'],
   [CLOUD_CAPABILITIES.truthRecords]: ['truthCommitter', 'truthObjectDownloads'],
   [CLOUD_CAPABILITIES.skillPacks]: ['skillPacks'],
   [CLOUD_CAPABILITIES.agentMemoryProjection]: ['agentMemoryProjectionAuthorizer', 'agentMemoryProjectionStore'],
-  [CLOUD_CAPABILITIES.e2eeMember]: ['e2eeMemberStore'],
-} as const satisfies Partial<Record<CloudCapability, readonly (keyof ByokCloudOptions)[]>>;
+  [CLOUD_CAPABILITIES.e2eeMember]: ['cloud.e2eeMember'],
+} as const satisfies Partial<Record<CloudCapability, readonly (keyof ByokCloudOptions | 'cloud.e2eeMember')[]>>;
 
-/** The `createByokCloud` ports a capability is bound to. */
-export type CapabilityPorts = Pick<
-  ByokCloudOptions,
-  (typeof CAPABILITY_PORTS)[keyof typeof CAPABILITY_PORTS][number]
->;
+/** The name of one capability port in {@link CAPABILITY_PORTS}. */
+export type CapabilityPortName = (typeof CAPABILITY_PORTS)[keyof typeof CAPABILITY_PORTS][number];
+
+/** The `createByokCloud` inputs a port-bound capability is bound to. */
+export type CapabilityPorts = Pick<ByokCloudOptions, Exclude<CapabilityPortName, 'cloud.e2eeMember'>> & {
+  readonly cloud?: Pick<CloudStores, 'e2eeMember'>;
+};
+
+/** The port `name` in `ports`, `undefined` when absent. */
+export function capabilityPort(ports: CapabilityPorts, name: CapabilityPortName): unknown {
+  return name === 'cloud.e2eeMember' ? ports.cloud?.e2eeMember : ports[name];
+}
 
 /** Whether every port `capability` is bound to is present. */
 function portsServe(ports: CapabilityPorts, capability: keyof typeof CAPABILITY_PORTS): boolean {
-  return CAPABILITY_PORTS[capability].every((port) => ports[port] !== undefined);
+  return CAPABILITY_PORTS[capability].every((port) => capabilityPort(ports, port) !== undefined);
 }
 
 /**

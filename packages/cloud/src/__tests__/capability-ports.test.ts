@@ -10,12 +10,18 @@ import { createInProcessMailboxWake } from '../stores/in-memory/mailbox-wake';
 
 /** Every capability port, each with the capability it is bound to. Presence is all the check reads. */
 const PORTS = [
-  { capability: CLOUD_CAPABILITIES.blobsContentProxy, ports: { blobContentProxy: {} } },
-  { capability: CLOUD_CAPABILITIES.truthRecords, ports: { truthCommitter: {}, truthObjectDownloads: {} } },
-  { capability: CLOUD_CAPABILITIES.skillPacks, ports: { skillPacks: {} } },
-  { capability: CLOUD_CAPABILITIES.agentMemoryProjection, ports: { agentMemoryProjectionAuthorizer: {}, agentMemoryProjectionStore: {} } },
-  { capability: CLOUD_CAPABILITIES.e2eeMember, ports: { e2eeMemberStore: {} } },
-] as unknown as readonly { readonly capability: string; readonly ports: CapabilityPorts }[];
+  { capability: CLOUD_CAPABILITIES.blobsContentProxy, names: ['blobContentProxy'] },
+  { capability: CLOUD_CAPABILITIES.truthRecords, names: ['truthCommitter', 'truthObjectDownloads'] },
+  { capability: CLOUD_CAPABILITIES.skillPacks, names: ['skillPacks'] },
+  { capability: CLOUD_CAPABILITIES.agentMemoryProjection, names: ['agentMemoryProjectionAuthorizer', 'agentMemoryProjectionStore'] },
+  // A store of the composition, so it travels in `cloud` (#2267).
+  { capability: CLOUD_CAPABILITIES.e2eeMember, names: ['cloud.e2eeMember'] },
+].map((row) => ({ ...row, ports: supply(row.names) }));
+
+/** Placeholder ports for `names`, where `cloud.e2eeMember` goes into the `cloud` stores. */
+function supply(names: readonly string[]): CapabilityPorts {
+  return Object.fromEntries(names.map((name) => (name === 'cloud.e2eeMember' ? ['cloud', { e2eeMember: {} }] : [name, {}]))) as CapabilityPorts;
+}
 
 function cloudWith(capabilities: CapabilityDeclaration, ports: CapabilityPorts) {
   const clock = createMutableClock();
@@ -28,12 +34,12 @@ function cloudWith(capabilities: CapabilityDeclaration, ports: CapabilityPorts) 
     proofReceiptRetention: { authority: composition.proofReceiptAuthority },
     mailboxWake: createInProcessMailboxWake(),
     core,
-    cloud: stores,
     crypto,
     tokenSigner: createHmacTokenSigner(new Uint8Array(32), clock),
     clock,
     capabilities,
     ...ports,
+    cloud: { ...stores, ...ports.cloud },
   });
 }
 
@@ -54,15 +60,13 @@ describe('capability declaration ⇄ ports, both directions (#1096)', () => {
 
   for (const row of PORTS) {
     it(`refuses ${row.capability} declared without its ports`, () => {
-      const { ...ports } = allPorts as Record<string, unknown>;
-      for (const name of Object.keys(row.ports)) delete ports[name];
-      expect(() => cloudWith(all, ports as CapabilityPorts)).toThrowError(expect.objectContaining({ code: 'capability_over_declared' }));
+      const ports = supply(PORTS.flatMap((other) => other.names).filter((name) => !row.names.includes(name)));
+      expect(() => cloudWith(all, ports)).toThrowError(expect.objectContaining({ code: 'capability_over_declared' }));
     });
 
-    for (const name of Object.keys(row.ports)) {
+    for (const name of row.names) {
       it(`refuses ${name} passed without declaring ${row.capability}, naming the port and the capability`, () => {
-        const ports = { ...PORTS.filter((other) => other !== row).reduce((acc, other) => ({ ...acc, ...other.ports }), {}),
-          [name]: {} } as CapabilityPorts;
+        const ports = supply([...PORTS.filter((other) => other !== row).flatMap((other) => other.names), name]);
         expect(() => cloudWith(without(all, row.capability), ports)).toThrowError(expect.objectContaining({
           code: 'capability_port_undeclared',
           message: expect.stringContaining(`${name} (${row.capability})`),
@@ -75,7 +79,7 @@ describe('capability declaration ⇄ ports, both directions (#1096)', () => {
     expect(() => cloudWith(without(without(all, CLOUD_CAPABILITIES.skillPacks), CLOUD_CAPABILITIES.e2eeMember), allPorts))
       .toThrowError(expect.objectContaining({
         code: 'capability_port_undeclared',
-        message: expect.stringMatching(/skillPacks \(skills\.pack\).*e2eeMemberStore \(e2ee\.member\)/),
+        message: expect.stringMatching(/skillPacks \(skills\.pack\).*cloud\.e2eeMember \(e2ee\.member\)/),
       }));
   });
 

@@ -1033,14 +1033,34 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await expect(installation.upgrade(relabeled)).rejects.toMatchObject({ code: 'version_conflict' });
   });
 
-  it('uninstall removes the versions, pointers, snapshots, receipt and record, and leaves the store', async () => {
+  const uninstallVia = (uninstall: () => Promise<void>) => {
+    const base = fakeLifecycle();
+    installation = installationOver({ ...base, owned: (operation) => withServiceOwnerGate(() => operation({ install: base.install, uninstall })) });
+  };
+  const layout = async () => [await pointer('current'), await pointer('previous'), await fs.readdir(path.join(installRoot, 'versions'))];
+
+  it.each([false, true])('uninstall stops the service while current is present, then removes the versions, pointers, snapshots, receipt and record, and leaves the store (upgraded: %s, #2274)', async (upgraded) => {
+    // The Host's stop program runs from under current, as the Windows lifecycle's deactivate does.
+    let seen: unknown[] = [];
+    uninstallVia(async () => { seen = await layout(); });
     await installation.install(await payload('1.0.0'));
-    await installation.upgrade(await payload('2.0.0'));
+    if (upgraded) await installation.upgrade(await payload('2.0.0'));
     await installation.uninstall();
+    expect(seen).toEqual(upgraded ? ['2.0.0', '1.0.0', ['1.0.0', '2.0.0']] : ['1.0.0', undefined, ['1.0.0']]);
     expect(await fs.readdir(installRoot)).toEqual([]);
     expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
     expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
-    expect(events.at(-1)).toBe('uninstall');
+  });
+
+  it('uninstall throws a failed stop as is and removes nothing (#2274)', async () => {
+    const failed = new ServiceUnitError('service_stop_failed');
+    const stop = vi.fn(async () => { throw failed; });
+    uninstallVia(stop);
+    await installation.install(await payload('1.0.0'));
+    await installation.upgrade(await payload('2.0.0'));
+    const receipt = await installation.receipt();
+    await expect(installation.uninstall()).rejects.toBe(failed);
+    expect([stop.mock.calls.length, ...await layout(), await installation.receipt()]).toEqual([1, '2.0.0', '1.0.0', ['1.0.0', '2.0.0'], receipt]);
   });
   describe('install store preparation (#1983)', () => {
     const migrating = (verdict = 'accepted') => installationOver(fakeLifecycle(), {

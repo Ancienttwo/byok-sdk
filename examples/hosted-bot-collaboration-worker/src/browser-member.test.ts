@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createByokCloud, createInMemoryByokCloud, createHmacTokenSigner, fullCapabilityDeclaration,
-  InMemoryE2eeMemberStore, tenantId, type DeviceTerminal, type TaskOfferReadback } from '@byok-sdk/cloud';
+  tenantId, type DeviceTerminal, type TaskOfferReadback } from '@byok-sdk/cloud';
 import { computeDevicePairingMac, createMemberKeyBundle, parsePairingInput, memberApprovalCode,
   verifyClientPairingMac, openScopeKeyPackage, openSealedContent, sealContent } from '@byok-sdk/core/sealed-payload';
 import { template } from '../../host-execution-core/src/test-support';
@@ -20,9 +20,9 @@ const hash = () => sha256(new TextEncoder().encode(summary));
 afterEach(() => vi.restoreAllMocks());
 
 async function fixture() {
-  const base = createInMemoryByokCloud();
-  const store = new InMemoryE2eeMemberStore(base.stores.receipts);
-  const cloud = createByokCloud({ ...base, cloud: base.stores, e2eeMemberStore: store,
+  const base = createInMemoryByokCloud({ e2eeMember: true });
+  const store = base.stores.e2eeMember!;
+  const cloud = createByokCloud({ ...base, cloud: base.stores,
     tokenSigner: createHmacTokenSigner(crypto.getRandomValues(new Uint8Array(32)), base.clock),
     capabilities: fullCapabilityDeclaration(undefined, { includeE2eeMember: true }) });
   const terminals = new Map<string, DeviceTerminal>(), offers = new Map<string, TaskOfferReadback>(), objects = new Map<string, Uint8Array>();

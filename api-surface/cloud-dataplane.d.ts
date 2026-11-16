@@ -987,10 +987,26 @@ import type { Clock, TenantId } from '@byok-sdk/core';
 import type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeScopeKeyPackagePutInput, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow } from '@byok-sdk/cloud';
 import type { ByokPool } from '../pool.js';
 /**
+ * #2267: a device's member state, `$2` being its ids, as
+ * `E2eeMemberStore.deleteDevice` defines it. Device retirement runs the same
+ * statements in its own transaction (`devices.ts`). Packages go first, while
+ * the registration still names the device's member. Security does not rest on
+ * this cleanup: the remaining members rotate (design §7.6). The package rows
+ * are locked in the order a put locks them, (scope_id, epoch, recipient) in
+ * code point order, so a racing put cannot deadlock.
+ */
+export declare const E2EE_MEMBER_STATE_DELETES: readonly [`DELETE FROM e2ee_scope_key_package p USING (
+     SELECT scope_id, epoch, recipient FROM e2ee_scope_key_package
+      WHERE tenant_id = $1 AND recipient IN (
+        SELECT member_id FROM e2ee_member_key WHERE tenant_id = $1 AND device_id = ANY($2::text[]))
+      ORDER BY scope_id COLLATE "C", epoch, recipient COLLATE "C"
+      FOR UPDATE) locked
+    WHERE p.tenant_id = $1 AND p.scope_id = locked.scope_id AND p.epoch = locked.epoch AND p.recipient = locked.recipient`, 'DELETE FROM e2ee_pairing_mac WHERE tenant_id = $1 AND device_id = ANY($2::text[])', 'DELETE FROM e2ee_member_key WHERE tenant_id = $1 AND device_id = ANY($2::text[])'];
+/**
  * Postgres E2EE member store (`deploy/sql/0027_e2ee_member.sql`,
  * `0028_e2ee_scope_shred.sql`, `0029_e2ee_member_kem_floor.sql`). Device
  * revocation and machine supersession delete a device's rows in the device
- * transaction (`E2EE_MEMBER_STATE_DELETES` in `devices.ts`). A shred receipt goes to `device_request_receipts`, the
+ * transaction ({@link E2EE_MEMBER_STATE_DELETES}). A shred receipt goes to `device_request_receipts`, the
  * request receipt store, in the append transaction.
  */
 export declare class PostgresE2eeMemberStore implements E2eeMemberStore {
@@ -1032,6 +1048,7 @@ export declare class PostgresE2eeMemberStore implements E2eeMemberStore {
         readonly deviceId: string;
         readonly now: string;
     }): Promise<string | undefined>;
+    deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/index.d.ts ====
 export { PostgresAgentMessageDraftStore } from './agent-message-draft.js';
@@ -1109,6 +1126,12 @@ export interface PostgresCloudStoreOptions {
      * spends one token. Required — there is no unlimited composition.
      */
     readonly rateLimit: PostgresRateLimitOptions;
+    /**
+     * Adds `e2eeMember`, a `PostgresE2eeMemberStore` on the same pool, for a
+     * deployment that declares `e2ee.member`. Device retirement deletes its rows
+     * in the retirement transaction.
+     */
+    readonly e2eeMember?: boolean;
 }
 /**
  * Compose the cloud-local ports over one pool.

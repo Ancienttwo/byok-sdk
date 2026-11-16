@@ -248,8 +248,8 @@ export interface ServiceUpgradeReceipt {
  *   recover() resolves with a `failed` receipt (`switch_unhealthy` or
  *   `rollback_unhealthy`).
  * - `uninstall()`: a timed-out stop, unregistration or `daemon-reload` is
- *   thrown as is, after `current` is removed; the unit files stay when the
- *   stop or unregistration timed out.
+ *   thrown as is; `current` and everything under the install root stay, and
+ *   so do the unit files when the stop or unregistration timed out.
  * - `lifecycle`: each of its operations rejects with it as is.
  *
  * A payload starts only through `current` (#2011): while a pending receipt
@@ -378,7 +378,7 @@ export interface ServiceInstallation {
    * failures follow the same rule as on `rollback()`.
    */
   recover(): Promise<ServiceUpgradeReceipt | undefined>;
-  /** Removes `current` first, so no payload starts even if the unit stays; uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
+  /** Uninstalls the service while `current` still holds its payload, then removes the pointers, `versions/`, `snapshots/` and the receipt. A failed stop throws as is and removes nothing, so the unit and `current` stay; a unit whose removal fails after its stop stays with `current`, so a boot or login can start it until `uninstall()` is retried. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
   uninstall(): Promise<void>;
   /** The last receipt, or `undefined`. */
   receipt(): Promise<ServiceUpgradeReceipt | undefined>;
@@ -1741,9 +1741,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   function uninstall(): Promise<void> {
     return rootOwned(async (held) => {
       await refusePending();
-      // Without `current` no unit starts a payload, even one this uninstall fails to remove (#2011).
-      await setPointer('current', undefined);
+      // The Host's stop program may run from under `current` (Windows runs it on every stop), so the pointers go only after the service is down (#2274).
       await held.uninstall();
+      await setPointer('current', undefined);
       await setPointer('previous', undefined);
       await fs.rm(versionsDir, { recursive: true, force: true });
       // Install snapshots stay, and so does `snapshots/` around them.
