@@ -451,13 +451,43 @@ included.
 The dispatch SDK and the independently installable `@byok-sdk/keys@0.43.0`
 require Node.js 24.22.1 or newer. MIT licensed.
 
+## API surface goldens
+
+Each `api-surface/<pkg>.d.ts` is that package's public API surface after
+`bun run build`: the names each `package.json` `exports` entry exports, and the
+declarations those names reach. It is gated by `bun run check:api-surface`
+(also a CI step in `build-test`).
+
+A golden starts with an index of every entry's exported names and the
+declaration file each one resolves to. Then comes one section per declaration
+file, reduced to:
+
+- the declarations an entry exports;
+- every declaration their signatures reach, transitively. A reached
+  declaration that no entry exports is preceded by `// support`. Consumers
+  cannot import it by name, but changing it changes the public surface;
+- the imports and re-exports that connect them.
+
+A declaration that no exported signature reaches is not public, even when its
+own module exports it, and it is left out. Comments and JSDoc are dropped, so
+documentation-only changes and tags such as `@deprecated` are not gated.
+`bin` entry points are not gated here either.
+
+Regenerate with `bun run check:api-surface -- --update`, and only as a
+deliberate, reviewed part of the commit that changes the surface: a golden diff
+is a public-API diff. Never regenerate to make CI green. A package whose
+`dist/` is missing fails the check with a build hint. The other packages are
+still checked and their drift is reported in the same run. The goldens live
+outside every package, so they never enter a published tarball.
+
 ## Entry dependencies
 
 `api-surface/entries.json` is the manual policy and generated-fact authority for
 all published exports, bins and private imports. `bun run check:api-surface`
 checks coverage, policies, measured workspace bytes, facts and this table.
 `--update` rewrites facts and the table only; policies must pass first.
-`--package` retains the declaration-only golden view.
+`--package <name>` checks only that package's public-surface golden
+(`api-surface/<name>.d.ts`; see [API surface goldens](#api-surface-goldens)).
 
 The budget counts workspace static JavaScript closures, not third-party bytes,
 sourcemaps or literal lazy edges. `nodeBuiltins` separately controls workspace
@@ -477,12 +507,12 @@ Third-party dependencies and code-generation evidence follow static dependency e
 
 | Import / command | Purpose | Third-party dependencies | Zod | Normalized budget |
 | --- | --- | --- | --- | ---: |
-| `@byok-sdk/bot-collaboration` | K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2810570 B |
+| `@byok-sdk/bot-collaboration` | K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2810887 B |
 | `@byok-sdk/bot-collaboration/host-kit` | K8 modules a Host adapter composes; Worker-loadable, no @byok-sdk/client | `@cfworker/json-schema`, `zod` | allowed | 609663 B |
 | `@byok-sdk/bot-collaboration/package.json` | Package metadata | — | forbidden | 2086 B |
 | `@byok-sdk/bot-collaboration/rules` | K8 pure rules; Worker-safe, no node:sqlite | `@cfworker/json-schema`, `zod` | allowed | 244296 B |
-| `@byok-sdk/bot-collaboration/testing` | K8 shared vectors and L test Host | `@cfworker/json-schema`, `@hono/node-server`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `chai`, `eventsource`, `eventsource-parser`, `expect-type`, `hono`, `pkce-challenge`, `tinybench`, `vite`, `vitest`, `zod` | allowed | 3263176 B |
-| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2477338 B |
+| `@byok-sdk/bot-collaboration/testing` | K8 shared vectors and L test Host | `@cfworker/json-schema`, `@hono/node-server`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `chai`, `eventsource`, `eventsource-parser`, `expect-type`, `hono`, `pkce-challenge`, `tinybench`, `vite`, `vitest`, `zod` | allowed | 3263493 B |
+| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2477655 B |
 | `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 567334 B |
 | `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 84768 B |
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 128120 B |
@@ -518,7 +548,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/server/package.json` | Package metadata | — | forbidden | 1761 B |
 | `@byok-sdk/ui-runtime` | UI folds; current cloud/Hono/Zod closure | `@cfworker/json-schema`, `hono`, `zod` | allowed | 577959 B |
 | `@byok-sdk/ui-runtime/package.json` | Package metadata | — | forbidden | 1215 B |
-| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2472885 B |
+| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2473202 B |
 | `bin:byok-agent-memory-mcp` | Agent memory MCP helper | — | forbidden | 46565 B |
 | `bin:byok-agent-message-mcp` | Agent message MCP helper | — | forbidden | 46569 B |
 | `bin:byok-agent-result-mcp` | Task-bound structured outcome MCP helper | — | forbidden | 46565 B |
