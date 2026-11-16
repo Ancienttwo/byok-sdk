@@ -5,6 +5,10 @@ import { verifyReviewedContent, changedApiOwners, publicManifests } from './revi
 import { documentationChecks } from './documentation-checks.mjs';
 import { resolveScriptChecks, scriptTestInputs } from './script-test-inputs.mjs';
 
+// The golden description moved to README.md (#2284), so api-surface/ holds only
+// generated files. Only the deletion of this one path is reviewed.
+const RETIRED_API_SURFACE_README = 'api-surface/README.md';
+
 // #1959: archived cloud-do paths; a PR that deletes them still lists them.
 const ARCHIVED_CLOUD_DO_FILES = new Set([
   'api-surface/cloud-do.d.ts',
@@ -542,7 +546,9 @@ export const reviewedScripts = Object.freeze({
   // #1102: the upgrade-manifest gate. Every targeted run also runs the gate itself.
   'scripts/release/check-upgrade-manifest.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/check-upgrade-manifest.test.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
-  'scripts/release/upgrade-manifest/dts-surface.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
+  // The api-surface golden renderer shares the declaration graph, so a change
+  // here also needs its test and the build job that runs check:api-surface.
+  'scripts/release/upgrade-manifest/dts-surface.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs', 'scripts/api-surface/check-api-surface.test.mjs'], install: true },
   'scripts/release/upgrade-manifest/history.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/upgrade-manifest/manifest.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/upgrade-manifest/snapshot.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
@@ -651,6 +657,10 @@ export function selectImpact(paths, context = {}) {
       verifyReviewedContent(path, context);
       for (const id of knownFamilies) if (id !== 'build-test' && id !== 'macos-client') families.add(id);
       continue;
+    }
+    if (path === RETIRED_API_SURFACE_README) {
+      if (existsSync(resolve(context.cwd ?? process.cwd(), path))) requireMapping(path);
+      scripts = true; continue;
     }
     if (ARCHIVED_CLOUD_DO_FILES.has(path)) {
       if (existsSync(resolve(context.cwd ?? process.cwd(), path))) requireMapping(path);

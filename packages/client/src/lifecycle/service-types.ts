@@ -79,7 +79,9 @@ export function nodeAgentProgram(opts: NodeAgentProgramOptions): ServiceProgram 
  *   `<storeDir>\service\<name>.launcher.cmd`, which reruns the program
  *   after a non-zero exit. `stop` is the Host's own program that makes the
  *   running service exit (for the byok-agent daemon, a control `shutdown`);
- *   it must exit 0 once the service is stopping or already gone.
+ *   it must exit 0 once the service is stopping or already gone. It runs only
+ *   while a launcher runs, so it is never run once the launcher has exited,
+ *   for example on an uninstall retried after `current` was removed.
  */
 export type ServiceWindowsOptions =
   | {
