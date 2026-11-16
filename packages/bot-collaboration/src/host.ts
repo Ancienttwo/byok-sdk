@@ -1200,8 +1200,8 @@ export class BotCollaboration {
       try {
         const result = await port.readback(old.id);
         this.write(s => {
-          const row = stateOf(s.application).channel?.deliveries[old.id];
-          if (row) readbackDelivery(row, old.attempts, result, this.now());
+          const current = stateOf(s.application).channel?.deliveries ?? {}, row = current[old.id];
+          if (row && !supersededDeliveryIds(current).has(row.id)) readbackDelivery(row, old.attempts, result, this.now());
         });
       } catch { continue; } // Missing readback evidence leaves this row unknown.
     }

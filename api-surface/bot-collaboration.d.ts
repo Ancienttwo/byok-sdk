@@ -464,7 +464,7 @@ export interface ChannelState {
 }
 export declare function channelState(state: CollaborationState): ChannelState;
 export declare function turnConversation(state: CollaborationState, turn: Turn): Conversation;
-/** Save with input admission, before any process pass can accept its reply. Redelivery never refreshes a token. */
+/** Save with input admission, replacing a filtered row. Redelivery of an admitted input never refreshes its token. */
 export declare function rememberInbound(state: CollaborationState, message: InboundMessage, root: string): void;
 /**
  * Records a message that the Host refused before any Turn (#1229 item 3), so its disposition is visible in the Host UI.
@@ -581,6 +581,8 @@ export declare function deliveryVectors(name: string, open: (port: ChannelPort) 
 import type { ChannelPort, Delivery } from './channel.js';
 type SendResult = Awaited<ReturnType<ChannelPort['send']>>;
 type ReadbackResult = Awaited<ReturnType<NonNullable<ChannelPort['readback']>>>;
+/** Manual replacements keep their predecessors as history, with acceptance still unknown. */
+export declare function supersededDeliveryIds(deliveries: Readonly<Record<string, Delivery>>): Set<string>;
 /** Manual resend supplies a nonce. The original delivery keeps its audit identity. */
 export declare function deliveryId(taskId: string, messageId: string, route: Delivery['route'], nonce?: string): string;
 /** The caller persists this claim before it calls the channel. */
@@ -746,7 +748,7 @@ export { DeviceSwitchingError, SwitchExportedError, SwitchImportedError, type Sw
 export { botOutcomePorts, outcomeFailure, routeTerminal, runHostIntentHandler, syncHead, syncTail } from './adapter-steps.js';
 export { isOwner, verified } from './channel.js';
 export { admitUserInput } from './coalesce.js';
-export { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from './delivery.js';
+export { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, supersededDeliveryIds, unknownDelivery } from './delivery.js';
 export { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, promoteStaged, queueDelivery, refuseRoute, rememberInbound, resendUnknown, revokePush, type IntentConclusions } from './delivery-routing.js';
 export { checkDreamInstruction, dreamIntentIds, dreamPolicy, reconcileDreamRoutines, recordDream, syncDreams, type DreamSync } from './dream.js';
 export { exportMarkOf, type SwitchExportMark, type SwitchHeader } from './migration.js';
