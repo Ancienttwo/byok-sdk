@@ -101,6 +101,7 @@ export const workspaceGraph = {
     "name": "@byok-sdk/example-basic",
     "dependencies": [
       "@byok-sdk/client",
+      "@byok-sdk/core",
       "@byok-sdk/protocol",
       "@byok-sdk/server"
     ]
@@ -109,6 +110,7 @@ export const workspaceGraph = {
     "name": "@byok-sdk/example-byok-mcp-server",
     "dependencies": [
       "@byok-sdk/client",
+      "@byok-sdk/core",
       "@byok-sdk/example-host-execution-core",
       "@byok-sdk/protocol",
       "@byok-sdk/server",
@@ -126,6 +128,7 @@ export const workspaceGraph = {
     "dependencies": [
       "@byok-sdk/bot-collaboration",
       "@byok-sdk/client",
+      "@byok-sdk/core",
       "@byok-sdk/keys",
       "@byok-sdk/server",
       "@byok-sdk/ui-runtime"
@@ -704,6 +707,7 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     if (path === 'examples/basic/clarification.ts' || path === 'examples/basic/clarification.test.ts'
+      || path === 'examples/basic/clarification-store.ts' || path === 'examples/basic/goal-btw-store.ts'
       || path === 'examples/basic/goal-btw.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-close.test.ts'
       || path === 'examples/basic/quickstart-smoke.test.ts' || path === 'examples/basic/server.ts'
       || path === 'examples/basic/task-events-route.ts' || path === 'examples/basic/task-events-route.test.ts') {
