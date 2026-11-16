@@ -33,7 +33,7 @@ import { isSharedSecretValue } from './secret-value.js';
  * value without the prefix, under another code (such as
  * `KEYCHAIN_SECRET_DECODE_FAILED`); the registry never overwrites those. A macOS
  * legacy entry reports `KEYCHAIN_LEGACY`, which an explicit provider
- * reconfiguration may overwrite without reading its contents.
+ * reconfiguration may overwrite without decoding its contents.
  */
 export interface SecretStore<TName extends string = string> {
   /** Human-readable backend name, safe to show a user. Never contains a secret. */

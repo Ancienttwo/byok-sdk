@@ -30,7 +30,6 @@
         "export:@byok-sdk/keys#PROVIDER_PROFILE_TRUTH_RECORD_KEY",
         "export:@byok-sdk/keys#MacOsKeychainSecretStoreOptions",
         "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
-        "export:@byok-sdk/keys#ByokKeysErrorCode",
         "export:@byok-sdk/bot-collaboration/host-kit#migrateWouldDo",
         "export:@byok-sdk/bot-collaboration/host-kit#WouldDoMigration",
         "export:@byok-sdk/bot-collaboration/host-kit#sealedRoutineInstruction",
@@ -53,7 +52,9 @@
       "impact": "breaking",
       "summary": "The hosted bot-collaboration example refuses an older entity kind constraint with hosted_schema_unsupported_old before DDL; preserve the old store and provision a separate current store.",
       "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
-      "items": ["behavior:reject-hosted-old-entity-constraint"]
+      "items": [
+        "behavior:reject-hosted-old-entity-constraint"
+      ]
     },
     {
       "id": "reject-older-provider-kind-store",
@@ -1128,6 +1129,11 @@
       "item": "export:@byok-sdk/core#PresenceStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
+    },
+    {
+      "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
+      "change": "changed",
+      "entry": "retire-compatibility-apis"
     },
     {
       "item": "export:@byok-sdk/keys#MacOsKeychainSecretStoreOptions",
