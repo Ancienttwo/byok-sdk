@@ -256,7 +256,7 @@ describe('a sealed routine Turn (#953)', () => {
     const row = turn(s, { id: 'occurrence:o1', root: 'occurrence:o1', source: 'routine', request: '', status: 'queued', sealedRoutine: ref });
     expect(syncTurn(s, row, facts(), { ...sealedOptions(), models: [] }, out.publish)).toBeUndefined();
     expect([row.status, row.conclusion, row.blockedReason]).toEqual(['blocked', undefined, 'Unavailable model: default']);
-    expect(out.rows.map(([id]) => id)).toEqual([expect.stringMatching(/^blocked:occurrence:o1:unavailable_model:/)]);
+    expect(out.rows.map(([id]) => id)).toEqual(['blocked:occurrence:o1:unavailable_model:37ac12f6da71']);
     expect(syncTurn(s, row, facts(), sealedOptions(), out.publish)?.kind).toBe('routine');
     expect([row.status, row.blockedReason]).toEqual(['processing', undefined]);
   });
@@ -274,11 +274,11 @@ describe('a sealed routine Turn (#953)', () => {
       const row = turn(s, { id: 'occurrence:o1', root: 'occurrence:o1', source: 'routine', request: '', status: 'queued', sealedRoutine: ref });
       expect(syncTurn(s, row, facts(), sealedOptions(), out.publish)).toBeUndefined();
       expect([row.status, row.conclusion, row.blockedReason]).toEqual(['blocked', undefined, 'Outcome schema over budget: still too large']);
-      expect(out.rows.map(([id]) => id)).toEqual([expect.stringMatching(/^blocked:occurrence:o1:schema_over_budget:/)]);
+      expect(out.rows.map(([id]) => id)).toEqual(['blocked:occurrence:o1:schema_over_budget:679c7e27ea48']);
       oversized = false;
       expect(syncTurn(s, row, facts(), sealedOptions(), out.publish)?.kind).toBe('routine');
       expect([row.status, row.blockedReason]).toEqual(['processing', undefined]);
-      expect(out.rows.map(([id]) => id)).toEqual([expect.stringMatching(/^blocked:occurrence:o1:schema_over_budget:/)]);
+      expect(out.rows.map(([id]) => id)).toEqual(['blocked:occurrence:o1:schema_over_budget:679c7e27ea48']);
     } finally { spy.mockRestore(); }
   });
 });
