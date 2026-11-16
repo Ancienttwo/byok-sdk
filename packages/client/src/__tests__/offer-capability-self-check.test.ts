@@ -27,7 +27,7 @@ let daemon: Daemon | undefined;
 
 const agentRef = { agentId: 'self-check-agent', profileRevision: 'profile-r1' } as const;
 
-const corpusOffers = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
+const corpusOffers = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: string; payload: Json })
@@ -38,8 +38,8 @@ const corpusOffers = readFileSync(new URL('../../../protocol/src/__tests__/golde
 function corpusOffer(match: (payload: Json) => boolean): Json {
   const payload = corpusOffers.find(match);
   if (payload === undefined) throw new Error('no matching corpus offer');
-  const { dispatchSelection: _d, requiredToolsets: _t, terminalProjection: _p, homeAccess: _h, harnessId: _x, messageEgress: _m, ...rest } = payload;
-  return { ...rest, runtime: 'pi' };
+  const { target: _x, requiredToolsets: _t, terminalProjection: _p, homeAccess: _h, messageEgress: _m, ...rest } = payload;
+  return { ...rest, target: { lane: 'runtime', runtimeId: 'pi' } };
 }
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -74,7 +74,7 @@ const CASES: readonly GapCase[] = [
   {
     name: 'egressPolicy on a daemon without Agent egress',
     egress: false,
-    payload: () => ({ agentRef, session: { mode: 'resume', sessionRef: 'session-1' }, instruction: 'x', runtime: 'pi', egressPolicy: DEFAULT_AGENT_EGRESS_POLICY }),
+    payload: () => ({ agentRef, session: { mode: 'resume', sessionRef: 'session-1' }, instruction: 'x', target: { lane: 'runtime', runtimeId: 'pi' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY }),
     missing: 'agent-egress-policy',
   },
   {
@@ -93,7 +93,7 @@ const CASES: readonly GapCase[] = [
   {
     name: 'a fresh session on a daemon with an Agent home but without fresh egress sessions',
     egress: false,
-    payload: () => ({ agentRef, session: { mode: 'fresh' }, instruction: 'x', runtime: 'pi', egressPolicy: DEFAULT_AGENT_EGRESS_POLICY }),
+    payload: () => ({ agentRef, session: { mode: 'fresh' }, instruction: 'x', target: { lane: 'runtime', runtimeId: 'pi' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY }),
     missing: 'agent-egress-fresh-session',
   },
 ];

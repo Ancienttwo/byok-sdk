@@ -5,7 +5,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope } from '@byok-sdk/protocol';
+import { createEnvelope, steerRefusalEnvelopeId } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { RuntimeExecutionFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON } from '../runtime-failure';
 import { TestServer } from './fixtures/test-server';
@@ -370,7 +370,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     );
     await server.waitFor((e) => e.type === 'task.claim');
     const fail = await server.waitFor((e) => e.type === 'task.fail');
-    expect(fail.payload).toEqual({ agentRef: echoedTestAgentRef,
+    expect(fail.payload).toEqual({ agentRef: echoedTestAgentRef, executor: { kind: 'runtime', runtimeId: 'pi' },
       reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.start,
       retryable: false,
       failure: { class: 'unknown' },
@@ -399,6 +399,36 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     await vi.waitFor(() => expect(adapter.sessions[0]?.steerCalls).toEqual(['focus on tests']));
   });
 
+  // Wire v7: a steer the device did not deliver is reported, under an id derived from the steer's id.
+  it.each([
+    ['task_not_active', 'a task that is not active'],
+    ['steer_unsupported', 'a runtime without a steering channel'],
+    ['input_too_large', 'a runtime that refuses the input as too large'],
+  ] as const)('reports task.steer_refused %s for a steer to %s', async (reason, _target) => {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
+      steer: reason !== 'steer_unsupported', resume: true, approvalInteractive: true, mcpToolsets: true,
+    });
+    await setupDaemon(adapter);
+    const taskId = `task-steer-${reason}`;
+    if (reason !== 'task_not_active') {
+      server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
+        { taskId, seq: server.nextSeq() }));
+      await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      if (reason === 'input_too_large') {
+        adapter.sessions[0]!.steerError = new RuntimeExecutionFailure({
+          phase: 'run', retry: 'non-retryable', reason: 'steer exceeds the runtime input bound', failure: { class: 'input_too_large' },
+        });
+      }
+    }
+    const steer = createEnvelope('task.steer', { text: 'focus on tests' }, { taskId, seq: server.nextSeq() });
+    server.send(steer);
+    const refused = await server.waitFor((e) => e.type === 'task.steer_refused' && e.task_id === taskId);
+    expect(refused.id).toBe(await steerRefusalEnvelopeId(steer.id));
+    expect(refused.payload).toEqual({ steerMessageId: steer.id, reason });
+    expect(adapter.sessions[0]?.steerCalls ?? []).toEqual([]);
+  });
+
   describe('task.claim reports the actually-selected runtime (M5, requested vs. claimed)', () => {
     it('an explicit-runtime offer: task.claim carries that same runtime as the actual pick', async () => {
       const adapter = new StubRuntimeAdapter('pi');
@@ -413,7 +443,33 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       );
 
       const claim = await server.waitFor((e) => e.type === 'task.claim');
-      expect(claim.payload).toMatchObject({ deviceId: 'device-1', runtime: 'pi' });
+      expect(claim.payload).toMatchObject({ deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' } });
+      expect(claim.payload).not.toHaveProperty('agentId');
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      adapter.sessions[0]!.emit({ type: 'turn_end' });
+      const complete = await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-runtime-explicit');
+      expect(complete.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'pi' } });
+    });
+
+    it('a harness offer: task.claim and task.complete carry the harness executor', async () => {
+      const adapter = new StubRuntimeAdapter('acme-harness');
+      await setupDaemon(adapter);
+
+      server.send(
+        createEnvelope(
+          'task.offer',
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'acme-harness' } },
+          { taskId: 'task-harness-explicit', seq: server.nextSeq() },
+        ),
+      );
+
+      const claim = await server.waitFor((e) => e.type === 'task.claim');
+      expect(claim.payload).toMatchObject({ deviceId: 'device-1', executor: { kind: 'harness', harnessId: 'acme-harness' } });
+      expect(claim.payload).not.toHaveProperty('agentId');
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      adapter.sessions[0]!.emit({ type: 'turn_end' });
+      const complete = await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-harness-explicit');
+      expect(complete.payload).toMatchObject({ executor: { kind: 'harness', harnessId: 'acme-harness' } });
     });
 
     it('an offer naming NO runtime: task.claim still carries the auto-selected adapter this device actually picked, not merely an absence (single-candidate case; see task-runner-runtime-selection.test.ts for multi-candidate order)', async () => {
@@ -431,7 +487,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       const claim = await server.waitFor((e) => e.type === 'task.claim');
       // This is the exact gap the feature closes: before, the server never
       // learned which runtime an auto-selected task actually ran on.
-      expect(claim.payload).toMatchObject({ deviceId: 'device-1', runtime: 'claude' });
+      expect(claim.payload).toMatchObject({ deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'claude' } });
     });
   });
 

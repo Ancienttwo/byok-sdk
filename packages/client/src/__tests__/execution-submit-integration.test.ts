@@ -37,7 +37,7 @@ it('runs two recurring executions through real HTTP and TaskRunner with distinct
       // Host context fixture; this test does not implement the product's transcript builder.
       const instruction = index === 0 ? 'U1' : 'U1\nA1\nU2';
       const input = { taskId, deviceId, payload: {
-        instruction, runtime: 'pi' as const,
+        instruction, target: { lane: 'runtime' as const, runtimeId: 'pi' as const },
         agentRef: { agentId: 'recurring-agent', profileRevision: 'profile-v1' },
         session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required' as const, contract: 'conversation-turn/v1', contentType: 'text/markdown' as const, maxBytes: 1024 },

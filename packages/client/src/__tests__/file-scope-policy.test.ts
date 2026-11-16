@@ -333,7 +333,7 @@ describe('fileScope fail-closed admission through the task runner', () => {
     const adapter = new GateCapturingAdapter(AUTO_CAPABLE, 'claude');
     const sent: Envelope[] = [];
     await offer(makeRunner(adapter, sent, homePolicy), 'scope-claude');
-    expect(declineReason(sent)).toMatch(/^file_scope_unsupported: runtime claude /);
+    expect(sent.find((envelope) => envelope.type === 'task.decline')?.payload).toMatchObject({ code: 'file_scope_unsupported', reason: expect.stringMatching(/^runtime claude /) });
     expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(false);
     expect(adapter.inputs).toEqual([]);
   });
@@ -354,7 +354,7 @@ describe('fileScope fail-closed admission through the task runner', () => {
     const sent: Envelope[] = [];
     await offer(makeRunner(adapter, sent,
       () => ({ default: 'auto', byRuntime: { pi: 'all' }, fileScope: { mode: 'home' } })), 'scope-all');
-    expect(declineReason(sent)).toMatch(/^file_scope_conflicts_with_all: /);
+    expect(sent.find((envelope) => envelope.type === 'task.decline')?.payload).toMatchObject({ code: 'file_scope_conflicts_with_all', reason: expect.not.stringContaining('file_scope_conflicts_with_all') });
     expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(false);
     expect(adapter.inputs).toEqual([]);
   });

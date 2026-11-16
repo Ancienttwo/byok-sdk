@@ -165,7 +165,7 @@ describe('terminal durability and actual harness boundaries', () => {
     adapter.sessions[0]!.emit({ type: 'progress', text: 'x'.repeat(8192) });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(async () => expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('failed'), { timeout: 4000 });
-    expect(decodeEnvelope((await cloud.readTerminalBody(offer.taskId))!).payload).toMatchObject({ reason: 'terminal_result_too_large', retryable: false, harnessId: 'acme-harness' });
+    expect(decodeEnvelope((await cloud.readTerminalBody(offer.taskId))!).payload).toMatchObject({ reason: 'terminal_result_too_large', retryable: false, executor: { kind: 'harness', harnessId: 'acme-harness' } });
     expect(adapter.startCalls).toHaveLength(1);
   });
 });

@@ -10,6 +10,7 @@ import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentResultStore } from '../daemon/agent-result-store';
 import { createDaemon, createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
 import { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError } from '../daemon/daemon-errors';
+import { CursorStore } from '../daemon/cursor-store';
 import { journalHash } from '../daemon/journal/journal';
 import { JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { createTestDeviceStore } from './fixtures/device-credentials';
@@ -245,10 +246,24 @@ describe('result-document recovery from the journal', () => {
     journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
     await startWith(config, journal);
     const terminal = await server.waitFor((envelope) => envelope.task_id === taskId && envelope.type === 'task.fail');
-    expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false, agentRef });
+    expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false, agentRef, executor: { kind: 'runtime', runtimeId: 'pi' } });
     expect(JSON.stringify(terminal)).not.toContain('"document"');
     expect(server.received.some((envelope) => envelope.type === 'task.complete')).toBe(false);
     expect(await (await AgentResultStore.open(home)).get(taskId)).toEqual(staged);
+  });
+
+  it('an acknowledged offer that was never claimed recovers as daemon_interrupted without an executor', async () => {
+    const { server, config, identity, offerBytes } = await pairedAgentStore();
+    const taskId = 'acked-never-claimed';
+    const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
+    const bytes = offerBytes(taskId);
+    await journal.appendEnvelope({ identity, taskId, envelopeId: (JSON.parse(bytes) as { id: string }).id, seq: 1, bytes,
+      bytesHash: journalHash(bytes), opensTask: true, receivedAt: new Date().toISOString() });
+    await new CursorStore(config.storeDir!).save(config.serverUrl, identity.deviceId, 1);
+    await startWith(config, journal);
+    const terminal = await server.waitFor((envelope) => envelope.task_id === taskId && envelope.type === 'task.fail');
+    expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false, agentRef, recovery: { kind: 'daemon_interrupted' } });
+    expect(terminal.payload).not.toHaveProperty('executor');
   });
 
   it('a task.complete with its document recorded before send is replayed once, byte-identical', async () => {

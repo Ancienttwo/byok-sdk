@@ -87,7 +87,7 @@ interface Seeded {
 
 interface OfferReport {
   readonly claims: number;
-  readonly declines: readonly string[];
+  readonly declineCodes: readonly (string | undefined)[];
   readonly preparedStarts: number;
   readonly instructionStarts: number;
   readonly openCalls: number;
@@ -251,7 +251,7 @@ describe('a prepared preparation survives a real daemon process restart', () => 
       artifactDigest: held.artifactDigest,
       seq: 1,
     });
-    expect(heldOffer.declines).toEqual([]);
+    expect(heldOffer.declineCodes).toEqual([]);
     expect(heldOffer.claims).toBe(1);
     expect(heldOffer.preparedStarts).toBe(1);
     expect(heldOffer.instructionStarts).toBe(0);
@@ -267,7 +267,7 @@ describe('a prepared preparation survives a real daemon process restart', () => 
       artifactDigest: released.artifactDigest,
       seq: 2,
     });
-    expect(releasedOffer.declines).toEqual([]);
+    expect(releasedOffer.declineCodes).toEqual([]);
     expect(releasedOffer.claims).toBe(1);
     expect(releasedOffer.preparedStarts).toBe(2);
     // The documented release rule, exercised rather than assumed: the pin is
@@ -304,7 +304,7 @@ describe('a prepared preparation survives a real daemon process restart', () => 
       artifactDigest: released.artifactDigest,
       seq: 3,
     });
-    expect(admittedByB.declines).toEqual([]);
+    expect(admittedByB.declineCodes).toEqual([]);
     expect(admittedByB.claims).toBe(1);
     expect(admittedByB.preparedStarts).toBe(1);
     expect(admittedByB.instructionStarts).toBe(0);
@@ -337,8 +337,7 @@ describe('a prepared preparation survives a real daemon process restart', () => 
       seq: 4,
     });
     expect(redelivered.claims).toBe(0);
-    expect(redelivered.declines).toHaveLength(1);
-    expect(redelivered.declines[0]!.split(':')[0]).toBe('preparation_already_pinned');
+    expect(redelivered.declineCodes).toEqual(['preparation_already_pinned']);
     expect(await second.rpc<Pin | null>('pin', { recordId: held.recordId })).toEqual(pinByA);
 
     // --- negative control, same process B ------------------------------
@@ -354,8 +353,7 @@ describe('a prepared preparation survives a real daemon process restart', () => 
       seq: 5,
     });
     expect(unknown.claims).toBe(0);
-    expect(unknown.declines).toHaveLength(1);
-    expect(unknown.declines[0]!.split(':')[0]).toBe('preparation_not_found');
+    expect(unknown.declineCodes).toEqual(['preparation_not_found']);
     // The two refusals started nothing: the count is still B's one admitted
     // prepared Execution.
     expect(unknown.preparedStarts).toBe(1);

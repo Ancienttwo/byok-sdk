@@ -159,7 +159,7 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
         const instruction = failure.startsWith('C7b')
           ? { blobRef: { blobId: 'b1', contentHash: `sha256:${'0'.repeat(64)}`, size: 10, contentType: 'text/plain' } }
           : 'fail before active';
-        const payload = { agentRef: freshTestAgentRef(), instruction, ...FRESH_OFFER } as never;
+        const payload = { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction, ...FRESH_OFFER } as never;
         await runner.handleEnvelope(createEnvelope('task.offer', payload, { taskId, seq: 1 }));
         expect(sent.filter((e) => e.type === 'task.fail' && e.task_id === taskId)).toHaveLength(1);
         expect(sent.filter((e) => e.task_id === taskId).map((e) => e.type))

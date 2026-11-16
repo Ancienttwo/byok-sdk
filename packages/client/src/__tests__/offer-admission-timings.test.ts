@@ -189,7 +189,7 @@ describe('DaemonObserver projects admission from the outbound envelope (#1014)',
   const admission = { totalMs: 90, resultHelperPreflightMs: 40 };
 
   it.each([
-    ['task.claim', createEnvelope('task.claim', { deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' }, admission }, { taskId: 'observed' }), { kind: 'claimed', ts: expect.any(String), taskId: 'observed', admission }],
+    ['task.claim', createEnvelope('task.claim', { deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' }, admission }, { taskId: 'observed' }), { kind: 'claimed', ts: expect.any(String), taskId: 'observed', claimedRuntime: 'pi', admission }],
     ['task.decline', createEnvelope('task.decline', { reason: 'busy', retryable: true, admission }, { taskId: 'observed' }), {
       kind: 'failed', ts: expect.any(String), taskId: 'observed', reason: 'busy', retryable: true, preClaim: true, admission,
     }],

@@ -59,9 +59,9 @@ function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partia
 async function offer(runner: TaskRunner, taskId: string): Promise<void> {
   await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId, seq: 1 }));
 }
-const declineReason = (sent: Envelope[]) => {
+const plainDecline = (sent: Envelope[]) => {
   const decline = sent.find(e => e.type === 'task.decline');
-  return decline?.type === 'task.decline' && decline.payload.sealed === undefined ? decline.payload.reason : undefined;
+  return decline?.type === 'task.decline' && decline.payload.sealed === undefined ? decline.payload : undefined;
 };
 
 describe('daemon tool authorization', () => {
@@ -291,7 +291,7 @@ describe('daemon tool authorization', () => {
     await offer(runner, 'task-unsupported');
     expect(adapter.inputs).toEqual([]);
     expect(sent.some(e => e.type === 'task.claim')).toBe(false);
-    expect(declineReason(sent)).toMatch(/^tool_authorization_unsupported: runtime pi /);
+    expect(plainDecline(sent)).toMatchObject({ code: 'tool_authorization_unsupported', reason: expect.stringMatching(/^runtime pi /) });
   });
 
   it('all uses the same rule precedence: ask reminds, allow suppresses, floor still reminds', async () => {
@@ -401,7 +401,7 @@ describe('daemon tool authorization', () => {
       allowWithoutAsking: [{ id: 'allow-read', match: { toolName: 'read' } }],
     } }) });
     await offer(runner, `unsupported-${runtimeId}`);
-    expect(declineReason(sent)).toMatch(new RegExp(`^tool_authorization_unsupported: runtime ${runtimeId} `));
+    expect(plainDecline(sent)).toMatchObject({ code: 'tool_authorization_unsupported', reason: expect.stringMatching(new RegExp(`^runtime ${runtimeId} `)) });
     expect(sent.some(event => event.type === 'task.claim')).toBe(false);
     expect(adapter.inputs).toEqual([]);
   });

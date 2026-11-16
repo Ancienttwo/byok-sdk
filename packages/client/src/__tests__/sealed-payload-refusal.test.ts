@@ -21,7 +21,7 @@ import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; payload: Record<string, unknown> });
@@ -70,7 +70,6 @@ describe('strict offer decline redelivery', () => {
     const declines = sent.filter((envelope) => envelope.type === 'task.decline');
     expect(declines).toHaveLength(1);
     expect(declines[0]!.payload).toMatchObject({ code: 'offer_capability_missing', reason: 'this daemon does not advertise agent-egress-policy', retryable: false });
-    expect(declines[0]!.payload).not.toHaveProperty('code');
   });
 });
 

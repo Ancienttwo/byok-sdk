@@ -61,7 +61,7 @@ describe('TaskRunner typed runtime failure projection', () => {
     await start(adapter);
     await offer('typed-start-infrastructure');
     const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'typed-start-infrastructure');
-    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'runtime process could not be spawned', retryable: true, failure: { class: 'unknown' } });
+    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, executor: { kind: 'runtime', runtimeId: 'pi' }, reason: 'runtime process could not be spawned', retryable: true, failure: { class: 'unknown' } });
   });
 
   it('projects typed run semantic failure as non-retryable after forwarding diagnostics', async () => {
@@ -78,7 +78,7 @@ describe('TaskRunner typed runtime failure projection', () => {
     }));
 
     const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'typed-run-semantic');
-    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'runtime reported terminal task failure', retryable: false, failure: { class: 'unknown' } });
+    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, executor: { kind: 'runtime', runtimeId: 'pi' }, reason: 'runtime reported terminal task failure', retryable: false, failure: { class: 'unknown' } });
     const progress = await server.waitFor((event) => event.type === 'task.progress' && event.task_id === 'typed-run-semantic');
     expect(progress.payload).toMatchObject({ events: [{ type: 'error', message: 'provider diagnostic' }] });
   });
@@ -114,7 +114,7 @@ describe('TaskRunner typed runtime failure projection', () => {
     adapter.sessions[0]!.fail(new Error('temporary timeout please retry'));
 
     const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'untyped-run');
-    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef,
+    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, executor: { kind: 'runtime', runtimeId: 'pi' },
       reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.run,
       retryable: false,
       failure: { class: 'unknown' },
@@ -134,7 +134,7 @@ describe('TaskRunner typed runtime failure projection', () => {
     adapter.sessions[0]!.endAbruptly();
 
     const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'clean-end-without-success');
-    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef,
+    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, executor: { kind: 'runtime', runtimeId: 'pi' },
       reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.run,
       retryable: false,
       failure: { class: 'unknown' },
@@ -154,7 +154,7 @@ describe('TaskRunner typed runtime failure projection', () => {
         failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' },
       }));
       const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'scope-run');
-      expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'weekly limit', retryable: false, failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' } });
+      expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, executor: { kind: 'runtime', runtimeId: 'pi' }, reason: 'weekly limit', retryable: false, failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' } });
     });
   });
 });

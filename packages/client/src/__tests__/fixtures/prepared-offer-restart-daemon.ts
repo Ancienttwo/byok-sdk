@@ -370,8 +370,8 @@ function report(before: number): Record<string, unknown> {
   const produced = sent.slice(before);
   return {
     claims: produced.filter((envelope) => envelope.type === 'task.claim').length,
-    declines: produced.flatMap((envelope) => (
-      envelope.type === 'task.decline' && envelope.payload.sealed === undefined ? [envelope.payload.reason] : []
+    declineCodes: produced.flatMap((envelope) => (
+      envelope.type === 'task.decline' && envelope.payload.sealed === undefined ? [envelope.payload.code] : []
     )),
     preparedStarts: adapter.preparedStartCalls.length,
     instructionStarts: adapter.startCalls.length,
