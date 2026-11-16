@@ -119,7 +119,7 @@ describe('SQLite durable device authority', () => {
     read.close();
     expect(objects.length).toBeGreaterThan(10);
     for (const { type, name } of objects) {
-      const path = database(); await open(path).close();
+      const path = database(); copyFileSync(reference, path);
       const edit = new DatabaseSync(path); edit.exec(`DROP ${type.toUpperCase()} ${name}`); edit.close();
       expect(() => open(path), name).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID' }));
       const check = new DatabaseSync(path, { readOnly: true });
