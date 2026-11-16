@@ -55,6 +55,25 @@ Expired replay rows are not removed on their own. Pass the replay authority as
 schedule; without the authority the `deviceAssertionReplay` step reports
 `not-configured` and expired rows accumulate.
 
+## Grok tasks no longer run the Grok updater (#2269)
+
+`GrokAdapter` (`DaemonConfig.runtimes.grok`) now starts every Grok agent
+process with `GROK_DISABLE_AUTOUPDATER=1`, Grok's documented process switch
+for its updater. The SDK sets it last, so a `GROK_DISABLE_AUTOUPDATER` in the
+task environment, including `0` or an empty value, no longer reaches Grok.
+
+Under `agentUserContext: 'inherit'`, a task started from a managed Grok install
+with `GROK_HOME` at that install used to run Grok's updater module, which wrote
+an `agent` link into the install's `bin/`. SDK tasks no longer change the
+user's Grok install and no longer check for Grok updates. Grok the user runs
+still updates itself. Under `agentUserContext: 'excluded'`, Grok already
+skipped its updater, because the SDK-owned `GROK_HOME` is not a managed
+install.
+
+Host action: if your product relied on Grok tasks to keep the user's Grok
+current, update Grok outside SDK tasks, for example by having the user run
+Grok or its installer.
+
 ## OAR 0.109.0 (#2235)
 
 The vendored OAR moves from 0.105.0 to 0.109.0 (`packages/client/vendor/oar/4eb5919/`, fork branch `byok/0.109.0`). No public type, export or configuration field changes. The upgrade manifest declares the three behavior-only breaking changes below as `model-confirmation-non-retryable`, `agy-model-confirmation-deadline` and `claude-queued-write-failure`.
