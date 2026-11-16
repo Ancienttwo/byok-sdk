@@ -24,6 +24,7 @@ const inMemoryFactory: CloudCompositionFactory = {
     objectBytes,
     );
     return {
+      presence: core.presence,
       // Exactly the certified ports, in `CLOUD_CONFORMANCE_PORTS` order: the
       // suite asserts the key set, so a composition cannot quietly hand over
       // extra surface the other compositions do not owe.

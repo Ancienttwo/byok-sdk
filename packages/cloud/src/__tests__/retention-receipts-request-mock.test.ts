@@ -12,6 +12,7 @@ const factory: CloudCompositionFactory = {
     const clock = createMutableClock();
     const composition = createInMemoryByokCloud({ clock });
     return {
+      presence: composition.core.presence,
       stores: composition.stores, now: () => clock.now().toISOString(), advanceTime: ms => clock.advance(ms),
       landBlobBytes: async ({ grant, bytes }) => { const result = await composition.blobContentProxy.writeContent(grant.blobId, bytes); if (!result.ok) throw new Error(result.reason); },
       commitBlob: async (tenant, reservation, observation) => { await composition.core.objects.commit(tenant, { hash: reservation.contentHash, ...observation }); },

@@ -290,6 +290,31 @@ export function runQuotaConformance(factory: CoreCompositionFactory): void {
       });
     });
 
+    it('is normal just below 80% usage and warning exactly at 80%', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
+        for (const [id, kind, bytes, seed] of [
+          ['object', 'object', 400n, 1], ['inline', 'inline', 100n, 2],
+        ] as const) {
+          await stores.quota.reserve(TENANT_A, { ...reservation(id, bytes, seed), kind });
+          await putReservationManifest(stores, id);
+          await stores.quota.finalizeReservation(TENANT_A, {
+            reservationId: id, observedByteSize: bytes, observedContentType: 'application/octet-stream',
+          });
+        }
+        await stores.quota.reserve(TENANT_A, reservation('held', 299n, 3));
+        expect(await stores.quota.readStatus(TENANT_A)).toMatchObject({
+          posture: 'normal', availableBytes: 201n,
+          usage: { committedObjectBytes: 400n, committedInlineBytes: 100n, reservedBytes: 299n },
+        });
+        await stores.quota.reserve(TENANT_A, reservation('boundary', 1n, 4));
+        expect(await stores.quota.readStatus(TENANT_A)).toMatchObject({
+          posture: 'warning', availableBytes: 200n,
+          usage: { committedObjectBytes: 400n, committedInlineBytes: 100n, reservedBytes: 300n },
+        });
+      });
+    });
+
     it('suspends durable writes once a downgrade grace has ended over the limit', async () => {
       await withComposition(factory, async (handle) => {
         const { stores } = handle;

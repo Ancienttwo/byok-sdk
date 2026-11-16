@@ -22,6 +22,7 @@ import {
   type CoreStores,
   type MailboxMessage,
   type MailboxStore,
+  type PresenceStore,
   type StorageReservation,
   type TenantId,
 } from '@byok-sdk/core';
@@ -89,6 +90,8 @@ export type CloudConformanceStores = Pick<CloudStores, CloudConformancePortName>
 /** One live composition under test. Same shape as `CoreCompositionHandle`. */
 export interface CloudCompositionHandle {
   readonly stores: CloudConformanceStores;
+  /** This composition's core presence authority, sharing its storage and clock. */
+  readonly presence: PresenceStore;
   /**
    * The composition's current instant as an ISO string. Exposed so assertions
    * about absolute deadlines (a pairing code's `expiresAt`) can be written

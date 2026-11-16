@@ -89,6 +89,14 @@ export function runActivityConformance(name: string, factory: ActivityCompositio
         expect((await store.read(TENANT_A, 'task', { after: second.cursor }))?.entries).toEqual([]);
       });
     });
+    it('rejects a cursor ahead of the log without changing history', async () => {
+      await withActivityComposition(factory, async ({ store }) => {
+        const tail = await store.append(TENANT_A, batch(1));
+        const after = { ...tail.cursor, revision: tail.cursor.revision + 1 };
+        await expect(store.read(TENANT_A, 'task', { after })).rejects.toMatchObject({ code: 'activity_cursor_invalid' });
+        expect(await store.read(TENANT_A, 'task')).toEqual(tail);
+      });
+    });
     it('retains complete batches and keeps producer loss separate from entry eviction', async () => {
       await withActivityComposition(factory, async ({ store }) => {
         const first = await store.append(TENANT_A, batch(1, { capacity: 1, dropped: 4, events: [{ type: 'progress', text: 'a' }, { type: 'future_observation', value: 7 }, { type: 'turn_end' }] }));

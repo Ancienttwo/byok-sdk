@@ -68,6 +68,7 @@ const postgresFactory: CloudCompositionFactory = {
     const core = createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: objectStorage.config });
 
     return {
+      presence: core.presence,
       stores,
       now: () => clock.now().toISOString(),
       advanceTime: (ms: number) => {

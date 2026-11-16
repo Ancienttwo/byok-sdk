@@ -56,6 +56,7 @@ const cloudFactory: CloudCompositionFactory = {
     );
     const stores = composition.cloud;
     return {
+      presence: composition.core.presence,
       stores: {
         activity: stores.activity,
         approvals: stores.approvals,
