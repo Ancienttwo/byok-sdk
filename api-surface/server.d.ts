@@ -1636,6 +1636,14 @@ export declare function isSqliteAvailable(): boolean;
  */
 export declare function openSqliteDatabase(path: string, options?: DatabaseSyncOptions, faults?: SqliteOpenFaultSeam): DatabaseSync;
 /**
+ * Run `read` on an existing, non-empty database file opened read-only and
+ * immutable, before anything opens it for writing. SQLite then takes no lock,
+ * writes nothing to the file and creates no journal, WAL or SHM file. It reads
+ * the main file only: content still in a WAL is not seen. `undefined` for
+ * `:memory:`, a missing path or an empty file, which hold nothing to read.
+ */
+export declare function readSqliteFileUnchanged<T>(path: string, read: (db: DatabaseSync) => T): T | undefined;
+/**
  * Restrict `dbPath` and its WAL/SHM sibling files (`<path>-wal`,
  * `<path>-shm` — created by SQLite itself once WAL mode is active and a
  * write has happened) to owner-only read/write ({@link SECURE_FILE_MODE}).

@@ -76,6 +76,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import {
   closeSqliteDatabaseAfterInitializationFailure,
   openSqliteDatabase,
+  readSqliteFileUnchanged,
   secureSqliteFilePermissions,
   SqliteSchemaError,
   type SqliteSchemaErrorCode,
@@ -254,6 +255,28 @@ const TASK_EVENTS_WAKE_TRIGGERS = ['task_attempt', 'activity_log_head', 'approva
       BEGIN SELECT ${TASK_CHANGED_FUNCTION}(${row}.tenant_id, ${row}.task_id); END;`;
   })).join('\n');
 
+/**
+ * The refusal a file's own schema metadata calls for, or `undefined` when this
+ * build adopts the file: it is current, or holds no table yet. Reads only.
+ * Wire v7 starts on a new store, so no older file is upgraded in place.
+ */
+function schemaRefusal(db: DatabaseSync): SqliteSchemaError | undefined {
+  const hasMetadata = db
+    .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'byok_sqlite_meta'")
+    .get();
+  if (hasMetadata === undefined) {
+    const existing = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get();
+    return existing === undefined
+      ? undefined
+      : new SqliteSchemaError('SQLITE_SCHEMA_INVALID', 'Existing SQLite database has no BYOK schema metadata', undefined, SQLITE_SCHEMA_VERSION);
+  }
+  const version = (db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get() as { value: string } | undefined)?.value;
+  if (version === SQLITE_SCHEMA_VERSION) return undefined;
+  return new SqliteSchemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version)}; ` +
+    `this build requires ${SQLITE_SCHEMA_VERSION}. ` +
+    'An older file is not adopted: start on a new database. A newer file needs a newer build.', version, SQLITE_SCHEMA_VERSION);
+}
+
 /** One serialized owner for the synchronous SQLite handle and every transaction on it. */
 class SqliteCoordinator {
   readonly db: DatabaseSync;
@@ -265,6 +288,12 @@ class SqliteCoordinator {
   #closePromise: Promise<void> | undefined;
 
   constructor(path: string, wake?: WakeConsumer) {
+    // Refuse a file this build does not adopt before the open below writes to
+    // it: switching a rollback-journal file to WAL rewrites its header, and no
+    // rollback undoes that. The check inside the schema transaction stays the
+    // authority for a file that changes between the two reads.
+    const refused = readSqliteFileUnchanged(path, schemaRefusal);
+    if (refused !== undefined) throw refused;
     this.db = openSqliteDatabase(path);
     let foundVersion: string | undefined;
     const schemaError = (code: SqliteSchemaErrorCode, message: string, options?: ErrorOptions) =>
@@ -281,19 +310,13 @@ class SqliteCoordinator {
       // openSqliteDatabase holds EXCLUSIVE ownership before this schema transaction.
       this.db.exec('BEGIN IMMEDIATE');
       try {
+        const refusal = schemaRefusal(this.db);
+        if (refusal !== undefined) throw refusal;
         const hasMetadata = this.db
           .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'byok_sqlite_meta'")
           .get();
         if (hasMetadata !== undefined) {
-          const version = this.db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'")
-            .get() as { value: string } | undefined;
-          foundVersion = version?.value;
-          // Wire v7 starts on a new store: no older file is upgraded in place.
-          if (version?.value !== SQLITE_SCHEMA_VERSION) {
-            throw schemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
-              `this build requires ${SQLITE_SCHEMA_VERSION}. ` +
-              'An older file is not adopted: start on a new database. A newer file needs a newer build.');
-          }
+          foundVersion = SQLITE_SCHEMA_VERSION;
           for (const projection of [
             'tenant_id, device_id, next_seq, delivered_seq, acked_seq, updated_at, closed_at, closed_cause FROM mailbox_cursor',
             'tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at FROM mailbox_message',
@@ -306,8 +329,6 @@ class SqliteCoordinator {
             assertProjection(projection);
           }
         } else {
-          const existing = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get();
-          if (existing !== undefined) throw schemaError('SQLITE_SCHEMA_INVALID', 'Existing SQLite database has no BYOK schema metadata');
           this.db.exec(SCHEMA);
           this.db.exec(RECEIPT_SCHEMA);
           this.db.exec(DEVICE_SCHEMA);
