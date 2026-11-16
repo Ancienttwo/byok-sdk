@@ -85,9 +85,13 @@ vi.mock('../adapters/pi/rpc-client', () => ({
     get events() {
       return { async *[Symbol.asyncIterator]() { for (const frame of sandbox.frames) yield frame; } };
     }
-    async send(command: { type: string }): Promise<PiRpcMessage> {
+    async send(command: { type: string }, framesBefore?: (count: number, response: PiRpcMessage) => void): Promise<PiRpcMessage> {
       sandbox.commands.push(command.type);
-      if (command.type === 'prompt') return { type: 'response', success: true };
+      if (command.type === 'prompt') {
+        const response = { type: 'response', success: true, data: { disposition: 'started' } };
+        framesBefore?.(0, response);
+        return response;
+      }
       if (command.type === 'get_state') return { type: 'response', success: true, data: { sessionId: 'p2-synthetic-session' } };
       if (command.type === 'get_session_stats') return sandbox.stats();
       return sandbox.deny(`RPC ${command.type}`);

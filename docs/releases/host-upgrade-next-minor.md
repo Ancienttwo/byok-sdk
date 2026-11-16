@@ -96,6 +96,43 @@ Host action: if your product relied on Grok tasks to keep the user's Grok
 current, update Grok outside SDK tasks, for example by having the user run
 Grok or its installer.
 
+## Pi tasks and extension runs (#2299)
+
+A Pi extension can start a run of its own: from `session_start`, a timer, or
+one of its hooks. Pi RPC events name no run, so before this change a pi-rpc
+task could lose its start or its turn to such a run.
+
+- A task that starts while an extension run is active used to fail as
+  non-retryable `RuntimeExecutionFailure` `Agent is already processing`. Its
+  first prompt now carries `streamingBehavior: 'followUp'`, so the input joins
+  that run. The turn ends when that run settles, and its events include the
+  rest of that run's output.
+- An extension run that settles before the task's prompt is accepted, or that
+  runs between turns, no longer ends the task's turn early. Frames written
+  outside the task's turn, such as that run's progress, usage and tool
+  events, are no longer reported as the task's events. When the task's input
+  joins a run in the middle of a tool call, that call's result is not reported
+  either. Every `extension_error` is still reported, because Pi does not say
+  which prompt or run it belongs to.
+- A first prompt that Pi handles without a run, such as an extension command,
+  now ends the turn at once instead of waiting for the next settlement.
+
+The turn boundary relies on Pi 1.5.2's implementation order (runs never
+overlap; a started prompt is answered before its run begins), which a test
+pins against the installed Pi.
+
+One case is not covered. When an extension run is still in its `agent_settled`
+hook and that hook starts compaction, Pi defers the task's first prompt and
+then drops it without any response. The start stays pending until the Host's
+own start deadline; #2300 bounds it inside the SDK.
+
+Host action: none. Extensions reach a pi-rpc task under the default
+`agentUserContext: 'inherit'` (the user's Pi agent directory and settings
+packages, and `.pi/extensions` in the task workspace) and through
+`agentExtensionPaths` in either mode. A Host that needs task output free of
+extension runs uses `agentUserContext: 'excluded'` and lists only Host-owned
+`agentExtensionPaths`.
+
 ## OAR 0.110.0 (#2235, #2296)
 
 The vendored OAR moves from 0.105.0 to 0.110.0 (`packages/client/vendor/oar/552a4f9/`, fork branch `byok/0.110.0`). No public type, export or configuration field changes. The upgrade manifest declares the three behavior-only breaking changes below as `model-confirmation-non-retryable`, `agy-model-confirmation-deadline` and `claude-queued-write-failure`.

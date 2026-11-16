@@ -147,6 +147,15 @@
       ]
     },
     {
+      "id": "pi-turn-own-run",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client Pi tasks on the pi-rpc lane send their first prompt with streamingBehavior 'followUp' and end a turn only when the run their own prompt joined settles. A task that starts while a Pi extension's own run is active (a user extension under the default agentUserContext 'inherit', a workspace .pi extension, or agentExtensionPaths) no longer fails non-retryable with 'Agent is already processing': its input joins that run, the turn ends when that run settles, and the turn's events carry the rest of that run's output. Frames written before the task's prompt was accepted or between turns, such as an extension run's settlement, progress, usage and tool events, are no longer reported as the task's events and no longer end its turn; a tool result whose call started before the task joined the run is not reported either. Every extension_error is still reported. A first prompt Pi handles without a run (an extension command) now ends the turn at once instead of waiting for the next settlement. An extension run that is still in its agent_settled hook and starts compaction can leave the first prompt without any response; that start stays pending until the Host's own start deadline (#2300). No Host action is required; a Host that needs task output free of extension runs uses agentUserContext 'excluded' and lists only Host-owned agentExtensionPaths.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pi-tasks-and-extension-runs-2299",
+      "items": [
+        "behavior:pi-turn-own-run"
+      ]
+    },
+    {
       "id": "remove-task-terminal-read",
       "impact": "breaking",
       "summary": "@byok-sdk/client removes AgentSessionHandoffStore.getTaskTerminal(). Remove reads; recordTaskTerminal() still persists failure evidence and returns its write receipt.",
