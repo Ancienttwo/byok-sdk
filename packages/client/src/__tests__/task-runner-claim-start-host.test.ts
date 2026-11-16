@@ -57,6 +57,22 @@ function wireTypes(sent: Envelope[], taskId: string): string[] {
   return sent.filter(envelope => envelope.task_id === taskId).map(envelope => envelope.type);
 }
 
+type ClaimSettlement = Awaited<ReturnType<NonNullable<TaskRunnerDeps['awaitClaimSettlement']>>>;
+
+/** A cloud stand-in that settles each posted claim only when the test says so (#2294). */
+function claimGate(): { deps: Pick<TaskRunnerDeps, 'awaitClaimSettlement'>; settle: (settlement: ClaimSettlement) => void } {
+  let settleClaim: ((settlement: ClaimSettlement) => void) | undefined;
+  return {
+    deps: {
+      awaitClaimSettlement: (_taskId, _claimId, signal) => new Promise((resolve) => {
+        settleClaim = resolve;
+        signal.addEventListener('abort', () => resolve(undefined), { once: true });
+      }),
+    },
+    settle: settlement => settleClaim?.(settlement),
+  };
+}
+
 /** A start that waits for the test and then throws, so a cancel can race it. */
 class GatedFailingAdapter extends StubRuntimeAdapter {
   private enter!: () => void;
@@ -196,6 +212,69 @@ describe('TaskRunner claim/start/cancel host wiring (S4)', () => {
     // retained exactly like the legacy cancel-vs-start path; stopping retries
     // here keeps the fixture's 1s timer out of the next test.
     runner.stopAcceptingOffers();
+    forgetHost(runner);
+  });
+
+  it('starts the runtime once the cloud answers the claim as a duplicate (#2294)', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const gate = claimGate();
+    const { runner } = makeRunner(sent, { adapters: [adapter], ...gate.deps });
+    const taskId = 'task-2294-duplicate';
+    const offer = runner.handleEnvelope(offerEnvelope(taskId));
+    await vi.waitFor(() => expect(wireTypes(sent, taskId)).toContain('task.claim'));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(hostFor(runner).current(taskId)?.phase).toBe('claimed');
+
+    gate.settle({ outcome: 'duplicate' });
+    await offer;
+    expect(adapter.startCalls).toHaveLength(1);
+    expect(wireTypes(sent, taskId)).toEqual(['task.claim', 'task.started']);
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(wireTypes(sent, taskId)).toContain('task.complete'));
+    forgetHost(runner);
+  });
+
+  it('a cancel while the claim is unsettled sends task.cancelled and never starts; a late acceptance changes nothing (#2294)', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const gate = claimGate();
+    const { runner } = makeRunner(sent, { adapters: [adapter], ...gate.deps });
+    const taskId = 'task-2294-cancel';
+    const offer = runner.handleEnvelope(offerEnvelope(taskId));
+    await vi.waitFor(() => expect(wireTypes(sent, taskId)).toContain('task.claim'));
+
+    await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'stop before start' }, { taskId, seq: 2 }));
+    await offer;
+    gate.settle({ outcome: 'accepted' });
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(wireTypes(sent, taskId)).toEqual(['task.claim', 'task.cancelled']);
+    const cancelled = sent.find(envelope => envelope.type === 'task.cancelled')!;
+    expect(cancelled.payload).toMatchObject({ reason: 'stop before start', executor: { kind: 'runtime' } });
+    expect(hostFor(runner).archivedTask(taskId)?.terminal).toMatchObject({ kind: 'cancelled', reason: 'stop before start' });
+    expect(runner.activeTaskCount).toBe(0);
+    forgetHost(runner);
+  });
+
+  it('the startup deadline ends an unsettled claim through C7b and never starts the runtime (#2294)', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const gate = claimGate();
+    const { runner } = makeRunner(sent, { adapters: [adapter], startupTimeoutMs: 200, ...gate.deps });
+    const taskId = 'task-2294-deadline';
+    await runner.handleEnvelope(offerEnvelope(taskId));
+    gate.settle({ outcome: 'accepted' });
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(wireTypes(sent, taskId)).toEqual(['task.claim', 'task.fail']);
+    expect(sent.find(envelope => envelope.type === 'task.fail')?.payload).toMatchObject({
+      reason: 'runtime startup deadline exceeded', retryable: true, executor: { kind: 'runtime' },
+    });
+    expect(hostFor(runner).archivedTask(taskId)?.terminal).toMatchObject({ kind: 'failed', retryable: true });
     forgetHost(runner);
   });
 
