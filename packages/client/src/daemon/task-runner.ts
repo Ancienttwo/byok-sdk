@@ -12,6 +12,7 @@ import {
   type AgentEgressPolicy,
   type Envelope,
   type SealedDeclineCode,
+  type ClaimedExecutor,
   type RuntimeId,
   type TerminalInferenceUsage,
   type TerminalPreparedObservation,
@@ -575,7 +576,8 @@ export class TaskRunner {
   private readonly inFlightOffers = new Set<string>();
   /** Sealed offers being opened, so a redelivery during the open is not opened twice. */
   private readonly sealedOpening = new Set<string>();
-  private readonly claimedHarnesses = new Map<string, string>();
+  /** The adapter id each task claimed during its offer, so a terminal sent before the task is active echoes `executor`. */
+  private readonly claimedExecutorIds = new Map<string, string>();
   private readonly homeReservations = new Map<string, number>();
   /** Offers admitted past the device-wide task cap that are not yet active; cleared when `handleOffer` returns. */
   private readonly deviceTaskReservations = new Set<string>();
@@ -1403,7 +1405,7 @@ export class TaskRunner {
 
   /**
    * Build the optional terminal observation from facts this running daemon
-   * actually has. No offered `dispatchSelection` is echoed here: it is a
+   * actually has. No offered model-lane `target` is echoed here: it is a
    * requested execution target, not an adapter-reported provider/model fact.
    * The bundled adapter event contracts currently expose token observations
    * (Codex and Claude) but no provider/model observation, so those keys stay
@@ -1436,8 +1438,8 @@ export class TaskRunner {
   private agentTerminalPayload(
     active: ActiveTask,
   ): {
+    executor: ClaimedExecutor;
     agentRef?: AgentRef;
-    harnessId?: string;
     agentHomeProjection?: TerminalAgentHomeProjection;
     agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
     residentMemoryOverLimit?: TerminalResidentMemoryOverLimit;

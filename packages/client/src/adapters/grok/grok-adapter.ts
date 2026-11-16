@@ -1,7 +1,7 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
 import { execFile, spawn, type spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { RuntimeTaskInput } from '../../types.js';
+import { modelLaneTarget, type RuntimeTaskInput } from '../../types.js';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -438,7 +438,7 @@ class GrokSession implements Session {
   }
   async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string') throw new PolicyUnsupportedError('grok requires a string instruction');
-    if (task.dispatchSelection !== undefined) throw new PolicyUnsupportedError(`grok persistent session runs ${this.model ?? 'the default model'} and takes no dispatch selection`);
+    if (modelLaneTarget(task.target) !== undefined) throw new PolicyUnsupportedError(`grok persistent session runs ${this.model ?? 'the default model'} and takes no dispatch selection`);
     await this.prompt(task.instruction);
   }
   async steer(): Promise<void> {

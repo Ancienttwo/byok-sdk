@@ -1,3 +1,5 @@
+import type { ExecutionTarget } from '@byok-sdk/protocol';
+
 /**
  * M4 Phase 3: default wait for `requestApproval` (see its own doc comment)
  * before force-resolving an unanswered out-of-band approval as a fail-closed
@@ -299,9 +301,8 @@ export interface OfferFactsV1 {
   readonly requiredToolsets: readonly string[];
   readonly strict: boolean;
   readonly sealed: boolean;
-  readonly requestedRuntime?: string;
-  readonly dispatchRuntime?: string;
-  readonly harnessId?: string;
+  /** The offer's requested target; absent on a strict decline, which reads no offer field. */
+  readonly target?: ExecutionTarget;
   readonly agentRef?: string;
   readonly sessionRef?: string;
   readonly maxDurationMs?: number;

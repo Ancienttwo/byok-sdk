@@ -365,7 +365,7 @@ export async function fail(this: TaskRunner, taskId: string, reason: string, ret
     return;
   }
   this['deps'].send(createEnvelope('task.fail', {
-    reason, retryable, failure: failure, ...terminalIdentity(this['claimedHarnesses'].get(taskId)),
+    reason, retryable, failure: failure, ...terminalIdentity(this['claimedExecutorIds'].get(taskId)),
   }, { taskId }));
   await this['finish'](taskId);
 }

@@ -35,8 +35,11 @@ export async function bindOfferWorkspace(this: TaskRunner, phase: OfferPhaseCont
         home: resolution.canonicalHome,
       });
     } catch (error) {
-      decline(`Agent session handoff mismatch: ${outboundErrorMessage(error)}`, error instanceof AgentHomeBusyError,
-        error instanceof AgentHomeBusyError ? homeBusyCode : undefined);
+      decline({
+        reason: `Agent session handoff mismatch: ${outboundErrorMessage(error)}`,
+        retryable: error instanceof AgentHomeBusyError,
+        ...(error instanceof AgentHomeBusyError ? { code: homeBusyCode } : {}),
+      });
       return;
     }
   }
@@ -51,11 +54,11 @@ export async function bindOfferWorkspace(this: TaskRunner, phase: OfferPhaseCont
     held.agentBinding = agentBinding;
     releaseReservation();
   } catch (error) {
-    decline(
-      `Agent home admission failed: ${outboundErrorMessage(error)}`,
-      error instanceof AgentHomeBusyError || !(error instanceof AgentHomeResolutionError),
-      error instanceof AgentHomeBusyError ? homeBusyCode : undefined,
-    );
+    decline({
+      reason: `Agent home admission failed: ${outboundErrorMessage(error)}`,
+      retryable: error instanceof AgentHomeBusyError || !(error instanceof AgentHomeResolutionError),
+      ...(error instanceof AgentHomeBusyError ? { code: homeBusyCode } : {}),
+    });
     return;
   }
 
@@ -85,7 +88,7 @@ export async function bindOfferWorkspace(this: TaskRunner, phase: OfferPhaseCont
     } catch (error) {
       await agentBinding.lease.release().catch(() => {});
       held.agentBinding = undefined;
-      decline(`Agent session handoff mismatch: ${outboundErrorMessage(error)}`, error instanceof PathMutationGateBusyError);
+      decline({ reason: `Agent session handoff mismatch: ${outboundErrorMessage(error)}`, retryable: error instanceof PathMutationGateBusyError });
       return;
     }
   }
@@ -98,11 +101,13 @@ export async function bindOfferWorkspace(this: TaskRunner, phase: OfferPhaseCont
       held.agentBinding = undefined;
       // A busy run directory (a redelivered task found a directory it
       // cannot reuse) may clear; every other failure is permanent.
-      decline(error instanceof AgentHomeReaderRunMissingError
-        ? `Agent session ${sessionRef} cannot resume: its reader run directory no longer exists`
-        : `Agent reader run directory preparation failed: ${outboundErrorMessage(error)}`,
-        error instanceof AgentHomeBusyError,
-        error instanceof AgentHomeBusyError ? homeBusyCode : undefined);
+      decline({
+        reason: error instanceof AgentHomeReaderRunMissingError
+          ? `Agent session ${sessionRef} cannot resume: its reader run directory no longer exists`
+          : `Agent reader run directory preparation failed: ${outboundErrorMessage(error)}`,
+        retryable: error instanceof AgentHomeBusyError,
+        ...(error instanceof AgentHomeBusyError ? { code: homeBusyCode } : {}),
+      });
       return;
     }
   }
@@ -111,8 +116,11 @@ export async function bindOfferWorkspace(this: TaskRunner, phase: OfferPhaseCont
   } catch (error) {
     await agentBinding.lease.release().catch(() => {});
     held.agentBinding = undefined;
-    decline(`Agent home initialization failed: ${outboundErrorMessage(error)}`, error instanceof AgentHomeBusyError,
-      error instanceof AgentHomeBusyError ? homeBusyCode : undefined);
+    decline({
+      reason: `Agent home initialization failed: ${outboundErrorMessage(error)}`,
+      retryable: error instanceof AgentHomeBusyError,
+      ...(error instanceof AgentHomeBusyError ? { code: homeBusyCode } : {}),
+    });
     return;
   }
   // Terminal evidence only (#318): an unreadable projection record must not
@@ -138,7 +146,7 @@ export async function bindOfferWorkspace(this: TaskRunner, phase: OfferPhaseCont
     } catch (error) {
       await agentBinding.lease.release().catch(() => {});
       held.agentBinding = undefined;
-      decline(`Agent message outbox initialization failed: ${outboundErrorMessage(error)}`, true);
+      decline({ reason: `Agent message outbox initialization failed: ${outboundErrorMessage(error)}`, retryable: true });
       return;
     }
   }
@@ -152,7 +160,7 @@ export async function bindOfferWorkspace(this: TaskRunner, phase: OfferPhaseCont
     } catch (error) {
       await agentBinding.lease.release().catch(() => {});
       held.agentBinding = undefined;
-      decline(`Agent result store initialization failed: ${outboundErrorMessage(error)}`, true);
+      decline({ reason: `Agent result store initialization failed: ${outboundErrorMessage(error)}`, retryable: true });
       return;
     }
   }

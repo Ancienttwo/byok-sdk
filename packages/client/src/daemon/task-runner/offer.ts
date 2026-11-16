@@ -1,15 +1,14 @@
 // `TaskRunner.handleOffer`: one offer from redelivery guard to active task
 // (see ./support.ts for how a member module runs).
 import type { ExecutionScratch } from '../retention/scratch.js';
-import { offerSelectionViolation, type PreparedAgentMemoryMode, type TaskDeclinePayload } from '@byok-sdk/protocol';
+import { offerSelectionViolation, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import { type AgentHomeExecutionBinding, type AgentRef } from '../../agent-home.js';
 import type { OfferPhaseContext } from './support.js';
 import { outboundErrorMessage } from '../outbound-error.js';
 import { endMemoryStartWait, settleAgentMemoryCommitCopy } from './agent-memory.js';
-import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable.js';
 import { hostDeclineSender, offeredPreparation, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage } from './support.js';
 import type { TaskRunner } from '../task-runner.js';
-import type { AcceptedOfferPayload } from './support.js';
+import type { AcceptedOfferPayload, OfferDecline } from './support.js';
 import { offerAlreadyHandled } from './offer-admission.js';
 import { bindOfferWorkspace } from './offer-workspace.js';
 import { sealOfferManifest, claimOffer, startOfferRuntime } from './offer-launch.js';
@@ -47,9 +46,7 @@ function offerFactsFor(taskId: string, payload: AcceptedOfferPayload): OfferFact
     requiredToolsets: [...(payload.requiredToolsets ?? [])],
     strict: false,
     sealed: payload.sealing !== undefined,
-    ...(payload.runtime === undefined ? {} : { requestedRuntime: payload.runtime }),
-    ...(payload.dispatchSelection === undefined ? {} : { dispatchRuntime: payload.dispatchSelection.runtimeId }),
-    ...(payload.harnessId === undefined ? {} : { harnessId: payload.harnessId }),
+    target: payload.target,
     ...(sessionRef === undefined ? {} : { sessionRef }),
     ...(payload.limits?.maxDurationMs === undefined ? {} : { maxDurationMs: payload.limits.maxDurationMs }),
     ...(message === undefined ? {} : {
@@ -101,12 +98,7 @@ export async function handleOffer(
     stage: 'receive',
     sendDecline: hostDeclineSender.call(this, taskId, admission),
   });
-  const decline = (
-    reason: string,
-    retryable: boolean,
-    code?: TaskDeclinePayload['code'],
-    runtimeUnavailable?: RuntimeUnavailableAdmission,
-  ): void => {
+  const decline = ({ reason, retryable, code, runtimeUnavailable }: OfferDecline): void => {
     host.setRuntimeUnavailable(taskId, runtimeUnavailable);
     try {
       host.dispatchSync({
@@ -137,13 +129,6 @@ export async function handleOffer(
     return;
   }
 
-  if (payload.nativeSessions !== undefined && (this['deps'].nativeSessions === undefined
-    || !this['deps'].advertisedCapabilities?.().includes('native-sessions')
-    || (payload.runtime !== undefined && payload.runtime !== 'pi')
-    || (payload.dispatchSelection !== undefined && payload.dispatchSelection.runtimeId !== 'pi'))) {
-    decline('native_sessions_unsupported', false, 'native_sessions_unsupported');
-    return;
-  }
   const request = readOfferRequest.call(this, taskId, payload, admission, decline);
   if (request === undefined) return;
   const {
@@ -156,7 +141,7 @@ export async function handleOffer(
       // By name, not by reinterpretation. A daemon with no input-preparation
       // section holds no record this reference could mean, and running the
       // offer some other way would be running an Execution nobody counted.
-      decline('preparation_lane_unconfigured: this daemon is not configured for input preparation', false);
+      decline({ reason: 'this daemon is not configured for input preparation', retryable: false, code: 'preparation_lane_unconfigured' });
       return;
     }
     // BEFORE the first read. A restarted daemon reaches this line with a
@@ -173,17 +158,18 @@ export async function handleOffer(
     try {
       await preparationLane.open();
     } catch (error) {
-      decline(
-        `preparation_store_unavailable: the preparation store could not be opened: ${outboundErrorMessage(error)}`,
-        false,
-      );
+      decline({
+        reason: `the preparation store could not be opened: ${outboundErrorMessage(error)}`,
+        retryable: false,
+        code: 'preparation_store_unavailable',
+      });
       return;
     } finally {
       this['inFlightOffers'].delete(taskId);
       endMemoryStartWait.call(this, taskId);
     }
     if (preparationLane.store.get(preparation.reference) === undefined) {
-      decline('preparation_not_found: no preparation record under this reference on this device', false);
+      decline({ reason: 'no preparation record under this reference on this device', retryable: false, code: 'preparation_not_found' });
       return;
     }
   }
@@ -191,17 +177,17 @@ export async function handleOffer(
   const terminalProjection = payload.terminalProjection;
   if (payload.egressPolicy !== undefined) {
     if (this['deps'].agentEgressPolicy === undefined || !sameEgressPolicy(this['deps'].agentEgressPolicy, payload.egressPolicy)) {
-      decline('Agent egress offer policy is not exactly enabled by this daemon', false);
+      decline({ reason: 'Agent egress offer policy is not exactly enabled by this daemon', retryable: false });
       return;
     }
   }
   if (messageRequirement !== undefined && ((preparation === undefined && this['deps'].agentMessageMcpBin === undefined) || this['deps'].tenantId === undefined)) {
-    decline('required Agent message egress is unavailable on this daemon', false);
+    decline({ reason: 'required Agent message egress is unavailable on this daemon', retryable: false });
     return;
   }
   if (terminalProjection?.mode === 'result-document') {
     if (this['deps'].tenantId === undefined || this['deps'].agentResultMcpBin === undefined) {
-      decline('offer requires a result document but this daemon cannot host the submit_result channel: it needs an Agent offer, an enrolled tenant and the SDK result helper', false);
+      decline({ reason: 'offer requires a result document but this daemon cannot host the submit_result channel: it needs an Agent offer, an enrolled tenant and the SDK result helper', retryable: false });
       return;
     }
   }
@@ -218,10 +204,10 @@ export async function handleOffer(
     if (current?.phase === 'declined' || current?.terminal !== undefined) return true;
     if (current?.cancel.requested === true) {
       if (current.phase === 'claimed' || current.claim.journaled || current.claim.sent) return true;
-      decline('cancelled before claim', false);
+      decline({ reason: 'cancelled before claim', retryable: false });
       return true;
     }
-    decline(this['stoppingOffers'] ? 'daemon is shutting down' : 'runtime startup deadline exceeded', true);
+    decline({ reason: this['stoppingOffers'] ? 'daemon is shutting down' : 'runtime startup deadline exceeded', retryable: true });
     return true;
   };
   this['inFlightBlobAborts'].set(taskId, blobAbort);
@@ -380,7 +366,7 @@ export async function handleOffer(
       this['inFlightOffers'].delete(taskId);
       endMemoryStartWait.call(this, taskId);
       this['deviceTaskReservations'].delete(taskId);
-      this['claimedHarnesses'].delete(taskId);
+      this['claimedExecutorIds'].delete(taskId);
     }
   }
 }
@@ -390,17 +376,17 @@ function readOfferRequest(
   taskId: string,
   payload: AcceptedOfferPayload,
   admission: OfferAdmissionTiming,
-  decline: (reason: string, retryable: boolean, code?: TaskDeclinePayload['code'], runtimeUnavailable?: RuntimeUnavailableAdmission) => void,
+  decline: (decline: OfferDecline) => void,
 ) {
   let offeredRef: AgentRef | undefined;
   try {
     offeredRef = offeredAgentRef(payload);
   } catch (error) {
-    decline(`invalid AgentRef: ${errorMessage(error)}`, false);
+    decline({ reason: `invalid AgentRef: ${errorMessage(error)}`, retryable: false });
     return;
   }
   if (offeredRef === undefined) {
-    decline('Agent offer requires the SDK-owned agent-home-contract layout and handoff store', false);
+    decline({ reason: 'Agent offer requires the SDK-owned agent-home-contract layout and handoff store', retryable: false });
     return;
   }
   // Every offer past this point is bound to exactly one Agent, so a decline
@@ -408,13 +394,22 @@ function readOfferRequest(
   const agentRef: AgentRef = offeredRef;
   hostFor(this).setAgentRef(taskId, agentRef);
   const homeAccess = offeredHomeAccess(payload);
+  // The selection rules run before any native-sessions support check, so
+  // `native_sessions_unsupported` never hides a selection violation
+  // (docs/protocol.md §3.2 "Order on the device"). Rule 3 already declined a
+  // native-sessions offer without an explicit Pi target.
   const violation = offerSelectionViolation(payload);
   if (violation !== undefined) {
-    decline(`${violation.rule}: ${violation.message}`, false, violation.rule);
+    decline({ reason: violation.message, retryable: false, code: violation.rule });
+    return;
+  }
+  if (payload.nativeSessions !== undefined && (this['deps'].nativeSessions === undefined
+    || !this['deps'].advertisedCapabilities?.().includes('native-sessions'))) {
+    decline({ reason: 'native_sessions_unsupported', retryable: false, code: 'native_sessions_unsupported' });
     return;
   }
   if (this['deps'].agentHome === undefined || this['deps'].agentSessionHandoffs === undefined) {
-    decline('Agent offer requires the SDK-owned agent-home-contract layout and handoff store', false);
+    decline({ reason: 'Agent offer requires the SDK-owned agent-home-contract layout and handoff store', retryable: false });
     return;
   }
   const sessionRef = offeredSessionRef(payload);
@@ -425,7 +420,7 @@ function readOfferRequest(
   // not mention it behaves exactly as it did before this lane existed.
   const preparation = offeredPreparation(payload);
   if (payload.agentMemoryCommit !== undefined && this['deps'].agentMemoryCommit === undefined) {
-    decline('agent_memory_commit_unavailable: this daemon has no proven strict memory backend', false);
+    decline({ reason: 'this daemon has no proven strict memory backend', retryable: false, code: 'agent_memory_commit_unavailable' });
     return;
   }
   const offeredMemory = payload.agentMemory;
@@ -443,7 +438,7 @@ function readOfferRequest(
   const ordinaryMemory = preparation === undefined ? offeredMemory : undefined;
   const memoryAdmitted = this['agentMemoryMcpAdmitted']();
   if ((ordinaryMemory === 'read' || ordinaryMemory === 'read-write') && !memoryAdmitted) {
-    decline('agent_memory_unavailable: this daemon does not admit the Agent memory MCP', false);
+    decline({ reason: 'this daemon does not admit the Agent memory MCP', retryable: false, code: 'agent_memory_unavailable' });
     return;
   }
   const ordinaryMemoryMode: PreparedAgentMemoryMode = ordinaryMemory === 'read-if-admitted'
