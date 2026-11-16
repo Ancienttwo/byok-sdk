@@ -2489,7 +2489,7 @@ export declare class EnvelopeValidationError extends ProtocolError {
 /**
  * A peer did not negotiate this wire major (wire v7). The answer to a lone
  * `conn.hello` was an explicit, permanent refusal — a `rejected` outcome with
- * `protocol_version_unsupported`, or a 4xx other than 401, 403, 413 and 429 —
+ * `protocol_version_unsupported`, or a 4xx other than 401, 403, 409, 413 and 429 —
  * so the peer cannot read this major. `peerVersion` is present only when the
  * peer stated its major; a refusal never implies which major the peer speaks.
  * A coordinated upgrade of the server side and the daemons resolves it.
