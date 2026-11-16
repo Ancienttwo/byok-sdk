@@ -620,15 +620,18 @@ describe('GrokAdapter agentUserContext (#2239)', () => {
     expect(existsSync(resources.log) && facts(resources.log).some(fact => fact.kind === 'start')).toBe(false);
   });
 
-  it('allows the Claude and Cursor files only while inspect reports their cell disabled, folding letter case on darwin', async () => {
-    const output = (enabled: boolean) => JSON.stringify({
-      projectInstructions: [{ path: '/Users/u/.claude/Claude.md', scope: 'global' }, { path: '/Users/u/.claude/rules/c.md', scope: 'global' }],
-      externalCompat: { cells: ['agents', 'rules'].map(surface => ({ vendor: 'claude', surface, enabled, source: 'env' })) },
-    });
-    expect(await grokUserInstructionsRefusal(output(false), '/Users/u', 'darwin')).toBeUndefined();
-    expect(await grokUserInstructionsRefusal(output(true), '/Users/u', 'darwin')).toBe(`${PREFIX}: Grok still loads 2 user instruction files outside the task, such as [paths] extra_rule_dirs`);
-    expect(await grokUserInstructionsRefusal(output(false), '/users/u', 'linux')).toBe(`${PREFIX}: Grok still loads 2 user instruction files outside the task, such as [paths] extra_rule_dirs`);
-    expect(await grokUserInstructionsRefusal('{"projectInstructions":[]}', '/Users/u', 'darwin')).toBe(`${PREFIX}: grok inspect failed`);
+  it('judges each instruction by its own vendor, disabled and compatibilityStatus, never by its directory', async () => {
+    const judge = (...entries: object[]) => grokUserInstructionsRefusal(JSON.stringify({ projectInstructions: entries.map(entry => ({ scope: 'global', ...entry })) }));
+    const off = { vendor: 'claude', disabled: true, compatibilityStatus: 'disabled' };
+    const loads = (n: number) => `${PREFIX}: Grok still loads ${n} user instruction file${n === 1 ? '' : 's'} outside the task, such as [paths] extra_rule_dirs`;
+    expect(await judge({ path: '/home/u/.claude/CLAUDE.md', ...off }, { path: '/w/AGENTS.md', scope: 'project' })).toBeUndefined();
+    // Grok 1.0.77 with extra_rule_dirs = ["~/.claude"]: the directory's files are listed without a vendor.
+    expect(await judge({ path: '/home/u/.claude/extra.md', fileType: 'rules' }, { path: '/home/u/.claude/rules/c.md', ...off })).toBe(loads(1));
+    expect(await judge({ path: '/home/u/.claude/extra.md', vendor: 'claude', disabled: false, compatibilityStatus: 'enabled' })).toBe(loads(1));
+    // Contradictory or partial marks count as loaded.
+    expect(await judge({ path: '/a', vendor: 'claude', disabled: true, compatibilityStatus: 'enabled' }, { path: '/b', vendor: 'cursor', compatibilityStatus: 'disabled' }, { path: '/c', vendor: 'grok', disabled: true, compatibilityStatus: 'disabled' })).toBe(loads(3));
+    expect(await judge({ path: '/a', vendor: 'claude', disabled: 'yes' })).toBe(`${PREFIX}: grok inspect failed`);
+    expect(await grokUserInstructionsRefusal('{"mcpServers":[]}')).toBe(`${PREFIX}: grok inspect failed`);
   });
 
   it('refuses on Windows before it creates the home or any link', async () => {

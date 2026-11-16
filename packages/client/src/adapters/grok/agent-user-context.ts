@@ -1,4 +1,3 @@
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 import { createOwnedRuntimeHome } from '../owned-runtime-home.js';
@@ -49,36 +48,25 @@ export async function createGrokAgentHome(env: Readonly<Record<string, string | 
 /**
  * Why `grok inspect --json` output, run with the SDK-owned home, still lists a
  * user instruction file, or `undefined` when it lists none. `projectInstructions`
- * reports discovery: a `global` entry may load. The SDK home has no `AGENTS.md`
- * or `rules/`, so a `global` entry is an `extra_rule_dirs` file, an unknown
- * source, or a Claude or Cursor file. Only the last is allowed, and only when
- * inspect reports its `agents` or `rules` cell disabled: Grok 1.0.77 lists those
- * files even with the cell off. Output it cannot read refuses too.
+ * reports discovery: a `global` entry may load. Each entry is judged by its own
+ * marks, never by its directory: only a Claude or Cursor compatibility file that
+ * inspect marks `disabled: true` and `compatibilityStatus: 'disabled'` is allowed.
+ * An `[paths] extra_rule_dirs` file, even inside `~/.claude`, carries no vendor;
+ * partial or contradictory marks count as loaded. Output it cannot read refuses.
  */
-export async function grokUserInstructionsRefusal(output: string, home: string, platform: NodeJS.Platform = process.platform): Promise<string | undefined> {
+export async function grokUserInstructionsRefusal(output: string): Promise<string | undefined> {
   let parsed: Record<string, unknown> | undefined;
   try { parsed = record(JSON.parse(output)); } catch { parsed = undefined; }
-  const cells = record(parsed?.externalCompat)?.cells;
-  if (!parsed || !Array.isArray(parsed.projectInstructions) || !Array.isArray(cells)) return GROK_USER_CONTEXT_INSPECT_FAILED;
-  const disabled = new Set<string>();
-  for (const entry of cells) {
-    const cell = record(entry);
-    if (typeof cell?.vendor !== 'string' || typeof cell.surface !== 'string' || typeof cell.enabled !== 'boolean') return GROK_USER_CONTEXT_INSPECT_FAILED;
-    if (!cell.enabled) disabled.add(`${cell.vendor}/${cell.surface}`);
-  }
-  // Grok prints names in its own letter case (`Claude.md`); darwin's case-insensitive volume compares folded.
-  const fold = (value: string) => platform === 'darwin' ? value.toLowerCase() : value;
-  const homes = [...new Set([home, await fs.realpath(home).catch(() => home)])].map(fold);
-  const allowed = (file: string): boolean => homes.some(root => ['claude', 'cursor'].some(vendor => {
-    const base = path.join(root, `.${vendor}`);
-    return (disabled.has(`${vendor}/agents`) && path.dirname(file) === base)
-      || (disabled.has(`${vendor}/rules`) && file.startsWith(`${path.join(base, 'rules')}${path.sep}`));
-  }));
+  if (!parsed || !Array.isArray(parsed.projectInstructions)) return GROK_USER_CONTEXT_INSPECT_FAILED;
   let found = 0;
   for (const entry of parsed.projectInstructions) {
     const instruction = record(entry);
     if (typeof instruction?.path !== 'string' || typeof instruction.scope !== 'string') return GROK_USER_CONTEXT_INSPECT_FAILED;
-    if (instruction.scope === 'global' && !allowed(fold(instruction.path))) found++;
+    const { vendor, disabled, compatibilityStatus } = instruction;
+    if ((vendor !== undefined && typeof vendor !== 'string') || (disabled !== undefined && typeof disabled !== 'boolean')
+      || (compatibilityStatus !== undefined && typeof compatibilityStatus !== 'string')) return GROK_USER_CONTEXT_INSPECT_FAILED;
+    const switchedOff = (vendor === 'claude' || vendor === 'cursor') && disabled === true && compatibilityStatus === 'disabled';
+    if (instruction.scope === 'global' && !switchedOff) found++;
   }
   return found === 0 ? undefined : `${PREFIX}: Grok still loads ${found} user instruction file${found === 1 ? '' : 's'} outside the task, such as [paths] extra_rule_dirs`;
 }

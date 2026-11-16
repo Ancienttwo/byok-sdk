@@ -226,7 +226,7 @@ export class GrokAdapter implements RuntimeAdapter {
       // One inspect judges both options, with the environment the agent gets.
       const inspected = await runGrokInspect(this.options.spawnFn ?? spawn, command, cwd, { ...env, ...agentEnv });
       if (excludeUserContext) {
-        const refusal = inspected === undefined ? GROK_USER_CONTEXT_INSPECT_FAILED : await grokUserInstructionsRefusal(inspected, env.HOME ?? '');
+        const refusal = inspected === undefined ? GROK_USER_CONTEXT_INSPECT_FAILED : await grokUserInstructionsRefusal(inspected);
         if (refusal !== undefined) throw authority(refusal);
       }
       if (excludeUserMcp) {

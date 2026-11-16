@@ -705,12 +705,14 @@ Grok then declares `isolation.userInstructions`; `userMemory`, `userSkills` and
 
 `[paths] extra_rule_dirs` in the linked `config.toml` still loads. Before the
 agent starts, the adapter reads `projectInstructions` from `grok inspect --json`
-with the agent's environment and refuses a `global` entry unless it is a Claude
-or Cursor file whose `agents` or `rules` cell inspect reports disabled: Grok
-1.0.77 lists those files even with the cell off. On darwin the paths compare
-case-folded. Probed on Grok 1.0.77 in a synthetic home with the network denied:
-an `extra_rule_dirs` file, `$GROK_HOME/AGENTS.md` and `$GROK_HOME/rules/*` are
-`global` entries; `[paths]` in the `GROK_CONFIG` or `GROK_CONFIG_PATH` overlay
+with the agent's environment and judges each `global` entry by its own marks: it
+allows only a Claude or Cursor compatibility file that inspect marks
+`vendor: 'claude' | 'cursor'`, `disabled: true` and `compatibilityStatus: 'disabled'`.
+Every other `global` entry refuses the start, including partial or contradictory
+marks. Probed on Grok 1.0.77 in a synthetic home with the network denied: an
+`extra_rule_dirs` file, `$GROK_HOME/AGENTS.md` and `$GROK_HOME/rules/*` are
+`global` entries without a vendor, also when `extra_rule_dirs` points into
+`~/.claude`; `[paths]` in the `GROK_CONFIG` or `GROK_CONFIG_PATH` overlay
 is ignored; a project `.grok/config.toml` in an untrusted folder adds none. The
 runtime contract checks that `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and
 `~/.claude/CLAUDE.md` reach the model under `inherit` and not under
