@@ -13,6 +13,7 @@ import {
   type AdapterCapabilityFixture,
 } from './fixtures/adapter-capability-conformance';
 import { startPreparedOperation } from './fixtures/prepared-operation';
+import { taskRuntimeTarget } from '../runtime-detection';
 
 type QualifiedRuntime = 'claude' | 'codex' | 'grok';
 
@@ -48,6 +49,7 @@ async function createFixture(id: QualifiedRuntime): Promise<AdapterCapabilityFix
     }),
     async start(input = {}) {
       const session = await startPreparedOperation(adapter, {
+        target: taskRuntimeTarget(adapter.descriptor),
         instruction: 'conformance turn',
         ...(input.sessionRef === undefined ? {} : { sessionRef: input.sessionRef }),
       }, {

@@ -23,7 +23,7 @@ describe('Pi adapter / credential launcher composition', () => {
       });
       await expect(startPreparedOperation(adapter, {
         instruction: 'Synthetic input',
-        dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'test-zai', modelId: 'glm-5.3-flash' },
+        target: { lane: 'byok', runtimeId: 'pi', providerId: 'test-zai', modelId: 'glm-5.3-flash' },
       }, { workspaceDir: dir, env: { ZAI_API_KEY: 'must-not-forward', UNRELATED: 'must-not-forward' } })).rejects.toThrow();
       expect(captured).toBeDefined();
       const profile = parseModelProviderProfile({

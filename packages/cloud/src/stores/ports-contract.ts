@@ -51,24 +51,3 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
   rateLimiter: ['consume'],
   taskArchive: ['listWork', 'archive', 'settle'],
 };
-
-/** The interface each port name is declared as, for a source-side scan. */
-export const CLOUD_PORT_INTERFACES: Readonly<Record<CloudStoreName, string>> = {
-  activity: 'ActivityStore',
-  agentMessageDraft: 'AgentMessageDraftStore',
-  approvals: 'ApprovalTimelineStore',
-  devices: 'DeviceDirectory',
-  pairingCodes: 'PairingCodeStore',
-  pairing: 'PairingEnrollment',
-  nonces: 'NonceStore',
-  dedup: 'InboundDedupStore',
-  tasks: 'TaskAttemptStore',
-  cancellations: 'TaskCancellationStore',
-  receipts: 'RequestReceiptStore',
-  steerRefusals: 'TaskSteerRefusalStore',
-  egress: 'AgentEgressStore',
-  proofReceipts: 'ProofRequestReceiptStore',
-  blobs: 'CloudBlobStore',
-  rateLimiter: 'InboundRateLimiter',
-  taskArchive: 'TaskArchiveStore',
-};

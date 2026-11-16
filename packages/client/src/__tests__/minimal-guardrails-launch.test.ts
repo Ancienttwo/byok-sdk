@@ -72,7 +72,7 @@ describe('Claude launch', () => {
   it('skips permissions on the ordinary launch, with no mode, no tool list and the MCP config mounted', async () => {
     const argv: string[][] = [];
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FAKE_CLAUDE, source: 'path' }), spawnFn: capturing(argv) });
-    const session = await startPreparedOperation(adapter, { instruction: 'say hi' }, await resources(process.env));
+    const session = await startPreparedOperation(adapter, { target: { lane: 'auto' }, instruction: 'say hi' }, await resources(process.env));
     sessions.push(session);
 
     const args = argv[0] ?? [];
@@ -92,7 +92,7 @@ describe('Claude launch', () => {
       resolveBin: () => ({ command: CLAUDE_NATIVE, source: 'path' }),
       nativeInteractions: { onRequest: () => {} },
     });
-    const session = await startPreparedOperation(adapter, { instruction: 'native launch' }, {
+    const session = await startPreparedOperation(adapter, { target: { lane: 'auto' }, instruction: 'native launch' }, {
       workspaceDir: directory,
       env: { ...process.env, CLAUDE_NATIVE_SCENARIO: 'turn-end', CLAUDE_NATIVE_TRANSCRIPT: transcript },
     });
@@ -120,7 +120,7 @@ describe('Codex launch', () => {
         return realSpawn(command, args, options);
       }) as typeof realSpawn,
     });
-    const session = await startPreparedOperation(adapter, { instruction: 'hello' }, await resources({
+    const session = await startPreparedOperation(adapter, { target: { lane: 'auto' }, instruction: 'hello' }, await resources({
       PATH: process.env.PATH, HOME: os.homedir(), FAKE_CODEX_RPC_RECEIPT: receipt,
     }));
     sessions.push(session);
@@ -148,7 +148,7 @@ describe('Codex sandbox', () => {
         return realSpawn(command, args, options);
       }) as typeof realSpawn,
     });
-    const session = await startPreparedOperation(adapter, { instruction: 'hello' }, {
+    const session = await startPreparedOperation(adapter, { target: { lane: 'auto' }, instruction: 'hello' }, {
       workspaceDir: await tempDir('byok-minimal-guardrails-codex-sandbox-'),
       env: { PATH: process.env.PATH, HOME: os.homedir() },
     });
@@ -189,7 +189,7 @@ describe('Pi launch', () => {
         return realSpawn(FAKE_PI, args, options);
       }) as never,
     });
-    const session = await startPreparedOperation(adapter, { instruction: 'hello' }, {
+    const session = await startPreparedOperation(adapter, { target: { lane: 'auto' }, instruction: 'hello' }, {
       workspaceDir: await tempDir('byok-minimal-guardrails-pi-'),
       env: process.env,
     });
@@ -233,7 +233,7 @@ describe('daemon admission', () => {
     await daemon.pair('pairing-code');
     await daemon.start();
 
-    const offer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'no policy' }, { taskId: 'task-no-policy', seq: server.nextSeq() });
+    const offer = createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'no policy' }, { taskId: 'task-no-policy', seq: server.nextSeq() });
     expect('policy' in offer.payload).toBe(false);
     server.send(offer);
 

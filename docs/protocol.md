@@ -373,9 +373,9 @@ stripping it. A daemon also checks the
 gates on its own side: before it opens a sealed offer or starts any work, it
 computes `requiredReceiverCapabilities('task.offer', payload)` on the wire
 payload and declines non-retryably when a flag is missing from its own
-`conn.hello`. The decline carries `code: 'offer_capability_missing'`, and its
-`reason` is `offer_capability_missing: this daemon does not advertise
-<flags>`. A task whose `sealing.categories` includes `task-output`
+`conn.hello`. The decline carries `code: 'offer_capability_missing'`; its
+`reason` is only the detail, `this daemon does not advertise <flags>`, and
+Hosts classify by `code`. A task whose `sealing.categories` includes `task-output`
 is declined with the sealed code `sealed_key_unavailable` instead, because a
 decline for such a task must take a closed sealed-code form (§2.5). Its
 `reason` is that code alone; the missing flags appear only in the device log
@@ -817,7 +817,7 @@ one strict discriminated union on `lane`, so no two selectors can disagree:
 
 | `lane` | Members | Meaning |
 | --- | --- | --- |
-| `auto` | none | The device picks a built-in runtime by its own preference |
+| `auto` | none | The device picks by its own preference: a built-in runtime or a custom harness it advertised |
 | `runtime` | `runtimeId` | A built-in runtime (`pi`, `claude`, `codex`) with the device's own model |
 | `subscription` | `runtimeId: 'claude' \| 'codex'`, `modelId` | A vendor CLI with its subscription credentials and this model |
 | `byok` | `runtimeId: 'pi'`, `providerId`, `modelId` | A BYOK provider and model, run only through Pi |
@@ -972,8 +972,8 @@ sessionRef instead of sending a fresh offer.
 
 Each lane keeps its own Host method: `enqueueAgentOffer`,
 `enqueueAgentEgressOffer`, `enqueuePreparedOffer`, `submitAgentExecution` and
-their sealed counterparts `enqueueSealedAgentOffer`,
-`enqueueSealedAgentEgressOffer` and `submitSealedAgentExecution`. Every one
+its sealed counterpart `submitSealedAgentExecution`. The resume lanes have no
+sealed counterpart and refuse `sealing` and `sealed`. Every one
 sends a `task.offer`. Host policy values are resolved before the wire offer is persisted; the Host
 writes `session` itself (`{ mode: 'resume', sessionRef }` on the resume lanes,
 `{ mode: 'fresh' }` on the execution and prepared lanes), and each lane
@@ -1506,14 +1506,8 @@ the same value as `enrollmentRevision` from `readDeviceEnrollmentIdentity`
 monotonic across proof-key rotation for one device id; re-pair mints a new
 device id.
 
-A Host built on `@byok-sdk/cloud` appends the notice with
-`enqueueProviderProvisioningNotice(tenant, deviceId, { requestId })`. It
-validates the strict payload first, then refuses (`agent_capability_missing`,
-no mailbox row) a device whose durable capabilities lack
-`provider-provisioning.v1`. The mailbox message id is derived from
-tenant, device and `requestId`, so a retried enqueue returns the existing row
-and seq. Cloud records no provisioning receipt: completion and readback are Host
-authority.
+`@byok-sdk/cloud` has no Host method that appends this notice and records no
+provisioning receipt: completion and readback are Host authority.
 
 ### 2.4 Task-free Agent memory intent notice
 
@@ -2548,13 +2542,24 @@ redelivered or losing claim leaves it as it is. v7 replaced the claim's
 `runtime` and `harnessId` with this field and removed `agentId`;
 `agentRef` names the Agent.
 
+The claimed executor must be one the offer's `target` allows: any under
+`auto`, otherwise exactly the named runtime (`runtime`, `subscription`,
+`byok`, `byok-profile`) or harness (`harness`). A claim naming another is
+rejected (`claim_offer_mismatch`).
+
 The terminals echo it. `task.complete` requires `executor`: a task completes
 only from `Running`, so every completion follows a claim. `task.fail` and
-`task.cancelled` carry it optionally on the wire. A device that restarts
-after acknowledging an offer it never claimed reports `daemon_interrupted`
-with no executor, and a cancel before any claim omits it. After a claim, the
-server requires the terminal's `executor` and requires it to equal the
-claimed one.
+`task.cancelled` carry it optionally on the wire. After a claim, the server
+requires the terminal's `executor` and requires it to equal the claimed one.
+Before a claim, a cancel omits it. A device that restarts after admitting an
+offer reports `daemon_interrupted` (a `task.fail` with `recovery`), and it
+cannot tell whether its claim reached the cloud, so that report may name the
+executor it admitted. With no claim recorded, the server only checks that
+executor against the offer's `target` (the rule above), rejecting another
+with `terminal_executor_mismatch`; it records no claim and no owner, and the
+task fails unowned. With a claim recorded, the report must name the claimed
+executor like every terminal. The terminal read model's `executor` is the
+claimed one, so an unclaimed task's result has none.
 
 **Attempt phase instants (#980, cloud only).** `@byok-sdk/cloud` records four
 write-once instants on its `TaskAttempt`, from the same clock and in the same
@@ -2637,7 +2642,7 @@ Attempt's requested home access. This includes capacity, lease acquisition,
 reader resume/run-directory and home initialization conflicts reported as
 `AgentHomeBusyError`. An offer that breaks an offer selection rule
 (`offerSelectionViolation`) is declined non-retryable with `code` equal to the
-rule and `reason` `<rule>: <message>`.
+rule; `reason` is only the rule's message, and Hosts classify by `code`.
 
 **Offer selection rules.** The predicate returns only the first
 violation, in the order of this table, which is the single source of truth for
@@ -3638,7 +3643,7 @@ every later major keeps it, so a peer of any major can read it:
 ```
 
 A daemon whose lone `conn.hello` gets a `protocol_version_unsupported`
-outcome, or a 4xx answer other than 401, 403, 413 and 429, halts with
+outcome, or a 4xx answer other than 401, 403, 409, 413 and 429, halts with
 `ProtocolNegotiationError` (`code: 'protocol_negotiation_failed'`,
 `localVersion`, `httpStatus`, and `peerVersion` only when the peer stated its
 major). A refusal never implies which major the peer speaks. A coordinated
@@ -4568,7 +4573,14 @@ the offer `target` and one kind of the claim `executor`.
   after a claim (§3.1). A missing, different, or unexpected executor is rejected. Builtin usage
   metrics keep their existing schema; the SDK does not invent custom usage.
 
-Independent inbound handlers retain per-task control order. Acknowledgement only
+Independent inbound handlers retain per-task control order, with one
+exception: `task.cancel` does not wait for an earlier control of its task to
+finish, and later controls of that task wait for the cancel (#2304). An
+earlier control can be waiting on the runtime, as a `task.steer` waits for the
+runtime to take its input, and a runtime that never answers would otherwise
+leave the cancel queued behind it. The cancel closes the session; a steer the
+runtime has not taken by then is reported as `task.steer_refused` with
+`task_not_active`, and one it answers later sends nothing. Acknowledgement only
 advances after all received sequences in the prefix have succeeded and the cursor
 is durable. Successfully handled tails survive gaps and cursor-write retries in
 memory; delivery alone is never acknowledgement.
@@ -4584,9 +4596,10 @@ offer receipt and exact offer UUID; a missing receipt is a rejection.
 
 A local admission may commit before the cloud accepts claim. If cloud ownership
 is absent, this bound recovery report can settle the task without asserting or
-creating a claim, and it carries no `executor`. If cloud ownership exists, all
-terminals, including recovery, must carry `executor` equal to
-`claimedExecutor`. Ordinary failures gain no exception. The terminal
+creating a claim. It may carry the `executor` the device admitted, which must
+be one the offer's `target` allows and is not recorded (§3.1). If cloud
+ownership exists, all terminals, including recovery, must carry `executor`
+equal to `claimedExecutor`. Ordinary failures gain no exception. The terminal
 read model copies `recovery` verbatim; `TaskAttempt` remains cloud claim authority.
 Deploy the supporting server before using these recovery reports. Migration
 0021 remains required for custom claims; the recovery object lives in existing

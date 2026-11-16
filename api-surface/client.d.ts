@@ -2501,11 +2501,19 @@ export declare const DAEMON_HALT_REASONS: readonly [
 'store_owned',
 'device_revoked',
 'handshake_rejected',
+'protocol_negotiation_failed',
 'replay_cursor_too_old',
 'cursor_unreadable',
 'config_invalid'];
 export type DaemonHaltReason = (typeof DAEMON_HALT_REASONS)[number];
 export declare function isDaemonHaltReason(value: unknown): value is DaemonHaltReason;
+// support
+export type DaemonHalt = {
+    reason: Exclude<DaemonHaltReason, 'protocol_negotiation_failed'>;
+} | {
+    reason: 'protocol_negotiation_failed';
+    httpStatus: number;
+};
 export type DaemonLifecycle = {
     phase: 'stopped';
 } | {
@@ -2513,11 +2521,10 @@ export type DaemonLifecycle = {
 } | {
     phase: 'running';
     connection: 'connecting' | 'open';
-} | {
+} | ({
     phase: 'halted';
-    reason: DaemonHaltReason;
     at: string;
-} | {
+} & DaemonHalt) | {
     phase: 'crashed';
     at: string;
 };
@@ -5364,7 +5371,7 @@ export interface LocalAgentReleaseIdentity {
 }
 export declare function resolveLocalAgentReleaseIdentity(input: LocalAgentReleaseIdentity | undefined): Readonly<LocalAgentReleaseIdentity>;
 // ==== @byok-sdk/client dist/runtime-detection.d.ts ====
-import type { RuntimeId } from '@byok-sdk/protocol';
+import type { ExecutionTarget, RuntimeId } from '@byok-sdk/protocol';
 import { type ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
 import { type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeExecutableSource, type RuntimeVersionVerdict } from './types.js';
 export type RuntimeVersionChangeDirection = 'upgrade' | 'downgrade' | 'changed' | 'unknown';
@@ -5394,11 +5401,9 @@ export declare function projectRuntimeObservation(descriptor: RuntimeAdapterDesc
 export declare function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult;
 export declare function observeRuntimeDetection(adapter: RuntimeAdapter, signal?: AbortSignal): Promise<RuntimeDetectResult>;
 export declare function isWireRuntimeId(id: string): id is RuntimeId;
-export declare function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescriptor, 'id'>): {
-    readonly runtime: RuntimeId;
-} | {
-    readonly harnessId: string;
-};
+export declare function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescriptor, 'id'>): Extract<ExecutionTarget, {
+    readonly lane: 'runtime' | 'harness';
+}>;
 // ==== @byok-sdk/client dist/runtime-failure.d.ts ====
 import type { TaskFailure } from '@byok-sdk/protocol';
 export type RuntimeFailurePhase = 'start' | 'run';
@@ -5822,14 +5827,18 @@ import type { NativeInteractionCapabilities, NativeInteractionChannel } from './
 import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization.js';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory.js';
-import type { AgentEvent, TaskOfferPlainPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, ExecutionTarget, TaskOfferPlainPayload } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation.js';
 import type { AgentRef } from './agent-home.js';
 import type { McpToolsetServerObservation } from './mcp/observation.js';
-export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'runtime' | 'harnessId' | 'dispatchSelection' | 'limits'> & {
+export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'target' | 'limits'> & {
     instruction: NonNullable<TaskOfferPlainPayload['instruction']>;
     sessionRef?: string;
 };
+// support
+export type ModelLaneTarget = Extract<ExecutionTarget, {
+    readonly lane: 'subscription' | 'byok' | 'byok-profile';
+}>;
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 // support
 export declare const RUNTIME_DETECTION_FAILURE_KINDS: readonly ['not-found', 'not-executable', 'timeout', 'probe-failed', 'refused'];
@@ -6011,7 +6020,7 @@ export interface RuntimeOperationManifest {
     readonly runtimeId: string;
     readonly descriptor: RuntimeAdapterDescriptor;
     readonly requiredToolsetIds: readonly string[];
-    readonly dispatchSelection?: RuntimeTaskInput['dispatchSelection'];
+    readonly modelTarget?: ModelLaneTarget;
     readonly sessionRef?: string;
     readonly agentRef?: AgentRef;
     readonly cwd?: string;

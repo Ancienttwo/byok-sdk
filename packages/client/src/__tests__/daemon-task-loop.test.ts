@@ -5,10 +5,11 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope } from '@byok-sdk/protocol';
+import { createEnvelope, steerRefusalEnvelopeId } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { RuntimeExecutionFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON } from '../runtime-failure';
 import { TestServer } from './fixtures/test-server';
+import { CursorStore } from '../daemon/cursor-store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { resumeSession } from './fixtures/fresh-offer';
@@ -62,7 +63,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     // a fresh offer's latest-value lane would coalesce the batch below. The
     // session it resumes comes from a first, fresh task.
     const agentRef = freshTestAgentRef();
-    server.send(createEnvelope('task.offer', { agentRef, ...FRESH_OFFER, instruction: 'start the session' }, { taskId: 'task-seed', seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef, ...FRESH_OFFER, instruction: 'start the session' }, { taskId: 'task-seed', seq: server.nextSeq() }));
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-seed');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const seed = adapter.sessions[0]!;
@@ -72,7 +73,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef, ...resumeSession(seed.sessionRef), instruction: 'do the thing' },
+        { target: { lane: 'auto' }, agentRef, ...resumeSession(seed.sessionRef), instruction: 'do the thing' },
         { taskId: 'task-1', seq: server.nextSeq() },
       ),
     );
@@ -80,7 +81,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     const claim = await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-1');
     expect(claim.payload).toMatchObject({ deviceId: 'device-1' });
     expect('taskId' in claim.payload).toBe(false);
-    expect(claim.payload).toMatchObject({ runtime: 'pi' });
+    expect(claim.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'pi' } });
 
     // M1 gap #2: `task.claim` no longer implies `Running` — `task.started`
     // is the explicit, separate signal the adapter session actually started.
@@ -122,7 +123,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'long running thing' },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'long running thing' },
         { taskId: 'task-2', seq: server.nextSeq() },
       ),
     );
@@ -168,7 +169,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...batching.offer, instruction: 'buffer some progress then cancel' },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...batching.offer, instruction: 'buffer some progress then cancel' },
         { taskId: 'task-cancel-buffered', seq: server.nextSeq() },
       ),
     );
@@ -200,7 +201,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...batching.offer, instruction: 'buffer, cancel, then outlast the batch deadline' },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...batching.offer, instruction: 'buffer, cancel, then outlast the batch deadline' },
         { taskId: 'task-cancel-teardown', seq: server.nextSeq() },
       ),
     );
@@ -241,7 +242,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     // latest-value lane would coalesce the batch. The resumed session comes
     // from a first, fresh task.
     const agentRef = freshTestAgentRef();
-    server.send(createEnvelope('task.offer', { agentRef, ...batching.offer, instruction: 'start the session' }, { taskId: 'task-complete-seed', seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef, ...batching.offer, instruction: 'start the session' }, { taskId: 'task-complete-seed', seq: server.nextSeq() }));
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-complete-seed');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const seed = adapter.sessions[0]!;
@@ -251,7 +252,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef, ...resumeSession(seed.sessionRef), instruction: 'buffer progress then finish' },
+        { target: { lane: 'auto' }, agentRef, ...resumeSession(seed.sessionRef), instruction: 'buffer progress then finish' },
         { taskId: 'task-complete-buffered', seq: server.nextSeq() },
       ),
     );
@@ -278,7 +279,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'race me' },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'race me' },
         { taskId: 'task-race', seq: server.nextSeq() },
       ),
     );
@@ -321,7 +322,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'pi' },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'pi' } },
         { taskId: 'task-4', seq: server.nextSeq() },
       ),
     );
@@ -329,6 +330,55 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     const decline = await server.waitFor((e) => e.type === 'task.decline');
     expect(decline.payload).toMatchObject({ retryable: true });
     expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === 'task-4')).toBe(false);
+  });
+
+  describe('the runtime waits for the cloud to settle task.claim (#2294)', () => {
+    const offerTask = (taskId: string): void => server.send(createEnvelope('task.offer',
+      { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, { taskId, seq: server.nextSeq() }));
+    const wire = (taskId: string, type: string) => server.received.filter((e) => e.task_id === taskId && e.type === type);
+
+    it('starts the runtime only after the claim is accepted', async () => {
+      const adapter = new StubRuntimeAdapter();
+      await setupDaemon(adapter);
+      const release = server.holdNextMessagesResponse((e) => e.type === 'task.claim' && e.task_id === 'task-held-claim');
+      offerTask('task-held-claim');
+      await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-held-claim');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(adapter.startCalls).toHaveLength(0);
+      expect(wire('task-held-claim', 'task.started')).toHaveLength(0);
+      release();
+      await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-held-claim');
+      expect(adapter.startCalls).toHaveLength(1);
+    });
+
+    it('declines once, non-retryably, without starting the runtime when the claim is refused', async () => {
+      const adapter = new StubRuntimeAdapter();
+      const d = await setupDaemon(adapter);
+      server.setOutboundRefusal((e) => (e.type === 'task.claim' ? 'state_conflict' : undefined));
+      offerTask('task-refused-claim');
+      await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-refused-claim');
+      await expect(d.whenTaskSettled('task-refused-claim')).resolves.toEqual({ terminal: 'declined', delivery: 'accepted', disposal: 'none' });
+      const declines = wire('task-refused-claim', 'task.decline');
+      expect(declines).toHaveLength(1);
+      expect(declines[0]!.payload).toMatchObject({ reason: 'claim refused: state_conflict', retryable: false });
+      expect('code' in declines[0]!.payload).toBe(false);
+      expect('executor' in declines[0]!.payload).toBe(false);
+      expect(adapter.startCalls).toHaveLength(0);
+      expect(wire('task-refused-claim', 'task.started')).toHaveLength(0);
+    });
+
+    it('ends the task locally and never resends a decline the cloud also refuses', async () => {
+      const adapter = new StubRuntimeAdapter();
+      const d = await setupDaemon(adapter);
+      server.setOutboundRefusal((e) => (e.type === 'task.claim' ? 'state_conflict' : e.type === 'task.decline' ? 'not_permitted' : undefined));
+      offerTask('task-refused-decline');
+      await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-refused-decline');
+      await expect(d.whenTaskSettled('task-refused-decline')).resolves.toEqual({ terminal: 'declined', delivery: 'rejected', disposal: 'none' });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(wire('task-refused-decline', 'task.decline')).toHaveLength(1);
+      expect(adapter.startCalls).toHaveLength(0);
+      expect(daemon?.status().activeTaskCount).toBe(0);
+    });
   });
 
   it('a typed authority failure from adapter.start() is reported non-retryable', async () => {
@@ -343,7 +393,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
         { taskId: 'task-6', seq: server.nextSeq() },
       ),
     );
@@ -364,13 +414,13 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
         { taskId: 'task-7', seq: server.nextSeq() },
       ),
     );
     await server.waitFor((e) => e.type === 'task.claim');
     const fail = await server.waitFor((e) => e.type === 'task.fail');
-    expect(fail.payload).toEqual({ agentRef: echoedTestAgentRef,
+    expect(fail.payload).toEqual({ agentRef: echoedTestAgentRef, executor: { kind: 'runtime', runtimeId: 'pi' },
       reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.start,
       retryable: false,
       failure: { class: 'unknown' },
@@ -386,17 +436,91 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
         { taskId: 'task-5', seq: server.nextSeq() },
       ),
     );
-    await server.waitFor((e) => e.type === 'task.claim');
+    // The cloud steers only a running task, which `task.started` makes (#2306).
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-5');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
 
     server.send(
       createEnvelope('task.steer', { text: 'focus on tests' }, { taskId: 'task-5', seq: server.nextSeq() }),
     );
     await vi.waitFor(() => expect(adapter.sessions[0]?.steerCalls).toEqual(['focus on tests']));
+  });
+
+  // Wire v7: a steer the device did not deliver is reported, under an id derived from the steer's id.
+  it.each([
+    ['task_not_active', 'a task that is not active'],
+    ['steer_unsupported', 'a runtime without a steering channel'],
+    ['input_too_large', 'a runtime that refuses the input as too large'],
+  ] as const)('reports task.steer_refused %s for a steer to %s', async (reason, _target) => {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
+      steer: reason !== 'steer_unsupported', resume: true, approvalInteractive: true, mcpToolsets: true,
+    });
+    await setupDaemon(adapter);
+    const taskId = `task-steer-${reason}`;
+    if (reason !== 'task_not_active') {
+      server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
+        { taskId, seq: server.nextSeq() }));
+      await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      if (reason === 'input_too_large') {
+        adapter.sessions[0]!.steerError = new RuntimeExecutionFailure({
+          phase: 'run', retry: 'non-retryable', reason: 'steer exceeds the runtime input bound', failure: { class: 'input_too_large' },
+        });
+      }
+    }
+    const steer = createEnvelope('task.steer', { text: 'focus on tests' }, { taskId, seq: server.nextSeq() });
+    server.send(steer);
+    const refused = await server.waitFor((e) => e.type === 'task.steer_refused' && e.task_id === taskId);
+    expect(refused.id).toBe(await steerRefusalEnvelopeId(steer.id));
+    expect(refused.payload).toEqual({ steerMessageId: steer.id, reason });
+    expect(adapter.sessions[0]?.steerCalls ?? []).toEqual([]);
+  });
+
+  // #2304: a cancel does not queue behind a steer the runtime has not answered.
+  it.each(['rejects during the cancel teardown', 'rejects', 'resolves'] as const)('a cancel runs ahead of an unanswered steer, which then %s without a second terminal', async (outcome) => {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true });
+    const storeDir = await tmpDir('byok-client-store-');
+    await setupDaemon(adapter, { storeDir });
+    const taskId = `task-steer-held-${outcome}`;
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
+      { taskId, seq: server.nextSeq() }));
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    const session = adapter.sessions[0]!;
+    const release = session.blockSteer();
+    const diagnostics = vi.spyOn(console, 'error');
+    // A runtime rejects a pending steer once the cancel's teardown stops it,
+    // here while the task is still active and its terminal not yet sent.
+    if (outcome === 'rejects during the cancel teardown') {
+      const interrupt = session.interrupt.bind(session);
+      session.interrupt = async () => { release(new Error('session closed')); await interrupt(); };
+    }
+    const steer = createEnvelope('task.steer', { text: 'focus on tests' }, { taskId, seq: server.nextSeq() });
+    server.send(steer);
+    await vi.waitFor(() => expect(session.steerAttempts).toBe(1));
+    const cancel = createEnvelope('task.cancel', { reason: 'user stopped it' }, { taskId, seq: server.nextSeq() });
+    server.send(cancel);
+    await server.waitFor((e) => e.type === 'task.cancelled' && e.task_id === taskId);
+    expect(session.interruptCalled).toBe(true);
+    expect(session.closeCalled).toBe(true);
+    const settled = server.received.length;
+    // Or later; one the runtime answers late delivered nothing the task can use.
+    if (outcome === 'rejects') release(new Error('session closed'));
+    if (outcome === 'resolves') release();
+    if (outcome !== 'resolves') {
+      const refused = await server.waitFor((e) => e.type === 'task.steer_refused' && e.task_id === taskId);
+      expect(refused.payload).toEqual({ steerMessageId: steer.id, reason: 'task_not_active' });
+    } else await vi.waitFor(() => expect(session.steerCalls).toEqual(['focus on tests']));
+    // Both envelopes are handled on first delivery: the cursor passes them, with no failed gap.
+    await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, 'device-1')).toBe(cancel.seq));
+    expect(diagnostics.mock.calls.flat().filter((line) => String(line).includes('envelope handler failed for task.steer'))).toEqual([]);
+    expect(server.received.filter((e) => e.task_id === taskId && e.type === 'task.cancelled')).toHaveLength(1);
+    expect(server.received.filter((e) => e.task_id === taskId && e.type === 'task.steer_refused')).toHaveLength(outcome === 'resolves' ? 0 : 1);
+    expect(server.received.slice(settled).filter((e) => e.task_id === taskId && e.type !== 'task.steer_refused')).toEqual([]);
   });
 
   describe('task.claim reports the actually-selected runtime (M5, requested vs. claimed)', () => {
@@ -407,13 +531,39 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'pi' },
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'pi' } },
           { taskId: 'task-runtime-explicit', seq: server.nextSeq() },
         ),
       );
 
       const claim = await server.waitFor((e) => e.type === 'task.claim');
-      expect(claim.payload).toMatchObject({ deviceId: 'device-1', runtime: 'pi' });
+      expect(claim.payload).toMatchObject({ deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' } });
+      expect(claim.payload).not.toHaveProperty('agentId');
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      adapter.sessions[0]!.emit({ type: 'turn_end' });
+      const complete = await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-runtime-explicit');
+      expect(complete.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'pi' } });
+    });
+
+    it('a harness offer: task.claim and task.complete carry the harness executor', async () => {
+      const adapter = new StubRuntimeAdapter('acme-harness');
+      await setupDaemon(adapter);
+
+      server.send(
+        createEnvelope(
+          'task.offer',
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'acme-harness' } },
+          { taskId: 'task-harness-explicit', seq: server.nextSeq() },
+        ),
+      );
+
+      const claim = await server.waitFor((e) => e.type === 'task.claim');
+      expect(claim.payload).toMatchObject({ deviceId: 'device-1', executor: { kind: 'harness', harnessId: 'acme-harness' } });
+      expect(claim.payload).not.toHaveProperty('agentId');
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      adapter.sessions[0]!.emit({ type: 'turn_end' });
+      const complete = await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-harness-explicit');
+      expect(complete.payload).toMatchObject({ executor: { kind: 'harness', harnessId: 'acme-harness' } });
     });
 
     it('an offer naming NO runtime: task.claim still carries the auto-selected adapter this device actually picked, not merely an absence (single-candidate case; see task-runner-runtime-selection.test.ts for multi-candidate order)', async () => {
@@ -423,7 +573,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, // no `runtime` — daemon auto-selects
+          { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, // no `runtime` — daemon auto-selects
           { taskId: 'task-runtime-auto', seq: server.nextSeq() },
         ),
       );
@@ -431,7 +581,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       const claim = await server.waitFor((e) => e.type === 'task.claim');
       // This is the exact gap the feature closes: before, the server never
       // learned which runtime an auto-selected task actually ran on.
-      expect(claim.payload).toMatchObject({ deviceId: 'device-1', runtime: 'claude' });
+      expect(claim.payload).toMatchObject({ deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'claude' } });
     });
   });
 
@@ -443,7 +593,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'needs a human' },
+          { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'needs a human' },
           { taskId, seq: server.nextSeq() },
         ),
       );

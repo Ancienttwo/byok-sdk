@@ -51,7 +51,7 @@ describe('Agent-only daemon admission (#925)', () => {
   it('declines an Agent offer before claim when the daemon has no Agent home', async () => {
     const adapter = await startDaemon({ agentHome: false });
     const agentRef = { agentId: 'homeless-agent', profileRevision: 'r1' };
-    server.send(createEnvelope('task.offer', { instruction: 'agent work', agentRef, ...FRESH_OFFER }, { taskId: 'no-home-offer', seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, instruction: 'agent work', agentRef, ...FRESH_OFFER }, { taskId: 'no-home-offer', seq: server.nextSeq() }));
     const decline = await server.waitFor((entry) => entry.type === 'task.decline' && entry.task_id === 'no-home-offer');
     expect(decline.payload).toMatchObject({ retryable: false, agentRef });
     expect(adapter.sessions).toHaveLength(0);
@@ -79,12 +79,14 @@ describe('Agent-only daemon admission (#925)', () => {
     const cancelled = 'agent-pre-cancel';
     server.send(createEnvelope('task.cancel', { reason: 'operator cancelled first' }, { taskId: cancelled, seq: server.nextSeq() }));
     server.send(createEnvelope('task.offer', {
+      target: { lane: 'auto' },
       instruction: 'agent work', agentRef: { agentId: 'pre-cancel-agent', profileRevision: 'r1' }, ...FRESH_OFFER,
     }, { taskId: cancelled, seq: server.nextSeq() }));
     const cancellationDecline = await server.waitFor((entry) => entry.type === 'task.decline' && entry.task_id === cancelled);
     expect((cancellationDecline.payload as { reason: string }).reason).toMatch(/cancelled before claim/i);
 
     const duplicate = createEnvelope('task.offer', {
+      target: { lane: 'auto' },
       instruction: 'agent work', agentRef: { agentId: 'duplicate-agent', profileRevision: 'r1' }, ...FRESH_OFFER,
     }, { taskId: 'agent-duplicate', seq: server.nextSeq() });
     server.send(duplicate);
@@ -98,6 +100,7 @@ describe('Agent-only daemon admission (#925)', () => {
   it('runs an Agent offer in the Agent home (#319)', async () => {
     const adapter = await startDaemon();
     server.send(createEnvelope('task.offer', {
+      target: { lane: 'auto' },
       instruction: 'agent work', agentRef: { agentId: 'no-root-agent', profileRevision: 'r1' }, ...FRESH_OFFER,
     }, { taskId: 'no-root-agent-offer', seq: server.nextSeq() }));
     await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'no-root-agent-offer');

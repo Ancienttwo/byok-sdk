@@ -11,7 +11,7 @@ import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner } from '../daemon/task-runner';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferRunnerDeps, resumeSession } from './fixtures/fresh-offer';
 
 /**
@@ -64,7 +64,7 @@ class FixedSessionAdapter extends StubRuntimeAdapter {
 function readerOffer(taskId: string, seq: number, sessionRef?: string): Envelope {
   return createEnvelope('task.offer', {
     instruction: 'outbound reason work',
-    runtime: 'pi',
+    target: { lane: 'runtime', runtimeId: 'pi' },
     agentRef: AGENT,
     homeAccess: 'memory-reader' as const,
     ...(sessionRef === undefined ? FRESH_OFFER : resumeSession(sessionRef)),
@@ -83,7 +83,7 @@ async function readerRunner(adapter: StubRuntimeAdapter): Promise<{
   const storeDir = await temporary('byok-outbound-reason-store-');
   const hostStorageRoot = await temporary('byok outbound reason home-');
   const sent: Envelope[] = [];
-  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     agentHome: new AgentHomeManager({ hostStorageRoot }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),

@@ -33,6 +33,7 @@ import {
   encodeEnvelope,
   isSealedPayload,
   isSealedTaskPlainOutput,
+  steerRefusalEnvelopeId,
   type AgentRef,
   type Envelope,
   type MessageType,
@@ -61,7 +62,7 @@ const EPOCH = 1;
 const BOTH: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input', 'task-output'] };
 const OUTPUT_ONLY: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-output'] };
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; payload: Record<string, unknown> });
@@ -184,11 +185,11 @@ async function sealedOffer(
 ): Promise<Envelope> {
   const plain = options.plain ?? {};
   if (!sealing.categories.includes('task-input')) {
-    return createEnvelope('task.offer', { agentRef: agentOf(taskId), ...FRESH_OFFER, ...plain, instruction, sealing } as never, { taskId, seq });
+    return createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: agentOf(taskId), ...FRESH_OFFER, ...plain, instruction, sealing } as never, { taskId, seq });
   }
   const bound = binding('task.offer', 'server-to-daemon', { taskId }, deviceId, options.boundSealing ?? sealing);
   const { header, ciphertext } = await sealedMember(member, { instruction }, bound);
-  return createEnvelope('task.offer', { agentRef: agentOf(taskId), ...FRESH_OFFER, ...plain, sealing, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId, seq });
+  return createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: agentOf(taskId), ...FRESH_OFFER, ...plain, sealing, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId, seq });
 }
 
 /** Opens a sealed output as a member would, with the binding the receiver builds, under `scopeKey` (the scope key by default). */
@@ -405,7 +406,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
       sender: member.web.member.memberId, category: 'task-input', binding: bound, plaintext: { instruction: 'never runs' } as never,
       maxContentLength: SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
     });
-    server.send(createEnvelope('task.offer', { agentRef: agentOf('foreign-head'), ...FRESH_OFFER, sealing: BOTH, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never,
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: agentOf('foreign-head'), ...FRESH_OFFER, sealing: BOTH, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never,
       { taskId: 'foreign-head', seq: server.nextSeq() }));
     const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'foreign-head');
     expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false, admission: { totalMs: expect.any(Number) } });
@@ -480,7 +481,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
 
   it('seals the decline of a plain gate after the open', async () => {
     const { server, adapter, deviceId, member } = await start();
-    server.send(await sealedOffer(member, 'gated', server.nextSeq(), deviceId, 'never runs', BOTH, { plain: { harnessId: 'acme-harness' } }));
+    server.send(await sealedOffer(member, 'gated', server.nextSeq(), deviceId, 'never runs', BOTH, { plain: { target: { lane: 'harness', harnessId: 'acme-harness' } } }));
 
     const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline_sealed' && envelope.task_id === 'gated');
     expect(await openOutput(member, decline, deviceId)).toEqual({ reason: expect.any(String) });
@@ -527,6 +528,17 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     } finally {
       diagnostic.mockRestore();
     }
+  });
+
+  it('refuses a sealed steer to a task that is not active unopened, with no content', async () => {
+    const { server, deviceId, member } = await start();
+    const steerId = randomUUID();
+    const { header, ciphertext } = await sealedMember(member, { text: 'go left' }, binding('task.steer', 'server-to-daemon', { taskId: 'not-active', steerId }, deviceId, BOTH));
+    const steer = createEnvelope('task.steer', { steerId, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId: 'not-active', seq: server.nextSeq() });
+    server.send(steer);
+    const refused = await server.waitFor((envelope) => envelope.type === 'task.steer_refused' && envelope.task_id === 'not-active');
+    expect(refused.id).toBe(await steerRefusalEnvelopeId(steer.id));
+    expect(refused.payload).toEqual({ steerMessageId: steer.id, reason: 'task_not_active' });
   });
 
   it('applies a sealed steer once per steerId', async () => {
@@ -839,6 +851,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
       server.seedBlob(blobId, bytes, 'application/octet-stream');
       const contentHash = `sha256:${createHash('sha256').update(corrupt ? Buffer.from('other') : bytes).digest('hex')}`;
       return createEnvelope('task.offer', {
+        target: { lane: 'auto' },
         agentRef: agentOf(taskId),
         ...FRESH_OFFER,
         sealing: BOTH,
@@ -1263,7 +1276,7 @@ async function seedRefusedResult(storeDir: string, deviceId: string, member: Sco
   });
   const contentHash = `sha256:${createHash('sha256').update(ciphertext).digest('hex')}`;
   const refused = createEnvelope('task.complete', {
-    sessionRef: 'sess-refused',
+    sessionRef: 'sess-refused', executor: { kind: 'runtime', runtimeId: 'pi' },
     sealed: { ...header, ciphertextRef: { blobId: `collected-${taskId}`, contentHash, size: ciphertext.length, contentType: 'application/octet-stream' } },
   } as never, { taskId });
   const journal = new SqliteLocalTaskJournal({ storeDir });

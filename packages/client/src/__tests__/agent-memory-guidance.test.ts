@@ -27,7 +27,7 @@ import { serveAgentMemoryMcpOverStdio, serveGrantedAgentMemoryMcpOverStdio } fro
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { reservedMcpContext, reservedMcpToken } from './fixtures/execution-scratch';
 
 const roots: string[] = [];
@@ -83,7 +83,7 @@ describe('Agent memory guidance', () => {
         throw new Error('not used in this test');
       },
     };
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters,
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -105,7 +105,7 @@ describe('Agent memory guidance', () => {
           'task.offer',
           {
             instruction: `agent instruction for ${runtime}`,
-            runtime,
+            target: { lane: 'runtime', runtimeId: runtime },
             agentRef: { agentId: `agent-${runtime}`, profileRevision: 'profile-1' },
             ...FRESH_OFFER,
           },
@@ -197,7 +197,7 @@ async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mc
   const storeDir = await makeRoot();
   const adapter = new StubRuntimeAdapter('pi', undefined, { steer: true, resume: true, approvalInteractive: true, mcpToolsets });
   const sent: Envelope[] = [];
-  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     agentHome: new AgentHomeManager({ hostStorageRoot }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -226,7 +226,7 @@ async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mc
   const offer = (taskId: string, options: { reader?: boolean; agentId?: string; agentMemory?: AgentMemorySelection; agentMemoryCommit?: 'on-success'; sessionRef?: string } = {}) =>
     runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: `instruction for ${taskId}`,
-      runtime: 'pi',
+      target: { lane: 'runtime', runtimeId: 'pi' },
       agentRef: { agentId: options.agentId ?? 'agent-admission', profileRevision: 'profile-1' },
       ...(options.sessionRef === undefined ? FRESH_OFFER : { session: { mode: 'resume' as const, sessionRef: options.sessionRef } }),
       ...(options.reader ? { homeAccess: 'memory-reader' as const } : {}),
@@ -450,7 +450,7 @@ describe('per-task Agent memory selection', () => {
     const { adapter, offer, declineOf } = await createMemoryRunner('auto');
     await offer('reader-read-write', { reader: true, agentMemory: 'read-write' });
     expect(declineOf('reader-read-write')?.payload).toMatchObject({
-      retryable: false, code: 'agent_memory_selection_invalid', reason: expect.stringContaining('agent_memory_selection_invalid: '),
+      retryable: false, code: 'agent_memory_selection_invalid', reason: expect.not.stringContaining('agent_memory_selection_invalid'),
     });
     expect(adapter.startCalls).toHaveLength(0);
   });
@@ -462,7 +462,7 @@ describe('per-task Agent memory selection', () => {
     await offer('off-none', { agentId: 'agent-off-none', agentMemory: 'none' });
     for (const taskId of ['off-read', 'off-read-write']) {
       expect(declineOf(taskId)?.payload, taskId).toMatchObject({
-        retryable: false, reason: expect.stringContaining('agent_memory_unavailable'),
+        retryable: false, code: 'agent_memory_unavailable', reason: 'this daemon does not admit the Agent memory MCP',
       });
     }
     expect(adapter.startCalls).toHaveLength(1);
@@ -566,7 +566,7 @@ describe('agentMemory read-write-if-admitted', () => {
     const { adapter, offer, declineOf } = await createMemoryRunner(agentMemoryMcp);
     await offer('reader-rw-if', { reader: true, agentMemory: 'read-write-if-admitted' });
     expect(declineOf('reader-rw-if')?.payload).toMatchObject({
-      retryable: false, code: 'agent_memory_selection_invalid', reason: expect.stringContaining('agent_memory_selection_invalid: '),
+      retryable: false, code: 'agent_memory_selection_invalid', reason: expect.not.stringContaining('agent_memory_selection_invalid'),
     });
     expect(adapter.startCalls).toHaveLength(0);
   });

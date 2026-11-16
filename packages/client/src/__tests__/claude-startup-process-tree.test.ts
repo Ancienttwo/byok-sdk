@@ -8,6 +8,8 @@ import type { SpawnFn } from '../adapters/claude/claude-adapter';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
+const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
+
 function exists(pid: number): boolean {
   try { process.kill(pid, 0); return true; }
   catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
@@ -34,7 +36,7 @@ describe('Claude rejected startup process-tree receipt', () => {
     }) as SpawnFn;
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-node-fixture', source: 'path' }), spawnFn });
     try {
-      const failure = await startPreparedOperation(adapter, {
+      const failure = await startPreparedOperation(adapter, { target: CLAUDE_TARGET,
         instruction: 'hello', sessionRef: 'requested-session',
       }, { workspaceDir, env: process.env }).catch(error => error);
       expect(failure).toBeInstanceOf(RuntimeExecutionFailure);

@@ -73,7 +73,7 @@ describe('one pending copy of each held reliable record across reconnects (#698)
     // A finished fresh-session task leaves the durable handoff that reliable egress publishes from.
     server.send(createEnvelope(
       'task.offer',
-      { instruction: 'mint a session to publish from', runtime: 'pi', agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY },
+      { instruction: 'mint a session to publish from', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY },
       { taskId, seq: server.nextSeq() },
     ));
     await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === taskId);

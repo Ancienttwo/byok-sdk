@@ -1,3 +1,4 @@
+import type { TaskRunnerDeps } from '../../daemon/task-runner';
 import type { ActivityIngress } from '@byok-sdk/protocol';
 
 /**
@@ -10,3 +11,9 @@ export const TEST_ACTIVITY_INGRESS: Readonly<ActivityIngress> = Object.freeze({ 
 export function testIngressBudget(): Readonly<ActivityIngress> {
   return TEST_ACTIVITY_INGRESS;
 }
+
+/**
+ * TaskRunner harnesses have no cloud to answer their `task.claim`; this
+ * stands in for the POST outcome of an accepted claim (#2294).
+ */
+export const acceptClaimSettlement: TaskRunnerDeps['awaitClaimSettlement'] = async () => ({ outcome: 'accepted' });

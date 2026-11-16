@@ -14,7 +14,7 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapterDescriptor, type Session } from '../types';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { testScratchOwner, reservedMcpToken } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
@@ -315,7 +315,7 @@ describe('TaskRunner draft reconciliation before publish', () => {
     const policy = { ...DEFAULT_AGENT_EGRESS_POLICY,
       activity: { ...DEFAULT_AGENT_EGRESS_POLICY.activity, maxCoalesceMs: 10 } };
     const runner = new TaskRunner({
-      getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+      getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot: path.join(root, 'home') }),
       agentEgressPolicy: policy, agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -329,7 +329,7 @@ describe('TaskRunner draft reconciliation before publish', () => {
     });
     runners.push(runner);
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'reply', runtime: 'pi', agentRef, session: { mode: 'fresh' }, egressPolicy: policy,
+      instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, session: { mode: 'fresh' }, egressPolicy: policy,
       messageEgress: { mode: 'required', contract: 'draft.v1', contentType: 'text/plain', maxBytes: frameMax * 3 },
     }, { taskId: 'finalize-task', seq: 1 }));
     expect(adapter.descriptor.progressMessageBoundary).toBe(progressMessageBoundary);

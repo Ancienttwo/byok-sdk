@@ -117,7 +117,6 @@ async function startDaemon(
   longPoll = false,
   pair = true,
 ): Promise<Daemon> {
-  currentServer.setAckCapabilities(['agent-egress-reliable-ack']);
   const config: DaemonConfig = {
     localAgentRelease: { version: '0.0.0-content-test' },
     productName: 'Content test',

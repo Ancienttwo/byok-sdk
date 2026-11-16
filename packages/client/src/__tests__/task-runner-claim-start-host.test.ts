@@ -16,7 +16,7 @@ import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '..
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 const unusedBlobClient: BlobResolver = {
@@ -30,7 +30,7 @@ function makeRunner(
 ): { runner: TaskRunner; deps: TaskRunnerDeps } {
   const deps: TaskRunnerDeps = {
     ...freshOfferRunnerDeps(),
-    getIngressBudget: testIngressBudget,
+    getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement,
     scratchRoot: testScratchOwner(),
     adapters: [new StubRuntimeAdapter()],
     ...testAgentHomeDeps(),
@@ -48,13 +48,29 @@ function makeRunner(
 function offerEnvelope(taskId: string, seq = 1): Envelope {
   return createEnvelope(
     'task.offer',
-    { agentRef: freshTestAgentRef(), instruction: 's4 claim/start', ...FRESH_OFFER },
+    { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction: 's4 claim/start', ...FRESH_OFFER },
     { taskId, seq },
   );
 }
 
 function wireTypes(sent: Envelope[], taskId: string): string[] {
   return sent.filter(envelope => envelope.task_id === taskId).map(envelope => envelope.type);
+}
+
+type ClaimSettlement = Awaited<ReturnType<NonNullable<TaskRunnerDeps['awaitClaimSettlement']>>>;
+
+/** A cloud stand-in that settles each posted claim only when the test says so (#2294). */
+function claimGate(): { deps: Pick<TaskRunnerDeps, 'awaitClaimSettlement'>; settle: (settlement: ClaimSettlement) => void } {
+  let settleClaim: ((settlement: ClaimSettlement) => void) | undefined;
+  return {
+    deps: {
+      awaitClaimSettlement: (_taskId, _claimId, signal) => new Promise((resolve) => {
+        settleClaim = resolve;
+        signal.addEventListener('abort', () => resolve(undefined), { once: true });
+      }),
+    },
+    settle: settlement => settleClaim?.(settlement),
+  };
 }
 
 /** A start that waits for the test and then throws, so a cancel can race it. */
@@ -196,6 +212,72 @@ describe('TaskRunner claim/start/cancel host wiring (S4)', () => {
     // retained exactly like the legacy cancel-vs-start path; stopping retries
     // here keeps the fixture's 1s timer out of the next test.
     runner.stopAcceptingOffers();
+    forgetHost(runner);
+  });
+
+  it('starts the runtime once the cloud answers the claim as a duplicate (#2294)', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const gate = claimGate();
+    const { runner } = makeRunner(sent, { adapters: [adapter], ...gate.deps });
+    const taskId = 'task-2294-duplicate';
+    const offer = runner.handleEnvelope(offerEnvelope(taskId));
+    await vi.waitFor(() => expect(wireTypes(sent, taskId)).toContain('task.claim'));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(hostFor(runner).current(taskId)?.phase).toBe('claimed');
+
+    gate.settle({ outcome: 'duplicate' });
+    await offer;
+    expect(adapter.startCalls).toHaveLength(1);
+    expect(wireTypes(sent, taskId)).toEqual(['task.claim', 'task.started']);
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(wireTypes(sent, taskId)).toContain('task.complete'));
+    forgetHost(runner);
+  });
+
+  it('a cancel while the claim is unsettled sends task.cancelled and never starts; a late acceptance changes nothing (#2294)', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const gate = claimGate();
+    const { runner } = makeRunner(sent, { adapters: [adapter], ...gate.deps });
+    const taskId = 'task-2294-cancel';
+    const offer = runner.handleEnvelope(offerEnvelope(taskId));
+    await vi.waitFor(() => expect(wireTypes(sent, taskId)).toContain('task.claim'));
+
+    await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'stop before start' }, { taskId, seq: 2 }));
+    await offer;
+    gate.settle({ outcome: 'accepted' });
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(wireTypes(sent, taskId)).toEqual(['task.claim', 'task.cancelled']);
+    const cancelled = sent.find(envelope => envelope.type === 'task.cancelled')!;
+    expect(cancelled.payload).toMatchObject({ reason: 'stop before start', executor: { kind: 'runtime' } });
+    expect(hostFor(runner).archivedTask(taskId)?.terminal).toMatchObject({ kind: 'cancelled', reason: 'stop before start' });
+    expect(runner.activeTaskCount).toBe(0);
+    forgetHost(runner);
+  });
+
+  it('the startup deadline ends an unsettled claim through C7b and never starts the runtime (#2294)', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const gate = claimGate();
+    const { runner } = makeRunner(sent, { adapters: [adapter], startupTimeoutMs: 2_000, ...gate.deps });
+    const taskId = 'task-2294-deadline';
+    const handled = runner.handleEnvelope(offerEnvelope(taskId));
+    // The deadline must find the claim sent and still unsettled.
+    await vi.waitFor(() => expect(wireTypes(sent, taskId)).toEqual(['task.claim']));
+    await handled;
+    gate.settle({ outcome: 'accepted' });
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(wireTypes(sent, taskId)).toEqual(['task.claim', 'task.fail']);
+    expect(sent.find(envelope => envelope.type === 'task.fail')?.payload).toMatchObject({
+      reason: 'runtime startup deadline exceeded', retryable: true, executor: { kind: 'runtime' },
+    });
+    expect(hostFor(runner).archivedTask(taskId)?.terminal).toMatchObject({ kind: 'failed', retryable: true });
     forgetHost(runner);
   });
 

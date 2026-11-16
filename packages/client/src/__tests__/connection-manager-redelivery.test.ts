@@ -86,7 +86,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     const offerSeq = server.nextSeq();
     const offer = createEnvelope(
       'task.offer',
-      { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'redelivery-session' },  instruction: 'x' },
+      { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'redelivery-session' }, target: { lane: 'auto' },  instruction: 'x' },
       { taskId, seq: offerSeq },
     );
     server.send(offer);
@@ -137,7 +137,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     });
     await connection.start();
     await waitForOpen(connection);
-    const offers = [1, 2, 3].map(n => createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'redelivery-session' }, 
+    const offers = [1, 2, 3].map(n => createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'redelivery-session' }, target: { lane: 'auto' }, 
       instruction: 'finite backlog',
     }, { taskId: String(n), seq: server.nextSeq() }));
     offers.forEach(offer => server.send(offer));
@@ -166,7 +166,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
       onEnvelope: async e => { if (e.type === 'task.offer') effect(); },
     });
     await connection.start(); await waitForOpen(connection);
-    const offer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'redelivery-session' },  instruction: 'x' }, { taskId: 'a', seq: server.nextSeq() });
+    const offer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'redelivery-session' }, target: { lane: 'auto' },  instruction: 'x' }, { taskId: 'a', seq: server.nextSeq() });
     server.send(offer);
     await vi.waitFor(() => expect(effect).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(cursorStore.save).toHaveBeenCalledWith(server.url, record.deviceId, offer.seq));

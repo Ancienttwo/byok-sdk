@@ -121,7 +121,7 @@ export function createTaskReadsApi({ root, controlPlane, options }: Dependencies
       const receipt = await stores.receipts.get(
         terminalReceiptKey(taskId),
       );
-      if (receipt !== undefined) return projectTerminalResult(taskId, receipt);
+      if (receipt !== undefined) return projectTerminalResult(taskId, receipt, attempt?.claimedExecutor);
       // Cloud settled the attempt itself (device retirement or abandonTask): the
       // attempt row is the only terminal fact, and no device receipt is invented.
       if (

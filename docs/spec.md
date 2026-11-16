@@ -2314,10 +2314,11 @@ read, replay or later terminal renews them (#1113 A3).
 A task events wake hints that a task's state, activity log or approval
 timeline changed, after the commit and with no content: it names only the
 tenant and task, and a reader re-reads the sources. In-memory and embedded
-SQLite stores signal their own `taskEventsWake`; Postgres signals through
-migration 0036's triggers to `createPostgresTaskEventsWake`, so commits on any
-instance wake readers on every instance. A reader no hint reaches re-reads
-within `fallbackMs` (5 seconds by default) (#1113 A4).
+SQLite stores signal their own `taskEventsWake`. Postgres also emits the hint
+through migration 0036's triggers, but the SDK ships no listener for it: a
+Postgres Host injects `createInProcessTaskEventsWake`, so a commit on another
+instance reaches a reader at its next re-read, within `fallbackMs` (5 seconds by
+default) (#1113 A4).
 
 Unknown event types retain their original event index and render as neutral
 placeholders. Known but malformed variants fail closed. Each `progress.text`
@@ -3733,8 +3734,8 @@ holds the manifest row through physical deletion, and SQLite commits its SQL
 and process-local ledger release without an asynchronous gap.
 
 The old mailbox façade, `collectRetired`, replay `deleteExpired`, public
-`expireReservations` and Postgres `runTenant` are removed. Hosted policy lives on `PostgresRetentionPolicyStore` in the
-Worker-loadable dataplane runtime entry. Operator
+`expireReservations` and Postgres `runTenant` are removed. The Host owns its
+retention policy and passes it to `runMaintenance`. Operator
 dead-letter, reconciliation and usage-rebuild APIs remain. Installed
 `cleanup_job` rows are historical; no current code writes them. Client artifact
 retention retains its own ownership boundary.
@@ -3795,8 +3796,9 @@ Unknown or invalid executable messages cannot silently advance the mailbox curso
 
 Independent offers may progress concurrently. Admission reserves the canonical
 Agent home synchronously before asynchronous preparation and converts that
-reservation into the existing execution lease. Controls remain ordered per task;
-startup does not block another Agent or that task's cancel. `startupTimeoutMs`
+reservation into the existing execution lease. Controls remain ordered per task,
+except that a cancel does not wait behind an earlier control of its task
+(#2304); startup does not block another Agent or that task's cancel. `startupTimeoutMs`
 (default 30 seconds) starts before admission and bounds pure adapter detect/prepare
 waits as well as runtime start. AbortSignal is supplied to these pure adapter
 operations; late returns cannot claim/start or retain the home reservation. A deadline is not a disposal
@@ -4632,15 +4634,12 @@ signals only after committed append or a cancellation result containing a
 mailbox message. Handlers retain no cross-request subscription state.
 
 Memory and reference-server memory/SQLite compositions use an in-process wake.
-Resident Node/Postgres Hosts use one dedicated session-mode LISTEN connection
-per process and migration 0024's pending-outbox insert trigger, which covers
-append, cancellation and dead-letter replay at commit. The listener reconnects
-with backoff, broadcasts a re-read hint on each successful LISTEN, and probes
-self-NOTIFY delivery; failure is observable through `onError` or the default
-console error. Host shutdown closes the listener and outstanding subscriptions.
-This Node-only factory is excluded from the dataplane runtime entry. Workers
-Hosts compose one in-process wake per invocation and choose their fallback
-latency because Hyperdrive does not carry LISTEN/NOTIFY. The client and frozen
+Postgres Hosts use one too. Migration 0024's pending-outbox insert trigger
+emits a hint at commit for append, cancellation and dead-letter replay, but the
+SDK ships no listener for it, so a write from another process reaches a hold
+within the fallback interval. Workers Hosts compose one in-process wake per
+invocation and choose their fallback latency because Hyperdrive does not carry
+LISTEN/NOTIFY. The client and frozen
 wire contracts do not change.
 
 ### Client intermediate retention (#399)

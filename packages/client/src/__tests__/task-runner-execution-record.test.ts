@@ -10,7 +10,7 @@ import type { ExecutionRecord } from '../daemon/execution-record';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { StubRuntimeAdapter, type StubSession } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
@@ -48,7 +48,7 @@ async function makeRunner(options: RunnerOptions = {}) {
   if (options.omitEvidence === true) adapter.decorateSession = stub => { Object.defineProperty(stub, 'evidence', { value: undefined }); };
   const sent: Envelope[] = [];
   const records: ExecutionRecord[] = [];
-  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'execution-record-device',
@@ -63,7 +63,7 @@ async function makeRunner(options: RunnerOptions = {}) {
     ...(options.withoutRecords === true ? {} : { onExecutionRecord: (record: ExecutionRecord) => { records.push(record); } }),
     ...options.deps,
   });
-  await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: RECORD_AGENT, ...FRESH_OFFER,  instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
+  await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: RECORD_AGENT, ...FRESH_OFFER,  instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
   const session = adapter.sessions[0]!;
   const terminals = () => sent.filter(envelope => TERMINAL_TYPES.includes(envelope.type));
   const finished = () => vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
@@ -131,7 +131,7 @@ describe('TaskRunner execution record', () => {
     session.emit(use('a'));
     session.fail(new RuntimeExecutionFailure({ phase: 'run', retry: 'retryable', reason: 'runtime exited' }));
     await finished();
-    expect(terminals().map(envelope => [envelope.type, envelope.payload])).toEqual([['task.fail', { agentRef: RECORD_AGENT, reason: 'runtime exited', retryable: true, failure: { class: 'unknown' } }]]);
+    expect(terminals().map(envelope => [envelope.type, envelope.payload])).toEqual([['task.fail', { agentRef: RECORD_AGENT, executor: { kind: 'runtime', runtimeId: 'pi' }, reason: 'runtime exited', retryable: true, failure: { class: 'unknown' } }]]);
     expect(records).toEqual([{
       taskId: TASK_ID, terminal: 'failed', status: 'partial', source: 'event-stream',
       gaps: [{ reason: 'unpaired_tool_call', count: 1 }, { reason: 'stream_ended_early', count: 1 }],
@@ -210,14 +210,14 @@ describe('TaskRunner execution record', () => {
     adapter.startError = new RuntimeExecutionFailure({ phase: 'start', retry: 'retryable', reason: 'spawn failed' });
     const sent: Envelope[] = [];
     const onExecutionRecord = vi.fn();
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(),...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(),...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter], deviceId: 'execution-record-device',
       send: envelope => { sent.push(envelope); },
       blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },
       approvalRegistry: new ApprovalRegistry(),
       storeDir: directory, productId: 'execution-record-product', onExecutionRecord,
     });
-    await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: RECORD_AGENT, ...FRESH_OFFER,  instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
+    await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: RECORD_AGENT, ...FRESH_OFFER,  instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
     expect(sent.filter(envelope => TERMINAL_TYPES.includes(envelope.type)).map(envelope => envelope.type)).toEqual(['task.fail']);
     expect(onExecutionRecord).not.toHaveBeenCalled();
   });

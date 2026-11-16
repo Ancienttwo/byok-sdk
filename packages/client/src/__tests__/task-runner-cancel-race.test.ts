@@ -7,7 +7,7 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 
 const unusedBlobClient: BlobResolver = {
   resolveInstruction: async () => {
@@ -23,7 +23,7 @@ async function makeRunner(
   sent: Envelope[],
   overrides: Partial<Pick<TaskRunnerDeps, 'onRuntimeDisposalFailure'>> = {},
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
     ...overrides,
     adapters: [adapter],
     ...testAgentHomeDeps(),
@@ -72,7 +72,7 @@ describe('TaskRunner: cancel arriving during the offer-processing window (findin
     const taskId = 'task-cancel-terminal-race';
     await runner.handleEnvelope(createEnvelope(
       'task.offer',
-      { agentRef: freshTestAgentRef(),  instruction: 'cancel me', ...FRESH_OFFER },
+      { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'cancel me', ...FRESH_OFFER },
       { taskId, seq: 1 },
     ));
     const session = adapter.sessions[0]!;
@@ -98,7 +98,7 @@ describe('TaskRunner: cancel arriving during the offer-processing window (findin
     const taskId = 'task-race-window';
     const offerEnvelope = createEnvelope(
       'task.offer',
-      { agentRef: freshTestAgentRef(),  instruction: 'race the cancel', ...FRESH_OFFER },
+      { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'race the cancel', ...FRESH_OFFER },
       { taskId, seq: 1 },
     );
     const cancelEnvelope = createEnvelope('task.cancel', { reason: 'cancel during start()' }, { taskId, seq: 2 });
@@ -141,7 +141,7 @@ describe('TaskRunner: cancel arriving during the offer-processing window (findin
     const releaseStart = adapter.blockStart();
     const taskId = 'task-cancel-pending-start';
 
-    const offerPromise = runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'slow start', ...FRESH_OFFER }, { taskId, seq: 1 }));
+    const offerPromise = runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'slow start', ...FRESH_OFFER }, { taskId, seq: 1 }));
     await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
     await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'cancel while starting' }, { taskId, seq: 2 }));
     await vi.waitFor(() => expect(sent.some((e) => e.type === 'task.cancelled' && e.task_id === taskId)).toBe(true));
@@ -181,7 +181,7 @@ describe('TaskRunner: cancel arriving during the offer-processing window (findin
     await runner.handleEnvelope(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(),  instruction: 'too late', ...FRESH_OFFER },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'too late', ...FRESH_OFFER },
         { taskId, seq: 2 },
       ),
     );

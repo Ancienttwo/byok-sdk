@@ -8,13 +8,13 @@ import type { ApprovalKind } from '../approvals.js';
 import { observePreparedMemory, type PreparedAgentMemoryState } from '../../agent-memory/prepared-agent-memory.js';
 import { InputPreparationRequestError } from '../input-preparation-service.js';
 import { DURABLE_REPLICA_DIRNAME } from '../../adapters/pi-durable/replica.js';
-import { terminalIdentity } from '../terminal-identity.js';
+import { claimedExecutorFor, terminalIdentity } from '../terminal-identity.js';
 import { abortedStartOf, startOwnedRuntime } from '../runtime-start.js';
 import type { DeclaredSessionMembers } from '../session-contract.js';
 import path from 'node:path';
-import { createEnvelope, type AgentMemoryStartRefusal, type TaskFailure } from '@byok-sdk/protocol';
+import { createEnvelope, type AgentMemoryStartRefusal, type TaskDeclineCode, type TaskFailure } from '@byok-sdk/protocol';
 import { readResidentMemory } from '../../resident-memory.js';
-import { sealRuntimeOperationManifest, type RuntimeLaunchResources, type RuntimeOperationStartInput, type RuntimePreparedLaunchV1, type Session } from '../../types.js';
+import { modelLaneTarget, sealRuntimeOperationManifest, type RuntimeLaunchResources, type RuntimeOperationStartInput, type RuntimePreparedLaunchV1, type Session } from '../../types.js';
 import { admitPreparedOffer, type PreparedOfferServerProjection } from '../prepared-offer-admission.js';
 import type { InputPreparationStore } from '../input-preparation-store.js';
 import { inputPreparationDigest } from '../../input-preparation.js';
@@ -27,7 +27,7 @@ import { DAEMON_TASK_FAILURE } from '../task-failure.js';
 import { settleAgentMemoryCommitCopy } from './agent-memory.js';
 import type { PreparedExecutionObservation, ActiveTask, ClaimedAgentFailureContext, OfferPhaseContext } from './support.js';
 import { outboundErrorMessage } from '../outbound-error.js';
-import { isKnownRuntimeId, offeredInstruction, errorMessage, pendingCancelBeforeActive } from './support.js';
+import { offeredInstruction, errorMessage, pendingCancelBeforeActive } from './support.js';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner.js';
 import type { AcceptedOfferPayload } from './support.js';
 import type { OfferClaim, OfferHeld, OfferLimits, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer.js';
@@ -77,7 +77,7 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
   const effectiveToolAuthorization = toolAuthorizationMode(toolAuthorization, pick.descriptor.id);
   if (effectiveToolAuthorization === 'auto' && pick.descriptor.capabilities.toolAuthorizationAuto !== true) {
     if (!admissionWithdrawn()) {
-      decline(`tool_authorization_unsupported: runtime ${pick.descriptor.id} cannot gate tool calls before execution, so auto mode cannot run`, false);
+      decline({ reason: `runtime ${pick.descriptor.id} cannot gate tool calls before execution, so auto mode cannot run`, retryable: false, code: 'tool_authorization_unsupported' });
     }
     return;
   }
@@ -86,14 +86,14 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
   // an unscoped run, and `all` (which never blocks a call) cannot carry one.
   if (toolAuthorization.fileScope !== undefined) {
     if (toolAuthorizationMode(toolAuthorization, pick.descriptor.id) === 'all') {
-      if (!admissionWithdrawn()) decline('file_scope_conflicts_with_all: a file-scope policy applies only to auto tasks', false);
+      if (!admissionWithdrawn()) decline({ reason: 'a file-scope policy applies only to auto tasks', retryable: false, code: 'file_scope_conflicts_with_all' });
       return;
     }
     const admissionOfScope = fileScopeAdmission({
       descriptor: pick.descriptor, lane, platform: process.platform,
     });
     if (!admissionOfScope.supported) {
-      if (!admissionWithdrawn()) decline(`file_scope_unsupported: ${admissionOfScope.reason}`, false);
+      if (!admissionWithdrawn()) decline({ reason: admissionOfScope.reason, retryable: false, code: 'file_scope_unsupported' });
       return;
     }
   }
@@ -106,7 +106,7 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
         scratch,
       }));
     } catch (error) {
-      if (!admissionWithdrawn()) decline(`runtime launch admission failed: ${errorMessage(error)}`, false);
+      if (!admissionWithdrawn()) decline({ reason: `runtime launch admission failed: ${errorMessage(error)}`, retryable: false });
       return;
     }
     if (admissionWithdrawn()) return;
@@ -115,13 +115,14 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
   // `env` was built before admission (see its declaration above) so the
   // MCP probes and the runtime child are guaranteed to share one
   // allowlist decision rather than two computations that could drift.
+  const modelTarget = modelLaneTarget(offered.target);
   const manifest = sealRuntimeOperationManifest({
     ...(preparation === undefined ? {} : {agentMemory}),
     taskId,
     runtimeId: pick.descriptor.id,
     descriptor: pick.descriptor,
     requiredToolsetIds: requiredToolsets ?? [],
-    ...(offered.dispatchSelection === undefined ? {} : { dispatchSelection: offered.dispatchSelection }),
+    ...(modelTarget === undefined ? {} : { modelTarget }),
     ...(sessionRef === undefined ? {} : { sessionRef }),
     agentRef: agentBinding.resolution.agentRef,
     cwd: workspaceDir,
@@ -146,30 +147,29 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
     const lane = preparationLane!;
     const record = lane.store.get(preparation.reference);
     if (record === undefined) {
-      decline('preparation_not_found: no preparation record under this reference on this device', false);
+      decline({ reason: 'no preparation record under this reference on this device', retryable: false, code: 'preparation_not_found' });
       return;
     }
-    // Each memory admission stage declines with its own C5 `reason: detail`
-    // pair, decided by the stage (or the typed error it raised), never by
-    // reading an error message. Every one is before pin and claim, and no
-    // raw helper/transport text reaches the wire.
-    const declineMemory = (reason: string): void => {
-      decline(reason, false);
+    // Each memory admission stage declines with its own C5 code and detail,
+    // decided by the stage (or the typed error it raised), never by reading
+    // an error message. Every one is before pin and claim, and no raw
+    // helper/transport text reaches the wire.
+    const declineMemory = (code: TaskDeclineCode, reason: string): void => {
+      decline({ reason, retryable: false, code });
     };
     if (agentMemory === undefined) {
-      declineMemory('agent_memory_selection_invalid: prepared offers require an explicit memory selection');
+      declineMemory('agent_memory_selection_invalid', 'prepared offers require an explicit memory selection');
       return;
     }
     if (record.binding.agentMemory !== agentMemory) {
-      declineMemory('agent_memory_mismatch: the offered Agent memory selection differs from the named preparation');
+      declineMemory('agent_memory_mismatch', 'the offered Agent memory selection differs from the named preparation');
       return;
     }
     try {
       await lane.authorizeAgentMemory(record.binding);
     } catch (error) {
-      declineMemory(error instanceof InputPreparationRequestError
-        ? `${error.code}: ${error.message}`
-        : 'authority_unavailable: the local Agent memory authority could not be consulted');
+      if (error instanceof InputPreparationRequestError) declineMemory(error.code, error.message);
+      else declineMemory('authority_unavailable', 'the local Agent memory authority could not be consulted');
       return;
     }
     let memory: PreparedAgentMemoryState | null = null;
@@ -177,13 +177,13 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
       const describe = this['deps'].agentMemoryDescribeBin;
       if (describe === undefined || this['deps'].agentMemoryMcpBin === undefined
         || !isAgentMemorySecureFilesystemAvailable(this['deps'].resolveAgentMemoryFilesystemHelperBin !== undefined)) {
-        declineMemory('unsupported_input: agent_memory_unavailable');
+        declineMemory('unsupported_input', 'agent_memory_unavailable');
         return;
       }
       try {
         memory = await observePreparedMemory(describe, mcpEnv, blobAbort.signal);
       } catch {
-        declineMemory('toolsets_unobservable: agent_memory_descriptor_unobservable');
+        declineMemory('toolsets_unobservable', 'agent_memory_descriptor_unobservable');
         return;
       }
     }
@@ -231,7 +231,7 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
       // against the same device state reaches the same answer, and a
       // prepared failure never permits sending a DIFFERENT input under the
       // same accounting.
-      decline(`${admitted.reason}: ${admitted.detail}`, false);
+      decline({ reason: admitted.detail, retryable: false, code: admitted.code });
       return;
     }
     let pinned: Awaited<ReturnType<InputPreparationStore['pin']>>;
@@ -242,14 +242,15 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
         sealedAt: new Date().toISOString(),
       });
     } catch (error) {
-      decline(`preparation_not_ready: the preparation pin could not be written: ${errorMessage(error)}`, false);
+      decline({ reason: `the preparation pin could not be written: ${errorMessage(error)}`, retryable: false, code: 'preparation_not_ready' });
       return;
     }
     if (pinned.kind === 'occupied') {
-      decline(
-        `preparation_already_pinned: task ${JSON.stringify(pinned.record.pin!.taskId)} already consumed this preparation`,
-        false,
-      );
+      decline({
+        reason: `task ${JSON.stringify(pinned.record.pin!.taskId)} already consumed this preparation`,
+        retryable: false,
+        code: 'preparation_already_pinned',
+      });
       return;
     }
     this['preparationPinsByTask'].set(taskId, record.recordId);
@@ -312,48 +313,42 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
   // host reduces C2, runs this send synchronously, and reduces the claim.sent
   // completion inside the same turn; a cancel can only be queued behind it
   // and then sees a claimed task (X3b), never a pre-claim X2a row.
+  const claim: { settlement?: ReturnType<TaskRunnerDeps['awaitClaimSettlement']> } = {};
   host.setSendClaim(taskId, () => {
-    if (!isKnownRuntimeId(manifest.descriptor.id)) this['claimedHarnesses'].set(taskId, manifest.descriptor.id);
+    this['claimedExecutorIds'].set(taskId, manifest.descriptor.id);
     const timings = admission.snapshot();
-    this['deps'].send(
-      createEnvelope(
-        'task.claim',
-        {
-          deviceId: this['deps'].deviceId,
-          ...(manifest.agentRef === undefined ? {} : { agentRef: manifest.agentRef }),
-          // M5 (claimed runtime, docs/protocol.md §3.1): the ACTUAL adapter
-          // `pickAdapter` just selected — covers both the explicit-runtime
-          // path (`payload.runtime` named one) and the auto-select
-          // (preference-ordered, pi last by default — M5 batch-3, see
-          // `DEFAULT_RUNTIME_PREFERENCE`) path (`payload.runtime` was
-          // absent) uniformly, since `pick.adapter` already reflects
-          // whichever one won either way. Distinct from `payload.runtime`
-          // (the merely REQUESTED runtime): this is what closes the gap
-          // where an auto-selected task left the server never learning
-          // which runtime actually ran.
-          runtime: isKnownRuntimeId(manifest.descriptor.id) ? manifest.descriptor.id : undefined,
-          ...(!isKnownRuntimeId(manifest.descriptor.id) ? { harnessId: manifest.descriptor.id } : {}),
-          // S0/D-4 (`task.claim.capabilities`, docs/protocol.md §2.4): the
-          // selected adapter's own capability self-report, carried on the
-          // same message that establishes the task↔runtime binding. The
-          // server gates control messages (`task.steer`) on this and only
-          // this — connection-level `conn.hello.runtimes[].capabilities`
-          // stays device discovery on both transports and cannot replace
-          // the claim-time truth for this exact task/runtime binding.
-          //
-          // Sent UNCONDITIONALLY, deliberately NOT gated on
-          // `isKnownRuntimeId` the way `runtime` above is: `runtime` is a
-          // closed protocol enum a custom adapter has no member of, but
-          // capabilities are a self-report every adapter can make honestly.
-          // Gating them would silently strip a custom steer-capable
-          // adapter's own truth and leave the server fail-closing on it
-          // forever.
-          capabilities: toRuntimeInfoCapabilities(manifest.descriptor.capabilities),
-          ...(timings === undefined ? {} : { admission: timings }),
-        },
-        { taskId },
-      ),
+    const envelope = createEnvelope(
+      'task.claim',
+      {
+        deviceId: this['deps'].deviceId,
+        ...(manifest.agentRef === undefined ? {} : { agentRef: manifest.agentRef }),
+        // Wire v7 (claimed executor, docs/protocol.md §3.1): the ACTUAL
+        // adapter `pickAdapter` just selected — for a target that named
+        // one and for an `auto` target alike, since `pick.adapter` already
+        // reflects whichever one won. Distinct from the offer's `target`
+        // (the merely REQUESTED one): this is how the server learns what
+        // an auto-selected task ran. It names no model.
+        executor: claimedExecutorFor(manifest.descriptor.id),
+        // S0/D-4 (`task.claim.capabilities`, docs/protocol.md §2.4): the
+        // selected adapter's own capability self-report, carried on the
+        // same message that establishes the task↔runtime binding. The
+        // server gates control messages (`task.steer`) on this and only
+        // this — connection-level `conn.hello.runtimes[].capabilities`
+        // stays device discovery on both transports and cannot replace
+        // the claim-time truth for this exact task/runtime binding.
+        //
+        // Sent UNCONDITIONALLY, for a custom harness too: capabilities
+        // are a self-report every adapter can make honestly. Omitting them
+        // would silently strip a custom steer-capable adapter's own truth
+        // and leave the server fail-closing on it forever.
+        capabilities: toRuntimeInfoCapabilities(manifest.descriptor.capabilities),
+        ...(timings === undefined ? {} : { admission: timings }),
+      },
+      { taskId },
     );
+    // Registered before the send, so no settlement can arrive unobserved.
+    claim.settlement = this['deps'].awaitClaimSettlement(taskId, envelope.id, blobAbort.signal);
+    this['deps'].send(envelope);
   });
   try {
     const journaled = host.dispatchSync({ type: 'claim.journaled', taskId, atMs: Date.now() });
@@ -365,6 +360,11 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
   } finally {
     host.setSendClaim(taskId, undefined);
   }
+  if (claim.settlement === undefined) throw new Error(`claim for ${taskId} was sent without its settlement wait`);
+  if (!await claimAccepted.call(this, taskId, claim.settlement, blobAbort.signal, {
+    binding: agentBinding,
+    runtimeId: pick.descriptor.id,
+  })) return;
 
   // Resolve the instruction blob after claim.
   // A prepared Execution resolves nothing here — it carries no instruction,
@@ -435,6 +435,56 @@ function failBeforeStart(
 ): Promise<boolean> {
   hostFor(this).dispatchSync({ type: 'runtime.prestart_failed', taskId, atMs: Date.now(), reason, retryable });
   return this['failClaimedAgent'](taskId, reason, retryable, context, failure);
+}
+
+/**
+ * #2294: waits for the cloud to settle this device's `task.claim` before the
+ * runtime starts. True when the start may proceed. A refused claim declines
+ * the task (C10). A cancel, shutdown or startup deadline that ends the wait
+ * first takes the existing claimed-before-start terminal: C7's cancelled
+ * branch for a cancel, C7b otherwise. Those terminals carry the claimed
+ * executor; the outbox posts the claim before them, so the cloud settles
+ * both the same way.
+ */
+async function claimAccepted(
+  this: TaskRunner,
+  taskId: string,
+  settlement: ReturnType<TaskRunnerDeps['awaitClaimSettlement']>,
+  signal: AbortSignal,
+  context: ClaimedAgentFailureContext,
+): Promise<boolean> {
+  const settled = await settlement;
+  const host = hostFor(this);
+  if (host.current(taskId)?.terminal !== undefined) return false;
+  if (settled?.outcome === 'rejected') {
+    host.dispatchSync({ type: 'claim.refused', taskId, atMs: Date.now(), reason: `claim refused: ${settled.reason}` });
+    return false;
+  }
+  // `duplicate` is a replay of an accepted claim: the cloud reaches its
+  // envelope dedupe (`completeInboundEnvelope`, packages/cloud/src/inbound.ts:838-841)
+  // only after the ownership CAS in `applyLifecycle` (inbound.ts:876-877)
+  // passed with this device as owner and the same executor, and a refused
+  // claim never records that dedupe.
+  if (settled !== undefined && !signal.aborted) return true;
+  const pendingCancel = pendingCancelBeforeActive.call(this, taskId);
+  if (pendingCancel === undefined) {
+    await failBeforeStart.call(this, taskId,
+      this['stoppingOffers'] ? 'daemon shutting down during runtime startup' : 'runtime startup deadline exceeded', true, context);
+    return false;
+  }
+  host.dispatchSync({
+    type: 'runtime.start_failed', taskId, atMs: Date.now(),
+    ...(pendingCancel.reason === undefined ? {} : { reason: pendingCancel.reason }),
+  });
+  this['revokeAgentMessageContext'](taskId);
+  this['revokeAgentResultContext'](taskId);
+  await this['pendingMessageTasks'].get(taskId)?.outbox.revoke(taskId);
+  this['deps'].send(createEnvelope('task.cancelled', {
+    reason: pendingCancel.reason,
+    ...terminalIdentity(this['claimedExecutorIds'].get(taskId)),
+    agentRef: context.binding.resolution.agentRef,
+  }, { taskId }));
+  return false;
 }
 
 /**
@@ -717,7 +767,7 @@ async function startAndActivateRuntime(
       }
       const cancellation = createEnvelope('task.cancelled', {
         reason: pendingCancel?.reason,
-        ...terminalIdentity(this['claimedHarnesses'].get(taskId)),
+        ...terminalIdentity(this['claimedExecutorIds'].get(taskId)),
         agentRef: agentBinding.resolution.agentRef,
       }, { taskId });
       let cancellationSettled = false;

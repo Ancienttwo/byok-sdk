@@ -184,6 +184,26 @@ describe('task-runner reducer core (#1099 S1)', () => {
     expect(result.effects.find(effect => effect.effect.kind === 'send.decline')?.effect.retryable).toBe(true);
   });
 
+  it('declines once, non-retryably and without a code, when the cloud refuses the claim; a late refusal drops (#2294)', () => {
+    const snapshot = makeSnapshot({ task: { phase: 'claimed', claim: { journaled: true, sent: true } } });
+    const refused = apply(snapshot, makeEvent('claim.refused', { reason: 'claim refused: task_owned_by_other_device' }));
+    expect(refused.rowId).toBe('C10');
+    expect(refused.task?.phase).toBe('declined');
+    expect(refused.task?.terminal).toMatchObject({ kind: 'declined', reason: 'claim refused: task_owned_by_other_device', retryable: false });
+    expect(kinds(refused.effects)).not.toContain('start.runtime');
+    expect(kinds(refused.effects)).not.toContain('send.started');
+    const decline = refused.effects.filter(effect => effect.effect.kind === 'send.decline');
+    expect(decline.map(effect => effect.effect)).toEqual([
+      { kind: 'send.decline', taskId: 't1', reason: 'claim refused: task_owned_by_other_device', retryable: false },
+    ]);
+
+    const cancelled = apply(snapshot, makeEvent('runtime.start_failed', { reason: 'stop' }));
+    const late = apply(snapshotOf(cancelled), makeEvent('claim.refused', { reason: 'claim refused: attempt_superseded' }));
+    expect(late.rowId).toBe('F-CLAIM');
+    expect(late.disposition).toBe('dropped');
+    expect(kinds(late.effects)).toEqual([]);
+  });
+
   it('appends a barrier completion at the queue tail instead of the front (#1218)', () => {
     const queue = new ReducerQueue(makeSnapshot({ task: { phase: 'claiming' } }));
     // The cancel arrives while beforeClaim is in flight; the journal barrier

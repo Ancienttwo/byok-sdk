@@ -171,7 +171,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
       payload: {
         session: { mode: 'fresh' },
         instruction: 'admitted right after open',
-        runtime: 'pi',
+        target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef: { agentId: 'agent-hello-gate', profileRevision: 'profile-1' },
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         terminalProjection: { mode: 'none' },
@@ -299,7 +299,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
         payload: {
           session: { mode: 'fresh' },
           instruction: 'run in the durable Agent home over long-poll',
-          runtime: 'pi',
+          target: { lane: 'runtime', runtimeId: 'pi' },
           agentRef: { agentId: 'agent-longpoll', profileRevision: 'profile-1' },
           egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
           terminalProjection: { mode: 'none' },

@@ -12,6 +12,8 @@ import {
   type AgentEgressPolicy,
   type Envelope,
   type SealedDeclineCode,
+  type ClaimedExecutor,
+  type SteerRefusalReason,
   type RuntimeId,
   type TerminalInferenceUsage,
   type TerminalPreparedObservation,
@@ -87,7 +89,7 @@ import { offerSettlements, trackOffer, taskTearingDown } from './task-runner/sup
 import { publishAgentMessage, describeAgentResult, submitAgentResult, recoverAgentMessageOutboxes, agentMessageOutbox, cancelRecoveredAgentMessage, activateAgentMessage, sendAgentMessageRecord, handleAgentMessageDisposition, agentResultStore } from './task-runner/agent-message.js';
 import { withAgentMessageMcp, withAgentResultMcp, withAgentMemoryMcp, withHostToolsetContext, resolveMcpServers } from './task-runner/mcp-contexts.js';
 import { activeMemoryContext, runMemoryOperation, quiesceAndSnapshotAgentMemory, bindAgentMemoryFilesystem } from './task-runner/agent-memory.js';
-import { stopAcceptingOffers, closeActiveSession, awaitActiveSessionClose, interruptBounded, teardownActiveTask, shutdownTask, armMaxDurationTimer, handleCancel, handleSteer } from './task-runner/lifecycle.js';
+import { stopAcceptingOffers, closeActiveSession, awaitActiveSessionClose, interruptBounded, teardownActiveTask, shutdownTask, armMaxDurationTimer, handleCancel, handleSteer, refuseSteer } from './task-runner/lifecycle.js';
 import { reserveOfferHome, admitOfferLimits, handleSealedOffer, declineSealedOffer, declineOfferMissingCapabilities } from './task-runner/offer-admission.js';
 import { prepareOfferRuntime, pickAdapter } from './task-runner/offer-runtime.js';
 import { requestApproval, handleApprove, handleReject } from './task-runner/approvals.js';
@@ -205,6 +207,16 @@ export interface TaskRunnerDeps {
   awaitTerminalCommit?: (taskId: string) => Promise<void>;
   /** Fsync the execution commitment before claim/runtime side effects. */
   beforeClaim?: (taskId: string, runtime: string) => Promise<void>;
+  /**
+   * The cloud's outcome for the posted `task.claim` with this envelope id
+   * (#2294). Registered before the claim is sent; resolves `undefined` once
+   * `signal` aborts first. The runtime starts only after an accepted claim.
+   */
+  awaitClaimSettlement: (taskId: string, claimId: string, signal: AbortSignal) => Promise<
+    | { readonly outcome: 'accepted' | 'duplicate' }
+    | { readonly outcome: 'rejected'; readonly reason: string }
+    | undefined
+  >;
   blobClient: BlobResolver;
   batcherOptions?: ProgressBatcherOptions;
   /** Runtime ownership facts for `Daemon.whenTaskSettled`. */
@@ -575,7 +587,8 @@ export class TaskRunner {
   private readonly inFlightOffers = new Set<string>();
   /** Sealed offers being opened, so a redelivery during the open is not opened twice. */
   private readonly sealedOpening = new Set<string>();
-  private readonly claimedHarnesses = new Map<string, string>();
+  /** The adapter id each task claimed during its offer, so a terminal sent before the task is active echoes `executor`. */
+  private readonly claimedExecutorIds = new Map<string, string>();
   private readonly homeReservations = new Map<string, number>();
   /** Offers admitted past the device-wide task cap that are not yet active; cleared when `handleOffer` returns. */
   private readonly deviceTaskReservations = new Set<string>();
@@ -947,8 +960,13 @@ export class TaskRunner {
             );
             return;
           }
-          if (!this.tasks.has(taskId)) return;
-          await this.deps.sealedTasks.applySteer(envelope, (text) => this.handleSteer(taskId, text));
+          // A steer for a task that is not active is refused unopened: the
+          // refusal names the steer by id and carries no content.
+          if (!this.tasks.has(taskId)) {
+            await this.refuseSteer(taskId, envelope.id, 'task_not_active');
+            return;
+          }
+          await this.deps.sealedTasks.applySteer(envelope, (text) => this.handleSteer(taskId, envelope.id, text));
           return;
         }
         // #654 §6.2: a task that seals its input takes no plaintext steer.
@@ -956,7 +974,7 @@ export class TaskRunner {
           console.error(`[byok/client] plaintext task.steer for task ${taskId} dropped: the task seals its input`);
           return;
         }
-        await this.handleSteer(taskId, envelope.payload.text);
+        await this.handleSteer(taskId, envelope.id, envelope.payload.text);
         return;
       }
       case 'task.approve':
@@ -1268,9 +1286,17 @@ export class TaskRunner {
    * run failure of class `input_too_large`, to reject a particular steer
    * without retry. Other errors propagate and keep the existing cursor stall
    * and redelivery behavior.
+   *
+   * Every steer acknowledged without delivery (no active task, no steering
+   * channel, too large for the runtime) is reported as `task.steer_refused`.
    */
-  private handleSteer(taskId: string, text: string): Promise<void> {
-    return handleSteer.call(this, taskId, text);
+  private handleSteer(taskId: string, steerMessageId: string, text: string): Promise<void> {
+    return handleSteer.call(this, taskId, steerMessageId, text);
+  }
+
+  /** Sends the `task.steer_refused` of the steer whose envelope id is `steerMessageId`. */
+  private refuseSteer(taskId: string, steerMessageId: string, reason: SteerRefusalReason): Promise<void> {
+    return refuseSteer.call(this, taskId, steerMessageId, reason);
   }
 
   /**
@@ -1403,7 +1429,7 @@ export class TaskRunner {
 
   /**
    * Build the optional terminal observation from facts this running daemon
-   * actually has. No offered `dispatchSelection` is echoed here: it is a
+   * actually has. No offered model-lane `target` is echoed here: it is a
    * requested execution target, not an adapter-reported provider/model fact.
    * The bundled adapter event contracts currently expose token observations
    * (Codex and Claude) but no provider/model observation, so those keys stay
@@ -1436,8 +1462,8 @@ export class TaskRunner {
   private agentTerminalPayload(
     active: ActiveTask,
   ): {
+    executor: ClaimedExecutor;
     agentRef?: AgentRef;
-    harnessId?: string;
     agentHomeProjection?: TerminalAgentHomeProjection;
     agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
     residentMemoryOverLimit?: TerminalResidentMemoryOverLimit;

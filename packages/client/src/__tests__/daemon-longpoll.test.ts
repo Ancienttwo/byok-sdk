@@ -38,10 +38,10 @@ describe('long-poll lifecycle (protocol §8)', () => {
     await daemon.pair('code');
     await daemon.start();
     try {
-      server.pushLongPollEvent(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'blocked', runtime: 'codex' },
+      server.pushLongPollEvent(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'blocked', target: { lane: 'runtime', runtimeId: 'codex' } },
         { taskId: 'slow-start', seq: server.nextSeq() }));
       await server.waitFor(e => e.type === 'task.claim');
-      server.pushLongPollEvent(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'independent', runtime: 'pi' },
+      server.pushLongPollEvent(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'independent', target: { lane: 'runtime', runtimeId: 'pi' } },
         { taskId: 'other-start', seq: server.nextSeq() }));
       await vi.waitFor(() => expect(other.sessions).toHaveLength(1));
       server.pushLongPollEvent(createEnvelope('task.cancel', { reason: 'remote' },
@@ -81,7 +81,7 @@ describe('long-poll lifecycle (protocol §8)', () => {
     server.pushLongPollEvent(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'do the thing' },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },  instruction: 'do the thing' },
         { taskId: 'task-long-poll-1', seq: offerSeq },
       ),
     );
@@ -104,7 +104,7 @@ describe('long-poll lifecycle (protocol §8)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'do another thing' },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },  instruction: 'do another thing' },
         { taskId: 'task-recovered-1', seq: secondSeq },
       ),
     );

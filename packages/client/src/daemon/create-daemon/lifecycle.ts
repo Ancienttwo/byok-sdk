@@ -1,5 +1,6 @@
 import { startControlServer, AnotherControlServerRunningError } from '../control-server.js';
-import { type DaemonLifecycle, type DaemonHaltReason, DaemonHaltError, DaemonNotOpenError } from '../daemon-lifecycle.js';
+import { PROTOCOL_VERSION, ProtocolNegotiationError } from '@byok-sdk/protocol';
+import { type DaemonHalt, type DaemonLifecycle, type DaemonHaltReason, DaemonHaltError, DaemonNotOpenError } from '../daemon-lifecycle.js';
 import { InsecureServerUrlError } from '../url.js';
 import { DeviceRecordRePairRequiredError } from '../store.js';
 import { DeviceStoreBindingMismatchError } from '../daemon-errors.js';
@@ -100,7 +101,9 @@ export function whenOpen(daemonScope: DaemonScope, options: { readonly signal: A
         case 'awaiting-enrollment':
           return false;
         case 'halted':
-          reject(new DaemonHaltError(lifecycle.reason));
+          reject(lifecycle.reason === 'protocol_negotiation_failed'
+            ? new DaemonHaltError(lifecycle.reason, { cause: new ProtocolNegotiationError({ localVersion: PROTOCOL_VERSION, httpStatus: lifecycle.httpStatus }) })
+            : new DaemonHaltError(lifecycle.reason));
           return true;
         case 'crashed':
         case 'stopped':
@@ -122,10 +125,10 @@ export function whenOpen(daemonScope: DaemonScope, options: { readonly signal: A
   });
 }
 
-export function halted(daemonScope: DaemonScope, reason: DaemonHaltReason): void {
+export function halted(daemonScope: DaemonScope, halt: DaemonHalt): void {
   const { setLifecycle } = daemonScope;
-  setLifecycle({ phase: 'halted', reason, at: new Date().toISOString() });
-  endActiveTasks(daemonScope, `halted: ${reason}`);
+  setLifecycle({ phase: 'halted', ...halt, at: new Date().toISOString() });
+  endActiveTasks(daemonScope, `halted: ${halt.reason}`);
 }
 
 /**
@@ -202,10 +205,11 @@ export async function runAuthOperation<T>(
 /**
  * The halts a start can find locally. Anything else thrown from startup is
  * a crash. `store_owned` is found before this process owns the store, so it
- * is thrown only (see {@link DaemonHaltError}).
+ * is thrown only (see {@link DaemonHaltError}). A refused wire major is
+ * found only by the connection loop's handshake, never by a start.
  */
-export function startupHaltReason(daemonScope: DaemonScope, err: unknown): DaemonHaltReason | undefined {
-  if (err instanceof DaemonHaltError) return err.reason;
+export function startupHaltReason(daemonScope: DaemonScope, err: unknown): Exclude<DaemonHaltReason, 'protocol_negotiation_failed'> | undefined {
+  if (err instanceof DaemonHaltError && err.reason !== 'protocol_negotiation_failed') return err.reason;
   if (err instanceof AnotherControlServerRunningError) return 'store_owned';
   if (err instanceof DeviceRecordRePairRequiredError) return 're_pair_required';
   if (err instanceof DeviceStoreBindingMismatchError) return 'store_not_bound';

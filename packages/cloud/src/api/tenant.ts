@@ -13,8 +13,6 @@ export function createTenantApi({ root, controlPlane, options }: Dependencies): 
   | 'listDevices'
   | 'revokeDevice'
   | 'createBoardItem'
-  | 'listBoardItems'
-  | 'acceptBoardItem'
   | 'listPresence'
   | 'readTenantReadiness'
 > {
@@ -33,18 +31,6 @@ export function createTenantApi({ root, controlPlane, options }: Dependencies): 
         titleMaxBytes: options.boardTitleMaxBytes ?? DEFAULT_BOARD_TITLE_MAX_BYTES,
       });
       return tenantStoresFor(controlPlane(tenant), root).board.create(input);
-    },
-
-    listBoardItems(tenant, query) {
-      return tenantStoresFor(controlPlane(tenant), root).board.list(query);
-    },
-
-    acceptBoardItem(tenant, itemId) {
-      return tenantStoresFor(controlPlane(tenant), root).board.updateStatus({
-        itemId,
-        expectedStatus: 'in_review',
-        status: 'done',
-      });
     },
 
     listPresence(tenant) {

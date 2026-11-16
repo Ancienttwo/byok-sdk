@@ -1,6 +1,6 @@
 import type { Envelope, RuntimeInfo, CapabilityFlag, RuntimeId, AgentEgressPolicy, ContentReadPolicy, RuntimeUnavailableEntry } from '@byok-sdk/protocol';
 import { type JournalIdentity, type ReceivedEnvelopeRecord, journalHash } from '../journal/journal.js';
-import { encodeEnvelope, PROVIDER_PROFILE_BINDING_CAPABILITY, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY, AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, PROVIDER_PROVISIONING_CAPABILITY, AGENT_MEMORY_INTENT_CAPABILITY, AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY } from '@byok-sdk/protocol';
+import { encodeEnvelope, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY, AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, PROVIDER_PROVISIONING_CAPABILITY, AGENT_MEMORY_INTENT_CAPABILITY, AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY } from '@byok-sdk/protocol';
 import type { RuntimeAdapter } from '../../types.js';
 import type { DaemonConfigIssue } from '../config-schema/validate.js';
 import { type HarnessInfo, HarnessIdSchema } from '@byok-sdk/protocol';
@@ -148,8 +148,7 @@ export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
     if (detected.version !== undefined) info.version = detected.version;
     if (detected.authPresent !== undefined) info.authPresent = detected.authPresent;
     // Pre-freeze addition (`RuntimeInfo.capabilities`, `messages.ts`):
-    // surfaces this same adapter descriptor's capabilities (already used above
-    // by `computeCapabilities` for the connection-level `steer` flag) into
+    // surfaces this adapter descriptor's capabilities into
     // the per-runtime wire field — see `toRuntimeInfoCapabilities`'s doc
     // comment.
     info.capabilities = toRuntimeInfoCapabilities(adapter.descriptor.capabilities);
@@ -164,8 +163,7 @@ export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
 
 /**
  * M0 gatekeeper finding ②: advertise only what this device can actually do,
- * not a static spread of every known flag. `steer` reflects whether any
- * configured adapter can express it.
+ * not a static spread of every known flag.
  */
 export function computeCapabilities(
   adapters: RuntimeAdapter[],
@@ -185,7 +183,6 @@ export function computeCapabilities(
     && ['darwin', 'linux'].includes(nativeSessions.platform ?? process.platform)
     && nativeSessions.sessionDir !== undefined
     && adapters.some(adapter => adapter.descriptor.id === 'pi' && adapter.descriptor.memoryLane !== undefined)) flags.push('native-sessions');
-  if (adapters.some((adapter) => adapter.descriptor.capabilities.steer)) flags.push('steer');
   const selectionAdapters = adapters.filter((adapter) =>
     ALL_RUNTIME_IDS.includes(adapter.descriptor.id as RuntimeId),
   );
@@ -194,12 +191,6 @@ export function computeCapabilities(
     selectionAdapters.every((adapter) => adapter.descriptor.supportsDispatchSelection === true)
   ) {
     flags.push('dispatch-selection');
-  }
-  if (
-    providerProfileBindingConfigured &&
-    adapters.some((adapter) => adapter.descriptor.providerProfileBinding === true && adapter.descriptor.supportsDispatchSelection)
-  ) {
-    flags.push(PROVIDER_PROFILE_BINDING_CAPABILITY);
   }
   if (adapters.some((adapter) => adapter.descriptor.capabilities.mcpToolsets === true)) {
     flags.push('toolset-selection');

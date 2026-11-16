@@ -102,7 +102,7 @@ const resumeTurns = once(async () => {
       // The SDK home's entries just before the scratch is removed.
       const scratch = await testExecutionScratch();
       const release = async () => { homes.push(await fs.readdir(path.join(scratch.sdkDir, 'codex-home'))); await scratch.release(); };
-      const session = await startPreparedOperation(runtime, offer, { workspaceDir: box.workspace, agentHome: box.workspace, env, scratch: { ...scratch, release } });
+      const session = await startPreparedOperation(runtime, { target: { lane: 'runtime', runtimeId: 'codex' }, ...offer }, { workspaceDir: box.workspace, agentHome: box.workspace, env, scratch: { ...scratch, release } });
       for await (const event of session.events) if (event.type === 'turn_end') break;
       const ref = session.sessionRef;
       await session.close();

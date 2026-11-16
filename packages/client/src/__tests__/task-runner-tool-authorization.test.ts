@@ -21,7 +21,7 @@ import { ControlError } from '../daemon/control-protocol';
 import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps, resumeSession } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeCapabilities, RuntimeOperationStartInput } from '../types';
@@ -50,18 +50,18 @@ const NO_AUTO: RuntimeCapabilities = { steer: true, resume: true, approvalIntera
 function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<Pick<TaskRunnerDeps, 'toolAuthorization' | 'onToolReminder' | 'onToolAuthorizationDecision' | 'approvalTimeoutMs'>> = {}) {
   const approvalRegistry = new ApprovalRegistry();
   const runner = new TaskRunner({
-    advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter], ...testAgentHomeDeps(), deviceId: 'device-1', send: (envelope) => { sent.push(envelope); },
     blobClient: unusedBlobClient, approvalRegistry, storeDir: 'unused-store-dir', productId: 'unused-product-id', ...extra,
   });
   return { runner, approvalRegistry };
 }
 async function offer(runner: TaskRunner, taskId: string): Promise<void> {
-  await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId, seq: 1 }));
+  await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId, seq: 1 }));
 }
-const declineReason = (sent: Envelope[]) => {
+const plainDecline = (sent: Envelope[]) => {
   const decline = sent.find(e => e.type === 'task.decline');
-  return decline?.type === 'task.decline' && decline.payload.sealed === undefined ? decline.payload.reason : undefined;
+  return decline?.type === 'task.decline' && decline.payload.sealed === undefined ? decline.payload : undefined;
 };
 
 describe('daemon tool authorization', () => {
@@ -291,7 +291,7 @@ describe('daemon tool authorization', () => {
     await offer(runner, 'task-unsupported');
     expect(adapter.inputs).toEqual([]);
     expect(sent.some(e => e.type === 'task.claim')).toBe(false);
-    expect(declineReason(sent)).toMatch(/^tool_authorization_unsupported: runtime pi /);
+    expect(plainDecline(sent)).toMatchObject({ code: 'tool_authorization_unsupported', reason: expect.stringMatching(/^runtime pi /) });
   });
 
   it('all uses the same rule precedence: ask reminds, allow suppresses, floor still reminds', async () => {
@@ -375,7 +375,7 @@ describe('daemon tool authorization', () => {
         : { allowWithoutAsking: [{ id: 'first-read', match: { toolName: 'read' } }] } };
     } });
     const agentRef = freshTestAgentRef();
-    await runner.handleEnvelope(createEnvelope('task.offer', { agentRef, ...FRESH_OFFER, instruction: 'first turn' }, { taskId: 'first-turn', seq: 1 }));
+    await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef, ...FRESH_OFFER, instruction: 'first turn' }, { taskId: 'first-turn', seq: 1 }));
     const first = adapter.inputs[0]!;
     await expect(first.toolAuthorization!.authorize({ toolCallId: 'first-read', toolName: 'read', input: { path: 'notes.md' }, cwd: first.manifest.workspace.workspaceDir }))
       .resolves.toMatchObject({ decision: 'allow', authorization: { source: 'rule', ruleIds: ['first-read'] } });
@@ -383,7 +383,7 @@ describe('daemon tool authorization', () => {
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some(event => event.type === 'task.complete' && event.task_id === 'first-turn')).toBe(true));
     askOnResume = true;
-    await runner.handleEnvelope(createEnvelope('task.offer', { agentRef, ...resumeSession(sessionRef), instruction: 'resumed turn' }, { taskId: 'resumed-turn', seq: 2 }));
+    await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef, ...resumeSession(sessionRef), instruction: 'resumed turn' }, { taskId: 'resumed-turn', seq: 2 }));
     expect(adapter.inputs).toHaveLength(2);
     expect(adapter.inputs[1]!.manifest.sessionRef).toBe(sessionRef);
     expect(seen).toEqual(['first-turn', 'resumed-turn']);
@@ -401,7 +401,7 @@ describe('daemon tool authorization', () => {
       allowWithoutAsking: [{ id: 'allow-read', match: { toolName: 'read' } }],
     } }) });
     await offer(runner, `unsupported-${runtimeId}`);
-    expect(declineReason(sent)).toMatch(new RegExp(`^tool_authorization_unsupported: runtime ${runtimeId} `));
+    expect(plainDecline(sent)).toMatchObject({ code: 'tool_authorization_unsupported', reason: expect.stringMatching(new RegExp(`^runtime ${runtimeId} `)) });
     expect(sent.some(event => event.type === 'task.claim')).toBe(false);
     expect(adapter.inputs).toEqual([]);
   });
@@ -435,7 +435,6 @@ async function withPublicDaemon(
   extra: { localToolApproval?: 'allow' } = {},
 ): Promise<void> {
   const server = await TestServer.start();
-  server.setAckCapabilities(['custom-harness']);
   const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-tool-auth-public-'));
   const adapter = new GateCapturingAdapter({ ...AUTO_CAPABLE, approvalInteractive: true });
   const daemon = createDaemonWithAdapters({
@@ -447,7 +446,7 @@ async function withPublicDaemon(
   try {
     await daemon.pair('pairing-code');
     await daemon.start();
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' },
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' },
       { taskId: 'public-task', seq: server.nextSeq() }));
     await server.waitFor(e => e.type === 'task.started' && e.task_id === 'public-task');
     await run(daemon, server, adapter, storeDir);

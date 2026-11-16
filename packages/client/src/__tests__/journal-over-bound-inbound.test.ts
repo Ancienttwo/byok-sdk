@@ -28,7 +28,7 @@ import { openJournalDatabase } from '../util/sqlite-support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; payload: Record<string, unknown> });
@@ -89,8 +89,8 @@ async function start() {
 describe('a task-opening envelope over the journal bound (#826)', () => {
   it('declines an offer once, journals no bytes, and lets the next offer be acked', async () => {
     const { storeDir, server, cursor } = await start();
-    const big = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x'.repeat(OVER_BOUND), ...FRESH_OFFER }, { taskId: 'big', seq: server.nextSeq() });
-    const small = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'hi', ...FRESH_OFFER }, { taskId: 'small', seq: server.nextSeq() });
+    const big = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x'.repeat(OVER_BOUND), ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'big', seq: server.nextSeq() });
+    const small = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'hi', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'small', seq: server.nextSeq() });
     server.send(big);
     server.send(small);
 
@@ -134,12 +134,12 @@ describe('a task-opening envelope over the journal bound (#826)', () => {
 
   it('serves a later offer for a withheld task from the stored decline', async () => {
     const { storeDir, server, cursor } = await start();
-    const big = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x'.repeat(OVER_BOUND), ...FRESH_OFFER }, { taskId: 'reused', seq: server.nextSeq() });
+    const big = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x'.repeat(OVER_BOUND), ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'reused', seq: server.nextSeq() });
     server.send(big);
     await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'reused');
     await vi.waitFor(async () => expect(await cursor()).toBe(big.seq), EVENTUAL_STATE_BUDGET_MS);
 
-    const again = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'hi', ...FRESH_OFFER }, { taskId: 'reused', seq: server.nextSeq() });
+    const again = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'hi', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'reused', seq: server.nextSeq() });
     server.send(again);
     await vi.waitFor(async () => expect(await cursor()).toBe(again.seq), EVENTUAL_STATE_BUDGET_MS);
     expect(server.received.filter((event) => event.task_id === 'reused').map((event) => event.type)).toEqual(['task.decline']);
@@ -149,7 +149,6 @@ describe('a task-opening envelope over the journal bound (#826)', () => {
 
 describe('a non-opening envelope over the journal bound (#826)', () => {
   it.each([
-    ['task.steer', { text: 's'.repeat(OVER_BOUND) }],
     ['task.cancel', { reason: 'c'.repeat(OVER_BOUND) }],
     ['task.reject', { reason: 'r'.repeat(OVER_BOUND), approvalId: 'approval-over-bound' }],
   ] as const)('drops %s without journaling it and moves the cursor', async (type, payload) => {
@@ -201,7 +200,7 @@ describe('the withheld offer record of the journal (#826)', () => {
   it('refuses a withheld offer for a task whose stored offer could run', async () => {
     const journal = new SqliteLocalTaskJournal({ storeDir: await tmp() });
     try {
-      const offer = encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'hi', ...FRESH_OFFER }, { taskId: 'task-1', seq: 1 }));
+      const offer = encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'hi', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'task-1', seq: 1 }));
       await journal.appendEnvelope({
         identity: IDENTITY, envelopeId: randomUUID(), taskId: 'task-1', seq: 1, bytes: offer, bytesHash: journalHash(offer),
         receivedAt: '2026-10-24T00:00:00.000Z', opensTask: true,
@@ -219,7 +218,7 @@ describe('the withheld offer record of the journal (#826)', () => {
 
   it('refuses, at open and without altering it, a journal written before the withheld column existed', async () => {
     const storeDir = await tmp();
-    const offer = encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'hi', ...FRESH_OFFER }, { taskId: 'task-1', seq: 1 }));
+    const offer = encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'hi', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'task-1', seq: 1 }));
     const first = new SqliteLocalTaskJournal({ storeDir });
     try {
       await first.appendEnvelope({

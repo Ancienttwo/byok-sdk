@@ -73,25 +73,14 @@
 //   BlobReadErrorCode -> dist/stores/ports.d.ts
 //   BlobReadResult -> dist/stores/ports.d.ts
 //   BlobWriteResult -> dist/stores/ports.d.ts
-//   BoardFeedClient -> dist/coordination-client.d.ts
-//   BoardFeedClientOptions -> dist/coordination-client.d.ts
-//   BoardFeedItem -> dist/coordination-client.d.ts
-//   BoardFeedMode -> dist/coordination-client.d.ts
-//   BoardFeedPage -> dist/coordination-client.d.ts
-//   BoardFeedRead -> dist/coordination-client.d.ts
-//   BoardFeedRetryableError -> dist/coordination-client.d.ts
-//   BoardFeedStoppedError -> dist/coordination-client.d.ts
 //   ByokCloud -> dist/cloud.d.ts
 //   ByokCloudError -> dist/errors.d.ts
 //   ByokCloudObserver -> dist/inbound.d.ts
 //   ByokCloudOptions -> dist/cloud.d.ts
 //   CLOUD_CAPABILITIES -> dist/capabilities.d.ts
 //   CLOUD_ERROR_CODES -> dist/errors.d.ts
-//   CLOUD_PORT_INTERFACES -> dist/stores/ports-contract.d.ts
 //   CLOUD_PORT_METHODS -> dist/stores/ports-contract.d.ts
 //   CLOUD_STORE_NAMES -> dist/stores/ports.d.ts
-//   CapabilitiesResponse -> dist/capabilities.d.ts
-//   CapabilitiesResponseSchema -> dist/capabilities.d.ts
 //   CapabilityPorts -> dist/capabilities.d.ts
 //   CloudBlobStore -> dist/stores/ports.d.ts
 //   CloudCapability -> dist/capabilities.d.ts
@@ -163,8 +152,6 @@
 //   INBOUND_REFUSAL_REASONS -> dist/inbound.d.ts
 //   InMemoryActivityStore -> dist/stores/in-memory/activity.d.ts
 //   InMemoryAgentEgressStore -> dist/stores/in-memory/agent-egress.d.ts
-//   InMemoryAgentMemoryProjectionAuthorizer -> dist/stores/in-memory/agent-memory-projection.d.ts
-//   InMemoryAgentMemoryProjectionStore -> dist/stores/in-memory/agent-memory-projection.d.ts
 //   InMemoryAgentMessageDraftStore -> dist/stores/in-memory/agent-message-draft.d.ts
 //   InMemoryBlobBytes -> dist/stores/in-memory/blobs.d.ts
 //   InMemoryBlobContentProxy -> dist/stores/in-memory/blobs.d.ts
@@ -229,7 +216,6 @@
 //   ProofRequestReceipt -> dist/stores/ports.d.ts
 //   ProofRequestReceiptInput -> dist/stores/ports.d.ts
 //   ProofRequestReceiptStore -> dist/stores/ports.d.ts
-//   ProviderProvisioningNoticeInput -> dist/cloud.d.ts
 //   PublicRouteLimiter -> dist/cloud.d.ts
 //   RECEIPT_RETENTION -> dist/receipt-retention.d.ts
 //   REQUEST_RECEIPT_PREFIXES -> dist/receipt-retention.d.ts
@@ -246,8 +232,6 @@
 //   RouteClass -> dist/router/registry.d.ts
 //   RouteDescriptor -> dist/router/registry.d.ts
 //   RouteMethod -> dist/router/registry.d.ts
-//   SealedAgentDispatchInput -> dist/cloud.d.ts
-//   SealedAgentEgressDispatchInput -> dist/cloud.d.ts
 //   SealedAgentExecutionInput -> dist/agent-execution.d.ts
 //   SealedAgentExecutionInputSchema -> dist/agent-execution.d.ts
 //   StaleApprovalError -> dist/approval-control.d.ts
@@ -260,10 +244,8 @@
 //   TASK_ATTEMPT_UNFINISHED_STATUSES -> dist/stores/ports.d.ts
 //   TASK_REDACTION_MAX_TASKS -> dist/task-redaction.d.ts
 //   TRUTH_BATCH_MAX_RECORDS -> dist/truth/contract.d.ts
-//   TRUTH_INLINE_CONTENT_TYPE -> dist/truth/contract.d.ts
 //   TRUTH_LABEL_MAX_LENGTH -> dist/truth/contract.d.ts
 //   TRUTH_MANIFEST_MAX_LIMIT -> dist/truth/contract.d.ts
-//   TRUTH_RECORD_CAPABILITY -> dist/truth/contract.d.ts
 //   TRUTH_RECORD_KEY_MAX_LENGTH -> dist/truth/contract.d.ts
 //   TRUTH_REQUEST_ID_MAX_LENGTH -> dist/truth/contract.d.ts
 //   TaskAbandonCause -> dist/stores/ports.d.ts
@@ -369,7 +351,6 @@
 //   projectTimelineEvents -> dist/activity.d.ts
 //   readAgentHomeProjectionStatus -> dist/agent-home-projections.d.ts
 //   readInputPreparationStatus -> dist/input-preparations.d.ts
-//   receiptRetentionClass -> dist/receipt-retention.d.ts
 //   recordAgentHomeProjectionCompletion -> dist/agent-home-projections.d.ts
 //   recordInputPreparationCompletion -> dist/input-preparations.d.ts
 //   resolveRetentionPolicy -> dist/maintenance.d.ts
@@ -1085,7 +1066,7 @@ export declare class StaleApprovalError extends Error {
     constructor(taskId: string, requestedApprovalId: string, currentApprovalId: string | undefined);
 }
 export interface PendingApproval {
-    readonly approvalId?: string;
+    readonly approvalId: string;
     readonly sourceEnvelopeId: string;
     readonly revision: number;
 }
@@ -1102,7 +1083,7 @@ export declare const APPROVAL_SUMMARY_MAX_BYTES: number;
 export declare const ApprovalTimelineEventSchema: z.ZodUnion<readonly [z.ZodObject<{
     type: z.ZodLiteral<"approval_requested">;
     summary: z.ZodString;
-    approvalId: z.ZodOptional<z.ZodString>;
+    approvalId: z.ZodString;
 }, z.core.$strict>, z.ZodObject<{
     type: z.ZodLiteral<"approval_requested">;
     approvalId: z.ZodString;
@@ -1134,7 +1115,7 @@ export declare const ApprovalTimelineEventSchema: z.ZodUnion<readonly [z.ZodObje
     }, z.core.$strict>;
 }, z.core.$strict>, z.ZodObject<{
     type: z.ZodLiteral<"approval_resolved">;
-    approvalId: z.ZodOptional<z.ZodString>;
+    approvalId: z.ZodString;
     decision: z.ZodEnum<{
         approve: "approve";
         reject: "reject";
@@ -1143,13 +1124,13 @@ export declare const ApprovalTimelineEventSchema: z.ZodUnion<readonly [z.ZodObje
     at: z.ZodISODateTime;
 }, z.core.$strict>, z.ZodObject<{
     type: z.ZodLiteral<"approval_resolved">;
-    approvalId: z.ZodOptional<z.ZodString>;
+    approvalId: z.ZodString;
     decision: z.ZodLiteral<"approve">;
     resolvedBy: z.ZodLiteral<"host">;
     at: z.ZodISODateTime;
 }, z.core.$strict>, z.ZodObject<{
     type: z.ZodLiteral<"approval_resolved">;
-    approvalId: z.ZodOptional<z.ZodString>;
+    approvalId: z.ZodString;
     decision: z.ZodLiteral<"reject">;
     resolvedBy: z.ZodLiteral<"host">;
     reason: z.ZodNullable<z.ZodString>;
@@ -1165,7 +1146,7 @@ export declare const ApprovalObservationSchema: z.ZodObject<{
     event: z.ZodUnion<readonly [z.ZodObject<{
         type: z.ZodLiteral<"approval_requested">;
         summary: z.ZodString;
-        approvalId: z.ZodOptional<z.ZodString>;
+        approvalId: z.ZodString;
     }, z.core.$strict>, z.ZodObject<{
         type: z.ZodLiteral<"approval_requested">;
         approvalId: z.ZodString;
@@ -1197,7 +1178,7 @@ export declare const ApprovalObservationSchema: z.ZodObject<{
         }, z.core.$strict>;
     }, z.core.$strict>, z.ZodObject<{
         type: z.ZodLiteral<"approval_resolved">;
-        approvalId: z.ZodOptional<z.ZodString>;
+        approvalId: z.ZodString;
         decision: z.ZodEnum<{
             approve: "approve";
             reject: "reject";
@@ -1206,13 +1187,13 @@ export declare const ApprovalObservationSchema: z.ZodObject<{
         at: z.ZodISODateTime;
     }, z.core.$strict>, z.ZodObject<{
         type: z.ZodLiteral<"approval_resolved">;
-        approvalId: z.ZodOptional<z.ZodString>;
+        approvalId: z.ZodString;
         decision: z.ZodLiteral<"approve">;
         resolvedBy: z.ZodLiteral<"host">;
         at: z.ZodISODateTime;
     }, z.core.$strict>, z.ZodObject<{
         type: z.ZodLiteral<"approval_resolved">;
-        approvalId: z.ZodOptional<z.ZodString>;
+        approvalId: z.ZodString;
         decision: z.ZodLiteral<"reject">;
         resolvedBy: z.ZodLiteral<"host">;
         reason: z.ZodNullable<z.ZodString>;
@@ -1403,12 +1384,6 @@ export declare const CLOUD_CAPABILITIES: {
     readonly e2eeMemberKemEpoch: 'e2ee.member.kem-epoch';
 };
 export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAPABILITIES];
-export declare const CapabilitiesResponseSchema: import("zod").ZodObject<{
-    schema: import("zod").ZodLiteral<"byok-capabilities-v1">;
-    version: import("zod").ZodNumber;
-    capabilities: import("zod").ZodArray<import("zod").ZodString>;
-}, import("zod/v4/core").$strip>;
-export type CapabilitiesResponse = CapabilityDeclaration;
 export interface FullCapabilityDeclarationOptions {
     readonly includeTruthRecords?: boolean;
     readonly includeSkillPacks?: boolean;
@@ -1433,17 +1408,17 @@ export declare function capabilityDeclarationForPorts(ports: CapabilityPorts, ve
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
 export declare function declares(declaration: CapabilityDeclaration, capability: CloudCapability): boolean;
 // ==== @byok-sdk/cloud dist/cloud.d.ts ====
-import type { HostOfferPlainPayload, HostOfferSealedPayload } from '@byok-sdk/protocol';
+import type { HostOfferPlainPayload } from '@byok-sdk/protocol';
 import { z } from 'zod';
 import { type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './agent-message-draft.js';
 import { type MaintenanceInput, type MaintenanceReport, type ProofReceiptRetentionOptions } from './maintenance.js';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import { type TaskAgentMessage } from './task-agent-message.js';
 import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agent-execution.js';
-import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
+import { type BoardItem, type BoardItemInput, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail, ActivityReadOptions } from './activity.js';
 import type { ApprovalTimelineTail } from './approval-timeline.js';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type AgentEgressPolicy, type InputPreparationOfferBinding, type SessionSelection, type TaskOfferPayload, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskSteerSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageSchema } from '@byok-sdk/protocol';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type AgentEgressPolicy, type InputPreparationOfferBinding, type SessionSelection, type TaskOfferPayload, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type AgentMemoryIntentAvailablePayload, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskSteerSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageSchema } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens.js';
 import type { CloudCrypto } from './crypto/port.js';
 import { type RouteDescriptor } from './router/registry.js';
@@ -1545,27 +1520,10 @@ export interface AgentEgressDispatchInput {
     };
     readonly agentMessageContext?: AgentMessageServerContext;
 }
-export interface SealedAgentDispatchInput {
-    readonly taskId?: string;
-    readonly payload: HostOfferSealedPayload & {
-        readonly session: ResumeSession;
-        readonly egressPolicy?: never;
-        readonly messageEgress?: never;
-    };
-}
-export interface SealedAgentEgressDispatchInput {
-    readonly taskId?: string;
-    readonly payload: HostOfferSealedPayload & {
-        readonly session: ResumeSession;
-        readonly egressPolicy: AgentEgressPolicy;
-    };
-    readonly agentMessageContext?: AgentMessageServerContext;
-}
 export interface AgentContentReadInput {
     readonly payload: AgentContentReadPayload;
 }
 export type AgentHomeProjectionInput = AgentHomeProjectionPayload;
-export type ProviderProvisioningNoticeInput = ProviderProvisioningAvailablePayload;
 export type AgentMemoryIntentNoticeInput = AgentMemoryIntentAvailablePayload;
 export type AgentHomeProjectionStatusInput = AgentHomeProjectionReceiptInput;
 export type InputPreparationInput = AgentInputPreparationPayload;
@@ -1618,19 +1576,14 @@ export interface ByokCloud {
     enqueuePreparedOffer(tenant: TenantId, deviceId: string, input: PreparedDispatchInput): Promise<EnqueuedOffer>;
     enqueueAgentEgressOffer(tenant: TenantId, deviceId: string, input: AgentEgressDispatchInput): Promise<EnqueuedOffer>;
     submitAgentExecution(tenant: TenantId, input: AgentExecutionInput): Promise<EnqueuedOffer>;
-    enqueueSealedAgentOffer(tenant: TenantId, deviceId: string, input: SealedAgentDispatchInput): Promise<EnqueuedOffer>;
-    enqueueSealedAgentEgressOffer(tenant: TenantId, deviceId: string, input: SealedAgentEgressDispatchInput): Promise<EnqueuedOffer>;
     submitSealedAgentExecution(tenant: TenantId, input: SealedAgentExecutionInput): Promise<EnqueuedOffer>;
     enqueueAgentContentRead(tenant: TenantId, deviceId: string, input: AgentContentReadInput): Promise<EnqueuedAgentControl>;
     enqueueAgentHomeProjection(tenant: TenantId, deviceId: string, input: AgentHomeProjectionInput): Promise<EnqueuedAgentHomeProjection>;
     getAgentHomeProjectionStatus(tenant: TenantId, deviceId: string, input: AgentHomeProjectionStatusInput): Promise<AgentHomeProjectionReadback | undefined>;
-    completeAgentHomeProjection(tenant: TenantId, deviceId: string, receipt: AgentHomeProjectionCompletionRequest): Promise<AgentHomeProjectionReadback>;
     enqueueInputPreparation(tenant: TenantId, deviceId: string, input: InputPreparationInput): Promise<EnqueuedInputPreparation>;
-    enqueueProviderProvisioningNotice(tenant: TenantId, deviceId: string, input: ProviderProvisioningNoticeInput): Promise<EnqueuedAgentControl>;
     enqueueAgentMemoryIntentNotice(tenant: TenantId, deviceId: string, input: AgentMemoryIntentNoticeInput): Promise<EnqueuedAgentControl>;
     enqueueScopeKeyPackageNotice(tenant: TenantId, deviceId: string, input: E2eeKeyPackageAvailablePayload): Promise<EnqueuedAgentControl>;
     getInputPreparationStatus(tenant: TenantId, deviceId: string, input: InputPreparationStatusInput): Promise<InputPreparationReadback | undefined>;
-    completeInputPreparation(tenant: TenantId, deviceId: string, receipt: InputPreparationCompletionRequest): Promise<InputPreparationReadback>;
     eraseAgentMemoryProjection(tenant: TenantId, agentId: string): Promise<AgentMemoryProjectionEraseResult>;
     redactTasks(tenant: TenantId, input: {
         readonly taskIds: readonly string[];
@@ -1693,8 +1646,6 @@ export interface ByokCloud {
     listDevices(tenant: TenantId): Promise<readonly DeviceRecord[]>;
     revokeDevice(tenant: TenantId, deviceId: string): Promise<void>;
     createBoardItem(tenant: TenantId, input: BoardItemInput): Promise<BoardItem>;
-    listBoardItems(tenant: TenantId, query: BoardListQuery): Promise<BoardPage>;
-    acceptBoardItem(tenant: TenantId, itemId: string): Promise<BoardItem>;
     listPresence(tenant: TenantId): Promise<readonly PresenceHint[]>;
     readTenantReadiness(tenant: TenantId): Promise<TenantReadiness>;
     readActivity(tenant: TenantId, taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
@@ -1759,86 +1710,6 @@ export interface InMemoryByokCloud {
     readonly crypto: CloudCrypto;
 }
 export declare function createInMemoryByokCloud(options?: InMemoryByokCloudOptions): InMemoryByokCloud;
-// ==== @byok-sdk/cloud dist/coordination-client.d.ts ====
-import { type CapabilityDeclaration } from '@byok-sdk/core';
-import { z } from 'zod';
-// support
-declare const BoardFeedItemSchema: z.ZodObject<{
-    tenantId: z.ZodString;
-    itemId: z.ZodString;
-    channel: z.ZodString;
-    title: z.ZodString;
-    status: z.ZodEnum<{
-        closed: "closed";
-        done: "done";
-        in_progress: "in_progress";
-        in_review: "in_review";
-        todo: "todo";
-    }>;
-    assignee: z.ZodOptional<z.ZodObject<{
-        holderId: z.ZodString;
-        heldSince: z.ZodString;
-    }, z.core.$strip>>;
-    boardSeq: z.ZodNumber;
-    createdAt: z.ZodString;
-    updatedAt: z.ZodString;
-}, z.core.$strip>;
-// support
-declare const BoardFeedPageSchema: z.ZodObject<{
-    items: z.ZodArray<z.ZodObject<{
-        tenantId: z.ZodString;
-        itemId: z.ZodString;
-        channel: z.ZodString;
-        title: z.ZodString;
-        status: z.ZodEnum<{
-            closed: "closed";
-            done: "done";
-            in_progress: "in_progress";
-            in_review: "in_review";
-            todo: "todo";
-        }>;
-        assignee: z.ZodOptional<z.ZodObject<{
-            holderId: z.ZodString;
-            heldSince: z.ZodString;
-        }, z.core.$strip>>;
-        boardSeq: z.ZodNumber;
-        createdAt: z.ZodString;
-        updatedAt: z.ZodString;
-    }, z.core.$strip>>;
-    nextSeq: z.ZodNumber;
-    hasMore: z.ZodBoolean;
-}, z.core.$strip>;
-export type BoardFeedItem = z.infer<typeof BoardFeedItemSchema>;
-export type BoardFeedPage = z.infer<typeof BoardFeedPageSchema>;
-export type BoardFeedMode = 'sse' | 'poll';
-export type BoardFeedRead = {
-    readonly type: 'board';
-    readonly item: BoardFeedItem;
-} | {
-    readonly type: 'reconcile';
-} | {
-    readonly type: 'poll';
-    readonly page: BoardFeedPage;
-};
-export declare class BoardFeedRetryableError extends Error {
-    constructor(message: string, options?: ErrorOptions);
-}
-export declare class BoardFeedStoppedError extends Error {
-    constructor(message: string);
-}
-export interface BoardFeedClientOptions {
-    readonly baseUrl: string | URL;
-    readonly accessToken: string;
-    readonly capabilities: CapabilityDeclaration;
-    readonly fetch?: typeof globalThis.fetch;
-    readonly idleWatchdogMs?: number;
-}
-export declare class BoardFeedClient {
-    #private;
-    readonly mode: BoardFeedMode;
-    constructor(options: BoardFeedClientOptions);
-    readOnce(afterSeq: number, signal?: AbortSignal): Promise<BoardFeedRead>;
-}
 // ==== @byok-sdk/cloud dist/coordination.d.ts ====
 export declare const DEFAULT_BOARD_CHANNEL_MAX_BYTES = 128;
 export declare const DEFAULT_BOARD_TITLE_MAX_BYTES = 512;
@@ -2085,7 +1956,6 @@ export declare const CLOUD_ERROR_CODES: {
     readonly agent_capability_missing: 'agent_capability_missing';
     readonly agent_ref_mismatch: 'agent_ref_mismatch';
     readonly agent_task_already_exists: 'agent_task_already_exists';
-    readonly task_attempt_agent_ref_missing: 'task_attempt_agent_ref_missing';
     readonly task_offer_append_refused: 'task_offer_append_refused';
     readonly agent_content_request_mismatch: 'agent_content_request_mismatch';
     readonly agent_message_sealed_consumer_missing: 'agent_message_sealed_consumer_missing';
@@ -2191,7 +2061,7 @@ export type { TenantId } from '@byok-sdk/core';
 export { createByokCloud } from './cloud.js';
 export type { TaskAgentMessage } from './task-agent-message.js';
 export type { AgentMessageConsumers, AgentMessageConsumeInput, AgentMessageDecision } from './agent-message-disposition.js';
-export type { ByokCloud, ByokCloudOptions, LimitedPublicRoute, PublicRouteLimiter, AgentDispatchInput, AgentEgressDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, ProviderProvisioningNoticeInput, AgentMemoryIntentNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, SealedAgentDispatchInput, SealedAgentEgressDispatchInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud.js';
+export type { ByokCloud, ByokCloudOptions, LimitedPublicRoute, PublicRouteLimiter, AgentDispatchInput, AgentEgressDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, AgentMemoryIntentNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud.js';
 export { agentHomeProjectionCompletionKey, agentHomeProjectionRequestKey, readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion, } from './agent-home-projections.js';
 export type { AgentHomeProjectionReceiptInput } from './agent-home-projections.js';
 export { inputPreparationCompletionKey, inputPreparationRequestKey, readInputPreparationStatus, recordInputPreparationCompletion, sameInputPreparationRequest, } from './input-preparations.js';
@@ -2203,7 +2073,6 @@ export { createInMemoryByokCloud } from './composition/in-memory.js';
 export type { InMemoryByokCloud, InMemoryByokCloudOptions } from './composition/in-memory.js';
 export { ByokCloudError, CLOUD_ERROR_CODES, DeviceRetiredError, TaskOfferAppendRefusedError, isCloudError } from './errors.js';
 export type { CloudErrorCode } from './errors.js';
-export { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore, } from './stores/in-memory/agent-memory-projection.js';
 export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionSealing, AgentMemoryProjectionStore, } from './agent-memory-projection.js';
 export type { TaskArchiveCounts, TaskArchiveListInput, TaskArchiveStepCounts, TaskArchiveStore, TaskArchiveStoreInput, TaskArchiveStoreResult, TaskArchiveWork, } from './task-archive.js';
 export { taskArchiveInput } from './task-archive.js';
@@ -2211,8 +2080,8 @@ export { TASK_REDACTION_MAX_TASKS } from './task-redaction.js';
 export type { TaskRedactionCodec, TaskRedactionCounts, TaskRedactionRefusal, TaskRedactionResult, TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult, } from './task-redaction.js';
 export { parseRecordedWriteResult } from './e2ee-member.js';
 export type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeProofRequest, E2eeProvenWrite, E2eeScopeKeyPackagePutInput, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow, E2eeScopeShred, } from './e2ee-member.js';
-export { CLOUD_CAPABILITIES, CapabilitiesResponseSchema, capabilityDeclarationForPorts, declares, fullCapabilityDeclaration, } from './capabilities.js';
-export type { CapabilitiesResponse, CapabilityPorts, CloudCapability, FullCapabilityDeclarationOptions, } from './capabilities.js';
+export { CLOUD_CAPABILITIES, capabilityDeclarationForPorts, declares, fullCapabilityDeclaration, } from './capabilities.js';
+export type { CapabilityPorts, CloudCapability, FullCapabilityDeclarationOptions, } from './capabilities.js';
 export { CloudRouteRegistry, ROUTE_CLASSES, ROUTE_METHODS, routeKey } from './router/registry.js';
 export type { CloudRouteHandler, RouteClass, RouteDescriptor, RouteMethod } from './router/registry.js';
 export { ACCESS_TOKEN_TTL_SECONDS, createHmacTokenSigner } from './auth/tokens.js';
@@ -2244,15 +2113,13 @@ export { assertTaskAttemptListLimit, DEFAULT_ACTIVITY_BOUNDS, DEFAULT_ACTIVITY_C
 export type { ActivityBounds } from './coordination.js';
 export { TimelineEventSchema, ActivityAppendRequestSchema, projectTimelineEvents, validateActivityAppend, MAX_ACTIVITY_BYTES, ACTIVITY_TERMINAL_TTL_MS, activityEntryBytes, createActivityEntry, activitySourceHash, } from './activity.js';
 export type { ActivityAppendInput, ActivityCursor, ActivityReadOptions, ActivityStore, ActivityTail, ActivityTailEntry, TimelineEvent, } from './activity.js';
-export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client.js';
-export type { BoardFeedClientOptions, BoardFeedItem, BoardFeedMode, BoardFeedPage, BoardFeedRead, } from './coordination-client.js';
-export { TRUTH_BATCH_MAX_RECORDS, TRUTH_INLINE_CONTENT_TYPE, TRUTH_LABEL_MAX_LENGTH, TRUTH_MANIFEST_MAX_LIMIT, TRUTH_RECORD_CAPABILITY, TRUTH_RECORD_KEY_MAX_LENGTH, TRUTH_REQUEST_ID_MAX_LENGTH, TruthBodyInputSchema, TruthCommitResponseSchema, TruthRecordKeySchema, TruthRecordMetadataSchema, TruthWriteRequestSchema, truthManifestMetadata, truthRecordMetadata, } from './truth/contract.js';
+export { TRUTH_BATCH_MAX_RECORDS, TRUTH_LABEL_MAX_LENGTH, TRUTH_MANIFEST_MAX_LIMIT, TRUTH_RECORD_KEY_MAX_LENGTH, TRUTH_REQUEST_ID_MAX_LENGTH, TruthBodyInputSchema, TruthCommitResponseSchema, TruthRecordKeySchema, TruthRecordMetadataSchema, TruthWriteRequestSchema, truthManifestMetadata, truthRecordMetadata, } from './truth/contract.js';
 export { DEFAULT_MAX_TRUTH_REQUEST_BYTES, DEVICE_PROOF_HEADER, MAX_DEVICE_PROOF_HEADER_BYTES, } from './handlers/truth.js';
 export type { PreparedTruthWrite, TruthBodyInput, TruthCommitInput, TruthCommitResponse, TruthCommitResult, TruthCommitter, TruthObjectDownloads, TruthRecordMetadata, TruthWriteRequest, } from './truth/contract.js';
 export { TruthCommitError, isTruthCommitError } from './truth/errors.js';
 export type { TruthCommitErrorCode } from './truth/errors.js';
 export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ABANDON_CAUSES, TASK_ATTEMPT_STATUSES, TASK_ATTEMPT_ACTIVE_STATUSES, TASK_ATTEMPT_UNFINISHED_STATUSES, } from './stores/ports.js';
-export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract.js';
+export { CLOUD_PORT_METHODS } from './stores/ports-contract.js';
 export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, DeviceScopedStores, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, SteerRefusalRecord, TaskSteerRefusalStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskAbandonCause, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports.js';
 export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index.js';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index.js';
@@ -2260,7 +2127,7 @@ export type { DeviceTerminal } from './terminal-result.js';
 export { AgentExecutionInputSchema, SealedAgentExecutionInputSchema, type AgentExecutionInput, type SealedAgentExecutionInput, } from './agent-execution.js';
 export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy, DEFAULT_PROOF_RECEIPT_RETENTION_MS, PROOF_RECEIPT_RETENTION_FLOOR_MS, } from './maintenance.js';
 export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport, ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofReceiptRetentionOptions, } from './maintenance.js';
-export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention.js';
+export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES } from './receipt-retention.js';
 export type { ReceiptRetentionClass } from './receipt-retention.js';
 export type { ReceiptCollectExpiredInput } from './stores/ports.js';
 export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake.js';
@@ -2359,7 +2226,6 @@ export declare const RECEIPT_RETENTION: readonly Readonly<{
     class: ReceiptRetentionClass;
 }>[];
 export declare const REQUEST_RECEIPT_PREFIXES: readonly string[];
-export declare function receiptRetentionClass(key: string): ReceiptRetentionClass;
 // ==== @byok-sdk/cloud dist/router/registry.d.ts ====
 import { type Context } from 'hono';
 export declare const ROUTE_CLASSES: readonly ['device', 'proof', 'presigned', 'public'];
@@ -2423,31 +2289,6 @@ export declare class InMemoryAgentEgressStore implements AgentEgressStore {
         readonly created: boolean;
     }>;
     get(tenant: TenantId, deviceId: string, agentRef: AgentEgressRecord['payload']['agentRef'], eventId: string): Promise<AgentEgressRecord | undefined>;
-}
-// ==== @byok-sdk/cloud dist/stores/in-memory/agent-memory-projection.d.ts ====
-import type { Clock, TenantId } from '@byok-sdk/core';
-import { type AgentMemoryProjectionEraseResult, type AgentMemoryProjectionReceipt } from '@byok-sdk/protocol';
-import type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionSealing, AgentMemoryProjectionStore } from '../../agent-memory-projection.js';
-import type { CloudCrypto } from '../../crypto/port.js';
-export declare class InMemoryAgentMemoryProjectionStore implements AgentMemoryProjectionStore {
-    #private;
-    constructor(clock: Clock, crypto: CloudCrypto);
-    commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionReceipt>;
-    erase(input: {
-        readonly tenantId: TenantId;
-        readonly agentId: string;
-    }): Promise<AgentMemoryProjectionEraseResult>;
-}
-export declare class InMemoryAgentMemoryProjectionAuthorizer implements AgentMemoryProjectionAuthorizer {
-    #private;
-    grant(input: AgentMemoryProjectionAuthorizerInput & {
-        readonly sealing?: AgentMemoryProjectionSealing;
-    }): void;
-    authorize(input: AgentMemoryProjectionAuthorizerInput): Promise<AgentMemoryProjectionAuthorization>;
-    revoke(input: {
-        readonly tenantId: TenantId;
-        readonly agentId: string;
-    }): Promise<void>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/agent-message-draft.d.ts ====
 import { type Clock, type TenantId } from '@byok-sdk/core';
@@ -2758,7 +2599,6 @@ export type TaskChanged = (tenant: TenantId, taskId: string) => void;
 // ==== @byok-sdk/cloud dist/stores/ports-contract.d.ts ====
 import type { CloudStoreName } from './ports.js';
 export declare const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string[]>>;
-export declare const CLOUD_PORT_INTERFACES: Readonly<Record<CloudStoreName, string>>;
 // ==== @byok-sdk/cloud dist/stores/ports.d.ts ====
 import type { AgentMessageDraftStore } from '../agent-message-draft.js';
 import type { TaskArchiveStore } from '../task-archive.js';
@@ -3185,7 +3025,7 @@ export interface TaskArchiveStepCounts {
 export declare function taskArchiveInput(crypto: Pick<CloudCrypto, 'sha256'>, tenant: TenantId, unit: {
     readonly taskId: string;
     readonly deviceId: string;
-    readonly agentRef?: AgentRef;
+    readonly agentRef: AgentRef;
 }, archivedAt: string): Promise<TaskArchiveStoreInput>;
 // ==== @byok-sdk/cloud dist/task-events-wake.d.ts ====
 import type { TenantId } from '@byok-sdk/core';
@@ -3476,12 +3316,10 @@ export interface TerminalResult {
     readonly failure?: TaskFailureReading;
     readonly recordedAt: string;
 }
-export declare function projectTerminalResult(taskId: string, receipt: RequestReceipt): TerminalResult;
+export declare function projectTerminalResult(taskId: string, receipt: RequestReceipt, claimedExecutor: ClaimedExecutor | undefined): TerminalResult;
 // ==== @byok-sdk/cloud dist/truth/contract.d.ts ====
 import type { ContentHash, TenantId, TruthBodyRef, TruthManifestEntry, TruthManifestQuery, TruthRecord, TruthRecordKind, TruthRecordSelector } from '@byok-sdk/core';
 import { z } from 'zod';
-export declare const TRUTH_RECORD_CAPABILITY = "truth.records";
-export declare const TRUTH_INLINE_CONTENT_TYPE = "application/vnd.byok.truth+utf8";
 export declare const TRUTH_REQUEST_ID_MAX_LENGTH = 120;
 export declare const TRUTH_RECORD_KEY_MAX_LENGTH = 200;
 export declare const TRUTH_LABEL_MAX_LENGTH = 200;

@@ -142,7 +142,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER }, { taskId: 't1', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -188,7 +188,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     daemon = built.daemon;
     server.send(createEnvelope(
       'task.offer',
-      { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER },
+      { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER },
       { taskId: 't-disposal-barrier', seq: server.nextSeq() },
     ));
     await server.waitFor((event) => event.type === 'task.started');
@@ -221,7 +221,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER }, { taskId: 't-idem', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER }, { taskId: 't-idem', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -255,7 +255,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER }, { taskId: 't-double', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER }, { taskId: 't-double', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -314,7 +314,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     await daemon.pair('pairing-code');
     await daemon.start();
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'late writer', ...FRESH_OFFER }, { taskId: 't-late', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'late writer', ...FRESH_OFFER }, { taskId: 't-late', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -594,7 +594,7 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
       agentHome: testAgentHomeConfig(), agentEgress: FRESH_DAEMON_EGRESS, localAgentRelease: { version: '0.0.0-test' },
       productName: 'Acme', productId: 'acme-store-alias', serverUrl: server.url, storeDir,
     };
-    const offer = (taskId: string) => server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), instruction: taskId, ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
+    const offer = (taskId: string) => server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction: taskId, ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
 
     const first = new LaunchingAdapter('pi');
     daemon = createDaemonWithAdapters(config, [first]);

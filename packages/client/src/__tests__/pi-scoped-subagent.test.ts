@@ -18,6 +18,8 @@ import {
 import type { ToolAuthorizationIpcConfig } from '../tool-authorization-ipc';
 import type { Session } from '../types';
 
+const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
+
 const roots: string[] = [];
 const sessions: Session[] = [];
 const servers: Server[] = [];
@@ -300,7 +302,7 @@ describe('a scoped parent through the real Pi subagent scheduler (#1061 D11/S1)'
       onDeny: (denial) => { denials.push(denial.toolName + ':' + denial.reason); },
     });
 
-    const session = await startPreparedOperation(adapter(), { instruction: 'Delegate the scripted calls to scope-child' }, {
+    const session = await startPreparedOperation(adapter(), { target: PI_TARGET, instruction: 'Delegate the scripted calls to scope-child' }, {
       workspaceDir: cwd, agentHome: cwd, env, toolAuthorization: inner,
     });
     sessions.push(session);

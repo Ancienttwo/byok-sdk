@@ -107,8 +107,6 @@ export class TestServer {
   /** Blob content PUTs answered by {@link refuseBlobUploads}. */
   blobUploadsRefused = 0;
   private dropNextBlobFinalizeResponse = false;
-  /** Capabilities advertised in every subsequent long-poll response. */
-  private ackCapabilities: string[] = [];
   /**
    * The ADR-010 declaration `GET /byok/capabilities` serves.
    *
@@ -163,11 +161,6 @@ export class TestServer {
   /** Test-only authenticated pairing-code projection for re-pair replacement coverage. */
   setPairingTenantId(pairingCode: string, tenantId: string): void {
     this.pairingTenantIds.set(pairingCode, tenantId);
-  }
-
-  /** Capabilities to advertise in every subsequent poll response (default `[]`, matching the wire's real additive-minor convention). */
-  setAckCapabilities(capabilities: string[]): void {
-    this.ackCapabilities = capabilities;
   }
 
   /**
@@ -687,14 +680,8 @@ export class TestServer {
     respondJson(res, 200, {
       events: entries,
       cursor: this.longPollCursor,
-      capabilities: this.advertisedCapabilities(),
       ingress: TEST_ACTIVITY_INGRESS,
     });
-  }
-
-  /** What every poll response, and the answer to a `conn.hello` batch, advertises. */
-  private advertisedCapabilities(): string[] {
-    return [...new Set([...this.ackCapabilities, 'mailbox-read-ahead'])];
   }
 
   /** `POST /byok/messages`: the daemon's outbound send path. */
@@ -740,13 +727,13 @@ export class TestServer {
     }
     // Test hook (see `holdNextMessagesResponse`): recorded above, acceptance held here.
     if (holdGate) await holdGate;
-    // Like the hosted cloud (#391 Phase 2): a handshake's answer carries the
-    // advertisement and ingress; every answer carries outcomes (wire v3).
+    // Like the hosted cloud: a handshake's answer carries the ingress; every
+    // answer carries outcomes (wire v3).
     respondJson(res, 200, {
       accepted,
       outcomes,
       ...(rejected > 0 ? { rejected } : {}),
-      ...(handshake ? { capabilities: this.advertisedCapabilities(), ingress: TEST_ACTIVITY_INGRESS } : {}),
+      ...(handshake ? { ingress: TEST_ACTIVITY_INGRESS } : {}),
     });
   }
 

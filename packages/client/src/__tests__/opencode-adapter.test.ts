@@ -9,7 +9,7 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { testExecutionScratch, testScratchOwner } from './fixtures/execution-scratch';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { projectRuntimeBoundaryFailure, RuntimeDisposalFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 import * as processTree from '../adapters/process-tree';
 import { OpenCodeAdapter } from '../adapters/opencode/opencode-adapter';
@@ -26,6 +26,8 @@ import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { validateRuntimeDetectResult } from '../runtime-detection';
 import type { MessageDraftDelta, Session } from '../types';
+
+const OPENCODE_TARGET = { lane: 'harness', harnessId: 'opencode' } as const;
 
 const fake = path.join(import.meta.dirname, 'fixtures/fake-acp-agent.mjs');
 const models = ['fixture/first', 'fixture/next', 'fixture/third'];
@@ -45,7 +47,7 @@ function setup(version = '1.18.35', extra: Record<string, string> = {}) {
   const adapter = new OpenCodeAdapter({ models, resolveBin: () => ({ command: fake, source: 'env' }), runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_ACP_*'] } });
   const facts = (): Array<Record<string, any>> => readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
   const start = async (instruction: string, sessionRef?: string, mcpServers?: { host: { command: string } }) => {
-    const session = await startPreparedOperation(adapter, { instruction, ...(sessionRef === undefined ? {} : { sessionRef }) }, { workspaceDir: cwd, env, ...(mcpServers === undefined ? {} : { mcpServers }) });
+    const session = await startPreparedOperation(adapter, { target: OPENCODE_TARGET, instruction, ...(sessionRef === undefined ? {} : { sessionRef }) }, { workspaceDir: cwd, env, ...(mcpServers === undefined ? {} : { mcpServers }) });
     sessions.push(session);
     return session;
   };
@@ -187,9 +189,9 @@ it.each(['1.19.5', 'opencode v2.3.0'])('passes admitted MCP servers on new and r
   const box = setup(version);
   const server = { command: '/fixture/mcp', args: ['--stdio'], env: { TASK_SECRET: 'fixture-secret' } };
   const resources = { workspaceDir: box.cwd, env: box.env, mcpServers: { host: server } };
-  const first = await startPreparedOperation(box.adapter, { instruction: 'hello' }, resources); sessions.push(first);
+  const first = await startPreparedOperation(box.adapter, { target: OPENCODE_TARGET, instruction: 'hello' }, resources); sessions.push(first);
   await collect(first); await first.close();
-  const second = await startPreparedOperation(box.adapter, { instruction: 'hello', sessionRef: first.sessionRef }, resources); sessions.push(second);
+  const second = await startPreparedOperation(box.adapter, { target: OPENCODE_TARGET, instruction: 'hello', sessionRef: first.sessionRef }, resources); sessions.push(second);
   await collect(second);
   const opens = box.facts().filter(fact => fact.kind === 'open');
   expect(opens.map(fact => fact.method)).toEqual(['session/new', 'session/resume']);
@@ -207,7 +209,7 @@ it.each(['1.19.5', 'opencode v2.3.0'])('uses MCP servers supplied at start on %s
       mcpServers: { late: { command: 'late-mcp', env: { TOKEN: 'late-secret' } } },
     }) } };
   });
-  const session = await startPreparedOperation(box.adapter, { instruction: 'hello' }, {
+  const session = await startPreparedOperation(box.adapter, { target: OPENCODE_TARGET, instruction: 'hello' }, {
     workspaceDir: box.cwd, env: box.env, mcpServers: { admitted: { command: 'admitted-mcp' } },
   });
   sessions.push(session); await collect(session);
@@ -217,7 +219,7 @@ it.each(['1.19.5', 'opencode v2.3.0'])('uses MCP servers supplied at start on %s
 });
 
 it.each([{ '': { command: 'server' } }, { host: { command: '' } }, { host: { command: 'server', env: { KEY: null } } }])('rejects malformed MCP authority during preparation', async mcpServers => {
-  const box = setup(); const result = await box.adapter.prepare({ offer: { instruction: 'hello' }, descriptor: box.adapter.descriptor, requiredToolsetIds: [], mcpServers: mcpServers as any });
+  const box = setup(); const result = await box.adapter.prepare({ offer: { target: OPENCODE_TARGET, instruction: 'hello' }, descriptor: box.adapter.descriptor, requiredToolsetIds: [], mcpServers: mcpServers as any });
   expect(result).toMatchObject({ kind: 'reject', retryable: false }); expect(existsSync(box.log)).toBe(false);
 });
 
@@ -253,7 +255,7 @@ it('retains the v1 appended-persona overlay and removes its private instruction 
 
 it('refuses a v2 Agent-memory reader before launching ACP', async () => {
   const box = setup('opencode v2.0.26');
-  await expect(startPreparedOperation(box.adapter, { instruction: 'reader' }, {
+  await expect(startPreparedOperation(box.adapter, { target: OPENCODE_TARGET, instruction: 'reader' }, {
     workspaceDir: box.cwd, env: box.env, reader: { canonicalHome: box.cwd },
   })).rejects.toThrow(/transient instruction channel/);
   expect(existsSync(box.log)).toBe(false);
@@ -270,14 +272,14 @@ it('keeps the admitted native identity in task.complete and persisted terminal e
   const sent: Envelope[] = [];
   const handoffs = new AgentSessionHandoffStore();
   const recorded = vi.spyOn(handoffs, 'recordTerminal');
-  const runner = new TaskRunner({ ...freshOfferRunnerDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ ...freshOfferRunnerDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [box.adapter], agentHome: new AgentHomeManager({ hostStorageRoot: path.join(box.cwd, 'homes') }), agentSessionHandoffs: handoffs,
     deviceId: 'device-1', productId: 'opencode-test', storeDir: path.join(box.cwd, 'store'),
     send: envelope => { sent.push(envelope); }, approvalRegistry: new ApprovalRegistry(),
     blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },
   });
   try {
-    await runner.handleEnvelope(createEnvelope('task.offer', { harnessId: 'opencode', agentRef: { agentId: 'opencode-agent', profileRevision: 'r1' },
+    await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'harness', harnessId: 'opencode' }, agentRef: { agentId: 'opencode-agent', profileRevision: 'r1' },
       instruction: 'opencode-limit', agentMemory: 'none', ...FRESH_OFFER }, { taskId: 'identity-fallback', seq: 1 }));
     expect(sent.some(envelope => envelope.type === 'task.started')).toBe(true);
     const published = box.facts().find(fact => fact.kind === 'native-session')!.sessionId;
@@ -362,7 +364,7 @@ it('reports a refused abort without sending native cancel', async () => {
   const box = setup();
   const adapter = new OpenCodeAdapter({ models, interruptTimeoutMs: 1_000, resolveBin: () => ({ command: fake, source: 'env' }),
     runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_ACP_*'] } });
-  const session = await startPreparedOperation(adapter, { instruction: 'hold' }, { workspaceDir: box.cwd, env: box.env });
+  const session = await startPreparedOperation(adapter, { target: OPENCODE_TARGET, instruction: 'hold' }, { workspaceDir: box.cwd, env: box.env });
   sessions.push(session);
   await vi.waitFor(() => expect(box.facts().some(fact => fact.kind === 'prompt')).toBe(true));
   const remember = processTree.rememberOwnedDescendants;
@@ -433,7 +435,7 @@ it.each(['1.18.35', 'opencode v2.0.26'])('does not start fallback after interrup
 it('disposes the native session after running with a small retained-record budget', async () => {
   const box = setup();
   const adapter = new OpenCodeAdapter({ models, maxRetainedBytes: 1, resolveBin: () => ({ command: fake, source: 'env' }) });
-  const session = await startPreparedOperation(adapter, { instruction: 'hello' }, { workspaceDir: box.cwd, env: box.env });
+  const session = await startPreparedOperation(adapter, { target: OPENCODE_TARGET, instruction: 'hello' }, { workspaceDir: box.cwd, env: box.env });
   sessions.push(session);
   expect((await collect(session)).at(-1)).toEqual({ type: 'turn_end' });
   const started = box.facts().find(fact => fact.kind === 'start')!;
@@ -456,7 +458,7 @@ it('retries a halt whose cleanup failed before signalling without retaining its 
     return real(options);
   });
   let error: unknown;
-  const opening = startPreparedOperation(box.adapter, { instruction: 'hello' }, { workspaceDir: box.cwd, env: box.env, scratch: { ...scratch, release } })
+  const opening = startPreparedOperation(box.adapter, { target: OPENCODE_TARGET, instruction: 'hello' }, { workspaceDir: box.cwd, env: box.env, scratch: { ...scratch, release } })
     .catch(value => { error = value; });
   try {
     await vi.waitFor(() => expect(error).toBeInstanceOf(RuntimeStartupDisposalFailure), { timeout: 1000 });

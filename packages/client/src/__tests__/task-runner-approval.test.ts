@@ -14,7 +14,7 @@ import {
   MAX_PENDING_APPROVALS_PER_TASK,
 } from '../daemon/task-runner/state';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
@@ -45,7 +45,7 @@ async function makeRunner(
   home = testAgentHomeDeps(),
 ): Promise<{ runner: TaskRunner; approvalRegistry: ApprovalRegistry }> {
   const approvalRegistry = overrides.approvalRegistry ?? new ApprovalRegistry();
-  const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...home,
     deviceId: 'device-1',
@@ -65,7 +65,7 @@ async function makeRunner(
 
 async function offerAndActivate(runner: TaskRunner, taskId: string): Promise<void> {
   await runner.handleEnvelope(
-    createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'do work' }, { taskId, seq: 1 }),
+    createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'do work' }, { taskId, seq: 1 }),
   );
 }
 

@@ -25,6 +25,8 @@ import {
   type McpToolsetServerObservation,
 } from '../mcp';
 
+const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
+
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 /** A product Pi asset root that holds the SDK asset manifest: the built package assets. */
 const PRODUCT_ASSETS = fileURLToPath(new URL('../../dist/assets/', import.meta.url));
@@ -53,7 +55,7 @@ async function startAdapter(adapter: PiAdapter, task: RuntimeTaskInput, resource
   return startPreparedOperation(adapter, task, resources);
 }
 
-const baseTask: RuntimeTaskInput = {
+const baseTask: RuntimeTaskInput = { target: PI_TARGET,
   instruction: 'say hi',
 };
 
@@ -70,7 +72,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     const spawnFn=((_command:string,args:string[],options:Parameters<typeof realSpawn>[2])=>realSpawn(FIXTURE_PATH,args.slice(args.indexOf('--')+1),options)) as never;
     const adapter=new PiAdapter({resolveBin:()=>({command:FIXTURE_PATH,source:'env'}),spawnFn,
       byokLauncher:{command:'/opt/byok-pi-provider-launcher',profileDbPath:'/private/providers.sqlite',sessionDir:dir}});
-    const task:RuntimeTaskInput={...baseTask,dispatchSelection:{lane:'byok',runtimeId:'pi',providerId:'openai',modelId:'gpt-5.2'},...(resume?{sessionRef:'fake-session-1'}:{})};
+    const task:RuntimeTaskInput={...baseTask,target:{lane:'byok',runtimeId:'pi',providerId:'openai',modelId:'gpt-5.2'},...(resume?{sessionRef:'fake-session-1'}:{})};
     let session:Session|undefined;
     try{
       session=await startAdapter(adapter,task,await makeCtx({...process.env,FAKE_PI_HANG_AFTER_TOOL:'1'}));
@@ -85,7 +87,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     const dir=await fs.mkdtemp(path.join(os.tmpdir(),'pi-retention-token-')),spawnFn=vi.fn(()=>{throw new Error('must not spawn');});
     const adapter=new PiAdapter({resolveBin:()=>({command:FIXTURE_PATH,source:'env'}),spawnFn:spawnFn as never,
       byokLauncher:{command:'/opt/byok-pi-provider-launcher',profileDbPath:'/private/providers.sqlite',sessionDir:dir}});
-    const task:RuntimeTaskInput={...baseTask,sessionRef:'fake-session-1',dispatchSelection:{lane:'byok',runtimeId:'pi',providerId:'openai',modelId:'gpt-5.2'}};
+    const task:RuntimeTaskInput={...baseTask,sessionRef:'fake-session-1',target:{lane:'byok',runtimeId:'pi',providerId:'openai',modelId:'gpt-5.2'}};
     let retained:import('../types').RuntimeSessionLease|undefined;
     const wrapped:import('../types').RuntimeAdapter={descriptor:adapter.descriptor,runtimeEnvironment:()=>adapter.runtimeEnvironment(),detect:()=>adapter.detect(),prepare:async input=>{
       const result=await adapter.prepare(input);if(result.kind!=='prepared')return result;
@@ -208,7 +210,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     });
     const task: RuntimeTaskInput = {
       ...baseTask,
-      dispatchSelection: {
+      target: {
         lane: 'byok',
         runtimeId: 'pi',
         providerId: 'openai',
@@ -246,7 +248,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     expect(calls[0]?.env.OPENAI_API_KEY).toBeUndefined();
     await expect(session.followUp({
       instruction: 'switch provider',
-      dispatchSelection: {
+      target: {
         lane: 'byok',
         runtimeId: 'pi',
         providerId: 'deepseek',
@@ -274,7 +276,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     });
     const task: RuntimeTaskInput = {
       ...baseTask,
-      dispatchSelection: {
+      target: {
         lane: 'byok',
         runtimeId: 'pi',
         providerId: 'openai',
@@ -350,7 +352,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       byokLauncher: { command: '/opt/byok-pi-provider-launcher', profileDbPath: '/private/providers.sqlite', sessionDir: '/private/pi-sessions' },
       packageDir: PRODUCT_ASSETS,
     });
-    const task: RuntimeTaskInput = { ...baseTask, dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'gpt-5.2' } };
+    const task: RuntimeTaskInput = { ...baseTask, target: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'gpt-5.2' } };
     const ctx = await makeCtx();
     const session = await startAdapter(adapter, task, ctx);
     openSessions.push(session);
@@ -385,7 +387,7 @@ const __executionScratch = await testExecutionScratch();
       const compiled = new PiAdapter({ sdkHelperHost: { mode: 'self-executable', executable: path.join(empty, 'product') } });
       await expect(compiled.detect()).resolves.toEqual({ kind: 'not-found' });
     } finally { await fs.rm(empty, { recursive: true, force: true }); }
-    const prepared = await bundle.prepare({ offer: { instruction: 'Never sent' }, descriptor: bundle.descriptor, requiredToolsetIds: [] });
+    const prepared = await bundle.prepare({ offer: { target: PI_TARGET, instruction: 'Never sent' }, descriptor: bundle.descriptor, requiredToolsetIds: [] });
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
     await expect(prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,  kind: 'instruction', cwd: os.tmpdir(), env: {},  }))
       .rejects.toMatchObject({ name: 'RuntimeExecutionFailure', phase: 'start', message: 'pi_bundled_assets_unavailable: an interpreter + bundle product must set runtimes.pi.packageDir (PiAdapterOptions.packageDir) to its Pi asset root' });
@@ -498,7 +500,7 @@ const __executionScratch = await testExecutionScratch();
   it('fails closed before spawn when a BYOK selection has no credential launcher', async () => {
     const task: RuntimeTaskInput = {
       ...baseTask,
-      dispatchSelection: {
+      target: {
         lane: 'byok',
         runtimeId: 'pi',
         providerId: 'openai',

@@ -64,7 +64,9 @@ async function createFixtureStores() {
   }
   try {
     const expected = realpathSync(config.dbPath);
+    // Construction may also open and close a short-lived connection; only a live one can own the store.
     const matches = [...handles].filter((handle) => {
+      if (!handle.isOpen) return false;
       if (handle.isTransaction !== false) throw new Error('fixture capture observed an open transaction');
       const main = prepare.call(handle, 'PRAGMA database_list').all().find((row) => row.name === 'main');
       return main?.file && realpathSync(String(main.file)) === expected;
@@ -384,6 +386,12 @@ const httpServer = serve({
     if (faultCandidate !== undefined) {
       const messages = (faultCandidate as { messages?: Array<{ type: string; payload: unknown }> }).messages ?? [];
       const publishAt = messages.findIndex((message) => message.type === 'agent.message.publish');
+      // The runtime starts only after the claim's answer (#2294), so task.started
+      // can leave before the runtime publishes. Refusing a request that carries
+      // task.started without the publish keeps both queued until they leave together.
+      if (publishAt < 0 && messages.some((message) => message.type === 'task.started') && existsSync(`${config.dbPath}.started-gate`)) {
+        return new Response('message admission unavailable', { status: 503 });
+      }
       if (publishAt >= 0 && existsSync(`${config.dbPath}.message-outage`)) {
         appendFileSync(`${config.dbPath}.message-blocked-batches`, `${JSON.stringify(messages.map((message) => message.type))}\n`);
         // The cloud applies a batch in order and never rolls back (handlers/messages.ts),
@@ -403,10 +411,6 @@ const httpServer = serve({
         return new Response('message admission unavailable', { status: 503 });
       }
       await ownerWrite(() => db.prepare('INSERT INTO fixture_wire (body) VALUES (?)').run(JSON.stringify(messages)));
-      // A slow claim reply lets the envelopes queued behind it leave together.
-      if (messages.some((message) => message.type === 'task.claim') && existsSync(`${config.dbPath}.claim-delay`)) {
-        await new Promise((resolve) => setTimeout(resolve, Number(readFileSync(`${config.dbPath}.claim-delay`, 'utf8'))));
-      }
     }
     const response = await cloud.fetch(request);
     if (response.ok && hasTerminal(faultCandidate) && existsSync(config.faultFile)) {
@@ -451,7 +455,7 @@ lines.on('line', (line) => {
           taskId: params.taskId ?? globalThis.crypto.randomUUID(),
           deviceId: params.deviceId,
           payload: {
-            instruction: String(params.instruction), runtime: 'pi',
+            instruction: String(params.instruction), target: { lane: 'runtime', runtimeId: 'pi' },
             agentRef: params.agentRef ?? { agentId: `recovery-${globalThis.crypto.randomUUID()}`, profileRevision: '1' },
             session: { mode: 'fresh' },
             egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -464,7 +468,7 @@ lines.on('line', (line) => {
           deviceId: params.deviceId,
           agentMessageContext: { destinationBinding: 'fixture-conversation', freshnessCursor: 'fixture-turn' },
           payload: {
-            instruction: 'publish durable reply', runtime: 'pi',
+            instruction: 'publish durable reply', target: { lane: 'runtime', runtimeId: 'pi' },
             agentRef: { agentId: 'agent-message', profileRevision: 'profile-v1' },
             session: { mode: 'fresh' },
             egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -478,7 +482,7 @@ lines.on('line', (line) => {
           taskId: params.taskId,
           deviceId: params.deviceId,
           payload: {
-            instruction: 'submit one structured result', runtime: 'pi',
+            instruction: 'submit one structured result', target: { lane: 'runtime', runtimeId: 'pi' },
             agentRef: { agentId: 'agent-result', profileRevision: 'profile-v1' },
             session: { mode: 'fresh' },
             egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,

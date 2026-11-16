@@ -2,10 +2,10 @@
 // terminal evidence (see ./support.ts for how a member
 // module runs).
 import type { ResultReplyFailure } from '../result-reply-failure.js';
-import { terminalIdentity } from '../terminal-identity.js';
+import { claimedExecutorFor } from '../terminal-identity.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { RESIDENT_MEMORY_MAX_BYTES, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit } from '@byok-sdk/protocol';
+import { RESIDENT_MEMORY_MAX_BYTES, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type ClaimedExecutor } from '@byok-sdk/protocol';
 import type { AgentRef } from '../../agent-home.js';
 import { compareAgentHomeMemory, digestAgentHomeMemory } from '../../agent-home-readers.js';
 import type { AgentTerminalCause } from '../agent-session-handoff-store.js';
@@ -59,14 +59,16 @@ export function agentTerminalPayload(
   this: TaskRunner,
   active: ActiveTask,
 ): {
+  executor: ClaimedExecutor;
   agentRef?: AgentRef;
-  harnessId?: string;
   agentHomeProjection?: TerminalAgentHomeProjection;
   agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
   residentMemoryOverLimit?: TerminalResidentMemoryOverLimit;
 } {
+  // An active task was claimed, so its terminal always echoes the executor.
   return {
-    ...terminalIdentity(active.adapter.descriptor.id, active.agentRef),
+    executor: claimedExecutorFor(active.adapter.descriptor.id),
+    ...(active.agentRef === undefined ? {} : { agentRef: active.agentRef }),
     ...(active.appliedAgentHomeProjection === undefined ? {} : { agentHomeProjection: active.appliedAgentHomeProjection }),
     ...(active.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: active.agentHomeMemoryChange }),
     ...(active.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: active.residentMemoryOverLimit }),

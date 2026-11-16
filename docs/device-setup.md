@@ -1383,6 +1383,7 @@ still need correction. Codes do not replace the reported field/path or cause.
 | `invalid_version_policy` | no | Fix the reported runtime version policy field: use exact/prefix specs, end a prefix with ".", remove duplicates, and configure block only from the Host. | [guide](#configuration) |
 | `missing_required` | no | Supply the required field at the reported path. | [guide](#configuration) |
 | `not_an_object` | no | Supply a JSON object. | [guide](#configuration) |
+| `protocol_negotiation_failed` | no | Read the HTTP status in the halt. On 404, check the server base URL and that the Host mounts the messages route; otherwise upgrade the server side and the daemons to the same wire protocol major. | [guide](#troubleshooting) |
 | `re_pair_required` | no | Obtain a fresh pairing code from the Host, pair this device, then start. | [guide](#reset) |
 | `removed_field` | no | Remove the field and follow its migration; do not rename it to an unknown field. | [guide](#removed-fields) |
 | `replay_cursor_too_old` | no | Pair again or use the Host operator recovery procedure for expired history. | [guide](#reset) |

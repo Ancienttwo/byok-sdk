@@ -74,7 +74,7 @@ describe('a backlog larger than the rate burst still drains (real @byok-sdk/serv
     const total = MAX_MESSAGES_PER_BATCH + 44;
     const sent = new Set<string>();
     for (let i = 0; i < total; i++) {
-      const envelope = createEnvelope('task.claim', { deviceId: record.deviceId }, { taskId: `rate-task-${i}` });
+      const envelope = createEnvelope('task.claim', { deviceId: record.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: `rate-task-${i}` });
       sent.add(envelope.id);
       connection.send(envelope);
     }

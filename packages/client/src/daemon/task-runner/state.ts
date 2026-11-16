@@ -299,9 +299,6 @@ export interface OfferFactsV1 {
   readonly requiredToolsets: readonly string[];
   readonly strict: boolean;
   readonly sealed: boolean;
-  readonly requestedRuntime?: string;
-  readonly dispatchRuntime?: string;
-  readonly harnessId?: string;
   readonly agentRef?: string;
   readonly sessionRef?: string;
   readonly maxDurationMs?: number;
@@ -464,6 +461,7 @@ export type ReducerEventType =
   | 'claim.journaled'
   | 'claim.journal_failed'
   | 'claim.sent'
+  | 'claim.refused'
   | 'startup.registered'
   | 'startup.transferred'
   | 'startup.disposed'
@@ -1171,7 +1169,30 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
       };
     },
     rejection:
-      'Duplicate claim.sent drops. A cancel during start selects X3/X3b and is settled by the start result (C6/C7), never by a second claim.',
+      'Duplicate claim.sent drops. With a claim settlement source the start waits for an accepted claim (#2294). A cancel during start selects X3/X3b and is settled by the start result (C6/C7), never by a second claim.',
+  },
+  {
+    id: 'C10',
+    events: ['claim.refused'],
+    phase: ['claimed'],
+    when: (snapshot) => snapshot.task !== undefined && snapshot.task.terminal === undefined,
+    apply: (snapshot, event) => {
+      const declined = declinedTask(snapshot, event, 'claimed', {
+        reason: event.reason ?? 'claim refused',
+        retryable: false,
+      });
+      return {
+        runner: snapshot.runner,
+        task: declined.task,
+        effects: [
+          atom('send.decline', { reason: declined.reason, retryable: false }),
+          ...declineCleanupEffects(),
+        ],
+        reason: declined.reason,
+      };
+    },
+    rejection:
+      '#2294: the cloud refused the claim, so the runtime never starts and task.started never sends: one non-retryable decline without a code. A settlement after another terminal drops (F-CLAIM).',
   },
   {
     id: 'C0',
@@ -2853,7 +2874,7 @@ function fallbackRow(id: string, events: readonly ReducerEventType[]): Transitio
 const FALLBACK_ROWS: readonly TransitionRow[] = [
   /* @__PURE__ */ fallbackRow('F-OFFER', ['offer.received']),
   /* @__PURE__ */ fallbackRow('F-ADMISSION', ['admission.begin', 'admission.stage', 'admission.declined', 'admission.claimable']),
-  /* @__PURE__ */ fallbackRow('F-CLAIM', ['claim.journaled', 'claim.journal_failed', 'claim.sent']),
+  /* @__PURE__ */ fallbackRow('F-CLAIM', ['claim.journaled', 'claim.journal_failed', 'claim.sent', 'claim.refused']),
   /* @__PURE__ */ fallbackRow('F-STARTUP', ['startup.registered', 'startup.transferred', 'startup.disposed']),
   /* @__PURE__ */ fallbackRow('F-RUNTIME', ['runtime.session_bound', 'runtime.started', 'runtime.activation_failed', 'runtime.start_failed', 'runtime.prestart_failed', 'runtime.run_failed']),
   /* @__PURE__ */ fallbackRow('F-TURN', ['turn.ended', 'stream.ended', 'resource.exceeded']),

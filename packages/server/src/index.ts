@@ -8,7 +8,14 @@ import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/
 export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError, WAKE_MAX_FUTURE_MS } from './wakes/types.js';
 export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types.js';
 import { MaintenanceScheduler, assertMaintenanceInterval, DEFAULT_MAINTENANCE_INTERVAL_MS } from './maintenance-scheduler.js';
-import { resolveRetentionPolicy, DEFAULT_MAINTENANCE_LIMIT, ByokCloudError, type MaintenanceReport } from '@byok-sdk/cloud';
+import {
+  resolveRetentionPolicy,
+  DEFAULT_LONG_POLL_HOLD_MS,
+  DEFAULT_MAINTENANCE_LIMIT,
+  DEFAULT_MAX_BLOB_SIZE_BYTES,
+  ByokCloudError,
+  type MaintenanceReport,
+} from '@byok-sdk/cloud';
 export type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
 import {
@@ -51,7 +58,7 @@ import {
 } from '@byok-sdk/protocol';
 import { TaskEventRelay } from './relay.js';
 import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot.js';
-import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores.js';
+import { composeFacadeStores, serverTenantId } from './stores.js';
 import { approvePendingApproval, createTaskHandle, noteAbandoned, rejectPendingApproval } from './task-handle.js';
 import { readTaskEvents, type TaskEventDeps, type TaskEventFacts, type TaskEventSources } from './task-events.js';
 import type {
@@ -135,8 +142,6 @@ function toSteerRefusal(record: SteerRefusalRecord): SteerRefusal {
   return { messageId: record.steerMessageId, reason: readSteerRefusalReason(record.reason), at: record.recordedAt, revision: record.revision };
 }
 
-/** `GET /byok/events` hold duration (§8): ~50s unless overridden (e.g. for tests). */
-const DEFAULT_LONG_POLL_HOLD_MS = 50_000;
 /**
  * Default presence lease beyond one long-poll hold: a poll renews presence once,
  * when it starts, so a device must re-poll within this slack after a full hold
@@ -517,7 +522,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     const { snapshot, timeline, pending } = await projectTaskReads(attempt);
     if (pending === undefined) return { state: snapshot.state, at: snapshot.updatedAt };
     const event = timeline?.entries.find((entry) => entry.revision === pending.revision)?.event;
-    const request: ServerTaskEvent | undefined = event?.type === 'approval_requested' && 'summary' in event && event.approvalId !== undefined
+    const request: ServerTaskEvent | undefined = event?.type === 'approval_requested' && 'summary' in event
       ? { kind: 'await_approval', summary: event.summary, approvalId: event.approvalId }
       : undefined;
     return { state: snapshot.state, at: snapshot.updatedAt, approval: { revision: pending.revision, ...(request === undefined ? {} : { request }) } };

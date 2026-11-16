@@ -22,7 +22,7 @@ import type { ControlStatusResult } from '../daemon/control-protocol';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
 // A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
-const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, target: { lane: 'auto' as const } };
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));

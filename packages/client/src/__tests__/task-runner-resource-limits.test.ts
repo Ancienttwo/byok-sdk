@@ -17,7 +17,7 @@ import {
 } from '../daemon/task-runner/state';
 import { estimateEventBytes } from '../daemon/task-runner/support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 
 /**
  * M5 batch-3 (workstream 2): `TaskRunner`'s two local resource-limit
@@ -69,7 +69,7 @@ async function makeRunner(
     shutdownInterruptTimeoutMs: overrides.shutdownInterruptTimeoutMs,
     maxTaskOutputBytes: overrides.maxTaskOutputBytes,
     batcherOptions: overrides.batcherOptions,
-    getIngressBudget: overrides.getIngressBudget ?? testIngressBudget,
+    getIngressBudget: overrides.getIngressBudget ?? testIngressBudget, awaitClaimSettlement: acceptClaimSettlement,
   };
   return new TaskRunner(deps);
 }
@@ -91,7 +91,7 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
     await runner.handleEnvelope(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: 5000 }, ...FRESH_OFFER },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: 5000 }, ...FRESH_OFFER },
         { taskId: 'task-1', seq: 1 },
       ),
     );
@@ -120,7 +120,7 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
     await runner.handleEnvelope(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: limitMs }, ...FRESH_OFFER },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: limitMs }, ...FRESH_OFFER },
         { taskId: 'task-long', seq: 1 },
       ),
     );
@@ -151,7 +151,7 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
     await runner.handleEnvelope(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: 1000 }, ...FRESH_OFFER },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: 1000 }, ...FRESH_OFFER },
         { taskId: 'task-hang', seq: 1 },
       ),
     );
@@ -184,7 +184,7 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
     await runner.handleEnvelope(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: 5000 }, ...FRESH_OFFER },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: 5000 }, ...FRESH_OFFER },
         { taskId: 'task-ok', seq: 1 },
       ),
     );
@@ -212,7 +212,7 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
     const runner = await makeRunner(adapter, sent);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'task-nolimit', seq: 1 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'task-nolimit', seq: 1 }),
     );
     expect(runner.activeTaskCount).toBe(1);
 
@@ -230,7 +230,7 @@ describe('TaskRunner: maxTaskOutputBytes enforcement (M5 batch-3, workstream 2)'
     const runner = await makeRunner(adapter, sent, { maxTaskOutputBytes: 200 });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'task-flood', seq: 1 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'task-flood', seq: 1 }),
     );
     const session = adapter.sessions[0];
     expect(session).toBeDefined();
@@ -259,7 +259,7 @@ describe('TaskRunner: maxTaskOutputBytes enforcement (M5 batch-3, workstream 2)'
     expect(() => estimateEventBytes(unserializable)).toThrow(TypeError);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'task-unserializable', seq: 1 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'task-unserializable', seq: 1 }),
     );
     const session = adapter.sessions[0];
     session!.emit(unserializable);
@@ -277,7 +277,7 @@ describe('TaskRunner: maxTaskOutputBytes enforcement (M5 batch-3, workstream 2)'
     const runner = await makeRunner(adapter, sent, { maxTaskOutputBytes: 1_000_000 });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'task-small', seq: 1 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'task-small', seq: 1 }),
     );
     const session = adapter.sessions[0];
     expect(session).toBeDefined();
@@ -298,7 +298,7 @@ describe('TaskRunner: maxTaskOutputBytes enforcement (M5 batch-3, workstream 2)'
     expect(DEFAULT_MAX_TASK_OUTPUT_BYTES).toBe(64 * 1024 * 1024);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'task-default-cap', seq: 1 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'task-default-cap', seq: 1 }),
     );
     const session = adapter.sessions[0];
     session!.emit({ type: 'progress', text: 'a small amount of output' });
@@ -316,7 +316,7 @@ describe('TaskRunner: server activity ingress enforcement', () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
     const runner = await makeRunner(adapter, sent);
-    await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'text-split', seq: 1 }));
+    await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'text-split', seq: 1 }));
     const text = 'x'.repeat(100 * 1024);
     adapter.sessions[0]!.emit({ type: 'progress', text });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
@@ -341,7 +341,7 @@ describe('TaskRunner: server activity ingress enforcement', () => {
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'task-batch-bytes', seq: 1 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'task-batch-bytes', seq: 1 }),
     );
     const session = adapter.sessions[0];
     expect(session).toBeDefined();
@@ -394,7 +394,7 @@ describe('TaskRunner: clean custom Session termination', () => {
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'task-crash', seq: 1 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'task-crash', seq: 1 }),
     );
     const session = adapter.sessions[0];
     expect(session).toBeDefined();

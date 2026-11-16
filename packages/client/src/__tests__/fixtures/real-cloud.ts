@@ -59,8 +59,8 @@ export interface RealCloudHandle {
    * Fresh Agent execution through its one hosted entry, `submitAgentExecution` (#470/#484). No
    * `TaskHandle` exists on this surface. Waits until the device's authenticated capability snapshot
    * durably carries the Agent egress capabilities, then submits with the default egress policy and
-   * `terminalProjection: none`. Targets `harnessId` when given, else `runtime` (default `pi`, the
-   * stub adapter's id); `agentRef` defaults to a new Agent per call.
+   * `terminalProjection: none`. Targets the `harness` lane when `harnessId` is given, else the
+   * `runtime` lane (default `pi`, the stub adapter's id); `agentRef` defaults to a new Agent per call.
    */
   submitFreshAgent(deviceId: string, input: {
     readonly instruction: string;
@@ -170,7 +170,7 @@ export async function startRealCloud(opts: StartRealCloudOptions): Promise<RealC
             deviceId,
             payload: {
               ...fields,
-              ...(harnessId === undefined ? { runtime: runtime ?? 'pi' } : { harnessId, ...(runtime === undefined ? {} : { runtime }) }),
+              target: harnessId === undefined ? { lane: 'runtime', runtimeId: runtime ?? 'pi' } : { lane: 'harness', harnessId },
               agentRef: agentRef ?? freshTestAgentRef(),
               session: { mode: 'fresh' },
               egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,

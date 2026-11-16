@@ -11,16 +11,8 @@ import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 /**
- * M5 batch-3 (workstream 1): the offer admission gate for a payload field
- * that were previously accepted and silently ignored (see
- * `TaskRunner.handleOffer`'s own doc comments in `daemon/task-runner.ts` for
- * the full rationale):
- *
- *  - `payload.limits.maxTokens` — no bundled runtime adapter has hard
- *    token-limit enforcement. Silently accepting it would let a caller
- *    believe a cap is in effect when nothing checks it.
- *
- * It is declined fail-closed, pre-claim (never claim-then-fail).
+ * `limits.maxDurationMs` is the only offer limit (wire v7 removed
+ * `limits.maxTokens`); an offer that sets it is admitted and claimed.
  */
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -60,33 +52,14 @@ describe('task.offer admission gates (M5 batch-3)', () => {
     return { daemon, adapter };
   }
 
-  describe('limits.maxTokens', () => {
-    it('declines pre-claim (never claims) when limits.maxTokens is set', async () => {
+  describe('limits.maxDurationMs', () => {
+    it('does NOT decline when limits.maxDurationMs is set', async () => {
       const { adapter } = await setup();
 
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxTokens: 4000 }, ...FRESH_OFFER },
-          { taskId: 'task-maxtokens-1', seq: server.nextSeq() },
-        ),
-      );
-
-      const decline = await server.waitFor((e) => e.type === 'task.decline');
-      expect(decline.payload).toMatchObject({ retryable: true });
-      expect((decline.payload as { reason: string }).reason).toMatch(/maxTokens/i);
-      expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === 'task-maxtokens-1')).toBe(false);
-      expect(server.received.some((e) => e.type === 'task.fail' && e.task_id === 'task-maxtokens-1')).toBe(false);
-      expect(adapter.startCalls).toHaveLength(0);
-    });
-
-    it('does NOT decline when only limits.maxDurationMs is set (maxTokens absent)', async () => {
-      const { adapter } = await setup();
-
-      server.send(
-        createEnvelope(
-          'task.offer',
-          { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: 60_000 }, ...FRESH_OFFER },
+          { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: 60_000 }, ...FRESH_OFFER },
           { taskId: 'task-maxduration-1', seq: server.nextSeq() },
         ),
       );
