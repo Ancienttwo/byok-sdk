@@ -1,9 +1,11 @@
+import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { resolvePiBin } from '../adapters/pi/resolve-bin';
-import { PiRpcClient, type PiRpcMessage } from '../adapters/pi/rpc-client';
+import { PiRpcClient, type PiRpcMessage, type SpawnFn } from '../adapters/pi/rpc-client';
+import { RuntimeExecutionFailure } from '../runtime-failure';
 import type { Session } from '../types';
 import { baseEnv, createSandbox } from './runtime-contract/contract';
 import { startLoopbackProvider, type LoopbackProvider } from './runtime-contract/loopback';
@@ -19,8 +21,22 @@ const LATER = 'BYOK-LATER-2299';
 type SessionEvent = Session['events'] extends AsyncIterable<infer Event> ? Event : never;
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * Extension source that sets `promptSeen` once Pi has taken the task prompt.
+ * Pi's stdin reader is the first `data` listener; this one is attached right
+ * after it, so Pi has already deferred or queued the prompt synchronously by
+ * the time `promptSeen` is set.
+ */
+const PROMPT_WATCH = `let promptSeen = false;
+process.stdin.on('newListener', function watch(event) {
+  if (event !== 'data') return;
+  process.stdin.off('newListener', watch);
+  queueMicrotask(() => process.stdin.on('data', chunk => { if (String(chunk).includes('"type":"prompt"')) promptSeen = true; }));
+});
+`;
+
 /** An isolated Pi agent directory with one user extension, under the default `inherit` context. */
-async function piHome(extension: string, provider: LoopbackProvider) {
+async function piHome(extension: string, provider: LoopbackProvider, settings: Record<string, unknown> = {}) {
   const box = await createSandbox('pi-boot');
   const agentDir = path.join(box.home, '.pi', 'agent');
   await fs.mkdir(path.join(agentDir, 'extensions'), { recursive: true });
@@ -28,7 +44,7 @@ async function piHome(extension: string, provider: LoopbackProvider) {
     baseUrl: provider.baseUrl, api: 'openai-completions', apiKey: 'synthetic',
     models: [{ id: 'm', name: 'm', contextWindow: 32_768, maxTokens: 256, input: ['text'], reasoning: false }],
   } } }));
-  await fs.writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: PROVIDER, defaultModel: 'm' }));
+  await fs.writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: PROVIDER, defaultModel: 'm', ...settings }));
   await fs.writeFile(path.join(agentDir, 'extensions', 'boot.ts'), extension);
   return { box, env: { ...baseEnv(box.home), PI_CODING_AGENT_DIR: agentDir } };
 }
@@ -93,10 +109,10 @@ describe('pi-rpc lane with a user extension that runs Pi itself (#2299)', () => 
   }, 60_000);
 
   it('the settlement of a run still in its agent_settled hook does not end the task turn', async () => {
-    const text = await firstTurn(`export default function(pi) {
+    const text = await firstTurn(`${PROMPT_WATCH}export default function(pi) {
   let settling = false, first = true;
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-  pi.on('agent_settled', async () => { if (!first) return; first = false; settling = true; await delay(1500); });
+  pi.on('agent_settled', async () => { if (!first) return; first = false; settling = true; while (!promptSeen) await delay(5); });
   pi.on('session_start', async () => { pi.sendUserMessage(${JSON.stringify(BOOT)}); while (!settling) await delay(10); });
 }\n`, await provider());
     expect(text).toContain(`${TASK} reply`);
@@ -120,11 +136,11 @@ describe('pi-rpc lane with a user extension that runs Pi itself (#2299)', () => 
     const loopback = await provider(0, 'slow_2299');
     try {
       const { session } = await startTask(`import { Type } from 'typebox';
-export default function(pi) {
+${PROMPT_WATCH}export default function(pi) {
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   let running = false;
   pi.registerTool({ name: 'slow_2299', label: 'slow', description: 'Waits.', parameters: Type.Object({}),
-    async execute() { running = true; await delay(1500); return { content: [{ type: 'text', text: 'slow done' }], details: {} }; } });
+    async execute() { running = true; while (!promptSeen) await delay(5); return { content: [{ type: 'text', text: 'slow done' }], details: {} }; } });
   // Pi reads the task prompt only after session_start returns: hold it until the call runs.
   pi.on('session_start', async () => { pi.sendUserMessage(${JSON.stringify(BOOT)}); while (!running) await delay(10); });
 }\n`, loopback);
@@ -167,6 +183,48 @@ export default function(pi) {
         expect(second).toContain(`${TASK}-2 reply`);
         expect(second).not.toContain('extension reply');
       } finally { await session.close(); }
+    } finally { await loopback.close(); }
+  }, 60_000);
+
+  it('a first prompt Pi defers and then refuses without a response fails start once the start is aborted (#2300)', async () => {
+    const loopback = await provider();
+    try {
+      // The settle hook compacts after Pi deferred the prompt. Compaction waits
+      // until the hook has returned, so the deferred prompt, which Pi runs
+      // right after the hook without any I/O, meets the compaction and is
+      // refused without a response.
+      const { box, env } = await piHome(`${PROMPT_WATCH}export default function(pi) {
+  let settling = false, first = true, compacting = false, settled = false;
+  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+  pi.on('session_before_compact', async () => {
+    compacting = true;
+    while (!settled) await delay(5);
+    (await import('node:fs')).writeFileSync(process.env.HOME + '/refused', '');
+  });
+  pi.on('agent_settled', async (_event, ctx) => {
+    if (!first) return; first = false; settling = true;
+    while (!promptSeen) await delay(5);
+    ctx.compact();
+    while (!compacting) await delay(5);
+    settled = true;
+  });
+  pi.on('session_start', async () => { pi.sendUserMessage(${JSON.stringify(BOOT)}); while (!settling) await delay(10); });
+}\n`, loopback, { compaction: { keepRecentTokens: 1 } });
+      let child: ChildProcess | undefined;
+      const spawnFn = ((...args: Parameters<SpawnFn>) => (child = spawn(...args))) as SpawnFn;
+      const adapter = new PiAdapter({ resolveBin: () => ({ command: rpcHost, source: 'package' }), agentUserContext: 'inherit', spawnFn });
+      const deadline = new AbortController();
+      const refused = startPreparedOperation(adapter, { instruction: `${TASK} reply briefly.` },
+        { workspaceDir: box.workspace, env, signal: deadline.signal });
+      // The abort stands in for the daemon's startup deadline. Once compaction
+      // holds, the deferred prompt is refused and no response will ever come.
+      await expect.poll(() => existsSync(path.join(box.home, 'refused')), { timeout: 15_000 }).toBe(true);
+      deadline.abort();
+      const error = await refused.then(() => undefined, (failure: unknown) => failure);
+      expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+      expect(error).toMatchObject({ phase: 'start', retry: 'retryable' });
+      expect((error as Error).message).toContain('the start was aborted before pi answered');
+      expect(child!.exitCode !== null || child!.signalCode !== null).toBe(true);
     } finally { await loopback.close(); }
   }, 60_000);
 
