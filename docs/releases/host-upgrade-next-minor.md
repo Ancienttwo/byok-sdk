@@ -302,6 +302,16 @@ A v7 daemon that reaches a v6 cloud gets HTTP 400 on its hello and halts with
 `localVersion`, `httpStatus`; `peerVersion` only when the peer stated it).
 Upgrade both sides to resolve it.
 
+In `@byok-sdk/client` this is the halt reason `protocol_negotiation_failed`
+(new in `DAEMON_HALT_REASONS`). The daemon takes it when its lone hello gets a
+`rejected` outcome with `protocol_version_unsupported` (`httpStatus` 200) or a
+4xx other than 401, 403, 409, 413 and 429. `DaemonLifecycle`'s `halted` phase
+carries `httpStatus` for it, `byok-agent start`, diagnostics and the support
+bundle print it, and `whenOpen()` rejects with a `DaemonHaltError` whose `cause`
+is the `ProtocolNegotiationError`. A 404 usually means a wrong server base URL
+or a Host that does not mount the messages route. Add the reason wherever a
+Host switches on halt reasons.
+
 ### Offer `target` and claim `executor`
 
 - `task.offer` takes one required `target` in place of `runtime`,
@@ -312,11 +322,17 @@ Upgrade both sides to resolve it.
   `byok-profile` with `runtimeId: 'pi'`).
   Without one the offer declines with `native_sessions_selection_invalid`.
   `native_sessions_unsupported` no longer hides a selection violation: a
-  device checks the selection rules first (client order: phase 1).
+  device checks the selection rules first.
 - `task.claim` takes one required `executor`
   (`{ kind: 'runtime', runtimeId }` or `{ kind: 'harness', harnessId }`) in
   place of `runtime`, `harnessId` and `agentId`. `task.complete` requires it;
   `task.fail` and `task.cancelled` carry it after a claim.
+- `@byok-sdk/client`: `RuntimeTaskInput` takes `target`, and
+  `RuntimeOperationManifest.modelTarget` (the model-lane target) replaces
+  `dispatchSelection`; a custom adapter reads the model selection from
+  `manifest.modelTarget`. `taskRuntimeTarget(descriptor)` returns
+  `{ lane: 'runtime', runtimeId }` or `{ lane: 'harness', harnessId }`: pass it
+  as the offer `target`.
 - Cloud `TaskAttempt.claimedExecutor` replaces `claimedRuntime` and
   `claimedHarnessId`. Host offer and task APIs that took `runtime`,
   `harnessId` or `dispatchSelection`: phase 1.
@@ -352,6 +368,9 @@ input, selection rules, offer admission (for example
 stays optional and open: read it with `readDeclineCode`, and expect
 `unknown` with `reportedCode`. Codes stay plaintext on sealed tasks.
 `task.decline.reason` is now bounded and redacted like `task.fail.reason`.
+A v7 device puts the code only in `code`: `reason` is the detail and no longer
+starts with `<code>: ` (for example `offer_capability_missing` and the offer
+selection rules). A Host that parsed a code out of `reason` reads `code`.
 See [Decline codes](../protocol.md#decline-codes).
 
 ### Steer text bound
