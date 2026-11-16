@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { readSqliteFileUnchanged } from '@byok-sdk/core/sqlite-node';
 import type { BotProfile, BotRow, Roster, TranscriptEntry, TurnProjection, TurnRecord } from './types.ts';
 
 const SCHEMA_VERSION = 1;
@@ -20,6 +21,25 @@ export class StoreConflictError extends Error {
     super(message);
     this.name = 'StoreConflictError';
   }
+}
+
+/** A file in another format than this Host's store. It is refused before any write and left as it is. */
+export class StoreFormatError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StoreFormatError';
+  }
+}
+
+/** The store's one format check: `'empty'` for a new file, otherwise the current schema version or a {@link StoreFormatError}. */
+function assertCurrentStore(db: DatabaseSync, file: string): 'empty' | 'current' {
+  const objects = db.prepare(`SELECT count(*) AS n FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'`).get() as { n: number };
+  if (objects.n === 0) return 'empty';
+  const meta = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'meta'`).get();
+  if (meta === undefined) throw new StoreFormatError(`Host store ${file} holds tables but no schema version; this Host reads ${SCHEMA_VERSION}`);
+  const version = db.prepare(`SELECT value FROM meta WHERE key = 'schema'`).get() as { value: number } | undefined;
+  if (version?.value !== SCHEMA_VERSION) throw new StoreFormatError(`Host store ${file} has schema ${String(version?.value)}; this Host reads ${SCHEMA_VERSION}`);
+  return 'current';
 }
 
 interface EntryRow { seq: number; kind: string; bot_id: string; action_id: string | null; text: string | null; turn_id: string | null; task_id: string | null; at: number }
@@ -48,15 +68,21 @@ export class HostStore {
     this.now = now;
   }
 
-  /** Opens or creates the store. A store with another schema version is refused; there is no automatic repair. */
+  /**
+   * Opens or creates the store. A store with another schema version, or tables without one, is refused before
+   * anything writes to the file; there is no automatic repair.
+   */
   static open(file: string, now: () => number = Date.now): HostStore {
+    readSqliteFileUnchanged(file, (db) => assertCurrentStore(db, file));
     const db = new DatabaseSync(file);
     try {
+      // The writable connection also sees a WAL the main file does not hold yet.
+      const created = assertCurrentStore(db, file) === 'empty';
       db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
-      const meta = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'meta'`).get();
-      if (meta === undefined) db.exec(`BEGIN; ${SCHEMA} COMMIT;`);
-      const version = db.prepare(`SELECT value FROM meta WHERE key = 'schema'`).get() as { value: number } | undefined;
-      if (version?.value !== SCHEMA_VERSION) throw new Error(`Host store ${file} has schema ${String(version?.value)}; this Host reads ${SCHEMA_VERSION}`);
+      if (created) {
+        db.exec(`BEGIN IMMEDIATE; ${SCHEMA} COMMIT;`);
+        db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+      }
       return new HostStore(db, now);
     } catch (error) {
       db.close();

@@ -1,21 +1,26 @@
 // Copy-and-own Host storage, not SDK API. Use a separate Host database, never
 // the SDK store/Agent home. SQLite CAS works across connections on one machine;
 // this is not a distributed database. Keep cap/config identical across workers.
-import { DatabaseSync } from 'node:sqlite';
-import { HostRevisionConflict, type HostSnapshot } from './goal-btw-store';
+import type { DatabaseSync } from 'node:sqlite';
+import { HostRevisionConflict, openHostDatabase, type HostSnapshot, type HostStoreFormat } from './goal-btw-store';
+
+const CLARIFICATION_FORMAT: HostStoreFormat = {
+  owner: 'clarification',
+  version: 1,
+  tables: ['clarification_runs', 'clarification_execution_ids'],
+  ddl: `CREATE TABLE clarification_runs (
+        tenant TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL,
+        waiting INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(tenant,id));
+      CREATE INDEX clarification_pending ON clarification_runs(tenant,waiting,id);
+      CREATE TABLE clarification_execution_ids (
+        tenant TEXT NOT NULL, task_id TEXT NOT NULL, PRIMARY KEY(tenant,task_id));`,
+};
 
 export class SqliteClarificationStore {
   private readonly db: DatabaseSync;
   constructor(filename: string, readonly tenantId: string, readonly maxPending = 100) {
     if (!filename || !tenantId.trim() || !Number.isSafeInteger(maxPending) || maxPending < 1) throw new Error('Invalid Host database, tenant or pending cap');
-    this.db = new DatabaseSync(filename);
-    this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
-      CREATE TABLE IF NOT EXISTS clarification_runs (
-        tenant TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL,
-        waiting INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(tenant,id));
-      CREATE INDEX IF NOT EXISTS clarification_pending ON clarification_runs(tenant,waiting,id);
-      CREATE TABLE IF NOT EXISTS clarification_execution_ids (
-        tenant TEXT NOT NULL, task_id TEXT NOT NULL, PRIMARY KEY(tenant,task_id));`);
+    this.db = openHostDatabase(filename, CLARIFICATION_FORMAT, 'PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
   }
   close(): void { this.db.close(); }
   read<T>(id: string): HostSnapshot<T> | undefined {

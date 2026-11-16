@@ -1863,6 +1863,20 @@
       ]
     }
   },
+  "@byok-sdk/core/sqlite-node": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Read-only SQLite format admission for Node stores",
+      "budgetBytes": 1135,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {}
+  },
   "@byok-sdk/core/system-tool": {
     "kind": "exports",
     "policy": {

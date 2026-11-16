@@ -167,6 +167,10 @@ const SECURE_FILE_MODE = 0o600;
  * `SQLITE_BUSY` — bounded on purpose, so contention surfaces as an error the
  * caller sees rather than an unbounded stall on the envelope path.
  *
+ * `auto_vacuum` and `journal_mode` can rewrite an existing file's header, so
+ * the caller decides the file's format first, on the unchanged main file
+ * (`readSqliteFileUnchanged` from `@byok-sdk/core/sqlite-node`).
+ *
  * Throws whatever `node:sqlite` throws (module load failure, a corrupt file,
  * an unreadable directory). Every caller is `SqliteLocalTaskJournal`'s
  * constructor, which turns each of those into its own typed error — see

@@ -50,7 +50,7 @@ async function inspectJournal(storeDir: string): Promise<StoreCompatibility> {
     const journal = new SqliteLocalTaskJournal({ storeDir: resolve(copy, '..') });
     await journal.close();
   }, (error) => {
-    // A pre-#826 or hash-only journal is refused with JournalUnavailableError and
+    // A journal in another format is refused with JournalUnavailableError and
     // left unchanged; an unreadable one would be quarantined. Both need the operator.
     if (error instanceof JournalUnavailableError || error instanceof JournalCorruptError) {
       return { verdict: 'rejected', code: error.name, reason: error.message };
@@ -61,7 +61,7 @@ async function inspectJournal(storeDir: string): Promise<StoreCompatibility> {
 
 async function inspectDurableReplica(file: string): Promise<StoreCompatibility | undefined> {
   return inspectCopy('pi-durable', file, async (copy) => {
-    // Opening applies pi-durable's forward migrations to the copy; a newer schema is refused.
+    // A replica in any pi-durable schema version other than the pinned one is refused unchanged.
     // Pi packages stay out of the root entry's static graph, as the storage factory does.
     const storage = await openExistingLocalDurableStorage(copy);
     const { BACKGROUND_CONTEXT } = await import('@earendil-works/chord/context');

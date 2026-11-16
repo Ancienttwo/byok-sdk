@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@byok-sdk/client": "workspace:*",
+    "@byok-sdk/core": "workspace:*",
     "@byok-sdk/bot-collaboration": "workspace:*",
     "@byok-sdk/keys": "workspace:*",
     "@byok-sdk/server": "workspace:*",
