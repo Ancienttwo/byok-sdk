@@ -288,7 +288,8 @@ describe('Host ledger format', () => {
     refused(created(), { k8: 3 });
     refused(created({ k8: 3 }), { k8: 4 });
     refused(created({ k8: 3 }));
-    expect(new HostLedger(created({ k8: 3 }), 'test', { expectedFormats: { k8: 3 } }).formats).toEqual({ k4: 1, k8: 3 });
+    const current = new HostLedger(created({ k8: 3 }), 'test', { expectedFormats: { k8: 3 } }); ledgers.push(current);
+    expect(current.formats).toEqual({ k4: 1, k8: 3 });
   });
 
   it('decides on the writable connection when the schema is only in the WAL, before any DDL', () => {
