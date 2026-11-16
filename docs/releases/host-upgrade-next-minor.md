@@ -2,18 +2,19 @@
 
 Use this checklist in order: [before](#before-upgrading), [during](#during-the-upgrade),
 [after](#after-the-upgrade), then [known residuals](#known-residuals).
+It covers changes after 0.43.0. Earlier Hosts first apply the
+[previous checklist](host-upgrade-0.43.0.md) and its predecessors.
+
 Before upgrading, finish or explicitly abandon in-flight collaboration work.
 Older ledgers are refused regardless of any earlier migration; the candidate
 removes `migrateWouldDo`. See [Host ledgers](#host-ledgers-record-their-format-2286).
 
-**This is release preparation.** Sections marked **随 wire v7 合入 (with the
-wire v7 merge)** take effect with that merge. Check the final candidate's
-manifest before deployment.
+**This is release preparation.** Sections marked **With the wire v7 merge**
+take effect with that merge. Check the final candidate's manifest before deployment.
 
 Sources below name PRs and entry ids in
 [`upgrade-manifest.json`](../../packages/client/upgrade-manifest.json).
-Wire and pairing ids refer to their change manifests until merge. Missing
-dedicated entries are stated explicitly.
+Missing dedicated entries are stated explicitly.
 
 ## Before upgrading
 
@@ -159,7 +160,7 @@ older build.
 
 ### Removed cloud and data-plane APIs
 
-**随 wire v7 合入 (with the wire v7 merge).**
+**With the wire v7 merge.**
 
 Sources: [#2297]. Manifest entries: `cloud-unused-exports-removed`, `cloud-host-facade-methods-removed`, `cloud-approval-identity-required`, `cloud-approval-unnamed-observation-refused`, `cloud-agentless-archive-input-removed`, `cloud-error-agent-ref-missing-removed`, `dataplane-unused-exports-removed`, `dataplane-retention-policy-store-removed`, `dataplane-mailbox-row-tenant-validated`.
 
@@ -310,9 +311,8 @@ Sources: [#2290], [#2309], [#2287]. Entries `retire-compatibility-apis`
 `wire-v7-v6-enrollment-entry-deleted`.
 
 - An unprefixed provider Keychain entry raises `KEYCHAIN_SECRET_DECODE_FAILED`.
-  Delete that entry in the OS keychain, then configure the provider again,
-  as the SDK error instructs. Keep the decode-error UI; there is no
-  `KEYCHAIN_LEGACY` code.
+  Delete that entry in the OS keychain, then configure the provider again.
+  Keep the decode-error UI; there is no `KEYCHAIN_LEGACY` code.
 - `SqliteProviderProfileStore` refuses a `provider_profile` store missing
   custody tables with `PROVIDER_STORE_SCHEMA_STALE` before WAL/DDL. Preserve it
   and configure a separate current store and providers. Read-only open failure
@@ -325,7 +325,7 @@ Sources: [#2290], [#2309], [#2287]. Entries `retire-compatibility-apis`
 
 ### Wire v7
 
-**随 wire v7 合入 (with the wire v7 merge).**
+**With the wire v7 merge.**
 
 Sources: [#2277], [#2285], [#2283], [#2291], [#2293], [#2302], [#2303], [#2305]. Manifest entries: `wire-v7`, `wire-v7-execution-target`, `wire-v7-steer-refused`, `wire-v7-no-server-capabilities`, `wire-v7-decline-codes`, `wire-v7-retired-flags-and-bounds`, `wire-v7-decline-reason-bound`, `wire-v7-server-execution-target`, `wire-v7-server-steer-refused`, `wire-v7-server-sqlite-store`, `wire-v7-cloud-executor`, `wire-v7-cloud-steer-refusal-reads`, `wire-v7-cloud-terminal-executor`, `wire-v7-cloud-unclaimed-task-reports`, `wire-v7-cloud-steer-text-bound`, `wire-v7-dataplane-postgres-new-database`, `wire-v7-dataplane-store-epoch`, `wire-v7-dataplane-stores`, `wire-v7-client-negotiation-halt`, `wire-v7-client-execution-target`, `wire-v7-client-decline-reason-detail`, `wire-v7-client-selection-before-native-sessions`, `claim-accepted-before-runtime-start`.
 
@@ -553,7 +553,7 @@ sends another terminal. Use [refusal reads](#tasksteer_refused) after the feed e
 
 ### Pairing registration fence (#2045)
 
-**随 wire v7 合入 (with the wire v7 merge).**
+**With the wire v7 merge.**
 
 Sources: [#2282], [#2287]. Manifest entries: `wire-v7-pair-fencing`, `wire-v7-pair-field-bounds`, `wire-v7-tenant-id-text`, `wire-v7-pairing-enrollment-port`, `wire-v7-pairing-product-id-bound`, `wire-v7-pairing-product-id-refused`, `wire-v7-client-pairing-errors`, `wire-v7-device-credential-attempt`, `wire-v7-auth-manager-pair`, `wire-v7-pair-gate-split`, `wire-v7-pair-new-code-fresh-key`, `wire-v7-v6-enrollment-entry-deleted`, `wire-v7-auth-errors-without-server-text`, `wire-v7-access-token-in-memory`.
 
