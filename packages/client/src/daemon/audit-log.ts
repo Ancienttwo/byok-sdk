@@ -308,10 +308,11 @@ function parseRecordLine(line: string | undefined): DaemonRecord | undefined {
     case 'retention-failure': {
       if (typeof raw.trigger !== 'string' || !['startup', 'periodic', 'pressure', 'home-lease'].includes(raw.trigger)
         || ![...EXPIRING_CLASS_IDS, ...PROTECTED_CLASS_IDS].includes(raw.classId as RetentionClassId)
-        || typeof raw.code !== 'string' || !['sweep_failed', 'measurement_failed'].includes(raw.code) || !Number.isSafeInteger(raw.count) || (raw.count as number) < 0
-        || (raw.taskId !== undefined && typeof raw.taskId !== 'string')) return undefined;
+        || typeof raw.code !== 'string' || !['sweep_failed', 'measurement_failed', 'grok_login_preserved'].includes(raw.code) || !Number.isSafeInteger(raw.count) || (raw.count as number) < 0
+        || (raw.taskId !== undefined && typeof raw.taskId !== 'string') || (raw.path !== undefined && typeof raw.path !== 'string')) return undefined;
       return { kind: 'retention-failure', ts: raw.ts, trigger: raw.trigger as RetentionTrigger, classId: raw.classId as RetentionClassId,
-        code: raw.code as string, count: raw.count as number, ...(raw.taskId === undefined ? {} : { taskId: raw.taskId }) };
+        code: raw.code as string, count: raw.count as number, ...(raw.taskId === undefined ? {} : { taskId: raw.taskId }),
+        ...(raw.path === undefined ? {} : { path: raw.path }) };
     }
     case 'lifecycle': {
       const lifecycle = parseDaemonLifecycle(raw.lifecycle);

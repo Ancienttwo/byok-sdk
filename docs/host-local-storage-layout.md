@@ -110,6 +110,13 @@ only non-current hash revisions past 24h are deleted under the install gate.
 
 ### Retention bounds
 
+An execution whose `sdk/grok-home/auth.json` is a regular file holds a login
+Grok wrote over the SDK home's link. The release keeps it, both execution
+sweeps skip it and report a `grok_login_preserved` `retention-failure` event
+with its `path` on every pass, and it is reclaimed as usual once the user moved
+the file back to `~/.grok/auth.json` or deleted it and logged in again (see
+[A login Grok writes over the link](adapter-capabilities.md#a-login-grok-writes-over-the-link)).
+
 Every retention class declares how its storage stays finite (#1105). An
 expiring class has a TTL and sometimes a count; a protected class has a fixed
 count, or an exemption that says why it cannot be bounded, who clears it and
@@ -119,9 +126,9 @@ until it has one. TTLs are `storage.retention.ttlMs[<class>]`.
 
 | Class | Bound | Cleared by |
 | --- | --- | --- |
-| `exec-sdk`, `durable-replica`, `input-preparation` | TTL 0 (removed at release or terminal) | SDK |
+| `exec-sdk`, `durable-replica`, `input-preparation` | TTL 0 (removed at release or terminal); an execution holding a Grok login is kept until the user resolves it | SDK; the user, for a held Grok login |
 | `daemon-temp`, `home-temp` | TTL 1 hour | SDK |
-| `exec-runtime`, `skill-pack-old` | TTL 24 hours | SDK |
+| `exec-runtime`, `skill-pack-old` | TTL 24 hours; an execution holding a Grok login is kept | SDK |
 | `reader-run` | TTL 7 days, 32 per home | SDK, idle home |
 | `agent-result` | TTL 7 days, 256 per home | SDK, idle home |
 | `confirmed-journal` | TTL 30 days (must exceed 7 days) | SDK |

@@ -7489,6 +7489,7 @@ export type DaemonEvent = ({
     count: number;
     code: string;
     taskId?: string;
+    path?: string;
 } | {
     kind: 'offered';
     ts: string;
@@ -7987,7 +7988,7 @@ export declare class DaemonObserver {
      * cursor advancement or the next envelope being processed.
      */
     noteRetentionSweep(report: SweepReport): void;
-    noteRetentionFailure(trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string): void;
+    noteRetentionFailure(trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string, path?: string): void;
     private emit;
 }
 // ==== @byok-sdk/client dist/daemon/operational-health.d.ts ====
@@ -8352,6 +8353,8 @@ export interface SweepBudget {
     remaining(): number;
     removed(bytes: number): void;
     truncate(): void;
+    /** Reports an item the sweep keeps and must not remove, such as a held Grok login, as a failure of `classId`. */
+    report(classId: RetentionClassId, code: string, path: string): void;
 }
 /**
  * How a class stays finite. An expiring class is deleted by TTL, optionally also by count. A protected
@@ -8409,6 +8412,22 @@ export declare class RetentionRegistry {
 export declare class ScratchRootPathError extends Error {
     constructor(reason: string);
 }
+/** The directory Grok's SDK-owned home is built in, inside an execution's `sdk` directory. */
+export declare const GROK_HOME_DIRECTORY = "grok-home";
+/**
+ * The login held in an execution directory: its path while it is a regular
+ * file, else `undefined`. `sdk/grok-home/auth.json` is the one path where a
+ * credential can appear in the scratch: Grok's SDK-owned home links the
+ * user's `auth.json`, so a regular file there is a login Grok wrote over the
+ * link, possibly the only copy of a refreshed credential; a link or a
+ * directory holds none. The release, both execution retention sweeps and
+ * every Grok start check it by `lstat` only.
+ */
+export declare function heldLogin(executionDirectory: string): Promise<string | undefined>;
+/** Every login held in the executions of the scratch root that holds `sdkDir`. */
+export declare function heldLogins(sdkDir: string): Promise<string[]>;
+/** What a Host or user does with a held login; the SDK never moves, restores or deletes it. */
+export declare const HELD_LOGIN_RESOLUTION = "once you confirm which login to keep, move it back to the user GROK_HOME auth.json (~/.grok/auth.json by default) yourself or delete it, then log in to Grok again";
 /** Resources owned by one execution. release() is part of its disposal receipt. */
 export interface ExecutionScratch {
     readonly token: string;
@@ -8499,8 +8518,8 @@ export interface RetentionSweeperOptions {
     readonly timers?: RetentionTimers;
     readonly jitter: (sequence: number, baseMs: number) => number;
     readonly onSweep?: (report: SweepReport) => void;
-    /** `taskId` is set only for a journal task that failed its integrity check; one call per such task. */
-    readonly onFailure?: (trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string) => void;
+    /** `taskId` is set only for a journal task that failed its integrity check; one call per such task. `path` names an item a sweep kept. */
+    readonly onFailure?: (trigger: RetentionTrigger, classId: RetentionClassId, code: string, taskId?: string, path?: string) => void;
 }
 /** All maintenance has this one lifecycle owner, including daemons without a journal. */
 export declare class RetentionSweeper {

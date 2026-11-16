@@ -13,7 +13,7 @@ import { acquirePathMutationGate, PathMutationGateBusyError, withGateReleaseFail
 import { readInstalledSkillPack, skillPacksRoot } from '../skill-pack-installer.js';
 import { LocalStorageConfigError, type ResolvedStorageConfig } from './config.js';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_BOUNDS, PROTECTED_CLASS_IDS, RetentionRegistry, type ClassAuthority, type ProtectedClassId, type ClassUsage, type ExpiringClassId, type RetentionClassId, type SweepBudget } from './registry.js';
-import type { ScratchRoot } from './scratch.js';
+import { heldLogin, type ScratchRoot } from './scratch.js';
 import { authorityBudget, classBudget, registryPassInspections, RETENTION_LIMITS, type RetentionLimits } from './runtime-accounting.js';
 import { TreeCleanup } from './tree-cleanup.js';
 import { selectReaderRuns } from '../../agent-home-reader-retention.js';
@@ -126,8 +126,11 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     async function reclaim(directory: string): Promise<boolean> {
       const eligible = async (): Promise<boolean> => !scratch.isLive(path.basename(directory));
       if (!await eligible()) { pendingTrees.delete(path.join(directory, 'sdk')); return true; }
+      const held = await heldLogin(directory);
+      if (held !== undefined) { budget.report('exec-sdk', 'grok_login_preserved', held); return true; }
       if (!await reclaimTree(execRoot, path.join(directory, 'sdk'), eligible, budget)) return false;
-      if (budget.trigger === 'startup' && await releasedAt(directory) === undefined) {
+      // An execution that is not live has no release record after a crash, or after a held login was resolved.
+      if (await releasedAt(directory) === undefined) {
         await atomicWriteFile(path.join(directory, 'released'), budget.now.toISOString(), { mode: 0o600, fsync: true });
       }
       return true;
@@ -166,7 +169,9 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     if (runtimeCleanup !== undefined && !await resume()) return;
     for await (const entry of entries('exec-runtime', execRoot, { ...budget, available })) {
       if (!TOKEN.test(entry.name) || !entry.isDirectory() || scratch.isLive(entry.name)) continue;
-      const directory = path.join(execRoot, entry.name), released = await releasedAt(directory);
+      const directory = path.join(execRoot, entry.name), held = await heldLogin(directory);
+      if (held !== undefined) { budget.report('exec-runtime', 'grok_login_preserved', held); continue; }
+      const released = await releasedAt(directory);
       if (released === undefined || budget.now.getTime() - released < config.ttlMs['exec-runtime']) continue;
       const collector = await TreeCleanup.create(directory, true);
       if (collector === undefined) continue;

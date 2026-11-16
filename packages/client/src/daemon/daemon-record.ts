@@ -264,7 +264,7 @@ function recordOf(event: Exclude<DaemonEvent, { kind: 'progress' }>): DaemonReco
         bytesReclaimed: event.bytesReclaimed, failures: event.failures, truncated: event.truncated, durationMs: event.durationMs };
     case 'retention-failure':
       return { kind: event.kind, ts, trigger: event.trigger, classId: event.classId, count: event.count, code: event.code,
-        ...(event.taskId === undefined ? {} : { taskId: event.taskId }) };
+        ...(event.taskId === undefined ? {} : { taskId: event.taskId }), ...(event.path === undefined ? {} : { path: event.path }) };
     case 'offered':
       return { kind: 'offered', ts, taskId: event.taskId, ...(event.runtime === undefined ? {} : { runtime: event.runtime }) };
     case 'claimed':

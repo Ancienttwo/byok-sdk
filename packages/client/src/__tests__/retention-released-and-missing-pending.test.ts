@@ -37,7 +37,7 @@ function budget(trigger: SweepBudget['trigger'] = 'periodic') {
     trigger, now, available: () => ++tally.inspections <= 8192,
     remaining: () => 256 - tally.deleted,
     removed: () => { tally.deleted++; },
-    truncate: () => { tally.truncated = true; },
+    truncate: () => { tally.truncated = true; }, report: () => {},
   };
   return { value, tally };
 }

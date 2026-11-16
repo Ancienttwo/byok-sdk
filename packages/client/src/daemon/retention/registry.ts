@@ -40,6 +40,8 @@ export interface SweepBudget {
   remaining(): number;
   removed(bytes: number): void;
   truncate(): void;
+  /** Reports an item the sweep keeps and must not remove, such as a held Grok login, as a failure of `classId`. */
+  report(classId: RetentionClassId, code: string, path: string): void;
 }
 /**
  * How a class stays finite. An expiring class is deleted by TTL, optionally also by count. A protected

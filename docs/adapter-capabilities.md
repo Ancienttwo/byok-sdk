@@ -731,21 +731,34 @@ boundary. The start fails as a non-retryable `authority` failure, class
 - `grok Agent user context exclusion refused: the SDK-owned GROK_HOME is not supported on Windows`, before any link is tried, until #2241 settles how a Windows account without symbolic-link privilege links the login
 
 Whether a login refresh through the linked `auth.json` reaches the user's file
-is being verified (#2239). Two guards cover a Grok that writes a refreshed login
-over the link (a write by rename), both by `lstat` and `readlink` only:
+is being verified (#2239).
 
-- At cleanup, after Grok exits and before the scratch release, an `auth.json`
-  that is no longer the link the home was built with is moved, never deleted
-  or copied, to `<Agent home>/.byok/grok/preserved-auth-<execution token>.json`.
-  The session close then fails once with a `cleanup` `RuntimeDisposalFailure`:
-  `grok replaced the linked auth.json; the refreshed login was moved into the Agent home Grok store and was not restored to the user GROK_HOME`.
-- At start, while such a file is in the Agent's Grok store, the Agent's Grok
-  tasks under `excluded` refuse:
-  `grok Agent user context exclusion refused: an earlier task left a refreshed Grok login in the Agent home that the Host has not resolved`.
+##### A login Grok writes over the link
 
-The SDK stops and reports; it does not restore the login to the user's
-`GROK_HOME`, because the user's own Grok may have refreshed it meanwhile. The
-Host decides which login to keep and removes the preserved file.
+If Grok writes a refreshed login over the `auth.json` link (a write by rename),
+that file may be the only copy of the new credential. The SDK keeps it where
+Grok wrote it and stops:
+
+- **Where it is.** `<scratch root>/exec/<execution token>/sdk/grok-home/auth.json`,
+  with the mode Grok gave it, in the execution directory (`0700`). The SDK
+  detects it by `lstat` only, as a regular file at that one path; it never
+  reads, copies, moves or deletes it, and never writes it to the user's
+  `GROK_HOME`, because the user's own Grok may have refreshed meanwhile.
+- **How it is reported.** The execution's release fails with a `cleanup`
+  `RuntimeDisposalFailure` that names the path and keeps the scratch. Every
+  retention pass then skips that one execution in its `exec-sdk` and
+  `exec-runtime` sweeps and reports a `retention-failure` event with code
+  `grok_login_preserved` and the `path`; other executions are reclaimed as
+  usual.
+- **What it blocks.** Every Grok task of the daemon (all executions under the
+  same scratch root, `excluded` or not) refuses to start, as a non-retryable
+  start failure:
+  `grok start refused: a login Grok wrote over the linked auth.json is held at <path>; once you confirm which login to keep, move it back to the user GROK_HOME auth.json (~/.grok/auth.json by default) yourself or delete it, then log in to Grok again; until then every Grok task on this device refuses`.
+- **How to resolve it.** Confirm which login to keep, then move the file back
+  to `~/.grok/auth.json` yourself or delete it, then log in to Grok again. No
+  SDK call or marker is needed: the next Grok start proceeds, and the next
+  retention pass reclaims the execution. The SDK offers no API that resolves
+  it for you.
 
 #### `agentUserMcpServers` (Grok)
 

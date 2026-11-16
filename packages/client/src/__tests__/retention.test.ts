@@ -45,7 +45,7 @@ async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:
  const registry=createRetentionRegistry({storeDir:store,scratch,config,clock,journal:()=>input.journal,identity:()=>identity,preparation:()=>undefined,
   ...(input.home?{home:input.home,handoffs:new AgentSessionHandoffStore()}:{}),...(input.usageScanLimit===undefined?{}:{usageScanLimit:input.usageScanLimit}),...(input.piSessionDir===undefined?{}:{piSessionDir:input.piSessionDir}),...(input.agySessionStore===undefined?{}:{agySessionStore:input.agySessionStore}),limits:input.limits??untimedLimits});
  const pressure=new StoragePressure(config.budget),failures:string[]=[];
- const sweeper=new RetentionSweeper({registry,config,clock,pressure,freeBytes:async()=>input.freeBytes??1_000_000_000,jitter:(_s,ms)=>ms,onFailure:(_t,id,code,taskId)=>{failures.push([id,code,...(taskId===undefined?[]:[taskId])].join(':'));}});
+ const sweeper=new RetentionSweeper({registry,config,clock,pressure,freeBytes:async()=>input.freeBytes??1_000_000_000,jitter:(_s,ms)=>ms,onFailure:(_t,id,code,taskId,file)=>{failures.push([id,code,...(taskId===undefined?[]:[taskId]),...(file===undefined?[]:[file])].join(':'));}});
  cleanups.push(()=>sweeper.stop());return {store,scratch,sweeper,registry,pressure,failures,config,clock,advance:(ms:number)=>{time+=ms;}};
 }
 const fakeAuthority=(id:RetentionClassId):ClassAuthority=>({roots:[],owner:'sdk',scope:'store',bound:PROTECTED_CLASS_IDS.includes(id as ProtectedClassId)?PROTECTED_CLASS_BOUNDS[id as ProtectedClassId]:{kind:'ttl',ttlMs:DAY}});
@@ -77,6 +77,21 @@ it('crash residue begins runtime TTL at restart, regardless of its old directory
  await f.sweeper.runPass('startup');expect(await exists(s.sdkDir)).toBe(false);expect(await exists(s.runtimeDir)).toBe(true);
  f.advance(DAY-1);await f.sweeper.runPass('periodic');expect(await exists(s.runtimeDir)).toBe(true);
  f.advance(1);await f.sweeper.runPass('periodic');expect(await exists(s.runtimeDir)).toBe(false);
+});
+it('keeps an execution holding a Grok login through release and both sweeps, reports it each pass, and reclaims it once it is gone',async()=>{
+ const f=await fixture({ttlMs:{'exec-runtime':DAY}}),held=await f.scratch.create(),other=await f.scratch.create(),named=await f.scratch.create();
+ const login=path.join(held.sdkDir,'grok-home','auth.json'),execution=path.dirname(held.sdkDir);
+ await fs.mkdir(path.dirname(login),{mode:0o700});await fs.writeFile(login,'refreshed',{mode:0o600});
+ // A directory of the same name holds no login.
+ await fs.mkdir(path.join(named.sdkDir,'grok-home','auth.json'),{recursive:true});
+ await expect(held.release()).rejects.toMatchObject({name:'RuntimeDisposalFailure',stage:'cleanup',message:expect.stringContaining(login)});
+ await other.release();await named.release();expect(await exists(named.sdkDir)).toBe(false);
+ f.advance(2*DAY);await f.sweeper.runPass('periodic');
+ expect([...f.failures].sort()).toEqual([`exec-runtime:grok_login_preserved:${login}`,`exec-sdk:grok_login_preserved:${login}`]);
+ expect(await fs.readFile(login,'utf8')).toBe('refreshed');expect((await fs.stat(login)).mode&0o777).toBe(0o600);
+ expect(await exists(path.dirname(other.sdkDir))).toBe(false);
+ await fs.rm(login);await f.sweeper.runPass('periodic');expect(await exists(held.sdkDir)).toBe(false);
+ f.advance(2*DAY);await f.sweeper.runPass('periodic');expect(await exists(execution)).toBe(false);expect(f.failures).toHaveLength(2);
 });
 it('cleanup failure stays typed and keeps live ownership until retry completes',async()=>{
  const f=await fixture(),s=await f.scratch.create(),original=fs.rm;
@@ -377,7 +392,7 @@ it('accounts partial runtime bytes and resumes after registry restart without co
  await s.release();f.advance(DAY);
  const marker=path.join(path.dirname(s.runtimeDir),'released'),released=await fs.readFile(marker,'utf8');
  let deleted=0,bytes=0,steps=0;
- const budget: SweepBudget={now:f.clock(),trigger:'periodic',available:()=>++steps<=5,remaining:()=>1-deleted,removed:n=>{deleted++;bytes+=n;},truncate:()=>{}};
+ const budget: SweepBudget={now:f.clock(),trigger:'periodic',available:()=>++steps<=5,remaining:()=>1-deleted,removed:n=>{deleted++;bytes+=n;},truncate:()=>{},report:()=>{}};
  await f.registry.sweep('exec-runtime',budget);
  expect(deleted).toBe(0);expect(runtimeReclaimedBytes.get(budget)).toBeGreaterThan(0);expect(runtimeReclaimedBytes.get(budget)).toBeLessThan(36);
  expect(await fs.readFile(marker,'utf8')).toBe(released);
@@ -391,7 +406,7 @@ it('rechecks release eligibility before resuming a partial runtime cleanup',asyn
  const f=await fixture(),s=await f.scratch.create();
  for(let i=0;i<12;i++)await fs.writeFile(path.join(s.runtimeDir,`file-${i}`),'abc');
  await s.release();f.advance(DAY);
- let steps=0;const budget: SweepBudget={now:f.clock(),trigger:'periodic',available:()=>++steps<=5,remaining:()=>1,removed:()=>{},truncate:()=>{}};
+ let steps=0;const budget: SweepBudget={now:f.clock(),trigger:'periodic',available:()=>++steps<=5,remaining:()=>1,removed:()=>{},truncate:()=>{},report:()=>{}};
  await f.registry.sweep('exec-runtime',budget);
  const remaining=await fs.readdir(s.runtimeDir);
  await fs.writeFile(path.join(path.dirname(s.runtimeDir),'released'),f.clock().toISOString());
@@ -412,7 +427,7 @@ it('retains release eligibility when final token removal fails and accounts its 
  for(let pass=0;pass<3;pass++){const report=await f.sweeper.runPass('periodic');deleted+=report.deleted;bytes+=report.bytesReclaimed;}
  expect(deleted).toBe(1);expect(bytes).toBe(Buffer.byteLength(released));expect(await exists(target)).toBe(false);
 });
-const runtimeBudget=(f:{clock:()=>Date},tally:{deleted:number;bytes:number}):SweepBudget=>({now:f.clock(),trigger:'periodic',available:()=>true,remaining:()=>1-tally.deleted,removed:n=>{tally.deleted++;tally.bytes+=n;},truncate:()=>{}});
+const runtimeBudget=(f:{clock:()=>Date},tally:{deleted:number;bytes:number}):SweepBudget=>({now:f.clock(),trigger:'periodic',available:()=>true,remaining:()=>1-tally.deleted,removed:n=>{tally.deleted++;tally.bytes+=n;},truncate:()=>{},report:()=>{}});
 it.skipIf(process.platform==='win32')('unlinks a symlink inside a released runtime without touching its target',async()=>{
  const f=await fixture(),s=await f.scratch.create(),outside=testScratchRoot(),keep=path.join(outside,'keep');
  await fs.writeFile(keep,'protected');const link=path.join(s.runtimeDir,'link');await fs.symlink(outside,link);const linkBytes=(await fs.lstat(link)).size;

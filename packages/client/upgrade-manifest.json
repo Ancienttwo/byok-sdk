@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "4bea4ddea772ed03eba657d06e3a2dbdebb9453514736ae14afbb282c051baf9"
+    "snapshotSha256": "cf0abedb3032a5910dcbaa798fa5bfbcae5437984e451c38a62ac99a8563f120"
   },
   "configFields": {
     "status": "tracked",
@@ -149,13 +149,15 @@
     {
       "id": "grok-agent-user-context",
       "impact": "additive",
-      "summary": "GrokAdapterOptions.agentUserContext and runtimes.grok.agentUserContext, default inherit, which changes nothing. Under excluded, a Grok Agent task runs with GROK_HOME set to an SDK-owned directory that links the user's auth.json, config.toml, trusted_folders.toml and hooks/, keeps AGENTS.md, rules/, skills, memory, plugins and the user's sessions out, keeps the Agent's sessions in <Agent home>/.byok/grok/sessions, and sets the four Claude and Cursor agents and rules variables. The start fails as a non-retryable authority failure while grok inspect still lists a user instruction file (such as an [paths] extra_rule_dirs file), when inspect fails, without a sealed Agent home, or when the user GROK_HOME has no auth.json and XAI_API_KEY is not set. A login Grok writes over the auth.json link is moved into <Agent home>/.byok/grok/ at cleanup and reported as a cleanup RuntimeDisposalFailure; the Agent's Grok tasks then refuse to start until the Host resolves it. The SDK does not restore it to the user GROK_HOME. The Grok descriptor then declares isolation.userInstructions. A Bot switched from inherit cannot resume sessions it made in the user's store.",
+      "summary": "GrokAdapterOptions.agentUserContext and runtimes.grok.agentUserContext, default inherit, which changes nothing. Under excluded, a Grok Agent task runs with GROK_HOME set to an SDK-owned directory that links the user's auth.json, config.toml, trusted_folders.toml and hooks/, keeps AGENTS.md, rules/, skills, memory, plugins and the user's sessions out, keeps the Agent's sessions in <Agent home>/.byok/grok/sessions, and sets the four Claude and Cursor agents and rules variables. The start fails as a non-retryable authority failure while grok inspect still lists a user instruction file (such as an [paths] extra_rule_dirs file), when inspect fails, without a sealed Agent home, or when the user GROK_HOME has no auth.json and XAI_API_KEY is not set. A login Grok writes over the auth.json link stays in the execution scratch: the release fails with a cleanup RuntimeDisposalFailure naming its path, retention skips that execution and reports a grok_login_preserved retention-failure event with the path on every pass, and every Grok task of the daemon refuses to start until the user moves the file back to ~/.grok/auth.json or deletes it, then logs in again. The SDK never restores or deletes it. The Grok descriptor then declares isolation.userInstructions. A Bot switched from inherit cannot resume sessions it made in the user's store.",
       "migration": "docs/adapter-capabilities.md#agentusercontext-grok",
       "items": [
         "config:runtimes",
         "export:@byok-sdk/client#GrokAdapterOptions",
         "export:@byok-sdk/client/adapters#GrokAdapterOptions",
-        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes"
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+        "export:@byok-sdk/client#DaemonEvent",
+        "export:@byok-sdk/client#DaemonObserver"
       ]
     },
     {
@@ -201,9 +203,19 @@
       "entry": "remove-task-terminal-read"
     },
     {
+      "item": "export:@byok-sdk/client#DaemonEvent",
+      "change": "changed",
+      "entry": "grok-agent-user-context"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonLog",
       "change": "removed",
       "entry": "remove-standalone-daemon-log"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonObserver",
+      "change": "changed",
+      "entry": "grok-agent-user-context"
     },
     {
       "item": "export:@byok-sdk/client#ExpiringClassId",

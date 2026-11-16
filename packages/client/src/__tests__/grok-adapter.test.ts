@@ -10,10 +10,12 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
-import { GROK_LOGIN_PRESERVED, createGrokAgentHome, grokUserInstructionsRefusal } from '../adapters/grok/agent-user-context';
+import { createGrokAgentHome, grokUserInstructionsRefusal } from '../adapters/grok/agent-user-context';
+import { HELD_LOGIN_RESOLUTION } from '../daemon/retention/scratch';
 import { PolicyUnsupportedError, SteerUnsupportedError, type McpToolsetToolObservation, type RuntimeAdapter, type Session } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import * as processTree from '../adapters/process-tree';
+import { testScratchOwner } from './fixtures/execution-scratch';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { GrokProjection } from '../adapters/grok/projection';
 import { AgyAdapter, type AgyAdapterOptions } from '../adapters/antigravity/agy-adapter';
@@ -642,29 +644,26 @@ describe('GrokAdapter agentUserContext (#2239)', () => {
     expect(await fs.readdir(dir)).toEqual([]);
   });
 
-  it('moves a login Grok wrote over the link into the Agent store at cleanup, and reports it once', async () => {
-    const resources = await agentCtx();
-    const s = await open(adapter({ agentUserContext: 'excluded' }), { instruction: 'hello' }, resources);
+  it('keeps a login Grok wrote over the link in the execution scratch, and refuses every Grok start until it is gone', async () => {
+    const resources = await agentCtx(), owner = testScratchOwner(), first = await owner.create();
+    const s = await open(adapter({ agentUserContext: 'excluded' }), { instruction: 'hello' }, { ...resources, scratch: first });
     await turn(s);
-    const auth = path.join(String(facts(resources.log).find(fact => fact.kind === 'start')!.env.GROK_HOME), 'auth.json');
     // A refresh written by rename leaves a regular file where the link was.
+    const auth = path.join(first.sdkDir, 'grok-home', 'auth.json');
     await fs.unlink(auth);
-    await fs.writeFile(auth, 'refreshed');
-    await expect(s.close()).rejects.toMatchObject({ name: 'RuntimeDisposalFailure', stage: 'cleanup', message: GROK_LOGIN_PRESERVED });
-    const store = path.join(resources.agentHome, '.byok', 'grok');
-    const [preserved] = (await fs.readdir(store)).filter(name => name.startsWith('preserved-auth-'));
-    expect(await fs.readFile(path.join(store, preserved!), 'utf8')).toBe('refreshed');
+    await fs.writeFile(auth, 'refreshed', { mode: 0o600 });
+    await expect(s.close()).rejects.toMatchObject({ name: 'RuntimeDisposalFailure', stage: 'cleanup', message: expect.stringContaining(auth) });
+    expect(await fs.readFile(auth, 'utf8')).toBe('refreshed');
+    expect((await fs.stat(auth)).mode & 0o777).toBe(0o600);
+    expect((await fs.stat(path.dirname(auth))).mode & 0o777).toBe(0o700);
     expect(await fs.readFile(path.join(resources.user, 'auth.json'), 'utf8')).toBe('{}');
+    // Any Grok task on the device refuses, here one that inherits the user context.
+    const refused = await startPreparedOperation(adapter(), { instruction: 'hello' }, { ...resources, scratch: await owner.create() }).catch(e => e);
+    expect(refused).toMatchObject({ phase: 'start', retry: 'non-retryable', message: `grok start refused: a login Grok wrote over the linked auth.json is held at ${auth}; ${HELD_LOGIN_RESOLUTION}; until then every Grok task on this device refuses` });
+    await fs.rm(auth);
+    await turn(await open(adapter(), { instruction: 'hello' }, { ...resources, scratch: await owner.create() }));
     await expect(s.close()).resolves.toBeUndefined();
-  });
-
-  it('refuses to start while an earlier task left a preserved login in the Agent home', async () => {
-    const resources = await agentCtx();
-    await fs.mkdir(path.join(resources.agentHome, '.byok', 'grok'), { recursive: true });
-    await fs.writeFile(path.join(resources.agentHome, '.byok', 'grok', 'preserved-auth-0123456789ab.json'), 'refreshed');
-    const error = await startPreparedOperation(adapter({ agentUserContext: 'excluded' }), { instruction: 'hello' }, resources).catch(e => e);
-    expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable', message: `${PREFIX}: an earlier task left a refreshed Grok login in the Agent home that the Host has not resolved` });
-    expect(existsSync(resources.log)).toBe(false);
+    expect(existsSync(first.sdkDir)).toBe(false);
   });
 
   it('refuses a session store that is not a real directory inside the Agent home', async () => {
