@@ -390,7 +390,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
         { taskId: 'task-5', seq: server.nextSeq() },
       ),
     );
-    await server.waitFor((e) => e.type === 'task.claim');
+    // The cloud steers only a running task, which `task.started` makes (#2306).
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-5');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
 
     server.send(
