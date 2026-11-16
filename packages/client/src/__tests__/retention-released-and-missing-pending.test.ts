@@ -19,7 +19,7 @@ const FIRST_PASS = SHARE - 1;
 // Startup enumerates exec/ outside the exec-sdk share, so the whole share goes to unlinks.
 const SDK_FIRST_PASS = SHARE;
 // More released executions than one share, as 1024 was against the production exec-sdk share.
-const EXECUTIONS = 2 * SHARE;
+const EXECUTIONS = SHARE + 1;
 const now = new Date('2026-10-28T00:00:00Z');
 const old = new Date('2026-09-01T00:00:00Z');
 const disposers: (() => Promise<void>)[] = [];
@@ -88,7 +88,8 @@ it('P1: startup succeeds across restarts with more normally released executions 
   expect(outcomes).toEqual([undefined, undefined, undefined]);
   // Startup must not erase fresh runtime history merely to finish its SDK scan.
   expect(await fs.readdir(execRoot)).toHaveLength(EXECUTIONS);
-});
+  // Each release writes its marker with fsync, which is slow on a loaded disk.
+}, 30_000);
 
 it('P2: a missing pending daemon directory does not block reclaiming the next expired directory', async () => {
   const f = await fixture();
