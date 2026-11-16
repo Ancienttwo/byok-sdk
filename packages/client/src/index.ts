@@ -147,7 +147,10 @@ export {
   DaemonJournalProtocolUnsupportedError,
   DeviceStoreBindingMismatchError,
   EmbeddedPairingError,
-  FirstPairingAttemptRefusedError,
+  PairingAttemptRefusedError,
+  PairingBusyError,
+  PairingCodeRejectedError,
+  PairingSupersededError,
   type DaemonJournalProtocolRecord,
 } from './daemon/daemon-errors.js';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */

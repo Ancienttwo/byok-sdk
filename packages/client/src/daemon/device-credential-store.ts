@@ -39,31 +39,35 @@ export interface DeviceMetadata {
 export type DeviceRecord = DeviceMetadata & DeviceCredentials;
 
 /**
- * The one durable authority allowed before a first pairing response is
- * received. It keeps the generated key immutable across a lost response, so
- * an exact server-side retry can prove the same public-key binding.
+ * One pairing, staged before its request is sent (#2045). Every pairing
+ * stages one, including a re-pair of this store's own enrollment. It keeps
+ * the request immutable across a lost response, so an exact retry with the
+ * same code (#1767) proves the same binding, and it is what a pairing
+ * compares under the enrollment gate to know it still owns the slot.
  */
-export interface FirstPairingAttempt {
-  readonly kind: 'first-pairing-attempt-v1';
+export interface PairingAttempt {
+  readonly kind: 'pairing-attempt-v2';
+  /** Random, minted when the attempt is staged. */
+  readonly attemptId: string;
+  /** `pairingCodeDigest` of the code this attempt sends; a retry with the same code resumes the attempt. */
+  readonly codeDigest: string;
+  /** `DeviceStore.identity` of the store that staged the attempt. */
+  readonly storeIdentity: string;
   readonly deviceName: string;
+  readonly machineId?: string;
   readonly devicePublicKey: string;
   readonly devicePrivateKeyPem: string;
-  readonly machineId?: string;
-  /**
-   * `DeviceStore.identity` of the store that staged the attempt. An attempt
-   * staged by 0.42.0 has none; a clear refuses it as
-   * `pairing_attempt_unattributed` unless told to delete it (#1964).
-   */
-  readonly storeIdentity?: string;
+  /** The `PairRequest` fence: `pairDeviceDigest` of the slot's enrollment when staged, or `null`. */
+  readonly expectedDeviceDigest: string | null;
 }
 
-interface ReplacementPairingAttempt {
-  readonly kind: 'replacement-pairing-attempt-v1';
+interface EnrollmentWithAttempt {
+  readonly kind: 'enrollment-with-attempt-v2';
   readonly record: DeviceRecord;
-  readonly attempt: FirstPairingAttempt;
+  readonly attempt: PairingAttempt;
 }
 
-type DeviceCredentialAuthority = DeviceRecord | FirstPairingAttempt | ReplacementPairingAttempt;
+type DeviceCredentialAuthority = DeviceRecord | PairingAttempt | EnrollmentWithAttempt;
 
 /** A real provider-command outcome; signal termination has null exitCode and carries signal. */
 export interface DeviceCommandResult {
@@ -87,7 +91,9 @@ export type DeviceCommandRunner = (
 ) => Promise<DeviceCommandResult>;
 
 const ENTRY_ACCOUNT = 'device-enrollment';
-const ENCODED_PREFIX = 'byok-device-credential-v1:';
+const ENCODED_PREFIX = 'byok-device-credential-v2:';
+/** The wire v6 entry format. Its credentials are void on a v7 cloud, and it is recognized by this prefix alone. */
+const LEGACY_ENCODED_PREFIX = 'byok-device-credential-v1:';
 /** The Windows generic-credential blob bound, kept on every OS entry of this product. */
 export const OS_CREDENTIAL_ENTRY_MAX_BYTES = 2_400;
 const NOT_FOUND = 44;
@@ -128,6 +134,19 @@ export class DeviceCredentialStoreError extends Error {
   }
 }
 
+/**
+ * The OS entry holds a wire v6 enrollment or attempt. It is recognized by its
+ * format version alone; nothing in it is decoded, including its private key.
+ * Its credentials are void on a v7 cloud: `clear()` deletes the entry, and
+ * the store pairs as a first pairing.
+ */
+export class DeviceCredentialLegacyEntryError extends DeviceCredentialStoreError {
+  constructor() {
+    super('OS credential entry holds a wire v6 device enrollment; pair again');
+    this.name = 'DeviceCredentialLegacyEntryError';
+  }
+}
+
 /** macOS refused an operation that requires unavailable user interaction. */
 export class DeviceCredentialInteractionRequiredError extends DeviceCredentialStoreError {
   constructor() {
@@ -154,21 +173,22 @@ export class DeviceCredentialCommandAbortedError extends DeviceCredentialStoreEr
 }
 
 /**
- * Complete enrollment custody. An injected implementation owns secret storage
+ * Complete enrollment custody: one slot holding an enrollment, a staged
+ * pairing attempt, or both. An injected implementation owns secret storage
  * and its lifetime. `signal` cancels the operation (daemon shutdown); an
  * implementation must stop and reject once it aborts.
- * Staging an attempt preserves the current enrollment returned by `read()`.
- * `replace()` retains that attempt when renewing the same deviceId, tenantId
- * and devicePublicKey; a different authenticated enrollment promotes the
- * replacement and discards the attempt. `clear()` removes both authorities.
- * An attempt is kept with every field, including `storeIdentity`.
+ * Staging an attempt replaces any staged attempt and preserves the current
+ * enrollment returned by `read()`. `replace()` retains the attempt when
+ * renewing the same deviceId, tenantId and devicePublicKey; a different
+ * authenticated enrollment promotes the pairing and discards the attempt.
+ * `clear()` removes both. An attempt is kept with every field.
  * An error it throws reaches the Host unchanged, as the `cause` of a public
  * error such as `DeviceEnrollmentClearError`, so it must not carry a secret.
  */
 export interface DeviceCredentialBackend {
   read(signal?: AbortSignal): Promise<DeviceRecord | undefined>;
-  readFirstPairingAttempt(signal?: AbortSignal): Promise<FirstPairingAttempt | undefined>;
-  saveFirstPairingAttempt(attempt: FirstPairingAttempt, signal?: AbortSignal): Promise<void>;
+  readPairingAttempt(signal?: AbortSignal): Promise<PairingAttempt | undefined>;
+  savePairingAttempt(attempt: PairingAttempt, signal?: AbortSignal): Promise<void>;
   replace(record: DeviceRecord, signal?: AbortSignal): Promise<void>;
   clear(signal?: AbortSignal): Promise<boolean>;
 }
@@ -205,44 +225,48 @@ function assertRecord(value: unknown): asserts value is DeviceRecord {
   }
 }
 
-function isFirstPairingAttempt(value: DeviceCredentialAuthority): value is FirstPairingAttempt {
-  return 'kind' in value && value.kind === 'first-pairing-attempt-v1';
+function isPairingAttempt(value: DeviceCredentialAuthority): value is PairingAttempt {
+  return 'kind' in value && value.kind === 'pairing-attempt-v2';
 }
 
-function isReplacementPairingAttempt(value: DeviceCredentialAuthority): value is ReplacementPairingAttempt {
-  return 'kind' in value && value.kind === 'replacement-pairing-attempt-v1';
+function isEnrollmentWithAttempt(value: DeviceCredentialAuthority): value is EnrollmentWithAttempt {
+  return 'kind' in value && value.kind === 'enrollment-with-attempt-v2';
 }
 
-function assertFirstPairingAttempt(value: unknown): asserts value is FirstPairingAttempt {
+const BASE64URL_43 = /^[A-Za-z0-9_-]{43}$/u;
+
+function assertPairingAttempt(value: unknown): asserts value is PairingAttempt {
+  const attempt = value as Partial<PairingAttempt>;
   if (
     typeof value !== 'object' ||
     value === null ||
     Array.isArray(value) ||
-    (value as Partial<FirstPairingAttempt>).kind !== 'first-pairing-attempt-v1' ||
-    typeof (value as Partial<FirstPairingAttempt>).deviceName !== 'string' ||
-    typeof (value as Partial<FirstPairingAttempt>).devicePublicKey !== 'string' ||
-    typeof (value as Partial<FirstPairingAttempt>).devicePrivateKeyPem !== 'string' ||
-    ((value as Partial<FirstPairingAttempt>).machineId !== undefined &&
-      typeof (value as Partial<FirstPairingAttempt>).machineId !== 'string') ||
-    ((value as Partial<FirstPairingAttempt>).storeIdentity !== undefined &&
-      !/^[0-9a-f]{64}$/u.test(String((value as Partial<FirstPairingAttempt>).storeIdentity))) ||
-    (value as FirstPairingAttempt).deviceName.length === 0 ||
-    (value as FirstPairingAttempt).devicePublicKey.length === 0 ||
-    (value as FirstPairingAttempt).devicePrivateKeyPem.length === 0
+    attempt.kind !== 'pairing-attempt-v2' ||
+    typeof attempt.attemptId !== 'string' || !/^[A-Za-z0-9_-]{22}$/u.test(attempt.attemptId) ||
+    typeof attempt.codeDigest !== 'string' || !BASE64URL_43.test(attempt.codeDigest) ||
+    typeof attempt.storeIdentity !== 'string' || !/^[0-9a-f]{64}$/u.test(attempt.storeIdentity) ||
+    typeof attempt.deviceName !== 'string' ||
+    typeof attempt.devicePublicKey !== 'string' ||
+    typeof attempt.devicePrivateKeyPem !== 'string' ||
+    (attempt.machineId !== undefined && typeof attempt.machineId !== 'string') ||
+    (attempt.expectedDeviceDigest !== null && (typeof attempt.expectedDeviceDigest !== 'string' || !BASE64URL_43.test(attempt.expectedDeviceDigest))) ||
+    attempt.deviceName.length === 0 ||
+    attempt.devicePublicKey.length === 0 ||
+    attempt.devicePrivateKeyPem.length === 0
   ) {
-    throw new DeviceCredentialStoreError('OS credential entry has an invalid first-pairing attempt shape');
+    throw new DeviceCredentialStoreError('OS credential entry has an invalid pairing attempt shape');
   }
 }
 
-function assertReplacementPairingAttempt(value: unknown): asserts value is ReplacementPairingAttempt {
+function assertEnrollmentWithAttempt(value: unknown): asserts value is EnrollmentWithAttempt {
   if (
     typeof value !== 'object' || value === null || Array.isArray(value) ||
-    (value as Partial<ReplacementPairingAttempt>).kind !== 'replacement-pairing-attempt-v1'
+    (value as Partial<EnrollmentWithAttempt>).kind !== 'enrollment-with-attempt-v2'
   ) {
-    throw new DeviceCredentialStoreError('OS credential entry has an invalid replacement-pairing attempt shape');
+    throw new DeviceCredentialStoreError('OS credential entry has an invalid enrollment-with-attempt shape');
   }
-  assertRecord((value as Partial<ReplacementPairingAttempt>).record);
-  assertFirstPairingAttempt((value as Partial<ReplacementPairingAttempt>).attempt);
+  assertRecord((value as Partial<EnrollmentWithAttempt>).record);
+  assertPairingAttempt((value as Partial<EnrollmentWithAttempt>).attempt);
 }
 
 function freezeRecord(record: DeviceRecord): DeviceRecord {
@@ -256,20 +280,23 @@ function freezeRecord(record: DeviceRecord): DeviceRecord {
   });
 }
 
-function freezeAttempt(attempt: FirstPairingAttempt): FirstPairingAttempt {
+function freezeAttempt(attempt: PairingAttempt): PairingAttempt {
   return Object.freeze({
     kind: attempt.kind,
+    attemptId: attempt.attemptId,
+    codeDigest: attempt.codeDigest,
+    storeIdentity: attempt.storeIdentity,
     deviceName: attempt.deviceName,
+    ...(attempt.machineId === undefined ? {} : { machineId: attempt.machineId }),
     devicePublicKey: attempt.devicePublicKey,
     devicePrivateKeyPem: attempt.devicePrivateKeyPem,
-    ...(attempt.machineId === undefined ? {} : { machineId: attempt.machineId }),
-    ...(attempt.storeIdentity === undefined ? {} : { storeIdentity: attempt.storeIdentity }),
+    expectedDeviceDigest: attempt.expectedDeviceDigest,
   });
 }
 
 function encode(authority: DeviceCredentialAuthority): string {
-  if (isReplacementPairingAttempt(authority)) assertReplacementPairingAttempt(authority);
-  else if (isFirstPairingAttempt(authority)) assertFirstPairingAttempt(authority);
+  if (isEnrollmentWithAttempt(authority)) assertEnrollmentWithAttempt(authority);
+  else if (isPairingAttempt(authority)) assertPairingAttempt(authority);
   else assertRecord(authority);
   const encoded = Buffer.from(JSON.stringify(authority), 'utf8').toString('base64');
   const value = `${ENCODED_PREFIX}${encoded}`;
@@ -282,6 +309,7 @@ function encode(authority: DeviceCredentialAuthority): string {
 }
 
 function decode(value: string): DeviceCredentialAuthority {
+  if (value.startsWith(LEGACY_ENCODED_PREFIX)) throw new DeviceCredentialLegacyEntryError();
   if (!value.startsWith(ENCODED_PREFIX)) {
     throw new DeviceCredentialStoreError('OS credential entry is not owned by this client credential store');
   }
@@ -303,12 +331,12 @@ function decode(value: string): DeviceCredentialAuthority {
   } catch {
     throw new DeviceCredentialStoreError('OS credential entry is not valid JSON');
   }
-  if (typeof parsed === 'object' && parsed !== null && (parsed as Partial<FirstPairingAttempt>).kind === 'first-pairing-attempt-v1') {
-    assertFirstPairingAttempt(parsed);
+  if (typeof parsed === 'object' && parsed !== null && (parsed as Partial<PairingAttempt>).kind === 'pairing-attempt-v2') {
+    assertPairingAttempt(parsed);
     return freezeAttempt(parsed);
   }
-  if (typeof parsed === 'object' && parsed !== null && (parsed as Partial<ReplacementPairingAttempt>).kind === 'replacement-pairing-attempt-v1') {
-    assertReplacementPairingAttempt(parsed);
+  if (typeof parsed === 'object' && parsed !== null && (parsed as Partial<EnrollmentWithAttempt>).kind === 'enrollment-with-attempt-v2') {
+    assertEnrollmentWithAttempt(parsed);
     return Object.freeze({ kind: parsed.kind, record: freezeRecord(parsed.record), attempt: freezeAttempt(parsed.attempt) });
   }
   assertRecord(parsed);
@@ -522,24 +550,22 @@ export class DeviceCredentialStore implements DeviceCredentialBackend {
 
   async read(signal?: AbortSignal): Promise<DeviceRecord | undefined> {
     const authority = await this.#readAuthority(signal);
-    if (authority === undefined || isFirstPairingAttempt(authority)) return undefined;
-    return isReplacementPairingAttempt(authority) ? authority.record : authority;
+    if (authority === undefined || isPairingAttempt(authority)) return undefined;
+    return isEnrollmentWithAttempt(authority) ? authority.record : authority;
   }
 
-  async readFirstPairingAttempt(signal?: AbortSignal): Promise<FirstPairingAttempt | undefined> {
+  async readPairingAttempt(signal?: AbortSignal): Promise<PairingAttempt | undefined> {
     const authority = await this.#readAuthority(signal);
     if (authority === undefined) return undefined;
-    if (isReplacementPairingAttempt(authority)) return authority.attempt;
-    return isFirstPairingAttempt(authority) ? authority : undefined;
+    if (isEnrollmentWithAttempt(authority)) return authority.attempt;
+    return isPairingAttempt(authority) ? authority : undefined;
   }
 
-  async saveFirstPairingAttempt(attempt: FirstPairingAttempt, signal?: AbortSignal): Promise<void> {
-    assertFirstPairingAttempt(attempt);
-    const authority = await this.#readAuthority(signal);
-    const record = authority === undefined || isFirstPairingAttempt(authority)
-      ? undefined : isReplacementPairingAttempt(authority) ? authority.record : authority;
+  async savePairingAttempt(attempt: PairingAttempt, signal?: AbortSignal): Promise<void> {
+    assertPairingAttempt(attempt);
+    const record = await this.read(signal);
     await this.#entry.replace(encode(record === undefined
-      ? attempt : { kind: 'replacement-pairing-attempt-v1', record, attempt }), signal);
+      ? attempt : { kind: 'enrollment-with-attempt-v2', record, attempt }), signal);
   }
 
   async #readAuthority(signal: AbortSignal | undefined): Promise<DeviceCredentialAuthority | undefined> {
@@ -551,20 +577,25 @@ export class DeviceCredentialStore implements DeviceCredentialBackend {
     const encoded = encode(record);
     const authority = await this.#readAuthority(signal);
     // Token renewal belongs to the current enrollment, while a different
-    // authenticated binding commits the replacement and consumes its attempt.
-    const retainAttempt = authority !== undefined && isReplacementPairingAttempt(authority) &&
+    // authenticated binding commits the pairing and consumes its attempt.
+    const retainAttempt = authority !== undefined && isEnrollmentWithAttempt(authority) &&
       authority.record.deviceId === record.deviceId && authority.record.tenantId === record.tenantId &&
       authority.record.devicePublicKey === record.devicePublicKey;
     await this.#entry.replace(retainAttempt
-      ? encode({ kind: 'replacement-pairing-attempt-v1', record, attempt: authority.attempt }) : encoded, signal);
+      ? encode({ kind: 'enrollment-with-attempt-v2', record, attempt: authority.attempt }) : encoded, signal);
   }
 
-  /** Returns true only after the sole secret authority is confirmed absent. */
+  /**
+   * Returns true only after the sole secret authority is confirmed absent. A
+   * wire v6 entry is deleted unread. The caller holds the enrollment gate, so
+   * no v7 write lands between the read and the deletion.
+   */
   async clear(signal?: AbortSignal): Promise<boolean> {
-    const before = await this.#readAuthority(signal);
+    const before = await this.#entry.read(signal);
     if (before === undefined) return false;
+    if (!before.startsWith(LEGACY_ENCODED_PREFIX)) decode(before);
     await this.#entry.delete(signal);
-    if ((await this.#readAuthority(signal)) !== undefined) {
+    if ((await this.#entry.read(signal)) !== undefined) {
       throw new DeviceCredentialStoreError('operating-system credential provider reported deletion but device credentials remain');
     }
     return true;

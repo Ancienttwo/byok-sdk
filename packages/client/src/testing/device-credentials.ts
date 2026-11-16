@@ -1,15 +1,11 @@
-import type { DeviceCredentialBackend, DeviceRecord, FirstPairingAttempt } from '../daemon/device-credential-store.js';
+import type { DeviceCredentialBackend, DeviceRecord, PairingAttempt } from '../daemon/device-credential-store.js';
 
-interface ReplacementPairingAttempt {
-  readonly kind: 'replacement-pairing-attempt-v1';
-  readonly record: DeviceRecord;
-  readonly attempt: FirstPairingAttempt;
+interface Slot {
+  readonly record: DeviceRecord | undefined;
+  readonly attempt: PairingAttempt | undefined;
 }
 
-type Authority = DeviceRecord | FirstPairingAttempt | ReplacementPairingAttempt;
-
-const isFirst = (a: Authority): a is FirstPairingAttempt => 'kind' in a && a.kind === 'first-pairing-attempt-v1';
-const isReplacement = (a: Authority): a is ReplacementPairingAttempt => 'kind' in a && a.kind === 'replacement-pairing-attempt-v1';
+const EMPTY: Slot = { record: undefined, attempt: undefined };
 
 /**
  * A `DeviceCredentialBackend` held in memory, so a test never reaches the
@@ -17,35 +13,27 @@ const isReplacement = (a: Authority): a is ReplacementPairingAttempt => 'kind' i
  * the environment never selects it; a test injects it as `deviceCredentials`.
  */
 export class InMemoryDeviceCredentialBackend implements DeviceCredentialBackend {
-  #authority: Authority | undefined;
+  #slot: Slot = EMPTY;
   async read(): Promise<DeviceRecord | undefined> {
-    const authority = this.#authority;
-    if (authority === undefined || isFirst(authority)) return undefined;
-    const record = isReplacement(authority) ? authority.record : authority;
-    return Object.freeze({ ...record });
+    const { record } = this.#slot;
+    return record === undefined ? undefined : Object.freeze({ ...record });
   }
-  async readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined> {
-    const authority = this.#authority;
-    if (authority === undefined) return undefined;
-    if (isReplacement(authority)) return Object.freeze({ ...authority.attempt });
-    return isFirst(authority) ? Object.freeze({ ...authority }) : undefined;
+  async readPairingAttempt(): Promise<PairingAttempt | undefined> {
+    const { attempt } = this.#slot;
+    return attempt === undefined ? undefined : Object.freeze({ ...attempt });
   }
-  async saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void> {
-    const record = await this.read();
-    this.#authority = record === undefined ? Object.freeze({ ...attempt })
-      : Object.freeze({ kind: 'replacement-pairing-attempt-v1', record, attempt: Object.freeze({ ...attempt }) });
+  async savePairingAttempt(attempt: PairingAttempt): Promise<void> {
+    this.#slot = { record: this.#slot.record, attempt: Object.freeze({ ...attempt }) };
   }
   async replace(record: DeviceRecord): Promise<void> {
-    const prior = this.#authority;
-    this.#authority = prior !== undefined && isReplacement(prior) &&
-      prior.record.deviceId === record.deviceId && prior.record.tenantId === record.tenantId &&
-      prior.record.devicePublicKey === record.devicePublicKey
-      ? Object.freeze({ kind: 'replacement-pairing-attempt-v1', record: Object.freeze({ ...record }), attempt: prior.attempt })
-      : Object.freeze({ ...record });
+    const prior = this.#slot.record;
+    const renewal = prior !== undefined && prior.deviceId === record.deviceId &&
+      prior.tenantId === record.tenantId && prior.devicePublicKey === record.devicePublicKey;
+    this.#slot = { record: Object.freeze({ ...record }), attempt: renewal ? this.#slot.attempt : undefined };
   }
   async clear(): Promise<boolean> {
-    const existed = this.#authority !== undefined;
-    this.#authority = undefined;
+    const existed = this.#slot.record !== undefined || this.#slot.attempt !== undefined;
+    this.#slot = EMPTY;
     return existed;
   }
 }

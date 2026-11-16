@@ -3,6 +3,8 @@ import { type DeviceEnrollment, type DeviceRecord, DeviceRecordRePairRequiredErr
 import { clearEnrollmentUnderLease } from '../enrollment-clear.js';
 import { DeviceStoreBindingMismatchError, EmbeddedPairingError } from '../daemon-errors.js';
 import { checkVerificationSecret, enrollDeviceMember } from '../device-member.js';
+import { DeviceCredentialLegacyEntryError } from '../device-credential-store.js';
+import { writeUnderBinding } from '../enrollment-gate.js';
 import { acquireDaemonOwner } from '../../util/daemon-owner.js';
 import { AgentEgressController } from '../agent-egress-controller.js';
 import { PairedWithoutMemberError } from './support.js';
@@ -89,9 +91,12 @@ export async function pairEmbedded(daemonScope: DaemonScope, server: EmbeddedPai
       try {
         current = await daemonState.auth.readCurrent();
       } catch (error) {
-        if (error instanceof DeviceRecordRePairRequiredError) throw new EmbeddedPairingError('re_pair_required', { cause: error });
-        if (error instanceof DeviceStoreBindingMismatchError) throw new EmbeddedPairingError('store_not_bound', { cause: error });
-        throw error;
+        // A wire v6 entry is void: the store pairs as a first pairing, which deletes it.
+        if (!(error instanceof DeviceCredentialLegacyEntryError)) {
+          if (error instanceof DeviceRecordRePairRequiredError) throw new EmbeddedPairingError('re_pair_required', { cause: error });
+          if (error instanceof DeviceStoreBindingMismatchError) throw new EmbeddedPairingError('store_not_bound', { cause: error });
+          throw error;
+        }
       }
       const machines = await server.machines.list();
       if (current !== undefined) {
@@ -143,61 +148,69 @@ export async function pairUnderLease(
     try {
       previous = await daemonState.auth.readCurrent();
     } catch (error) {
-      // Pairing may replace a legacy/tampered record, but must not derive a
-      // cursor/device identity from an untrusted file. Another store's
+      // Pairing may replace a legacy/tampered record or a wire v6 entry, but
+      // must not derive a cursor/device identity from it. Another store's
       // enrollment is replaced only on the operator's explicit request, and
       // its cursor belongs to that store.
       const replaceable = error instanceof DeviceRecordRePairRequiredError ||
+        error instanceof DeviceCredentialLegacyEntryError ||
         (error instanceof DeviceStoreBindingMismatchError && replaceOtherStore);
       if (!replaceable) throw error;
     }
-    // auth.pair() takes the enrollment gate after this owner lease and holds it
-    // from its validation through the member custody below, so no other
-    // store's pairing or clear interleaves with the shared member entries
-    // (#1964, #2030 F2). Re-pairing a running daemon shuts it down inside the
-    // gate too, so its member work has ended before the entries are replaced.
-    const record = await daemonState.auth.pair(pairingCode, { replaceOtherStore, custody: async (record) => {
-      replacementPersisted = true;
-      // No stopped daemon operation may continue using a superseded binding
-      // between re-pair and the next start. startUnderLease will construct the
-      // bound controller only from the newly loaded DeviceRecord.
-      if (config.agentEgress !== undefined) {
-        // TaskRunner owns the previous controller by reference for this run;
-        // deactivate it before the new record can be followed by shutdown
-        // terminal/progress activity.
-        daemonState.agentEgress.deactivate();
-        daemonState.agentEgress = new AgentEgressController({ policy: egressPolicy });
-      }
-      if (wasRunning) {
-        // The pair response has replaced device.json, so the running daemon's
-        // closures are no longer allowed to handle work under the old record.
-        // Completing this shutdown before pair() resolves makes restart an
-        // explicit, fresh load of the new authenticated binding.
-        await runShutdownSequence('re-pairing enrollment binding');
-        daemonState.tenantRebinding = false;
-      }
-      if (previous && previous.deviceId !== record.deviceId) {
-        await cursorStore.clear(config.serverUrl, previous.deviceId);
-      }
-      observer.notePaired(record.deviceId);
-      // A new enrollment is a new member (§7.5); the previous one's entries are void (10b).
-      daemonState.carriedFreshness = undefined;
+    // auth.pair() takes the enrollment gate only around its local steps and
+    // never across the network (#2045). Everything below runs after it
+    // released the gate: the shutdown of a running daemon may wait on the
+    // network, and the member entries are written under the gate only through
+    // writeUnderBinding, which first checks that this pairing's enrollment
+    // still holds (#2055).
+    const record = await daemonState.auth.pair(pairingCode, { replaceOtherStore });
+    replacementPersisted = true;
+    // No stopped daemon operation may continue using a superseded binding
+    // between re-pair and the next start. startUnderLease will construct the
+    // bound controller only from the newly loaded DeviceRecord.
+    if (config.agentEgress !== undefined) {
+      // TaskRunner owns the previous controller by reference for this run;
+      // deactivate it before the new record can be followed by shutdown
+      // terminal/progress activity.
+      daemonState.agentEgress.deactivate();
+      daemonState.agentEgress = new AgentEgressController({ policy: egressPolicy });
+    }
+    if (wasRunning) {
+      // The pair response has replaced device.json, so the running daemon's
+      // closures are no longer allowed to handle work under the old record.
+      // Completing this shutdown before pair() resolves makes restart an
+      // explicit, fresh load of the new authenticated binding. It also ends
+      // the old run's member work before the entries below are replaced.
+      await runShutdownSequence('re-pairing enrollment binding');
+      daemonState.tenantRebinding = false;
+      // Teardown stopped the auth manager; the member writes below still check its binding.
+      daemonState.auth.resume();
+    }
+    if (previous && previous.deviceId !== record.deviceId) {
+      await cursorStore.clear(config.serverUrl, previous.deviceId);
+    }
+    observer.notePaired(record.deviceId);
+    // A new enrollment is a new member (§7.5); the previous one's entries are void (10b).
+    daemonState.carriedFreshness = undefined;
+    if (memberRecords !== undefined) {
+      const memberWrites = new AbortController();
+      const records = memberRecords.guardedBy((write) => writeUnderBinding(daemonState.auth, write, memberWrites.signal));
       try {
-        await memberRecords?.clear();
+        await records.clear();
       } catch (error) {
         throw new PairedWithoutMemberError(record.deviceId, 'the previous E2EE member entries could not be deleted', error);
       }
       if (verificationSecret !== undefined) {
         try {
           await enrollDeviceMember({
-            records: memberRecords!, client: memberClient(record), tenantId: record.tenantId, deviceId: record.deviceId,
+            records, client: memberClient(record), tenantId: record.tenantId, deviceId: record.deviceId,
             verificationSecret, log: logMember,
           });
         } catch (error) {
           throw new PairedWithoutMemberError(record.deviceId, 'its E2EE member enrollment failed; re-pair to enable E2EE', error);
         }
       }
-    } });
+    }
     if (acquiredHere) {
       await daemonState.daemonOwnerLease?.release();
       daemonState.daemonOwnerLease = undefined;

@@ -86,23 +86,55 @@ export class DeviceStoreBindingMismatchError extends Error {
   }
 }
 
-const PAIRING_ATTEMPT_MESSAGES = {
-  store_not_bound: 'another storeDir staged the first-pairing attempt of this productId; nothing was written. Pair with replaceOtherStore (--replace-other-store) to discard it',
-  pairing_attempt_unattributed: 'the first-pairing attempt of this productId names no storeDir; nothing was written. Clear it with clearDeviceEnrollment({ ..., clearUnattributedAttempt: true }), then pair',
-} as const;
+/**
+ * A pairing refused to reuse a staged pairing attempt another storeDir of
+ * this productId staged (#1964, #2033), by the same rule as an enrollment
+ * clear. Nothing was written; pairing with `replaceOtherStore`
+ * (`--replace-other-store`) discards that attempt.
+ */
+export class PairingAttemptRefusedError extends Error {
+  constructor() {
+    super('another storeDir staged the pairing attempt of this productId; nothing was written. Pair with replaceOtherStore (--replace-other-store) to discard it');
+    this.name = 'PairingAttemptRefusedError';
+  }
+}
 
 /**
- * A pairing refused to reuse a staged first-pairing attempt this storeDir
- * cannot prove it staged (#1964, #2033), by the same rule as an enrollment
- * clear: `store_not_bound` when another storeDir staged it (pairing with
- * `replaceOtherStore` discards it), `pairing_attempt_unattributed` when it
- * names no storeDir (staged by 0.42.0; clear it with
- * `clearUnattributedAttempt`, then pair). Nothing was written.
+ * Another pairing of this productId replaced this pairing's attempt while its
+ * request was in flight (#2045). This pairing wrote nothing and does not
+ * retry; the slot belongs to the pairing that replaced it. Pair again to take
+ * it back.
  */
-export class FirstPairingAttemptRefusedError extends Error {
-  constructor(readonly code: keyof typeof PAIRING_ATTEMPT_MESSAGES) {
-    super(PAIRING_ATTEMPT_MESSAGES[code]);
-    this.name = 'FirstPairingAttemptRefusedError';
+export class PairingSupersededError extends Error {
+  constructor() {
+    super('another pairing of this productId replaced this pairing while its request was in flight; nothing was written');
+    this.name = 'PairingSupersededError';
+  }
+}
+
+/**
+ * The server refused the pairing code: unknown, expired or already used,
+ * which it does not tell apart (`pairing_code_invalid`, protocol §6.1).
+ * The current enrollment is unchanged. Pair with a new code.
+ */
+export class PairingCodeRejectedError extends Error {
+  constructor() {
+    super('the server rejected the pairing code: it is unknown, expired or already used');
+    this.name = 'PairingCodeRejectedError';
+  }
+}
+
+/**
+ * The server refused this pairing twice because another pairing of the same
+ * machine registered in between (#2045). It happens only while two pairings
+ * of one machine run at once. Nothing was written and the staged attempt is
+ * kept, so retrying with the same code resumes it.
+ */
+export class PairingBusyError extends Error {
+  readonly retryable = true;
+  constructor() {
+    super('another pairing of this machine registered at the same time; retry the pairing');
+    this.name = 'PairingBusyError';
   }
 }
 
