@@ -299,10 +299,35 @@ describe('Host ledger format', () => {
     const copy = join(filename, '..', 'copy.sqlite');
     for (const suffix of ['', '-wal']) copyFileSync(filename + suffix, copy + suffix);
     writer.close();
-    expect(() => new HostLedger(copy, 'test')).toThrow(expect.objectContaining({ code: 'host_store_format_unsupported' }));
+    // Decided before any persistent pragma or DDL runs on the writable connection.
+    const exec = vi.spyOn(DatabaseSync.prototype, 'exec');
+    try {
+      expect(() => new HostLedger(copy, 'test')).toThrow(expect.objectContaining({ code: 'host_store_format_unsupported' }));
+      expect(exec.mock.calls.map(([sql]) => sql).filter(sql => /journal_mode|CREATE|INSERT/i.test(sql))).toEqual([]);
+    } finally { exec.mockRestore(); }
     const read = new DatabaseSync(copy, { readOnly: true });
     try { expect(read.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all().map(row => row.name)).toEqual(['host_ledger']); }
     finally { read.close(); }
+  });
+
+  it('refuses a malformed host_store_format: duplicate owners, other columns', () => {
+    for (const ddl of ['CREATE TABLE host_store_format (owner TEXT, version INTEGER NOT NULL); INSERT INTO host_store_format VALUES (\'k4\', 999), (\'k4\', 1)',
+      'CREATE TABLE host_store_format (owner TEXT PRIMARY KEY); INSERT INTO host_store_format VALUES (\'k4\')']) {
+      const file = created();
+      const db = new DatabaseSync(file);
+      try { db.exec(`DROP TABLE host_store_format; ${ddl}`); } finally { db.close(); }
+      refused(file);
+    }
+  });
+
+  it('decides on the live connection when the WAL holds a newer format than the main file', () => {
+    const file = created({ k8: 3 });
+    const writer = new DatabaseSync(file);
+    writer.exec("PRAGMA wal_autocheckpoint=0; UPDATE host_store_format SET version = 4 WHERE owner = 'k8'");
+    const copy = join(file, '..', 'live.sqlite');
+    for (const suffix of ['', '-wal']) copyFileSync(file + suffix, copy + suffix);
+    writer.close();
+    expect(() => new HostLedger(copy, 'test', { expectedFormats: { k8: 3 } })).toThrow(expect.objectContaining({ code: 'host_store_format_unsupported' }));
   });
 
   it('writes the format into the main file when it creates a ledger', () => {

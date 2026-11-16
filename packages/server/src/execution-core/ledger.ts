@@ -159,7 +159,17 @@ function admitFormat(db: DatabaseSync, expected: Readonly<Record<string, number>
     if (tables.length === 0) return 'empty';
     throw new HostStoreFormatError('This Host ledger was written before format metadata. Keep it and open a new ledger file.');
   }
-  const found = new Map(db.prepare('SELECT owner, version FROM host_store_format').all().map(row => [String(row.owner), Number(row.version)]));
+  // The table is exactly the one SCHEMA creates, so an owner is unique and a version is an integer.
+  const columns = db.prepare('PRAGMA table_info(host_store_format)').all()
+    .map(column => `${String(column.name)} ${String(column.type)} ${Number(column.notnull)} ${Number(column.pk)}`);
+  if (columns.join(',') !== 'owner TEXT 0 1,version INTEGER 1 0') throw new HostStoreFormatError('This Host ledger has a malformed host_store_format table. Keep it and open a new ledger file.');
+  const found = new Map<string, number>();
+  for (const row of db.prepare('SELECT owner, version FROM host_store_format').all()) {
+    if (typeof row.owner !== 'string' || typeof row.version !== 'number' || found.has(row.owner)) {
+      throw new HostStoreFormatError('This Host ledger has a malformed host_store_format row. Keep it and open a new ledger file.');
+    }
+    found.set(row.owner, row.version);
+  }
   for (const [owner, version] of Object.entries(expected)) {
     if (!found.has(owner)) throw new HostStoreFormatError(`This Host ledger has no ${owner} format; it was not written for ${owner}. Open a new ledger file.`);
     if (found.get(owner) !== version) throw new HostStoreFormatError(`This Host ledger holds ${owner} format ${found.get(owner)}; this build reads ${version}. Keep it and open a new ledger file.`);
@@ -219,29 +229,37 @@ export class HostLedger {
     if (!filename || !tenant.trim()) throw new Error('Select a Host database and tenant');
     const formats = this.formats = expectedFormats(options.expectedFormats);
     // #2286: the format is decided on the unchanged main file, before the writable open, its pragmas or any DDL.
-    const unchanged = readSqliteFileUnchanged(filename, db => admitFormat(db, formats));
+    readSqliteFileUnchanged(filename, db => admitFormat(db, formats));
     // The bundler drops the `node:` prefix from static imports, and `sqlite` has no unprefixed builtin.
     const { DatabaseSync: Database } = loadSqliteModule();
     this.db = new Database(sqliteOpenPath(filename));
     try {
-      this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
-      if (unchanged !== 'current') {
-        // A new or empty file, or one whose schema is only in its WAL: the decision on this connection is the authority.
-        // Not handled: an older ledger that crashed before its first checkpoint was already changed by WAL replay here.
-        this.db.exec('BEGIN IMMEDIATE');
-        try {
-          const created = admitFormat(this.db, formats) === 'empty';
+      // Connection settings only: nothing here writes the file.
+      this.db.exec('PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
+      // The live decision is the authority: the main file can be behind its WAL, and another process can create the
+      // ledger after the read above. It reads the format in a write transaction, before any persistent pragma or DDL.
+      // Not handled: when the main file has no schema and the WAL holds an older one, closing the refused connection
+      // checkpoints that WAL into the main file; its logical content is kept.
+      this.db.exec('BEGIN IMMEDIATE');
+      let created = false;
+      try {
+        if (admitFormat(this.db, formats) === 'empty') {
+          // journal_mode cannot change inside a transaction, and an empty file holds nothing to protect.
+          this.db.exec('ROLLBACK; PRAGMA journal_mode=WAL; BEGIN IMMEDIATE');
+          created = admitFormat(this.db, formats) === 'empty';
           if (created) {
             this.db.exec(SCHEMA);
             const row = this.db.prepare('INSERT INTO host_store_format VALUES (?, ?)');
             for (const [owner, version] of Object.entries(formats)) row.run(owner, version);
           }
-          this.db.exec('COMMIT');
-          // The main file then holds the format, so the next open decides it before any write.
-          if (created) this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-        } catch (error) { if (this.db.isTransaction) this.db.exec('ROLLBACK'); throw error; }
-      }
-      this.db.prepare('INSERT OR IGNORE INTO host_ledger VALUES (?, ?)').run(tenant, JSON.stringify(empty()));
+        }
+        this.db.prepare('INSERT OR IGNORE INTO host_ledger VALUES (?, ?)').run(tenant, JSON.stringify(empty()));
+        this.db.exec('COMMIT');
+      } catch (error) { if (this.db.isTransaction) this.db.exec('ROLLBACK'); throw error; }
+      if (created) {
+        // The main file then holds the format, so the next open decides it before any write.
+        this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+      } else this.db.exec('PRAGMA journal_mode=WAL');
     } catch (error) { this.db.close(); throw error; }
   }
   snapshot(): LedgerState {
