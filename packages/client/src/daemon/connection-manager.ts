@@ -8,6 +8,7 @@ import {
   createEnvelope,
   isServerToDaemonType,
   PROTOCOL_VERSION,
+  ProtocolNegotiationError,
   type CapabilityFlag,
   type Envelope,
   type RuntimeInfo,
@@ -18,7 +19,7 @@ import { AuthManager } from './auth-manager.js';
 import type { CursorStore } from './cursor-store.js';
 import type { DaemonHaltReason } from './daemon-lifecycle.js';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter.js';
-import { LongPollClient, type CorrelatedOutcome, type MessageBatchPostResult } from './long-poll-transport.js';
+import { LongPollClient, type CorrelatedOutcome, type MessageBatchPostResult, type MessageBatchRefusal } from './long-poll-transport.js';
 
 export { ReplayCursorTooOldError } from './replay-cursor.js';
 
@@ -38,7 +39,7 @@ const OUTBOX_DROPPABLE_TYPES: ReadonlySet<Envelope['type']> = new Set(['task.pro
 export type ConnectionState = 'connecting' | 'open';
 
 /** The remote conditions that end a session for good. */
-export type ConnectionHaltReason = Extract<DaemonHaltReason, 'device_revoked' | 'handshake_rejected' | 'replay_cursor_too_old' | 'store_not_bound' | 're_pair_required'>;
+export type ConnectionHaltReason = Extract<DaemonHaltReason, 'device_revoked' | 'handshake_rejected' | 'protocol_negotiation_failed' | 'replay_cursor_too_old' | 'store_not_bound' | 're_pair_required'>;
 
 /**
  * Server work requiring durable handler completion before acknowledgement.
@@ -93,12 +94,6 @@ export interface ConnectionManagerOptions {
   onEnvelope: (envelope: Envelope) => void | Promise<void>;
   /** Every transition between `connecting` and `open`, starting with `connecting` from {@link ConnectionManager.start}. */
   onStateChange?: (state: ConnectionState) => void;
-  /**
-   * Called each time the server's advertisement newly carries a capability
-   * the previous one did not — after every reconnect, the first advertisement
-   * is new in full. Hooks that retry capability-gated sends wait here.
-   */
-  onCapabilitiesAdvertised?: (added: readonly string[]) => void;
   /** Await durable disposition before retiring the exact accepted/rejected bytes. */
   onOutboundSettled?: (settlements: readonly OutboundSettlement[]) => Promise<void>;
   onOutboundQueued?: (envelope: Envelope) => void;
@@ -118,7 +113,7 @@ export interface ConnectionManagerOptions {
   /** The session ended for good; nothing reconnects after this. Called once. */
   onHalted?: (reason: ConnectionHaltReason) => void;
   /**
-   * An observer callback ({@link onStateChange}, {@link onCapabilitiesAdvertised})
+   * An observer callback ({@link onStateChange})
    * or the reconnect loop itself threw. The session ends for good, as for a
    * halt: nothing reconnects. Called once, never for a halt or a stop.
    */
@@ -150,8 +145,9 @@ function settlementFor(envelope: Envelope, outcome: CorrelatedOutcome): Outbound
  * of every session, including after a reconnect (protocol §8). Any route
  * failure returns the session to `connecting` and the loop handshakes again
  * after the capped exponential `fleetJitter('reconnect')`, or the server's
- * `Retry-After` when that is longer. A rejected hello, a revoked device or a
- * lost replay cursor halts it instead.
+ * `Retry-After` when that is longer. A rejected hello, a 400 to the hello (a
+ * server of another wire major), a revoked device or a lost replay cursor
+ * halts it instead.
  *
  * `send()` (Design B, finding N4) pushes onto a single shared outbox this
  * class owns and drains through `POST /byok/messages`; long-poll is a full
@@ -240,13 +236,12 @@ export class ConnectionManager {
   /** The longest `Retry-After` a route answered since the last reconnect wait; see `nextReconnectDelayMs`. */
   private retryAfterMs = 0;
   /**
-   * The capabilities the current server response advertised — untyped
-   * `string[]` for forward compatibility. An advertisement is scoped to the
-   * current session and is cleared when it ends (a route failure, stop, or
-   * halt). This keeps capability-gated outbound messages fail-closed until
-   * the current server has explicitly advertised support.
+   * Outbound types the current session's server answered `type_unsupported`.
+   * The rest of the session settles them locally as rejected, unsent. Scoped
+   * to the session: the responder behind the next session may know them.
+   * `conn.hello` never enters it.
    */
-  private serverCapabilities: string[] = [];
+  private readonly unsupportedTypes = new Set<Envelope['type']>();
 
   constructor(private readonly opts: ConnectionManagerOptions) {
     this.fleetJitter = opts.fleetJitter ?? createFleetJitter(opts.productId, opts.deviceId);
@@ -261,7 +256,6 @@ export class ConnectionManager {
       getCursor: () => this.cursor,
       onEnvelope: (envelope) => this.deliver(envelope),
       onIngress: (ingress) => { this.ingressBudget = ingress; },
-      onServerCapabilities: (capabilities) => this.applyServerCapabilities(capabilities),
       onLoopFailure: () => this.breakSession(),
       onRetryAfter: (delayMs) => { this.retryAfterMs = Math.max(this.retryAfterMs, delayMs); },
       onRevoked: () => this.halt('device_revoked'),
@@ -313,6 +307,10 @@ export class ConnectionManager {
       hello ??= createConnectionHelloEnvelope(this.opts, () => this.cursor);
       const answer = await this.longPoll.postBatch([hello], signal);
       if (this.isEnded()) return;
+      if (answer !== undefined && 'refusedStatus' in answer) {
+        this.haltOnNegotiation(answer);
+        return;
+      }
       if (answer !== undefined) {
         try {
           await this.opts.onOutboundSettled?.([settlementFor(hello, answer.outcomes[0]!)]);
@@ -357,10 +355,9 @@ export class ConnectionManager {
       this.endSession = resolve;
     });
     this.sessionGeneration += 1;
-    // Capabilities first: work an `open` observer queues sees them already.
+    // Ingress first: work an `open` observer queues sees it already.
     // `postBatch` refuses an accepted handshake answer without `ingress`.
     this.ingressBudget = handshake.ingress;
-    if (handshake.capabilities !== undefined) this.applyServerCapabilities(handshake.capabilities);
     this.setState('open');
     // An `open` observer that threw has already ended the session.
     if (!this.isEnded()) {
@@ -371,9 +368,8 @@ export class ConnectionManager {
     this.endSession = undefined;
     this.longPoll.stop();
     // Long-poll has no persistent peer identity: once a route failed, the
-    // responder behind the next request need not support what this one
-    // advertised. Withdraw the advertisement with the session.
-    this.serverCapabilities = [];
+    // responder behind the next request may know types this one refused.
+    this.unsupportedTypes.clear();
   }
 
   /**
@@ -385,15 +381,20 @@ export class ConnectionManager {
     if (end === undefined || this.isEnded()) return;
     this.endSession = undefined;
     this.setState('connecting');
-    this.serverCapabilities = [];
+    this.unsupportedTypes.clear();
     this.longPoll.stop();
     end();
   }
 
-  private applyServerCapabilities(capabilities: readonly string[]): void {
-    const added = capabilities.filter((flag) => !this.serverCapabilities.includes(flag));
-    this.serverCapabilities = [...capabilities];
-    if (added.length > 0) this.notify(() => this.opts.onCapabilitiesAdvertised?.(added));
+  /**
+   * A whole-request 400 to the lone handshake: a server of another wire
+   * major cannot parse this frame (a v6 server requires `v: 6`). No wire
+   * field states the peer major there, so `peerVersion` stays unset.
+   */
+  private haltOnNegotiation(refusal: MessageBatchRefusal): void {
+    const error = new ProtocolNegotiationError({ localVersion: PROTOCOL_VERSION, httpStatus: refusal.refusedStatus });
+    console.error(`[byok/client] ${error.message}; the daemon halts`);
+    this.halt(error.code);
   }
 
   private setState(state: ConnectionState): void {
@@ -507,16 +508,31 @@ export class ConnectionManager {
     // One POST per chunk. The answer correlates every envelope (protocol v3),
     // so each settles with its own outcome; a missing or unusable answer
     // retains the exact chunk for the ordinary retry paths below.
+    // A type this session's server answered `type_unsupported` settles
+    // locally as that same rejection, without being posted again.
     type Retained = { readonly envelopes: Envelope[]; readonly cause: 'route' | 'local' };
-    const postAndSettle = async (batch: Envelope[]): Promise<Retained | undefined> => {
+    const postAndSettle = async (batch: Envelope[], generation: number): Promise<Retained | undefined> => {
       if (this.isEnded()) return { envelopes: batch, cause: 'route' };
       try {
-        this.opts.beforeOutboundPost?.(batch);
-        const result = await this.longPoll.postBatch(batch);
-        if (result === undefined) return { envelopes: batch, cause: 'route' };
-        if (result.ingress !== undefined) this.ingressBudget = result.ingress;
-        if (result.capabilities !== undefined) this.applyServerCapabilities(result.capabilities);
-        const byId = new Map(result.outcomes.map((outcome) => [outcome.id, outcome]));
+        const toPost = batch.filter((envelope) => !this.unsupportedTypes.has(envelope.type));
+        const byId = new Map<string, CorrelatedOutcome>(batch
+          .filter((envelope) => this.unsupportedTypes.has(envelope.type))
+          .map((envelope) => [envelope.id, { id: envelope.id, outcome: 'rejected', reason: 'type_unsupported' }]));
+        if (toPost.length > 0) {
+          this.opts.beforeOutboundPost?.(toPost);
+          const result = await this.longPoll.postBatch(toPost);
+          if (result === undefined || 'refusedStatus' in result) return { envelopes: batch, cause: 'route' };
+          if (result.ingress !== undefined) this.ingressBudget = result.ingress;
+          for (const outcome of result.outcomes) byId.set(outcome.id, outcome);
+          if (generation === this.sessionGeneration) {
+            for (const envelope of toPost) {
+              const outcome = byId.get(envelope.id)!;
+              if (envelope.type !== 'conn.hello' && outcome.outcome === 'rejected' && outcome.reason === 'type_unsupported') {
+                this.unsupportedTypes.add(envelope.type);
+              }
+            }
+          }
+        }
         await this.opts.onOutboundSettled?.(batch.map((envelope) => settlementFor(envelope, byId.get(envelope.id)!)));
         // A refreshed snapshot is a handshake like any other.
         if (batch.some((envelope) => envelope.type === 'conn.hello' && byId.get(envelope.id)!.outcome === 'rejected')) {
@@ -550,17 +566,20 @@ export class ConnectionManager {
         // a stalled/hung `postBatch` call means: neither queued nor
         // delivered, just stuck). See `outboxLength`'s own doc comment.
         this.inFlightBatch = batch;
+        const posts = batch.some((envelope) => !this.unsupportedTypes.has(envelope.type));
         let retained: Retained | undefined;
         try {
-          retained = await postAndSettle(batch);
+          retained = await postAndSettle(batch, generation);
         } finally {
           this.inFlightBatch = [];
         }
         if (retained === undefined) {
           for (const envelope of batch) this.forget(envelope);
           if (this.isEnded()) return;
-          this.uploadRetryAttempt = 0;
-          this.notify(() => this.opts.onOperationalOutcome?.('success', 'upload'));
+          if (posts) {
+            this.uploadRetryAttempt = 0;
+            this.notify(() => this.opts.onOperationalOutcome?.('success', 'upload'));
+          }
           continue;
         }
 
@@ -612,15 +631,6 @@ export class ConnectionManager {
         resolve();
       };
     });
-  }
-
-  /**
-   * The capabilities the current session's server advertised — on the
-   * handshake answer or a poll response. Empty before either and after the
-   * session ends.
-   */
-  getServerCapabilities(): readonly string[] {
-    return this.serverCapabilities;
   }
 
   /** True while the server has accepted this session's `conn.hello` and no route has failed since. */
@@ -676,10 +686,7 @@ export class ConnectionManager {
       await this.waitForOutboxDrained(drainTimeoutMs);
     }
     this.stopped = true;
-    // Finding R2: this daemon's own connection is ending — whatever the
-    // server last advertised no longer applies to anything (there's nothing
-    // left to send to). See `serverCapabilities`'s own doc comment.
-    this.serverCapabilities = [];
+    this.unsupportedTypes.clear();
     this.lifetime.abort();
     this.longPoll.stop();
     this.cancelPendingDrainRetry?.();
@@ -893,7 +900,7 @@ export class ConnectionManager {
   private halt(reason: ConnectionHaltReason): void {
     if (this.isEnded()) return;
     this.haltReason = reason;
-    this.serverCapabilities = [];
+    this.unsupportedTypes.clear();
     this.lifetime.abort();
     this.longPoll.stop();
     this.cancelPendingDrainRetry?.();
@@ -905,7 +912,7 @@ export class ConnectionManager {
   private crash(error: unknown): void {
     if (this.isEnded()) return;
     this.crashed = true;
-    this.serverCapabilities = [];
+    this.unsupportedTypes.clear();
     this.lifetime.abort();
     this.longPoll.stop();
     this.cancelPendingDrainRetry?.();

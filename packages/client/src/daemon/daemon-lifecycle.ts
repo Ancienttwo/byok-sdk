@@ -21,6 +21,8 @@ export const DAEMON_HALT_REASONS = [
   'device_revoked',
   /** The server answered this device's `conn.hello` with a rejection. */
   'handshake_rejected',
+  /** The server refused the whole handshake request with HTTP 400: it speaks another wire major (`ProtocolNegotiationError`). */
+  'protocol_negotiation_failed',
   /** The server no longer retains the history after this device's acknowledged cursor. */
   'replay_cursor_too_old',
   /** The durable delivery cursor file is unreadable: run `doctor --repair reset-cursor`. */

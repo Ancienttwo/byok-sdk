@@ -89,6 +89,11 @@
     "nextStep": "Check productId and SDK compatibility with the server, or pair again.",
     "anchor": "#troubleshooting"
   },
+  "protocol_negotiation_failed": {
+    "retryable": false,
+    "nextStep": "Upgrade the server side and the daemons to the same wire protocol major.",
+    "anchor": "#troubleshooting"
+  },
   "replay_cursor_too_old": {
     "retryable": false,
     "nextStep": "Pair again or use the Host operator recovery procedure for expired history.",

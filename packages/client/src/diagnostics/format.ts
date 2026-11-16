@@ -88,6 +88,8 @@ export function formatHaltRemedy(reason: DaemonHaltReason): string {
       return 'device revoked — re-pair needed: the server confirmed this device is no longer registered. Run `byok-agent pair <code> --server <url>`, then start again; pairing registers a new device id';
     case 'handshake_rejected':
       return 'the server rejected this device\'s hello: check productId and the SDK version, or pair again, then start again';
+    case 'protocol_negotiation_failed':
+      return 'the server speaks another wire protocol major and refused this device\'s hello: upgrade the server side and the daemons to the same major, then start again';
     case 'replay_cursor_too_old':
       return 'the server no longer holds this device\'s undelivered history: pair again (or run operator recovery), then start again';
     case 'cursor_unreadable':
