@@ -48,13 +48,15 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
    * waits for it. `armed` is the hold that the next call of its kind takes. `busy` is the drain of the current Host while
    * that Host holds a call.
    */
-  type Hold = { kind: 'send' | 'readback'; started: Promise<void>; begin(): void; gate: Promise<void>; open(): void; holder?: Promise<void> };
+  type Hold = { kind: 'send' | 'readback'; started: Promise<void>; begin(): void; gate: Promise<void>; open(): void; holder?: Promise<void>;
+    taken?: true };
   let armed: Hold | undefined, busy: Promise<void> | undefined;
   /** Makes the call at once, and returns its result once the hold that it took opens. */
   const held = async <T>(kind: Hold['kind'], call: () => Promise<T>): Promise<T> => {
-    const hold = armed?.kind === kind ? armed : undefined;
+    const hold = armed?.kind === kind && !armed.taken ? armed : undefined;
     if (!hold) return call();
-    armed = undefined;
+    // It stays armed until a run attaches the drain that waits for it: a pass that K8 started itself may have taken it.
+    hold.taken = true;
     const result = call();
     hold.begin();
     await hold.gate;
@@ -112,7 +114,7 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
     if (hold) {
       // The held call may start in this pass: then this verb returns while the pass waits for it.
       const started = await Promise.race([pass.then(() => false), hold.started.then(() => true)]);
-      if (started) { hold.holder = busy = pass; return; }
+      if (started) { hold.holder = busy = pass; armed = undefined; return; }
     } else await pass;
     await settle();
   };
@@ -139,8 +141,9 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
       await bot.drain();
       const taskId = bot.core.intent(root)!.taskId;
       await adapter.started(taskId);
-      // The runtime's final message is accepted mid-Turn; the Turn's outcome makes it sendable (#1762). K4 alone concludes
-      // the intent, so the one Host run below makes the first send, as a held send expects.
+      // The runtime's final message is accepted mid-Turn; the Turn's outcome makes it sendable (#1762). K4 concludes the
+      // intent, and the pass that K8 then starts itself (#2244) or the Host run below makes the first send; the run attaches
+      // to a held send either way.
       void adapter.sessions.get(taskId)!.finish({}, true, FINAL_BODY);
       for (let tries = 0; !bot.core.intent(root)?.conclusion; tries++) {
         if (tries === 100) throw new Error('The Turn did not conclude');

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "09c01115eb3c931db69fe09558145c31cccf263a5198f49ecf9e194983732b4f"
+    "snapshotSha256": "b81b00f84a29eee6caaac12846759589d9ec426d8980dac925b20ee3aaee0ab1"
   },
   "configFields": {
     "status": "tracked",
@@ -134,9 +134,25 @@
       "items": [
         "behavior:bot-blocked-projection-id"
       ]
+    },
+    {
+      "id": "k4-settlement-notice",
+      "impact": "additive",
+      "summary": "@byok-sdk/server/execution-core HostOptions gains optional onSettled: a coalesced, synchronous hint after a drain cycle or memory reconciliation that settled at least one intent. @byok-sdk/bot-collaboration BotCollaboration uses it to run its own pass when K4 settles a Turn's intent in a drain the Host did not start. No Host action is required; a Host that drained BotCollaboration after terminal events or settlement projections only to advance Turns may drop those drains.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2244",
+      "items": [
+        "export:@byok-sdk/bot-collaboration#BotCollaboration",
+        "export:@byok-sdk/server/execution-core#HostExecutionCore",
+        "export:@byok-sdk/server/execution-core#HostOptions"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
+      "change": "changed",
+      "entry": "k4-settlement-notice"
+    },
     {
       "item": "export:@byok-sdk/client#AgentEgressDropReceipt",
       "change": "removed",
@@ -176,6 +192,16 @@
       "item": "export:@byok-sdk/client#serviceExitDisposition",
       "change": "removed",
       "entry": "remove-service-exit-disposition"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",
+      "change": "changed",
+      "entry": "k4-settlement-notice"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostOptions",
+      "change": "changed",
+      "entry": "k4-settlement-notice"
     }
   ]
 }

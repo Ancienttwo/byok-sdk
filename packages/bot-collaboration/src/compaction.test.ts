@@ -6,7 +6,7 @@ import { CompactVetoError, HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, occurre
 import { template as baseTemplate } from './k4-fixtures.test-support';
 import { BotCollaboration } from './host';
 import { botCompactVeto } from './compaction';
-import { openTeam, type TestTeam } from './__tests__/team.test-support';
+import { openTeam, settleOutsideK8, type TestTeam } from './__tests__/team.test-support';
 import { crossBot } from './__tests__/cross-bot.test-support';
 import { stateOf, type Delegation, type Turn } from './model';
 import { archiveBot } from './rules/team';
@@ -45,7 +45,7 @@ it('refuses to compact a Turn intent before K8 syncs its result, and the Host ke
   const turnId = await bot.input('k1', 'hello');
   expect(ledger.snapshot().intents[hash(turnId)]?.phase).toBe('inflight');
   // K4 settles the intent in its own drain, outside a K8 pass.
-  await bot.core.cancel(turnId);
+  await settleOutsideK8(bot, turnId);
   expect(ledger.snapshot().intents[hash(turnId)]).toMatchObject({ phase: 'settled', conclusion: 'cancelled' });
   expect(bot.snapshot().turns[turnId]).toMatchObject({ status: 'processing' });
   await bot.core.flushProjections(async () => {});
@@ -70,7 +70,7 @@ it('fails a Turn whose intent a writer without the veto retired, and the Host ke
   let now = 1_000_000;
   const { ledger, bot, unguarded } = open(() => now);
   const turnId = await bot.input('k1', 'hello');
-  await bot.core.cancel(turnId);
+  await settleOutsideK8(bot, turnId);
   await bot.core.flushProjections(async () => {});
   expect(unguarded().compact({ acknowledgedIntentKeys: [turnId], ...retention(now) })).toMatchObject({ compactedIntents: 1 });
   now += 1000;
@@ -91,7 +91,7 @@ it('fails a retired Turn of a Bot archived before the next pass, and does not re
   let now = 1_000_000;
   const { ledger, bot, unguarded } = open(() => now);
   const turnId = await bot.input('k1', 'hello');
-  await bot.core.cancel(turnId);
+  await settleOutsideK8(bot, turnId);
   await bot.core.flushProjections(async () => {});
   expect(unguarded().compact({ acknowledgedIntentKeys: [turnId], ...retention(now) })).toMatchObject({ compactedIntents: 1 });
   // The archive only marks the Bot, as `delete_bot` does.

@@ -106,6 +106,15 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
 }
 export type TestTeam = Awaited<ReturnType<typeof openTeam>>;
 /** Test fixture: the owner already switched these Bots to auto, so their autonomous actions apply (#1229). */
+/**
+ * K4 cancels and settles `key` while K8 queues no pass for it. This models a crash after K4 committed the settlement and
+ * before K8 ran its pass (#2244): the Turn stays unsynced until the test runs a K8 call.
+ */
+export async function settleOutsideK8(bot: BotCollaboration, key: string): Promise<void> {
+  const host = bot as unknown as { schedulePass(): void };
+  host.schedulePass = () => {};
+  try { await bot.core.cancel(key); } finally { delete (host as { schedulePass?: unknown }).schedulePass; }
+}
 export function autoBots(ledger: HostLedger, botIds: readonly string[]): void {
   ledger.transaction(s => {
     const bots = stateOf(s.application).team.bots;

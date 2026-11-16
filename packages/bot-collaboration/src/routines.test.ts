@@ -10,6 +10,7 @@ import { BotCollaboration, type BotOptions } from './host';
 import { json, stateOf } from './model';
 import { botRoutines, createDefinition, endable, owned, ownerRoutineUpdate, routineOccurrence, updateDefinition } from './routines';
 import { DAILY, deliverRoutine, routineOf, routineRow, seedRoutine } from './routines.test-support';
+import { settleOutsideK8 } from './__tests__/team.test-support';
 import { outcomeSchema } from './schema';
 import { botCompactVeto } from './compaction';
 
@@ -316,7 +317,7 @@ it('fails a promoted routine Turn whose intent a writer without the veto compact
   await due(id);
   const [turn] = turns();
   expect(fixture!.ledger.snapshot().intents[hash(turn!.id)]).toBeDefined();
-  await bot!.core.cancel(turn!.id);
+  await settleOutsideK8(bot!, turn!.id);
   await bot!.core.flushProjections(async () => {});
   const other = new HostLedger(join(fixture!.root, 'host.sqlite'), fixture!.ledger.tenant);
   try {

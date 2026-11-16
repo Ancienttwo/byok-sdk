@@ -87,6 +87,12 @@ export interface HostOptions {
   nextOccurrence?: NextOccurrence;
   /** Coalesced post-commit hint. May enqueue/flush reentrantly; failures retain projections. */
   onOutbox?: (signal: AbortSignal) => void | Promise<void>;
+  /**
+   * Coalesced post-commit hint that one or more intents settled. Called synchronously, at most once per drain cycle and once
+   * per memory reconciliation, outside any transaction, and never after `close()` begins. The return value is ignored and a
+   * throw is swallowed; the ledger stays the authority. Only schedule work here: awaiting a core call from it can deadlock.
+   */
+  onSettled?: () => void;
   applyMessage?: (input: AgentMessageInput, transaction: MessageTransaction) => MessageDecision;
   applyOutcome?: (document: unknown, transaction: OutcomeTransaction) => void;
   /**
@@ -156,7 +162,9 @@ export class HostExecutionCore {
     this.stopMemoryUpdates = options.memory?.onChange(binding => {
       const wake = this.memoryWaking.then(async () => {
         if (this.stopped) return;
+        const concluded = this.concluded();
         this.resumeMemory(binding);
+        this.noticeSettled(concluded);
         this.switchVersions();
         this.armScan(this.now() + this.reconcileMs);
         const result = await this.flushWakes();
@@ -317,7 +325,9 @@ export class HostExecutionCore {
         } else if (routine.next && !pending.has(routine.next.dedupKey)) scheduleNext(state, routine, this.now());
       }
     });
+    const concluded = this.concluded();
     this.resumeMemory();
+    this.noticeSettled(concluded);
     this.notifyOutbox();
     await this.drain();
   }
@@ -325,6 +335,7 @@ export class HostExecutionCore {
     this.assertOpen();
     this.again = true;
     if (this.draining) return this.draining;
+    const concluded = this.concluded();
     this.draining = (async () => {
       do { this.again = false; await this.scan(); } while (this.again && !this.stopped);
     })().finally(() => {
@@ -333,6 +344,7 @@ export class HostExecutionCore {
       this.armWakeRetry();
       this.armLiveScan();
       this.armCancelProbe();
+      this.noticeSettled(concluded);
       if (this.again && !this.stopped) return this.drain();
     });
     return this.draining;
@@ -345,6 +357,17 @@ export class HostExecutionCore {
     await this.eventIterator?.return?.();
     await Promise.all([this.draining, this.memoryWaking, this.eventPump, this.cancelProbing,
       ...(this.outboxContext.getStore() ? [] : [this.outboxNotifying])]);
+  }
+  /** The concluded intent ids before one drain cycle or one memory reconciliation. Only read when a Host takes `onSettled`. */
+  private concluded(): Set<string> | undefined {
+    if (!this.options.onSettled) return undefined;
+    return new Set(Object.values(this.ledger.snapshot().intents).flatMap(intent => intent.conclusion ? [intent.id] : []));
+  }
+  private noticeSettled(before: Set<string> | undefined): void {
+    if (!before || this.stopped) return;
+    try {
+      if (Object.values(this.ledger.snapshot().intents).some(intent => intent.conclusion && !before.has(intent.id))) this.options.onSettled?.();
+    } catch { /* A hint cannot change the drain result or roll back committed state. */ }
   }
   private notifyOutbox(): void {
     if (this.stopped || !this.options.onOutbox ||

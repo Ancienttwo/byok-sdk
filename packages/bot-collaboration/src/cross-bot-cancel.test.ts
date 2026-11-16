@@ -1,8 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { hash, taskId } from '@byok-sdk/server/execution-core';
+import { hash, MIN_TOMBSTONE_RETENTION_MS, taskId } from '@byok-sdk/server/execution-core';
 import { openTeam, type TestTeam } from './__tests__/team.test-support';
 import { crossBot } from './__tests__/cross-bot.test-support';
 import type { AgentMessageInput } from './host';
+import { stateOf } from './model';
 
 let fixture: TestTeam;
 afterEach(async () => { await fixture?.close(); vi.restoreAllMocks(); });
@@ -128,6 +129,46 @@ it('crash after the arbitration commit and before core.cancel -> restart deliver
   await fixture.reopen();
   await expect(t.host().cancelDelegation(d.id)).resolves.toEqual({ delegationId: d.id, result: 'already_settled', verdict: 'cancelled' });
   expect(t.delegation(d.id).chainTurnIds).toEqual([d.id]);
+  await t.finish(hash(['bot_reply', d.id]));
+});
+
+it('#2253: a cancel whose target ended and was compacted is marked delivered and no longer blocks a later cancel', async () => {
+  fixture = await openTeam({ routeMessages: true });
+  const first = (await delegated('stuck-cancel')).d;
+  await claimed(first.id);
+  const core = t.host().core, real = core.cancel.bind(core);
+  const cancel = vi.spyOn(core, 'cancel').mockRejectedValue(new Error('failed before commit'));
+  await expect(t.host().cancelDelegation(first.id)).rejects.toThrow('failed before commit');
+  (await t.running(first.id)).finish({});
+  expect(await verdict(first.id)).toMatchObject({ verdict: 'cancelled' });
+  await t.finish(hash(['bot_reply', first.id]));
+  await core.flushProjections(async () => {});
+  expect(fixture.ledger.compact({ acknowledgedIntentKeys: [first.id], now: Date.now(), tombstoneRetentionMs: MIN_TOMBSTONE_RETENTION_MS }))
+    .toMatchObject({ compactedIntents: 1 });
+  // A pass already marked the concluded target's cancel delivered. A ledger that an earlier release left stuck still has it open.
+  fixture.ledger.transaction(s => { stateOf(s.application).delegations[first.id]!.cancel!.delivered = false; });
+  cancel.mockImplementation(real);
+  const earlier = cancel.mock.calls.length;
+  const second = (await delegated('later-cancel')).d;
+  await claimed(second.id);
+  await expect(t.host().cancelDelegation(second.id)).resolves.toEqual({ delegationId: second.id, result: 'cancelled' });
+  // Both facts are delivered, so the timer arms no cancel retry.
+  expect([t.delegation(first.id).cancel, t.delegation(second.id).cancel]).toEqual([expect.objectContaining({ delivered: true }), expect.objectContaining({ delivered: true })]);
+  expect(cancel.mock.calls.slice(earlier).map(([key]) => key)).not.toContain(first.id);
+  expect(await verdict(second.id)).toMatchObject({ verdict: 'cancelled' });
+  await t.finish(hash(['bot_reply', second.id]));
+});
+
+it('#2253: a drain error after the cancel commit marks the cancel delivered, rejects once and is not sent again', async () => {
+  fixture = await openTeam({ routeMessages: true });
+  const { d } = await delegated('cancel-drain-error');
+  await claimed(d.id);
+  const core = t.host().core, real = core.cancel.bind(core);
+  const cancel = vi.spyOn(core, 'cancel').mockImplementationOnce(async key => { await real(key); return { drainError: new Error('Host job failed') }; });
+  await expect(t.host().cancelDelegation(d.id)).rejects.toThrow('Host job failed');
+  expect(t.delegation(d.id).cancel).toMatchObject({ delivered: true });
+  expect(await verdict(d.id)).toMatchObject({ verdict: 'cancelled', reason: 'user_cancelled' });
+  expect(cancel).toHaveBeenCalledTimes(1);
   await t.finish(hash(['bot_reply', d.id]));
 });
 

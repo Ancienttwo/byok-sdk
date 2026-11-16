@@ -715,6 +715,11 @@ backup made before this change, or start a new ledger.
 
 The Host drains application commands until all new turns have a K4 intent.
 An immediate terminal cannot leave a continuation without a wake.
+K4 also settles intents in drains that the Host did not start: a terminal
+event, a cancel probe or a retry timer (#2244). Through `HostOptions.onSettled`,
+each such settlement queues one coalesced pass behind the Host's serial calls,
+so the Turn, its successors and its deliveries advance with no Host call.
+A settlement that commits while the Host closes waits for `recover()`.
 K4 schedules and cancels routine wakes through its outbox. A resume of the
 same key replaces a pending cancel with the schedule, so the SDK holds one
 wake. A failed SDK wake call rejects the K4 drain, and the Host call that
@@ -1395,9 +1400,13 @@ chain Turn. That Turn then accepts no first message and applies no outcome.
 Without a K4 intent, the transaction closes the Turn and sets `cancelled`.
 It does not call `core.cancel`. With an intent, the Host calls `core.cancel`
 after the commit and then sets `delivered`. Each `process` pass delivers an
-undelivered cancel to its frozen target, so a restart completes it. When
-`core.cancel` fails, `cancelDelegation` rejects, but the cancel stays
-committed and the timer delivers it. A repeat gives `cancel_pending` until the
+undelivered cancel to its frozen target, so a restart completes it. Each
+cancel is delivered on its own, so one failure does not hold back the others
+(#2253). When `core.cancel` fails before the K4 commit, `cancelDelegation`
+rejects, but the cancel stays committed and the timer delivers it. When the
+drain after the K4 commit fails, the cancel is delivered and the call rejects
+with that drain error once. A cancel whose target intent has concluded, or was
+compacted after concluding, is delivered with no `core.cancel` call. A repeat gives `cancel_pending` until the
 verdict and `already_settled` with the verdict after it; neither writes or calls
 `core.cancel` ([idempotent owner cancels](#idempotent-owner-cancels-1405)).
 

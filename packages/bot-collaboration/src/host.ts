@@ -230,6 +230,7 @@ export class BotCollaboration {
   private chain: Promise<unknown> = Promise.resolve();
   private timer?: ReturnType<typeof setTimeout>;
   private closed = false;
+  private passQueued = false;
   private readonly now: () => number;
   private readonly connectorTimeoutMs: number;
   private readonly deliveryTimeoutMs: number;
@@ -356,6 +357,8 @@ export class BotCollaboration {
       } },
       applyMessage: (input, tx) => this.applyMessage(input, tx),
       applyOutcome: (document, tx) => this.applyOutcome(document, tx),
+      // #2244: K4 settles intents in drains that K8 did not start (events, cancel probes, retry timers).
+      onSettled: () => this.schedulePass(),
       // #957: K4 sends nothing to a device that is frozen or owned by H: not the timer drain, not a `bot.core` call.
       // #1229: the Host also reserves one slot of each device for user-source work.
       admitSubmit: (intent, state) => !deviceRefusal(stateOf(state.application as LedgerState['application']), intent.execution.deviceId)
@@ -725,8 +728,18 @@ export class BotCollaboration {
     if (this.closed) throw new Error('Bot Host is closed');
     refuseExported(this.snapshot());
     const result = await this.core.consumeMessage(input);
-    if (result.outcome === 'accepted') queueMicrotask(() => { if (!this.closed) void this.drain().catch(() => {}); });
+    if (result.outcome === 'accepted') this.schedulePass();
     return result;
+  }
+  /**
+   * One coalesced K8 pass after a K4 settlement or an accepted message. The caller never awaits it: a K8 pass calls
+   * `core.drain()`, so a K4 callback that waited for it would wait on itself. A pass that is queued and not started reads
+   * the ledger when it starts, so later notices join it. After `close()` the ledger keeps the work for `recover()`.
+   */
+  private schedulePass(): void {
+    if (this.closed || this.passQueued) return;
+    this.passQueued = true;
+    queueMicrotask(() => { void this.exclusive(async () => { this.passQueued = false; await this.process(); }).catch(() => {}); });
   }
   private applyMessage(input: AgentMessageInput, tx: MessageTransaction): { outcome: 'accepted' | 'refused'; reasonCode?: string } {
     const state = stateOf(tx.application);
@@ -748,7 +761,8 @@ export class BotCollaboration {
   /**
    * Owner API ("Cancel", §8.8), from A's delegation chip or from B's `bot_request` Turn. Idempotent (#1405): an earlier cancel
    * gives `cancel_pending` and a verdict `already_settled`, and neither writes or sends. Refuses with `DelegationError`.
-   * It rejects when `core.cancel` fails. The cancel fact is already committed, and the timer delivers it later.
+   * It rejects when `core.cancel` fails. The cancel fact is already committed. A failure before the K4 commit leaves it for
+   * the timer; a drain failure after the commit leaves it delivered (#2253).
    */
   cancelDelegation(id: string, ...by: PrincipalArg): Promise<DelegationCancelResult> {
     return this.exclusive(async () => {
@@ -779,14 +793,21 @@ export class BotCollaboration {
   /**
    * Deliver each committed cancel to its frozen target (§8.8). A crash before
    * `delivered` leaves the fact for the next pass. It never picks a new Turn.
+   * A cancel is delivered once K4 commits it, even when the drain after that commit fails, and when its target intent has
+   * concluded or was compacted after concluding (#2253). Each fact is tried on its own; the first error is rethrown.
    */
   private async deliverCancels(): Promise<void> {
+    let failure: { error: unknown } | undefined;
     for (const d of Object.values(this.snapshot().delegations)) {
       if (!d.cancel || d.cancel.delivered) continue;
-      const result = await this.core.cancel(d.cancel.targetTurnId);
-      if ('drainError' in result) throw result.drainError;
-      this.write(s => { stateOf(s.application).delegations[d.id]!.cancel!.delivered = true; });
+      try {
+        const target = this.core.intent(d.cancel.targetTurnId);
+        const result = target && !target.conclusion ? await this.core.cancel(d.cancel.targetTurnId) : {};
+        this.write(s => { stateOf(s.application).delegations[d.id]!.cancel!.delivered = true; });
+        if ('drainError' in result) throw result.drainError;
+      } catch (error) { failure ??= { error }; }
     }
+    if (failure) throw failure.error;
   }
 
   /**

@@ -928,6 +928,7 @@ export declare class BotCollaboration {
     private chain;
     private timer?;
     private closed;
+    private passQueued;
     private readonly now;
     private readonly connectorTimeoutMs;
     private readonly deliveryTimeoutMs;
@@ -1067,11 +1068,18 @@ export declare class BotCollaboration {
         outcome: 'accepted' | 'refused';
         reasonCode?: string;
     }>;
+    /**
+     * One coalesced K8 pass after a K4 settlement or an accepted message. The caller never awaits it: a K8 pass calls
+     * `core.drain()`, so a K4 callback that waited for it would wait on itself. A pass that is queued and not started reads
+     * the ledger when it starts, so later notices join it. After `close()` the ledger keeps the work for `recover()`.
+     */
+    private schedulePass;
     private applyMessage;
     /**
      * Owner API ("Cancel", §8.8), from A's delegation chip or from B's `bot_request` Turn. Idempotent (#1405): an earlier cancel
      * gives `cancel_pending` and a verdict `already_settled`, and neither writes or sends. Refuses with `DelegationError`.
-     * It rejects when `core.cancel` fails. The cancel fact is already committed, and the timer delivers it later.
+     * It rejects when `core.cancel` fails. The cancel fact is already committed. A failure before the K4 commit leaves it for
+     * the timer; a drain failure after the commit leaves it delivered (#2253).
      */
     cancelDelegation(id: string, ...by: PrincipalArg): Promise<DelegationCancelResult>;
     /** Owner API ("End", §8.3): close a held reply or an uncertain delegation with `abandoned`. */
@@ -1083,6 +1091,8 @@ export declare class BotCollaboration {
     /**
      * Deliver each committed cancel to its frozen target (§8.8). A crash before
      * `delivered` leaves the fact for the next pass. It never picks a new Turn.
+     * A cancel is delivered once K4 commits it, even when the drain after that commit fails, and when its target intent has
+     * concluded or was compacted after concluding (#2253). Each fact is tried on its own; the first error is rethrown.
      */
     private deliverCancels;
     /**

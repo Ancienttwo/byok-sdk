@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { autoBots, openTeam, type TestTeam } from './__tests__/team.test-support';
+import { autoBots, openTeam, settleOutsideK8, type TestTeam } from './__tests__/team.test-support';
 import { ROOM_GRACE_MS } from './rooms';
 import { stateOf } from './model';
 import { HostLedger, MIN_TOMBSTONE_RETENTION_MS } from '@byok-sdk/server/execution-core';
@@ -153,7 +153,7 @@ it('releases the seat of a room Turn whose intent a writer without the veto comp
   const round = await host().roomInput('retired-seat', room.id, 'Review', [profiles[0]!.id, profiles[1]!.id]);
   const first = seats(round)[0]!, second = seats(round)[1]!;
   // K4 settles the seat intent outside a K8 pass, and a maintenance writer without the veto compacts it.
-  await host().core.cancel(first.id);
+  await settleOutsideK8(host(), first.id);
   await host().core.flushProjections(async () => {});
   const other = new HostLedger(join(fixture.root, 'host.sqlite'), fixture.ledger.tenant);
   try {

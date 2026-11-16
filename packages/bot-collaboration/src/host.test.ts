@@ -259,6 +259,47 @@ it('reports a missing outcome as failure and exposes cancellation through the se
   await vi.waitFor(async () => { await bot.drain(); expect(bot.snapshot().turns[cancelled]).toMatchObject({ status: 'failed', conclusion: 'cancelled' }); }, { timeout: 5000 });
 });
 
+/** #2244: observes only. No helper calls `drain()`, so the Host must advance on its own after K4 settles. */
+async function observed(id: string, turn: Record<string, unknown>) {
+  await vi.waitFor(() => expect(bot.snapshot().turns[id]).toMatchObject(turn), { timeout: 5000 });
+}
+it('#2244: a K4 event settlement advances the Turn and freezes its successor with no K8 call', async () => {
+  await setup();
+  const root = await bot.input('self-success', 'Work');
+  (await running(root)).finish({ delegate: [{ to: 'main', request: 'Continue' }] });
+  await observed(root, { status: 'succeeded' });
+  expect(Object.values(fixture.ledger.snapshot().outbox)).toContainEqual(expect.objectContaining({ id: `bot-turn:${root}` }));
+  const child = Object.values(bot.snapshot().turns).find(t => t.source === 'continuation')!;
+  await running(child.id);
+});
+it('#2244: a K4 event failure ends the Turn with no K8 call', async () => {
+  await setup();
+  const id = await bot.input('self-failure', 'Work');
+  (await running(id)).fail();
+  await observed(id, { status: 'failed' });
+});
+it('#2244: a cancel terminal found by the K4 probe ends the Turn with no further K8 call', async () => {
+  await setup();
+  const id = await bot.input('self-cancel', 'Stop this work');
+  await running(id);
+  await vi.waitFor(async () => expect(await fixture.server.tasks.attempt(bot.core.intent(id)!.taskId))
+    .toMatchObject({ claimedRuntime: 'pi', ownerDeviceId: fixture.deviceId }), { timeout: 5000 });
+  await bot.cancelTurn(id);
+  await observed(id, { status: 'failed', conclusion: 'cancelled' });
+});
+it('#2244: a terminal that lands while the Host closes is advanced by recover() alone', async () => {
+  const options = await setup();
+  const id = await bot.input('close-race', 'Work');
+  (await running(id)).finish({});
+  const task = bot.core.intent(id)!.taskId;
+  await vi.waitFor(async () => expect(await fixture.server.tasks.deviceTerminal(task)).toBeDefined(), { timeout: 5000 });
+  await bot.close();
+  extra = new HostLedger(`${fixture.root}/host.sqlite`, fixture.ledger.tenant, { compactVeto: botCompactVeto });
+  bot = new BotCollaboration(fixture.server, extra, options);
+  await bot.recover();
+  await observed(id, { status: 'succeeded' });
+});
+
 it('drains immediate real SDK terminals to a fixed point without stranding a continuation', async () => {
   await setup({}, server => ({ ...server, executions: { submit: async input => {
     const result = await server.executions.submit(input);
