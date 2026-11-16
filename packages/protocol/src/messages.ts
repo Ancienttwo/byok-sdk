@@ -404,7 +404,8 @@ export const RequiredToolsetsSchema = z
  * one writer at a time. The SDK does not make memory read-only; a reader
  * terminal reports memory changes in `agentHomeMemoryChange`. A host sends this
  * field only to a device that advertises `agent-home-readers`: the Agent
- * offers are strict, so an older daemon cannot accept it.
+ * offers are strict, so a device without the configured reader facility
+ * refuses the field.
  */
 export const AgentHomeAccessSchema = z.literal('memory-reader');
 export type AgentHomeAccess = z.infer<typeof AgentHomeAccessSchema>;

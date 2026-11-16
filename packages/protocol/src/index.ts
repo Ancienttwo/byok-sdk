@@ -477,6 +477,7 @@ export type {
 } from './e2ee-member.js';
 
 export {
+  BOT_TURN_OUTCOME_CONTRACT,
   BOT_TURN_OUTCOME_LIMITS,
   BotTurnOutcomeSchemaError,
   botTurnOutcomeFragments,

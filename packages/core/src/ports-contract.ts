@@ -20,7 +20,7 @@
  * Adding a port method means editing this table, which is the point: a port
  * grows by contract, not by whichever composition needed something.
  */
-import { CORE_STORE_NAMES, type CoreStoreName } from './stores.js';
+import type { CoreStoreName } from './stores.js';
 
 export const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly string[]>> = {
   mailbox: [
