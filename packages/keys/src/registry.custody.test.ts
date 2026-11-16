@@ -15,6 +15,7 @@ import { InMemoryProviderProfileStore } from './profile-store';
 import { ProviderRegistry, type ProviderConfiguration } from './registry';
 import type { CommandRunner } from './command-runner';
 import { LinuxSecretServiceSecretStore } from './linux-secret-service';
+import { MacOsKeychainSecretStore } from './macos-keychain';
 import { InMemorySecretStore, type ModelProviderSecretName, modelProviderSecretName } from './secret-store';
 import { SqliteProviderProfileStore, providerConfigurationLockPath } from './sqlite-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
@@ -189,11 +190,39 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     await expect(profiles.getPending('openai')).resolves.toBeUndefined();
   });
 
-  it('explicitly replaces a legacy entry without exposing it', async () => {
-    await registry().configure(OPENAI, OLD_KEY);
-    vi.spyOn(secrets, 'get').mockRejectedValueOnce(new ByokKeysError('KEYCHAIN_LEGACY', 'legacy'));
-    await expect(registry().replaceSecret('openai', NEW_KEY)).resolves.toMatchObject({ configuration_pending: false });
-    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
+  it.each(['configure', 'replaceSecret'] as const)('%s refuses a macOS entry the SDK did not write before any custody change; delete never reads it', async (operation) => {
+    const entries = new Map<string, string>();
+    const calls: string[][] = [];
+    const commandRunner: CommandRunner = async (_command, args, stdin) => {
+      const argv = args[0] === '-i' ? [...stdin!.matchAll(/"([^"]*)"|(\S+)/gu)].map((match) => match[1] ?? match[2]!) : args;
+      calls.push(argv);
+      const service = argv[argv.indexOf('-s') + 1]!;
+      if (argv[0] === 'add-generic-password') entries.set(service, argv[argv.indexOf('-w') + 1]!);
+      if (argv[0] === 'delete-generic-password') return { exitCode: entries.delete(service) ? 0 : 44, stdout: '', stderr: '' };
+      const value = argv[0] === 'find-generic-password' ? entries.get(service) : '';
+      return { exitCode: value === undefined ? 44 : 0, stdout: value ?? '', stderr: '' };
+    };
+    const macos = new MacOsKeychainSecretStore<ModelProviderSecretName>({ platform: 'darwin', commandRunner });
+    const subject = new ProviderRegistry({ now: () => new Date(clock), profileStore: profiles, secretStore: macos });
+    await subject.configure(OPENAI, OLD_KEY);
+    const [service] = [...entries.keys()];
+    entries.set(service!, 'sk-foreign-entry');
+    const markPending = vi.spyOn(profiles, 'markPending');
+    const commit = vi.spyOn(profiles, 'commitCustody');
+
+    const change = operation === 'configure'
+      ? subject.configure({ ...OPENAI, model: 'gpt-5.2-mini' }, NEW_KEY)
+      : subject.replaceSecret('openai', NEW_KEY);
+    await expect(change).rejects.toMatchObject({ code: 'KEYCHAIN_SECRET_DECODE_FAILED' });
+    expect(entries.get(service!)).toBe('sk-foreign-entry');
+    expect(markPending).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+    await expect(profiles.get('openai')).resolves.toMatchObject({ model: OPENAI.model });
+
+    calls.length = 0;
+    await expect(subject.delete('openai')).resolves.toBe(true);
+    expect(calls.map((argv) => argv[0])).toEqual(['delete-generic-password']);
+    await expect(profiles.getPending('openai')).resolves.toBeUndefined();
   });
 
   it('a new key overwrites a previous entry the store cannot read (#1946)', async () => {

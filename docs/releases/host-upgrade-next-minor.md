@@ -18,10 +18,6 @@ Hosted stores with an old `entity_kind_check` are refused with
 `hosted_schema_unsupported_old` before any DDL. The server ledger opening
 boundary is handled separately by #2286.
 
-macOS Keychain values without the configured prefix are refused with
-`KEYCHAIN_LEGACY`. An explicit provider reconfiguration with a
-new key overwrites a same-name legacy record; back up what you need first.
-
 `scopeSecretStore`, `listPiCatalogModels`, `sealedRoutineInstruction`, the
 TruthStore provider profile adapter, and the local Host switch importer and its
 commit/discard APIs are removed. Use `SecretStore.scope(secretScopeId(scope))`,

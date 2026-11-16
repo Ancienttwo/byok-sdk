@@ -31,9 +31,7 @@ import { isSharedSecretValue } from './secret-value.js';
  * `ProviderRegistry.replaceSecret` and `configure` overwrite such an entry, so
  * a store a Host injects must report any other decode problem, including a
  * value without the prefix, under another code (such as
- * `KEYCHAIN_SECRET_DECODE_FAILED`); the registry never overwrites those. A macOS
- * legacy entry reports `KEYCHAIN_LEGACY`, which an explicit provider
- * reconfiguration may overwrite without decoding its contents.
+ * `KEYCHAIN_SECRET_DECODE_FAILED`); the registry never overwrites those.
  */
 export interface SecretStore<TName extends string = string> {
   /** Human-readable backend name, safe to show a user. Never contains a secret. */
