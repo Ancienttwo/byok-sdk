@@ -13,6 +13,7 @@ import {
   type Envelope,
   type SealedDeclineCode,
   type ClaimedExecutor,
+  type SteerRefusalReason,
   type RuntimeId,
   type TerminalInferenceUsage,
   type TerminalPreparedObservation,
@@ -88,7 +89,7 @@ import { offerSettlements, trackOffer, taskTearingDown } from './task-runner/sup
 import { publishAgentMessage, describeAgentResult, submitAgentResult, recoverAgentMessageOutboxes, agentMessageOutbox, cancelRecoveredAgentMessage, activateAgentMessage, sendAgentMessageRecord, handleAgentMessageDisposition, agentResultStore } from './task-runner/agent-message.js';
 import { withAgentMessageMcp, withAgentResultMcp, withAgentMemoryMcp, withHostToolsetContext, resolveMcpServers } from './task-runner/mcp-contexts.js';
 import { activeMemoryContext, runMemoryOperation, quiesceAndSnapshotAgentMemory, bindAgentMemoryFilesystem } from './task-runner/agent-memory.js';
-import { stopAcceptingOffers, closeActiveSession, awaitActiveSessionClose, interruptBounded, teardownActiveTask, shutdownTask, armMaxDurationTimer, handleCancel, handleSteer } from './task-runner/lifecycle.js';
+import { stopAcceptingOffers, closeActiveSession, awaitActiveSessionClose, interruptBounded, teardownActiveTask, shutdownTask, armMaxDurationTimer, handleCancel, handleSteer, refuseSteer } from './task-runner/lifecycle.js';
 import { reserveOfferHome, admitOfferLimits, handleSealedOffer, declineSealedOffer, declineOfferMissingCapabilities } from './task-runner/offer-admission.js';
 import { prepareOfferRuntime, pickAdapter } from './task-runner/offer-runtime.js';
 import { requestApproval, handleApprove, handleReject } from './task-runner/approvals.js';
@@ -949,8 +950,13 @@ export class TaskRunner {
             );
             return;
           }
-          if (!this.tasks.has(taskId)) return;
-          await this.deps.sealedTasks.applySteer(envelope, (text) => this.handleSteer(taskId, text));
+          // A steer for a task that is not active is refused unopened: the
+          // refusal names the steer by id and carries no content.
+          if (!this.tasks.has(taskId)) {
+            await this.refuseSteer(taskId, envelope.id, 'task_not_active');
+            return;
+          }
+          await this.deps.sealedTasks.applySteer(envelope, (text) => this.handleSteer(taskId, envelope.id, text));
           return;
         }
         // #654 §6.2: a task that seals its input takes no plaintext steer.
@@ -958,7 +964,7 @@ export class TaskRunner {
           console.error(`[byok/client] plaintext task.steer for task ${taskId} dropped: the task seals its input`);
           return;
         }
-        await this.handleSteer(taskId, envelope.payload.text);
+        await this.handleSteer(taskId, envelope.id, envelope.payload.text);
         return;
       }
       case 'task.approve':
@@ -1270,9 +1276,17 @@ export class TaskRunner {
    * run failure of class `input_too_large`, to reject a particular steer
    * without retry. Other errors propagate and keep the existing cursor stall
    * and redelivery behavior.
+   *
+   * Every steer acknowledged without delivery (no active task, no steering
+   * channel, too large for the runtime) is reported as `task.steer_refused`.
    */
-  private handleSteer(taskId: string, text: string): Promise<void> {
-    return handleSteer.call(this, taskId, text);
+  private handleSteer(taskId: string, steerMessageId: string, text: string): Promise<void> {
+    return handleSteer.call(this, taskId, steerMessageId, text);
+  }
+
+  /** Sends the `task.steer_refused` of the steer whose envelope id is `steerMessageId`. */
+  private refuseSteer(taskId: string, steerMessageId: string, reason: SteerRefusalReason): Promise<void> {
+    return refuseSteer.call(this, taskId, steerMessageId, reason);
   }
 
   /**
