@@ -78,7 +78,7 @@ it('crash residue begins runtime TTL at restart, regardless of its old directory
  f.advance(DAY-1);await f.sweeper.runPass('periodic');expect(await exists(s.runtimeDir)).toBe(true);
  f.advance(1);await f.sweeper.runPass('periodic');expect(await exists(s.runtimeDir)).toBe(false);
 });
-it('keeps an execution holding a Grok login through release and both sweeps, reports it each pass, and reclaims it once it is gone',async()=>{
+it('keeps an execution holding a Grok login through release, both sweeps and a restart, reports it each pass, and reclaims it once it is gone',async()=>{
  const f=await fixture({ttlMs:{'exec-runtime':DAY}}),held=await f.scratch.create(),other=await f.scratch.create(),named=await f.scratch.create();
  const login=path.join(held.sdkDir,'grok-home','auth.json'),execution=path.dirname(held.sdkDir);
  await fs.mkdir(path.dirname(login),{mode:0o700});await fs.writeFile(login,'refreshed',{mode:0o600});
@@ -90,8 +90,17 @@ it('keeps an execution holding a Grok login through release and both sweeps, rep
  expect([...f.failures].sort()).toEqual([`exec-runtime:grok_login_preserved:${login}`,`exec-sdk:grok_login_preserved:${login}`]);
  expect(await fs.readFile(login,'utf8')).toBe('refreshed');expect((await fs.stat(login)).mode&0o777).toBe(0o600);
  expect(await exists(path.dirname(other.sdkDir))).toBe(false);
+ await f.sweeper.runPass('periodic');expect(f.failures).toHaveLength(4);
+ // A daemon restart: a new owner of the same scratch root, whose startup exec-sdk sweep must prove the namespace without the login.
+ const restart=new ScratchRoot(f.config.scratchRoot,f.clock);await restart.open(f.store);
+ const registry=createRetentionRegistry({storeDir:f.store,scratch:restart,config:f.config,clock:f.clock,journal:()=>undefined,identity:()=>identity,preparation:()=>undefined,limits:untimedLimits});
+ const reported:string[]=[],sweeper=new RetentionSweeper({registry,config:f.config,clock:f.clock,pressure:new StoragePressure(),freeBytes:async()=>1_000_000_000,jitter:(_s,ms)=>ms,onFailure:(trigger,id,code,_taskId,file)=>{reported.push([trigger,id,code,file].join(':'));}});
+ cleanups.push(()=>sweeper.stop(),()=>registry.close());
+ await expect(sweeper.runPass('startup')).resolves.toMatchObject({failures:2});
+ expect([...reported].sort()).toEqual([`startup:exec-runtime:grok_login_preserved:${login}`,`startup:exec-sdk:grok_login_preserved:${login}`]);
+ expect(await fs.readFile(login,'utf8')).toBe('refreshed');expect((await fs.stat(login)).mode&0o777).toBe(0o600);
  await fs.rm(login);await f.sweeper.runPass('periodic');expect(await exists(held.sdkDir)).toBe(false);
- f.advance(2*DAY);await f.sweeper.runPass('periodic');expect(await exists(execution)).toBe(false);expect(f.failures).toHaveLength(2);
+ f.advance(2*DAY);await f.sweeper.runPass('periodic');expect(await exists(execution)).toBe(false);expect(f.failures).toHaveLength(4);
 });
 it('cleanup failure stays typed and keeps live ownership until retry completes',async()=>{
  const f=await fixture(),s=await f.scratch.create(),original=fs.rm;
