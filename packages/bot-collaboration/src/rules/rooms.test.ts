@@ -57,6 +57,13 @@ it('cancels work that has not started at the deadline; a Turn that was never adm
   }
 });
 
+it('#2247: a seat that expires keeps the conclusion that its Turn already has', () => {
+  const { slice, seats: [seat] } = round(['a']), turns = { [seat!]: { status: 'failed', conclusion: 'cancelled' } } as never as Parameters<typeof advanceRoomSeats>[0]['turns'];
+  advanceRooms(slice, {}, 0);
+  advanceRoomSeats({ team: slice, turns }, {}, ROOM_GRACE_MS, () => {}, noPublish);
+  expect([slice.seats[seat!]!.status, turns[seat!]!.conclusion]).toEqual(['busy', 'cancelled']);
+});
+
 it('releases the seat of a removed or archived member and cancels only work that has not started', () => {
   const cases: Array<[SeatFacts | undefined, boolean]> = [[undefined, true], [{ admitted: true, started: false }, true],
     [{ admitted: true, started: true }, false], [{ admitted: true, started: false, conclusion: 'succeeded' }, false]];

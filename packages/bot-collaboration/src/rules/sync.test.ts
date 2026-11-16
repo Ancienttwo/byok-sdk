@@ -5,6 +5,7 @@ import { DEVICE_NOT_BOUND, DEVICE_SWITCHING, syncTurn, type DeviceRefusal, type 
 import type { Json, Rejection, Turn } from './turn';
 import type { IntentFact } from './delegation';
 import { outcomeOffer, SYSTEM_PROMPT, systemPrompt, type CheckedOffer } from './schema';
+import { canonical } from '@byok-sdk/server/execution-core/canonical';
 
 const OPTIONS: SyncOptions<never> = { now: 1000, models: ['default'], readOnlyToolsets: [],
   limits: { turnLimit: 12, contextMaxBytes: 32_768, instructionMaxBytes: 65_536 }, historyMode: false, routines: [] };
@@ -49,6 +50,27 @@ describe('syncTurn', () => {
     const started = state(false, [consumed()]), other = turn(started);
     syncTurn(started, other, facts({ taskId: 'task', conclusion: 'failed' }, true), OPTIONS, () => {});
     expect(started.rejected[0]!.consumedBy).toBe('t1');
+  });
+
+  it('#2245: gives each block reason its own projection id, so a reason that comes back republishes the same row', () => {
+    let size = 1;
+    const spy = vi.spyOn(protocol, 'composeBotTurnOutcomeSchema').mockImplementation(() => {
+      throw new protocol.BotTurnOutcomeSchemaError('schema-over-budget', `schema is ${size} bytes`);
+    });
+    try {
+      const s = state(), row = turn(s, { status: 'queued' }), outbox = new Map<string, string>(), rows: Array<[string, Json]> = [];
+      // The identity rule of K4 `project`: one id never takes a second value.
+      const publish = (id: string, value: Json) => { if ((outbox.get(id) ?? canonical(value)) !== canonical(value)) throw new Error('Projection identity conflict');
+        outbox.set(id, canonical(value)); rows.push([id, value]); };
+      const sync = (models = OPTIONS.models) => syncTurn(s, row, facts(), { ...OPTIONS, models }, publish);
+      sync(); sync([]); sync(); size = 2; sync();
+      const [a, , again] = rows;
+      expect(a).toEqual([expect.stringMatching(/^blocked:t1:schema_over_budget:[0-9a-f]{12}$/),
+        { owner: 'main', turnId: 't1', code: 'schema_over_budget', reason: 'Outcome schema over budget: schema is 1 bytes' }]);
+      expect(again).toEqual(a);
+      expect(rows.map(([id]) => id.split(':')[2])).toEqual(['schema_over_budget', 'unavailable_model', 'schema_over_budget', 'schema_over_budget']);
+      expect(new Set(rows.map(([id]) => id)).size).toBe(3);
+    } finally { spy.mockRestore(); }
   });
 
   it('cancels a Turn of an archived Bot that has no intent, and reports a concluded Turn without an intent as ended', () => {
@@ -234,7 +256,7 @@ describe('a sealed routine Turn (#953)', () => {
     const row = turn(s, { id: 'occurrence:o1', root: 'occurrence:o1', source: 'routine', request: '', status: 'queued', sealedRoutine: ref });
     expect(syncTurn(s, row, facts(), { ...sealedOptions(), models: [] }, out.publish)).toBeUndefined();
     expect([row.status, row.conclusion, row.blockedReason]).toEqual(['blocked', undefined, 'Unavailable model: default']);
-    expect(out.rows.map(([id]) => id)).toEqual(['blocked:occurrence:o1']);
+    expect(out.rows.map(([id]) => id)).toEqual(['blocked:occurrence:o1:unavailable_model:37ac12f6da71']);
     expect(syncTurn(s, row, facts(), sealedOptions(), out.publish)?.kind).toBe('routine');
     expect([row.status, row.blockedReason]).toEqual(['processing', undefined]);
   });
@@ -252,11 +274,11 @@ describe('a sealed routine Turn (#953)', () => {
       const row = turn(s, { id: 'occurrence:o1', root: 'occurrence:o1', source: 'routine', request: '', status: 'queued', sealedRoutine: ref });
       expect(syncTurn(s, row, facts(), sealedOptions(), out.publish)).toBeUndefined();
       expect([row.status, row.conclusion, row.blockedReason]).toEqual(['blocked', undefined, 'Outcome schema over budget: still too large']);
-      expect(out.rows.map(([id]) => id)).toEqual(['blocked:occurrence:o1']);
+      expect(out.rows.map(([id]) => id)).toEqual(['blocked:occurrence:o1:schema_over_budget:679c7e27ea48']);
       oversized = false;
       expect(syncTurn(s, row, facts(), sealedOptions(), out.publish)?.kind).toBe('routine');
       expect([row.status, row.blockedReason]).toEqual(['processing', undefined]);
-      expect(out.rows.map(([id]) => id)).toEqual(['blocked:occurrence:o1']);
+      expect(out.rows.map(([id]) => id)).toEqual(['blocked:occurrence:o1:schema_over_budget:679c7e27ea48']);
     } finally { spy.mockRestore(); }
   });
 });

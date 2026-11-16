@@ -670,7 +670,8 @@ does that on the Host's explicit acknowledgement. It never runs on its own.
 - An unknown root throws. A root that is already archived counts as
   `alreadyArchivedRoots`.
 - Each call also moves the command records of archived roots and the records
-  with no root. They answer replays for at least `retentionMs`, which must be
+  with no root. A record's root is the root of the command's own Turn, not of
+  an input batch Turn that the command sealed ahead of it (#2254). They answer replays for at least `retentionMs`, which must be
   seven days or more; a later call removes them after that. A retry after the
   window decides again, and an archived Turn, input or round id makes the
   commit throw `RetiredIdentityError` and change nothing. A store makes that
@@ -1104,7 +1105,8 @@ that froze before keeps the execution it froze with, also while it waits in
 the K4 FIFO. A template outside `readOnlyToolsets` refuses the call, which then
 changes nothing. A Bot whose model has no template keeps its stored template,
 and each of its Turns, a sealed routine Turn too, blocks with
-`Unavailable model: <name>` before it freezes (`blocked:<turnId>`). It freezes
+`Unavailable model: <name>` before it freezes (a `blocked:` projection with
+code `unavailable_model`). It freezes
 once a later `setModels` or restart provides the template. No write entry
 refuses a missing template of an existing Bot: a snapshot or `update_bot` that
 names such a model stores the profile and keeps the stored template. A new Bot
@@ -1188,8 +1190,9 @@ drops oldest whole rows until that budget fits. `historyWindow.notice` reports
 omitted messages and refusals.
 History overflow does not block a seat. The frozen Request section keeps the
 complete accepted request. Only a Request that alone exceeds 32 KiB blocks
-the turn. The seat reason and blocked projection report its byte count, the
-limit, and a request to shorten the input.
+the turn. The seat reason and blocked projection (code
+`current_request_too_large`) report its byte count, the limit, and a request
+to shorten the input.
 For room_call seats, the visible caller post is the current request and its
 author id is retained. A pass inherits the earlier visible trigger. This
 request is preserved even if it has left the recent message window.
@@ -1228,6 +1231,19 @@ Rejected feedback is private to its Bot. The next frozen input reserves it.
 An execution that fails before it starts releases that reservation.
 A turn that cannot pass Request or schema admission has status `blocked` and
 `blockedReason`. It creates no intent. `cancelTurn` can cancel it before admission.
+
+Each blocked reason publishes
+`blocked:<turnId>:<code>:<fingerprint>` with `{ owner, turnId, code, reason }`
+when the Turn's reason changes (#2245). `code` is `unavailable_model`,
+`schema_over_budget` or `current_request_too_large`; `reason` has the details,
+such as the model name or byte counts. The fingerprint is the first 12 hex
+digits of the SHA-256 of the canonical JSON of `{ code, reason }`, so a
+projection id never changes value. A Turn whose reason changes while it stays
+blocked gets one more `blocked:` id per reason, and a reason that comes back
+republishes the same id and value, which a receiver deduplicates by id. The
+byte count of `schema_over_budget` follows the team, so each team change can
+publish one more row while the Turn stays blocked. A Host routes these rows by
+the `blocked:` prefix and reads the turn id from the value.
 Other schema composition errors propagate as Host defects.
 
 Unmentioned messages are stored as background. They do not create a seat, but
@@ -1287,6 +1303,10 @@ true.
   own `triggerMessageId`, else the root). A Host tells a mentioned seat from a
   `room_call` seat by this field and does not derive it from the seat id. A
   seat opened before the release that added the field is not backfilled.
+  A `cancelTurn` of a seat Turn that has no intent ends its seat `failed`
+  with reason `cancelled` in the same commit, so the next seat queues at
+  once; the seat deadline never changes the Turn's `cancelled` conclusion
+  (#2247).
 - `room-root:<roomId>:<root>` with `{ roomId, root, seats }`, when every seat
   of every round of the root is terminal, the seats that a `room_call` added
   included. `seats` lists their ids in reservation order; each has its

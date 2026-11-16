@@ -333,7 +333,8 @@ export function advanceRoomSeats(state: { team: RoomsState } & Pick<TurnsState, 
   for (const { seatId, conclusion } of cancel) {
     const turn = state.turns[seatId];
     if (facts[seatId]?.admitted) admitted.push(seatId);
-    else if (turn) { turn.status = 'failed'; turn.conclusion = conclusion; }
+    // A Turn that a command already concluded keeps that conclusion, which it may have reported (#2247).
+    else if (turn && !turn.conclusion) { turn.status = 'failed'; turn.conclusion = conclusion; }
   }
   for (const turn of turns) add(turn.id, turn.botId, turn.request);
   return admitted;
