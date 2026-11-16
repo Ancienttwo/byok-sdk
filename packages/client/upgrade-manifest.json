@@ -86,12 +86,14 @@
     {
       "id": "core-sqlite-node-entry",
       "impact": "additive",
-      "summary": "@byok-sdk/core/sqlite-node is a new Node-only entry exporting readSqliteFileUnchanged(path, readMetadata). It opens an existing, non-empty SQLite file read-only and immutable, runs readMetadata on its main file and closes it, so a store can decide its format before any writable open, pragma or DDL; it returns undefined for :memory:, a missing path or a zero-length file, and throws SqliteReadOnlyOpenError when the file exists but cannot be stat'ed or opened read-only. The core root does not export it. No Host action is required.",
+      "summary": "@byok-sdk/core/sqlite-node is a new Node-only entry exporting readSqliteFileUnchanged(path, readMetadata). It opens an existing, non-empty SQLite file read-only and immutable, runs readMetadata on its main file and closes it, so a store can decide its format before any writable open, pragma or DDL; it returns undefined for :memory:, a missing path or a zero-length file, and throws SqliteReadOnlyOpenError when the file exists but cannot be stat'ed or opened read-only. sqliteOpenPath(path) and sqliteFileUri(path) name a store file for SQLite under one rule, with the Windows extended-length prefix past MAX_PATH; the client journal's writable open uses sqliteOpenPath, and the read-only check opens sqliteFileUri. The core root does not export it. No Host action is required.",
       "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
       "items": [
         "entry:@byok-sdk/core/sqlite-node",
         "export:@byok-sdk/core/sqlite-node#SqliteReadOnlyOpenError",
-        "export:@byok-sdk/core/sqlite-node#readSqliteFileUnchanged"
+        "export:@byok-sdk/core/sqlite-node#readSqliteFileUnchanged",
+        "export:@byok-sdk/core/sqlite-node#sqliteFileUri",
+        "export:@byok-sdk/core/sqlite-node#sqliteOpenPath"
       ]
     },
     {
@@ -1203,6 +1205,16 @@
     },
     {
       "item": "export:@byok-sdk/core/sqlite-node#readSqliteFileUnchanged",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#sqliteFileUri",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#sqliteOpenPath",
       "change": "added",
       "entry": "core-sqlite-node-entry"
     },

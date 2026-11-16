@@ -335,6 +335,8 @@ export const familyOwners = Object.freeze({
     /^packages\/keys\/src\/(?:windows-credential-custody[^/]*|(?:windows-credential-manager|device-sealing-key|sealed-provisioning|pi-provider-launcher-core|provider-profile|provider-profile-binding|secret-store|secret-value|sqlite-profile-store|command-runner)\.ts)$/,
   ],
   'windows-client': [
+    // #2286: an existing journal past MAX_PATH reopened through the read-only check and the writable open.
+    /^packages\/(?:client\/src\/(?:__tests__\/journal-sqlite-path\.test\.ts|util\/sqlite-support\.ts|daemon\/journal\/sqlite-journal\.ts)|core\/src\/sqlite-node\.ts)$/,
     // Runtime PATH detection is exercised on Windows, including native and batch candidates.
     /^packages\/client\/src\/(?:adapters\/(?:runtime-invocation\.ts|antigravity\/resolve-bin\.ts|opencode\/resolve-bin\.ts)|__tests__\/runtime-executable-detection\.test\.ts)$/,
     /^packages\/client\/src\/daemon\/(?:auth-manager|daemon-lifecycle|daemon-record)\.ts$/,

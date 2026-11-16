@@ -2,7 +2,7 @@
 // Select a separate Host database explicitly; never point it at an Agent home
 // or the daemon's SDK store. Acceptance uses SQLite and stub runtimes only.
 import { DatabaseSync } from 'node:sqlite';
-import { readSqliteFileUnchanged } from '@byok-sdk/core/sqlite-node';
+import { readSqliteFileUnchanged, sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
 
 export interface HostSnapshot<T> { readonly revision: number; readonly value: T; }
 
@@ -53,7 +53,7 @@ function hostFormat(db: DatabaseSync, format: HostStoreFormat): 'new' | 'current
  */
 export function openHostDatabase(filename: string, format: HostStoreFormat, pragmas: string): DatabaseSync {
   readSqliteFileUnchanged(filename, db => hostFormat(db, format));
-  const db = new DatabaseSync(filename);
+  const db = new DatabaseSync(sqliteOpenPath(filename));
   try {
     if (hostFormat(db, format) === 'current') {
       db.exec(pragmas);

@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { closeSync, lstatSync, mkdirSync, openSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
-import { readSqliteFileUnchanged } from '@byok-sdk/core/sqlite-node';
+import { readSqliteFileUnchanged, sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
 import type { ByokServer } from '@byok-sdk/server';
 import { AgentRefSchema } from '@byok-sdk/protocol';
 import { BetaError, WINDOW_MS, agentScope, canonicalJson, freeze, hash, invalid, keySpec, taskArguments, text,
@@ -69,7 +69,7 @@ export class BetaLedger {
     // Decided on the unchanged main file before the writable open; inside the
     // exclusive transaction again, where a not-yet-checkpointed WAL is visible.
     readSqliteFileUnchanged(path, db => assertCurrentLedger(db, tenant));
-    this.db = new DatabaseSync(path);
+    this.db = new DatabaseSync(sqliteOpenPath(path));
     try {
       this.db.exec('PRAGMA locking_mode=EXCLUSIVE; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; BEGIN EXCLUSIVE');
       if (assertCurrentLedger(this.db, tenant) === 'empty') {

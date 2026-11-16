@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { readSqliteFileUnchanged } from '@byok-sdk/core/sqlite-node';
+import { readSqliteFileUnchanged, sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
 import type { BotProfile, BotRow, Roster, TranscriptEntry, TurnProjection, TurnRecord } from './types.ts';
 
 const SCHEMA_VERSION = 1;
@@ -74,7 +74,7 @@ export class HostStore {
    */
   static open(file: string, now: () => number = Date.now): HostStore {
     readSqliteFileUnchanged(file, (db) => assertCurrentStore(db, file));
-    const db = new DatabaseSync(file);
+    const db = new DatabaseSync(sqliteOpenPath(file));
     try {
       // The writable connection also sees a WAL the main file does not hold yet.
       const created = assertCurrentStore(db, file) === 'empty';

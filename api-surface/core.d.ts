@@ -388,6 +388,8 @@
 // entry @byok-sdk/core/sqlite-node
 //   SqliteReadOnlyOpenError -> dist/sqlite-node.d.ts
 //   readSqliteFileUnchanged -> dist/sqlite-node.d.ts
+//   sqliteFileUri -> dist/sqlite-node.d.ts
+//   sqliteOpenPath -> dist/sqlite-node.d.ts
 // entry @byok-sdk/core/system-tool
 //   SystemToolHost -> dist/system-tool.d.ts
 //   SystemToolUnavailableError -> dist/system-tool.d.ts
@@ -2072,6 +2074,8 @@ export declare class SqliteReadOnlyOpenError extends Error {
     });
 }
 export declare function readSqliteFileUnchanged<T>(path: string, readMetadata: (db: DatabaseSync) => T): T | undefined;
+export declare function sqliteOpenPath(path: string, platform?: NodeJS.Platform): string;
+export declare function sqliteFileUri(path: string, platform?: NodeJS.Platform): string;
 // ==== @byok-sdk/core dist/store-compatibility.d.ts ====
 export type LocalStoreId = 'server-sqlite' | 'client-journal' | 'keys-profile-store' | 'pi-durable' | 'bot-collaboration-ledger';
 export type StoreCompatibilityVerdict = 'accepted' | 'migration-required' | 'new-path-repair' | 'rejected' | 'absent';

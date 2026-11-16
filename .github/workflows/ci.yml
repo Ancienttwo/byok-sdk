@@ -1012,6 +1012,11 @@ jobs:
           bun run --filter @byok-sdk/client test -- `
             src/__tests__/agent-home-contract.test.ts
 
+      # #2286: an existing journal past MAX_PATH is reopened through the
+      # read-only format check and then the writable open.
+      - name: Run journal long-path tests on Windows
+        run: bun run --filter @byok-sdk/client test -- src/__tests__/journal-sqlite-path.test.ts
+
       - name: Run runtime executable detection tests on Windows
         run: |
           bun run --filter @byok-sdk/client test -- `

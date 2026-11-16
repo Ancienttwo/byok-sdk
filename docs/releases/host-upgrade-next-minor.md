@@ -54,7 +54,8 @@ entries never load it.
   `JournalUnavailableError` and stays in place; it is not quarantined. Other
   stores that call `readSqliteFileUnchanged` get `SqliteReadOnlyOpenError` in
   the same case. On Windows the check opens a path past `MAX_PATH` in the
-  same `\\?\` extended-length form as the writable open.
+  same `\\?\` extended-length form as the writable open: both name the file
+  through `sqliteOpenPath` / `sqliteFileUri` from `@byok-sdk/core/sqlite-node`.
 - A durable replica written in another pi-durable schema version than the
   pinned one is refused instead of migrated forward.
 - A replica lock path that holds another database, such as the replica of a

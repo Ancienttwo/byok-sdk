@@ -48,7 +48,7 @@ export function readSqliteFileUnchanged<T>(
   if (!sqlite) throw new Error('node:sqlite is not available in this runtime');
   let db: DatabaseSync;
   try {
-    db = new sqlite.DatabaseSync(`${fileUri(path)}?mode=ro&immutable=1`, { readOnly: true });
+    db = new sqlite.DatabaseSync(`${sqliteFileUri(path)}?mode=ro&immutable=1`, { readOnly: true });
   } catch (error) {
     throw new SqliteReadOnlyOpenError(path, { cause: error });
   }
@@ -59,23 +59,37 @@ export function readSqliteFileUnchanged<T>(
   }
 }
 
+const EXTENDED = '\\\\?\\';
+
 /**
- * A SQLite `file:` URI naming `path`. SQLite's Windows VFS does not add the
- * extended-length prefix itself, so past the legacy MAX_PATH the path is
- * given as `\\?\<absolute>`, the form the stores' writable opens use; a
- * `file:///` URL cannot carry it. Every byte outside the unreserved set is
- * percent-encoded, so `?`, `#` and `%` in a path stay part of the name.
+ * The path handed to SQLite, which is not always the path the rest of the code
+ * uses. On Windows the SQLite VFS does not apply the extended-length prefix
+ * itself: past the legacy MAX_PATH the open fails, and a failed open is
+ * indistinguishable from a damaged file at the call site. The prefix is
+ * applied only when the path is long enough to need it, so ordinary installs
+ * keep the plain path. Every SQLite open of a store path, writable or the
+ * read-only format check, names the file through this one rule.
  */
-function fileUri(path: string): string {
-  const { resolve, win32 } = process.getBuiltinModule('node:path');
-  let absolute = process.platform === 'win32' ? win32.resolve(path) : resolve(path);
-  if (process.platform === 'win32' && !absolute.startsWith('\\\\?\\') && absolute.length >= 240) absolute = `\\\\?\\${absolute}`;
-  const bytes = new TextEncoder().encode(absolute);
+export function sqliteOpenPath(path: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform !== 'win32') return path;
+  const absolute = process.getBuiltinModule('node:path').win32.resolve(path);
+  if (absolute.startsWith(EXTENDED) || absolute.length < 240) return absolute;
+  return EXTENDED + absolute;
+}
+
+/**
+ * A SQLite `file:` URI naming `path` as {@link sqliteOpenPath} does. A
+ * `file:///` URL cannot carry the Windows extended-length prefix, so the URI
+ * is built directly: every UTF-8 byte outside the unreserved set and `/` is
+ * percent-encoded, so `%`, `#`, `?` and non-ASCII characters stay part of the
+ * name.
+ */
+export function sqliteFileUri(path: string, platform: NodeJS.Platform = process.platform): string {
+  const target = platform === 'win32' ? sqliteOpenPath(path, platform) : process.getBuiltinModule('node:path').posix.resolve(path);
   let encoded = '';
-  for (const byte of bytes) {
+  for (const byte of new TextEncoder().encode(target)) {
     const char = String.fromCharCode(byte);
     encoded += /[A-Za-z0-9._~/-]/.test(char) ? char : `%${byte.toString(16).toUpperCase().padStart(2, '0')}`;
   }
   return `file:${encoded}`;
 }
-
