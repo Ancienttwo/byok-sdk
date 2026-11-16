@@ -115,7 +115,7 @@ async function smoke(): Promise<void> {
   }));
   await profiles.close();
   const daemon = createDaemon({
-    localAgentRelease: { version: '0.0.0-desktop-smoke' }, productName: 'BYOK Desktop Smoke', productId: PRODUCT_ID, serverUrl: listener.serverUrl,
+    localAgentRelease: { version: '0.0.0-desktop-smoke' }, productName: 'BYOK Desktop Smoke', productId: PRODUCT_ID, deviceName: 'desktop-smoke', serverUrl: listener.serverUrl,
     storeDir: path.join(root, 'store'), storage: { scratchRoot: path.join(root, 'scratch') },
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: EGRESS_POLICY },
     runtimeAllowlist: ['pi'], ...hosting.daemon,

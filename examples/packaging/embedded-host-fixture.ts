@@ -90,7 +90,7 @@ async function host(): Promise<void> {
   }));
   await profiles.close();
   const daemon = createDaemon({
-    localAgentRelease: { version: '0.0.0-packaging' }, productName: 'BYOK Packaging', productId: PRODUCT_ID, serverUrl,
+    localAgentRelease: { version: '0.0.0-packaging' }, productName: 'BYOK Packaging', productId: PRODUCT_ID, deviceName: 'packaging-host', serverUrl,
     storeDir: path.join(root, 'store'), storage: { scratchRoot: path.join(root, 'scratch') },
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: EGRESS_POLICY },
     runtimeAllowlist: ['pi'], ...hosting.daemon, runtimes: hosting.adapters.runtimes,
