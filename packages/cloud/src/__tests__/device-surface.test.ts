@@ -65,7 +65,7 @@ describe('POST /byok/messages', () => {
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
 
     const response = await send(harness, device.authorization, [
-      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }),
       createEnvelope('task.started', {}, { taskId }),
     ]);
 
@@ -79,7 +79,7 @@ describe('POST /byok/messages', () => {
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId });
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId });
 
     await send(harness, device.authorization, [claim]);
     const response = await send(harness, device.authorization, [
@@ -107,7 +107,7 @@ describe('POST /byok/messages', () => {
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     const response = await send(harness, device.authorization, [
-      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }),
       createEnvelope('task.started', {}, { taskId }),
     ]);
 
@@ -138,7 +138,7 @@ describe('POST /byok/messages', () => {
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId });
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId });
     const broken = { ...createEnvelope('task.started', {}, { taskId }), task_id: 42 };
     const started = createEnvelope('task.started', {}, { taskId });
 
@@ -158,13 +158,17 @@ describe('POST /byok/messages', () => {
     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.status).toBe('running');
   });
 
-  it('still fails the whole request for a broken frame: another wire major or an entry without a UUID id', async () => {
+  it('still fails the whole request for an entry without a UUID id, and refuses another wire major per entry', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const started = createEnvelope('task.started', {}, { taskId: 'task-1' });
 
     expect((await send(harness, device.authorization, [started, { ...started, id: 'not-a-uuid' }])).status).toBe(400);
-    expect((await send(harness, device.authorization, [started, { ...started, v: 3 }])).status).toBe(400);
+    const otherMajor = await send(harness, device.authorization, [{ ...started, v: 3 }]);
+    expect(otherMajor.status).toBe(200);
+    expect(MessagesSendResponseSchema.parse(await otherMajor.json()).outcomes).toEqual([
+      { id: started.id, outcome: 'rejected', reason: 'protocol_version_unsupported' },
+    ]);
   });
 
   it('refuses a terminal whose stored receipt is not canonical without failing the batch (#1121)', async () => {
@@ -172,10 +176,10 @@ describe('POST /byok/messages', () => {
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId });
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId });
     await send(harness, device.authorization, [claim]);
     await harness.stores.receipts.record(TENANT_A, { key: terminalReceiptKey(taskId), body: 'not an envelope' });
-    const fail = createEnvelope('task.fail', { reason: 'boom', retryable: false, agentRef: TEST_AGENT_REF }, { taskId });
+    const fail = createEnvelope('task.fail', { reason: 'boom', retryable: false, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId });
     const started = createEnvelope('task.started', {}, { taskId });
 
     const response = await send(harness, device.authorization, [fail, started]);
@@ -192,8 +196,8 @@ describe('POST /byok/messages', () => {
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    await send(harness, device.authorization, [createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId })]);
-    const fail = { ...createEnvelope('task.fail', { reason: 'capacity', agentRef: TEST_AGENT_REF }, { taskId }) };
+    await send(harness, device.authorization, [createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId })]);
+    const fail = { ...createEnvelope('task.fail', { reason: 'capacity', agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }) };
     const newer = { ...fail, payload: { ...fail.payload, retryable: true, failure: { class: 'provider_capacity', retryAfterMs: 30_000 } } };
 
     const response = await send(harness, device.authorization, [newer]);

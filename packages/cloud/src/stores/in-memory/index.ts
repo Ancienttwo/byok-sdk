@@ -30,6 +30,7 @@ import { InMemoryActivityStore, closeActivityLog, deleteActivityTail } from './a
 import { InMemoryApprovalTimelineStore, closeApprovalTimeline, deleteApprovalTimelineTail } from './approval-timeline.js';
 import { InMemoryAgentEgressStore } from './agent-egress.js';
 import { createInProcessTaskEventsWake } from './mailbox-wake.js';
+import { InMemoryTaskSteerRefusalStore } from './steer-refusals.js';
 import type { TaskEventsWake } from '../../task-events-wake.js';
 
 export { AllowAllRateLimiter } from './rate-limiter.js';
@@ -67,7 +68,7 @@ export interface InMemoryCloudComposition {
   readonly blobContentProxy: BlobContentProxy;
   /** The owner of the used proof `requestId`s in `stores.proofReceipts`, for `proofReceiptRetention`. */
   readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
-  /** Hints after every write to a task's state, activity log or approval timeline in these stores (#1113 A4). */
+  /** Hints after every write to a task's state, activity log, approval timeline or steer refusals in these stores (#1113 A4). */
   readonly taskEventsWake: TaskEventsWake;
 }
 
@@ -134,6 +135,7 @@ export function createInMemoryCloudStores(
       cancellations: new InMemoryTaskCancellationStore(taskState, mailbox, devices),
       receipts,
       egress: new InMemoryAgentEgressStore(clock),
+      steerRefusals: new InMemoryTaskSteerRefusalStore(clock, taskEventsWake.changed),
       proofReceipts,
       blobs: blobs.blobs,
       rateLimiter: new AllowAllRateLimiter(),

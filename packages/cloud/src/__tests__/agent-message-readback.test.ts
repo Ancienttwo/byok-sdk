@@ -19,7 +19,7 @@ describe('Host exact Agent message disposition readback', () => {
     const input = {
       taskId,
       payload: {
-        instruction: 'reply', agentRef, runtime: 'codex',
+        instruction: 'reply', agentRef, target: { lane: 'runtime' as const, runtimeId: 'codex' as const },
         egressPolicy: {
           policyRevision: 'policy-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },

@@ -1257,6 +1257,10 @@ export declare class InMemoryMailboxStore implements MailboxStore {
     append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage>;
     readUsage(tenant: TenantId): Promise<MailboxUsage>;
     readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage>;
+    readMessage(tenant: TenantId, input: {
+        readonly deviceId: string;
+        readonly messageId: string;
+    }): Promise<MailboxMessage | undefined>;
     advanceCursor(tenant: TenantId, input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
     recordDelivery(tenant: TenantId, input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
     readCursor(tenant: TenantId, deviceId: string): Promise<MailboxCursorState>;

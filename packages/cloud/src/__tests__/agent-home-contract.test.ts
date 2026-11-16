@@ -5,11 +5,11 @@ import {
   handleInboundEnvelope,
   tenantStoresFor,
 } from '..';
-import { CLOUD_PROTOCOL_CAPABILITIES } from '../handlers/events';
 import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'profile-r1' } as const;
 const OTHER_AGENT_REF = { agentId: 'agent-2', profileRevision: 'profile-r9' } as const;
+const EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
 
 function deviceStores(harness: CloudHarness, deviceId: string) {
   return tenantStoresFor(
@@ -23,6 +23,7 @@ function agentPayload() {
     instruction: 'remember this Agent task',
     agentRef: AGENT_REF,
     session: { mode: 'resume', sessionRef: 'session-resume-1' } as const,
+    target: { lane: 'auto' } as const,
   };
 }
 
@@ -153,7 +154,7 @@ describe('hosted Agent-home contract', () => {
         handleInboundEnvelope(
           stores,
           device.deviceId,
-          createEnvelope('task.claim', { deviceId: device.deviceId, agentRef }, { taskId }),
+          createEnvelope('task.claim', { deviceId: device.deviceId, agentRef, executor: EXECUTOR }, { taskId }),
         ).then((result) => result.outcome),
       ).resolves.toBe('accepted');
       await expect(
@@ -200,7 +201,10 @@ describe('hosted Agent-home contract', () => {
       body: JSON.stringify({ messages: [hello] }),
     });
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ accepted: 1, capabilities: [...CLOUD_PROTOCOL_CAPABILITIES] });
+    // Wire v7: the handshake answer carries no server capabilities.
+    const body = await response.json();
+    expect(body).toMatchObject({ accepted: 1 });
+    expect(body).not.toHaveProperty('capabilities');
     expect((await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities).toEqual([
       AGENT_HOME_CONTRACT_CAPABILITY,
     ]);
@@ -442,7 +446,7 @@ describe('hosted Agent-home contract', () => {
         other.deviceId,
         createEnvelope(
           'task.claim',
-          { deviceId: other.deviceId, agentRef: AGENT_REF },
+          { deviceId: other.deviceId, agentRef: AGENT_REF, executor: EXECUTOR },
           { taskId },
         ),
       ).then((result) => result.outcome),
@@ -450,7 +454,7 @@ describe('hosted Agent-home contract', () => {
 
     const mismatchedClaim = createEnvelope(
       'task.claim',
-      { deviceId: device.deviceId, agentRef: { agentId: 'agent-other', profileRevision: 'profile-r1' } },
+      { deviceId: device.deviceId, agentRef: { agentId: 'agent-other', profileRevision: 'profile-r1' }, executor: EXECUTOR },
       { taskId },
     );
     expect(await handleInboundEnvelope(stores, device.deviceId, mismatchedClaim).then((result) => result.outcome)).toBe('rejected');
@@ -472,7 +476,7 @@ describe('hosted Agent-home contract', () => {
     );
     expect(await handleInboundEnvelope(stores, device.deviceId, mismatchedDecline).then((result) => result.outcome)).toBe('rejected');
 
-    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF }, { taskId });
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: EXECUTOR }, { taskId });
     expect(await handleInboundEnvelope(stores, device.deviceId, claim).then((result) => result.outcome)).toBe('accepted');
     expect(await handleInboundEnvelope(stores, device.deviceId, createEnvelope('task.started', {}, { taskId })).then((result) => result.outcome)).toBe(
       'accepted',
@@ -487,6 +491,7 @@ describe('hosted Agent-home contract', () => {
         summary: 'wrong Agent',
         sessionRef: 'session-wrong',
         agentRef: { agentId: 'agent-other', profileRevision: 'profile-r1' },
+        executor: EXECUTOR,
       },
       { taskId },
     );
@@ -495,12 +500,12 @@ describe('hosted Agent-home contract', () => {
 
     const first = createEnvelope(
       'task.complete',
-      { summary: 'first', sessionRef: 'session-1', agentRef: AGENT_REF },
+      { summary: 'first', sessionRef: 'session-1', agentRef: AGENT_REF, executor: EXECUTOR },
       { taskId },
     );
     const second = createEnvelope(
       'task.fail',
-      { reason: 'second', agentRef: AGENT_REF },
+      { reason: 'second', agentRef: AGENT_REF, executor: EXECUTOR },
       { taskId },
     );
     expect(await handleInboundEnvelope(stores, device.deviceId, first).then((result) => result.outcome)).toBe('accepted');

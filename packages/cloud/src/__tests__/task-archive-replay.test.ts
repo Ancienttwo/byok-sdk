@@ -19,6 +19,8 @@ import { createHarness, grantAgentHome, offerPayload, TENANT_A, TEST_AGENT_REF }
 
 type Scenario = 'claimed' | 'claimed-recovery' | 'unclaimed-recovery';
 
+const PI_EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+
 async function setUp(scenario: Scenario) {
   const h = createHarness();
   const { deviceId } = await h.pairDevice(TENANT_A);
@@ -28,12 +30,14 @@ async function setUp(scenario: Scenario) {
   const send = (envelope: Envelope) => handleInboundEnvelope(stores, deviceId, envelope);
   const offer = await h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
   const taskId = offer.taskId;
-  const claim = createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, runtime: 'pi' }, { taskId });
+  const claim = createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR }, { taskId });
+  // After a claim the recovery echoes the claimed executor; before one it carries none.
   const recovery = createEnvelope('task.fail', { reason: 'daemon_interrupted', retryable: false, agentRef: TEST_AGENT_REF,
+    ...(scenario === 'unclaimed-recovery' ? {} : { executor: PI_EXECUTOR }),
     recovery: { kind: 'daemon_interrupted', offerId: offer.envelope.id } }, { taskId });
   if (scenario !== 'unclaimed-recovery') expect(await send(claim)).toEqual({ outcome: 'accepted' });
   if (scenario === 'claimed') {
-    expect(await send(createEnvelope('task.fail', { reason: 'ordinary_failure', retryable: false, agentRef: TEST_AGENT_REF }, { taskId })))
+    expect(await send(createEnvelope('task.fail', { reason: 'ordinary_failure', retryable: false, agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR }, { taskId })))
       .toEqual({ outcome: 'accepted' });
   } else {
     expect(await send(recovery)).toEqual({ outcome: 'accepted' });
@@ -57,7 +61,7 @@ describe('replays across the terminal-task archive', () => {
       ...(scenario === 'unclaimed-recovery' ? [] : [
         claim,
         // A claim that does not match the claim snapshot.
-        createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, runtime: 'codex' }, { taskId }),
+        createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId }),
       ]),
       ...(scenario === 'claimed' ? [] : [recovery]),
     ];
@@ -118,7 +122,8 @@ describe('replays across the terminal-task archive', () => {
     // keep the attempt offered so the cloud-settled guard does not preempt it.
     expect(await stores.receipts.get(terminalReceiptKey(offer.taskId))).toBeUndefined();
     const envelope = type === 'task.claim'
-      ? createEnvelope(type, { deviceId, agentRef: TEST_AGENT_REF, ...(harnessId === undefined ? {} : { harnessId }) }, { taskId: offer.taskId })
+      ? createEnvelope(type, { deviceId, agentRef: TEST_AGENT_REF,
+        executor: harnessId === undefined ? PI_EXECUTOR : { kind: 'harness', harnessId } }, { taskId: offer.taskId })
       : createEnvelope(type, { reason: 'daemon_interrupted', retryable: false, agentRef: TEST_AGENT_REF,
         recovery: { kind: 'daemon_interrupted', offerId: offer.envelope.id } }, { taskId: offer.taskId });
     expect(await handleInboundEnvelope(guardedStores, deviceId, envelope)).toEqual(
@@ -129,7 +134,7 @@ describe('replays across the terminal-task archive', () => {
     }
   });
 
-  it.each(['task.claim', 'task.fail'] as const)('refuses %s when a harness contradicts a sealed dispatch selection', async (type) => {
+  it('refuses a harness claim that contradicts a sealed subscription target', async () => {
     const h = createHarness();
     const { deviceId } = await h.pairDevice(TENANT_A);
     await grantAgentHome(h, TENANT_A, deviceId);
@@ -139,24 +144,8 @@ describe('replays across the terminal-task archive', () => {
       { id: 'h1', version: '1.0.0', capabilities: { steer: false, resume: false, approvalInteractive: false } },
     ] });
     const offer = await h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(),
-      dispatchSelection: { lane: 'subscription', runtimeId: 'codex', providerId: null, modelId: 'test-model' } } });
-    const envelope = type === 'task.claim'
-      ? createEnvelope(type, { deviceId, agentRef: TEST_AGENT_REF, harnessId: 'h1' }, { taskId: offer.taskId })
-      : createEnvelope(type, { reason: 'daemon_interrupted', retryable: false, agentRef: TEST_AGENT_REF, harnessId: 'h1',
-        recovery: { kind: 'daemon_interrupted', offerId: offer.envelope.id } }, { taskId: offer.taskId });
-    expect(await handleInboundEnvelope(stores, deviceId, envelope)).toEqual({ outcome: 'rejected',
-      reason: type === 'task.claim' ? 'claim_offer_mismatch' : 'recovery_offer_mismatch' });
-  });
-
-  it('refuses a recovery report whose harness binding contradicts a live offer that pins a runtime', async () => {
-    const h = createHarness();
-    const { deviceId } = await h.pairDevice(TENANT_A);
-    await grantAgentHome(h, TENANT_A, deviceId);
-    const stores = tenantStoresFor({ kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId },
-      { core: h.core, cloud: h.stores, mailboxWake: h.mailboxWake });
-    const offer = await h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), runtime: 'pi' } });
-    const report = createEnvelope('task.fail', { reason: 'daemon_interrupted', retryable: false, agentRef: TEST_AGENT_REF, harnessId: 'h1',
-      recovery: { kind: 'daemon_interrupted', offerId: offer.envelope.id } }, { taskId: offer.taskId });
-    expect(await handleInboundEnvelope(stores, deviceId, report)).toEqual({ outcome: 'rejected', reason: 'recovery_offer_mismatch' });
+      target: { lane: 'subscription', runtimeId: 'codex', modelId: 'test-model' } } });
+    const envelope = createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'harness', harnessId: 'h1' } }, { taskId: offer.taskId });
+    expect(await handleInboundEnvelope(stores, deviceId, envelope)).toEqual({ outcome: 'rejected', reason: 'claim_offer_mismatch' });
   });
 });

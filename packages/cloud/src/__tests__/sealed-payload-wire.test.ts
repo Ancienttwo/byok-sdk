@@ -60,7 +60,9 @@ const GOLDEN_TENANT = 'tenant-golden';
 const GOLDEN_DEVICE = 'device-golden-1';
 const GOLDEN_SCOPE = { scopeId: 'scope-golden-device-1', epoch: 2 };
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
+const PI_EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; ts: string; payload: Json });
@@ -390,21 +392,27 @@ describe('sealed payload v1: a task without output sealing refuses sealed output
     const send = (envelopeType: string, payload: unknown) =>
       handleInboundEnvelope(stores, device.deviceId, createEnvelope(envelopeType as Envelope['type'], payload as never, { taskId }) as Envelope);
     if (type !== 'task.decline') {
-      expect(await send('task.claim', { deviceId: device.deviceId, runtime: 'pi', agentRef: TEST_AGENT_REF })).toEqual({ outcome: 'accepted' });
+      expect(await send('task.claim', { deviceId: device.deviceId, executor: PI_EXECUTOR, agentRef: TEST_AGENT_REF })).toEqual({ outcome: 'accepted' });
     }
     return { harness, taskId, send };
   }
 
   /**
-   * The line without the harness and recovery bindings that this plain task
-   * does not have, and with this task's Agent where the type echoes one: a
-   * claim, terminal or message must echo the attempt's Agent exactly.
+   * The line without the executor and recovery bindings of its own task, and
+   * with this task's Agent and claimed executor where the type echoes one: a
+   * claim, terminal or message must echo the attempt's Agent exactly, and a
+   * terminal after the claim its executor.
    */
   function unbound(type: MessageType, payload: Json): Json {
-    const { agentRef: _agentRef, harnessId: _harnessId, recovery: _recovery, ...rest } = payload;
-    return ECHOES_AGENT.includes(type) ? { ...rest, agentRef: TEST_AGENT_REF } : rest;
+    const { agentRef: _agentRef, executor: _executor, recovery: _recovery, ...rest } = payload;
+    return {
+      ...rest,
+      ...(ECHOES_AGENT.includes(type) ? { agentRef: TEST_AGENT_REF } : {}),
+      ...(ECHOES_EXECUTOR.includes(type) ? { executor: PI_EXECUTOR } : {}),
+    };
   }
   const ECHOES_AGENT: readonly MessageType[] = ['task.decline', 'task.complete', 'task.fail', 'task.cancelled', 'agent.message.publish'];
+  const ECHOES_EXECUTOR: readonly MessageType[] = ['task.complete', 'task.fail', 'task.cancelled'];
 
   it.each(sealedInbound.filter(isSealedLine).map((line, index) => [index, line.type, line] as const))(
     'line %i (%s) is rejected before the envelope identity is reserved',
@@ -454,7 +462,6 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
     && (variantOf(line.payload) !== 'sealed execution' || line.payload.terminalProjection !== undefined)
     ? [{ ...line, variant: variantOf(line.payload), payload: { ...line.payload,
       // Host fixtures keep the corpus sealing bytes, with valid selections (#1671).
-      runtime: (line.payload.dispatchSelection as { runtimeId: string } | undefined)?.runtimeId ?? line.payload.runtime,
       agentMemory: line.payload.homeAccess === 'memory-reader' && line.payload.agentMemory === 'read-write' ? 'read' : line.payload.agentMemory,
     } as Json }] : []));
   // A task that seals only its output keeps a plaintext instruction.
@@ -546,7 +553,7 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
     vi.spyOn(harness.stores.devices, 'get').mockImplementation(async (...args) => {
       // A non-resume offer with a selection would need dispatch-selection, which this device lacks.
       payload.session = { mode: 'fresh' };
-      payload.dispatchSelection = { lane: 'subscription', runtimeId: 'codex' };
+      payload.target = { lane: 'subscription', runtimeId: 'codex', modelId: 'test-model' };
       return read(...args);
     });
 

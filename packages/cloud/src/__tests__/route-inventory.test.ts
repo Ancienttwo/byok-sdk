@@ -156,7 +156,6 @@ describe('tenant isolation across every device-class resource', () => {
       ingress: { activityMaxEvents: 50, activityMaxBytes: 65536 },
       events: [],
       cursor: 0,
-      capabilities: [],
     });
     expect(JSON.stringify(events.body)).not.toContain('secret work');
 

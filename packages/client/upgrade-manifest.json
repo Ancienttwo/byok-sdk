@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "df84a3dbf643121686da0cced726f23b30349bfc690983e8ca07a1fd2ba98549"
+    "snapshotSha256": "e14181842c50d78407d17fdaca37d85df0413a72c3dcd391f2d6e4689232740c"
   },
   "configFields": {
     "status": "tracked",
@@ -458,6 +458,49 @@
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresE2eeMemberStore"
       ]
+    },
+    {
+      "id": "wire-v7-cloud-executor",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud reads the v7 claim executor: InMemoryTaskAttemptStore.claim and TenantBoundTaskAttempts.claim take executor, SteerRejectedError.executor replaces runtime and TerminalResult.executor replaces harnessId. INBOUND_REFUSAL_REASONS renames claim_harness_mismatch to claim_executor_mismatch and terminal_harness_mismatch to terminal_executor_mismatch, removes claim_harness_and_runtime_conflict, and adds steer_refusal_id_mismatch and steer_refusal_unknown_steer. Rename the reason strings an observer matches.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+        "export:@byok-sdk/cloud#TenantBoundTaskAttempts",
+        "export:@byok-sdk/cloud#SteerRejectedError",
+        "export:@byok-sdk/cloud#TerminalResult",
+        "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS"
+      ]
+    },
+    {
+      "id": "wire-v7-cloud-steer-refusal-reads",
+      "impact": "additive",
+      "summary": "@byok-sdk/cloud ByokCloud.readSteerRefusal and listSteerRefusals read a task's steer refusals by steer id or by revision; TenantStores.steerRefusals and TenantBoundMailbox.readMessage carry them, and @byok-sdk/core InMemoryMailboxStore implements readMessage.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/cloud#ByokCloud",
+        "export:@byok-sdk/cloud#TenantStores",
+        "export:@byok-sdk/cloud#TenantBoundMailbox",
+        "export:@byok-sdk/core#InMemoryMailboxStore"
+      ]
+    },
+    {
+      "id": "wire-v7-cloud-terminal-executor",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud handleInboundEnvelope and POST /byok/messages reject a task.complete, task.fail or task.cancelled whose executor differs from TaskAttempt.claimedExecutor, including one that carries an executor before any claim and a task.complete with no claim (terminal_executor_mismatch, wire not_permitted). An unclaimed daemon_interrupted recovery is no longer compared with the offer target. Devices on v7 echo the claimed executor; nothing for the Host to change beyond the reason rename.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-cloud-terminal-executor"
+      ]
+    },
+    {
+      "id": "wire-v7-cloud-steer-text-bound",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud ByokCloud.steerTask rejects a plaintext text over TASK_STEER_TEXT_MAX_BYTES (65,536 UTF-8 bytes) with coordination_input_invalid before it enqueues anything. Send longer follow-up input as a new task.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-cloud-steer-text-bound"
+      ]
     }
   ],
   "changes": [
@@ -581,6 +624,11 @@
       "entry": "wire-v7-execution-target"
     },
     {
+      "item": "export:@byok-sdk/cloud#ByokCloud",
+      "change": "changed",
+      "entry": "wire-v7-cloud-steer-refusal-reads"
+    },
+    {
       "item": "export:@byok-sdk/cloud#ByokCloudOptions",
       "change": "changed",
       "entry": "e2ee-member-store-in-cloud-stores"
@@ -611,6 +659,11 @@
       "entry": "e2ee-member-store-delete-device"
     },
     {
+      "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
+    },
+    {
       "item": "export:@byok-sdk/cloud#InMemoryByokCloudOptions",
       "change": "changed",
       "entry": "e2ee-composition-opt-ins"
@@ -636,6 +689,11 @@
       "entry": "device-state-delete-ports"
     },
     {
+      "item": "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
+    },
+    {
       "item": "export:@byok-sdk/cloud#InboundDedupStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
@@ -656,6 +714,11 @@
       "entry": "wire-v7-steer-refused"
     },
     {
+      "item": "export:@byok-sdk/cloud#SteerRejectedError",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
+    },
+    {
       "item": "export:@byok-sdk/cloud#TaskAttempt",
       "change": "changed",
       "entry": "wire-v7-execution-target"
@@ -669,6 +732,26 @@
       "item": "export:@byok-sdk/cloud#TaskSteerRefusalStore",
       "change": "added",
       "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TenantBoundMailbox",
+      "change": "changed",
+      "entry": "wire-v7-cloud-steer-refusal-reads"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TenantBoundTaskAttempts",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TenantStores",
+      "change": "changed",
+      "entry": "wire-v7-cloud-steer-refusal-reads"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TerminalResult",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
     },
     {
       "item": "export:@byok-sdk/cloud#createInMemoryBlobs",
@@ -729,6 +812,11 @@
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPresenceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/core#InMemoryMailboxStore",
+      "change": "changed",
+      "entry": "wire-v7-cloud-steer-refusal-reads"
     },
     {
       "item": "export:@byok-sdk/core#InMemoryPresenceStore",
