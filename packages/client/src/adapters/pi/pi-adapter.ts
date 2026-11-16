@@ -603,6 +603,7 @@ export class PiAdapter implements RuntimeAdapter {
               ...(startInput.toolAuthorization === undefined ? {} : { toolAuthorization: startInput.toolAuthorization }),
               nativeAssetRoot: this.options.nativeAssetRoot,
               ...(this.options.spawnFn === undefined ? {} : { spawnFn: this.options.spawnFn }),
+              ...(startInput.signal === undefined ? {} : { signal: startInput.signal }),
             });
           }
           if (typeof startInput.instruction !== 'string') {
@@ -781,7 +782,7 @@ export class PiAdapter implements RuntimeAdapter {
           // retains admission too, before allowing the first prompt.
           let sessionRef: string;
           try {
-            sessionRef = await resolveAuthoritativeSessionId(rpc);
+            sessionRef = await resolveAuthoritativeSessionId(rpc, startInput.signal);
             await readiness;
             if (memoryLane && (readyCount !== 1 || readySessionId !== sessionRef)) throw authorityFailure('memory_lane_tool_set_mismatch');
             if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
@@ -799,11 +800,11 @@ export class PiAdapter implements RuntimeAdapter {
             let onAbort: (() => void) | undefined;
             try {
               const interrupted = new Promise<never>((_resolve, reject) => {
-                if (!memoryLane || startInput.signal === undefined) return;
-                onAbort = () => { void abortMemoryLane().then(
+                if (startInput.signal === undefined) return;
+                onAbort = memoryLane ? () => { void abortMemoryLane().then(
                   () => reject(authorityFailure('Pi memory startup aborted')),
                   reject,
-                ); };
+                ); } : () => reject(startAborted());
                 startInput.signal.addEventListener('abort', onAbort, { once: true });
                 if (startInput.signal.aborted) onAbort();
               });
@@ -910,6 +911,8 @@ interface PreparedPiLaunchInput {
   };
   readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
   readonly mcpToolsetTools?: McpToolsetToolObservation;
+  /** The start's cancellation; see {@link untilStartAborted}. */
+  readonly signal?: AbortSignal;
   /**
    * The task's `auto` gate. The prepared session has no native file tools, so
    * a file-scoped task needs only the gate: its scope floor asks for every
@@ -1134,7 +1137,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     // RPC frame cap (`daemon/input-preparation-service.ts`). The id is stated,
     // not left to the transport, so the frame that was admitted is the frame
     // that is written.
-    response = await rpc.send(buildPreparedPromptCommand(envelope, preparation.expected, PREPARED_PROMPT_COMMAND_ID));
+    response = await untilStartAborted(rpc.send(buildPreparedPromptCommand(envelope, preparation.expected, PREPARED_PROMPT_COMMAND_ID)), input.signal);
   } catch (cause) {
     const failure = startupExit(rpc);
     await disposePiStartup(rpc, scratch);
@@ -1168,7 +1171,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
 
   let state: PiRpcMessage;
   try {
-    state = await rpc.send({ type: 'get_state' });
+    state = await untilStartAborted(rpc.send({ type: 'get_state' }), input.signal);
   } catch (cause) {
     const failure = startupExit(rpc);
     await disposePiStartup(rpc, scratch);
@@ -1285,10 +1288,10 @@ function sameDispatchSelection(
  * `PiRpcClient.buildExitError`), exactly like any other adapter start()
  * failure `task-runner.ts` already knows how to report as `task.fail`.
  */
-async function resolveAuthoritativeSessionId(rpc: PiRpcClient): Promise<string> {
+async function resolveAuthoritativeSessionId(rpc: PiRpcClient, signal: AbortSignal | undefined): Promise<string> {
   let state: PiRpcMessage;
   try {
-    state = await rpc.send({ type: 'get_state' });
+    state = await untilStartAborted(rpc.send({ type: 'get_state' }), signal);
   } catch (err) {
     if (isRuntimeExecutionFailure(err)) throw err;
     throw new RuntimeExecutionFailure({
@@ -1320,6 +1323,23 @@ async function resolveAuthoritativeSessionId(rpc: PiRpcClient): Promise<string> 
     retry: 'non-retryable',
     reason: 'pi get_state reported no authoritative session id',
   });
+}
+
+const startAborted = (): Error => new Error('the start was aborted before pi answered');
+
+/**
+ * `pending`, or a rejection once the start's signal aborts. Pi can leave a
+ * request unanswered (#2300): an extension that compacts from its
+ * `agent_settled` hook makes Pi defer the first prompt and then refuse it
+ * with no response. The daemon aborts this signal at its startup deadline;
+ * each caller then disposes the process and fails start with a typed error.
+ */
+async function untilStartAborted<T>(pending: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return await pending;
+  let onAbort!: () => void;
+  const aborted = new Promise<never>((_resolve, reject) => { onAbort = () => reject(startAborted()); });
+  if (signal.aborted) onAbort(); else signal.addEventListener('abort', onAbort, { once: true });
+  try { return await Promise.race([pending, aborted]); } finally { signal.removeEventListener('abort', onAbort); }
 }
 
 /** How Pi accepted a `prompt`; undefined for a response that names none of the three. */
