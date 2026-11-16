@@ -1,14 +1,15 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { generateKeyPairSync } from 'node:crypto';
 import { readDeviceEnrollmentStatus, runSdkReservedHelperCommand } from '@byok-sdk/client';
 import { DeviceCredentialStore } from '../../packages/client/src/daemon/device-credential-store';
+import { exportPrivateKeyPem, generateDeviceKeyPair } from '../../packages/client/src/daemon/device-keys';
 import { createOwnedLineProcessSpawn } from '../../packages/client/src/runtime/owned-line-process';
 
 /** One Credential Manager round trip of the packaged Host, through its own native asset root. */
 async function credentialRoundTrip(nativeAssetRoot: string, storeDir: string): Promise<void> {
   const productId = `native-assets-sea-${process.pid}-${Date.now()}`;
-  const record = { deviceId: 'device-sea', tenantId: 'tenant-sea', devicePublicKey: 'public',
-    devicePrivateKeyPem: generateKeyPairSync('ed25519').privateKey.export({ format: 'pem', type: 'pkcs8' }) as string };
+  const key = generateDeviceKeyPair();
+  const record = { deviceId: 'device-sea', tenantId: 'tenant-sea', devicePublicKey: key.publicKeyBase64Url,
+    devicePrivateKeyPem: exportPrivateKeyPem(key.privateKey) };
   const store = new DeviceCredentialStore({ productId, storeDir, nativeAssetRoot });
   try {
     const status = await readDeviceEnrollmentStatus({ productId, storeDir, nativeAssetRoot });
