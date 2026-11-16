@@ -2083,7 +2083,7 @@ export declare class AgentContentReadPolicyEngine {
 // ==== @byok-sdk/client dist/daemon/agent-egress-controller.d.ts ====
 import { type AgentEvent } from '@byok-sdk/protocol';
 import type { AgentRef } from '../agent-home.js';
-import { type AgentEgressDropReason, type AgentEgressDropReceipt, type AgentEgressPolicy, type AgentEgressStatus } from './agent-egress-policy.js';
+import { type AgentEgressDropReason, type AgentEgressPolicy, type AgentEgressStatus } from './agent-egress-policy.js';
 import { type AgentReliableAck, type AgentContentReceiptWithoutReliableIdentity, type AgentReliableEgressRecord } from './agent-egress-spool.js';
 export interface AgentEgressControllerOptions {
     readonly policy: Readonly<AgentEgressPolicy>;
@@ -2130,14 +2130,12 @@ export declare class AgentEgressController {
     private reliableAppendTail;
     private readonly latestStatus;
     private readonly reliableStatus;
-    private readonly drops;
     private active;
     constructor(options: AgentEgressControllerOptions);
     get policy(): Readonly<AgentEgressPolicy>;
     /** Permanently fail closed after its authenticated enrollment is replaced. */
     deactivate(): void;
     status(): AgentEgressStatus;
-    dropReceipts(): readonly AgentEgressDropReceipt[];
     noteTransportDrop(reason: AgentEgressDropReason, agentRef?: AgentRef): void;
     /**
      * Coalesce to the latest value before TaskRunner builds a `task.progress`
@@ -2167,14 +2165,6 @@ export declare class AgentEgressController {
 // ==== @byok-sdk/client dist/daemon/agent-egress-policy.d.ts ====
 import { type AgentEgressDropReason, type AgentEgressPolicy, type AgentEvent } from '@byok-sdk/protocol';
 export type { AgentEgressDropReason, AgentEgressPolicy } from '@byok-sdk/protocol';
-export interface AgentEgressDropReceipt {
-    lane: 'latest-value' | 'reliable';
-    reason: AgentEgressDropReason;
-    agentId?: string;
-    tenantId?: string;
-    eventId?: string;
-    occurredAt: string;
-}
 export interface AgentEgressLaneStatus {
     pendingEvents: number;
     pendingBytes: number;
@@ -9935,7 +9925,7 @@ export { AgentMemoryIntentNoticeError, AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASON
 export type { AgentMemoryIntentNoticeFailureReason, } from './daemon/agent-memory-intent.js';
 export { AgentMemorySnapshotLimitError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory.js';
 export type { AgentMemoryRedactor, AgentMemoryProjectionGrant, AgentMemoryHostedProjection, } from './daemon/agent-memory.js';
-export type { AgentEgressDropReceipt, AgentEgressLaneStatus, AgentEgressStatus, } from './daemon/agent-egress-policy.js';
+export type { AgentEgressLaneStatus, AgentEgressStatus, } from './daemon/agent-egress-policy.js';
 export { AGENT_CONTENT_READ_CAPABILITIES, AGENT_CONTENT_READ_CAPABILITY_WORKSPACE, AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT, AGENT_CONTENT_READ_CAPABILITY_ARTIFACT, } from './daemon/agent-content-read.js';
 export type { AgentContentReadSurface, AgentContentReadDecision, AgentContentReadReason, AgentContentReadRoot, AgentContentReadPolicy, AgentContentReadPolicySelection, AgentContentReadRequest, AgentContentReadResult, AgentContentReadAllowed, AgentContentReadDenied, AgentContentSessionIdentity, AgentContentAuditReceipt, } from './daemon/agent-content-read.js';
 export { McpToolsetRevisionConflictError, McpToolsetDefinitionRevisionConflictError, } from './daemon/toolset-registry.js';

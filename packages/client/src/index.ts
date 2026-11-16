@@ -217,7 +217,6 @@ export type {
   AgentMemoryHostedProjection,
 } from './daemon/agent-memory.js';
 export type {
-  AgentEgressDropReceipt,
   AgentEgressLaneStatus,
   AgentEgressStatus,
 } from './daemon/agent-egress-policy.js';

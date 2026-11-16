@@ -7,15 +7,6 @@ import {
 
 export type { AgentEgressDropReason, AgentEgressPolicy } from '@byok-sdk/protocol';
 
-export interface AgentEgressDropReceipt {
-  lane: 'latest-value' | 'reliable';
-  reason: AgentEgressDropReason;
-  agentId?: string;
-  tenantId?: string;
-  eventId?: string;
-  occurredAt: string;
-}
-
 export interface AgentEgressLaneStatus {
   pendingEvents: number;
   pendingBytes: number;

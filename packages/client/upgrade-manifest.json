@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "32f21795d6bdc22dc778f29989e35459e54911bdd3b91c9c9ef00900b00f4b1c"
+    "snapshotSha256": "915a7e63352cd180029813eb2df6de6750faabecb6498c78e81cfb75ef6274ce"
   },
   "configFields": {
     "status": "tracked",
@@ -60,9 +60,23 @@
         "export:@byok-sdk/client#LocalTeamWorkspace",
         "export:@byok-sdk/client#LocalTeamWorkspaceService"
       ]
+    },
+    {
+      "id": "remove-egress-drop-receipts",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes AgentEgressController.dropReceipts(), its buffer and AgentEgressDropReceipt. Read status() for lane counters and the last reason; retain any per-drop audit history at the Host transport boundary.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#egress-drop-receipts",
+      "items": [
+        "export:@byok-sdk/client#AgentEgressDropReceipt"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "export:@byok-sdk/client#AgentEgressDropReceipt",
+      "change": "removed",
+      "entry": "remove-egress-drop-receipts"
+    },
     {
       "item": "export:@byok-sdk/client#AgentSessionHandoffStore",
       "change": "changed",

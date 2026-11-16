@@ -5,7 +5,6 @@ import type { AgentRef } from '../agent-home.js';
 import { sameAgentRef } from './agent-ref-equality.js';
 import {
   type AgentEgressDropReason,
-  type AgentEgressDropReceipt,
   type AgentEgressLaneStatus,
   type AgentEgressPolicy,
   type AgentEgressStatus,
@@ -80,7 +79,6 @@ export class AgentEgressController {
   private reliableAppendTail: Promise<void> = Promise.resolve();
   private readonly latestStatus = emptyLane();
   private readonly reliableStatus = emptyLane();
-  private readonly drops: AgentEgressDropReceipt[] = [];
   private active = true;
 
   constructor(private readonly options: AgentEgressControllerOptions) {}
@@ -101,10 +99,8 @@ export class AgentEgressController {
     });
   }
 
-  dropReceipts(): readonly AgentEgressDropReceipt[] { return Object.freeze([...this.drops]); }
-
   noteTransportDrop(reason: AgentEgressDropReason, agentRef?: AgentRef): void {
-    this.noteDrop('latest-value', reason, agentRef);
+    this.noteDrop('latest-value', reason);
   }
 
   /**
@@ -115,7 +111,7 @@ export class AgentEgressController {
    */
   projectLatestValue(input: AgentEgressProgressInput): readonly AgentEvent[] {
     if (!this.active) {
-      this.noteDrop('latest-value', 'policy_denied', input.agentRef);
+      this.noteDrop('latest-value', 'policy_denied');
       return [];
     }
     if (this.options.tenantId === undefined) return Object.freeze([...input.events]);
@@ -126,7 +122,7 @@ export class AgentEgressController {
     for (const [index, event] of input.events.entries()) {
       const offered = this.latest.offer({ agentRef: input.agentRef, tenantId: this.options.tenantId, event }, this.options.policy);
       if (!offered.accepted) {
-        this.noteDrop('latest-value', offered.reason, input.agentRef);
+        this.noteDrop('latest-value', offered.reason);
         continue;
       }
       accepted.push(index);
@@ -137,7 +133,7 @@ export class AgentEgressController {
     for (const index of accepted) {
       if (sent(index)) continue;
       this.latestStatus.replaced += 1;
-      this.noteDrop('latest-value', 'coalesced', input.agentRef, false);
+      this.noteDrop('latest-value', 'coalesced', false);
     }
     return Object.freeze(input.events.filter((_event, index) => sent(index)));
   }
@@ -145,13 +141,13 @@ export class AgentEgressController {
   async appendReliable(input: AgentEgressReliableInput): Promise<AgentEgressReliableAppendResult> {
     const tenantId = this.options.tenantId;
     if (!this.active || tenantId === undefined) {
-      this.noteDrop('reliable', 'policy_denied', input.agentRef);
+      this.noteDrop('reliable', 'policy_denied');
       return { ok: false, reason: 'policy_denied' };
     }
     // The payload goes to the Host as is. It must still be a valid wire value
     // (JSON, at most 256 KiB) before the spool makes it durable.
     if (!AgentEgressReliablePayloadSchema.shape.payload.safeParse(input.payload).success) {
-      this.noteDrop('reliable', 'invalid_envelope', input.agentRef);
+      this.noteDrop('reliable', 'invalid_envelope');
       return { ok: false, reason: 'invalid_envelope' };
     }
     try {
@@ -172,7 +168,7 @@ export class AgentEgressController {
       });
     } catch (error) {
       const reason: AgentEgressDropReason = error instanceof AgentReliableQuotaError ? error.reason : 'backpressure';
-      this.noteDrop('reliable', reason, input.agentRef);
+      this.noteDrop('reliable', reason);
       return { ok: false, reason };
     }
   }
@@ -185,7 +181,7 @@ export class AgentEgressController {
   async appendContentReceipt(input: AgentEgressContentReceiptInput): Promise<AgentEgressReliableAppendResult> {
     const tenantId = this.options.tenantId;
     if (!this.active || tenantId === undefined) {
-      this.noteDrop('reliable', 'policy_denied', input.agentRef);
+      this.noteDrop('reliable', 'policy_denied');
       return { ok: false, reason: 'policy_denied' };
     }
     try {
@@ -205,7 +201,7 @@ export class AgentEgressController {
       });
     } catch (error) {
       const reason: AgentEgressDropReason = error instanceof AgentReliableQuotaError ? error.reason : 'backpressure';
-      this.noteDrop('reliable', reason, input.agentRef);
+      this.noteDrop('reliable', reason);
       return { ok: false, reason };
     }
   }
@@ -214,11 +210,11 @@ export class AgentEgressController {
   async acknowledge(ack: AgentReliableAck): Promise<boolean> {
     const spool = this.spools.get(agentKey(ack.agentRef));
     if (!this.active || !spool || this.options.tenantId === undefined || ack.tenantId !== this.options.tenantId) {
-      this.noteDrop('reliable', 'ack_mismatch', ack.agentRef);
+      this.noteDrop('reliable', 'ack_mismatch');
       return false;
     }
     const accepted = await spool.acknowledge(ack);
-    if (!accepted) this.noteDrop('reliable', 'ack_mismatch', ack.agentRef);
+    if (!accepted) this.noteDrop('reliable', 'ack_mismatch');
     return accepted;
   }
 
@@ -333,17 +329,9 @@ export class AgentEgressController {
     }
   }
 
-  private noteDrop(lane: 'latest-value' | 'reliable', reason: AgentEgressDropReason, agentRef?: AgentRef, countDrop = true): void {
+  private noteDrop(lane: 'latest-value' | 'reliable', reason: AgentEgressDropReason, countDrop = true): void {
     const laneStatus = lane === 'latest-value' ? this.latestStatus : this.reliableStatus;
     if (countDrop) laneStatus.dropped += 1;
     laneStatus.lastDropReason = reason;
-    this.drops.push(Object.freeze({
-      lane,
-      reason,
-      ...(agentRef === undefined ? {} : { agentId: agentRef.agentId }),
-      ...(this.options.tenantId === undefined ? {} : { tenantId: this.options.tenantId }),
-      occurredAt: new Date().toISOString(),
-    }));
-    if (this.drops.length > 256) this.drops.shift();
   }
 }

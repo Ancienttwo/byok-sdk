@@ -54,3 +54,10 @@ definitions. Validate a member lease by performing the intended `postMessage()`,
 `readMessages()` or `ackMessages()` operation; each resolves the lease itself.
 There is no public in-place membership/limit update API. Create a separately named
 workspace with the desired definition and issue its member leases instead.
+
+### Egress drop receipts
+
+`AgentEgressController.dropReceipts()` and `AgentEgressDropReceipt` are removed,
+including the unused in-memory receipt buffer. Use `status()` for each lane's
+`dropped`, `replaced` and `lastDropReason`. Per-drop history is no longer retained;
+Hosts needing an audit history must collect it at their own transport boundary.
