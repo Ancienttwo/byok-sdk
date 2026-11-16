@@ -22,7 +22,7 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
   const auth = new AuthManager({ serverUrl: cloud.url, store: createTestDeviceStore(root) });
   const device = await auth.pair((await cloud.createPairingCode()).code);
   const post = async (envelope: Envelope) => {
-    const response = await fetch(`${cloud.url}/byok/messages`, { method: 'POST', headers: { authorization: `Bearer ${device.accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ messages: [envelope] }) });
+    const response = await fetch(`${cloud.url}/byok/messages`, { method: 'POST', headers: { authorization: `Bearer ${await auth.getValidAccessToken()}`, 'content-type': 'application/json' }, body: JSON.stringify({ messages: [envelope] }) });
     expect(await response.json()).toMatchObject({ accepted: 1 });
   };
   // Agent offer admission reads the durable capability snapshot a hello records.

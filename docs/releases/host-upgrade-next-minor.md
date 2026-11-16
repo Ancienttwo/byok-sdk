@@ -407,7 +407,23 @@ machine's current device. See
   the lock; the member entries are written only while the new enrollment
   still holds.
 - A pairing or renewal error carries only the HTTP status, never the server's
-  response text.
+  response text. A malformed `2xx` body is `AuthResponseInvalidError` with no
+  `cause`.
+- **Wire bounds.** `PairRequest.deviceName` is 1 to 64 characters and
+  `PairResponse.deviceId` 1 to 64 (`PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH`,
+  `PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH`). A client refuses a longer `deviceId`
+  as `AuthResponseInvalidError` and writes nothing. A Host whose hostnames
+  exceed 64 characters sets `deviceName`: `config check` reports it, and
+  pairing throws `PairingInputInvalidError` (`field: 'deviceName'`). A
+  `machineId` resolver must return a lowercase hex SHA-256, or pairing throws
+  `PairingInputInvalidError` (`field: 'machineId'`).
+- **The access token is no longer persisted.** `DeviceRecord` (and
+  `DeviceCredentialBackend.read` and `replace`) carries no `accessToken` or
+  `expiresAt`. The daemon exchanges a token with the device key on its first
+  request after start and after a `401`, and keeps it in memory: a start costs
+  the `/byok/challenge` and `/byok/token` round trips once. Renewal writes
+  nothing. An injected `DeviceCredentialBackend` drops those two fields, and
+  its `replace` always discards a staged attempt.
 - **v6 OS entry.** The client reads the OS entry's format version and never
   decodes a v6 entry. `start` deletes it and reports re-pair required, pairing
   deletes it and pairs as a first pairing, and a clear deletes it. Re-pair

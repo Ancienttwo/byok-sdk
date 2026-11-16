@@ -3034,6 +3034,7 @@ Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint?, 
 401      (PairingCodeInvalidResponseSchema): { error, code: "pairing_code_invalid" }
 ```
 
+- `deviceName`: 1 to 64 characters (`PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH`).
 - `devicePublicKey`: Ed25519 public key, base64url-encoded.
 - `machineId`: OPTIONAL client-hashed machine identity — lowercase hex SHA-256
   of the product id and an OS-provided machine identifier (macOS
@@ -3049,7 +3050,9 @@ Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint?, 
 - `expectedDeviceDigest`: REQUIRED, `null` or a device digest. It fences
   machine supersession; see "Registration fence" below. A request without it
   is a pre-v7 client and gets `400`.
-- `accessToken`: JWT, ~1h lifetime.
+- `deviceId`: 1 to 64 characters (`PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH`).
+- `accessToken`: JWT, ~1h lifetime. A device keeps it in memory only and
+  exchanges a new one through `/byok/challenge` and `/byok/token`.
 - `tenantId`: required opaque, non-secret tenant binding copied exactly from
   the authenticated redeemed pairing-code/device row. It is bounded to 1–200
   characters, rejects leading/trailing whitespace and NUL, and has no

@@ -588,6 +588,8 @@ export {
   PAIRING_SUPERSEDED_CODE,
   PairingCodeInvalidResponseSchema,
   PairSupersededResponseSchema,
+  PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH,
+  PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH,
 } from './http-api.js';
 export type {
   PairRequest,

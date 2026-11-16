@@ -923,7 +923,11 @@ await clearDeviceEnrollment({
   with a staged attempt it made (#1964, #2033). Under
   the store's owner lease the clear takes a per-user `productId` lock and holds
   it from its validation through its deletion. A running daemon's token
-  renewal takes the same lock around validating and persisting the new token.
+  renewal takes the same lock only to check that the OS entry still holds its
+  enrollment. The access token itself is never written to disk or to the OS
+  entry: the daemon exchanges one with its device key (`/byok/challenge`,
+  then `/byok/token`) on its first request after start and after a `401`, and
+  keeps it in memory (#2045).
   A pairing takes it around each local step: rereading the OS entry,
   `device.json` and the staged attempt (never a cached record) and staging its
   attempt; checking that the attempt is still its own before a resend; and
@@ -1047,13 +1051,20 @@ and mailbox are kept. Otherwise give this store its own productId. `byok-agent
 pair --replace-other-store` stages a fresh key alongside the current enrollment
 in the same OS entry. A rejected request, network failure, or invalid response
 keeps the current enrollment usable; retrying after restart uses the staged key.
-Renewal of the current enrollment also preserves that attempt. A successful
-replacement promotes the new enrollment, and the other store then reads as not
-bound. Staging fails before writing if the combined entry exceeds the OS entry
-size bound. After promotion, the entry is an ordinary enrollment again. An
-injected `DeviceCredentialBackend` (`read`, `readPairingAttempt`,
-`savePairingAttempt`, `replace`, `clear`) must keep the same staging and
-renewal semantics.
+Renewal of the current enrollment writes nothing, so the attempt stays. A
+successful replacement promotes the new enrollment, and the other store then
+reads as not bound. After promotion, the entry is an ordinary enrollment again.
+Every stored field is bounded, so an enrollment beside an attempt always fits
+the 2,400-byte OS entry: the worst case is 1,962 bytes. An injected
+`DeviceCredentialBackend` (`read`, `readPairingAttempt`, `savePairingAttempt`,
+`replace`, `clear`) must keep the same staging semantics; `replace` promotes a
+pairing and discards its attempt.
+
+**Device name too long.** `deviceName`, or the hostname when it is unset, must
+be 1 to 64 characters. A longer one fails `config check`, and pairing throws
+`PairingInputInvalidError` (`field: 'deviceName'`) before it stages or sends
+anything; set `deviceName`. A `machineId` resolver that does not return a
+lowercase hex SHA-256 fails the same way with `field: 'machineId'`.
 
 **Staged pairing of another store.** Every pairing stages an attempt in the OS
 entry before its request. A pairing with the same code resumes this store's

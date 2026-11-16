@@ -6,7 +6,7 @@ import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import type { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient, type CorrelatedOutcome } from '../daemon/long-poll-transport';
-import { seedDeviceEnrollment } from './fixtures/device-enrollment';
+import { seedAuthHoldingToken } from './fixtures/device-enrollment';
 import { TestServer } from './fixtures/test-server';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -41,17 +41,7 @@ function offer(taskId: string, seq: number): Envelope {
 async function seededAuth(): Promise<AuthManager> {
   const storeDir = await tmpDir('byok-long-poll-reliability-auth-');
   const store = createTestDeviceStore(storeDir);
-  await seedDeviceEnrollment(store, {
-    deviceId: 'device-reliability',
-    tenantId: 'tenant-reliability',
-    accessToken: 'token-reliability',
-    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-    devicePrivateKeyPem: 'unused-in-test',
-    devicePublicKey: 'unused-in-test',
-  });
-  const auth = new AuthManager({ serverUrl: 'http://example.invalid', store });
-  await auth.loadExisting();
-  return auth;
+  return seedAuthHoldingToken(store, 'http://example.invalid', { deviceId: 'device-reliability', tenantId: 'tenant-reliability' });
 }
 
 describe('long-poll reliability regressions (#135, #136, #137)', () => {

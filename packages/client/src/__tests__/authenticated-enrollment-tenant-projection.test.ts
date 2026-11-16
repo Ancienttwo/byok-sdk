@@ -195,7 +195,7 @@ describe('authenticated enrollment tenant projection', () => {
     const store = createTestDeviceStore(await tmpDir('byok-enrollment-renew-'));
     const auth = new AuthManager({ serverUrl: server.url, store });
     const paired = await auth.pair('renew-code');
-    expect(paired.accessToken.split('.')).toHaveLength(1);
+    expect((await auth.getValidAccessToken()).split('.')).toHaveLength(1);
 
     server.rotateDeviceToken(paired.deviceId);
     await auth.handleUnauthorized();
@@ -220,7 +220,7 @@ describe('authenticated enrollment tenant projection', () => {
       tenantId: replacement.tenantId,
       devicePublicKey: replacement.devicePublicKey,
     });
-    expect(await store.credentials.read()).toMatchObject({ accessToken: replacement.accessToken });
+    expect(await store.credentials.read()).toEqual(replacement);
     await auth.stop();
   });
 
@@ -378,7 +378,10 @@ describe('authenticated enrollment tenant projection', () => {
     const observableEgress = JSON.stringify({ appended, journal: journal.appended, wire: server.received });
     const credentials = await createTestDeviceStore(storeDir, undefined, 'enrollment-test').credentials.read();
     expect(credentials).toBeDefined();
-    expect(observableEgress).not.toContain(credentials!.accessToken);
+    // The access token lives only in the daemon's memory (#2045); the cloud names the one it holds.
+    const accessToken = server.currentAccessToken(record.deviceId);
+    expect(accessToken).toBeDefined();
+    expect(observableEgress).not.toContain(accessToken);
     expect(observableEgress).not.toContain(credentials!.devicePrivateKeyPem);
   });
 });

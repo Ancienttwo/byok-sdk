@@ -14,6 +14,7 @@ import { describeEffectiveDaemonConfig, type DaemonEffectiveConfig } from './eff
 import { toolAuthorizationIssues } from './static-tool-authorization.js';
 import { validateDaemonConfig, type DaemonConfigIssue, type DaemonConfigSource } from './validate.js';
 import { versionPolicyConfigIssues } from '../../daemon-config-version-policy.js';
+import { PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH } from '@byok-sdk/protocol';
 
 export interface DaemonConfigCheckOptions {
   readonly source: DaemonConfigSource;
@@ -56,6 +57,11 @@ export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOpti
   }
   const policyIssues = versionPolicyConfigIssues(input);
   if (policyIssues.length > 0) return { ok: false, issues: [...issues, ...policyIssues] };
+  // Pairing refuses it with PairingInputInvalidError; report it before any pairing.
+  const { deviceName } = input as { deviceName?: unknown };
+  if (typeof deviceName === 'string' && (deviceName.length === 0 || deviceName.length > PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH)) {
+    return { ok: false, issues: [...issues, { severity: 'error', code: 'invalid_value', path: 'deviceName', message: `deviceName must be 1 to ${PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH} characters` }] };
+  }
   const config = (options.localAgentRelease === undefined ? input : { ...(input as object), localAgentRelease: options.localAgentRelease }) as DaemonConfig;
   try {
     const scope = resolveDaemonConfig({ config, overrides: {} });

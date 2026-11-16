@@ -354,13 +354,13 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
       let renewalArrived!: () => void;
       const arrived = new Promise<void>((resolve) => { renewalArrived = resolve; });
       const deleteEntry = credentials.clear.bind(credentials);
-      const write = credentials.replace.bind(credentials);
-      vi.spyOn(credentials, 'replace').mockImplementation(async (record) => { renewalArrived(); return write(record); });
+      // A renewal keeps its token in memory and never writes the entry (#2045).
+      const replace = vi.spyOn(credentials, 'replace');
       vi.spyOn(credentials, 'clear').mockImplementationOnce(async () => {
         const taken = gate.taken;
         gate.onWait = renewalArrived;
         server.rotateDeviceToken(firstDeviceId);
-        // Released once the renewal has either written or is waiting on the gate this clear holds.
+        // Released once the renewal waits on the gate this clear holds.
         await within(arrived);
         gate.onWait = undefined;
         expect(gate.taken).toBe(taken);
@@ -376,6 +376,7 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
         gate.restore();
       }
       expect(await credentials.read()).toBeUndefined();
+      expect(replace).not.toHaveBeenCalled();
     });
 
     it('never holds the lock across a pairing or renewal request (#2045)', async () => {

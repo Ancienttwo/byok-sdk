@@ -45,9 +45,17 @@ import { PairDeviceDigestSchema } from './pair-device-digest.js';
 // register the device and mint its first access token.
 // ---------------------------------------------------------------------------
 
+/**
+ * Every field a device stores from a pairing has a bound, so the enrollment
+ * fits one OS credential entry (#2045). 64 is the longest Linux hostname
+ * (`HOST_NAME_MAX`) and holds the reference `dev_<uuid>` device id.
+ */
+export const PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH = 64;
+export const PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH = 64;
+
 export const PairRequestSchema = z.object({
   pairingCode: z.string(),
-  deviceName: z.string(),
+  deviceName: z.string().min(1).max(PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH),
   /** Ed25519 public key, base64url-encoded. Private key stays device-local (OS keychain or 0600 file). */
   devicePublicKey: z.string(),
   /**
@@ -128,7 +136,7 @@ export const PairResponseTenantIdSchema = z
   });
 
 export const PairResponseSchema = z.object({
-  deviceId: z.string(),
+  deviceId: z.string().min(1).max(PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH),
   /** JWT, ~1h lifetime. */
   accessToken: z.string(),
   /** Opaque hint for when/how to renew (e.g. an ISO timestamp); not itself a credential. */

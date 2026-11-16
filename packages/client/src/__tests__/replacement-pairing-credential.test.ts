@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { pairDeviceDigest } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
-import { PairingBusyError, PairingCodeRejectedError, PairingSupersededError } from '../daemon/daemon-errors';
+import { PairingBusyError, PairingCodeRejectedError, PairingInputInvalidError, PairingSupersededError } from '../daemon/daemon-errors';
 import { DeviceCredentialStore, type DeviceCommandRunner } from '../daemon/device-credential-store';
 import { publicKeyOfPrivateKeyPem } from '../daemon/device-keys';
 import { acquireEnrollmentGate } from '../daemon/enrollment-gate';
@@ -63,9 +63,7 @@ describe.each(['OS entry', 'injected backend'] as const)('replacement pairing pr
     }) as typeof fetch);
     await expect(replacement.auth.pair('pairing-code', { replaceOtherStore: true })).rejects.toThrow();
     const retained = await original.credentials.read();
-    expect(retained?.deviceId).toBe(prior.deviceId);
-    expect(retained?.devicePrivateKeyPem === prior.devicePrivateKeyPem).toBe(true);
-    expect(retained?.accessToken === prior.accessToken).toBe(true);
+    expect(retained).toEqual(prior);
     expect(attemptedKey).not.toBe(prior.devicePublicKey);
     const staged = await replacement.credentials.readPairingAttempt();
     expect(staged && publicKeyOfPrivateKeyPem(staged.devicePrivateKeyPem)).toBe(attemptedKey);
@@ -194,15 +192,17 @@ describe.each(['OS entry', 'injected backend'] as const)('registration fence (#2
   });
 
   it.each([
-    { status: 401, body: { error: 'invalid pairing code', code: 'pairing_code_invalid' }, typed: true },
-    { status: 401, body: { error: 'secret-reflected-body' }, typed: false },
-    { status: 409, body: { error: 'secret-reflected-body', code: 'pairing_superseded' }, typed: false },
-  ])('maps a $status answer to a fixed error and keeps the attempt (%#)', async ({ status, body, typed }) => {
+    { status: 401, body: { error: 'invalid pairing code', code: 'pairing_code_invalid' }, expected: 'typed' },
+    { status: 401, body: { error: 'secret-reflected-body' }, expected: 'pairing failed: HTTP 401' },
+    { status: 409, body: { error: 'secret-reflected-body', code: 'pairing_superseded' }, expected: 'pairing failed: HTTP 409' },
+    { status: 200, body: 'secret-reflected-body', expected: 'pairing failed: the server response does not match the protocol schema' },
+  ])('maps a $status answer to a fixed error and keeps the attempt (%#)', async ({ status, body, expected }) => {
     const { auth, credentials } = make('store');
-    scriptPair([() => json(status, body)]);
+    scriptPair([() => typeof body === 'string' ? new Response(body, { status }) : json(status, body)]);
     const failure = await auth.pair('code-1').catch((caught: unknown) => caught) as Error;
-    if (typed) expect(failure).toBeInstanceOf(PairingCodeRejectedError);
-    else expect(failure.message).toBe(`pairing failed: HTTP ${status}`);
+    if (expected === 'typed') expect(failure).toBeInstanceOf(PairingCodeRejectedError);
+    else expect(failure.message).toBe(expected);
+    expect(String(failure.cause ?? '')).not.toContain('secret');
     expect(failure.message).not.toContain('secret');
     await expect(credentials.readPairingAttempt()).resolves.toBeDefined();
   });
@@ -215,6 +215,37 @@ describe.each(['OS entry', 'injected backend'] as const)('registration fence (#2
       return conflict(body.expectedDeviceDigest);
     }]);
     await expect(auth.pair('code-1')).resolves.toBeDefined();
+  });
+
+  it('keeps the access token in memory only and exchanges one after a restart', async () => {
+    const { auth, credentials } = make('store');
+    await auth.pair('code-1');
+    const token = await auth.getValidAccessToken();
+    expect(Object.keys((await credentials.read())!).sort()).toEqual(['deviceId', 'devicePrivateKeyPem', 'devicePublicKey', 'tenantId']);
+    if (backend === 'OS entry') expect(Buffer.from(value!.slice('byok-device-credential-v2:'.length), 'base64').toString()).not.toContain(token);
+    const restarted = make('store');
+    await restarted.auth.loadExisting();
+    const exchanges = server.httpRequests.length;
+    await expect(restarted.auth.getValidAccessToken()).resolves.toEqual(expect.any(String));
+    expect(server.httpRequests.slice(exchanges).map((request) => request.pathname)).toEqual(['/byok/challenge', '/byok/token']);
+  });
+
+  it.each([
+    { field: 'deviceName', options: { deviceName: 'h'.repeat(65) } },
+    { field: 'deviceName', options: { deviceName: '' } },
+    { field: 'machineId', options: { machineId: async () => 'not-a-digest' } },
+  ])('refuses an out-of-bound $field before staging or sending (%#)', async ({ field, options }) => {
+    const storeDir = path.join(root, 'bounded');
+    const credentials = backend === 'injected backend' ? injected
+      : new DeviceCredentialStore({ storeDir, productId, platform: 'linux', commandRunner: run });
+    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(productId, storeDir, credentials), ...options });
+    auths.push(auth);
+    const bodies = scriptPair([]);
+    const failure = await auth.pair('code-1').catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(PairingInputInvalidError);
+    expect((failure as PairingInputInvalidError).field).toBe(field);
+    expect(bodies).toHaveLength(0);
+    await expect(credentials.readPairingAttempt()).resolves.toBeUndefined();
   });
 
   it.runIf(backend === 'OS entry')('deletes a wire v6 entry unread: daemon start reports re-pair, and a pairing pairs as a first pairing', async () => {

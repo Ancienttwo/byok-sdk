@@ -112,7 +112,7 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
       const error = await auth.handleUnauthorized().catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(AuthResponseInvalidError);
       expect(error).toMatchObject({ name: 'AuthResponseInvalidError', route: 'challenge' });
-      expect((error as AuthResponseInvalidError).cause).toBeInstanceOf(SyntaxError);
+      expect((error as AuthResponseInvalidError).cause).toBeUndefined();
       expect(server.httpRequests.filter((request) => request.pathname === '/byok/token')).toHaveLength(tokenRequestsBefore);
       expect(auth.isRevoked()).toBe(false);
       expect(await store.credentials.read()).toEqual(before);
@@ -130,7 +130,7 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
       const error = await auth.handleUnauthorized().catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(AuthResponseInvalidError);
       expect(error).toMatchObject({ name: 'AuthResponseInvalidError', route: 'token' });
-      expect((error as AuthResponseInvalidError).cause).toBeInstanceOf(SyntaxError);
+      expect((error as AuthResponseInvalidError).cause).toBeUndefined();
       expect(auth.isRevoked()).toBe(false);
       expect(await store.credentials.read()).toEqual(before);
     } finally {
@@ -149,20 +149,29 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
     }
   });
 
-  it('ignores a stray expiresAt and stores the device-local expiry from expiresIn (#1114)', async () => {
+  it('ignores a stray expiresAt and keeps the device-local expiry from expiresIn (#1114)', async () => {
     // An hour out keeps the proactive renewal timer far from this test.
-    const { auth, store } = await pairedWithResponse('/byok/token', { accessToken: 'fresh-token', expiresAt: 'not a timestamp', expiresIn: 3600 });
+    const { auth, store, before } = await pairedWithResponse('/byok/token', { accessToken: 'fresh-token', expiresAt: 'not a timestamp', expiresIn: 3600 });
+    // Date and performance stand still unless advanced, so the renewal's
+    // receipt time is exact and its renewal floor elapses on the same clock.
+    vi.useFakeTimers({ toFake: ['Date', 'performance'] });
+    const tokenRequests = () => vi.mocked(globalThis.fetch).mock.calls
+      .filter(([input]) => new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url).pathname === '/byok/token').length;
     try {
-      const requestedAt = Date.now();
       await expect(auth.handleUnauthorized()).resolves.toBe('fresh-token');
-      const settledAt = Date.now();
-      const stored = await store.credentials.read();
-      expect(stored).toMatchObject({ accessToken: 'fresh-token' });
-      const storedExpiry = Date.parse(stored!.expiresAt);
-      expect(storedExpiry).toBeGreaterThanOrEqual(requestedAt + 3_600_000);
-      expect(storedExpiry).toBeLessThanOrEqual(settledAt + 3_600_000);
+      // The token lives only in memory (#2045): the stored record is untouched.
+      expect(await store.credentials.read()).toEqual(before);
+      const minted = tokenRequests();
+      // Expiry is receipt + 3600 s, so renewal starts 60 s before it.
+      vi.advanceTimersByTime(3_540_000 - 1);
+      await expect(auth.getValidAccessToken()).resolves.toBe('fresh-token');
+      expect(tokenRequests()).toBe(minted);
+      vi.advanceTimersByTime(2);
+      await expect(auth.getValidAccessToken()).resolves.toBe('fresh-token');
+      expect(tokenRequests()).toBe(minted + 1);
     } finally {
       await auth.stop();
+      vi.useRealTimers();
     }
   });
 
@@ -194,7 +203,7 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
     }
   });
 
-  it('stores the pair token expiry from expiresIn, not refreshHint (#1114)', async () => {
+  it('takes the pair token expiry from expiresIn, not refreshHint (#1114)', async () => {
     const store = createTestDeviceStore(await tmpDir('byok-auth-response-decoder-pair-ttl-'));
     const auth = new AuthManager({ serverUrl: server.url, store });
     const realFetch = globalThis.fetch;
@@ -211,18 +220,30 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
         };
         return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
       }
+      // The paired device exists only in this stub, so its renewal is answered here too.
+      if (url.pathname === '/byok/challenge') return Response.json({ nonce: 'relative-ttl-nonce' });
+      if (url.pathname === '/byok/token') return Response.json({ accessToken: 'renewed-token', expiresIn: 900 });
       return realFetch(input, init);
     });
+    // Only Date is frozen, so the pair's receipt time is exact.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const pairedAt = Date.now();
+    const tokenRequests = () => vi.mocked(globalThis.fetch).mock.calls
+      .filter(([input]) => new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url).pathname === '/byok/token').length;
     try {
-      const requestedAt = Date.now();
       const record = await auth.pair('pairing-code');
-      const settledAt = Date.now();
-      const storedExpiry = Date.parse(record.expiresAt);
-      expect(storedExpiry).toBeGreaterThanOrEqual(requestedAt + 900_000);
-      expect(storedExpiry).toBeLessThanOrEqual(settledAt + 900_000);
-      expect(await store.credentials.read()).toMatchObject({ accessToken: 'paired-token', expiresAt: record.expiresAt });
+      // The token lives only in memory (#2045): the stored record carries none.
+      expect(await store.credentials.read()).toEqual(record);
+      // Expiry is receipt + 900 s, so renewal starts 60 s before it.
+      vi.setSystemTime(pairedAt + 840_000 - 1);
+      await expect(auth.getValidAccessToken()).resolves.toBe('paired-token');
+      expect(tokenRequests()).toBe(0);
+      vi.setSystemTime(pairedAt + 840_000 + 1);
+      await expect(auth.getValidAccessToken()).resolves.toBe('renewed-token');
+      expect(tokenRequests()).toBe(1);
     } finally {
       await auth.stop();
+      vi.useRealTimers();
     }
   });
 });

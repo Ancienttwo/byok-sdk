@@ -3332,7 +3332,7 @@ export declare class AuthRequestAbortedError extends Error {
  */
 export declare class AuthResponseInvalidError extends Error {
     readonly route: 'challenge' | 'token' | 'pair';
-    constructor(route: 'challenge' | 'token' | 'pair', options: {
+    constructor(route: 'challenge' | 'token' | 'pair', options?: {
         cause: unknown;
     });
 }
@@ -3380,6 +3380,12 @@ export interface AuthManagerOptions {
 export declare class AuthManager {
     private readonly opts;
     private record;
+    /**
+     * Never persisted: the device key exchanges a new one whenever none is held,
+     * so a daemon's first request after start runs `/byok/challenge` and
+     * `/byok/token` (#2045).
+     */
+    private token;
     private renewing;
     private proactiveTimer;
     private revoked;
@@ -5953,6 +5959,16 @@ export declare class PairingBusyError extends Error {
     constructor();
 }
 /**
+ * A pairing input is out of its wire bound, checked before anything is staged
+ * or sent (#2045): `deviceName` is empty or longer than
+ * `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` (set `deviceName` when the hostname
+ * is longer), or `machineId` is not lowercase hex SHA-256.
+ */
+export declare class PairingInputInvalidError extends Error {
+    readonly field: 'deviceName' | 'machineId';
+    constructor(field: 'deviceName' | 'machineId');
+}
+/**
  * Why `Daemon.pairEmbedded` refused. Each reason leaves the local
  * enrollment and the server unchanged:
  * - `enrollment_missing`: this store is unpaired but the server already lists devices.
@@ -6333,15 +6349,12 @@ export interface FleetJitter {
 export declare function createFleetJitter(productId: string, deviceId: string): FleetJitter;
 // ==== @byok-sdk/client dist/daemon/device-credential-store.d.ts ====
 import { type Win32CredentialBindings } from './win32-credential-api.js';
-/** Secret fields inside the internal complete enrollment authority. */
+/**
+ * The secret of the enrollment authority. No access token is persisted: the
+ * daemon exchanges one with this key when it first needs it and after a 401,
+ * and keeps it in memory (#2045).
+ */
 export interface DeviceCredentials {
-    readonly accessToken: string;
-    /**
-     * Device-local expiry of `accessToken` (#1114): this device's receipt time
-     * plus the server's relative `expiresIn`. It is compared only with this
-     * device's clock, never with a server timestamp.
-     */
-    readonly expiresAt: string;
     readonly devicePrivateKeyPem: string;
 }
 /** Non-secret deterministic projection of the authenticated enrollment. */
@@ -6351,9 +6364,9 @@ export interface DeviceMetadata {
     readonly devicePublicKey: string;
 }
 /**
- * The single local enrollment authority. Keeping identity and credential
- * bytes in one OS-managed entry prevents a crash from composing a token/key
- * from one pairing response with metadata from another.
+ * The single local enrollment authority. Keeping identity and key in one
+ * OS-managed entry prevents a crash from composing a key from one pairing
+ * response with metadata from another.
  */
 export type DeviceRecord = DeviceMetadata & DeviceCredentials;
 /**
@@ -6371,9 +6384,11 @@ export interface PairingAttempt {
     readonly codeDigest: string;
     /** `DeviceStore.identity` of the store that staged the attempt. */
     readonly storeIdentity: string;
+    /** At most `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` characters. */
     readonly deviceName: string;
+    /** Lowercase hex SHA-256, as `PairRequest.machineId`. */
     readonly machineId?: string;
-    /** The public key is derived from it; storing it too would cost entry bytes (the 2,400-byte bound). */
+    /** Its public key is derived, never stored. */
     readonly devicePrivateKeyPem: string;
     /** The `PairRequest` fence: `pairDeviceDigest` of the slot's enrollment when staged, or `null`. */
     readonly expectedDeviceDigest: string | null;
@@ -6433,10 +6448,9 @@ export declare class DeviceCredentialCommandAbortedError extends DeviceCredentia
  * and its lifetime. `signal` cancels the operation (daemon shutdown); an
  * implementation must stop and reject once it aborts.
  * Staging an attempt replaces any staged attempt and preserves the current
- * enrollment returned by `read()`. `replace()` retains the attempt when
- * renewing the same deviceId, tenantId and devicePublicKey; a different
- * authenticated enrollment promotes the pairing and discards the attempt.
- * `clear()` removes both. An attempt is kept with every field.
+ * enrollment returned by `read()`. `replace()` promotes a pairing: it writes
+ * the new enrollment and discards the staged attempt. `clear()` removes both.
+ * An attempt is kept with every field.
  * An error it throws reaches the Host unchanged, as the `cause` of a public
  * error such as `DeviceEnrollmentClearError`, so it must not carry a secret.
  */
@@ -6484,8 +6498,8 @@ export declare class OsCredentialEntry {
     delete(signal?: AbortSignal): Promise<void>;
 }
 /**
- * Internal OS-backed authority for the bearer token and device private key,
- * in the entry `device-enrollment`.
+ * Internal OS-backed authority for the device enrollment and private key, in
+ * the entry `device-enrollment`.
  */
 export declare class DeviceCredentialStore implements DeviceCredentialBackend {
     #private;
@@ -9990,7 +10004,7 @@ export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartu
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure.js';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon.js';
 export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema/index.js';
-export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, PairingAttemptRefusedError, PairingBusyError, PairingCodeRejectedError, PairingSupersededError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
+export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, PairingAttemptRefusedError, PairingBusyError, PairingInputInvalidError, PairingCodeRejectedError, PairingSupersededError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals.js';
 export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals.js';

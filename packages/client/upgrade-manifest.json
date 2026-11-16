@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "5cb257ffd6a29805b56d49c475bababd54dac80a8639c16d1ffc8a8b5783af3f"
+    "snapshotSha256": "35c698c6f6709bdb0c3f375900162c8e5f7fdcc859ffc88ed44119aa675c4ab4"
   },
   "configFields": {
     "status": "tracked",
@@ -403,6 +403,16 @@
       ]
     },
     {
+      "id": "wire-v7-pair-field-bounds",
+      "impact": "breaking",
+      "summary": "@byok-sdk/protocol bounds PairRequest.deviceName and PairResponse.deviceId to 1-64 characters (PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH, PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH), so every field a device stores from a pairing has a bound. A server rejects a longer deviceName with 400; a client refuses a longer deviceId.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "export:@byok-sdk/protocol#PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH",
+        "export:@byok-sdk/protocol#PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH"
+      ]
+    },
+    {
       "id": "wire-v7-pairing-enrollment-port",
       "impact": "breaking",
       "summary": "@byok-sdk/cloud DeviceRegistration and PairingEnrollmentInput require expectedDeviceDigest. DeviceDirectory.register returns DeviceRegistrationResult (registered or conflict) and PairingEnrollment.redeemAndRegister returns PairingEnrollmentResult (registered, conflict, or code_invalid in place of undefined). A custom store checks the fence, supersedes and inserts in one atomic section per (tenant, product, machineId); a conflict writes nothing and consumes no code, and a consumed code with the same binding replays before the fence is read. Run the cloud conformance suite.",
@@ -419,20 +429,22 @@
     {
       "id": "wire-v7-client-pairing-errors",
       "impact": "breaking",
-      "summary": "@byok-sdk/client pairing rejects with PairingSupersededError (another pairing of this productId replaced this one while its request was in flight; nothing written), PairingBusyError (retryable; two pairings of one machine at once; retry with the same code) and PairingCodeRejectedError (code unknown, expired or used). FirstPairingAttemptRefusedError is renamed PairingAttemptRefusedError and has no code.",
+      "summary": "@byok-sdk/client pairing rejects with PairingSupersededError (another pairing of this productId replaced this one while its request was in flight; nothing written), PairingBusyError (retryable; two pairings of one machine at once; retry with the same code) and PairingCodeRejectedError (code unknown, expired or used). FirstPairingAttemptRefusedError is renamed PairingAttemptRefusedError and has no code. PairingInputInvalidError (field deviceName or machineId) refuses an out-of-bound pairing input before anything is staged or sent. AuthResponseInvalidError's cause is optional: a malformed 2xx body carries none, since the parser's message quotes the body.",
       "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
       "items": [
         "export:@byok-sdk/client#PairingSupersededError",
         "export:@byok-sdk/client#PairingBusyError",
         "export:@byok-sdk/client#PairingCodeRejectedError",
         "export:@byok-sdk/client#PairingAttemptRefusedError",
-        "export:@byok-sdk/client#FirstPairingAttemptRefusedError"
+        "export:@byok-sdk/client#FirstPairingAttemptRefusedError",
+        "export:@byok-sdk/client#PairingInputInvalidError",
+        "export:@byok-sdk/client#AuthResponseInvalidError"
       ]
     },
     {
       "id": "wire-v7-device-credential-attempt",
       "impact": "breaking",
-      "summary": "@byok-sdk/client DeviceCredentialBackend implements readPairingAttempt and savePairingAttempt (PairingAttempt) in place of the first-pairing methods; InMemoryDeviceCredentialBackend follows. clearDeviceEnrollment loses clearUnattributedAttempt and DeviceEnrollmentClearErrorCode loses pairing_attempt_unattributed: a v7 attempt always names its store.",
+      "summary": "@byok-sdk/client DeviceCredentialBackend implements readPairingAttempt and savePairingAttempt (PairingAttempt) in place of the first-pairing methods; InMemoryDeviceCredentialBackend follows. clearDeviceEnrollment loses clearUnattributedAttempt and DeviceEnrollmentClearErrorCode loses pairing_attempt_unattributed: a v7 attempt always names its store. DeviceRecord drops accessToken and expiresAt, and replace always discards a staged attempt.",
       "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
       "items": [
         "export:@byok-sdk/client#DeviceCredentialBackend",
@@ -486,6 +498,15 @@
       "items": [
         "behavior:wire-v7-auth-errors-without-server-text"
       ]
+    },
+    {
+      "id": "wire-v7-access-token-in-memory",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client no longer persists the access token: the daemon exchanges one with the device key on its first request after start and after a 401, and keeps it in memory. A start costs one /byok/challenge and /byok/token round trip; renewal writes nothing to the OS entry.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-access-token-in-memory"
+      ]
     }
   ],
   "changes": [
@@ -522,6 +543,11 @@
       "item": "export:@byok-sdk/client#AgentSessionHandoffStore",
       "change": "changed",
       "entry": "remove-task-terminal-read"
+    },
+    {
+      "item": "export:@byok-sdk/client#AuthResponseInvalidError",
+      "change": "changed",
+      "entry": "wire-v7-client-pairing-errors"
     },
     {
       "item": "export:@byok-sdk/client#BlobClient",
@@ -595,6 +621,11 @@
     },
     {
       "item": "export:@byok-sdk/client#PairingCodeRejectedError",
+      "change": "added",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#PairingInputInvalidError",
       "change": "added",
       "entry": "wire-v7-client-pairing-errors"
     },
@@ -937,6 +968,16 @@
       "item": "export:@byok-sdk/protocol#PAIR_DEVICE_DIGEST_NAMESPACE",
       "change": "added",
       "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH",
+      "change": "added",
+      "entry": "wire-v7-pair-field-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH",
+      "change": "added",
+      "entry": "wire-v7-pair-field-bounds"
     },
     {
       "item": "export:@byok-sdk/protocol#PREPARED_OFFER_DECLINE_CODES",

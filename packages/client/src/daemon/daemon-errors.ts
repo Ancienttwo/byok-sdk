@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION } from '@byok-sdk/protocol';
+import { PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH, PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import type { DeviceMetadata } from './device-credential-store.js';
 
 /**
@@ -135,6 +135,21 @@ export class PairingBusyError extends Error {
   constructor() {
     super('another pairing of this machine registered at the same time; retry the pairing');
     this.name = 'PairingBusyError';
+  }
+}
+
+/**
+ * A pairing input is out of its wire bound, checked before anything is staged
+ * or sent (#2045): `deviceName` is empty or longer than
+ * `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` (set `deviceName` when the hostname
+ * is longer), or `machineId` is not lowercase hex SHA-256.
+ */
+export class PairingInputInvalidError extends Error {
+  constructor(readonly field: 'deviceName' | 'machineId') {
+    super(field === 'deviceName'
+      ? `deviceName must be 1 to ${PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH} characters; set deviceName when the hostname is longer`
+      : 'machineId must be a lowercase hex SHA-256');
+    this.name = 'PairingInputInvalidError';
   }
 }
 

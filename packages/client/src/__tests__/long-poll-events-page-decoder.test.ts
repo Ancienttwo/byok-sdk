@@ -16,7 +16,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from '../daemon/auth-manager';
 import { LongPollClient, LongPollRouteError } from '../daemon/long-poll-transport';
-import { seedDeviceEnrollment } from './fixtures/device-enrollment';
+import { seedAuthHoldingToken } from './fixtures/device-enrollment';
 import { TEST_ACTIVITY_INGRESS as ingress } from './fixtures/activity-ingress';
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -30,16 +30,8 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
 
   beforeEach(async () => {
     const store = createTestDeviceStore(await tmpDir('byok-lp-page-decoder-store-'));
-    await seedDeviceEnrollment(store, {
-      deviceId: 'dev-1',
-      tenantId: 'tenant-long-poll',
-      accessToken: 'tok-1',
-      expiresAt: new Date(Date.now() + 3_600_000).toISOString(), // far future — never renews, never touches the network
-      devicePrivateKeyPem: 'unused-in-this-test',
-      devicePublicKey: 'unused-in-this-test',
-    });
-    auth = new AuthManager({ serverUrl: 'http://example.invalid', store });
-    await auth.loadExisting();
+    // The held token outlives the test — never renews, never touches the network.
+    auth = await seedAuthHoldingToken(store, 'http://example.invalid', { deviceId: 'dev-1', tenantId: 'tenant-long-poll' });
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});

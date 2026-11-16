@@ -26,10 +26,7 @@ export class InMemoryDeviceCredentialBackend implements DeviceCredentialBackend 
     this.#slot = { record: this.#slot.record, attempt: Object.freeze({ ...attempt }) };
   }
   async replace(record: DeviceRecord): Promise<void> {
-    const prior = this.#slot.record;
-    const renewal = prior !== undefined && prior.deviceId === record.deviceId &&
-      prior.tenantId === record.tenantId && prior.devicePublicKey === record.devicePublicKey;
-    this.#slot = { record: Object.freeze({ ...record }), attempt: renewal ? this.#slot.attempt : undefined };
+    this.#slot = { record: Object.freeze({ ...record }), attempt: undefined };
   }
   async clear(): Promise<boolean> {
     const existed = this.#slot.record !== undefined || this.#slot.attempt !== undefined;

@@ -1,6 +1,10 @@
 import { spawn as nodeSpawn } from 'node:child_process';
-import { generateKeyPairSync, randomUUID } from 'node:crypto';
-import { PAIR_RESPONSE_TENANT_ID_MAX_LENGTH } from '@byok-sdk/protocol';
+import { createPrivateKey, generateKeyPairSync } from 'node:crypto';
+import {
+  PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH,
+  PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH,
+  PAIR_RESPONSE_TENANT_ID_MAX_LENGTH,
+} from '@byok-sdk/protocol';
 import { inspect } from 'node:util';
 import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
@@ -28,13 +32,18 @@ import {
 } from '../daemon/device-credential-store';
 import type { Win32CredentialBindings, Win32CredentialCallback, Win32CredentialWrite } from '../daemon/win32-credential-api';
 
+function deviceKey() {
+  const keys = generateKeyPairSync('ed25519');
+  return {
+    devicePublicKey: keys.publicKey.export({ format: 'jwk' }).x!,
+    devicePrivateKeyPem: keys.privateKey.export({ format: 'pem', type: 'pkcs8' }) as string,
+  };
+}
+
 const credentials = {
   deviceId: 'device-credential-test',
   tenantId: 'tenant-credential-test',
-  devicePublicKey: 'test-public-key',
-  accessToken: 'opaque-token',
-  expiresAt: '2030-01-01T00:00:00.000Z',
-  devicePrivateKeyPem: 'test-private-key',
+  ...deviceKey(),
 } as const;
 
 const nativeTemporaryRoot = os.tmpdir();
@@ -116,7 +125,6 @@ describe('DeviceCredentialStore', () => {
     await store.replace(credentials);
     expect(calls).toHaveLength(2);
     expect(calls.flatMap((call) => call.args).join(' ')).not.toMatch(/device\.json|tmp|cache/i);
-    expect(JSON.stringify(calls)).not.toContain(credentials.accessToken);
     expect(JSON.stringify(calls)).not.toContain(credentials.devicePrivateKeyPem);
   });
 
@@ -175,10 +183,17 @@ describe('DeviceCredentialStore', () => {
 describe('replacement pairing credential authority', () => {
   const attempt: PairingAttempt = {
     kind: 'pairing-attempt-v2', attemptId: 'A'.repeat(22), codeDigest: 'c'.repeat(43), storeIdentity: 'a'.repeat(64),
-    deviceName: 'replacement', machineId: 'replacement-machine', devicePrivateKeyPem: 'replacement-private-key',
+    deviceName: 'replacement', machineId: 'b'.repeat(64), devicePrivateKeyPem: deviceKey().devicePrivateKeyPem,
     expectedDeviceDigest: null,
   };
   const encoded = (value: unknown): string => `byok-device-credential-v2:${Buffer.from(JSON.stringify(value), 'utf8').toString('base64')}`;
+  // The stored form: a key as its seed, no public key, free text as base64url UTF-16LE.
+  const seed = (pem: string) => (createPrivateKey(pem).export({ format: 'jwk' }) as { d: string }).d;
+  const text = (value: string) => Buffer.from(value, 'utf16le').toString('base64url');
+  const storedRecord = (record: typeof credentials) =>
+    ({ deviceId: text(record.deviceId), tenantId: text(record.tenantId), deviceKey: seed(record.devicePrivateKeyPem) });
+  const storedAttempt = ({ devicePrivateKeyPem, deviceName, ...fields }: PairingAttempt) =>
+    ({ ...fields, deviceName: text(deviceName), deviceKey: seed(devicePrivateKeyPem) });
 
   function provider(initial?: string) {
     let value = initial;
@@ -204,75 +219,62 @@ describe('replacement pairing credential authority', () => {
     expect(entry.value()).toBeUndefined();
   });
 
-  it('fits the largest enrollment beside a pairing attempt in one entry', async () => {
-    // The bounds this rests on: tenantId at its protocol maximum, a 64-character
-    // hostname (HOST_NAME_MAX), a 64-character productId inside the cloud's
-    // access token, a machine digest and a fence digest.
-    const keys = generateKeyPairSync('ed25519');
-    const privateKeyPem = keys.privateKey.export({ format: 'pem', type: 'pkcs8' }) as string;
-    const segment = (value: object): string => Buffer.from(JSON.stringify(value)).toString('base64url');
-    const deviceId = `dev_${randomUUID()}`;
-    const tenantId = 't'.repeat(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH);
+  it('fits the largest enrollment beside a pairing attempt in one entry, whatever the text content', async () => {
+    // Every stored field at its bound, two different keys. Control characters
+    // and lone surrogates are the costliest content as JSON text.
+    const worst = (length: number) => `x${'\u0001\ud800'.repeat(length).slice(0, length - 2)}x`;
     const record = {
-      deviceId, tenantId,
-      devicePublicKey: keys.publicKey.export({ format: 'jwk' }).x!,
-      accessToken: `${segment({ alg: 'HS256', typ: 'JWT' })}.${segment({ deviceId, tenantId, productId: 'p'.repeat(64), iat: 1_900_000_000, exp: 1_900_003_600 })}.${'s'.repeat(43)}`,
-      expiresAt: '2030-01-01T00:00:00.000Z',
-      devicePrivateKeyPem: privateKeyPem,
+      deviceId: worst(PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH), tenantId: worst(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH), ...deviceKey(),
     };
     const largest: PairingAttempt = {
-      ...attempt, deviceName: 'h'.repeat(64), machineId: 'm'.repeat(64), devicePrivateKeyPem: privateKeyPem, expectedDeviceDigest: 'e'.repeat(43),
+      ...attempt, deviceName: worst(PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH), machineId: 'f'.repeat(64), expectedDeviceDigest: 'e'.repeat(43),
     };
-    const entry = provider(encoded(record));
+    const entry = provider();
+    await entry.open().replace(record);
     await entry.open().savePairingAttempt(largest);
+    // Measured worst case: 1,962 bytes of the 2,400-byte bound.
+    expect(Buffer.byteLength(entry.value()!)).toBe(1_962);
     expect(Buffer.byteLength(entry.value()!)).toBeLessThanOrEqual(OS_CREDENTIAL_ENTRY_MAX_BYTES);
+    await expect(entry.open().read()).resolves.toEqual(record);
     await expect(entry.open().readPairingAttempt()).resolves.toEqual(largest);
   });
 
   it('keeps first pairing as a standalone attempt and clears it completely', async () => {
     const entry = provider();
     await entry.open().savePairingAttempt(attempt);
-    expect(entry.value()).toBe(encoded(attempt));
+    expect(entry.value()).toBe(encoded(storedAttempt(attempt)));
     await expect(entry.open().read()).resolves.toBeUndefined();
     await expect(entry.open().readPairingAttempt()).resolves.toEqual(attempt);
     await expect(entry.open().clear()).resolves.toBe(true);
     await expect(entry.open().readPairingAttempt()).resolves.toBeUndefined();
   });
 
-  it('stages both authorities in one entry and keeps the pending key through current enrollment renewal', async () => {
-    const entry = provider(encoded(credentials));
+  it('stages both authorities in one entry, and replace always consumes the attempt', async () => {
+    const entry = provider(encoded(storedRecord(credentials)));
     await entry.open().savePairingAttempt(attempt);
     expect(entry.writes()).toBe(1);
-    expect(entry.value()).toBe(encoded({ kind: 'enrollment-with-attempt-v2', record: credentials, attempt }));
+    expect(entry.value()).toBe(encoded({ kind: 'enrollment-with-attempt-v2', record: storedRecord(credentials), attempt: storedAttempt(attempt) }));
     await expect(entry.open().read()).resolves.toEqual(credentials);
     await expect(entry.open().readPairingAttempt()).resolves.toEqual(attempt);
-    const renewed = { ...credentials, accessToken: 'renewed-token', expiresAt: '2031-01-01T00:00:00.000Z' };
-    await entry.open().replace(renewed);
-    await expect(entry.open().read()).resolves.toEqual(renewed);
-    await expect(entry.open().readPairingAttempt()).resolves.toEqual(attempt);
+    await entry.open().replace(credentials);
+    expect(entry.value()).toBe(encoded(storedRecord(credentials)));
+    await expect(entry.open().readPairingAttempt()).resolves.toBeUndefined();
+    await entry.open().savePairingAttempt(attempt);
     await expect(entry.open().clear()).resolves.toBe(true);
     await expect(entry.open().read()).resolves.toBeUndefined();
-    await expect(entry.open().readPairingAttempt()).resolves.toBeUndefined();
-  });
-
-  it.each(['deviceId', 'tenantId', 'devicePublicKey'] as const)('promotes an authenticated enrollment with a different %s', async (field) => {
-    const entry = provider(encoded({ kind: 'enrollment-with-attempt-v2', record: credentials, attempt }));
-    const replacement = { ...credentials, [field]: `replacement-${field}` };
-    await entry.open().replace(replacement);
-    expect(entry.value()).toBe(encoded(replacement));
-    await expect(entry.open().read()).resolves.toEqual(replacement);
     await expect(entry.open().readPairingAttempt()).resolves.toBeUndefined();
   });
 
   it.each([
-    { record: undefined, attempt },
-    { record: credentials, attempt: undefined },
-    { record: { ...credentials, accessToken: '' }, attempt },
-    { record: credentials, attempt: { ...attempt, machineId: 1 } },
-    { record: { ...credentials, kind: 'pairing-attempt-v2' }, attempt },
+    { record: undefined, attempt: storedAttempt(attempt) },
+    { record: storedRecord(credentials), attempt: undefined },
+    { record: { ...storedRecord(credentials), deviceKey: '' }, attempt: storedAttempt(attempt) },
+    { record: { ...storedRecord(credentials), deviceId: 'not utf-16' }, attempt: storedAttempt(attempt) },
+    { record: storedRecord(credentials), attempt: { ...storedAttempt(attempt), machineId: 1 } },
+    { record: { ...storedRecord(credentials), kind: 'pairing-attempt-v2' }, attempt: storedAttempt(attempt) },
   ])('rejects a malformed wrapper without exposing or overwriting either member (%#)', async (members) => {
     // Flat fields cannot turn an invalid wrapper into a usable record.
-    const raw = encoded({ ...credentials, kind: 'enrollment-with-attempt-v2', ...members });
+    const raw = encoded({ ...storedRecord(credentials), kind: 'enrollment-with-attempt-v2', ...members });
     const entry = provider(raw);
     await expect(entry.open().read()).rejects.toBeInstanceOf(DeviceCredentialStoreError);
     await expect(entry.open().readPairingAttempt()).rejects.toBeInstanceOf(DeviceCredentialStoreError);
@@ -282,20 +284,16 @@ describe('replacement pairing credential authority', () => {
     expect(entry.value()).toBe(raw);
   });
 
-  it('refuses an oversized combined entry before writing and keeps the current enrollment', async () => {
-    const largeRecord = { ...credentials, accessToken: 'a'.repeat(800) };
-    const largeAttempt = { ...attempt, devicePrivateKeyPem: 'b'.repeat(700) };
-    expect(Buffer.byteLength(encoded(largeRecord))).toBeLessThanOrEqual(OS_CREDENTIAL_ENTRY_MAX_BYTES);
-    expect(Buffer.byteLength(encoded(largeAttempt))).toBeLessThanOrEqual(OS_CREDENTIAL_ENTRY_MAX_BYTES);
-    expect(Buffer.byteLength(encoded({ kind: 'enrollment-with-attempt-v2', record: largeRecord, attempt: largeAttempt })))
-      .toBeGreaterThan(OS_CREDENTIAL_ENTRY_MAX_BYTES);
-    const raw = encoded(largeRecord);
+  it.each([
+    ['an attempt over a field bound', (store: DeviceCredentialStore) => store.savePairingAttempt({ ...attempt, deviceName: 'h'.repeat(PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH + 1) })],
+    ['a record whose public key is not its private key\'s', (store: DeviceCredentialStore) => store.replace({ ...credentials, devicePublicKey: deviceKey().devicePublicKey })],
+  ] as const)('refuses %s before writing and keeps the current enrollment', async (_case, write) => {
+    const raw = encoded(storedRecord(credentials));
     const entry = provider(raw);
-    await expect(entry.open().savePairingAttempt(largeAttempt)).rejects.toThrow('exceeds the OS credential entry bound');
+    await expect(write(entry.open())).rejects.toBeInstanceOf(DeviceCredentialStoreError);
     expect(entry.writes()).toBe(0);
     expect(entry.value()).toBe(raw);
-    await expect(entry.open().read()).resolves.toEqual(largeRecord);
-    await expect(entry.open().readPairingAttempt()).resolves.toBeUndefined();
+    await expect(entry.open().read()).resolves.toEqual(credentials);
   });
 });
 

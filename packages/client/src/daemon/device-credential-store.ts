@@ -1,8 +1,10 @@
 import { assertNoNulSpawnInput, spawnStartError, systemExecutable } from '@byok-sdk/core/system-tool';
-import { createHash } from 'node:crypto';
+import { createHash, createPrivateKey } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import * as path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
+import { PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH, PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH } from '@byok-sdk/protocol';
+import { publicKeyOfPrivateKeyPem } from './device-keys.js';
 import {
   deleteWin32Credential,
   enqueueWin32CredentialCall,
@@ -12,15 +14,12 @@ import {
   type Win32CredentialBindings,
 } from './win32-credential-api.js';
 
-/** Secret fields inside the internal complete enrollment authority. */
+/**
+ * The secret of the enrollment authority. No access token is persisted: the
+ * daemon exchanges one with this key when it first needs it and after a 401,
+ * and keeps it in memory (#2045).
+ */
 export interface DeviceCredentials {
-  readonly accessToken: string;
-  /**
-   * Device-local expiry of `accessToken` (#1114): this device's receipt time
-   * plus the server's relative `expiresIn`. It is compared only with this
-   * device's clock, never with a server timestamp.
-   */
-  readonly expiresAt: string;
   readonly devicePrivateKeyPem: string;
 }
 
@@ -32,9 +31,9 @@ export interface DeviceMetadata {
 }
 
 /**
- * The single local enrollment authority. Keeping identity and credential
- * bytes in one OS-managed entry prevents a crash from composing a token/key
- * from one pairing response with metadata from another.
+ * The single local enrollment authority. Keeping identity and key in one
+ * OS-managed entry prevents a crash from composing a key from one pairing
+ * response with metadata from another.
  */
 export type DeviceRecord = DeviceMetadata & DeviceCredentials;
 
@@ -53,9 +52,11 @@ export interface PairingAttempt {
   readonly codeDigest: string;
   /** `DeviceStore.identity` of the store that staged the attempt. */
   readonly storeIdentity: string;
+  /** At most `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` characters. */
   readonly deviceName: string;
+  /** Lowercase hex SHA-256, as `PairRequest.machineId`. */
   readonly machineId?: string;
-  /** The public key is derived from it; storing it too would cost entry bytes (the 2,400-byte bound). */
+  /** Its public key is derived, never stored. */
   readonly devicePrivateKeyPem: string;
   /** The `PairRequest` fence: `pairDeviceDigest` of the slot's enrollment when staged, or `null`. */
   readonly expectedDeviceDigest: string | null;
@@ -178,10 +179,9 @@ export class DeviceCredentialCommandAbortedError extends DeviceCredentialStoreEr
  * and its lifetime. `signal` cancels the operation (daemon shutdown); an
  * implementation must stop and reject once it aborts.
  * Staging an attempt replaces any staged attempt and preserves the current
- * enrollment returned by `read()`. `replace()` retains the attempt when
- * renewing the same deviceId, tenantId and devicePublicKey; a different
- * authenticated enrollment promotes the pairing and discards the attempt.
- * `clear()` removes both. An attempt is kept with every field.
+ * enrollment returned by `read()`. `replace()` promotes a pairing: it writes
+ * the new enrollment and discards the staged attempt. `clear()` removes both.
+ * An attempt is kept with every field.
  * An error it throws reaches the Host unchanged, as the `cause` of a public
  * error such as `DeviceEnrollmentClearError`, so it must not carry a secret.
  */
@@ -207,8 +207,6 @@ function assertRecord(value: unknown): asserts value is DeviceRecord {
     typeof (value as Partial<DeviceRecord>).deviceId !== 'string' ||
     !isTenantId((value as Partial<DeviceRecord>).tenantId) ||
     typeof (value as Partial<DeviceRecord>).devicePublicKey !== 'string' ||
-    typeof (value as Partial<DeviceCredentials>).accessToken !== 'string' ||
-    typeof (value as Partial<DeviceCredentials>).expiresAt !== 'string' ||
     typeof (value as Partial<DeviceCredentials>).devicePrivateKeyPem !== 'string'
   ) {
     throw new DeviceCredentialStoreError('OS credential entry has an invalid device credential shape');
@@ -216,9 +214,8 @@ function assertRecord(value: unknown): asserts value is DeviceRecord {
   const credential = value as DeviceRecord;
   if (
     credential.deviceId.length === 0 ||
+    credential.deviceId.length > PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH ||
     credential.devicePublicKey.length === 0 ||
-    credential.accessToken.length === 0 ||
-    credential.expiresAt.length === 0 ||
     credential.devicePrivateKeyPem.length === 0
   ) {
     throw new DeviceCredentialStoreError('OS credential entry has an incomplete device credential');
@@ -247,9 +244,10 @@ function assertPairingAttempt(value: unknown): asserts value is PairingAttempt {
     typeof attempt.storeIdentity !== 'string' || !/^[0-9a-f]{64}$/u.test(attempt.storeIdentity) ||
     typeof attempt.deviceName !== 'string' ||
     typeof attempt.devicePrivateKeyPem !== 'string' ||
-    (attempt.machineId !== undefined && typeof attempt.machineId !== 'string') ||
+    (attempt.machineId !== undefined && (typeof attempt.machineId !== 'string' || !/^[0-9a-f]{64}$/u.test(attempt.machineId))) ||
     (attempt.expectedDeviceDigest !== null && (typeof attempt.expectedDeviceDigest !== 'string' || !BASE64URL_43.test(attempt.expectedDeviceDigest))) ||
     attempt.deviceName.length === 0 ||
+    attempt.deviceName.length > PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH ||
     attempt.devicePrivateKeyPem.length === 0
   ) {
     throw new DeviceCredentialStoreError('OS credential entry has an invalid pairing attempt shape');
@@ -272,8 +270,6 @@ function freezeRecord(record: DeviceRecord): DeviceRecord {
     deviceId: record.deviceId,
     tenantId: record.tenantId,
     devicePublicKey: record.devicePublicKey,
-    accessToken: record.accessToken,
-    expiresAt: record.expiresAt,
     devicePrivateKeyPem: record.devicePrivateKeyPem,
   });
 }
@@ -291,11 +287,101 @@ function freezeAttempt(attempt: PairingAttempt): PairingAttempt {
   });
 }
 
+/** PKCS8 DER of an Ed25519 private key, before its 32-byte seed (RFC 8410). */
+const ED25519_PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
+
+/**
+ * The entry stores each key as its 32-byte seed and no public key: both are
+ * deterministic projections of the seed, and the PEM form would cost the
+ * entry bound (`OS_CREDENTIAL_ENTRY_MAX_BYTES`) about 200 bytes per key.
+ */
+function seedOfPrivateKeyPem(pem: string): string {
+  let key;
+  try {
+    key = createPrivateKey(pem);
+  } catch {
+    throw new DeviceCredentialStoreError('device private key is not a PKCS8 Ed25519 key');
+  }
+  if (key.asymmetricKeyType !== 'ed25519') throw new DeviceCredentialStoreError('device private key is not a PKCS8 Ed25519 key');
+  return (key.export({ format: 'jwk' }) as { d: string }).d;
+}
+
+function privateKeyPemOfSeed(seed: unknown): string {
+  if (typeof seed !== 'string' || !BASE64URL_43.test(seed)) throw new DeviceCredentialStoreError('OS credential entry has an invalid device key');
+  const der = Buffer.concat([ED25519_PKCS8_PREFIX, Buffer.from(seed, 'base64url')]);
+  return createPrivateKey({ key: der, format: 'der', type: 'pkcs8' }).export({ type: 'pkcs8', format: 'pem' }) as string;
+}
+
+/**
+ * Free text (`tenantId`, `deviceId`, `deviceName`) is stored as base64url
+ * UTF-16LE: two bytes per code unit for any content. As JSON text, a control
+ * character or a lone surrogate would take six, and only these fields' lengths
+ * are bounded, not their content; this keeps the worst-case entry within
+ * `OS_CREDENTIAL_ENTRY_MAX_BYTES` for every value the bounds allow.
+ */
+function storedText(value: string): string {
+  return Buffer.from(value, 'utf16le').toString('base64url');
+}
+
+function textOfStored(value: unknown): unknown {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]*$/u.test(value)) return undefined;
+  const bytes = Buffer.from(value, 'base64url');
+  if (bytes.length % 2 !== 0 || bytes.toString('base64url') !== value) return undefined;
+  return bytes.toString('utf16le');
+}
+
+function storedRecord(record: DeviceRecord): object {
+  if (publicKeyOfPrivateKeyPem(record.devicePrivateKeyPem) !== record.devicePublicKey) {
+    throw new DeviceCredentialStoreError('device public key does not match its private key');
+  }
+  return {
+    deviceId: storedText(record.deviceId), tenantId: storedText(record.tenantId),
+    deviceKey: seedOfPrivateKeyPem(record.devicePrivateKeyPem),
+  };
+}
+
+function storedAttempt(attempt: PairingAttempt): object {
+  const { devicePrivateKeyPem, deviceName, ...fields } = freezeAttempt(attempt);
+  return { ...fields, deviceName: storedText(deviceName), deviceKey: seedOfPrivateKeyPem(devicePrivateKeyPem) };
+}
+
+function recordOfStored(value: unknown): DeviceRecord {
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || 'kind' in value) {
+    throw new DeviceCredentialStoreError('OS credential entry has an invalid device credential shape');
+  }
+  const stored = value as { deviceId?: unknown; tenantId?: unknown; deviceKey?: unknown };
+  const devicePrivateKeyPem = privateKeyPemOfSeed(stored.deviceKey);
+  const record = {
+    deviceId: textOfStored(stored.deviceId), tenantId: textOfStored(stored.tenantId),
+    devicePublicKey: publicKeyOfPrivateKeyPem(devicePrivateKeyPem), devicePrivateKeyPem,
+  };
+  assertRecord(record);
+  return freezeRecord(record);
+}
+
+function attemptOfStored(value: unknown): PairingAttempt {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new DeviceCredentialStoreError('OS credential entry has an invalid pairing attempt shape');
+  }
+  const { deviceKey, deviceName, ...fields } = value as Record<string, unknown>;
+  const attempt = { ...fields, deviceName: textOfStored(deviceName), devicePrivateKeyPem: privateKeyPemOfSeed(deviceKey) };
+  assertPairingAttempt(attempt);
+  return freezeAttempt(attempt);
+}
+
 function encode(authority: DeviceCredentialAuthority): string {
-  if (isEnrollmentWithAttempt(authority)) assertEnrollmentWithAttempt(authority);
-  else if (isPairingAttempt(authority)) assertPairingAttempt(authority);
-  else assertRecord(authority);
-  const encoded = Buffer.from(JSON.stringify(authority), 'utf8').toString('base64');
+  let stored: object;
+  if (isEnrollmentWithAttempt(authority)) {
+    assertEnrollmentWithAttempt(authority);
+    stored = { kind: authority.kind, record: storedRecord(authority.record), attempt: storedAttempt(authority.attempt) };
+  } else if (isPairingAttempt(authority)) {
+    assertPairingAttempt(authority);
+    stored = storedAttempt(authority);
+  } else {
+    assertRecord(authority);
+    stored = storedRecord(authority);
+  }
+  const encoded = Buffer.from(JSON.stringify(stored), 'utf8').toString('base64');
   const value = `${ENCODED_PREFIX}${encoded}`;
   // Windows generic-credential blobs are limited; do not silently truncate a
   // bearer/key authority into a different credential.
@@ -329,15 +415,13 @@ function decode(value: string): DeviceCredentialAuthority {
     throw new DeviceCredentialStoreError('OS credential entry is not valid JSON');
   }
   if (typeof parsed === 'object' && parsed !== null && (parsed as Partial<PairingAttempt>).kind === 'pairing-attempt-v2') {
-    assertPairingAttempt(parsed);
-    return freezeAttempt(parsed);
+    return attemptOfStored(parsed);
   }
   if (typeof parsed === 'object' && parsed !== null && (parsed as Partial<EnrollmentWithAttempt>).kind === 'enrollment-with-attempt-v2') {
-    assertEnrollmentWithAttempt(parsed);
-    return Object.freeze({ kind: parsed.kind, record: freezeRecord(parsed.record), attempt: freezeAttempt(parsed.attempt) });
+    const { record, attempt } = parsed as { record?: unknown; attempt?: unknown };
+    return Object.freeze({ kind: 'enrollment-with-attempt-v2', record: recordOfStored(record), attempt: attemptOfStored(attempt) });
   }
-  assertRecord(parsed);
-  return freezeRecord(parsed);
+  return recordOfStored(parsed);
 }
 
 function serviceFor(productId: string): string {
@@ -533,8 +617,8 @@ export class OsCredentialEntry {
 }
 
 /**
- * Internal OS-backed authority for the bearer token and device private key,
- * in the entry `device-enrollment`.
+ * Internal OS-backed authority for the device enrollment and private key, in
+ * the entry `device-enrollment`.
  */
 export class DeviceCredentialStore implements DeviceCredentialBackend {
   readonly #entry: OsCredentialEntry;
@@ -572,14 +656,9 @@ export class DeviceCredentialStore implements DeviceCredentialBackend {
 
   async replace(record: DeviceRecord, signal?: AbortSignal): Promise<void> {
     const encoded = encode(record);
-    const authority = await this.#readAuthority(signal);
-    // Token renewal belongs to the current enrollment, while a different
-    // authenticated binding commits the pairing and consumes its attempt.
-    const retainAttempt = authority !== undefined && isEnrollmentWithAttempt(authority) &&
-      authority.record.deviceId === record.deviceId && authority.record.tenantId === record.tenantId &&
-      authority.record.devicePublicKey === record.devicePublicKey;
-    await this.#entry.replace(retainAttempt
-      ? encode({ kind: 'enrollment-with-attempt-v2', record, attempt: authority.attempt }) : encoded, signal);
+    // An entry this store cannot decode is refused, never overwritten.
+    await this.#readAuthority(signal);
+    await this.#entry.replace(encoded, signal);
   }
 
   /**

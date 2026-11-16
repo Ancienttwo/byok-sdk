@@ -472,8 +472,6 @@ describe('truth memory client', () => {
     await seedDeviceEnrollment(store, {
       deviceId: 'device-e2e',
       tenantId: tenant,
-      accessToken: 'not-used',
-      expiresAt: '2026-08-10T00:00:00.000Z',
       devicePrivateKeyPem: exportPrivateKeyPem(keys.privateKey),
       devicePublicKey: publicJwk.x,
     });

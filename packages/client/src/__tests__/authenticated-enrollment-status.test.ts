@@ -27,8 +27,6 @@ describe('credential-blind authenticated enrollment status', () => {
     const record = {
       deviceId: 'device-status',
       tenantId: 'tenant-status',
-      accessToken: 'secret-access-token',
-      expiresAt: '2030-01-01T00:00:00.000Z',
       devicePrivateKeyPem: 'secret-private-key',
       devicePublicKey: 'public-key',
     };
@@ -37,7 +35,6 @@ describe('credential-blind authenticated enrollment status', () => {
     const paired = await readDeviceEnrollmentStatus(options);
     expect(paired).toEqual({ state: 'paired', deviceId: 'device-status' });
     expect(JSON.stringify(paired)).not.toContain(record.tenantId);
-    expect(JSON.stringify(paired)).not.toContain(record.accessToken);
     expect(JSON.stringify(paired)).not.toContain(record.devicePrivateKeyPem);
 
     await fs.writeFile(path.join(storeDir, 'device.json'), JSON.stringify({

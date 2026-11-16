@@ -6,6 +6,7 @@ import {
   BYOK_TOKEN_PATH,
   ChallengeResponseSchema,
   DeviceNotRegisteredResponseSchema,
+  PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH,
   PairingCodeInvalidResponseSchema,
   PairResponseSchema,
   PairSupersededResponseSchema,
@@ -28,6 +29,7 @@ import {
   PairingAttemptRefusedError,
   PairingBusyError,
   PairingCodeRejectedError,
+  PairingInputInvalidError,
   PairingSupersededError,
 } from './daemon-errors.js';
 import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, publicKeyOfPrivateKeyPem, signNonce } from './device-keys.js';
@@ -71,14 +73,24 @@ export class AuthRequestAbortedError extends Error {
 export class AuthResponseInvalidError extends Error {
   constructor(
     readonly route: 'challenge' | 'token' | 'pair',
-    options: { cause: unknown },
+    options?: { cause: unknown },
   ) {
     super(`${route === 'pair' ? 'pairing' : `token renewal (${route})`} failed: the server response does not match the protocol schema`, options);
     this.name = 'AuthResponseInvalidError';
   }
 }
 
-type RenewedToken = Pick<DeviceRecord, 'accessToken' | 'expiresAt'> & {
+/**
+ * The access token, held only in memory (#2045). `expiresAt` is device-local
+ * (#1114): this device's receipt time plus the server's relative `expiresIn`,
+ * compared only with this device's clock.
+ */
+interface AccessToken {
+  readonly accessToken: string;
+  readonly expiresAt: string;
+}
+
+type RenewedToken = AccessToken & {
   readonly clockSkew: ClockSkewObservation | undefined;
 };
 
@@ -99,12 +111,13 @@ function pairingCodeDigest(pairingCode: string): string {
  * network) propagates unchanged so `runRequest` still classifies it; only a
  * body that is not JSON becomes {@link AuthResponseInvalidError}.
  */
-async function readAuthResponseJson(response: Response, route: 'challenge' | 'token'): Promise<unknown> {
+async function readAuthResponseJson(response: Response, route: 'challenge' | 'token' | 'pair'): Promise<unknown> {
   const text = await response.text();
   try {
     return JSON.parse(text) as unknown;
-  } catch (cause) {
-    throw new AuthResponseInvalidError(route, { cause });
+  } catch {
+    // The parser's message quotes the body; no server text enters an error.
+    throw new AuthResponseInvalidError(route);
   }
 }
 
@@ -211,6 +224,12 @@ export class AuthManager {
   }
 
   private record: DeviceRecord | undefined;
+  /**
+   * Never persisted: the device key exchanges a new one whenever none is held,
+   * so a daemon's first request after start runs `/byok/challenge` and
+   * `/byok/token` (#2045).
+   */
+  private token: AccessToken | undefined;
   private renewing: Promise<string> | undefined;
   private proactiveTimer: ReturnType<typeof setTimeout> | undefined;
   private revoked = false;
@@ -278,6 +297,7 @@ export class AuthManager {
    * so {@link stop} cancels a read hung on a locked keychain.
    */
   async loadExisting(): Promise<DeviceRecord | undefined> {
+    const prior = this.record;
     this.record = undefined;
     this.record = await this.runCredentialMutation(async (signal) => {
       try {
@@ -290,6 +310,8 @@ export class AuthManager {
         return this.loadRecord(signal);
       }
     });
+    // A token is kept only for the enrollment it was issued to.
+    if (!sameEnrollment(prior, this.record)) this.token = undefined;
     if (this.record) this.scheduleProactiveRenewal();
     return this.record;
   }
@@ -326,6 +348,11 @@ export class AuthManager {
         const replaceOtherStore = options?.replaceOtherStore === true;
         const observedDeviceName = this.opts.deviceName ?? os.hostname();
         const observedMachineId = await this.opts.machineId?.();
+        // The wire bounds both, and the staged attempt stores both.
+        if (observedDeviceName.length === 0 || observedDeviceName.length > PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH) {
+          throw new PairingInputInvalidError('deviceName');
+        }
+        if (observedMachineId !== undefined && !/^[0-9a-f]{64}$/u.test(observedMachineId)) throw new PairingInputInvalidError('machineId');
         const attempt = await this.underEnrollmentGate(signal, () =>
           this.stagePairingAttempt(signal, pairingCode, replaceOtherStore, observedDeviceName, observedMachineId));
         const devicePublicKey = publicKeyOfPrivateKeyPem(attempt.devicePrivateKeyPem);
@@ -344,12 +371,7 @@ export class AuthManager {
           tenantId: body.tenantId,
           devicePublicKey,
         };
-        const record: DeviceRecord = {
-          ...metadata,
-          accessToken: body.accessToken,
-          expiresAt: body.expiresAt,
-          devicePrivateKeyPem: attempt.devicePrivateKeyPem,
-        };
+        const record: DeviceRecord = { ...metadata, devicePrivateKeyPem: attempt.devicePrivateKeyPem };
         await this.underEnrollmentGate(signal, async () => {
           await this.assertOwnsAttempt(signal, attempt);
           // device.json is this store's pair-time binding and a non-secret
@@ -361,6 +383,7 @@ export class AuthManager {
           await this.credentials.replace(record, signal);
         });
         this.record = record;
+        this.token = { accessToken: body.accessToken, expiresAt: body.expiresAt };
         this.lastClockSkew = body.clockSkew;
         this.revoked = false;
         return record;
@@ -416,7 +439,7 @@ export class AuthManager {
       // local state. Parse the required wire contract before building the
       // one atomic DeviceRecord; no token claim or host configuration is an
       // alternate tenant authority.
-      const paired = PairResponseSchema.safeParse(await res.json());
+      const paired = PairResponseSchema.safeParse(await readAuthResponseJson(res, 'pair'));
       if (!paired.success) throw new AuthResponseInvalidError('pair', { cause: paired.error });
       return {
         kind: 'paired',
@@ -437,11 +460,13 @@ export class AuthManager {
     // Returning the still-long-lived cached token here lets WS reconnect race
     // that renewal and present the same rejected bearer again.
     if (this.renewing) return this.renewing;
-    if (msUntilExpiry(this.record.expiresAt) > RENEW_MARGIN_MS) return this.record.accessToken;
+    const token = this.token;
+    if (token === undefined) return this.renew();
+    if (msUntilExpiry(token.expiresAt) > RENEW_MARGIN_MS) return token.accessToken;
     // Inside the renewal floor the cached token is the newest the server has
     // issued; the proactive timer renews when the floor ends, and a server 401
     // still renews at once through handleUnauthorized().
-    if (this.msUntilRenewAllowed() > 0) return this.record.accessToken;
+    if (this.msUntilRenewAllowed() > 0) return token.accessToken;
     return this.renew();
   }
 
@@ -486,25 +511,15 @@ export class AuthManager {
       body = await this.exchangeToken(record, signal);
       if (body === undefined) this.markRevoked();
     }
-    const updated: DeviceRecord = {
-      ...record,
-      accessToken: body.accessToken,
-      expiresAt: body.expiresAt,
-    };
-    // Renewal atomically replaces the complete enrollment authority; identity
-    // and key cannot drift from the new token/expiry. It writes only while
-    // this store still holds that enrollment, under the enrollment gate
-    // (#2034); otherwise the new token is discarded and the binding is lost.
-    await this.underEnrollmentGate(signal, async () => {
-      await checkBinding(this, record, signal);
-      await this.credentials.replace(updated, signal);
-    });
-    this.record = updated;
+    // The token is used only while this store still holds the enrollment it
+    // was issued to (#2034); otherwise it is discarded and the binding is lost.
+    await this.underEnrollmentGate(signal, () => checkBinding(this, record, signal));
+    this.token = { accessToken: body.accessToken, expiresAt: body.expiresAt };
     this.lastClockSkew = body.clockSkew;
     this.lastRenewedAt = performance.now();
-    this.nearExpiryRenewals = msUntilExpiry(updated.expiresAt) > RENEW_MARGIN_MS ? 0 : this.nearExpiryRenewals + 1;
+    this.nearExpiryRenewals = msUntilExpiry(body.expiresAt) > RENEW_MARGIN_MS ? 0 : this.nearExpiryRenewals + 1;
     this.scheduleProactiveRenewal();
-    return updated.accessToken;
+    return body.accessToken;
   }
 
   /**
@@ -581,6 +596,7 @@ export class AuthManager {
   /** The OS entry no longer holds this store's enrollment: drop the cached record, stop renewing and report it. Always throws `error`. */
   private loseBinding(error: DeviceStoreBindingMismatchError | DeviceRecordRePairRequiredError): never {
     this.record = undefined;
+    this.token = undefined;
     if (this.proactiveTimer) clearTimeout(this.proactiveTimer);
     this.proactiveTimer = undefined;
     this.opts.onBindingLost?.(error instanceof DeviceStoreBindingMismatchError ? 'store_not_bound' : 're_pair_required');
@@ -700,8 +716,9 @@ export class AuthManager {
   private scheduleProactiveRenewal(): void {
     if (this.proactiveTimer) clearTimeout(this.proactiveTimer);
     this.proactiveTimer = undefined;
-    if (!this.record || this.revoked || this.stopped || this.pairing) return;
-    const delay = Math.max(0, msUntilExpiry(this.record.expiresAt) - RENEW_MARGIN_MS, this.msUntilRenewAllowed());
+    // Without a token there is nothing to keep fresh: the next request exchanges one.
+    if (!this.record || !this.token || this.revoked || this.stopped || this.pairing) return;
+    const delay = Math.max(0, msUntilExpiry(this.token.expiresAt) - RENEW_MARGIN_MS, this.msUntilRenewAllowed());
     // A far-future expiry exceeds what one timer can hold (it would fire at
     // 1 ms). Arm a capped step and re-derive the delay from `expiresAt` when
     // it elapses; renewal only runs once the real renewal point is reached.
@@ -803,12 +820,17 @@ export class AuthManager {
   }
 }
 
+function sameEnrollment(a: DeviceRecord | undefined, b: DeviceRecord | undefined): boolean {
+  return a !== undefined && b !== undefined &&
+    a.deviceId === b.deviceId && a.tenantId === b.tenantId && a.devicePublicKey === b.devicePublicKey;
+}
+
 function msUntilExpiry(expiresAt: string): number {
   return new Date(expiresAt).getTime() - Date.now();
 }
 
 /**
- * The stored `expiresAt` is device-local (#1114): this device's receipt time
+ * `expiresAt` is device-local (#1114): this device's receipt time
  * plus the server's relative `expiresIn`, so {@link msUntilExpiry} compares it
  * only with the same device clock. `refreshHint` is never read for lifetime.
  */

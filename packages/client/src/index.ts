@@ -149,6 +149,7 @@ export {
   EmbeddedPairingError,
   PairingAttemptRefusedError,
   PairingBusyError,
+  PairingInputInvalidError,
   PairingCodeRejectedError,
   PairingSupersededError,
   type DaemonJournalProtocolRecord,
