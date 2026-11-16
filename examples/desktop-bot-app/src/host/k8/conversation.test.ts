@@ -277,14 +277,24 @@ it('refuses a created or re-pointed Bot whose model is not in the catalog before
   await refused(fx, { ...WRITER, model: 'missing' }, /Unavailable model: missing/);
 });
 
-it('refuses an older Host store before any write, leaving the file and its directory unchanged', async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'desktop-store-'));
-  try {
-    const file = path.join(root, 'store.sqlite');
+it.each([
+  ['an older Host store', (file: string) => {
     HostStore.open(file).close();
     const old = new DatabaseSync(file);
     old.exec(`PRAGMA journal_mode = DELETE; UPDATE meta SET value = 0 WHERE key = 'schema';`);
     old.close();
+  }],
+  // `_` is a LIKE wildcard: NOT LIKE 'sqlite_%' would count this file as new (#2318).
+  ['a file whose only table is named like an SQLite one', (file: string) => {
+    const old = new DatabaseSync(file);
+    old.exec('CREATE TABLE sqliteX_notes (v TEXT)');
+    old.close();
+  }],
+])('refuses %s before any write, leaving the file and its directory unchanged', async (_label, write) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'desktop-store-'));
+  try {
+    const file = path.join(root, 'store.sqlite');
+    write(file);
     const sha = async () => createHash('sha256').update(await readFile(file)).digest('hex');
     const before = await sha(), entries = await readdir(root);
     expect(() => HostStore.open(file)).toThrow(StoreFormatError);

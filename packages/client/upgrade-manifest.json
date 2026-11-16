@@ -505,10 +505,11 @@
     {
       "id": "core-sqlite-node-entry",
       "impact": "additive",
-      "summary": "@byok-sdk/core/sqlite-node is a new entry, whose functions need Node, exporting readSqliteFileUnchanged(path, readMetadata). It opens an existing, non-empty SQLite file read-only and immutable, runs readMetadata on its main file and closes it, so a store can decide its format before any writable open, pragma or DDL; it returns undefined for :memory:, a missing path or a zero-length file, and throws SqliteReadOnlyOpenError when the file exists but cannot be stat'ed or opened read-only. sqliteOpenPath(path) and sqliteFileUri(path) name a store file for SQLite under one rule, with the Windows extended-length prefix past MAX_PATH; the client journal's writable open uses sqliteOpenPath, and the read-only check opens sqliteFileUri. The core root does not export it. No Host action is required.",
+      "summary": "@byok-sdk/core/sqlite-node is a new entry, whose functions need Node, exporting readSqliteFileUnchanged(path, readMetadata). It opens an existing, non-empty SQLite file read-only and immutable, runs readMetadata on its main file and closes it, so a store can decide its format before any writable open, pragma or DDL; it returns undefined for :memory:, a missing path or a zero-length file, and throws SqliteReadOnlyOpenError when the file exists but cannot be stat'ed or opened read-only. sqliteOpenPath(path) and sqliteFileUri(path) name a store file for SQLite under one rule, with the Windows extended-length prefix past MAX_PATH; the client journal's writable open uses sqliteOpenPath, and the read-only check opens sqliteFileUri. SQLITE_USER_OBJECT is the SQL condition on a sqlite_schema name that excludes only the literal sqlite_ prefix; name NOT LIKE 'sqlite_%' also hides user objects named sqliteX..., because _ matches any character in LIKE. The core root does not export it. No Host action is required.",
       "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
       "items": [
         "entry:@byok-sdk/core/sqlite-node",
+        "export:@byok-sdk/core/sqlite-node#SQLITE_USER_OBJECT",
         "export:@byok-sdk/core/sqlite-node#SqliteReadOnlyOpenError",
         "export:@byok-sdk/core/sqlite-node#readSqliteFileUnchanged",
         "export:@byok-sdk/core/sqlite-node#sqliteFileUri",
@@ -1138,7 +1139,7 @@
       "id": "server-sqlite-format-before-write",
       "impact": "breaking",
       "summary": "@byok-sdk/server's SQLite store decides a file's format with @byok-sdk/core/sqlite-node readSqliteFileUnchanged before it opens the file for writing, and refuses with SqliteSchemaError while the file's bytes, WAL, SHM and directory stay unchanged: an older, newer or foreign file; a current file whose tables, indexes or triggers differ from schema 10's by name or definition (a missing or changed one is SQLITE_SCHEMA_INVALID and is no longer recreated; an unknown one is SQLITE_SCHEMA_UNSUPPORTED). The removed migration option is no longer checked. A new store checkpoints its metadata into the main file when it is created.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
       "items": [
         "behavior:server-sqlite-format-before-write"
       ]

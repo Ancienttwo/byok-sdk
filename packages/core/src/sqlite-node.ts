@@ -1,6 +1,14 @@
 import type { DatabaseSync } from 'node:sqlite';
 
 /**
+ * SQL condition on a `sqlite_schema` row's `name` that keeps the objects a
+ * store created and leaves out SQLite's own, which are named with the literal
+ * `sqlite_` prefix. `name NOT LIKE 'sqlite_%'` is not equivalent: `_` matches
+ * any one character in LIKE, so it also hides user objects named `sqliteX…`.
+ */
+export const SQLITE_USER_OBJECT = "substr(name, 1, 7) <> 'sqlite_'";
+
+/**
  * An existing file could not be opened read-only for its format check.
  * Nothing has read or written the file; a store refuses to start rather than
  * treat the file as damaged.

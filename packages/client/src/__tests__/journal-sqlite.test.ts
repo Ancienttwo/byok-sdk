@@ -417,12 +417,26 @@ describe('SqliteLocalTaskJournal', () => {
       ['a hash-only terminal table', 'ALTER TABLE journal_terminal DROP COLUMN bytes'],
       ['an envelope table from before #826', 'ALTER TABLE journal_envelope DROP COLUMN withheld_bytes'],
       ['a table this build does not have', 'CREATE TABLE local_storage_usage (category TEXT PRIMARY KEY)'],
+      // `_` is a LIKE wildcard, so NOT LIKE 'sqlite_%' would not see this table (#2318).
+      ['a user table named like an SQLite one', 'CREATE TABLE sqliteX_notes (v TEXT)'],
     ])('refuses %s before any write, leaving the file and its directory unchanged', async (_label, reshape) => {
       const storeDir = await tmpStore();
       const dbPath = path.join(storeDir, JOURNAL_DB_FILENAME);
       await fs.copyFile(new URL('../../../../scripts/release/fixtures/stores/0.43.0/daemon-store/daemon.db', import.meta.url), dbPath);
       const fixture = new DatabaseSync(dbPath);
       fixture.exec(reshape);
+      fixture.close();
+      const before = createHash('sha256').update(await fs.readFile(dbPath)).digest('hex');
+      expect(() => build(storeDir)).toThrow(JournalUnavailableError);
+      expect(createHash('sha256').update(await fs.readFile(dbPath)).digest('hex')).toBe(before);
+      expect(await fs.readdir(storeDir)).toEqual([JOURNAL_DB_FILENAME]);
+    });
+
+    it('refuses a file whose only table is named like an SQLite one before any write (#2318)', async () => {
+      const storeDir = await tmpStore();
+      const dbPath = path.join(storeDir, JOURNAL_DB_FILENAME);
+      const fixture = new DatabaseSync(dbPath);
+      fixture.exec('CREATE TABLE sqliteX_notes (v TEXT)');
       fixture.close();
       const before = createHash('sha256').update(await fs.readFile(dbPath)).digest('hex');
       expect(() => build(storeDir)).toThrow(JournalUnavailableError);

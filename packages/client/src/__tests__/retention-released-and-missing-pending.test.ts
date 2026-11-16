@@ -4,9 +4,22 @@ import { afterEach, expect, it } from 'vitest';
 import { resolveStorageConfig } from '../daemon/retention/config';
 import { createRetentionRegistry } from '../daemon/retention/producers';
 import type { SweepBudget } from '../daemon/retention/registry';
+import { RETENTION_LIMITS, type RetentionLimits } from '../daemon/retention/runtime-accounting';
 import { ScratchRoot } from '../daemon/retention/scratch';
 import { testScratchRoot } from './fixtures/execution-scratch';
 
+// #2312: small class shares keep each tree and pass count-bound and small, so the cases do the same work
+// as the production shares in a fraction of the file operations and do not race the test timeout.
+const SHARE = 16;
+const limits: RetentionLimits = { ...RETENTION_LIMITS, shares: { ...RETENTION_LIMITS.shares, 'exec-sdk': SHARE, 'daemon-temp': SHARE } };
+// A tree larger than two shares, so two passes each remove only part of it.
+const FILES = 3 * SHARE;
+// The daemon-temp root scan spends one inspection on the tree's directory entry before its first unlink.
+const FIRST_PASS = SHARE - 1;
+// Startup enumerates exec/ outside the exec-sdk share, so the whole share goes to unlinks.
+const SDK_FIRST_PASS = SHARE;
+// More released executions than one share, as 1024 was against the production exec-sdk share.
+const EXECUTIONS = SHARE + 1;
 const now = new Date('2026-10-28T00:00:00Z');
 const old = new Date('2026-09-01T00:00:00Z');
 const disposers: (() => Promise<void>)[] = [];
@@ -21,7 +34,7 @@ async function fixture() {
     const scratch = new ScratchRoot(config.scratchRoot, () => now);
     await scratch.open(store);
     const registry = createRetentionRegistry({
-      storeDir: store, config, scratch, clock: () => now,
+      storeDir: store, config, scratch, clock: () => now, limits,
       journal: () => undefined, identity: () => undefined, preparation: () => undefined,
     });
     disposers.push(() => registry.close());
@@ -30,7 +43,7 @@ async function fixture() {
   return { store, config, open };
 }
 
-// Same pass budget as retention-oversized-classes; production applies class shares.
+// Same pass budget as retention-oversized-classes; the registry applies the class shares above.
 function budget(trigger: SweepBudget['trigger'] = 'periodic') {
   const tally = { inspections: 0, deleted: 0, truncated: false };
   const value: SweepBudget = {
@@ -51,10 +64,10 @@ async function populate(directory: string, count: number) {
   await fs.utimes(directory, old, old);
 }
 
-it('P1: startup succeeds across restarts with 1024 normally released executions and no SDK secrets', async () => {
+it('P1: startup succeeds across restarts with more normally released executions than one share and no SDK secrets', async () => {
   const f = await fixture();
   const initial = await f.open();
-  for (let index = 0; index < 1024; index++) {
+  for (let index = 0; index < EXECUTIONS; index++) {
     const execution = await initial.scratch.create();
     await execution.release();
     expect(initial.scratch.isLive(execution.token)).toBe(false);
@@ -63,7 +76,7 @@ it('P1: startup succeeds across restarts with 1024 normally released executions 
   }
   await initial.registry.close();
   const execRoot = path.join(f.config.scratchRoot, 'exec');
-  expect(await fs.readdir(execRoot)).toHaveLength(1024);
+  expect(await fs.readdir(execRoot)).toHaveLength(EXECUTIONS);
 
   const outcomes: unknown[] = [];
   for (let restart = 0; restart < 3; restart++) {
@@ -74,21 +87,20 @@ it('P1: startup succeeds across restarts with 1024 normally released executions 
   }
   expect(outcomes).toEqual([undefined, undefined, undefined]);
   // Startup must not erase fresh runtime history merely to finish its SDK scan.
-  expect(await fs.readdir(execRoot)).toHaveLength(1024);
-}, 60_000);
+  expect(await fs.readdir(execRoot)).toHaveLength(EXECUTIONS);
+  // Each release writes its marker with fsync, which is slow on a loaded disk.
+}, 30_000);
 
 it('P2: a missing pending daemon directory does not block reclaiming the next expired directory', async () => {
   const f = await fixture();
   const { registry } = await f.open();
   const pending = path.join(f.store, 'tmp/daemon/diag-abc123');
-  await populate(pending, 2048);
+  await populate(pending, FILES);
   const first = budget();
   await registry.sweep('daemon-temp', first.value);
-  const remaining = await fs.readdir(pending);
-  expect(remaining.length).toBeGreaterThan(0);
-  expect(remaining.length).toBeLessThan(2048);
+  expect(await fs.readdir(pending)).toHaveLength(FILES - FIRST_PASS);
   expect(first.tally.truncated).toBe(true);
-  expect(first.tally.inspections).toBeLessThanOrEqual(1024);
+  expect(first.tally.inspections).toBe(SHARE);
 
   // A real removal between passes, while this registry retains its pending cursor.
   await fs.rm(pending, { recursive: true });
@@ -102,12 +114,12 @@ it('P2: a missing pending daemon directory does not block reclaiming the next ex
     const b = budget();
     outcomes.push(await registry.sweep('daemon-temp', b.value).catch(error => error));
     deleted += b.tally.deleted;
-    expect(b.tally.inspections).toBeLessThanOrEqual(1024);
+    expect(b.tally.inspections).toBeLessThanOrEqual(SHARE);
   }
   expect(outcomes).toEqual([undefined, undefined, undefined]);
   await expect(fs.lstat(next)).rejects.toMatchObject({ code: 'ENOENT' });
   expect(deleted).toBe(1);
-}, 60_000);
+});
 
 it('startup still fails closed when a released marker coexists with unfinished SDK cleanup', async () => {
   const f = await fixture();
@@ -115,13 +127,11 @@ it('startup still fails closed when a released marker coexists with unfinished S
   const execution = await scratch.create();
   await execution.release();
   // A marker alone must not authorize skipping inspection of the SDK subtree.
-  await populate(execution.sdkDir, 2048);
+  await populate(execution.sdkDir, FILES);
   const b = budget('startup');
   await expect(registry.sweep('exec-sdk', b.value)).rejects.toThrow('retention_startup_incomplete');
-  const remaining = await fs.readdir(execution.sdkDir);
-  expect(remaining.length).toBeGreaterThan(0);
-  expect(remaining.length).toBeLessThan(2048);
-  expect(b.tally.inspections).toBeLessThanOrEqual(1024);
+  expect(await fs.readdir(execution.sdkDir)).toHaveLength(FILES - SDK_FIRST_PASS);
+  expect(b.tally.inspections).toBe(SHARE);
   expect(b.tally.truncated).toBe(true);
 });
 
@@ -129,10 +139,12 @@ it('a replaced pending daemon directory still fails identity validation and is n
   const f = await fixture();
   const { registry } = await f.open();
   const target = path.join(f.store, 'tmp/daemon/diag-abc123');
-  await populate(target, 2048);
+  await populate(target, FILES);
+  // One pass removes part of the tree within its share, and the next pass continues from its cursor.
   await registry.sweep('daemon-temp', budget().value);
-  expect((await fs.readdir(target)).length).toBeGreaterThan(0);
-  expect((await fs.readdir(target)).length).toBeLessThan(2048);
+  expect(await fs.readdir(target)).toHaveLength(FILES - FIRST_PASS);
+  await registry.sweep('daemon-temp', budget().value);
+  expect(await fs.readdir(target)).toHaveLength(FILES - FIRST_PASS - SHARE);
   // Keep the original inode alive so this is a deterministic identity replacement.
   await fs.rename(target, path.join(f.store, 'displaced-pending'));
   await populate(target, 1);
