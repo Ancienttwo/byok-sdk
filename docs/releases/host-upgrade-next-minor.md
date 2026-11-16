@@ -380,8 +380,38 @@ machine's current device. See
   With `machineId`, the fence check, the supersession and the insert form
   one atomic section per machine; a conflict writes nothing and consumes no
   code. The cloud conformance suite has a case for each rule.
-- The reference stores, the hosted data plane and the client pairing flow:
-  phase 1.
+- The reference stores and the hosted data plane: phase 1.
+
+#### Client pairing
+
+- `Daemon.pair()` and `byok-agent pair` reject with three new errors:
+  `PairingSupersededError` (another pairing of this `productId` replaced this
+  one while its request was in flight; nothing was written), `PairingBusyError`
+  (`retryable: true`; two pairings of the same machine ran at once; retry with
+  the same code) and `PairingCodeRejectedError` (the code is unknown, expired
+  or used; pair with a new code).
+- `FirstPairingAttemptRefusedError` is renamed `PairingAttemptRefusedError`
+  and has no `code`: its only cause is another store's staged attempt.
+- `pairing_attempt_unattributed` and
+  `clearDeviceEnrollment({ clearUnattributedAttempt })` are removed: a v7
+  attempt always names its store. Hosts that handled them (AiphaBee:
+  aiphabee#1384) drop that path.
+- An injected `DeviceCredentialBackend` implements `readPairingAttempt` and
+  `savePairingAttempt` in place of `readFirstPairingAttempt` and
+  `saveFirstPairingAttempt`; the attempt type is `PairingAttempt`.
+- Every pairing stages an attempt, including a re-pair. A retry with the same
+  code resumes it; a new code stages a fresh key, except a re-pair of the
+  store's own enrollment, which keeps its key.
+- Pairing no longer holds the `productId` lock across its request or across
+  its E2EE member custody. Re-pairing a running daemon shuts it down outside
+  the lock; the member entries are written only while the new enrollment
+  still holds.
+- A pairing or renewal error carries only the HTTP status, never the server's
+  response text.
+- **v6 OS entry.** The client reads the OS entry's format version and never
+  decodes a v6 entry. `start` deletes it and reports re-pair required, pairing
+  deletes it and pairs as a first pairing, and a clear deletes it. Re-pair
+  every device after the cloud upgrade, as the operator order above says.
 
 ### Phase 1 and 2 items
 

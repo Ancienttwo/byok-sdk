@@ -481,14 +481,15 @@ describe('access token renewal (protocol §6.2)', () => {
     }
   });
 
-  it('bounds a hung error body instead of leaving safeErrorText unbounded', async () => {
+  it('bounds a hung rejection body read under the request deadline', async () => {
     const store = createTestDeviceStore(await tmpDir('byok-auth-error-body-deadline-'));
     const auth = authWithDeadline(server.url, store, 40);
     const realFetch = globalThis.fetch;
+    // A 409 body is read to match the typed fence rejection.
     const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response(new ReadableStream<Uint8Array>({ start: () => undefined }), {
-        status: 503,
-        headers: { 'content-type': 'text/plain' },
+        status: 409,
+        headers: { 'content-type': 'application/json' },
       }),
     );
     try {
