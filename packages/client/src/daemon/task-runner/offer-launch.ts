@@ -313,40 +313,42 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
   // host reduces C2, runs this send synchronously, and reduces the claim.sent
   // completion inside the same turn; a cancel can only be queued behind it
   // and then sees a claimed task (X3b), never a pre-claim X2a row.
+  const claim: { settlement?: ReturnType<TaskRunnerDeps['awaitClaimSettlement']> } = {};
   host.setSendClaim(taskId, () => {
     this['claimedExecutorIds'].set(taskId, manifest.descriptor.id);
     const timings = admission.snapshot();
-    this['deps'].send(
-      createEnvelope(
-        'task.claim',
-        {
-          deviceId: this['deps'].deviceId,
-          ...(manifest.agentRef === undefined ? {} : { agentRef: manifest.agentRef }),
-          // Wire v7 (claimed executor, docs/protocol.md §3.1): the ACTUAL
-          // adapter `pickAdapter` just selected — for a target that named
-          // one and for an `auto` target alike, since `pick.adapter` already
-          // reflects whichever one won. Distinct from the offer's `target`
-          // (the merely REQUESTED one): this is how the server learns what
-          // an auto-selected task ran. It names no model.
-          executor: claimedExecutorFor(manifest.descriptor.id),
-          // S0/D-4 (`task.claim.capabilities`, docs/protocol.md §2.4): the
-          // selected adapter's own capability self-report, carried on the
-          // same message that establishes the task↔runtime binding. The
-          // server gates control messages (`task.steer`) on this and only
-          // this — connection-level `conn.hello.runtimes[].capabilities`
-          // stays device discovery on both transports and cannot replace
-          // the claim-time truth for this exact task/runtime binding.
-          //
-          // Sent UNCONDITIONALLY, for a custom harness too: capabilities
-          // are a self-report every adapter can make honestly. Omitting them
-          // would silently strip a custom steer-capable adapter's own truth
-          // and leave the server fail-closing on it forever.
-          capabilities: toRuntimeInfoCapabilities(manifest.descriptor.capabilities),
-          ...(timings === undefined ? {} : { admission: timings }),
-        },
-        { taskId },
-      ),
+    const envelope = createEnvelope(
+      'task.claim',
+      {
+        deviceId: this['deps'].deviceId,
+        ...(manifest.agentRef === undefined ? {} : { agentRef: manifest.agentRef }),
+        // Wire v7 (claimed executor, docs/protocol.md §3.1): the ACTUAL
+        // adapter `pickAdapter` just selected — for a target that named
+        // one and for an `auto` target alike, since `pick.adapter` already
+        // reflects whichever one won. Distinct from the offer's `target`
+        // (the merely REQUESTED one): this is how the server learns what
+        // an auto-selected task ran. It names no model.
+        executor: claimedExecutorFor(manifest.descriptor.id),
+        // S0/D-4 (`task.claim.capabilities`, docs/protocol.md §2.4): the
+        // selected adapter's own capability self-report, carried on the
+        // same message that establishes the task↔runtime binding. The
+        // server gates control messages (`task.steer`) on this and only
+        // this — connection-level `conn.hello.runtimes[].capabilities`
+        // stays device discovery on both transports and cannot replace
+        // the claim-time truth for this exact task/runtime binding.
+        //
+        // Sent UNCONDITIONALLY, for a custom harness too: capabilities
+        // are a self-report every adapter can make honestly. Omitting them
+        // would silently strip a custom steer-capable adapter's own truth
+        // and leave the server fail-closing on it forever.
+        capabilities: toRuntimeInfoCapabilities(manifest.descriptor.capabilities),
+        ...(timings === undefined ? {} : { admission: timings }),
+      },
+      { taskId },
     );
+    // Registered before the send, so no settlement can arrive unobserved.
+    claim.settlement = this['deps'].awaitClaimSettlement(taskId, envelope.id, blobAbort.signal);
+    this['deps'].send(envelope);
   });
   try {
     const journaled = host.dispatchSync({ type: 'claim.journaled', taskId, atMs: Date.now() });
@@ -358,6 +360,11 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
   } finally {
     host.setSendClaim(taskId, undefined);
   }
+  if (claim.settlement === undefined) throw new Error(`claim for ${taskId} was sent without its settlement wait`);
+  if (!await claimAccepted.call(this, taskId, claim.settlement, blobAbort.signal, {
+    binding: agentBinding,
+    runtimeId: pick.descriptor.id,
+  })) return;
 
   // Resolve the instruction blob after claim.
   // A prepared Execution resolves nothing here — it carries no instruction,
@@ -428,6 +435,56 @@ function failBeforeStart(
 ): Promise<boolean> {
   hostFor(this).dispatchSync({ type: 'runtime.prestart_failed', taskId, atMs: Date.now(), reason, retryable });
   return this['failClaimedAgent'](taskId, reason, retryable, context, failure);
+}
+
+/**
+ * #2294: waits for the cloud to settle this device's `task.claim` before the
+ * runtime starts. True when the start may proceed. A refused claim declines
+ * the task (C10). A cancel, shutdown or startup deadline that ends the wait
+ * first takes the existing claimed-before-start terminal: C7's cancelled
+ * branch for a cancel, C7b otherwise. Those terminals carry the claimed
+ * executor; the outbox posts the claim before them, so the cloud settles
+ * both the same way.
+ */
+async function claimAccepted(
+  this: TaskRunner,
+  taskId: string,
+  settlement: ReturnType<TaskRunnerDeps['awaitClaimSettlement']>,
+  signal: AbortSignal,
+  context: ClaimedAgentFailureContext,
+): Promise<boolean> {
+  const settled = await settlement;
+  const host = hostFor(this);
+  if (host.current(taskId)?.terminal !== undefined) return false;
+  if (settled?.outcome === 'rejected') {
+    host.dispatchSync({ type: 'claim.refused', taskId, atMs: Date.now(), reason: `claim refused: ${settled.reason}` });
+    return false;
+  }
+  // `duplicate` is a replay of an accepted claim: the cloud reaches its
+  // envelope dedupe (`completeInboundEnvelope`, packages/cloud/src/inbound.ts:838-841)
+  // only after the ownership CAS in `applyLifecycle` (inbound.ts:876-877)
+  // passed with this device as owner and the same executor, and a refused
+  // claim never records that dedupe.
+  if (settled !== undefined && !signal.aborted) return true;
+  const pendingCancel = pendingCancelBeforeActive.call(this, taskId);
+  if (pendingCancel === undefined) {
+    await failBeforeStart.call(this, taskId,
+      this['stoppingOffers'] ? 'daemon shutting down during runtime startup' : 'runtime startup deadline exceeded', true, context);
+    return false;
+  }
+  host.dispatchSync({
+    type: 'runtime.start_failed', taskId, atMs: Date.now(),
+    ...(pendingCancel.reason === undefined ? {} : { reason: pendingCancel.reason }),
+  });
+  this['revokeAgentMessageContext'](taskId);
+  this['revokeAgentResultContext'](taskId);
+  await this['pendingMessageTasks'].get(taskId)?.outbox.revoke(taskId);
+  this['deps'].send(createEnvelope('task.cancelled', {
+    reason: pendingCancel.reason,
+    ...terminalIdentity(this['claimedExecutorIds'].get(taskId)),
+    agentRef: context.binding.resolution.agentRef,
+  }, { taskId }));
+  return false;
 }
 
 /**

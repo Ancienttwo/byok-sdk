@@ -4,11 +4,12 @@ import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { createEnvelope, steerRefusalEnvelopeId } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { RuntimeExecutionFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON } from '../runtime-failure';
 import { TestServer } from './fixtures/test-server';
+import { CursorStore } from '../daemon/cursor-store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { resumeSession } from './fixtures/fresh-offer';
@@ -331,6 +332,55 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === 'task-4')).toBe(false);
   });
 
+  describe('the runtime waits for the cloud to settle task.claim (#2294)', () => {
+    const offerTask = (taskId: string): void => server.send(createEnvelope('task.offer',
+      { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, { taskId, seq: server.nextSeq() }));
+    const wire = (taskId: string, type: string) => server.received.filter((e) => e.task_id === taskId && e.type === type);
+
+    it('starts the runtime only after the claim is accepted', async () => {
+      const adapter = new StubRuntimeAdapter();
+      await setupDaemon(adapter);
+      const release = server.holdNextMessagesResponse((e) => e.type === 'task.claim' && e.task_id === 'task-held-claim');
+      offerTask('task-held-claim');
+      await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-held-claim');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(adapter.startCalls).toHaveLength(0);
+      expect(wire('task-held-claim', 'task.started')).toHaveLength(0);
+      release();
+      await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-held-claim');
+      expect(adapter.startCalls).toHaveLength(1);
+    });
+
+    it('declines once, non-retryably, without starting the runtime when the claim is refused', async () => {
+      const adapter = new StubRuntimeAdapter();
+      const d = await setupDaemon(adapter);
+      server.setOutboundRefusal((e) => (e.type === 'task.claim' ? 'state_conflict' : undefined));
+      offerTask('task-refused-claim');
+      await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-refused-claim');
+      await expect(d.whenTaskSettled('task-refused-claim')).resolves.toEqual({ terminal: 'declined', delivery: 'accepted', disposal: 'none' });
+      const declines = wire('task-refused-claim', 'task.decline');
+      expect(declines).toHaveLength(1);
+      expect(declines[0]!.payload).toMatchObject({ reason: 'claim refused: state_conflict', retryable: false });
+      expect('code' in declines[0]!.payload).toBe(false);
+      expect('executor' in declines[0]!.payload).toBe(false);
+      expect(adapter.startCalls).toHaveLength(0);
+      expect(wire('task-refused-claim', 'task.started')).toHaveLength(0);
+    });
+
+    it('ends the task locally and never resends a decline the cloud also refuses', async () => {
+      const adapter = new StubRuntimeAdapter();
+      const d = await setupDaemon(adapter);
+      server.setOutboundRefusal((e) => (e.type === 'task.claim' ? 'state_conflict' : e.type === 'task.decline' ? 'not_permitted' : undefined));
+      offerTask('task-refused-decline');
+      await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-refused-decline');
+      await expect(d.whenTaskSettled('task-refused-decline')).resolves.toEqual({ terminal: 'declined', delivery: 'rejected', disposal: 'none' });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(wire('task-refused-decline', 'task.decline')).toHaveLength(1);
+      expect(adapter.startCalls).toHaveLength(0);
+      expect(daemon?.status().activeTaskCount).toBe(0);
+    });
+  });
+
   it('a typed authority failure from adapter.start() is reported non-retryable', async () => {
     const unsupportedAdapter = new StubRuntimeAdapter('pi');
     unsupportedAdapter.startError = new RuntimeExecutionFailure({
@@ -390,7 +440,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
         { taskId: 'task-5', seq: server.nextSeq() },
       ),
     );
-    await server.waitFor((e) => e.type === 'task.claim');
+    // The cloud steers only a running task, which `task.started` makes (#2306).
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-5');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
 
     server.send(
@@ -427,6 +478,59 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     expect(refused.id).toBe(await steerRefusalEnvelopeId(steer.id));
     expect(refused.payload).toEqual({ steerMessageId: steer.id, reason });
     expect(adapter.sessions[0]?.steerCalls ?? []).toEqual([]);
+  });
+
+  // #2304: a cancel does not queue behind a steer the runtime has not answered.
+  it.each(['rejects during the cancel teardown', 'rejects', 'resolves'] as const)('a cancel runs ahead of an unanswered steer, which then %s without a second terminal', async (outcome) => {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true });
+    const storeDir = await tmpDir('byok-client-store-');
+    await setupDaemon(adapter, { storeDir });
+    const taskId = `task-steer-held-${outcome}`;
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
+      { taskId, seq: server.nextSeq() }));
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    const session = adapter.sessions[0]!;
+    const release = session.blockSteer();
+    const diagnostics = vi.spyOn(console, 'error');
+    // A runtime rejects a pending steer once the cancel's teardown stops it,
+    // here while the task is still active and its terminal not yet sent.
+    if (outcome === 'rejects during the cancel teardown') {
+      const interrupt = session.interrupt.bind(session);
+      session.interrupt = async () => { release(new Error('session closed')); await interrupt(); };
+    }
+    const steer = createEnvelope('task.steer', { text: 'focus on tests' }, { taskId, seq: server.nextSeq() });
+    const cancel = createEnvelope('task.cancel', { reason: 'user stopped it' }, { taskId, seq: server.nextSeq() });
+    // Resolves once the daemon's own cursor write past the cancel has landed.
+    let cursorSaved!: () => void;
+    const cancelCursorSaved = new Promise<void>((resolve) => { cursorSaved = resolve; });
+    const save = CursorStore.prototype.save;
+    const saveSpy = vi.spyOn(CursorStore.prototype, 'save').mockImplementation(async function (this: CursorStore, url, device, cursor) {
+      await save.call(this, url, device, cursor);
+      if (cursor >= cancel.seq!) cursorSaved();
+    });
+    onTestFinished(() => saveSpy.mockRestore());
+    server.send(steer);
+    await vi.waitFor(() => expect(session.steerAttempts).toBe(1));
+    server.send(cancel);
+    await server.waitFor((e) => e.type === 'task.cancelled' && e.task_id === taskId);
+    expect(session.interruptCalled).toBe(true);
+    expect(session.closeCalled).toBe(true);
+    const settled = server.received.length;
+    // Or later; one the runtime answers late delivered nothing the task can use.
+    if (outcome === 'rejects') release(new Error('session closed'));
+    if (outcome === 'resolves') release();
+    if (outcome !== 'resolves') {
+      const refused = await server.waitFor((e) => e.type === 'task.steer_refused' && e.task_id === taskId);
+      expect(refused.payload).toEqual({ steerMessageId: steer.id, reason: 'task_not_active' });
+    } else await vi.waitFor(() => expect(session.steerCalls).toEqual(['focus on tests']));
+    // Both envelopes are handled on first delivery: the cursor passes them, with no failed gap.
+    await cancelCursorSaved;
+    expect(await new CursorStore(storeDir).load(server.url, 'device-1')).toBe(cancel.seq);
+    expect(diagnostics.mock.calls.flat().filter((line) => String(line).includes('envelope handler failed for task.steer'))).toEqual([]);
+    expect(server.received.filter((e) => e.task_id === taskId && e.type === 'task.cancelled')).toHaveLength(1);
+    expect(server.received.filter((e) => e.task_id === taskId && e.type === 'task.steer_refused')).toHaveLength(outcome === 'resolves' ? 0 : 1);
+    expect(server.received.slice(settled).filter((e) => e.task_id === taskId && e.type !== 'task.steer_refused')).toEqual([]);
   });
 
   describe('task.claim reports the actually-selected runtime (M5, requested vs. claimed)', () => {

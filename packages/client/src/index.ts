@@ -18,7 +18,6 @@ export type {
   RuntimeVersionSpec,
   RuntimeVersionVerdict,
   RuntimeDetectResult,
-  RuntimeDetectionAdvisory,
   RuntimeDetectionRefusalReason,
   RuntimeExecutableSource,
   Session,
@@ -45,7 +44,6 @@ export {
   AgentHomeLayout,
   AgentHomeLeaseManager,
   AgentHomeManager,
-  createAgentHomeProjection,
   createAgentHomeProjectionConsumer,
   AGENT_HOME_PROJECTION_STATE_FILE,
   stableAgentHomeOwnerId,
@@ -69,7 +67,6 @@ export type {
   AgentHomeProjection,
   AgentHomeProjectionInput,
   AgentHomeProjectionApplyInput,
-  AgentHomeProjectionFunction,
   AgentHomeProjectionApplyFunction,
   AgentHomeLease,
   AgentHomeBinding,
@@ -143,11 +140,14 @@ export {
   type DaemonMemoryHelperResolution,
 } from './daemon/config-schema/index.js';
 export {
-  DaemonConfigFieldRemovedError,
   DaemonJournalProtocolUnsupportedError,
   DeviceStoreBindingMismatchError,
   EmbeddedPairingError,
-  FirstPairingAttemptRefusedError,
+  PairingAttemptRefusedError,
+  PairingBusyError,
+  PairingInputInvalidError,
+  PairingCodeRejectedError,
+  PairingSupersededError,
   type DaemonJournalProtocolRecord,
 } from './daemon/daemon-errors.js';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
@@ -206,6 +206,7 @@ export type {
 } from './daemon/agent-memory-intent.js';
 export {
   AgentMemorySnapshotLimitError,
+  AgentMemoryOutboxVersionUnsupportedError,
   AgentMemoryRevisionConflictError,
   isAgentMemorySecureFilesystemAvailable,
   AGENT_MEMORY_AUDIT_FILENAME,
@@ -222,9 +223,6 @@ export type {
 } from './daemon/agent-egress-policy.js';
 export {
   AGENT_CONTENT_READ_CAPABILITIES,
-  AGENT_CONTENT_READ_CAPABILITY_WORKSPACE,
-  AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT,
-  AGENT_CONTENT_READ_CAPABILITY_ARTIFACT,
 } from './daemon/agent-content-read.js';
 export type {
   AgentContentReadSurface,
@@ -425,7 +423,7 @@ export type {
 /**
  * Host device proofs signed with the stored enrollment key, scoped to one
  * enrollment identity and an explicit operation allowlist. The key never
- * leaves the signer; `DeviceProofSigner` is also what `TruthMemoryClient` takes.
+ * leaves the signer.
  */
 export { createStoredDeviceProofSigner, DeviceProofSignerError } from './daemon/device-proof-signer.js';
 export type {
@@ -437,9 +435,9 @@ export type {
 } from './daemon/device-proof-signer.js';
 /**
  * Plan `skill-pack-delivery-channel`: the device half of the `skills.pack`
- * channel. The install pipeline and the two read APIs are public because the
+ * channel. The install pipeline and the projection API are public because the
  * HOST, not this SDK, decides where a vendor CLI keeps its skills (K4) — a host
- * lists what is installed and projects the pack it wants into the directory its
+ * installs packs and projects the pack it wants into the directory its
  * own runtime reads. Nothing here ever writes to a vendor CLI's skill directory.
  */
 export {
@@ -452,7 +450,6 @@ export {
   SKILL_PACK_RESPONSE_MAX_BYTES,
   SkillPackInstallError,
   installSkillPacks,
-  listInstalledSkillPacks,
   projectSkillPack,
   skillPacksRoot,
 } from './daemon/skill-pack-installer.js';
@@ -464,23 +461,6 @@ export type {
   SkillPackInstallResult,
   SkillPackLock,
 } from './daemon/skill-pack-installer.js';
-
-export { TruthMemoryClient, TruthMemoryClientError } from './daemon/truth-memory-client.js';
-export type {
-  LocalMemoryFilter,
-  MemorySelector,
-  TruthManifestQueryInput,
-  TruthManifestRecord,
-  TruthMemoryClientErrorCode,
-  TruthMemoryClientOptions,
-  TruthMemoryMetric,
-  TruthSnapshotCandidateInput,
-  TruthSnapshotWriteInput,
-  TruthTerminalWriteInput,
-  TruthWriteBody,
-  TruthWriteResult,
-  VerifiedTruthRecord,
-} from './daemon/truth-memory-client.js';
 export type { ConnectionState } from './daemon/connection-manager.js';
 export { DaemonTaskUnknownError, type DaemonTaskSettlement, type DaemonTaskTerminal } from './daemon/task-settlement.js';
 export { DAEMON_HALT_REASONS, DaemonHaltError, DaemonNotOpenError, isDaemonHaltReason } from './daemon/daemon-lifecycle.js';
@@ -492,7 +472,7 @@ export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, Blo
 // task feed, a task list, and approve/reject/unpair, all local to a running
 // daemon. See `daemon/observer.ts`.
 export { DaemonObserver } from './daemon/observer.js';
-export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer.js';
+export type { DaemonEvent, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer.js';
 // Issue #395: the content-free projection every durable sink writes (`start`
 // stdout and `audit.jsonl`). `DaemonEvent` carries content and is only for
 // authenticated live views. See `daemon/daemon-record.ts`.
@@ -622,7 +602,7 @@ export type { AgentMemoryExportOptions } from './daemon/agent-memory-export.js';
 
 export {
   classifyToolCall, createAutoToolAuthorizationGate, FileScopePolicyError, parseToolAuthorizationMode,
-  parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES, TOOL_FILE_ACCESS,
+  parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS,
 } from './tool-authorization.js';
 export type {
   ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationHomeAccess, ToolAuthorizationLane,

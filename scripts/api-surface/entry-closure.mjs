@@ -3,6 +3,8 @@ import { builtinModules, isBuiltin } from 'node:module';
 import { build } from 'esbuild';
 import path from 'node:path';
 import { normalizedModuleBytes, scanModule } from './module-scan.mjs';
+import { publicPackages } from '../public-packages.mjs';
+export { publicPackages } from '../public-packages.mjs';
 
 const readJson = file => JSON.parse(readFileSync(file, 'utf8'));
 const posix = value => value.split(path.sep).join('/');
@@ -12,16 +14,6 @@ const packageName = specifier => specifier.startsWith('@') ? specifier.split('/'
 const runtimeFields = ['dependencies', 'optionalDependencies', 'peerDependencies'];
 const START = '<!-- BEGIN generated: api-surface/entries.json -->';
 const END = '<!-- END generated: api-surface/entries.json -->';
-
-export function publicPackages(root) {
-  return readdirSync(path.join(root, 'packages'), { withFileTypes: true })
-    .filter(entry => entry.isDirectory() && existsSync(path.join(root, 'packages', entry.name, 'package.json')))
-    .map(entry => {
-      const directory = path.join(root, 'packages', entry.name);
-      return { directory, manifest: readJson(path.join(directory, 'package.json')), workspace: true };
-    }).filter(pkg => pkg.manifest.private !== true)
-    .sort((a, b) => a.manifest.name.localeCompare(b.manifest.name));
-}
 
 // Every conditional leaf remains visible in coverage. No guessed default
 // target and no handwritten list of subpaths is used by either consumer.

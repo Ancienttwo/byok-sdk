@@ -232,9 +232,9 @@ across its bounded reasoning-only retry, and sends a truthful
 `@byok-sdk/keys/<package version>` User-Agent. An endpoint or model name never
 selects this behavior. Authentication failures keep their closed outcome
 codes; a successful key check remains a UI hint. The added provider kind
-widens the profile store CHECK set: existing stores report
-`migration-required` and keep their data and credential-store key references
-through the Host's explicit `migrateProviderProfileStore` call. Pi execution
+widens the profile store CHECK set: stores with an earlier provider-kind set
+are refused with `PROVIDER_STORE_SCHEMA_STALE` and remain unchanged. A Host
+must explicitly provision a separate current store. Pi execution
 separately requires the declared Pi identity above; provider kind does not
 infer it.
 
@@ -252,7 +252,7 @@ browser: its closure has no Node builtins, and it imports no `SecretStore`,
 OS credential store, SQLite store or `ProviderRegistry`, reads no environment
 and makes no network request.
 
-- `listPiCatalogModels` lists the pinned catalog entries of a vendor and api,
+- The model view lists the pinned catalog entries of a vendor and api,
   each `representable` (with input, reasoning and thinking levels) or
   `unrepresentable` (with its blocking paths).
 - `PI_DEFAULT_THINKING_LEVEL` is generated from the pinned
@@ -1371,9 +1371,11 @@ or self-update are added.
 `DaemonStatus` and control `status` carry `runtimes: RuntimeObservation[]`,
 including unavailable outcomes, plus the closed `environment` projection.
 An observation carries the optional local `versionVerdict` and
-`versionChange` (#1103); the control-socket shape keeps both outside the
-strict observation array (additive `runtimeVersionVerdicts` /
-`runtimeVersionChanges` channels) so a pre-#1103 client still parses it.
+`versionChange` (#1103) inline in both. The verdict is the one warning
+authority; an observation's `qualifiedVersion` is only its `warn` projection,
+which audit keeps while it drops the verdict. A runtime detection result that
+still carries the removed `advisory` field is invalid. The CLI and the daemon
+must be the same release: a reader parses only this inline shape.
 `environment-resolved` is emitted once after ownership is acquired and before
 runtime detection; audit uses the same content-free flat shape as #409.
 
@@ -1399,15 +1401,15 @@ found by the OS at spawn, so `path` carries no path. Pi reports the fields only
 for a Host `resolveBin` on its plain pi-rpc lane, the one lane that launches
 that file; its bundled package, `BYOK_PI_BIN`, durable lane and SDK helper
 host launch SDK entries and report neither field.
-`Daemon.status()` carries them inline, control `status` through the additive
-`runtimeExecutables` channel, and `status`, `runtimes` and `doctor` print them
+`Daemon.status()` and control `status` carry them inline, and `status`,
+`runtimes` and `doctor` print them
 as `executable=<source>("<path>")`. The path can name the local user, so it
 never enters `conn.hello`, presence, `audit.jsonl`, `DaemonRecord` or a
 support bundle.
 
-For the next minor, a newer CLI reports unknown when an older daemon omits
-these fields. It never translates `runtimeIds` into availability or executes
-a local probe to fill the missing daemon facts.
+A reader reports unknown when an observation omits these fields. It never
+translates `runtimeIds` into availability or executes a local probe to fill
+the missing daemon facts.
 
 ### Durable daemon records
 
@@ -1418,7 +1420,7 @@ lifecycle facts, IDs, closed codes, configured identifiers, byte sizes, counts
 and timestamps. Progress is aggregated per turn, with an unfinished turn flushed
 before its terminal record or on shutdown. Artifact names, runtime version text,
 approval/completion summaries and free-form reasons never enter these sinks.
-Configured runtime advisory identifiers remain, and offline observations show
+A warning's configured qualified version remains, and offline observations show
 their timestamp. Full events remain on the authenticated control socket;
 `tasks --follow` requires that socket. Support-bundle kinds come from
 `DAEMON_RECORD_KINDS`.
@@ -3498,8 +3500,9 @@ secret change, or Agent-home deletion is part of this contract.
 Wire v4 removed Git workspace mode and the daemon's task workspace root (#925,
 ADR-034). Every offer is an Agent offer and runs in its SDK-owned Agent home, so
 no task runs in a `workspaceRoot/<taskId>` directory or a Git checkpoint
-workspace. `DaemonConfig.gitWorkspace`, `DaemonOverrides.gitWorkspace` and
-`DaemonConfig.workspaceRoot` raise `DaemonConfigFieldRemovedError`. The
+workspace. `DaemonConfig.gitWorkspace` and `DaemonConfig.workspaceRoot` are
+unknown fields and fail validation; `DaemonOverrides.gitWorkspace` throws a
+`TypeError`. The
 `byok-agent workspaces` command, the local `git-workspace` daemon event and
 audit record, the doctor `workspace` check and the `workspace` retention class
 are gone; an older audit log's `git-workspace` lines and `retention-failure`
@@ -3616,9 +3619,9 @@ Agent-only admission is the wire itself since v4: the one offer type,
 sealed), and the runtime-only offers are gone from the protocol. The local runner is the final authority: a daemon
 without `DaemonConfig.agentHome` advertises no `agent-home-contract` and
 declines every offer before admission, workspace, claim or start. The
-`strict-agent-only` flag is removed, and `DaemonConfig.strictAgentOnly` raises
-`DaemonConfigFieldRemovedError`, as do the removed `DaemonConfig.gitWorkspace`
-and `DaemonConfig.workspaceRoot`.
+`strict-agent-only` flag is removed, and `DaemonConfig.strictAgentOnly`, like
+the removed `DaemonConfig.gitWorkspace` and `DaemonConfig.workspaceRoot`, is an
+unknown field that fails validation.
 
 
 ### Owned Pi RPC team member and GUI interaction
@@ -3796,8 +3799,9 @@ Unknown or invalid executable messages cannot silently advance the mailbox curso
 
 Independent offers may progress concurrently. Admission reserves the canonical
 Agent home synchronously before asynchronous preparation and converts that
-reservation into the existing execution lease. Controls remain ordered per task;
-startup does not block another Agent or that task's cancel. `startupTimeoutMs`
+reservation into the existing execution lease. Controls remain ordered per task,
+except that a cancel does not wait behind an earlier control of its task
+(#2304); startup does not block another Agent or that task's cancel. `startupTimeoutMs`
 (default 30 seconds) starts before admission and bounds pure adapter detect/prepare
 waits as well as runtime start. AbortSignal is supplied to these pure adapter
 operations; late returns cannot claim/start or retain the home reservation. A deadline is not a disposal
@@ -4038,7 +4042,7 @@ A strict fresh Agent task selects `terminalProjection: { mode: 'result-document'
 
 The SDK-reserved `byokagentresult` MCP server advertises exactly one `submit_result` tool, with the offer's schema verbatim as its `inputSchema`. An authenticated task context binds it to one execution. The daemon validates the arguments and fsyncs the canonical outcome under the Agent home's `.byok/results/` before returning a staged receipt. Invalid arguments store nothing and return bounded issues for correction. Repeating the same outcome returns the same receipt; a different outcome for the same execution is refused. A staged receipt does not mean execution success.
 
-Only successful runtime completion with a staged outcome produces `task.complete.document`. The terminal is journaled before publication and recovery replays only those durable terminal bytes. Successful completion without `submit_result` fails non-retryably as `result_not_submitted`. Failure, cancellation and interruption carry no document; staged outcomes remain local audit records. Only the same live task reads a record, and that task holds the home's execution lease, so retention removes records only while the home is idle: those at least 7 days old by default (`storage.retention.ttlMs['agent-result']`, minimum 0) and then the oldest beyond 256 per home. Malformed records and crashed-stage temps expire the same way. A missing record does not prove there was no valid call. Durable Pi uses the same tool and daemon validator; it no longer creates `{text}` documents. `DaemonConfig.resultDocument`, `ResultDocumentExtractor` and `Session.resultDocument()` are removed; supplying the old config field throws `DaemonConfigFieldRemovedError`. Result-document offers require an enrolled Agent home, the reserved helper, an eligible runtime and a durable terminal journal. There is no `result-document` capability negotiation in v3.
+Only successful runtime completion with a staged outcome produces `task.complete.document`. The terminal is journaled before publication and recovery replays only those durable terminal bytes. Successful completion without `submit_result` fails non-retryably as `result_not_submitted`. Failure, cancellation and interruption carry no document; staged outcomes remain local audit records. Only the same live task reads a record, and that task holds the home's execution lease, so retention removes records only while the home is idle: those at least 7 days old by default (`storage.retention.ttlMs['agent-result']`, minimum 0) and then the oldest beyond 256 per home. Malformed records and crashed-stage temps expire the same way. A missing record does not prove there was no valid call. Durable Pi uses the same tool and daemon validator; it no longer creates `{text}` documents. `DaemonConfig.resultDocument`, `ResultDocumentExtractor` and `Session.resultDocument()` are removed; supplying the old config field is an `unknown_field` issue and construction throws `DaemonConfigInvalidError`. Result-document offers require an enrolled Agent home, the reserved helper, an eligible runtime and a durable terminal journal. There is no `result-document` capability negotiation in v3.
 
 On the prepared lane, the preparation request carries the same `terminalProjection` as the offer. Its exact schema and contract are retained in the durable binding, covered by the request digest, and represented by a schema-bound executor identity in `toolManifestDigest`. Admission compares the selection before pinning or claiming. A SummaryJob with `requiredToolsets: []` and `agentMemory:'none'` now counts and launches exactly one tool, `submit_result`; it omits `requiredToolsets` on the offer and needs no user `messageEgress`. The worker verifies the task-bound result helper's schema before constructing the model. The durable record version is 11; no version-10 record is read forward. Records and wire v3 share one drain-then-upgrade cut. Other preparations that select no result still support zero tools.
 
@@ -4112,7 +4116,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.5.2 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-schema, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.109.0 source at `packages/client/vendor/oar/4eb5919/`, from upstream commit `4eb5919f70f1dfd36cccba5cb4da946876ed0a16`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.5.2 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-schema, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.110.0 source at `packages/client/vendor/oar/552a4f9/`, from upstream commit `552a4f9c21bf4c98c48c626fc39050abb8c66465`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 pi-durable 1.0.1 ruling (2026-10-04, approved by Aimpact): admitted at exactly 1.0.1. Its shipped code is byte-identical to 1.0.0 (version-only change), and the closure was freshly attested at closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
 
@@ -4521,7 +4525,7 @@ becoming a second permission system.
 
 Codex is qualified against CLI 0.160.0. As in OAR, the version is read and by
 default does not gate: Codex updates itself, so any other version is admitted
-with a `runtime_version_unqualified` advisory. Native contracts are probed
+with a `warn` version verdict. Native contracts are probed
 instead (app-server presence). The only exception is a Host-configured version
 policy whose block matches the installed version: that version is declined
 before claim with `runtime_unavailable` / `version_blocked`, non-retryably.
@@ -5045,14 +5049,10 @@ missing `qualifiedVersion`/`unqualified`. `config check` reports the issue;
 adapter construction fails rather than silently dropping the policy.
 `DaemonEffectiveConfig.runtimes[].versionPolicy` reports the effective policy
 only — the installed version and verdict belong to `status`/`doctor`, because
-`config check` starts no runtime. Unknown fields remain warnings (Q4'). The
+`config check` starts no runtime. An unknown field is an error, in
+`config check` and at construction alike. The
 generated field table and error catalog are in
 [device setup](device-setup.md#configuration).
 
 The default policy changes no behavior, so migration needs no action; only a
 Host that deliberately configures a block changes admission.
-
-### Removed DaemonConfig fields
-
-See the [generated removed-field migration table](device-setup.md#removed-fields).
-This anchor remains the target of typed removed-field errors.

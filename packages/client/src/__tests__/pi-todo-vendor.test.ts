@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 const root = path.resolve(import.meta.dirname, '../../vendor/rpiv-todo/2.15.0');
 const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
@@ -20,7 +22,7 @@ describe('licensed private todo source boundary', () => {
       if (!row.delta) expect(row.vendoredSha256, row.path).toBe(row.upstreamSha256);
     }
     expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual([
-      'index.ts', 'state/i18n-bridge.ts', 'state/state-reducer.ts', 'todo-overlay.ts', 'tool/types.ts', 'view/format.ts',
+      'config.ts', 'index.ts', 'state/i18n-bridge.ts', 'state/state-reducer.ts', 'todo-overlay.ts', 'tool/types.ts', 'view/format.ts',
     ]);
     expect(readFileSync(path.join(root, 'LICENSE'), 'utf8')).toContain('Copyright (c) 2026 juicesharp');
   });
@@ -34,6 +36,9 @@ describe('licensed private todo source boundary', () => {
           ? current.replace('message.split("\\n")[0]!', 'message.split("\\n")[0]')
           : current.replace('lines[last]!.replace', 'lines[last].replace');
       const upstream = original
+        .replace('import type { Task, TaskAction, TaskDetails, TaskMutationParams, TaskStatus } from "../tool/types.ts";\n\n',
+          'import type { Task, TaskAction, TaskDetails, TaskMutationParams, TaskStatus } from "../tool/types.ts";\n\n'
+          + '// Re-export so legacy import paths (todo.ts, tests) continue to resolve;\n// the canonical definition lives in the i18n bridge.\nexport { formatStatusLabel };\n\n')
         .replace('import type { TodoRenderPort as TUI } from "../../pi-tui/0.85.1/ports.js";\nimport { truncateToWidth } from "../../pi-tui/0.85.1/utils.js";',
           'import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";')
         .replace('import { Text } from "../../../pi-tui/0.85.1/components/text.js";',
@@ -64,4 +69,30 @@ it('keeps all six licensed upstream UI JavaScript files byte-identical', () => {
     expect(readFileSync(path.join(base, 'LICENSE'), 'utf8')).toContain('MIT');
   }
   expect(count).toBe(6);
+});
+
+it('refuses a todo config left only at the legacy ~/.config location without reading it', async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'todo-home-'));
+  const xdg = mkdtempSync(path.join(os.tmpdir(), 'todo-xdg-'));
+  mkdirSync(path.join(home, '.config/rpiv-todo'), { recursive: true });
+  // Unparseable on purpose: a read would warn and fall back to defaults instead of refusing.
+  writeFileSync(path.join(home, '.config/rpiv-todo/config.json'), '{ legacy');
+  vi.stubEnv('HOME', home);
+  vi.stubEnv('XDG_CONFIG_HOME', xdg);
+  try {
+    // Loaded by URL so the vendored source stays outside this package's type program.
+    const { loadConfig, TodoConfigLegacyLocationError } = await import(pathToFileURL(path.join(root, 'config.ts')).href) as {
+      loadConfig(): unknown; TodoConfigLegacyLocationError: new (...args: never[]) => Error;
+    };
+    expect(() => loadConfig()).toThrow(TodoConfigLegacyLocationError);
+    mkdirSync(path.join(xdg, 'rpiv-todo'));
+    writeFileSync(path.join(xdg, 'rpiv-todo/config.json'), '{"maxWidgetLines":30}');
+    expect(loadConfig()).toEqual({ maxWidgetLines: 30 });
+    // Without XDG_CONFIG_HOME both locations are one file, which is read.
+    vi.stubEnv('XDG_CONFIG_HOME', '');
+    writeFileSync(path.join(home, '.config/rpiv-todo/config.json'), '{"collapseKey":"off"}');
+    expect(loadConfig()).toEqual({ collapseKey: 'off' });
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });

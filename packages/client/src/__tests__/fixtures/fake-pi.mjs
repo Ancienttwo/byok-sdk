@@ -266,7 +266,7 @@ async function handleCommand(msg) {
         });
         break;
       }
-      send({ type: 'response', command: 'prompt', success: true, id: msg.id });
+      send({ type: 'response', command: 'prompt', success: true, id: msg.id, data: { disposition: 'started' } });
       // Representative event sequence (shapes verbatim from pi's docs/rpc.md
       // and this task's live probes): a bash tool call, then a streamed
       // assistant text reply, then the real settle event.

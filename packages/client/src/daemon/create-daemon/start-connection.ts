@@ -15,7 +15,7 @@ import type { StartEnvelopes } from './start-envelopes.js';
  * The last stage of `runStartUnderLease` (#926), synchronous: builds this
  * start's connection manager — its transport, settlement and inbound routing.
  */
-export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartRun & StartLanes & StartTerminals & StartEnvelopes, 'record' | 'capabilities' | 'runtimes' | 'harnesses' | 'runtimeUnavailable' | 'handleAgentHomeProjectionEnvelope' | 'handleAgentInputPreparationEnvelope' | 'handleProviderProvisioningEnvelope' | 'handleAgentMemoryIntentEnvelope' | 'handleE2eeKeyPackageEnvelope' | 'handleAgentEgressEnvelope' | 'handleAgentContentReadEnvelope' | 'activePressureEngine' | 'journalIdentity' | 'activeJournal' | 'refuseOverBoundEnvelope' | 'resultReplyRecoveryTasks' | 'sendEnvelope' | 'opened' | 'replayRecoveryTerminals' | 'replaceRefusedTerminal' | 'sealedRun'>) {
+export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartRun & StartLanes & StartTerminals & StartEnvelopes, 'record' | 'capabilities' | 'runtimes' | 'harnesses' | 'runtimeUnavailable' | 'handleAgentHomeProjectionEnvelope' | 'handleAgentInputPreparationEnvelope' | 'handleProviderProvisioningEnvelope' | 'handleAgentMemoryIntentEnvelope' | 'handleE2eeKeyPackageEnvelope' | 'handleAgentEgressEnvelope' | 'handleAgentContentReadEnvelope' | 'activePressureEngine' | 'journalIdentity' | 'activeJournal' | 'refuseOverBoundEnvelope' | 'resultReplyRecoveryTasks' | 'sendEnvelope' | 'opened' | 'replayRecoveryTerminals' | 'replaceRefusedTerminal' | 'sealedRun' | 'settleClaim'>) {
   const {
     daemonState, config, localAgentRelease, toolsetRegistry, cursorStore, observer, terminalCommits,
     overrides, outbound, setLifecycle, runPresenceDiscovery, halted, crashed, dispatchReliableRecord,
@@ -27,7 +27,7 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
     handleAgentMemoryIntentEnvelope, handleE2eeKeyPackageEnvelope, handleAgentEgressEnvelope,
     handleAgentContentReadEnvelope, activePressureEngine, journalIdentity, activeJournal,
     refuseOverBoundEnvelope, resultReplyRecoveryTasks, sendEnvelope, opened, replayRecoveryTerminals,
-    replaceRefusedTerminal, sealedRun,
+    replaceRefusedTerminal, sealedRun, settleClaim,
   } = run;
   return new ConnectionManager({
     serverUrl: config.serverUrl,
@@ -178,6 +178,8 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
         if (receipt === undefined) publish();
         else void receipt.then(publish, publish);
       };
+      // The claim's waiter only resolves a promise; it never throws here.
+      for (const settlement of settlements) settleClaim(settlement);
       // All terminal fsyncs must succeed before publishing any observation.
       // A retry after a partial local write can repeat the idempotent journal
       // operation, without double-counting an earlier part of this batch.

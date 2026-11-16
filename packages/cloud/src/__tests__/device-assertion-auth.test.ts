@@ -50,6 +50,7 @@ describe('hosted device assertion authentication', () => {
       devicePublicKey: publicJwk.x!,
       proofKeyId: 'identity',
       proofKeyEpoch: 0,
+      expectedDeviceDigest: null,
     });
   });
 
@@ -114,6 +115,7 @@ describe('hosted device assertion authentication', () => {
       devicePublicKey: publicJwk.x!,
       proofKeyId: 'identity',
       proofKeyEpoch: 0,
+      expectedDeviceDigest: null,
     });
     await expect(authenticate(assertion)).resolves.toBeUndefined();
   });
@@ -171,6 +173,7 @@ describe('hosted task assertion authentication', () => {
       devicePublicKey: publicJwk.x!,
       proofKeyId: 'identity',
       proofKeyEpoch: 0,
+      expectedDeviceDigest: null,
     });
   });
 

@@ -22,7 +22,7 @@ import { PI_STUB_DECLARATIONS, StubRuntimeAdapter, type StubAdapterDeclarations 
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { freshTestAgentRef, testAgentHomeConfig, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner, testScratchRoot } from './fixtures/execution-scratch';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
@@ -59,7 +59,7 @@ function makeRunner(
   extra: Partial<Pick<TaskRunnerDeps, 'onFileScopeAudit'>> = {},
 ): TaskRunner {
   return new TaskRunner({
-    advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget,
+    advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement,
     scratchRoot: testScratchOwner(), adapters: [adapter], ...testAgentHomeDeps(),
     deviceId: 'device-1', send: (envelope) => { sent.push(envelope); },
     blobClient: unusedBlobClient, approvalRegistry: new ApprovalRegistry(),
@@ -231,7 +231,7 @@ describe('fileScope static validation and effective report', () => {
     } } });
     expect(check.ok).toBe(false);
     expect(check.issues).toEqual([expect.objectContaining({
-      severity: 'error', code: 'invalid_file_scope', path: 'toolAuthorization.fileScope',
+      code: 'invalid_file_scope', path: 'toolAuthorization.fileScope',
     })]);
   });
 
@@ -245,11 +245,11 @@ describe('fileScope static validation and effective report', () => {
     }
     expect(thrown).toMatchObject({ code: 'daemon_config_invalid' });
     expect((thrown as { issues: unknown }).issues).toEqual([expect.objectContaining({
-      severity: 'error', code: 'invalid_file_scope', path: 'toolAuthorization.default',
+      code: 'invalid_file_scope', path: 'toolAuthorization.default',
     })]);
     const issues = toolAuthorizationIssues(config, [new StubRuntimeAdapter('pi')], 'injected');
     expect(issues).toEqual([expect.objectContaining({
-      severity: 'error', code: 'invalid_file_scope', path: 'toolAuthorization.default',
+      code: 'invalid_file_scope', path: 'toolAuthorization.default',
     })]);
   });
 
@@ -258,7 +258,7 @@ describe('fileScope static validation and effective report', () => {
       default: 'auto', byRuntime: { pi: 'all' }, fileScope: { mode: 'home' },
     } });
     expect(toolAuthorizationIssues(config, [new StubRuntimeAdapter('pi')], 'injected')).toEqual([
-      expect.objectContaining({ severity: 'error', code: 'invalid_file_scope', path: 'toolAuthorization.byRuntime.pi' }),
+      expect.objectContaining({ code: 'invalid_file_scope', path: 'toolAuthorization.byRuntime.pi' }),
     ]);
   });
 
@@ -268,7 +268,7 @@ describe('fileScope static validation and effective report', () => {
       toolAuthorization: { default: 'auto', fileScope: { mode: 'home' } },
     });
     expect(toolAuthorizationIssues(config, [new StubRuntimeAdapter('pi', undefined, AUTO_CAPABLE)], 'injected')).toEqual([
-      expect.objectContaining({ severity: 'error', code: 'invalid_file_scope', path: 'toolAuthorization.fileScope' }),
+      expect.objectContaining({ code: 'invalid_file_scope', path: 'toolAuthorization.fileScope' }),
     ]);
   });
 
@@ -287,7 +287,7 @@ describe('fileScope static validation and effective report', () => {
       ],
     } } });
     const effective = describeEffectiveDaemonConfig({
-      config, warnings: [], memoryHelper: { state: 'not-needed' }, agentMemoryMcpAdmission: 'off',
+      config, memoryHelper: { state: 'not-needed' }, agentMemoryMcpAdmission: 'off',
       storeDir: path.join(os.tmpdir(), 'byok-effective-store'), scratchRoot: testScratchRoot(),
       adapters: [new StubRuntimeAdapter('pi')], runtimeSource: 'injected', platform: 'darwin',
     });

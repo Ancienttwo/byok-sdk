@@ -6,8 +6,8 @@ import { createTestDeviceStore } from './fixtures/device-credentials';
  * lifetime. A renewal whose fresh token is still inside the renewal margin (a
  * server TTL under the margin) must not re-arm an immediate renewal. Before
  * the floor each renewal re-scheduled itself with delay 0 and every
- * `getValidAccessToken()` call renewed again, so the loop never ended and each
- * lap rewrote the OS credential entry. Renewals that a server 401 did not
+ * `getValidAccessToken()` call renewed again, so the loop never ended. A
+ * renewal writes no credential: the token is held in memory only. Renewals that a server 401 did not
  * force are now spaced by a 30s floor that doubles from the second
  * consecutive short-lived renewal.
  */
@@ -130,7 +130,8 @@ describe('token renewal is rate-limited when the fresh token is already near exp
         await vi.advanceTimersByTimeAsync(MINUTE_MS);
       }
       expect(tokenRequests()).toBe(2);
-      expect(replace.mock.calls.length).toBe(2);
+      // The token lives in memory only: a renewal writes no credential (#2045).
+      expect(replace).not.toHaveBeenCalled();
       expect(auth.isRevoked()).toBe(false);
     } finally {
       await auth.stop();
@@ -145,7 +146,7 @@ describe('token renewal is rate-limited when the fresh token is already near exp
 
       expect(tokenRequests()).toBeGreaterThan(0);
       expect(tokenRequests()).toBeLessThanOrEqual(6);
-      expect(replace.mock.calls.length).toBe(tokenRequests());
+      expect(replace).not.toHaveBeenCalled();
     } finally {
       await auth.stop();
     }

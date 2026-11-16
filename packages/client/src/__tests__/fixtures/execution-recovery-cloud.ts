@@ -16,6 +16,7 @@ import {
   type DeviceDirectory,
   type DeviceRecord,
   type DeviceRegistration,
+  type DeviceRegistrationResult,
   type InboundDedupStore,
   type ReceiptCollectExpiredInput,
   type RequestReceipt,
@@ -24,7 +25,7 @@ import {
 import { InMemoryPairingCodeStore } from '../../../../cloud/src/stores/in-memory/pairing-codes';
 import { createSqliteEmbeddedStores } from '../../../../server/src/stores/sqlite/index';
 import { assertCanonicalTimestamp, assertCollectExpiredInput, PRESENCE_LEVELS, type CollectExpiredResult, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
-import { AGENT_EGRESS_FRESH_SESSION_CAPABILITY, type AgentRef } from '@byok-sdk/protocol';
+import { AGENT_EGRESS_FRESH_SESSION_CAPABILITY, pairDeviceDigest, type AgentRef } from '@byok-sdk/protocol';
 
 interface Config {
   readonly dbPath: string;
@@ -144,10 +145,24 @@ function deviceFromRow(row: Record<string, unknown> | undefined): DeviceRecord |
 }
 
 class SqliteFixtureDevices implements DeviceDirectory {
-  async register(owner: TenantId, input: DeviceRegistration): Promise<DeviceRecord> {
+  async register(owner: TenantId, input: DeviceRegistration): Promise<DeviceRegistrationResult> {
+    // The registration fence (#2045). The digest is async, so the transaction
+    // below re-reads the machine's device and fails loudly if it moved: the
+    // fixture never pairs one machine concurrently.
+    const currentOf = () => input.machineId === undefined ? undefined : (db.prepare(
+      'SELECT device_id FROM fixture_device WHERE tenant_id = ? AND product_id = ? AND machine_id = ?',
+    ).get(owner, input.productId, input.machineId) as { device_id: string } | undefined)?.device_id;
+    const current = await ownerWrite(currentOf);
+    if (input.machineId !== undefined) {
+      const currentDeviceDigest = current === undefined
+        ? null
+        : await pairDeviceDigest({ tenantId: owner, productId: input.productId, deviceId: current });
+      if (currentDeviceDigest !== input.expectedDeviceDigest) return { outcome: 'conflict', currentDeviceDigest };
+    }
     await ownerWrite(() => {
       db.exec('BEGIN IMMEDIATE');
       try {
+        if (currentOf() !== current) throw new Error('fixture: a concurrent registration moved the machine');
         if (input.machineId !== undefined) {
           db.prepare(
             'DELETE FROM fixture_device WHERE tenant_id = ? AND product_id = ? AND machine_id = ? AND device_id <> ?',
@@ -178,7 +193,7 @@ class SqliteFixtureDevices implements DeviceDirectory {
         throw error;
       }
     });
-    return (await this.get(owner, input.deviceId))!;
+    return { outcome: 'registered', device: (await this.get(owner, input.deviceId))! };
   }
 
   async get(owner: TenantId, deviceId: string): Promise<DeviceRecord | undefined> {
@@ -386,6 +401,12 @@ const httpServer = serve({
     if (faultCandidate !== undefined) {
       const messages = (faultCandidate as { messages?: Array<{ type: string; payload: unknown }> }).messages ?? [];
       const publishAt = messages.findIndex((message) => message.type === 'agent.message.publish');
+      // The runtime starts only after the claim's answer (#2294), so task.started
+      // can leave before the runtime publishes. Refusing a request that carries
+      // task.started without the publish keeps both queued until they leave together.
+      if (publishAt < 0 && messages.some((message) => message.type === 'task.started') && existsSync(`${config.dbPath}.started-gate`)) {
+        return new Response('message admission unavailable', { status: 503 });
+      }
       if (publishAt >= 0 && existsSync(`${config.dbPath}.message-outage`)) {
         appendFileSync(`${config.dbPath}.message-blocked-batches`, `${JSON.stringify(messages.map((message) => message.type))}\n`);
         // The cloud applies a batch in order and never rolls back (handlers/messages.ts),
@@ -405,10 +426,6 @@ const httpServer = serve({
         return new Response('message admission unavailable', { status: 503 });
       }
       await ownerWrite(() => db.prepare('INSERT INTO fixture_wire (body) VALUES (?)').run(JSON.stringify(messages)));
-      // A slow claim reply lets the envelopes queued behind it leave together.
-      if (messages.some((message) => message.type === 'task.claim') && existsSync(`${config.dbPath}.claim-delay`)) {
-        await new Promise((resolve) => setTimeout(resolve, Number(readFileSync(`${config.dbPath}.claim-delay`, 'utf8'))));
-      }
     }
     const response = await cloud.fetch(request);
     if (response.ok && hasTerminal(faultCandidate) && existsSync(config.faultFile)) {

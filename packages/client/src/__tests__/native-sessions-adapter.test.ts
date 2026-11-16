@@ -35,7 +35,7 @@ async function fixture(memory = false, readyFrames: unknown[] = [{ type: 'byok_h
     while (pending.includes('\n')) {
       const end = pending.indexOf('\n'), command = JSON.parse(pending.slice(0, end)); pending = pending.slice(end + 1);
       commands.push(command.type);
-      const response = () => frame({ type: 'response', id: command.id, success: true, data: { sessionId: 'native-session' } });
+      const response = () => frame({ type: 'response', id: command.id, success: true, data: command.type === 'prompt' ? { disposition: 'started' } : { sessionId: 'native-session' } });
       if (command.type === 'abort') { acknowledgeAbort = response; if (!commands.includes('prompt')) response(); }
       else response();
     }

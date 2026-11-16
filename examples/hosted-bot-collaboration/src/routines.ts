@@ -50,7 +50,7 @@ function occurrence(row: OccurrenceRow, intentKey?: string): Occurrence {
  * The caller holds the scope lock.
  */
 export async function loadSlice(client: PoolClient, scopeKey: string, dreams: readonly string[] = []): Promise<RoutineSlice> {
-  const state: LedgerState = { version: 1, sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {}, slots: {},
+  const state: LedgerState = { sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {}, slots: {},
     outbox: {}, applied: {}, application: {}, scanWake: null };
   const routines = await client.query<RoutineRow>(`SELECT id, definition, pending, lifecycle, status, next_at::text, calendar_errors,
     schedule_retry_at::text, schedule_retry_count, last_error FROM routine WHERE scope = $1 ORDER BY ordinal`, [scopeKey]);

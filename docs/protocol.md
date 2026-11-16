@@ -3033,10 +3033,20 @@ auth/device-flow UI, outside this protocol's concern) plus a freshly
 generated device keypair register the device and mint its first token.
 
 ```
-Request  (PairRequestSchema):  { pairingCode, deviceName, devicePublicKey, machineId? }
+Request  (PairRequestSchema):  { pairingCode, deviceName, devicePublicKey, machineId?, expectedDeviceDigest }
 Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint?, expiresIn }
+409      (PairSupersededResponseSchema):     { error, code: "pairing_superseded", currentDeviceDigest }
+401      (PairingCodeInvalidResponseSchema): { error, code: "pairing_code_invalid" }
 ```
 
+- `deviceName`: 1 to 64 UTF-16 code units (`PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH`)
+  of well-formed text without control characters (`isPairingText`: no C0, DEL
+  or C1 control and no unpaired surrogate). `deviceId` and `tenantId` follow
+  the same rule. Every bound here counts UTF-16 code units (`length`), not code
+  points: an astral character counts as two. `isPairingText(value, maxUnits)`
+  is the one check of length and text, at every boundary. These bounds are the
+  wire contract; a device's fit in its OS credential entry is guaranteed by its
+  own check of the encoded entry before it writes.
 - `devicePublicKey`: Ed25519 public key, base64url-encoded.
 - `machineId`: OPTIONAL client-hashed machine identity — lowercase hex SHA-256
   of the product id and an OS-provided machine identifier (macOS
@@ -3049,10 +3059,17 @@ Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint?, 
   product of its own — those still come
   only from the redeemed pairing code's claims — and a client that cannot
   resolve one omits the field, in which case no supersession happens at all.
-- `accessToken`: JWT, ~1h lifetime.
+- `expectedDeviceDigest`: REQUIRED, `null` or a device digest. It fences
+  machine supersession; see "Registration fence" below. A request without it
+  is a pre-v7 client and gets `400`.
+- `deviceId`: `isPairingText` within 64 UTF-16 code units
+  (`PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH`).
+- `accessToken`: JWT, ~1h lifetime. A device keeps it in memory only and
+  exchanges a new one through `/byok/challenge` and `/byok/token`.
 - `tenantId`: required opaque, non-secret tenant binding copied exactly from
-  the authenticated redeemed pairing-code/device row. It is bounded to 1–200
-  characters, rejects leading/trailing whitespace and NUL, and has no
+  the authenticated redeemed pairing-code/device row. It is `isPairingText`
+  within 200 UTF-16 code units (`PAIR_RESPONSE_TENANT_ID_MAX_LENGTH`), rejects
+  leading/trailing whitespace, and has no
   product-specific format. It is never accepted in `PairRequest` and must not
   be derived from or parsed out of the access token.
 - This required field is part of the 0.7.0 HTTP auth contract. Pairing is an
@@ -3086,6 +3103,89 @@ and row-write happen in one step, and the code's single-use semantics are what
 make it exclusive: a second redeem is rejected before any row is written.
 From that point the device row — not any token payload — is the authority on
 which tenant and product a device belongs to.
+
+**Registration fence (#2045, wire v7).** Without a fence, a pairing that
+lost the race for its local credential slot could still land on the server
+after its successor and supersede the successor's device, so the device that
+holds the slot would find itself retired. The fence is a compare-and-set on
+the machine's current device.
+
+*Device digest.* `pairDeviceDigest({ tenantId, productId, deviceId })` in
+`@byok-sdk/protocol` is the only definition; the client and every store call
+it. It is SHA-256 over the UTF-8 bytes of the JSON array
+`["byok-pair-device-v1", tenantId, productId, deviceId]`, encoded as
+unpadded base64url (43 characters). A JSON array of strings has one
+serialization, so fields cannot run into each other. Tenant and product salt
+the digest, so it does not match across scopes. Device ids are minted by the
+server as random UUIDs, so a digest reveals only whether the device changed.
+
+*Server decision*, in this order, inside the registration transaction:
+
+1. **Replay.** A code already used with the same binding (`deviceName`,
+   `devicePublicKey`, `machineId`, proof key; not `expectedDeviceDigest`)
+   returns its completion as `200` while that device is registered, without
+   reading the fence. A same-code retry after a timeout keeps working even
+   when the fence has moved.
+2. **Code.** An unknown, expired or otherwise used code gets `401`
+   `pairing_code_invalid`. The three are indistinguishable.
+3. **No `machineId`.** Nothing is superseded, so the fence is not read and
+   the device registers. Such a registration never retires another device.
+4. **Fence.** The server reads the current device of
+   `(tenantId, productId, machineId)` after every earlier registration of
+   that machine has committed. If `expectedDeviceDigest` is its digest, or
+   both are `null`, it supersedes that device, registers, and consumes the
+   code. Otherwise it answers `409` `pairing_superseded` with
+   `currentDeviceDigest`, the current device's digest or `null`. A `409`
+   changes nothing and consumes nothing: the same code stays redeemable.
+
+The `409` and `401` bodies carry a fixed `error` text and their `code`; the
+`409` adds `currentDeviceDigest` and nothing else the server knows.
+
+*Client rule* (wire v7 client):
+
+- Every pairing stages a local attempt carrying the digest of the slot's
+  current enrollment (`null` when there is none), including a re-pair of the
+  device's own enrollment, and sends it unchanged. A same-code retry resends
+  the stored value.
+- Only a schema-valid `409` `pairing_superseded` is a fence conflict. Any
+  other answer is unknown and keeps the attempt.
+- On a conflict, the `pair()` invocation that sent the request may adopt
+  `currentDeviceDigest` and resend once with the same code and key, and only
+  if the slot still holds exactly its attempt (store identity, attempt,
+  code and key). It never adopts from persisted state or in a later
+  invocation. A lost attempt ends the pairing with no retry.
+- A second conflict ends the pairing with a typed, retryable busy error. It
+  happens only when two pairings of the same machine run at once.
+
+A stale request names a device its successor has already superseded, and
+every commit installs a fresh server-minted id, so the stale request can no
+longer match. Only the owning invocation can learn the new digest.
+
+*Residual risks*, accepted and documented:
+
+- **Orphans.** A stale pairing without `machineId` can still register an
+  orphan device row; it retires nothing. A stale pairing whose code belongs
+  to another tenant than its successor's is fenced only within its own
+  tenant: when the device it names is still current there, it supersedes
+  that device (the enrollment the slot held before) and registers an orphan.
+  The successor's tenant is untouched. The Host revokes orphans.
+- **Keychain restore (CE-1).** A user who restores a keychain backup holding
+  the stale attempt within the seconds a pairing is in flight lets that
+  invocation adopt and supersede its successor. Only server state could tell
+  the two apart.
+- **Server database rollback (CE-2).** Restored rows bring back old current
+  devices and codes, and stale requests can match again.
+- **Revoked successor (CE-3).** After the Host revokes the successor, the
+  machine has no current device again, and a stale `null` request can
+  register an orphan. Only the device the Host chose was revoked; the next
+  pairing of that machine supersedes the orphan.
+- **Code validity probe.** A `409` does not consume the code, so a code
+  holder can repeat it until the code expires and learn that the code is
+  valid (the same bit `401` versus `200` gives) and whether that machine's
+  device changed. The public pairing rate limit bounds the attempts.
+- **v7 client, v6 server.** A v6 server drops the unknown field and registers
+  without the fence; the client then halts at the handshake. Upgrade the
+  cloud first.
 
 ### 6.2 Token renewal — `POST /byok/challenge` + `POST /byok/token`
 
@@ -4573,7 +4673,14 @@ the offer `target` and one kind of the claim `executor`.
   after a claim (§3.1). A missing, different, or unexpected executor is rejected. Builtin usage
   metrics keep their existing schema; the SDK does not invent custom usage.
 
-Independent inbound handlers retain per-task control order. Acknowledgement only
+Independent inbound handlers retain per-task control order, with one
+exception: `task.cancel` does not wait for an earlier control of its task to
+finish, and later controls of that task wait for the cancel (#2304). An
+earlier control can be waiting on the runtime, as a `task.steer` waits for the
+runtime to take its input, and a runtime that never answers would otherwise
+leave the cancel queued behind it. The cancel closes the session; a steer the
+runtime has not taken by then is reported as `task.steer_refused` with
+`task_not_active`, and one it answers later sends nothing. Acknowledgement only
 advances after all received sequences in the prefix have succeeded and the cursor
 is durable. Successfully handled tails survive gaps and cursor-write retries in
 memory; delivery alone is never acknowledgement.

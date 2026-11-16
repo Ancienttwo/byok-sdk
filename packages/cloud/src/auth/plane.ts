@@ -17,8 +17,9 @@
  *   tenant they act on is the row's, by construction.
  */
 import type { Clock, TenantId } from '@byok-sdk/core';
+import { PairResponseSchema } from '@byok-sdk/protocol';
 import type { CloudCrypto } from '../crypto/port.js';
-import type { CloudStores, DeviceRecord, PairingCodeInfo } from '../stores/ports.js';
+import type { CloudStores, DeviceRecord, PairingCodeInfo, PairingEnrollmentResult } from '../stores/ports.js';
 import { ACCESS_TOKEN_TTL_SECONDS, type TokenSigner } from './tokens.js';
 import { verifyNonceSignature } from './verify.js';
 
@@ -26,6 +27,13 @@ import { verifyNonceSignature } from './verify.js';
 export const PAIRING_CODE_TTL_MS = 10 * 60 * 1000;
 
 const PAIRING_CODE_LENGTH = 8;
+
+/**
+ * The longest `productId` a pairing code may carry. The device keys its
+ * enrollment and every `pairDeviceDigest` by it, so it is bounded where it
+ * enters the system: at the mint.
+ */
+export const PAIRING_CODE_PRODUCT_ID_MAX_LENGTH = 64;
 
 /** The paired identity key is the first and only proof key in S6. */
 export const DEVICE_IDENTITY_PROOF_KEY_ID = 'identity';
@@ -37,6 +45,8 @@ export interface PairInput {
   readonly devicePublicKey: string;
   /** Optional client-hashed machine identity (protocol §6.1). Carried into registration verbatim; it is never a tenant or product authority. */
   readonly machineId?: string;
+  /** The registration fence (#2045, protocol §6.1), carried into enrollment verbatim. */
+  readonly expectedDeviceDigest: string | null;
 }
 
 export interface MintedAccessToken {
@@ -46,15 +56,20 @@ export interface MintedAccessToken {
 }
 
 export interface AuthPlane {
-  /** Host control plane: mint a single-use code carrying the tenant/product a device will land in. */
+  /**
+   * Host control plane: mint a single-use code carrying the tenant/product a
+   * device will land in. The caller bounds `productId` by
+   * {@link PAIRING_CODE_PRODUCT_ID_MAX_LENGTH} (`Cloud.createPairingCode`).
+   */
   createPairingCode(tenant: TenantId, input: { readonly productId: string; readonly ttlMs?: number }): Promise<PairingCodeInfo>;
   /**
-   * Redeem a code and register the device it pairs, in one step. `undefined`
+   * Redeem a code and register the device it pairs, in one step. `code_invalid`
    * for a code that is unknown, expired, or already used — one answer for all
-   * three. Single-use redemption is what makes this exclusive: a second
-   * redeem never reaches the row write.
+   * three — and `conflict` when the fence does not name the machine's current
+   * device, which consumes nothing. Single-use redemption is what makes this
+   * exclusive: a second redeem never reaches the row write.
    */
-  redeemAndRegister(input: PairInput): Promise<DeviceRecord | undefined>;
+  redeemAndRegister(input: PairInput): Promise<PairingEnrollmentResult>;
   /** The pre-tenant device lookup §6.2's wire contract forces. `undefined` for unknown AND revoked alike — no existence oracle. */
   resolveDevice(deviceId: string): Promise<DeviceRecord | undefined>;
   issueNonce(device: DeviceRecord): Promise<string>;
@@ -95,13 +110,20 @@ export function createAuthPlane(deps: AuthPlaneDeps): AuthPlane {
       // The enrollment composition alone reads the guarded code claims, so a
       // handler never holds a tenant/product it could substitute. It consumes
       // the code only if this registration succeeds.
+      const deviceId = `dev_${crypto.randomUuid()}`;
+      // Checked against the response's own rule before redemption: an id the
+      // response may not carry must not become a registered row or a spent code.
+      if (!PairResponseSchema.shape.deviceId.safeParse(deviceId).success) {
+        throw new TypeError('CloudCrypto.randomUuid minted a device id PairResponse cannot carry');
+      }
       return stores.pairing.redeemAndRegister({
         pairingCode: input.pairingCode,
-        deviceId: `dev_${crypto.randomUuid()}`,
+        deviceId,
         deviceName: input.deviceName,
         devicePublicKey: input.devicePublicKey,
         proofKeyId: DEVICE_IDENTITY_PROOF_KEY_ID,
         proofKeyEpoch: DEVICE_IDENTITY_PROOF_KEY_EPOCH,
+        expectedDeviceDigest: input.expectedDeviceDigest,
         ...(input.machineId === undefined ? {} : { machineId: input.machineId }),
       });
     },

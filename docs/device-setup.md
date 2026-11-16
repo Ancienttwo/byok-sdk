@@ -40,7 +40,7 @@ same sequence:
    install or run a user-scoped daemon as `root` or `SYSTEM`.
 3. Choose one configuration path below: the CLI path owns a JSON file, the
    embedded path owns a `DaemonConfig` assembled in code.
-4. Validate before starting: `byok-agent config check --strict` for the CLI
+4. Validate before starting: `byok-agent config check` for the CLI
    path, `checkDaemonConfig(config, { source: 'embedded' })` for the embedded
    path. A Host-owned config file carries the required `productName`,
    `productId` and `serverUrl` (and normally a `storeDir`); runtime isolation,
@@ -69,7 +69,7 @@ for a Unix local demo, not a production storage location.
 ```
 
 ```sh
-byok-agent config check --strict --json --config device.json
+byok-agent config check --json --config device.json
 byok-agent pair <code> --server http://localhost:8787 --config device.json
 byok-agent start --config device.json
 ```
@@ -221,7 +221,7 @@ the Host sets does not reach an agent.
 
 ## Configuration
 
-`byok-agent config check --strict --json --config device.json` validates the
+`byok-agent config check --json --config device.json` validates the
 same input boundary as startup, checks construction constraints and reports
 effective values. It reads filesystem state but does not start a daemon,
 pair a device, write state or prove runtime credentials/server acceptance.
@@ -237,12 +237,11 @@ configured `runtimes` value, else the adapter default); and `toolAuthorization`
 for the mode (`all`, or `static` with each runtime's resolved mode in
 `byRuntime`) and local approval policy.
 
-Missing required fields, invalid types/values, removed fields and CLI-forbidden
-values are errors. Unknown fields are warnings under the Q4' rollback contract;
-they do not stop startup, but `--strict` fails on them. Correct warnings before
-shipping an installer config. The generated schema marks embedded-only and
-distribution-owned fields with `not: {}`; range and cross-field constraints are
-also checked by `config check`. Removed fields fail with a migration reference.
+Missing required fields, invalid types/values, unknown fields and CLI-forbidden
+values are errors, both in `config check` and at startup; a field an older
+release accepted and this one no longer has is an unknown field. The generated
+schema marks embedded-only and distribution-owned fields with `not: {}`; range
+and cross-field constraints are also checked by `config check`.
 
 ### Runtime isolation and tool authorization
 
@@ -845,7 +844,7 @@ rejected. Follow the reported migration instead of switching on that result.
 See [store compatibility](upgrade-manifest.md#store-compatibility-precheck) for
 the separate embedded-server and provider-key inspectors. Install the chosen
 distribution through your Host's installer or package manager, run
-`config check --strict`, and start it again. Confirm the authenticated
+`config check`, and start it again. Confirm the authenticated
 connection and first task before declaring adoption complete.
 
 ## Unpair
@@ -886,11 +885,10 @@ await clearDeviceEnrollment({
   later pairing reads because each pairing mints a new device id.
 - `DeviceEnrollmentClearError.code` is `store_owned` when another process holds
   the owner lease (nothing is read or cleared), `store_not_bound` when the OS
-  entry holds an enrollment another `storeDir` paired or a first-pairing
-  attempt another `storeDir` staged (it is left in place),
-  `pairing_attempt_unattributed` when it holds a first-pairing attempt that
-  names no `storeDir` (staged by 0.42.0; it is left in place), or
-  `clear_failed` with the provider or filesystem error as `cause`. A
+  entry holds an enrollment another `storeDir` paired or a pairing attempt
+  another `storeDir` staged (it is left in place), or `clear_failed` with the
+  provider or filesystem error as `cause`. A wire v6 entry is void and is
+  deleted without being read. A
   `device.json` that cannot be parsed or is empty is refused as `clear_failed`
   before anything is deleted; that store needs a re-pair. The clear deletes
   the member entries one at a time (pairing verification, member state,
@@ -924,41 +922,40 @@ await clearDeviceEnrollment({
 - It clears the OS credential set of the account it runs as. A Windows
   `LocalSystem` service's enrollment is out of an interactive user's reach.
 - The OS credential entry is shared by every store of one `productId`. A store
-  clears its own staged first pairing, never another store's, and pairs only
+  clears its own staged pairing attempt, never another store's, and pairs only
   with a staged attempt it made (#1964, #2033). Under
   the store's owner lease the clear takes a per-user `productId` lock and holds
   it from its validation through its deletion. A running daemon's token
-  renewal takes the same lock around validating and persisting the new token,
-  and never across a network request. A pairing is one critical section: it
-  takes the lock, rereads the OS entry, `device.json` and the staged attempt
-  (never a cached record), and holds the lock through its request, persisting
-  the enrollment, and the E2EE member entries, which are also shared per
-  `productId`. Re-pairing a running daemon also shuts it down inside the lock.
-  The pairing holds the lock across its request because the server's device
-  registration has no fencing (#2045 F1). Another store's pairing or renewal
-  therefore lands wholly before or wholly after the clear (#2034, #2030 F2).
-  A running daemon's own writes of the member entries (member resume, KEM
-  rotation, a verified chain head) take the lock around each write, reread
-  that the OS entry still holds the daemon's enrollment, and otherwise write
-  nothing and halt as a renewal does; they never hold it across a network
-  request (#2055).
+  renewal takes the same lock only to check that the OS entry still holds its
+  enrollment. The access token itself is never written to disk or to the OS
+  entry: the daemon exchanges one with its device key (`/byok/challenge`,
+  then `/byok/token`) on its first request after start and after a `401`, and
+  keeps it in memory (#2045).
+  A pairing takes it around each local step: rereading the OS entry,
+  `device.json` and the staged attempt (never a cached record) and staging its
+  attempt; checking that the attempt is still its own before a resend; and
+  persisting the enrollment. The E2EE member entries, also shared per
+  `productId`, are written after that, each write under the lock and only
+  while the OS entry still holds the new enrollment. Re-pairing a running
+  daemon shuts it down outside the lock. A running daemon's own writes of the
+  member entries (member resume, KEM rotation, a verified chain head) take
+  the lock around each write in the same way, and otherwise write nothing and
+  halt as a renewal does (#2055). No holder keeps the lock across a network
+  request; the server's registration fence keeps a pairing in flight from
+  superseding a later one (#2045). Another store's pairing or renewal
+  therefore lands wholly before or wholly after the clear (#2034).
   Lock order is the store owner lease, then the `productId` lock.
-- The request deadline bounds only the network request, and each OS credential
-  command has its own 15 s deadline; nothing bounds the whole time a holder
-  keeps the lock. Each waiter waits up to 30 seconds: a clear that times out
+- Each OS credential command has its own 15 s deadline; nothing bounds the
+  whole time a holder keeps the lock. Each waiter waits up to 30 seconds: a clear that times out
   fails as `clear_failed` and deletes nothing, a pairing fails as busy, and a
   renewal fails as busy, not as revocation, and is retried (#2045 F5).
-- A pairing whose request times out releases the lock while the server may
-  still register it. Its outcome is unknown: the staged attempt stays, and
-  pairing again retries with the same key. If another store pairs with
-  `replaceOtherStore` meanwhile, the late registration can still supersede
-  it on the server; only server-side registration fencing closes that gap.
+- A pairing whose request times out has an unknown outcome: the staged attempt
+  stays, and pairing again with the same code resends the same request with
+  the same key. A late registration of that request cannot supersede a pairing
+  that landed after it: the server answers it with `409` (#2045).
 - A renewal that finds the enrollment gone writes nothing and halts the
   daemon: `store_not_bound` when another store paired over it,
   `re_pair_required` when it was cleared.
-- `clearUnattributedAttempt: true` also deletes a first-pairing attempt that
-  names no `storeDir`. Set it only when no other store of this `productId` is
-  pairing.
 - Clear before deleting the data directory. The owner lease recreates
   `storeDir` if it is already gone.
 - `byok-agent unpair --yes --config <file>` runs `Daemon.unpair()`, which also
@@ -1057,23 +1054,54 @@ and mailbox are kept. Otherwise give this store its own productId. `byok-agent
 pair --replace-other-store` stages a fresh key alongside the current enrollment
 in the same OS entry. A rejected request, network failure, or invalid response
 keeps the current enrollment usable; retrying after restart uses the staged key.
-Renewal of the current enrollment also preserves that attempt. A successful
-replacement promotes the new enrollment, and the other store then reads as not
-bound. Staging fails before writing if the combined entry exceeds the OS entry
-size bound. Older clients fail closed while the replacement attempt is pending;
-after promotion, the entry is an ordinary enrollment again. The public credential
-backend API shape is unchanged; injected backends must preserve the same staging
-and renewal semantics.
+Renewal of the current enrollment writes nothing, so the attempt stays. A
+successful replacement promotes the new enrollment, and the other store then
+reads as not bound. After promotion, the entry is an ordinary enrollment again.
+Two layers keep the entry within its 2,400-byte bound. Every stored field
+has a wire bound in UTF-16 code units and is text without control characters
+(`isPairingText`); under those bounds the measured worst case of an
+enrollment beside an attempt is 2,106 bytes. What guarantees the fit is the
+store's check of the encoded entry's byte length before every write: an entry
+over the bound is refused with `DeviceCredentialStoreError`, and pairing runs
+that check, with every other validation, before it writes `device.json`, so a
+refused pairing writes nothing. An injected
+`DeviceCredentialBackend` (`read`, `readPairingAttempt`, `savePairingAttempt`,
+`replace`, `clear`) must keep the same staging semantics; `replace` promotes a
+pairing and discards its attempt.
 
-**Staged first pairing of another store.** A pairing reuses a staged
-first-pairing attempt only when that attempt names this `storeDir` (#2033).
-Otherwise it throws `FirstPairingAttemptRefusedError` and writes nothing:
-`store_not_bound` when another store staged it (that store finishes or clears
-its pairing, or `pair --replace-other-store` discards the attempt and stages a
-fresh key), or `pairing_attempt_unattributed` when it names no store, as one
-staged by 0.42.0 does (when no other store of this `productId` is pairing,
-clear it with `clearDeviceEnrollment({ productId, storeDir,
-clearUnattributedAttempt: true })`, then pair again).
+**Device name refused.** `deviceName`, or the hostname when it is unset, must
+be 1 to 64 UTF-16 code units of well-formed text without control characters
+(`isPairingText`; an astral character such as an emoji counts as two). Any
+other value fails `config check`, and pairing throws `PairingInputInvalidError`
+(`field: 'deviceName'`) before it stages or sends anything; set `deviceName`. A `machineId` resolver that does not return a
+lowercase hex SHA-256 fails the same way with `field: 'machineId'`.
+
+**Staged pairing of another store.** Every pairing stages an attempt in the OS
+entry before its request. A pairing with the same code resumes this store's
+staged attempt unchanged; a new code stages a new attempt, with this store's
+enrollment key on a re-pair and a fresh key otherwise. When another store
+staged the attempt, the pairing throws `PairingAttemptRefusedError` and writes
+nothing: that store finishes or clears its pairing, or `pair
+--replace-other-store` discards the attempt (#2033).
+
+**Pairing conflicts (#2045).** A pairing names the device the slot held when it
+staged, and the server registers it only while that device is still the
+machine's current one.
+- `PairingSupersededError`: another pairing of this `productId` replaced this
+  pairing's attempt while its request was in flight. Nothing was written and
+  it does not retry; the other pairing owns the slot.
+- `PairingBusyError` (`retryable: true`): the server refused the pairing twice,
+  because another pairing of the same machine registered in between. It
+  happens only while two pairings of one machine run at once. Retry with the
+  same code.
+- `PairingCodeRejectedError`: the code is unknown, expired or already used.
+  Pair with a new code.
+
+**Wire v6 entry.** A v7 client recognizes an OS entry written by a v6 client by
+its format version alone and never reads its private key. Its credentials are
+void on a v7 cloud. `start` deletes it under the `productId` lock and reports
+re-pair required; a pairing deletes it and pairs as a first pairing; a clear
+deletes it.
 
 **Provider unreachable on a slow IPv4 network.** Node tries each resolved
 address for 250 ms by default before it moves to the next one. When a device's
@@ -1120,6 +1148,7 @@ linked JSON schema for full array/union shapes and descriptions.
 <!-- generated:fields:start -->
 | Field | Tier | Shape |
 |-------|------|-------|
+| `$schema` | advanced | string |
 | `nativeSessions` | advanced | boolean |
 | `nativeAssetRoot` | advanced | string |
 | `toolAuthorization` | advanced | object |
@@ -1360,15 +1389,13 @@ Coverage checks compare it with `DaemonConfigIssueCode`, `DAEMON_HALT_REASONS`
 and coded errors in `daemon-errors.ts` / `config-schema/errors.ts`, including
 the layout helper's input validation before daemon construction.
 “Retryable unchanged” means repeating the same operation without changing its
-input or environment. A warning does not require a startup retry; strict checks
-still need correction. Codes do not replace the reported field/path or cause.
+input or environment. Codes do not replace the reported field/path or cause.
 
 <!-- generated:errors:start -->
 | Code / halt reason | Retryable unchanged | Next step | Guide |
 |--------------------|---------------------|-----------|-------|
 | `config_invalid` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
 | `cursor_unreadable` | no | Run doctor --repair reset-cursor --yes, then start again. | [guide](#reset-cursor) |
-| `daemon_config_field_removed` | no | Remove the field and follow its migration; do not rename it to an unknown field. | [guide](#removed-fields) |
 | `daemon_config_invalid` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
 | `daemon_journal_protocol_unsupported` | no | Drain the journal with the release that wrote it before upgrading. | [guide](#upgrade) |
 | `device_revoked` | no | Obtain a fresh pairing code from the Host, pair this device, then start. | [guide](#reset) |
@@ -1385,11 +1412,10 @@ still need correction. Codes do not replace the reported field/path or cause.
 | `not_an_object` | no | Supply a JSON object. | [guide](#configuration) |
 | `protocol_negotiation_failed` | no | Read the HTTP status in the halt. On 404, check the server base URL and that the Host mounts the messages route; otherwise upgrade the server side and the daemons to the same wire protocol major. | [guide](#troubleshooting) |
 | `re_pair_required` | no | Obtain a fresh pairing code from the Host, pair this device, then start. | [guide](#reset) |
-| `removed_field` | no | Remove the field and follow its migration; do not rename it to an unknown field. | [guide](#removed-fields) |
 | `replay_cursor_too_old` | no | Pair again or use the Host operator recovery procedure for expired history. | [guide](#reset) |
 | `store_not_bound` | no | If this store owns the enrollment, run doctor --repair restore-enrollment-metadata with the expected device and tenant ids; otherwise pair this store under its own productId, or pair --replace-other-store to replace the other store's enrollment. | [guide](#troubleshooting) |
 | `store_owned` | no | Stop the daemon that owns this store before starting another. | [guide](#troubleshooting) |
-| `unknown_field` | no | Remove or correct the unknown field; startup warns, while --strict rejects warnings. | [guide](#configuration) |
+| `unknown_field` | no | Remove or correct the unknown field; config check and startup reject it. | [guide](#configuration) |
 | `unpaired` | no | Obtain a fresh pairing code from the Host, pair this device, then start. | [guide](#reset) |
 <!-- generated:errors:end -->
 
@@ -1436,29 +1462,8 @@ Manifest transition: **0.43.0 → 0.43.0**. Versions and entries below come from
 |-------|--------|----------------------|
 | grok-agent-user-context | additive | GrokAdapterOptions.agentUserContext and runtimes.grok.agentUserContext, default inherit, which changes nothing. Under excluded, a Grok Agent task runs with GROK_HOME set to an SDK-owned directory that links the user's auth.json, config.toml, trusted_folders.toml and hooks/, keeps AGENTS.md, rules/, skills, memory, plugins and the user's sessions out, keeps the Agent's sessions in <Agent home>/.byok/grok/sessions, and sets the four Claude and Cursor agents and rules variables. The start fails as a non-retryable authority failure while grok inspect still lists a user instruction file (such as an [paths] extra_rule_dirs file), when inspect fails, without a sealed Agent home, or when the user GROK_HOME has no auth.json and XAI_API_KEY is not set. A login Grok writes over the auth.json link stays in the execution scratch: the release fails with a cleanup RuntimeDisposalFailure naming its path, retention skips that execution and reports a grok_login_preserved retention-failure event with the path on every pass, and every Grok task of the daemon refuses to start until the user moves the file back to ~/.grok/auth.json or deletes it, then logs in again. The SDK never restores or deletes it. The Grok descriptor then declares isolation.userInstructions. A Bot switched from inherit cannot resume sessions it made in the user's store. [Migration](../docs/adapter-capabilities.md#agentusercontext-grok) |
 | grok-session-store | additive | The new expiring retention class grok-session-store covers the sessions a Grok Agent task keeps under <Agent home>/.byok/grok/sessions when agentUserContext is excluded. A session folder, sessions/<encoded cwd>/<session id>/, is deleted once its newest write is older than the new DaemonConfig.storage.retention.ttlMs['grok-session-store'] (default 31 days, or the session-ledger TTL plus one day if longer; an explicit value must be at least the session-ledger TTL plus one day), unless a live session ledger still names the session or its Agent home is running a task. Grok's own index, sessions/session_search.sqlite, is never touched. A Host that switches exhaustively over retention class ids (ExpiringClassId or EXPIRING_CLASS_IDS) must add a branch for grok-session-store. No data migration: the store exists only for Grok Agent tasks under agentUserContext excluded, and resuming a pruned session fails through the existing missing-session path. [Migration](../docs/host-local-storage-layout.md#retention-bounds) |
+| daemon-config-unknown-fields-fail-closed | breaking | @byok-sdk/client removes DaemonConfigFieldRemovedError, the removed_field issue code, DaemonConfigIssue.severity and .migration, DaemonEffectiveConfig.warnings and byok-agent config check --strict; every DaemonConfig issue is an error. The generated daemon-config.schema.json closes every object (additionalProperties: false) and declares the root $schema, so editors refuse the unknown fields the daemon refuses. [Migration](../docs/releases/host-upgrade-next-minor.md#daemonconfig-rejects-unknown-fields) |
 <!-- generated:migrations:end -->
-
-## Removed fields
-
-Generated from `REMOVED_DAEMON_CONFIG_FIELDS`; remove the old inputs in the same
-Host change that adopts the new contract. No alias or dual configuration path.
-
-<!-- generated:removed:start -->
-| Removed field | Migration |
-|---------------|-----------|
-| `permissionDefaults` | DaemonConfig.permissionDefaults was removed: the local agent's own permission settings apply |
-| `agentEgress.sanitizer` | DaemonConfig.agentEgress.sanitizer was removed: Agent egress goes to the Host as is |
-| `mcpLaunchCwd` | DaemonConfig.mcpLaunchCwd was removed: MCP servers start in the session cwd, as the agent runtime does |
-| `toolImplementationAuthority` | DaemonConfig.toolImplementationAuthority was removed: the SDK does not attest tool or runtime executables |
-| `hostedJournal` | DaemonConfig.hostedJournal was removed: every daemon journals; tune it under storage.journal and inject a journal as overrides.journal |
-| `strictAgentOnly` | DaemonConfig.strictAgentOnly was removed: since wire v4 every offer is an Agent offer, so every daemon runs Agent offers only |
-| `gitWorkspace` | DaemonConfig.gitWorkspace was removed: since wire v4 every offer is an Agent offer and runs in its SDK-owned Agent home, so there are no Git task workspaces (overrides.gitWorkspace is gone too); configure agentHome |
-| `workspaceRoot` | DaemonConfig.workspaceRoot was removed: since wire v4 every offer runs in its SDK-owned Agent home, never in a workspaceRoot/<taskId> directory; configure agentHome |
-| `resultDocument` | DaemonConfig.resultDocument was removed: a result-document offer carries its frozen schema and the runtime submits the outcome through the SDK-reserved submit_result tool |
-| `maxConcurrentMutableSessionsPerAgentHome` | DaemonConfig.maxConcurrentMutableSessionsPerAgentHome was removed. A home has one writer Attempt; send concurrent tasks as homeAccess: 'memory-reader' offers and set maxConcurrentReaderAttemptsPerAgentHome to limit them. |
-| `durablePi` | DaemonConfig.durablePi was removed: set runtimes.pi.durableLane, or with createDaemonWithAdapters construct PiAdapter({ durableLane: true }); the daemon wires the durable journal from the adapter's durableLane capability |
-| `agentMemoryFilesystem` | DaemonConfig.agentMemoryFilesystem is removed; an arbitrary helper is not admitted on this platform. Use the SDK release artifact. |
-<!-- generated:removed:end -->
 
 ## Maintaining this guide
 

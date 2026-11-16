@@ -5,7 +5,7 @@ import { afterEach, expect, it } from 'vitest';
 import { HostLedger, type ExecutionServer } from '@byok-sdk/server/execution-core';
 import { template } from './k4-fixtures.test-support';
 import { BotCollaboration, type BotOptions } from './host';
-import { botCompactVeto } from './compaction';
+import { botLedgerOptions } from './compaction';
 import { TeamModeError, type TeamSnapshotBot } from './rules/team';
 
 /**
@@ -31,7 +31,7 @@ afterEach(async () => {
 });
 function open(options: Partial<BotOptions> = { team: 'external', persona: 'external' }): BotCollaboration {
   root ??= mkdtempSync(join(tmpdir(), 'k8-persona-'));
-  ledger ??= new HostLedger(join(root, 'host.sqlite'), 'tenant', { compactVeto: botCompactVeto });
+  ledger ??= new HostLedger(join(root, 'host.sqlite'), 'tenant', botLedgerOptions);
   return new BotCollaboration(server as never, ledger, { botId: 'main', execution: template('device'), connector: async () => null, ...options });
 }
 const MAIN = (profileRevision?: string, persona = 'Main persona'): TeamSnapshotBot => ({ id: 'main', name: 'Main', role: 'Team owner', persona,

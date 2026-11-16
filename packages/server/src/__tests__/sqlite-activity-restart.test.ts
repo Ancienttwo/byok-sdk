@@ -192,6 +192,7 @@ describeSqlite('SQLite durable activity log across restarts (#1113)', () => {
       };
       await stores.cloud.devices.register(TENANT, {
         deviceId: 'device', productId: 'product', deviceName: 'fixture', devicePublicKey: 'test-key', proofKeyId: 'proof-key', proofKeyEpoch: 1,
+        expectedDeviceDigest: null,
       });
       await woken(() => stores.cloud.tasks.reserveAgentOffer(TENANT, { taskId: TASK, deviceId: 'device', agentRef: AGENT_REF }));
       await woken(() => stores.cloud.activity.append(TENANT, batch(1)));

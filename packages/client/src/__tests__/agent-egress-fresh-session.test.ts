@@ -12,7 +12,7 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 const roots: string[] = [];
@@ -202,7 +202,7 @@ describe('fresh Agent egress session authority', () => {
     const handoffs = new AgentSessionHandoffStore();
     vi.spyOn(handoffs, 'record').mockRejectedValueOnce(new Error('fsync unavailable'));
     const sent: Envelope[] = [];
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,

@@ -71,7 +71,7 @@ it('backs off reply checks from 1 s to 60 s and shows uncertain after 30 minutes
 });
 
 function ledger(): LedgerState {
-  return { version: 1, sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {}, slots: {}, outbox: {},
+  return { sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {}, slots: {}, outbox: {},
     applied: {}, application: {}, scanWake: null };
 }
 const decline = (code: string) => ({ envelope: { type: 'task.decline', payload: { code } } }) as never;

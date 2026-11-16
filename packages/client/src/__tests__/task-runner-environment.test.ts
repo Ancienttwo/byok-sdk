@@ -20,7 +20,7 @@ type CodexSpawnFn = typeof codexNodeSpawn;
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 
 /**
  * `TaskRunner` hands every runtime its adapter's runtime environment — here
@@ -90,7 +90,7 @@ async function makeHarness(): Promise<Harness> {
   });
 
   const sent: Envelope[] = [];
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
     adapters: [piAdapter, claudeAdapter, codexAdapter],
     ...testAgentHomeDeps(),
     deviceId: 'device-1',

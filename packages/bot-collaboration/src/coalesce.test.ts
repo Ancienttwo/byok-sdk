@@ -8,7 +8,7 @@ import { template } from './k4-fixtures.test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { addTurn, stateOf, type CollaborationState, type Turn } from './model';
 import { admitUserInput, batchRequest, COALESCE_DEFAULTS, coalescePolicy, sealBatchForCancel, sealDueBatches, type CoalescePolicy } from './coalesce';
-import { botCompactVeto } from './compaction';
+import { botLedgerOptions } from './compaction';
 
 const POLICY: CoalescePolicy = { ...COALESCE_DEFAULTS };
 const BOUNDARIES: Turn['source'][] = ['answer', 'action_result', 'routine', 'room_slot', 'bot_request', 'bot_reply', 'continuation'];
@@ -36,7 +36,7 @@ afterEach(async () => {
 /** Real SDK server and Host ledger without a device: an offer freezes its input and then waits. */
 async function host(options: Partial<BotOptions>, name: string) {
   root ??= await mkdtemp(path.join(tmpdir(), 'bot-coalesce-'));
-  const ledger = new HostLedger(path.join(root, `${name}.sqlite`), 'coalesce-test', { compactVeto: botCompactVeto });
+  const ledger = new HostLedger(path.join(root, `${name}.sqlite`), 'coalesce-test', botLedgerOptions);
   const server = createByokServer({ productId: 'coalesce-test', storage: { kind: 'sqlite', path: path.join(root, `${name}-server.sqlite`) }, wake: { consume: async () => {} } });
   closers.push(() => ledger.close(), () => server.close());
   const bot = new BotCollaboration(server, ledger, { botId: 'main', execution: template('device'), connector: async () => null, ...options });
@@ -291,7 +291,7 @@ it('keeps every input in one batch, arrival order, frozen intents and the byte c
   const bots = ['main', 'other'];
   for (let run = 0; run < 150; run++) {
     const next = random(run + 1), pick = <T>(rows: readonly T[]) => rows[Math.floor(next() * rows.length)]!;
-    const state = team('other'), ledger = { version: 1, sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {},
+    const state = team('other'), ledger = { sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {},
       slots: {}, outbox: {}, applied: {}, application: {}, scanWake: null } as LedgerState;
     const arrivals: Record<string, string[]> = { main: [], other: [] };
     let now = 1_000, serial = 0;

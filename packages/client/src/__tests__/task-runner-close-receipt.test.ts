@@ -9,7 +9,7 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
@@ -29,7 +29,7 @@ async function makeRunner(overrides: Partial<Pick<TaskRunnerDeps, 'awaitTerminal
   directories.push(directory);
   const adapter = new StubRuntimeAdapter();
   const sent: Envelope[] = [];
-  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'close-receipt-device',

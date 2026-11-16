@@ -10,7 +10,7 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 
 /**
@@ -98,7 +98,7 @@ describe('a startup-deadline decline hands the canonical Agent home back to the 
 
       // Held by the test and mutated in place between the two offers; the
       // runner re-reads `startupTimeoutMs` off this exact object per offer.
-      const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+      const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
         adapters: [adapter],
         agentHome,
         agentSessionHandoffs: new AgentSessionHandoffStore(),

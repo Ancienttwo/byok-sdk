@@ -12,7 +12,7 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_DAEMON_EGRESS, FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
@@ -35,7 +35,7 @@ async function makeRunner(
   withRelease = true,
 ): Promise<TaskRunner> {
   const release = Object.freeze({ version: '0.6.0' });
-  const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'device-terminal-usage',

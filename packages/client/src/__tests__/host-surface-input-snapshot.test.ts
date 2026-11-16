@@ -46,8 +46,6 @@ async function pairedStore(): Promise<{ storeDir: string; identity: CreateStored
   await seedDeviceEnrollment(createTestDeviceStore(storeDir, undefined, PRODUCT), {
     deviceId: 'device-snapshot',
     tenantId: TENANT,
-    accessToken: 'secret-access-token',
-    expiresAt: '2030-01-01T00:00:00.000Z',
     devicePrivateKeyPem: exportPrivateKeyPem(keys.privateKey),
     devicePublicKey: x,
   });

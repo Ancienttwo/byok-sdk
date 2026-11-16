@@ -88,9 +88,9 @@ async function writeStores(dirs, out) {
   const byok = server.createByokServer({ productId: 'store-fixture', storage: { kind: 'sqlite', path: file('server-sqlite') } });
   try {
     if (dirs.botCollaboration) {
-      const { BotCollaboration, botCompactVeto } = await import(packageEntry(dirs.botCollaboration).url);
+      const { BotCollaboration, botLedgerOptions } = await import(packageEntry(dirs.botCollaboration).url);
       const { HostLedger } = await import(packageEntry(dirs.server, './execution-core').url);
-      const ledger = new HostLedger(file('bot-collaboration-ledger'), 'store-fixture', { compactVeto: botCompactVeto });
+      const ledger = new HostLedger(file('bot-collaboration-ledger'), 'store-fixture', botLedgerOptions);
       let bot;
       try {
         bot = new BotCollaboration(byok, ledger, {

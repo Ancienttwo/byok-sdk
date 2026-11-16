@@ -94,6 +94,7 @@ import {
   MCP_SERVER_MAX_PENDING_BYTES,
   MCP_SERVER_MAX_PENDING_FRAMES,
 } from './framing.js';
+import { MCP_MAX_FRAME_BYTES } from '../mcp/frame-limit.js';
 import { classifyJsonRpcMessage, isUsableRequestId, SeenRequestIds, type McpServerRequestId } from './dispatch.js';
 
 /** The revisions this core implements and will answer `initialize` with. Final; see the module header for each entry's and each exclusion's citation. */
@@ -102,12 +103,8 @@ export const MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS: readonly string[] = ['2025-
 /** Inbound: maximum bytes between two newlines before the session fails closed. */
 export const MCP_SERVER_MAX_LINE_BYTES = 1_048_576;
 
-/**
- * Outbound: maximum UTF-8 bytes of one encoded frame. Matches
- * `MCP_MAX_FRAME_BYTES` in `src/mcp/client.ts`, so an SDK server and an SDK
- * client agree on the same 1 MiB ceiling in both directions.
- */
-export const MCP_SERVER_MAX_FRAME_BYTES = 1_048_576;
+/** Outbound: maximum UTF-8 bytes of one encoded frame, the SDK MCP client's inbound ceiling. */
+export { MCP_MAX_FRAME_BYTES as MCP_SERVER_MAX_FRAME_BYTES } from '../mcp/frame-limit.js';
 
 /** Maximum `tools/call` requests in flight or queued at once. */
 export const MCP_SERVER_MAX_IN_FLIGHT = 64;
@@ -225,7 +222,7 @@ export interface McpServerOptions {
   readonly toolsListChanged?: McpServerToolsListChangedEmitter;
   /** Default {@link MCP_SERVER_MAX_LINE_BYTES}. Fail closed and close on exceed. */
   readonly maxLineBytes?: number;
-  /** Default {@link MCP_SERVER_MAX_FRAME_BYTES}. Outbound cap; an over-cap frame is never partially written. */
+  /** Default `MCP_SERVER_MAX_FRAME_BYTES`. Outbound cap; an over-cap frame is never partially written. */
   readonly maxOutboundFrameBytes?: number;
   /** Default {@link MCP_SERVER_MAX_IN_FLIGHT}. Over-limit `tools/call` requests get a typed `-32000` refusal. */
   readonly maxInFlight?: number;
@@ -269,7 +266,7 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
   }
 
   const maxLineBytes = options.maxLineBytes ?? MCP_SERVER_MAX_LINE_BYTES;
-  const maxOutboundFrameBytes = options.maxOutboundFrameBytes ?? MCP_SERVER_MAX_FRAME_BYTES;
+  const maxOutboundFrameBytes = options.maxOutboundFrameBytes ?? MCP_MAX_FRAME_BYTES;
   const maxInFlight = options.maxInFlight ?? MCP_SERVER_MAX_IN_FLIGHT;
   const input = options.input ?? process.stdin;
   const output = options.output ?? process.stdout;

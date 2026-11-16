@@ -20,21 +20,11 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { declarationGraph } from '../release/upgrade-manifest/dts-surface.mjs';
 import { checkEntryClosure, manifestEntries } from './entry-closure.mjs';
-
-const PACKAGES = [
-  'bot-collaboration',
-  'client',
-  'cloud',
-  'cloud-dataplane',
-  'core',
-  'protocol',
-  'server',
-  'ui-runtime',
-  'keys',
-];
+import { publicPackageDirectories } from '../public-packages.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultRoot = path.resolve(scriptDir, '..', '..');
+const PACKAGES = publicPackageDirectories(defaultRoot);
 
 // Static `import ... from './x'` / `export ... from './x'` specifiers, plus
 // bare side-effect `import './x'`. tsc-emitted declarations only ever carry
@@ -63,17 +53,14 @@ export function parseArgs(argv) {
       throw new Error(`unknown argument: ${arg}`);
     }
   }
-  if (options.package !== null && !PACKAGES.includes(options.package)) {
-    throw new Error(`unknown package: ${options.package} (known: ${PACKAGES.join(', ')})`);
+  const packages = publicPackageDirectories(options.root);
+  if (options.package !== null && !packages.includes(options.package)) {
+    throw new Error(`unknown package: ${options.package} (known: ${packages.join(', ')})`);
   }
   return options;
 }
 
 const toPosix = (value) => value.split(path.sep).join('/');
-
-function readJson(file) {
-  return JSON.parse(readFileSync(file, 'utf8'));
-}
 
 // `./x.js` -> `./x.d.ts`; `./x` -> `./x.d.ts` or `./x/index.d.ts`.
 function resolveDeclaration(fromFile, specifier) {
@@ -388,23 +375,10 @@ export function unifiedDiff(expected, actual, label) {
 // and no golden may outlive the package it described.
 export function inventoryFailures(root) {
   const failures = [];
-  const packagesDir = path.join(root, 'packages');
-  const published = existsSync(packagesDir)
-    ? readdirSync(packagesDir, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory() && existsSync(path.join(packagesDir, entry.name, 'package.json')))
-        .filter((entry) => readJson(path.join(packagesDir, entry.name, 'package.json')).private !== true)
-        .map((entry) => entry.name)
-        .sort()
-    : [];
-  const gated = [...PACKAGES].sort();
-  if (JSON.stringify(published) !== JSON.stringify(gated)) {
-    failures.push(
-      `inventory: the published (non-private) packages under packages/ are [${published.join(', ')}], but this gate covers [${gated.join(', ')}]`,
-    );
-  }
+  const packages = publicPackageDirectories(root);
   const goldenDir = path.join(root, 'api-surface');
   for (const file of existsSync(goldenDir) ? readdirSync(goldenDir).sort() : []) {
-    if (file.endsWith('.d.ts') && !PACKAGES.includes(file.slice(0, -'.d.ts'.length))) {
+    if (file.endsWith('.d.ts') && !packages.includes(file.slice(0, -'.d.ts'.length))) {
       failures.push(`inventory: api-surface/${file} is an orphan golden for a package this gate does not cover`);
     }
   }
@@ -413,7 +387,7 @@ export function inventoryFailures(root) {
 
 export function run(argv, out = console) {
   const options = parseArgs(argv);
-  const targets = options.package === null ? PACKAGES : [options.package];
+  const targets = options.package === null ? publicPackageDirectories(options.root) : [options.package];
   const goldenDir = path.join(options.root, 'api-surface');
   const failures = options.package === null ? inventoryFailures(options.root) : [];
   const updated = [];

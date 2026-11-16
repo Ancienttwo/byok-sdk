@@ -101,6 +101,7 @@ export const workspaceGraph = {
     "name": "@byok-sdk/example-basic",
     "dependencies": [
       "@byok-sdk/client",
+      "@byok-sdk/core",
       "@byok-sdk/protocol",
       "@byok-sdk/server"
     ]
@@ -109,6 +110,7 @@ export const workspaceGraph = {
     "name": "@byok-sdk/example-byok-mcp-server",
     "dependencies": [
       "@byok-sdk/client",
+      "@byok-sdk/core",
       "@byok-sdk/example-host-execution-core",
       "@byok-sdk/protocol",
       "@byok-sdk/server",
@@ -126,6 +128,7 @@ export const workspaceGraph = {
     "dependencies": [
       "@byok-sdk/bot-collaboration",
       "@byok-sdk/client",
+      "@byok-sdk/core",
       "@byok-sdk/keys",
       "@byok-sdk/server",
       "@byok-sdk/ui-runtime"
@@ -332,6 +335,8 @@ export const familyOwners = Object.freeze({
     /^packages\/keys\/src\/(?:windows-credential-custody[^/]*|(?:windows-credential-manager|device-sealing-key|sealed-provisioning|pi-provider-launcher-core|provider-profile|provider-profile-binding|secret-store|secret-value|sqlite-profile-store|command-runner)\.ts)$/,
   ],
   'windows-client': [
+    // #2286: an existing journal past MAX_PATH reopened through the read-only check and the writable open.
+    /^packages\/(?:client\/src\/(?:__tests__\/journal-sqlite-path\.test\.ts|util\/sqlite-support\.ts|daemon\/journal\/sqlite-journal\.ts)|core\/src\/sqlite-node\.ts)$/,
     // Runtime PATH detection is exercised on Windows, including native and batch candidates.
     /^packages\/client\/src\/(?:adapters\/(?:runtime-invocation\.ts|antigravity\/resolve-bin\.ts|opencode\/resolve-bin\.ts)|__tests__\/runtime-executable-detection\.test\.ts)$/,
     /^packages\/client\/src\/daemon\/(?:auth-manager|daemon-lifecycle|daemon-record)\.ts$/,
@@ -468,6 +473,8 @@ export const reviewedScripts = Object.freeze({
   'scripts/architecture/dependency-graph.mjs': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
   'scripts/architecture/dependency-graph.test.mjs': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
   'scripts/architecture/dependency-baseline.json': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
+  'scripts/public-packages.mjs': { tests: ['scripts/api-surface/check-api-surface.test.mjs', 'scripts/release/check-upgrade-manifest.test.mjs'], install: true, families: ['npm-release-pack'] },
+  'scripts/release/install-graph.mjs': { tests: ['scripts/release/pack-and-smoke.test.mjs'], install: true, families: ['npm-release-pack'] },
   'scripts/docs/device-setup.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
   'scripts/docs/device-setup.test.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
   // #1387: the test imports acorn (module-scan.mjs), and install also selects the
@@ -500,9 +507,6 @@ export const reviewedScripts = Object.freeze({
   'scripts/release/node-next-consumer-probe.mjs': {
     tests: [], families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
   },
-  // #1828: the one-time relative-specifier codemod. Open branches rerun it by hand; the release pack's
-  // NodeNext consumer probe proves the specifiers it writes.
-  'scripts/codemod/relative-js-specifiers.mjs': { tests: [], families: ['npm-release-pack'] },
   // #1378: the shared Secret Service wrapper that these family jobs run their
   // suites under. build-test also runs it, but plan-ci never lets a routine
   // path select build-test (the same rule as .node-version).
@@ -705,6 +709,7 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     if (path === 'examples/basic/clarification.ts' || path === 'examples/basic/clarification.test.ts'
+      || path === 'examples/basic/clarification-store.ts' || path === 'examples/basic/goal-btw-store.ts'
       || path === 'examples/basic/goal-btw.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-close.test.ts'
       || path === 'examples/basic/quickstart-smoke.test.ts' || path === 'examples/basic/server.ts'
       || path === 'examples/basic/task-events-route.ts' || path === 'examples/basic/task-events-route.test.ts') {
@@ -810,6 +815,8 @@ export function selectImpact(paths, context = {}) {
     if (path === 'packages/client/daemon-config.schema.json') {
       dirs.add('packages/client'); scripts = true; families.add('npm-release-pack'); continue;
     }
+    // Deleted paths remain CI inputs; packed NodeNext consumers cover this codemod's former output.
+    if (path === 'scripts/codemod/relative-js-specifiers.mjs') { scripts = true; families.add('npm-release-pack'); continue; }
     if (Object.hasOwn(reviewedScripts, path) || Object.hasOwn(scriptTestInputs, path)) {
       scripts = true;
       for (const id of reviewedScripts[path]?.families ?? []) families.add(id);
@@ -821,7 +828,7 @@ export function selectImpact(paths, context = {}) {
       scripts = true; continue;
     }
     // #652 trims these reviewed files in the pinned OAR snapshot.
-    if (/^packages\/client\/vendor\/oar\/4eb5919\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
+    if (/^packages\/client\/vendor\/oar\/552a4f9\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {
@@ -877,6 +884,8 @@ export function selectImpact(paths, context = {}) {
     }
     // The cloud-dataplane invariant suites run this file after migrating.
     if (path === 'tests/sql/control_plane_invariants.sql') { dirs.add('packages/cloud-dataplane'); continue; }
+    // The dataplane job's live workerd E2E serves this fixture over wrangler dev.
+    if (/^packages\/cloud-dataplane\/worker-smoke\/(?:src\.ts|wrangler\.jsonc)$/.test(path)) { dirs.add('packages/cloud-dataplane'); continue; }
     // #1322: the ArchContext model, its review policy and projection config, and
     // the projected archimap. They select no family. Every targeted run scans
     // .projection-manifest.json, docs/architecture/*.md, README.md and CHANGELOG.md

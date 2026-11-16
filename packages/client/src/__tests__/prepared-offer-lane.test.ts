@@ -58,7 +58,7 @@ import { observationOf } from './fixtures/mcp-observation';
 import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
 import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../agent-memory/mcp-server';
 import { AGENT_MEMORY_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { reservedMcpContext, reservedMcpToken } from './fixtures/execution-scratch';
@@ -369,7 +369,7 @@ async function lane(options: {
 
 async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<TaskRunnerDeps> = {}): Promise<TaskRunner> {
   const storeDir = await tempDir('byok-prepared-runner-store-');
-  return new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  return new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     deviceId: DEVICE_ID,
     send: (envelope) => sent.push(envelope),

@@ -68,12 +68,12 @@ export class StubSession implements Session {
    * enough for a concurrent duplicate redelivery to attempt landing behind
    * it, instead of depending on real network/microtask race timing. Returns
    * the release function; the blocked `steer()` call resolves once it's
-   * called.
+   * called, or throws the error it is called with.
    */
-  blockSteer(): () => void {
-    let release!: () => void;
-    this.steerGate = new Promise((resolve) => {
-      release = resolve;
+  blockSteer(): (error?: Error) => void {
+    let release!: (error?: Error) => void;
+    this.steerGate = new Promise((resolve, reject) => {
+      release = (error) => { if (error === undefined) resolve(); else reject(error); };
     });
     return release;
   }

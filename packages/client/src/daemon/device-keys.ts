@@ -1,4 +1,4 @@
-import { createPrivateKey, generateKeyPairSync, sign as edSign, type KeyObject } from 'node:crypto';
+import { createPrivateKey, createPublicKey, generateKeyPairSync, sign as edSign, type KeyObject } from 'node:crypto';
 import { nonceSigningBytes } from '@byok-sdk/core';
 
 /**
@@ -39,6 +39,11 @@ export function exportPrivateKeyPem(privateKey: KeyObject): string {
 
 export function importPrivateKeyPem(pem: string): KeyObject {
   return createPrivateKey(pem);
+}
+
+/** The base64url public key of a PKCS8 PEM private key. */
+export function publicKeyOfPrivateKeyPem(pem: string): string {
+  return publicKeyToBase64Url(createPublicKey(createPrivateKey(pem)));
 }
 
 /**

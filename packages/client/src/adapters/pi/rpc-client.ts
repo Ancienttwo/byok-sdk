@@ -77,9 +77,11 @@ export class PiRpcClient {
   private nextId = 1;
   private readonly pending = new Map<
     string,
-    { resolve: (msg: PiRpcMessage) => void; reject: (err: Error) => void }
+    { resolve: (msg: PiRpcMessage) => void; reject: (err: Error) => void; framesBefore?: (count: number, response: PiRpcMessage) => void }
   >();
   private readonly eventQueue = new AsyncQueue<PiRpcMessage>();
+  /** Frames handed to `events` so far, counted in stdout order. */
+  private eventFrames = 0;
   private closed = false;
   private exitError: Error | undefined;
   private exited = false;
@@ -143,7 +145,12 @@ export class PiRpcClient {
    * never yields a session. The wait costs one settled-promise turn once the
    * tree is adopted; every later command sees it already resolved.
    */
-  async send(command: Record<string, unknown> & { type: string; id?: string }): Promise<PiRpcMessage> {
+  /**
+   * `framesBefore` runs synchronously when the response is decoded, with the
+   * number of `events` frames that preceded it on stdout: the frames a consumer
+   * reads at that index or later were written after this response.
+   */
+  async send(command: Record<string, unknown> & { type: string; id?: string }, framesBefore?: (count: number, response: PiRpcMessage) => void): Promise<PiRpcMessage> {
     await this.adopted;
     if (this.closed) {
       throw this.exitError ?? new Error('pi process is closed');
@@ -151,7 +158,7 @@ export class PiRpcClient {
     const id = command.id ?? `req-${this.nextId++}`;
     const full = { ...command, id };
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { resolve, reject, ...(framesBefore === undefined ? {} : { framesBefore }) });
       this.child.stdin.write(`${JSON.stringify(full)}\n`, (err) => {
         if (err) {
           this.pending.delete(id);
@@ -292,6 +299,7 @@ export class PiRpcClient {
     if (msg.type === 'response' && typeof msg.id === 'string' && this.pending.has(msg.id)) {
       const waiter = this.pending.get(msg.id);
       this.pending.delete(msg.id);
+      waiter?.framesBefore?.(this.eventFrames, msg);
       waiter?.resolve(msg);
       return;
     }
@@ -303,6 +311,7 @@ export class PiRpcClient {
       else this.respondToExtensionUiRequest(msg.id, msg.method);
       return;
     }
+    this.eventFrames += 1;
     this.eventQueue.push(msg);
     observePiRpcSettlement(this, msg.type);
   }

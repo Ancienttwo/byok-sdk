@@ -1,4 +1,4 @@
-import { hash, type CompactVeto, type HostLedger, type LedgerState } from '@byok-sdk/server/execution-core';
+import { hash, type CompactVeto, type HostLedger, type HostLedgerOptions, type LedgerState } from '@byok-sdk/server/execution-core';
 import type { CollaborationState, Turn } from './model.js';
 import { routineOccurrence } from './routines.js';
 import { compactVeto } from './rules/commands.js';
@@ -13,16 +13,25 @@ export function turnIntentRetired(ledger: HostLedger, s: Pick<LedgerState, 'occu
 }
 
 /**
- * The K8 compact veto (#816). Open every Bot ledger with it: `new HostLedger(file, tenant, { compactVeto: botCompactVeto })`.
+ * The K8 compact veto (#816). `botLedgerOptions` registers it; the Host checks this identity.
  * It runs the K8 rule `compactVeto` (rules/compaction.ts) on the ledger's K4 intents and execution receipts.
  */
 export const botCompactVeto: CompactVeto = (ledger, key) => {
   // Read only: `stateOf` would create the collaboration row inside the compaction.
   const state = ledger.application.collaboration as unknown as CollaborationState | undefined;
   if (state === undefined) return undefined;
-  if (state.version !== 3) return 'Unsupported Bot collaboration state version';
   // #975: an exported domain keeps what it exported, so nothing of it is compacted.
   if (state.switchExport) return 'switch_exported';
   return compactVeto(state, key, { hasIntent: turnId => !!ledger.intents[hash(turnId)],
     receipt: taskId => ledger.executions[taskId]?.messageReceipt });
 };
+
+/** The format of K8 state in a Host ledger: its `k8` row of `host_store_format`. */
+export const K8_FORMAT = 3;
+/**
+ * The options of every Bot ledger: the K8 compact veto and the `k8` format row. Open it with
+ * `new HostLedger(file, tenant, botLedgerOptions)`, or `{ ...botLedgerOptions, projectionOutboxLimits }` to add options.
+ */
+export const botLedgerOptions: Readonly<HostLedgerOptions> = Object.freeze({
+  compactVeto: botCompactVeto, expectedFormats: Object.freeze({ k8: K8_FORMAT }),
+});

@@ -13,7 +13,7 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import * as mutationGate from '../util/path-mutation-gate';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { reservedMcpToken } from './fixtures/execution-scratch';
 
@@ -56,7 +56,7 @@ async function cancellationFixture(overrides: Partial<TaskRunnerDeps> = {}) {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-cancel',

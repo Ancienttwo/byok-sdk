@@ -2,7 +2,7 @@ import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { TaskRunner } from '../daemon/task-runner';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { testScratchOwner } from './fixtures/execution-scratch';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { acquirePiSessionRetention, acquirePiSessionWriter } from '../util/pi-session-retention';
@@ -752,7 +752,7 @@ it.each(['complete', 'cancel', 'start-failure', 'handoff-failure', 'busy', 'clos
  const competing=outcome==='busy'?await acquirePiSessionRetention(dir,sessionRef):undefined;
  if(competing)cleanups.push(()=>competing.release());
  if(outcome==='start-failure')adapter.startError=new Error('deterministic failed start');
- const runner=new TaskRunner({advertisedCapabilities:advertiseEveryDeviceFlag,...freshOfferEgressDeps(),getIngressBudget:testIngressBudget,scratchRoot:testScratchOwner(),
+ const runner=new TaskRunner({advertisedCapabilities:advertiseEveryDeviceFlag,...freshOfferEgressDeps(),getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement,scratchRoot:testScratchOwner(),
   adapters:[adapter],agentHome:home,agentSessionHandoffs:handoffs,deviceId:'device-1',send:e=>sent.push(e),
   blobClient:{resolveInstruction:async()=>{throw new Error('unused');},uploadArtifact:async()=>{throw new Error('unused');}},
   approvalRegistry:new ApprovalRegistry(),storeDir:testScratchRoot(),productId:'product-1'});

@@ -1,11 +1,16 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, symlink, writeFile, readFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, mkdir, readdir, rm, symlink, writeFile, readFile } from 'node:fs/promises';
+import { copyFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
+import { readSqliteFileUnchanged } from '@byok-sdk/core/sqlite-node';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import path from 'node:path';
 import os from 'node:os';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { admitReplica, acquireReplicaLock, resetReplica } from '../adapters/pi-durable/replica';
+import { admitReplica, acquireReplicaLock, replicaLockPath, resetReplica } from '../adapters/pi-durable/replica';
+import { DurableReplicaFormatError, openLocalDurableStorage } from '../adapters/pi-durable/storage';
 import { durableToolEnvironment } from '../adapters/pi-durable/environment';
 import { DurableViewProjection, projectDurableEvent } from '../adapters/pi-durable/events';
 const roots: string[] = [];
@@ -39,9 +44,64 @@ describe('durable replica and tool boundaries', () => {
     await expect(acquireReplicaLock(file, 'lease-b')).rejects.toThrow('locked');
     first.release(); const second = await acquireReplicaLock(file, 'lease-b'); second.release();
   });
+  // A released 0.43.0 replica in rollback-journal mode; refusal must leave its bytes and directory as they were.
+  const RELEASED_REPLICA = new URL('../../../../scripts/release/fixtures/stores/0.43.0/daemon-store/durable-replicas/fixture/durable-fixture.sqlite', import.meta.url);
+  const sha256 = async (file: string) => createHash('sha256').update(await readFile(file)).digest('hex');
+  it('refuses a lock path that holds another task replica without writing to it', async () => {
+    const { root, binding } = await setup(); const file = await admitReplica(path.join(root, 'durable'), binding);
+    const lockPath = replicaLockPath(file); await copyFile(RELEASED_REPLICA, lockPath);
+    const before = await sha256(lockPath), entries = await readdir(path.dirname(lockPath));
+    await expect(acquireReplicaLock(file, binding.leaseId)).rejects.toThrow('another database');
+    expect(await sha256(lockPath)).toBe(before);
+    expect(await readdir(path.dirname(lockPath))).toEqual(entries);
+  });
+  it('refuses a replica from an older pi-durable schema without migrating it', async () => {
+    const { root, binding } = await setup(); const file = await admitReplica(path.join(root, 'durable'), binding);
+    await copyFile(RELEASED_REPLICA, file);
+    const fixture = new DatabaseSync(file); fixture.exec('UPDATE durable_schema SET version = version - 1'); fixture.close();
+    const before = await sha256(file), entries = await readdir(path.dirname(file));
+    await expect(openLocalDurableStorage(file)).rejects.toBeInstanceOf(DurableReplicaFormatError);
+    expect(await sha256(file)).toBe(before);
+    expect(await readdir(path.dirname(file))).toEqual(entries);
+  });
+  /** A copy of `source` whose schema and rows exist only in its WAL, as a replica that crashed before its first checkpoint leaves it. */
+  async function walOnlyCopy(source: string, target: string, edit: string): Promise<void> {
+    const original = `${target}.source`, scratch = `${target}.scratch`;
+    await copyFile(source, original);
+    const db = new DatabaseSync(scratch);
+    try {
+      db.exec(`PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; ATTACH '${original}' AS src;`);
+      const objects = db.prepare("SELECT type, name, sql FROM src.sqlite_schema WHERE sql IS NOT NULL ORDER BY type = 'table' DESC").all() as Array<{ type: string; name: string; sql: string }>;
+      for (const object of objects) db.exec(object.sql);
+      for (const object of objects) if (object.type === 'table') db.exec(`INSERT INTO main."${object.name}" SELECT * FROM src."${object.name}"`);
+      db.exec(`DETACH src; ${edit}`);
+      copyFileSync(scratch, target); copyFileSync(`${scratch}-wal`, `${target}-wal`);
+    } finally { db.close(); }
+    for (const file of [original, scratch]) await rm(file);
+    // The branch under test: the main file alone shows no schema, the WAL holds all of it.
+    expect(readSqliteFileUnchanged(target, (main) => main.prepare('SELECT count(*) AS n FROM sqlite_schema').get())).toEqual({ n: 0 });
+  }
+  const replicaSource = () => new URL(RELEASED_REPLICA).pathname;
+  it('refuses another task replica at the lock path whose schema is only in its WAL, without writing owner', async () => {
+    const { root, binding } = await setup(); const file = await admitReplica(path.join(root, 'durable'), binding);
+    const lockPath = replicaLockPath(file); await walOnlyCopy(replicaSource(), lockPath, '');
+    await expect(acquireReplicaLock(file, binding.leaseId)).rejects.toThrow('another database');
+    const db = new DatabaseSync(lockPath);
+    try { expect(db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name = 'owner'").get()).toEqual({ n: 0 }); } finally { db.close(); }
+  });
+  it('refuses an older replica whose schema is only in its WAL before pi-durable opens it', async () => {
+    const { root, binding } = await setup(); const file = await admitReplica(path.join(root, 'durable'), binding);
+    await walOnlyCopy(replicaSource(), file, 'UPDATE durable_schema SET version = version - 1');
+    await expect(openLocalDurableStorage(file)).rejects.toBeInstanceOf(DurableReplicaFormatError);
+    const db = new DatabaseSync(file);
+    try {
+      expect(db.prepare('SELECT version FROM durable_schema').get()).toEqual({ version: 1 });
+      expect(db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type = 'table'").get()).toEqual({ n: 9 });
+    } finally { db.close(); }
+  });
   it('real cross-process OS lock refuses overlap and becomes available only after KILL close receipt', async () => {
     const { root, binding } = await setup(); const file = await admitReplica(path.join(root, 'durable'), binding);
-    const code = "const {DatabaseSync}=require('node:sqlite'); const db=new DatabaseSync(process.argv[1]); db.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; PRAGMA locking_mode=EXCLUSIVE; CREATE TABLE owner(slot INTEGER PRIMARY KEY,lease_id TEXT); BEGIN EXCLUSIVE;'); db.prepare('INSERT INTO owner VALUES(1,?)').run('old-lease'); db.exec('COMMIT'); console.log('locked'); setInterval(()=>{},1000);";
+    const code = "const {DatabaseSync}=require('node:sqlite'); const db=new DatabaseSync(process.argv[1]); db.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; PRAGMA locking_mode=EXCLUSIVE; CREATE TABLE owner (slot INTEGER PRIMARY KEY CHECK(slot=1), lease_id TEXT NOT NULL); BEGIN EXCLUSIVE;'); db.prepare('INSERT INTO owner VALUES(1,?)').run('old-lease'); db.exec('COMMIT'); console.log('locked'); setInterval(()=>{},1000);";
     const child = spawn(process.execPath, ['-e', code, `${file}.lock.sqlite`], { stdio: ['ignore','pipe','pipe'] });
     try {
       await new Promise<void>((resolve,reject) => { child.stdout.once('data', () => resolve()); child.once('error', reject); child.once('exit', () => reject(new Error('lock fixture exited'))); });

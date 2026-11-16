@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { ByokKeysError } from './errors.js';
 import { assertSecretName, assertSecretNamespace } from './secret-name.js';
-import { sanitizeSecretStoreError, secretStoreCall } from './secret-store-call.js';
+import { secretStoreCall } from './secret-store-call.js';
 import { type SecretStore, assertSharedSecretValue } from './secret-store.js';
 
 /**
@@ -31,29 +31,6 @@ export function secretScopeId(scope: SecretScope): string {
   return `acct_${createHash('sha256')
     .update(`${normalized.account_id}\n${normalized.workspace_id}`, 'utf8')
     .digest('hex')}`;
-}
-
-/**
- * Partition `store` by `scope` (`local-data-scope.ts:100-106`).
- *
- * The source read `store.scope?.(id) ?? new EnvelopeScopedSecretStore(...)`:
- * when a store happened not to implement `scope`, it silently switched to a
- * different storage layout. `SecretStore.scope` is required in this package, so
- * that implicit substitution is gone — a caller who wants envelope semantics
- * constructs {@link EnvelopeScopedSecretStore} on purpose.
- */
-export function scopeSecretStore<TName extends string>(
-  store: SecretStore<TName>,
-  scope: SecretScope,
-): SecretStore<TName> {
-  const id = secretScopeId(scope);
-  // `scope` is synchronous, so the shared boundary is applied here directly:
-  // an injected store's error leaves only in its credential-free form.
-  try {
-    return store.scope(id);
-  } catch (error) {
-    throw sanitizeSecretStoreError(error);
-  }
 }
 
 /**

@@ -20,7 +20,7 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SealedTasks, type SealedScopeKeyring } from '../daemon/sealed-task';
 import { TaskRunner } from '../daemon/task-runner';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
@@ -132,7 +132,7 @@ describe('Agent message drafts of a sealed task (#654 D9)', () => {
       blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
     });
     const runner = new TaskRunner({
-      getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
+      getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot: path.join(root, 'home') }),
       agentEgressPolicy: policy, agentSessionHandoffs: new AgentSessionHandoffStore(),

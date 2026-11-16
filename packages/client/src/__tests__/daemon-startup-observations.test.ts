@@ -131,9 +131,9 @@ describe('#392: daemon startup observations are the live authority', () => {
   });
 
   it('rejects older/mixed runtime-id records instead of inventing available observations', () => {
-    expect(parseRuntimeObservations([{ id: 'pi' }])).toBeUndefined();
-    expect(parseRuntimeObservations([{ id: 'pi', present: true, outcome: 'not-found', steer: true, resume: true }])).toBeUndefined();
-    expect(parseRuntimeObservations([{ id: 'pi', present: false, outcome: 'refused', reason: 'app_server_unavailable', steer: true, resume: true }])).toEqual([
+    expect(parseRuntimeObservations([{ id: 'pi' }], 'audit')).toBeUndefined();
+    expect(parseRuntimeObservations([{ id: 'pi', present: true, outcome: 'not-found', steer: true, resume: true }], 'audit')).toBeUndefined();
+    expect(parseRuntimeObservations([{ id: 'pi', present: false, outcome: 'refused', reason: 'app_server_unavailable', steer: true, resume: true }], 'audit')).toEqual([
       { id: 'pi', present: false, outcome: 'refused', reason: 'app_server_unavailable', steer: true, resume: true },
     ]);
   });

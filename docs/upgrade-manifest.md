@@ -242,12 +242,11 @@ stores calls their inspectors itself. Every inspector returns the
   afterwards.
 - `migration-required`: the build does not open the store as it is, but after
   its explicit migration the store keeps all of its data and opens; the old
-  build cannot open the migrated store. keys reports it when
-  `migrateProviderProfileStore` migrates a private copy that the store then
-  opens.
-- `new-path-repair`: refused as an older format (server `schema_version`,
-  keys `PROVIDER_STORE_SCHEMA_STALE` from the open or from the migration).
-  Start on a new path and pair or provision again.
+  build cannot open the migrated store. This verdict applies only where the
+  store owner still provides an explicit migration.
+- `new-path-repair`: refused as an older format (server `schema_version` or
+  keys `PROVIDER_STORE_SCHEMA_STALE`). Start on a new path and pair or
+  provision again.
 - `rejected`: refused for another reason, such as a newer format, a damaged
   file, or a journal from before `withheld_bytes`. `code` and `reason` carry
   what the store reported, and the operator resolves it.

@@ -59,6 +59,7 @@ describe('device proof authentication (I3)', () => {
       devicePublicKey: keys.publicKey,
       proofKeyId: 'identity',
       proofKeyEpoch: 0,
+      expectedDeviceDigest: null,
     });
   });
 
@@ -163,6 +164,7 @@ describe('device proof authentication (I3)', () => {
       devicePublicKey: keys.publicKey,
       proofKeyId: 'identity',
       proofKeyEpoch: 0,
+      expectedDeviceDigest: null,
     });
     const corrupted = `${valid.signature[0] === 'A' ? 'B' : 'A'}${valid.signature.slice(1)}`;
     await expect(verify({ ...valid, signature: corrupted })).resolves.toBeUndefined();
@@ -254,6 +256,7 @@ describe('in-memory device retirement cleanup (#2237)', () => {
     await devices.register(TENANT, {
       productId: 'product-1', deviceId: 'device-1', deviceName: 'device-1',
       devicePublicKey: 'pk-device-1', proofKeyId: 'identity', proofKeyEpoch: 0,
+      expectedDeviceDigest: null,
     });
     await dedup.checkAndRecord(TENANT, 'device-1', 'envelope-1');
 

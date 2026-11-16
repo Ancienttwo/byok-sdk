@@ -10,6 +10,7 @@ import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
+import { PiRpcClient } from '../adapters/pi/rpc-client';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
@@ -20,7 +21,7 @@ import { TestServer } from './fixtures/test-server';
 import { until } from './fixtures/until';
 import { readyGate } from './fixtures/start-ready';
 import { cancellationTiming } from './fixtures/task-runner-cancel-timing';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
@@ -73,12 +74,14 @@ async function setup(runtime: RuntimeId, scenario: string, {
     startupReceiptReleased = true;
     timing.record('startup.disposal.receipt.release');
   };
-  if (runtime === 'claude' && holdStartupReceipt) {
-    // Claude aborts native init immediately. Run its REAL tree disposal, then
-    // withhold only the acknowledgement so retention does not depend on init
-    // being uncancellable. A retry cannot claim quiescence before release.
-    const dispose = ClaudeStreamSession.prototype.dispose;
-    vi.spyOn(ClaudeStreamSession.prototype, 'dispose').mockImplementation(async function (this: ClaudeStreamSession) {
+  if (runtime !== 'codex' && holdStartupReceipt) {
+    // Claude and Pi abort native startup immediately. Run their REAL tree
+    // disposal, then withhold only the acknowledgement so retention does not
+    // depend on startup being uncancellable. A retry cannot claim quiescence
+    // before release.
+    const prototype: { dispose(): Promise<void> } = runtime === 'claude' ? ClaudeStreamSession.prototype : PiRpcClient.prototype;
+    const dispose = prototype.dispose;
+    vi.spyOn(prototype, 'dispose').mockImplementation(async function (this: unknown) {
       await dispose.call(this);
       timing.record('startup.disposal.real.complete');
       startupDisposed.resolve();
@@ -137,7 +140,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
   });
   const sent: Envelope[] = [];
   const terminalPublished = deferred();
-  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(),...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(),...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter], deviceId: 't1-native-device', storeDir: dir, productId: 't1-cancel',
     send: event => {
       timing.observeTerminal(event); sent.push(event);
@@ -180,7 +183,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
     await timing.waitFor(event => event.event === 'disposal.settled' || event.event === 'disposal.rejected');
   };
   const assertStartupReceiptRetained = async () => {
-    if (runtime === 'claude') {
+    if (runtime !== 'codex') {
       await startupDisposed.promise;
       await assertTreeReaped();
       expect(sessions).toHaveLength(0);
@@ -312,7 +315,7 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     await c.runner.shutdownActiveTasks('retry'); await c.cancel();
     expect(c.terminals()).toHaveLength(1);
     expect(c.sent.some(event => event.type === 'task.started')).toBe(false);
-    if (runtime === 'claude') expect(c.sessions).toHaveLength(0);
+    if (runtime !== 'codex') expect(c.sessions).toHaveLength(0);
     expectNoErrors(c); await c.assertReaped();
   });
 
@@ -328,7 +331,7 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     let settled = false;
     void offered.then(() => { settled = true; });
     await vi.waitFor(() => expect(settled && c.terminals().length === 1).toBe(true), { timeout: 5_000 });
-    if (runtime === 'claude') await vi.waitFor(() => expect(c.timing.events.some(event => event.event === 'startup.disposal.real.complete')).toBe(true), { timeout: 5_000 });
+    if (runtime !== 'codex') await vi.waitFor(() => expect(c.timing.events.some(event => event.event === 'startup.disposal.real.complete')).toBe(true), { timeout: 5_000 });
     // The abort grace for a start that has not returned (runtime-start.ts, 5s) is armed on the same fake clock.
     await vi.advanceTimersByTimeAsync(5_000);
     c.restoreClock();
@@ -343,7 +346,7 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     await c.runner.shutdownActiveTasks('deadline owner disposal'); await c.cancel();
     expect(c.terminals()).toHaveLength(1);
     expect(c.sent.some(event => event.type === 'task.started')).toBe(false);
-    if (runtime === 'claude') expect(c.sessions).toHaveLength(0);
+    if (runtime !== 'codex') expect(c.sessions).toHaveLength(0);
     expectNoErrors(c); await c.assertReaped();
   });
 

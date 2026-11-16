@@ -9,7 +9,7 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { testExecutionScratch, testScratchOwner } from './fixtures/execution-scratch';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { projectRuntimeBoundaryFailure, RuntimeDisposalFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 import * as processTree from '../adapters/process-tree';
 import { OpenCodeAdapter } from '../adapters/opencode/opencode-adapter';
@@ -20,7 +20,7 @@ import { createRuntimeAdapters } from '../adapters/runtime-adapters';
 import { resolveRuntimeInvocation } from '../adapters/runtime-invocation';
 import { npmNodeShim } from './fixtures/npm-node-shim';
 import { check, defineRuntimeCases } from './runtime-contract/contract';
-import { opencodeSession, opencodeV2RefusedSessionOptions } from '../../vendor/oar/4eb5919/runtimes/opencode/session';
+import { opencodeSession, opencodeV2RefusedSessionOptions } from '../../vendor/oar/552a4f9/runtimes/opencode/session';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { startPreparedOperation } from './fixtures/prepared-operation';
@@ -272,7 +272,7 @@ it('keeps the admitted native identity in task.complete and persisted terminal e
   const sent: Envelope[] = [];
   const handoffs = new AgentSessionHandoffStore();
   const recorded = vi.spyOn(handoffs, 'recordTerminal');
-  const runner = new TaskRunner({ ...freshOfferRunnerDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ ...freshOfferRunnerDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [box.adapter], agentHome: new AgentHomeManager({ hostStorageRoot: path.join(box.cwd, 'homes') }), agentSessionHandoffs: handoffs,
     deviceId: 'device-1', productId: 'opencode-test', storeDir: path.join(box.cwd, 'store'),
     send: envelope => { sent.push(envelope); }, approvalRegistry: new ApprovalRegistry(),

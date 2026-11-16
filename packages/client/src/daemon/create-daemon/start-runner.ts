@@ -14,7 +14,7 @@ import type { StartTerminals } from './start-terminals.js';
  * The fourth stage of `runStartUnderLease` (#926), synchronous: builds the
  * `TaskRunnerDeps` for this start.
  */
-export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<StartRun & StartLanes & StartTerminals, 'record' | 'sendEnvelope' | 'withReplyTransition' | 'activeJournal' | 'journalIdentity' | 'recordReplyState' | 'blobClient' | 'opened' | 'activePressureEngine' | 'capabilities'>) {
+export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<StartRun & StartLanes & StartTerminals, 'record' | 'sendEnvelope' | 'awaitClaimSettlement' | 'withReplyTransition' | 'activeJournal' | 'journalIdentity' | 'recordReplyState' | 'blobClient' | 'opened' | 'activePressureEngine' | 'capabilities'>) {
   const {
     adapters, config, agentHomeManager, agentHomeReaderLimit, scratchRoot, agentSessionHandoffs,
     toolsetRegistry, daemonState, inputPreparationLimits, egressBatcherOptions, egressPolicy,
@@ -24,7 +24,7 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     toolAuthorizationResolver, taskSettlement,
   } = daemonScope;
   const {
-    record, sendEnvelope, withReplyTransition, activeJournal, journalIdentity, recordReplyState,
+    record, sendEnvelope, awaitClaimSettlement, withReplyTransition, activeJournal, journalIdentity, recordReplyState,
     blobClient, opened, activePressureEngine,
   } = run;
   const memoryCommit = agentMemoryCommitStore(daemonScope);
@@ -72,6 +72,7 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     // Queue the exact bytes; observer delivery projections run only after
     // the awaited outbound settlement, including terminal journal fsync.
     send: sendEnvelope,
+    awaitClaimSettlement,
     ...(!adapters.some(adapter => adapter.descriptor.capabilities.durableLane === true) ? {} : { recordDurableTransition: async (taskId: string, leaseId: string, kind: string, ordinal: number) => {
       await withReplyTransition(async () => {
         const task = await activeJournal.readTask(taskId, journalIdentity);

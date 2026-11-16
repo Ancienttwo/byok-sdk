@@ -10,7 +10,7 @@ import { CodexProjection } from '../adapters/codex/projection';
 import { GrokProjection } from '../adapters/grok/projection';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { DaemonObserver, type DaemonEvent } from '../daemon/observer';
-import { createSessionKernel } from '../../vendor/oar/4eb5919/shared/session-kernel';
+import { createSessionKernel } from '../../vendor/oar/552a4f9/shared/session-kernel';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { describe, expect, it, vi } from 'vitest';
@@ -21,7 +21,7 @@ import { ControlError } from '../daemon/control-protocol';
 import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps, resumeSession } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeCapabilities, RuntimeOperationStartInput } from '../types';
@@ -50,7 +50,7 @@ const NO_AUTO: RuntimeCapabilities = { steer: true, resume: true, approvalIntera
 function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<Pick<TaskRunnerDeps, 'toolAuthorization' | 'onToolReminder' | 'onToolAuthorizationDecision' | 'approvalTimeoutMs'>> = {}) {
   const approvalRegistry = new ApprovalRegistry();
   const runner = new TaskRunner({
-    advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter], ...testAgentHomeDeps(), deviceId: 'device-1', send: (envelope) => { sent.push(envelope); },
     blobClient: unusedBlobClient, approvalRegistry, storeDir: 'unused-store-dir', productId: 'unused-product-id', ...extra,
   });

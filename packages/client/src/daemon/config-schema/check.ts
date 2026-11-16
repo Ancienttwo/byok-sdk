@@ -14,6 +14,7 @@ import { describeEffectiveDaemonConfig, type DaemonEffectiveConfig } from './eff
 import { toolAuthorizationIssues } from './static-tool-authorization.js';
 import { validateDaemonConfig, type DaemonConfigIssue, type DaemonConfigSource } from './validate.js';
 import { versionPolicyConfigIssues } from '../../daemon-config-version-policy.js';
+import { isPairingText, PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH } from '@byok-sdk/protocol';
 
 export interface DaemonConfigCheckOptions {
   readonly source: DaemonConfigSource;
@@ -27,7 +28,7 @@ export interface DaemonConfigCheckOptions {
 }
 
 export interface DaemonConfigCheck {
-  /** No `error` issue. A caller that treats warnings as failures (`config check --strict`) checks `issues`. */
+  /** No issue. */
   readonly ok: boolean;
   readonly issues: readonly DaemonConfigIssue[];
   /** The effective values, when the config would construct a daemon. */
@@ -45,17 +46,22 @@ export interface DaemonConfigCheck {
  */
 export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOptions): DaemonConfigCheck {
   const { issues } = validateDaemonConfig(input, { source: options.source });
-  if (issues.some((issue) => issue.severity === 'error')) return { ok: false, issues };
+  if (issues.length > 0) return { ok: false, issues };
   if (options.adapters !== undefined) {
     const conflicts = injectedAdapterConfigConflicts(input as object);
     if (conflicts.length > 0) {
-      return { ok: false, issues: [...issues, ...conflicts.map(({ key, message }): DaemonConfigIssue => ({ severity: 'error', code: 'invalid_value', path: key, message }))] };
+      return { ok: false, issues: conflicts.map(({ key, message }): DaemonConfigIssue => ({ code: 'invalid_value', path: key, message })) };
     }
     const duplicateIssues = duplicateAdapterIdIssues(options.adapters);
-    if (duplicateIssues.length > 0) return { ok: false, issues: [...issues, ...duplicateIssues] };
+    if (duplicateIssues.length > 0) return { ok: false, issues: duplicateIssues };
   }
   const policyIssues = versionPolicyConfigIssues(input);
-  if (policyIssues.length > 0) return { ok: false, issues: [...issues, ...policyIssues] };
+  if (policyIssues.length > 0) return { ok: false, issues: policyIssues };
+  // Pairing refuses it with PairingInputInvalidError; report it before any pairing.
+  const { deviceName } = input as { deviceName?: unknown };
+  if (typeof deviceName === 'string' && !isPairingText(deviceName, PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH)) {
+    return { ok: false, issues: [{ code: 'invalid_value', path: 'deviceName', message: `deviceName must be 1 to ${PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH} UTF-16 code units of text without control characters` }] };
+  }
   const config = (options.localAgentRelease === undefined ? input : { ...(input as object), localAgentRelease: options.localAgentRelease }) as DaemonConfig;
   try {
     const scope = resolveDaemonConfig({ config, overrides: {} });
@@ -64,27 +70,27 @@ export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOpti
     const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
     const storage = resolveStorageConfig(storeDir, config.storage);
     const environmentIssues = runtimeEnvironmentPolicyIssues(config);
-    if (environmentIssues.length > 0) return { ok: false, issues: [...issues, ...environmentIssues] };
+    if (environmentIssues.length > 0) return { ok: false, issues: environmentIssues };
     const adapters = options.adapters ?? buildRuntimeAdapters(config, scope.piByokLauncher);
     assertAgySessionStoreTtl(storage.ttlMs, adapters);
     const runtimeSource = options.adapters === undefined ? 'sdk-built' : 'injected';
     const authorizationIssues = toolAuthorizationIssues(config, adapters, runtimeSource);
-    if (authorizationIssues.length > 0) return { ok: false, issues: [...issues, ...authorizationIssues] };
+    if (authorizationIssues.length > 0) return { ok: false, issues: authorizationIssues };
     const effective = describeEffectiveDaemonConfig({
-      config, warnings: scope.configWarnings, memoryHelper: scope.memoryHelper,
+      config, memoryHelper: scope.memoryHelper,
       agentMemoryMcpAdmission: scope.agentMemoryMcpAdmission, storeDir, scratchRoot: storage.scratchRoot,
       adapters, runtimeSource,
     });
-    return { ok: true, issues, effective };
+    return { ok: true, issues: [], effective };
   } catch (error) {
     if (error instanceof AgentEgressPolicyError) {
-      return { ok: false, issues: [...issues, ...error.issues.map(({ path, message }): DaemonConfigIssue => ({
-        severity: 'error', code: 'invalid_value', path: ['agentEgress', 'policy', ...path].join('.'), message,
-      }))] };
+      return { ok: false, issues: error.issues.map(({ path, message }): DaemonConfigIssue => ({
+        code: 'invalid_value', path: ['agentEgress', 'policy', ...path].join('.'), message,
+      })) };
     }
-    if (error instanceof DaemonConfigInvalidError) return { ok: false, issues: [...issues, ...error.issues] };
+    if (error instanceof DaemonConfigInvalidError) return { ok: false, issues: error.issues };
     const message = error instanceof Error ? error.message : String(error);
     const path = error instanceof ScratchRootPathError ? 'storage.scratchRoot' : '';
-    return { ok: false, issues: [...issues, { severity: 'error', code: 'invalid_value', path, message }] };
+    return { ok: false, issues: [{ code: 'invalid_value', path, message }] };
   }
 }

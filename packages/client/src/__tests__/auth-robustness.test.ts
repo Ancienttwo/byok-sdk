@@ -28,22 +28,32 @@ const OK: DeviceCommandResult = { exitCode: 0, stdout: '', stderr: '' };
 /**
  * A `secret-tool` stand-in for the production DeviceCredentialStore. While
  * `hangWrites` is set, `store` never answers until its signal aborts, as a
- * locked keyring waiting on an unlock prompt does.
+ * locked keyring waiting on an unlock prompt does; `hangReads` does the same
+ * to `lookup`.
  */
 function linuxKeyring() {
   let value: string | undefined;
-  const state = { hangWrites: false, hungWrites: 0 };
-  let writeHung!: () => void;
-  const hung = new Promise<void>((resolve) => { writeHung = resolve; });
+  const state = { hangWrites: false, hungWrites: 0, hangReads: false, hungReads: 0 };
+  let commandHung!: () => void;
+  const hung = new Promise<void>((resolve) => { commandHung = resolve; });
+  const hang = (signal: AbortSignal | undefined) => {
+    commandHung();
+    return new Promise<DeviceCommandResult>((_, reject) => {
+      signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+  };
   const run: DeviceCommandRunner = async (_executable, args, stdin, signal) => {
-    if (args[0] === 'lookup') return value === undefined ? { exitCode: 1, stdout: '', stderr: '' } : { ...OK, stdout: value };
+    if (args[0] === 'lookup') {
+      if (state.hangReads) {
+        state.hungReads += 1;
+        return hang(signal);
+      }
+      return value === undefined ? { exitCode: 1, stdout: '', stderr: '' } : { ...OK, stdout: value };
+    }
     if (args[0] === 'clear') { value = undefined; return OK; }
     if (state.hangWrites) {
       state.hungWrites += 1;
-      writeHung();
-      return new Promise<DeviceCommandResult>((_, reject) => {
-        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
-      });
+      return hang(signal);
     }
     value = stdin;
     return OK;
@@ -215,14 +225,16 @@ describe('#1117 keychain command deadline and cancellation', () => {
     await server.close();
   });
 
-  it('a hung keychain write fails the renewal with a typed error after its deadline and keeps the prior record', async () => {
+  it('a hung keychain read fails the renewal with a typed error after its deadline and keeps the prior record', async () => {
     server.setTokenTtlMs(60 * 60 * 1000);
     const keyring = linuxKeyring();
     const storeDir = await tmpDir('byok-keychain-deadline-');
     const credentials = new DeviceCredentialStore({ storeDir, productId: 'test-product', platform: 'linux', commandRunner: keyring.run, commandDeadlineMs: 200 });
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore('test-product', storeDir, credentials) });
-    const record = await auth.pair('pairing-code');
-    keyring.state.hangWrites = true;
+    await auth.pair('pairing-code');
+    const before = await credentials.read();
+    // Renewal writes nothing (#2045); its keychain access is the enrollment check's read.
+    keyring.state.hangReads = true;
 
     const startedAt = performance.now();
     const error: unknown = await auth.handleUnauthorized().catch((caught: unknown) => caught);
@@ -231,18 +243,19 @@ describe('#1117 keychain command deadline and cancellation', () => {
     expect(error).toBeInstanceOf(DeviceCredentialCommandAbortedError);
     expect(error).toMatchObject({ reason: 'deadline' });
     expect(auth.isRevoked()).toBe(false);
-    expect((await credentials.read())?.accessToken).toBe(record.accessToken);
+    keyring.state.hangReads = false;
+    expect(await credentials.read()).toEqual(before);
     await auth.stop();
   });
 
-  it('stop() cancels a hung keychain write well before its deadline', async () => {
+  it('stop() cancels a renewal hung in its keychain read well before its deadline', async () => {
     server.setTokenTtlMs(60 * 60 * 1000);
     const keyring = linuxKeyring();
     const storeDir = await tmpDir('byok-keychain-stop-');
     const credentials = new DeviceCredentialStore({ storeDir, productId: 'test-product', platform: 'linux', commandRunner: keyring.run });
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore('test-product', storeDir, credentials) });
     await auth.pair('pairing-code');
-    keyring.state.hangWrites = true;
+    keyring.state.hangReads = true;
 
     const renewal = auth.handleUnauthorized().catch((caught: unknown) => caught);
     await keyring.hung;
@@ -363,9 +376,9 @@ describe('#1117 keychain command deadline and cancellation', () => {
     expect(server.httpRequests.filter((request) => request.pathname === '/byok/pair')).toHaveLength(0);
   });
 
-  it('daemon.stop() returns in time while a renewal is stuck in a hung keychain write', async () => {
-    // Just over the 60s renewal margin: the proactive renewal fires ~1s after start.
-    server.setTokenTtlMs(61_000);
+  it('daemon.stop() returns in time while a renewal is stuck in a hung keychain read', async () => {
+    // Just over the 60s renewal margin: the proactive renewal fires ~3s after pairing.
+    server.setTokenTtlMs(63_000);
     const keyring = linuxKeyring();
     const storeDir = await tmpDir('byok-keychain-daemon-stop-');
     daemon = createDaemonWithAdapters(
@@ -374,9 +387,10 @@ describe('#1117 keychain command deadline and cancellation', () => {
       { deviceCredentials: new DeviceCredentialStore({ storeDir, productId: 'test-product', platform: 'linux', commandRunner: keyring.run }) },
     );
     await daemon.pair('pairing-code');
-    // Armed before start: under load the first renewal can fire before open.
-    keyring.state.hangWrites = true;
     await daemon.start();
+    // Armed once start has read the stored enrollment, before the proactive
+    // renewal reads it again under the enrollment gate (#2045: renewal writes nothing).
+    keyring.state.hangReads = true;
     await waitForDaemonOpen(daemon);
     expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE);
     await keyring.hung;
@@ -387,6 +401,6 @@ describe('#1117 keychain command deadline and cancellation', () => {
 
     // The default per-command deadline is 15s; returning well inside it proves cancellation.
     expect(performance.now() - stoppedAt).toBeLessThan(3_000);
-    expect(keyring.state.hungWrites).toBe(1);
+    expect(keyring.state.hungReads).toBe(1);
   });
 });

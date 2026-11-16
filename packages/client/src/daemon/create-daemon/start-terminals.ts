@@ -7,6 +7,7 @@ import { DAEMON_TASK_FAILURE } from '../task-failure.js';
 import { terminalIdentity } from '../terminal-identity.js';
 import type { SealedTasks } from '../sealed-task.js';
 import type { TaskRunnerDeps } from '../task-runner.js';
+import type { OutboundSettlement } from '../connection-manager.js';
 import { resultReplyFailureFromState } from '../result-reply-failure.js';
 import type { DaemonScope } from './scope.js';
 import type { StartRun } from './start-run.js';
@@ -227,9 +228,35 @@ export function composeStartTerminals(daemonScope: DaemonScope, run: Pick<StartR
         to: state, occurredAt: new Date().toISOString() });
     });
   };
+  // #2294: one waiter per task for its posted `task.claim`, settled from the
+  // outbound settlement. A waiter that its signal ended is removed, so a late
+  // settlement finds nothing.
+  type ClaimSettlement = Awaited<ReturnType<TaskRunnerDeps['awaitClaimSettlement']>>;
+  const claimWaiters = new Map<string, { readonly claimId: string; readonly settle: (settlement: ClaimSettlement) => void }>();
+  const awaitClaimSettlement: TaskRunnerDeps['awaitClaimSettlement'] = (taskId, claimId, signal) =>
+    new Promise((resolve) => {
+      if (signal.aborted) { resolve(undefined); return; }
+      const settle = (settlement: ClaimSettlement): void => {
+        signal.removeEventListener('abort', onAbort);
+        if (claimWaiters.get(taskId)?.settle === settle) claimWaiters.delete(taskId);
+        resolve(settlement);
+      };
+      const onAbort = (): void => settle(undefined);
+      signal.addEventListener('abort', onAbort, { once: true });
+      claimWaiters.set(taskId, { claimId, settle });
+    });
+  const settleClaim = (settlement: OutboundSettlement): void => {
+    const { envelope } = settlement;
+    if (envelope.type !== 'task.claim' || envelope.task_id === undefined) return;
+    const waiter = claimWaiters.get(envelope.task_id);
+    if (waiter?.claimId !== envelope.id) return;
+    waiter.settle(settlement.outcome === 'rejected'
+      ? { outcome: 'rejected', reason: settlement.reason }
+      : { outcome: settlement.outcome });
+  };
   return {
     sendEnvelope, replaceRefusedTerminal, refuseOverBoundEnvelope, withReplyTransition,
-    recordReplyState,
+    recordReplyState, awaitClaimSettlement, settleClaim,
   };
 }
 

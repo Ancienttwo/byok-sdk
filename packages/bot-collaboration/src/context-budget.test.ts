@@ -13,7 +13,7 @@ import { contextPack as historyPack } from './rules/context';
 import { roomFields } from './team';
 import { botRoutines, createDefinition, updateDefinition } from './routines';
 import { deliverRoutine, routineOf, routineRow, seedRoutine } from './routines.test-support';
-import { botCompactVeto } from './compaction';
+import { botLedgerOptions } from './compaction';
 
 let root: string | undefined;
 let ledger: HostLedger | undefined;
@@ -27,7 +27,7 @@ afterEach(async () => {
 });
 async function setup(options: Partial<BotOptions> = {}) {
   root = await mkdtemp(path.join(tmpdir(), 'bot-context-'));
-  ledger = new HostLedger(path.join(root, 'host.sqlite'), 'context-test', { compactVeto: botCompactVeto });
+  ledger = new HostLedger(path.join(root, 'host.sqlite'), 'context-test', botLedgerOptions);
   server = createByokServer({ productId: 'context-test', storage: { kind: 'sqlite', path: path.join(root, 'server.sqlite') }, wake: { consume: async () => {} } });
   bot = new BotCollaboration(server, ledger, { botId: 'main', execution: template('device'), connector: async () => null, ...options });
 }

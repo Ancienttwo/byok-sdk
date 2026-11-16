@@ -18,7 +18,7 @@ import { startEgressRecorder, type EgressAttempt, type EgressRecorder } from './
  * a skip that hides a capability the adapter descriptor advertises.
  */
 export const CONTRACT_CASES = Object.freeze({
-  'detect.version': 'detect() is available and names the expected version, with an advisory exactly when it is not the qualified one',
+  'detect.version': 'detect() is available and names the expected version, with a warn verdict exactly when it is not the qualified one',
   'detect.auth.absent': 'detect() reports authPresent false with no credential',
   'detect.auth.apiKey': 'detect() reports authPresent true for an API key in the environment',
   'detect.auth.login': 'detect() reports authPresent true for the runtime\'s own stored login',
@@ -277,14 +277,14 @@ export async function detectWith(adapter: Pick<RuntimeAdapter, 'detect'>, env: N
 /**
  * The version case. `identifies` is this file's own reading of the version
  * text, independent of the adapter's parser, so a broken adapter parser fails
- * here. `advisory` says whether the adapter has an unqualified-version
- * advisory at all.
+ * here. `warns` says whether the adapter's default policy warns on an
+ * unqualified version at all.
  */
 export function expectDetectedVersion(
   result: RuntimeDetectResult,
   target: Pick<ContractTarget, 'expectedVersion' | 'qualifiedVersion'>,
   identifies: (version: string, expected: string) => boolean,
-  advisory: boolean,
+  warns: boolean,
 ): void {
   if (result.kind !== 'available') expect.fail(`detect(): ${JSON.stringify(result)}`);
   expect(typeof result.version).toBe('string');
@@ -292,20 +292,18 @@ export function expectDetectedVersion(
   const qualified = identifies(result.version!, target.qualifiedVersion);
   // #1103: every bundled adapter reports the effective policy verdict. A
   // qualified token is an allow; an unqualified one is a warn exactly where the
-  // adapter has the legacy advisory (Codex/Grok), and an allow for
+  // adapter's default policy warns (Codex/Grok), and an allow for
   // Claude/Pi whose default policy admits everything. A Host block never
   // applies to these fixture adapters.
   expect(result.versionVerdict, 'detect() must report the effective version policy verdict').toBeDefined();
   expect(result.versionVerdict?.qualifiedVersion).toBe(target.qualifiedVersion);
-  const state = qualified || !advisory ? 'allow' : 'warn';
+  const state = qualified || !warns ? 'allow' : 'warn';
   expect(result.versionVerdict?.state).toBe(state);
   // #1103 B2b: the hello/presence projection is the same verdict, reduced to
   // state + qualified token. A regression that invents allow, drops the
   // projectable field or carries a local `matched` spec fails here for every
   // bundled adapter.
   expect(runtimeVersionPolicyProjection(result.versionVerdict)).toEqual({ state, qualifiedVersion: target.qualifiedVersion });
-  if (advisory && !qualified) expect(result.advisory).toEqual({ reason: 'runtime_version_unqualified', qualifiedVersion: target.qualifiedVersion });
-  else expect(result.advisory).toBeUndefined();
 }
 
 export function expectAuth(result: RuntimeDetectResult, authPresent: boolean): void {

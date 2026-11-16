@@ -84,16 +84,14 @@ describe.skipIf(!(sqliteSupport.isSqliteAvailable() || process.env.BYOK_REQUIRE_
 });
 
 describe('SqliteProviderProfileStore construction lifecycle', () => {
-  it('closes the native handle when schema initialization fails', () => {
-    const error = new Error('profile schema failed');
+  it('closes the native handle when initialization after the open fails', () => {
+    const error = new Error('profile file hardening failed');
     const close = vi.fn();
-    const database = {
-      close,
-      exec: vi.fn(() => {
-        throw error;
-      }),
-    } as unknown as DatabaseSync;
+    const database = { close } as unknown as DatabaseSync;
     sqliteMocks.openSqliteDatabase.mockReturnValueOnce(database);
+    sqliteMocks.secureSqliteFilePermissions.mockImplementationOnce(() => {
+      throw error;
+    });
 
     expect(() => new SqliteProviderProfileStore({ path: ':memory:' })).toThrow(error);
     expect(sqliteMocks.openSqliteDatabase).toHaveBeenCalledOnce();

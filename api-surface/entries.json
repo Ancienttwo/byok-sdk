@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2816837,
+      "budgetBytes": 2810996,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -23,6 +23,7 @@
         "@byok-sdk/client",
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
@@ -60,6 +61,7 @@
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-coding-agent",
+        "@earendil-works/pi-durable/storage/sqlite",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "koffi",
         "node:http"
@@ -129,7 +131,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 modules a Host adapter composes; Worker-loadable, no @byok-sdk/client",
-      "budgetBytes": 611911,
+      "budgetBytes": 611682,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -152,6 +154,7 @@
       "bareImports": [
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
         "@byok-sdk/protocol/constants",
@@ -227,7 +230,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 pure rules; Worker-safe, no node:sqlite",
-      "budgetBytes": 246617,
+      "budgetBytes": 248591,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -286,7 +289,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3269773,
+      "budgetBytes": 3260303,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -307,6 +310,7 @@
         "@byok-sdk/cloud",
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
@@ -352,6 +356,7 @@
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-coding-agent",
+        "@earendil-works/pi-durable/storage/sqlite",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "koffi",
         "node:http"
@@ -460,7 +465,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2483669,
+      "budgetBytes": 2482055,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -479,6 +484,7 @@
       "bareImports": [
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
@@ -511,6 +517,7 @@
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-coding-agent",
+        "@earendil-works/pi-durable/storage/sqlite",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "koffi",
         "node:http"
@@ -577,7 +584,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 567511,
+      "budgetBytes": 569241,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -647,7 +654,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 84620,
+      "budgetBytes": 84606,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -693,7 +700,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Task/device assertions; core includes protected Zod probes",
-      "budgetBytes": 128259,
+      "budgetBytes": 128330,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -804,7 +811,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Tools-only MCP server",
-      "budgetBytes": 13135,
+      "budgetBytes": 13144,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -836,7 +843,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Tools-only MCP Streamable HTTP framing",
-      "budgetBytes": 28394,
+      "budgetBytes": 28447,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -948,7 +955,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 528255,
+      "budgetBytes": 529832,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1088,7 +1095,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 589491,
+      "budgetBytes": 595305,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1105,6 +1112,7 @@
         "packages/client/dist/bin/pi-runtime-host.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/constants",
@@ -1150,6 +1158,7 @@
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-ai/api/openai-responses",
         "@earendil-works/pi-coding-agent",
+        "@earendil-works/pi-durable/storage/sqlite",
         "@earendil-works/pi-durable/storage/sqlite/node"
       ],
       "thirdParty": [
@@ -1323,22 +1332,22 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 37,
+          "line": 38,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 37,
+          "line": 38,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 37,
+          "line": 38,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 37,
+          "line": 38,
           "rule": "opaque import()"
         },
         {
@@ -1383,7 +1392,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private pure todo runtime",
-      "budgetBytes": 372058,
+      "budgetBytes": 372588,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1425,7 +1434,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 543628,
+      "budgetBytes": 547273,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1483,7 +1492,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 778191,
+      "budgetBytes": 782892,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1613,7 +1622,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 747141,
+      "budgetBytes": 751842,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1734,7 +1743,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Shared contracts and validation",
-      "budgetBytes": 101069,
+      "budgetBytes": 101150,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1786,7 +1795,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1542,
+      "budgetBytes": 1655,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1814,7 +1823,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Sealed payload v1 byte rules",
-      "budgetBytes": 160652,
+      "budgetBytes": 160733,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1863,6 +1872,38 @@
       ]
     }
   },
+  "@byok-sdk/core/sqlite-node": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Read-only SQLite format admission for Node stores",
+      "budgetBytes": 1750,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/core/dist/sqlite-node.js",
+      "conditions": [
+        "default"
+      ],
+      "types": [
+        "packages/core/dist/sqlite-node.d.ts"
+      ],
+      "bareImports": [],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
   "@byok-sdk/core/system-tool": {
     "kind": "exports",
     "policy": {
@@ -1906,7 +1947,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 250133,
+      "budgetBytes": 241009,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1924,6 +1965,7 @@
       ],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "child_process",
         "crypto",
@@ -1973,7 +2015,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Headless Pi model route: choices, linkage, field errors and submission",
-      "budgetBytes": 323552,
+      "budgetBytes": 323388,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2105,7 +2147,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 152419,
+      "budgetBytes": 154425,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2251,7 +2293,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 717344,
+      "budgetBytes": 706311,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2327,7 +2369,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 418444,
+      "budgetBytes": 424893,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2346,6 +2388,7 @@
       "bareImports": [
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
         "@byok-sdk/protocol/constants",
@@ -2455,7 +2498,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 582833,
+      "budgetBytes": 571007,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2542,7 +2585,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2479411,
+      "budgetBytes": 2492559,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2557,6 +2600,7 @@
       "bareImports": [
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
@@ -2590,6 +2634,7 @@
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-coding-agent",
+        "@earendil-works/pi-durable/storage/sqlite",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "koffi",
         "node:http"
@@ -2657,7 +2702,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent memory MCP helper",
-      "budgetBytes": 46417,
+      "budgetBytes": 46403,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2698,7 +2743,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent message MCP helper",
-      "budgetBytes": 46421,
+      "budgetBytes": 46407,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2739,7 +2784,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Task-bound structured outcome MCP helper",
-      "budgetBytes": 46417,
+      "budgetBytes": 46403,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2780,7 +2825,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent team MCP helper",
-      "budgetBytes": 46387,
+      "budgetBytes": 46373,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2881,7 +2926,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 187393,
+      "budgetBytes": 189956,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2895,6 +2940,7 @@
       "types": [],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "child_process",
         "crypto",

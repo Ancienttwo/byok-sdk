@@ -18,7 +18,7 @@ import {
 import { RESULT_NOT_SUBMITTED_REASON_PREFIX } from '../daemon/task-runner/result-reason-prefixes';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
 import { reservedMcpContext, reservedMcpToken } from './fixtures/execution-scratch';
@@ -59,7 +59,7 @@ async function harness(overrides: Partial<TaskRunnerDeps> = {}) {
   });
   const preflight = vi.fn<NonNullable<TaskRunnerDeps['agentResultMcpPreflight']>>(async () => {});
   const storeDir = await temporary('byok-result-control-');
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
     adapters: [adapter],
     agentHome: new AgentHomeManager({ hostStorageRoot }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),

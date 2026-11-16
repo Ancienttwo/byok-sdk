@@ -7,7 +7,7 @@
  */
 import { tenantId, type TenantId } from '@byok-sdk/core';
 import type { DeviceRegistration } from '@byok-sdk/cloud';
-import type { ClaimedExecutor } from '@byok-sdk/protocol';
+import { pairDeviceDigest, type ClaimedExecutor } from '@byok-sdk/protocol';
 
 export const TENANT_A: TenantId = tenantId('tenant-a');
 export const TENANT_B: TenantId = tenantId('tenant-b');
@@ -24,8 +24,14 @@ export function registration(deviceId: string, overrides: Partial<DeviceRegistra
     devicePublicKey: `pk-${deviceId}`,
     proofKeyId: 'identity',
     proofKeyEpoch: 0,
+    expectedDeviceDigest: null,
     ...overrides,
   };
+}
+
+/** The registration fence value naming `deviceId` as the machine's current device (#2045). */
+export function deviceDigest(tenant: TenantId, deviceId: string, productId = 'product-1'): Promise<string> {
+  return pairDeviceDigest({ tenantId: tenant, productId, deviceId });
 }
 
 /**

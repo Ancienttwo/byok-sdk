@@ -29,13 +29,13 @@ export function toolAuthorizationIssues(
   const fileScope = policy.fileScope;
   if (fileScope !== undefined && config.agentHome === undefined) {
     issues.push({
-      severity: 'error', code: 'invalid_file_scope', path: 'toolAuthorization.fileScope',
+      code: 'invalid_file_scope', path: 'toolAuthorization.fileScope',
       message: 'DaemonConfig.toolAuthorization.fileScope requires DaemonConfig.agentHome for the canonical Agent home root',
     });
   }
   if (fileScope !== undefined && policy.default === 'all') {
     issues.push({
-      severity: 'error', code: 'invalid_file_scope', path: 'toolAuthorization.default',
+      code: 'invalid_file_scope', path: 'toolAuthorization.default',
       message: 'DaemonConfig.toolAuthorization.default is "all", which cannot be combined with fileScope; fileScope applies only to auto tasks',
     });
   }
@@ -44,7 +44,7 @@ export function toolAuthorizationIssues(
     if (ids.includes(key)) continue;
     const path = `toolAuthorization.byRuntime.${key}`;
     issues.push({
-      severity: 'error', code: 'invalid_value', path,
+      code: 'invalid_value', path,
       message: `DaemonConfig.${path} names no runtime of this daemon (runtimes: ${ids.length === 0 ? 'none' : ids.join(', ')})`,
     });
   }
@@ -54,14 +54,14 @@ export function toolAuthorizationIssues(
     const path = policy.byRuntime !== undefined && Object.hasOwn(policy.byRuntime, id) ? `toolAuthorization.byRuntime.${id}` : 'toolAuthorization.default';
     if (fileScope !== undefined && mode === 'all' && policy.default !== 'all') {
       issues.push({
-        severity: 'error', code: 'invalid_file_scope', path,
+        code: 'invalid_file_scope', path,
         message: `DaemonConfig.${path} gives runtime ${id} the all mode, which cannot be combined with fileScope; fileScope applies only to auto tasks`,
       });
     }
     if (mode !== 'auto' || adapter.descriptor.capabilities.toolAuthorizationAuto === true) continue;
     const remove = runtimeSource === 'sdk-built' ? `remove ${id} from runtimeAllowlist` : `do not pass the ${id} adapter`;
     issues.push({
-      severity: 'error', code: 'invalid_value', path,
+      code: 'invalid_value', path,
       message: `DaemonConfig.${path} gives runtime ${id} the auto mode, which ${id} does not support (no toolAuthorizationAuto); set toolAuthorization.byRuntime.${id} to "all" or ${remove}`,
     });
   }
