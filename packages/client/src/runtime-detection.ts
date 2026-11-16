@@ -90,6 +90,24 @@ const AUDIT_OBSERVATION_KEYS: readonly string[] = Object.freeze(['id', 'present'
 /** Live status adds the local-only evidence audit never holds. */
 const STATUS_OBSERVATION_KEYS: readonly string[] = Object.freeze([...AUDIT_OBSERVATION_KEYS, 'versionVerdict', 'versionChange', 'executablePath', 'executableSource']);
 
+/** Side arrays an earlier daemon's control `status` sent beside `runtimes[]`. */
+const REMOVED_STATUS_SIDE_ARRAYS: readonly string[] = Object.freeze(['runtimeVersionVerdicts', 'runtimeVersionChanges', 'runtimeExecutables']);
+
+/** A control `status` from an earlier daemon release; its runtime evidence is refused, not dropped. */
+export class ControlStatusShapeUnsupportedError extends Error {
+  constructor(readonly fields: readonly string[]) {
+    super(`daemon status carries ${fields.join(', ')} from an earlier release; run status and doctor from the daemon's release`);
+    this.name = 'ControlStatusShapeUnsupportedError';
+  }
+}
+
+/** The runtimes of a control `status` result. */
+export function parseControlStatusRuntimes(status: object): RuntimeObservation[] | undefined {
+  const removed = REMOVED_STATUS_SIDE_ARRAYS.filter((key) => Object.hasOwn(status, key));
+  if (removed.length > 0) throw new ControlStatusShapeUnsupportedError(removed);
+  return parseRuntimeObservations((status as { readonly runtimes?: unknown }).runtimes, 'status');
+}
+
 /**
  * Reject unreadable observations; never infer availability from another
  * discovery shape. `audit` reads the redacted `runtimes-detected` record;

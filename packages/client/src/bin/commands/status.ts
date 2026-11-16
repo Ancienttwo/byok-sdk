@@ -3,7 +3,7 @@ import { DeviceStore } from '../../daemon/store.js';
 import { createDeviceCredentialStore } from '../../daemon/device-credential-provider.js';
 import type { ControlStatusResult } from '../../daemon/control-protocol.js';
 import { auditLogPath, readAuditRecords, readLastEnvironmentRecord, parseEnvironmentRecord } from '../../daemon/audit-log.js';
-import { parseRuntimeObservations } from '../../runtime-detection.js';
+import { parseControlStatusRuntimes } from '../../runtime-detection.js';
 import { connectControlClient } from '../../daemon/control-client.js';
 import { resolveStoreDir } from '../config.js';
 import { serviceLogDir } from '../../daemon/host-layout.js';
@@ -73,7 +73,7 @@ export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = 
   try {
     const live = await conn.client.request<ControlStatusResult>('status');
     const environment = parseEnvironmentRecord({ kind: 'environment-resolved', ts: live.environmentResolvedAt, ...live.environment });
-    const runtimes = parseRuntimeObservations(live.runtimes, 'status');
+    const runtimes = parseControlStatusRuntimes(live);
     for (const line of formatLiveStatusLines({ ...live, runtimes, environment: environment?.status })) log(line);
   } catch (err) {
     log(`live status unavailable: ${err instanceof Error ? err.message : String(err)}`);

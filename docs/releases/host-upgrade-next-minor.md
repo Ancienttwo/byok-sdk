@@ -418,8 +418,10 @@ No Host change is needed for a stop program that runs from under `current`.
 each runtime's `versionVerdict`, `versionChange`, `executablePath` and
 `executableSource` inside `runtimes[]`, like `Daemon.status()`. The
 `runtimeVersionVerdicts`, `runtimeVersionChanges` and `runtimeExecutables` side
-arrays are gone. A CLI and a daemon of different releases no longer read each
-other's status: run `status` and `doctor` from the same release as the daemon.
+arrays are gone. A status from an earlier daemon that still sends them is
+refused (`ControlStatusShapeUnsupportedError`): `status` reports the live status
+unavailable, and `doctor` reports the daemon status request failed and probes
+runtimes locally. Run `status` and `doctor` from the same release as the daemon.
 Audit records and the support bundle still carry neither the verdict, the
 restart comparison nor the executable path.
 

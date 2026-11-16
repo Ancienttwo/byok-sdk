@@ -398,12 +398,12 @@
       ]
     },
     {
-      "id": "runtime-status-side-arrays-not-read",
+      "id": "runtime-status-side-arrays-refused",
       "impact": "breaking",
-      "summary": "@byok-sdk/client byok-agent status and doctor read only the inline runtimes[] status; a daemon of an earlier release that sends verdicts, restart changes and executables in side arrays is reported without them. Upgrade the CLI and the daemon together.",
+      "summary": "@byok-sdk/client byok-agent status and doctor refuse a control status from an earlier daemon that still sends runtimeVersionVerdicts, runtimeVersionChanges or runtimeExecutables beside runtimes[]: status reports the live status unavailable with ControlStatusShapeUnsupportedError, and doctor reports the daemon status request failed and probes runtimes locally. Upgrade the CLI and the daemon together.",
       "migration": "docs/releases/host-upgrade-next-minor.md#runtime-status-carries-every-observation-field-inline",
       "items": [
-        "behavior:runtime-status-side-arrays-not-read"
+        "behavior:runtime-status-side-arrays-refused"
       ]
     },
     {

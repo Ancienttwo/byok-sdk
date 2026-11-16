@@ -6,7 +6,7 @@ import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../dae
 import { connectControlClient } from '../daemon/control-client';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import {
-  parseRuntimeObservations, projectRuntimeObservation, validateRuntimeDetectResult,
+  ControlStatusShapeUnsupportedError, parseControlStatusRuntimes, parseRuntimeObservations, projectRuntimeObservation, validateRuntimeDetectResult,
 } from '../runtime-detection';
 import { runStatusCommand } from '../bin/commands/status';
 import { runDoctorCommand } from '../bin/commands/doctor';
@@ -176,6 +176,13 @@ describe('#1103: runtime observation parsing', () => {
     ]) expect(parseRuntimeObservations([value], 'status')).toBeUndefined();
     const unknown = [{ id: 'codex', present: true, outcome: 'available' as const, version: '0.101.0', steer: true, resume: true }];
     expect(parseRuntimeObservations(unknown, 'status')).toEqual(unknown);
+  });
+
+  it('refuses a control status from an earlier daemon that sends the side arrays', () => {
+    const runtimes = [{ id: 'codex', present: true, outcome: 'available' as const, version: '0.101.0', steer: true, resume: true }];
+    expect(parseControlStatusRuntimes({ runtimes })).toEqual(runtimes);
+    expect(() => parseControlStatusRuntimes({ runtimes, runtimeVersionVerdicts: [{ id: 'codex', versionVerdict: WARN }] }))
+      .toThrow(ControlStatusShapeUnsupportedError);
   });
 
   it('rejects a detect result that still carries the removed advisory', () => {

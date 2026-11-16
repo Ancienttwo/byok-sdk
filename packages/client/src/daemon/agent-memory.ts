@@ -56,7 +56,8 @@ export class AgentMemoryIoError extends AgentMemoryError {
  */
 export class AgentMemoryOutboxVersionUnsupportedError extends AgentMemoryError {
   constructor(readonly stateVersion: unknown) {
-    super(`Agent memory outbox state version ${JSON.stringify(stateVersion)} is not supported; this build reads version 3 only and leaves the file untouched`);
+    // Only a numeric version enters the message; the file's other content stays out of logs.
+    super(`Agent memory outbox state ${typeof stateVersion === 'number' ? `version ${stateVersion}` : 'without a numeric version'} is not supported; this build reads version 3 only and leaves the file untouched`);
     this.name = 'AgentMemoryOutboxVersionUnsupportedError';
   }
 }
