@@ -23,6 +23,7 @@
         "@byok-sdk/client",
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
@@ -60,6 +61,7 @@
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-coding-agent",
+        "@earendil-works/pi-durable/storage/sqlite",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "koffi",
         "node:http"
@@ -307,6 +309,7 @@
         "@byok-sdk/cloud",
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
@@ -352,6 +355,7 @@
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-coding-agent",
+        "@earendil-works/pi-durable/storage/sqlite",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "koffi",
         "node:http"
@@ -479,6 +483,7 @@
       "bareImports": [
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
@@ -511,6 +516,7 @@
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-coding-agent",
+        "@earendil-works/pi-durable/storage/sqlite",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "koffi",
         "node:http"
@@ -1105,6 +1111,7 @@
         "packages/client/dist/bin/pi-runtime-host.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/constants",
@@ -1150,6 +1157,7 @@
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-ai/api/openai-responses",
         "@earendil-works/pi-coding-agent",
+        "@earendil-works/pi-durable/storage/sqlite",
         "@earendil-works/pi-durable/storage/sqlite/node"
       ],
       "thirdParty": [
@@ -1323,22 +1331,22 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 37,
+          "line": 38,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 37,
+          "line": 38,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 37,
+          "line": 38,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 37,
+          "line": 38,
           "rule": "opaque import()"
         },
         {
@@ -1875,7 +1883,26 @@
         "thirdParty": false
       }
     },
-    "facts": {}
+    "facts": {
+      "target": "packages/core/dist/sqlite-node.js",
+      "conditions": [
+        "node",
+        "import"
+      ],
+      "types": [
+        "packages/core/dist/sqlite-node.d.ts"
+      ],
+      "bareImports": [],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
   },
   "@byok-sdk/core/system-tool": {
     "kind": "exports",
@@ -2571,6 +2598,7 @@
       "bareImports": [
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
@@ -2604,6 +2632,7 @@
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-coding-agent",
+        "@earendil-works/pi-durable/storage/sqlite",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "koffi",
         "node:http"

@@ -385,6 +385,9 @@
 //   verifyMemberChainEntry -> dist/sealed-payload/member-chain.d.ts
 //   verifyMemberChainFromAnchor -> dist/sealed-payload/member-chain-walk.d.ts
 //   verifyMemberKem -> dist/sealed-payload/member-bundle.d.ts
+// entry @byok-sdk/core/sqlite-node
+//   SqliteReadOnlyOpenError -> dist/sqlite-node.d.ts
+//   readSqliteFileUnchanged -> dist/sqlite-node.d.ts
 // entry @byok-sdk/core/system-tool
 //   SystemToolHost -> dist/system-tool.d.ts
 //   SystemToolUnavailableError -> dist/system-tool.d.ts
@@ -2060,6 +2063,15 @@ export interface SkillPackStore {
     list(tenant: TenantId, query: SkillPackListQuery): Promise<readonly SkillPackManifest[]>;
     readFile(tenant: TenantId, name: string, path: string): Promise<SkillPackFileContent | undefined>;
 }
+// ==== @byok-sdk/core dist/sqlite-node.d.ts ====
+import type { DatabaseSync } from 'node:sqlite';
+export declare class SqliteReadOnlyOpenError extends Error {
+    readonly path: string;
+    constructor(path: string, options: {
+        cause: unknown;
+    });
+}
+export declare function readSqliteFileUnchanged<T>(path: string, readMetadata: (db: DatabaseSync) => T): T | undefined;
 // ==== @byok-sdk/core dist/store-compatibility.d.ts ====
 export type LocalStoreId = 'server-sqlite' | 'client-journal' | 'keys-profile-store' | 'pi-durable' | 'bot-collaboration-ledger';
 export type StoreCompatibilityVerdict = 'accepted' | 'migration-required' | 'new-path-repair' | 'rejected' | 'absent';
