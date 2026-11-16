@@ -513,7 +513,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/bot-collaboration/rules` | K8 pure rules; Worker-safe, no node:sqlite | `@cfworker/json-schema`, `zod` | allowed | 244296 B |
 | `@byok-sdk/bot-collaboration/testing` | K8 shared vectors and L test Host | `@cfworker/json-schema`, `@hono/node-server`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `chai`, `eventsource`, `eventsource-parser`, `expect-type`, `hono`, `pkce-challenge`, `tinybench`, `vite`, `vitest`, `zod` | allowed | 3263493 B |
 | `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2477655 B |
-| `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 569017 B |
+| `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 569064 B |
 | `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 84768 B |
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 128120 B |
 | `@byok-sdk/client/host-layout` | Pure Host directory layout for shells and installers; no client daemon or runtime SDKs | — | forbidden | 4171 B |
@@ -521,7 +521,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/client/mcp-server/http` | Tools-only MCP Streamable HTTP framing | — | forbidden | 28447 B |
 | `@byok-sdk/client/package.json` | Package metadata | — | forbidden | 4769 B |
 | `@byok-sdk/client/packaging` | Single-file Host build: esbuild packaging plugin and SDK asset copy | — | forbidden | 34699 B |
-| `@byok-sdk/client/testing` | Runtime adapter and device credential test doubles; no daemon | — | forbidden | 530372 B |
+| `@byok-sdk/client/testing` | Runtime adapter and device credential test doubles; no daemon | — | forbidden | 530419 B |
 | `@byok-sdk/client#byok-acp-runtime` | Private ACP runtime stack (Grok, agy, OpenCode) | `@agentclientprotocol/sdk`, `zod` | allowed | 134773 B |
 | `@byok-sdk/client#byok-pi-runtime-host` | Private Pi runtime host | `@cfworker/json-schema`, `@earendil-works/chord`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, `@earendil-works/pi-codemode`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-durable`, `@earendil-works/pi-mcp`, `@earendil-works/pi-schema`, `@earendil-works/pi-telemetry`, `@earendil-works/pi-tui`, `@isaacs/nonrecursive-glob-match`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `balanced-match`, `brace-expansion`, `chalk`, `cross-spawn`, `diff`, `eventsource`, `eventsource-parser`, `get-east-asian-width`, `graceful-fs`, `highlight.js`, `hosted-git-info`, `ignore`, `isexe`, `lovely-mermaid`, `lru-cache`, `marked`, `marked-cjk-friendly`, `minimatch`, `openai`, `p-limit`, `partial-json`, `path-key`, `pi-web-access`, `pkce-challenge`, `proper-lockfile`, `retry`, `semver`, `shebang-command`, `shebang-regex`, `signal-exit`, `typebox`, `undici`, `which`, `yaml`, `yocto-queue`, `zod` | allowed | 591107 B |
 | `@byok-sdk/client#byok-pi-todo-runtime` | Private pure todo runtime | — | forbidden | 372588 B |
@@ -549,7 +549,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/server/package.json` | Package metadata | — | forbidden | 1761 B |
 | `@byok-sdk/ui-runtime` | UI folds; current cloud/Hono/Zod closure | `@cfworker/json-schema`, `hono`, `zod` | allowed | 577959 B |
 | `@byok-sdk/ui-runtime/package.json` | Package metadata | — | forbidden | 1215 B |
-| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2475192 B |
+| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2475239 B |
 | `bin:byok-agent-memory-mcp` | Agent memory MCP helper | — | forbidden | 46565 B |
 | `bin:byok-agent-message-mcp` | Agent message MCP helper | — | forbidden | 46569 B |
 | `bin:byok-agent-result-mcp` | Task-bound structured outcome MCP helper | — | forbidden | 46565 B |
