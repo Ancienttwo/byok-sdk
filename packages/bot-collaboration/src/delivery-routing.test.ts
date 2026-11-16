@@ -5,7 +5,8 @@ import { createByokServer } from '@byok-sdk/server';
 import { BotCollaboration } from './host';
 import { addTurn, stateOf } from './model';
 import { inboundKey, type InboundMessage } from './channel';
-import { cleanReplyTokens, deliveryRoute, enablePush, queueDelivery, refuseRoute, rememberInbound, resendUnknown, revokePush } from './delivery-routing';
+import { cleanReplyTokens, deliveryRoute, enablePush, queueDelivery, refuseRoute, rememberFilteredInbound, rememberInbound, resendUnknown, revokePush } from './delivery-routing';
+import { inboundDispositionsOf } from './inbound';
 import { botCompactVeto } from './compaction';
 
 const ledgers: HostLedger[] = [];
@@ -45,6 +46,47 @@ it('never refreshes the original credential or expiry on platform redelivery', (
   });
 });
 
+it('keeps a blocked root reply route until it resumes and replies', () => {
+  ledger().transaction(s => {
+    const state = stateOf(s.application), turn = state.turns.root!;
+    rememberInbound(state, incoming(), turn.root);
+    turn.status = 'blocked'; turn.blockedReason = 'Unavailable model: test';
+    cleanReplyTokens(s, state, 100);
+    expect(state.channel!.inbounds[inboundKey(incoming())]!.reply?.token).toBe('secret-in1');
+    turn.status = 'processing'; delete turn.blockedReason;
+    const reply = queueDelivery(s, state, turn, 'task', 'message', 'answer', 150)!;
+    expect(deliveryRoute(state, reply, 150)).toMatchObject({ token: 'secret-in1' });
+  });
+});
+
+it('closes a reply route after a blocked room seat is released', () => {
+  ledger().transaction(s => {
+    const state = stateOf(s.application), message = { ...incoming(), conversation: { kind: 'group', id: 'room' } as const };
+    state.team.rooms.room = { id: 'room', name: 'Room', members: ['main'], mode: 'mention', announcement: '', visibleFrom: { main: 0 }, messages: [] };
+    state.team.rounds.round = { id: 'round', root: 'round', roomId: 'room', input: '', seats: ['seat'], limit: 1, counts: { main: 1 }, closed: true };
+    state.team.seats.seat = { id: 'seat', roundId: 'round', botId: 'main', status: 'blocked', released: true, late: false };
+    const turn = addTurn(state, { id: 'seat', root: 'seat', botId: 'main', source: 'room_slot', request: 'request', hop: 0, authority: 'owner' });
+    turn.status = 'blocked';
+    rememberInbound(state, message, 'round');
+    expect(queueDelivery(s, state, turn, 'task', 'message', 'answer', 100)).toBeUndefined();
+    cleanReplyTokens(s, state, 100);
+    expect(state.channel!.inbounds[inboundKey(message)]!.reply?.token).toBeUndefined();
+  });
+});
+
+it('replaces a filtered inbound when the same message is admitted', () => {
+  ledger().transaction(s => {
+    const state = stateOf(s.application), message = incoming(), turn = state.turns.root!;
+    rememberFilteredInbound(state, { ...message, sender: undefined }, 'unverified_sender');
+    rememberInbound(state, message, turn.root);
+    expect(inboundDispositionsOf(state)).toMatchObject([{ disposition: 'coalesced', turnId: turn.id }]);
+    const reply = queueDelivery(s, state, turn, 'task', 'message', 'answer', 100)!;
+    expect(deliveryRoute(state, reply, 100)).toMatchObject({ token: 'secret-in1' });
+    turn.conclusion = 'succeeded';
+    expect(inboundDispositionsOf(state)).toMatchObject([{ disposition: 'answered', turnId: turn.id }]);
+  });
+});
+
 it('keeps a committed pending reply slot through settlement, then deletes its token after acceptance', () => {
   const db = ledger();
   db.transaction(s => {
@@ -70,6 +112,20 @@ it('does not acquire a fresh reply slot after its root has settled', () => {
     expect(queueDelivery(s, state, turn, 'late-task', 'late-message', 'late', 100)).toBeUndefined();
     expect(state.audit).toContain('Delivery reply_route_expired: late-task late-message');
     expect(state.channel!.deliveries).toEqual({});
+  });
+});
+
+it('clears the reply token once a replacement is accepted and the root concludes', () => {
+  ledger().transaction(s => {
+    const state = stateOf(s.application), turn = state.turns.root!;
+    rememberInbound(state, incoming(), turn.root);
+    const old = queueDelivery(s, state, turn, 'task', 'message', 'answer', 100)!;
+    old.state = 'unknown'; old.attempts = 1;
+    const replacement = resendUnknown(state, old.id, 100);
+    replacement.state = 'accepted'; turn.conclusion = 'succeeded';
+    cleanReplyTokens(s, state, 150);
+    expect(old.state).toBe('unknown');
+    expect(state.channel!.inbounds[inboundKey(incoming())]!.reply?.token).toBeUndefined();
   });
 });
 
@@ -118,6 +174,9 @@ it('revokes pending work immediately, preserves unknown evidence and uses a new 
     expect(resend).toMatchObject({ resendOf: unknown.id, state: 'pending', attempts: 0, route: { kind: 'push', pushRouteId: next.id } });
     expect(resend.id).not.toBe(unknown.id);
     expect(unknown.state).toBe('unknown');
+    expect(() => resendUnknown(state, unknown.id, 102)).toThrow('already been resent');
+    resend.state = 'unknown';
+    expect(resendUnknown(state, resend.id, 102).resendOf).toBe(resend.id);
   });
 });
 

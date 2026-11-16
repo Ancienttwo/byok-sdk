@@ -1947,6 +1947,9 @@ coalescing off. This is the remaining interaction of #1229 item 1.
 Every inbound human message gets one deterministic destination, derived from
 the rows the Host already writes. There is no second disposition table:
 `inboundDispositions()` reads the inbound, input-batch and Turn rows.
+An admitted redelivery replaces an earlier filtered row for the same message,
+binding its root and reply route. Redelivery of an already admitted message
+keeps its original reply credential and expiry. The earlier refusal stays in audit.
 
 | Destination | Meaning |
 | --- | --- |
@@ -2069,8 +2072,12 @@ A push target is a non-secret platform target, never a reply credential.
 Only the owner can enable, revoke or resend. As with the other owner APIs,
 an omitted principal means that the Host already authenticated the owner.
 A manual resend requires a usable reply route or an active push route. It
-creates a new id and preserves the old unknown row. It can show a duplicate
-message if the original send arrived.
+creates a new id and preserves the old row in `unknown` as history. That row
+cannot be resent again or read back, and does not reserve a reply token or
+block retention. Consumers counting unknown deliveries must use `resendOf`
+on the replacement rows to exclude their predecessors. A new unknown
+replacement can itself be resent. A resend can show a duplicate message if
+the original send arrived.
 
 `consumeMessage` records first acceptance and its pending Delivery in the
 same SQLite transaction. Exact redelivery creates no second row. Applied
@@ -2101,8 +2108,9 @@ from message text. A different bot, human, channel or conversation cannot
 confirm a delivery. Echoes can arrive while `send` is pending; they do not
 wait behind the send operation.
 
-Reply tokens are removed at expiry. They are also removed after the root
-has no open Turn or seat and no pending/sending delivery on that route.
+Reply tokens are removed at expiry. A non-seat blocked Turn remains open
+because it can resume. Tokens are also removed after the root has no open
+Turn or seat and no staged/pending/sending/unknown delivery on that route.
 Metadata and delivery audit remain. All delivery state is Host state; it
 does not change K4, K7, the SDK message disposition or wire messages.
 

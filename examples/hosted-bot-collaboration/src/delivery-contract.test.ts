@@ -3,7 +3,7 @@ import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { taskId, type Json } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import type { ChannelPort, Delivery, InboundMessage } from '@byok-sdk/bot-collaboration/host-kit';
+import { supersededDeliveryIds, type ChannelPort, type Delivery, type InboundMessage } from '@byok-sdk/bot-collaboration/host-kit';
 import type { KeylessCommand } from '@byok-sdk/bot-collaboration/rules';
 import { type DeliverySubject, deliveryVectors, FINAL_BODY, replyToken, seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/bot-collaboration/testing';
 import { frozenIntent } from './intents';
@@ -31,11 +31,12 @@ async function indexDrift(db: Awaited<ReturnType<typeof openStore>>, scope: stri
     `SELECT key, next_at::text, settled_at::text FROM "${db.store.schema}".outbox WHERE scope = $1 AND kind = 'delivery'`, [storedKey(scope)]))
     .rows.map(row => [JSON.parse(row.key) as string, row]));
   const drift: string[] = [];
+  const superseded = supersededDeliveryIds(Object.fromEntries(deliveries.map(row => [row.id, row])));
   for (const row of deliveries) {
     const index = rows.get(row.id);
     // A staged row, or one withheld before its promotion, has no outbox row (#1762).
     if (!index) { if (row.state !== 'staged' && row.code !== 'outcome_not_applied') drift.push(`${row.id}: no outbox row`); continue; }
-    if ((index.settled_at !== null) !== (row.state === 'accepted' || row.state === 'rejected')) drift.push(`${row.id}: settled_at for ${row.state}`);
+    if ((index.settled_at !== null) !== (row.state === 'accepted' || row.state === 'rejected' || superseded.has(row.id))) drift.push(`${row.id}: settled_at for ${row.state}`);
     if (row.state === 'pending' && Number(index.next_at) !== (row.nextAttemptAt ?? 0)) drift.push(`${row.id}: next_at for pending`);
   }
   if ([...rows.keys()].some(key => !deliveries.some(row => row.id === key))) drift.push('an outbox delivery row with no entity');

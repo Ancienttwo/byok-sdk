@@ -6,6 +6,8 @@ const MAX_WAIT_MS = 60_000;
 type SendResult = Awaited<ReturnType<ChannelPort['send']>>;
 type ReadbackResult = Awaited<ReturnType<NonNullable<ChannelPort['readback']>>>;
 
+export { supersededDeliveryIds } from './delivery-superseded.js';
+
 /** Manual resend supplies a nonce. The original delivery keeps its audit identity. */
 export function deliveryId(taskId: string, messageId: string, route: Delivery['route'], nonce?: string): string {
   const key = route.kind === 'reply' ? ['reply', route.inboundId] : ['push', route.pushRouteId];

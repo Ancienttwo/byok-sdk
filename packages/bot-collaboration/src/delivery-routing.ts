@@ -2,6 +2,7 @@ import { hash, type Conclusion } from '@byok-sdk/server/execution-core';
 import type { CollaborationState, Turn } from './model.js';
 import { inboundKey, type Conversation, type Delivery, type InboundMessage, type PushRoute, type ReplyRoute } from './channel.js';
 import { deliveryId } from './delivery.js';
+import { supersededDeliveryIds } from './delivery-superseded.js';
 
 /** The intent conclusions a delivery rule reads. A K4 `LedgerState` fits; H passes its intent rows. */
 export interface IntentConclusions { readonly intents: Readonly<Record<string, { readonly conclusion?: Conclusion }>> }
@@ -33,11 +34,12 @@ function turnRoot(state: CollaborationState, turn: Turn): string {
 }
 function rootOpen(ledger: IntentConclusions, state: CollaborationState, root: string, conversation: Conversation): boolean {
   return Object.values(state.turns).some(turn => turnRoot(state, turn) === root && sameConversation(turnConversation(state, turn), conversation)
-    && !turn.conclusion && !ledger.intents[hash(turn.id)]?.conclusion && !['blocked', 'failed', 'delivered'].includes(turn.status))
+    && !turn.conclusion && !ledger.intents[hash(turn.id)]?.conclusion && !['failed', 'delivered'].includes(turn.status)
+    && (turn.status !== 'blocked' || !state.team.seats[turn.id]))
     || Object.values(state.inputBatches ?? {}).some(batch => batch.id === root && batch.state === 'open')
     || Object.values(state.team.seats).some(seat => state.team.rounds[seat.roundId]?.root === root && !seat.released);
 }
-/** Save with input admission, before any process pass can accept its reply. Redelivery never refreshes a token. */
+/** Save with input admission, replacing a filtered row. Redelivery of an admitted input never refreshes its token. */
 export function rememberInbound(state: CollaborationState, message: InboundMessage, root: string): void {
   if (typeof message.channel !== 'string' || !message.channel.trim() || typeof message.platformMessageId !== 'string' || !message.platformMessageId) throw new Error('Invalid inbound identity');
   const route = message.replyRoute;
@@ -46,7 +48,8 @@ export function rememberInbound(state: CollaborationState, message: InboundMessa
     throw new Error('Invalid reply route binding');
   }
   const channels = channelState(state), id = inboundKey(message);
-  channels.inbounds[id] ??= { id, root, conversation: { ...message.conversation }, channel: message.channel,
+  const prior = channels.inbounds[id];
+  if (!prior || prior.filtered !== undefined) channels.inbounds[id] = { id, root, conversation: { ...message.conversation }, channel: message.channel,
     sequence: ++state.sequence, ...(route ? { reply: { ...route } } : {}) };
 }
 /**
@@ -146,10 +149,11 @@ export function refuseRoute(state: CollaborationState, row: Delivery): void {
  * promotion, and an unknown row can return to pending after a readback.
  */
 export function cleanReplyTokens(ledger: IntentConclusions, state: CollaborationState, now: number): void {
+  const superseded = supersededDeliveryIds(state.channel?.deliveries ?? {});
   for (const row of Object.values(state.channel?.inbounds ?? {})) {
     if (!row.reply?.token || row.root === undefined) continue;
     const reserved = Object.values(state.channel!.deliveries).some(delivery => delivery.route.kind === 'reply'
-      && delivery.route.inboundId === row.id && ['staged', 'pending', 'sending', 'unknown'].includes(delivery.state));
+      && delivery.route.inboundId === row.id && !superseded.has(delivery.id) && ['staged', 'pending', 'sending', 'unknown'].includes(delivery.state));
     if (now >= row.reply.expiresAt || !reserved && !rootOpen(ledger, state, row.root, row.conversation)) delete row.reply.token;
   }
 }
@@ -158,6 +162,7 @@ export function resendUnknown(state: CollaborationState, id: string, now: number
   const deliveries = state.channel?.deliveries;
   const old = deliveries && Object.hasOwn(deliveries, id) ? deliveries[id] : undefined;
   if (!old || old.state !== 'unknown') throw new Error('Only an unknown delivery can be resent');
+  if (supersededDeliveryIds(deliveries!).has(id)) throw new Error('Delivery has already been resent');
   const available = deliveryRoute(state, old, now) ?? activePush(state, old.conversation);
   if (!available) throw new Error('No active delivery route');
   const route: Delivery['route'] = available.kind === 'reply' ? old.route : { kind: 'push', pushRouteId: available.id };

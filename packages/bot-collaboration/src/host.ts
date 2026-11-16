@@ -43,6 +43,7 @@ import { sealSwitchExport, SwitchExportError, type SwitchExport, type SwitchHead
 import { admitUserInput, coalescePolicy, type CoalescePolicy } from './coalesce.js';
 import { classifyInbound, inboundKey, isOwner, verified, type ChannelOptions, type Conversation, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel.js';
 import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from './delivery.js';
+import { supersededDeliveryIds } from './delivery-superseded.js';
 import { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, promoteStaged, queueDelivery, refuseRoute, rememberFilteredInbound, rememberInbound,
   resendUnknown, revokePush } from './delivery-routing.js';
 import { inboundDispositionsOf } from './inbound.js';
@@ -1195,12 +1196,13 @@ export class BotCollaboration {
   private async flushDeliveries(): Promise<void> {
     const port = this.options.channel?.port;
     if (!port) return;
-    if (port.readback) for (const old of Object.values(this.snapshot().channel?.deliveries ?? {}).filter(row => row.state === 'unknown')) {
+    const deliveries = this.snapshot().channel?.deliveries ?? {}, superseded = supersededDeliveryIds(deliveries);
+    if (port.readback) for (const old of Object.values(deliveries).filter(row => row.state === 'unknown' && !superseded.has(row.id))) {
       try {
         const result = await port.readback(old.id);
         this.write(s => {
-          const row = stateOf(s.application).channel?.deliveries[old.id];
-          if (row) readbackDelivery(row, old.attempts, result, this.now());
+          const current = stateOf(s.application).channel?.deliveries ?? {}, row = current[old.id];
+          if (row && !supersededDeliveryIds(current).has(row.id)) readbackDelivery(row, old.attempts, result, this.now());
         });
       } catch { continue; } // Missing readback evidence leaves this row unknown.
     }

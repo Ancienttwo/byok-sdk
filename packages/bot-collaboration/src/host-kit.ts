@@ -53,7 +53,7 @@ export { DeviceSwitchingError, SwitchExportedError, SwitchImportedError, type Sw
 export { botOutcomePorts, outcomeFailure, routeTerminal, runHostIntentHandler, syncHead, syncTail } from './adapter-steps.js';
 export { isOwner, verified } from './channel.js';
 export { admitUserInput } from './coalesce.js';
-export { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from './delivery.js';
+export { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, supersededDeliveryIds, unknownDelivery } from './delivery.js';
 export { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, promoteStaged, queueDelivery, refuseRoute, rememberInbound, resendUnknown,
   revokePush, type IntentConclusions } from './delivery-routing.js';
 export { checkDreamInstruction, dreamIntentIds, dreamPolicy, reconcileDreamRoutines, recordDream, syncDreams, type DreamSync } from './dream.js';

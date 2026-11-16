@@ -198,17 +198,29 @@ export function deliveryVectors(name: string, open: (port: ChannelPort) => Promi
     }, 60_000);
 
     it('11. gives a manual resend of an unknown delivery a new id, and sends it', async () => {
-      const port = scripted(new Error('receipt lost'), accepted('again')), subject = await open(port);
-      await subject.publish('in1');
+      const port = scripted(new Error('receipt lost'), accepted('again')), reads: string[] = [];
+      let absent = false;
+      const subject = await open({ send: port.send, readback: async id => { reads.push(id); return absent ? 'absent' : 'unsupported'; } });
+      await subject.enablePush('direct-target');
+      await subject.publish('in1', { replyMs: null });
       const [old] = await subject.deliveries();
+      absent = true;
+      const held = subject.holdNextReadback();
+      await subject.advance(60_000);
+      absent = false;
+      await subject.advance(subject.recoveryMs);
       const next = await subject.resend(old!.id);
       expect(next).not.toBe(old!.id);
-      await subject.drain();
+      const readCount = reads.length;
+      await held.release();
+      await subject.advance(60_000);
+      await subject.advance(1_000);
       expect(await subject.deliveries()).toMatchObject([
         { id: old!.id, state: 'unknown', attempts: 1 },
         { id: next, resendOf: old!.id, state: 'accepted', attempts: 1, platformMessageId: 'again' },
       ]);
       expect(port.calls.map(call => call.deliveryId)).toEqual([old!.id, next]);
+      expect(reads).toHaveLength(readCount);
     }, 60_000);
 
     it('12. drops the stored reply token once its route expires', async () => {

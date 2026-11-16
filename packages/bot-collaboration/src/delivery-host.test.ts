@@ -123,6 +123,20 @@ channelContract('Host delivery outbox with an external fake ChannelPort', openDe
 let h: Harness | undefined;
 afterEach(async () => { await h?.close(); h = undefined; });
 
+it('resumes a blocked inbound and replies through its original route after the model returns', async () => {
+  const send = vi.fn<ChannelPort['send']>(async () => ({ result: 'accepted', platformMessageId: 'resumed' }));
+  h = await openDeliveryHost({ send });
+  await h.bot.setModels({ spare: h.options.execution });
+  const message = inbound(), root = (await h.bot.receive(message)).id!;
+  expect(h.bot.snapshot().turns[root]).toMatchObject({ status: 'blocked', blockedReason: 'Unavailable model: default' });
+  expect(h.bot.snapshot().channel!.inbounds[inboundKey(message)]!.reply?.token).toBe('secret-in1');
+  await h.bot.setModels({ default: h.options.execution });
+  await h.finish(root);
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(send.mock.calls[0]![0].route).toMatchObject({ kind: 'reply', token: 'secret-in1' });
+  expect(h.rows()).toMatchObject([{ state: 'accepted', attempts: 1 }]);
+});
+
 it('atomically accepts one payload and one staged delivery, and withholds it when the daemon stops before the outcome (#1762)', async () => {
   const send = vi.fn<ChannelPort['send']>(async () => ({ result: 'accepted', platformMessageId: 'platform-1' }));
   h = await openDeliveryHost({ send });
