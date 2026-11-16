@@ -7,6 +7,7 @@ import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-ide
 import type { RuntimeTaskInput } from '../../types.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import { startDurablePi } from '../pi-durable/session.js';
+import { startAborted, untilStartAborted } from './start-signal.js';
 import { serializePiHostConfig } from './runtime-host-binding.js';
 import { parsePiMcpEnvironment, projectPiMcpEnvironment } from './mcp-environment.js';
 import { PI_PREPARED_ENV_ALLOW, piLaunchCommand, resolvePiRuntimeLaunch, type PiRuntimeLaunchResources } from './runtime-launch.js';
@@ -1323,23 +1324,6 @@ async function resolveAuthoritativeSessionId(rpc: PiRpcClient, signal: AbortSign
     retry: 'non-retryable',
     reason: 'pi get_state reported no authoritative session id',
   });
-}
-
-const startAborted = (): Error => new Error('the start was aborted before pi answered');
-
-/**
- * `pending`, or a rejection once the start's signal aborts. Pi can leave a
- * request unanswered (#2300): an extension that compacts from its
- * `agent_settled` hook makes Pi defer the first prompt and then refuse it
- * with no response. The daemon aborts this signal at its startup deadline;
- * each caller then disposes the process and fails start with a typed error.
- */
-async function untilStartAborted<T>(pending: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-  if (signal === undefined) return await pending;
-  let onAbort!: () => void;
-  const aborted = new Promise<never>((_resolve, reject) => { onAbort = () => reject(startAborted()); });
-  if (signal.aborted) onAbort(); else signal.addEventListener('abort', onAbort, { once: true });
-  try { return await Promise.race([pending, aborted]); } finally { signal.removeEventListener('abort', onAbort); }
 }
 
 /** How Pi accepted a `prompt`; undefined for a response that names none of the three. */
