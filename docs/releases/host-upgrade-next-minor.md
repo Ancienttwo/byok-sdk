@@ -74,9 +74,9 @@ Host action: if your product relied on Grok tasks to keep the user's Grok
 current, update Grok outside SDK tasks, for example by having the user run
 Grok or its installer.
 
-## OAR 0.109.0 (#2235)
+## OAR 0.110.0 (#2235, #2296)
 
-The vendored OAR moves from 0.105.0 to 0.109.0 (`packages/client/vendor/oar/4eb5919/`, fork branch `byok/0.109.0`). No public type, export or configuration field changes. The upgrade manifest declares the three behavior-only breaking changes below as `model-confirmation-non-retryable`, `agy-model-confirmation-deadline` and `claude-queued-write-failure`.
+The vendored OAR moves from 0.105.0 to 0.110.0 (`packages/client/vendor/oar/552a4f9/`, fork branch `byok/0.110.0`). No public type, export or configuration field changes. The upgrade manifest declares the three behavior-only breaking changes below as `model-confirmation-non-retryable`, `agy-model-confirmation-deadline` and `claude-queued-write-failure`.
 
 ### Unconfirmed models fail non-retryable (Codex, agy)
 
