@@ -111,7 +111,28 @@ export interface DeviceRegistration {
    * can only ever supersede rows the caller already addressed.
    */
   readonly machineId?: string;
+  /**
+   * The registration fence (#2045, docs/protocol.md §6.1): the
+   * `pairDeviceDigest` of the device the caller knew as current for this
+   * machine, or `null` for none. Required on every registration, so no
+   * caller supersedes by default. With `machineId`, `register` reads the
+   * current device of (tenant, product, machineId) — at most one, after any
+   * earlier registration of that machine committed — and supersedes only
+   * when its digest equals this, `null` matching no current device. Otherwise
+   * it answers `conflict` and changes nothing. Without `machineId` nothing is
+   * superseded and the value is not read.
+   */
+  readonly expectedDeviceDigest: string | null;
 }
+
+/**
+ * The outcome of {@link DeviceDirectory.register}. `conflict` carries the
+ * `pairDeviceDigest` of the machine's current device, `null` when it has none,
+ * and means nothing was written or retired.
+ */
+export type DeviceRegistrationResult =
+  | { readonly outcome: 'registered'; readonly device: DeviceRecord }
+  | { readonly outcome: 'conflict'; readonly currentDeviceDigest: string | null };
 
 /**
  * Device retirement — revocation, and the supersession of a machine's prior
@@ -155,8 +176,16 @@ export interface DeviceRegistration {
  * the id is revoked again, which clears it (see `revoke`).
  */
 export interface DeviceDirectory {
-  /** Registers the device. With `input.machineId` set this ALSO deletes this tenant/product's prior rows carrying that same machine identity — one physical machine, one row — and retires each under `device_superseded`. In the same transaction it reopens the registered id's mailbox stream (`MailboxStore.reopenStream`), so a fresh grant for a retired id receives mail again. */
-  register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
+  /**
+   * Registers the device. With `input.machineId` set this ALSO deletes this tenant/product's prior rows carrying that same machine identity — one physical machine, one row — and retires each under `device_superseded`. In the same transaction it reopens the registered id's mailbox stream (`MailboxStore.reopenStream`), so a fresh grant for a retired id receives mail again.
+   *
+   * With `input.machineId`, the fence check of `expectedDeviceDigest`, the
+   * supersession and the insert are one atomic section per (tenant, product,
+   * machineId): two registrations of one machine never both read the same
+   * current device. A mismatch answers `conflict` with no write. Without
+   * `machineId` it never retires another device.
+   */
+  register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRegistrationResult>;
   /** The row `tenant` owns under `deviceId` — `undefined` including when the device exists under a DIFFERENT tenant. */
   get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
   /**
@@ -240,16 +269,38 @@ export interface PairingEnrollmentInput {
   readonly proofKeyId: string;
   readonly proofKeyEpoch: number;
   readonly machineId?: string;
+  /** The `PairRequest` fence, as {@link DeviceRegistration.expectedDeviceDigest}. Never part of the completion binding. */
+  readonly expectedDeviceDigest: string | null;
 }
+
+/**
+ * The outcome of {@link PairingEnrollment.redeemAndRegister}: the HTTP `200`,
+ * `409 pairing_superseded` and `401 pairing_code_invalid` of `POST /byok/pair`.
+ */
+export type PairingEnrollmentResult =
+  | { readonly outcome: 'registered'; readonly device: DeviceRecord }
+  | { readonly outcome: 'conflict'; readonly currentDeviceDigest: string | null }
+  | { readonly outcome: 'code_invalid' };
 
 /**
  * The only pairing-code consumption operation. Implementations atomically
  * consume a valid code, apply machine supersession/state cleanup, and register
  * the device; failures leave the code retryable. Unknown, expired, and already
- * consumed codes all return `undefined`.
+ * consumed codes all answer `code_invalid`.
+ *
+ * Decision order (#2045):
+ * 1. A code already consumed with this request's binding (every input field
+ *    except `pairingCode`, `deviceId` and `expectedDeviceDigest`) replays its
+ *    completion without reading the fence or writing anything: `registered`
+ *    with the device it registered while that device is still registered,
+ *    `code_invalid` once it is not.
+ * 2. Any other unusable code answers `code_invalid`.
+ * 3. The registration runs under the fence of {@link DeviceDirectory.register}
+ *    in the same transaction. `conflict` consumes nothing: the code stays
+ *    redeemable, and the same request with the current digest succeeds.
  */
 export interface PairingEnrollment {
-  redeemAndRegister(input: PairingEnrollmentInput): Promise<DeviceRecord | undefined>;
+  redeemAndRegister(input: PairingEnrollmentInput): Promise<PairingEnrollmentResult>;
 }
 
 // ---------------------------------------------------------------------------

@@ -55,9 +55,9 @@ export function runCloudRetentionConformance(name: string, factory: CloudComposi
         const expiresAt = handle.now();
         for (const code of ['used', 'unused-1', 'unused-2']) await stores.pairingCodes.issue(TENANT_A, { code, productId: 'product-1', expiresAt });
         const device = registration('paired');
-        const input = { pairingCode: 'used', deviceId: device.deviceId, deviceName: device.deviceName, devicePublicKey: device.devicePublicKey, proofKeyId: device.proofKeyId, proofKeyEpoch: device.proofKeyEpoch };
+        const input = { pairingCode: 'used', deviceId: device.deviceId, deviceName: device.deviceName, devicePublicKey: device.devicePublicKey, proofKeyId: device.proofKeyId, proofKeyEpoch: device.proofKeyEpoch, expectedDeviceDigest: null };
         const enrolled = await stores.pairing.redeemAndRegister(input);
-        expect(enrolled).toBeDefined();
+        expect(enrolled).toMatchObject({ outcome: 'registered' });
         expect(await stores.pairingCodes.collectExpired(TENANT_A, { now: handle.now(), limit: 1 })).toEqual({ removed: 0, expired: 0, releasedBytes: 0n, more: false });
         await handle.advanceTime(1);
         expect(await stores.pairingCodes.collectExpired(TENANT_A, { now: handle.now(), limit: 1 })).toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: true });
