@@ -38,6 +38,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import { isCloudError } from '../errors';
 import { handleInboundEnvelope } from '../inbound';
+import { DEDUP_RING_CAPACITY } from '../stores/in-memory';
 import { SteerRejectedError } from '../steer-control';
 import { tenantStoresFor } from '../tenant-stores';
 import {
@@ -484,6 +485,31 @@ describe('task.steer_refused (wire v7, #2009)', () => {
     expect(recorded).toMatchObject({ steerMessageId: steer.envelope.id, reason: 'task_not_active', deviceId: device.deviceId, revision: 1 });
     expect(await harness.cloud.listSteerRefusals(TENANT_A, { taskId: task.taskId, afterRevision: 0, limit: 10 })).toEqual([recorded]);
     expect((await harness.cloud.readTaskAttempt(TENANT_A, task.taskId))?.status).toBe('complete');
+  });
+
+  it('answers duplicate from the recorded refusal, not the bounded dedup ring, and commits once', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
+    const [evicted, unacked] = await Promise.all([1, 2].map(() => harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'go left' })));
+    let commits = 0;
+    const observer = { onInboundCommitted() { commits += 1; } };
+    const inbound = async (steerMessageId: string) => (await handleInboundEnvelope(deviceStores(harness, device), device.deviceId,
+      await refusal(steerMessageId, 'steer_unsupported', task.taskId), undefined, undefined, observer)).outcome;
+
+    // The ring forgot the first refusal's envelope.
+    expect(await inbound(evicted!.envelope.id)).toBe('accepted');
+    for (let index = 0; index < DEDUP_RING_CAPACITY; index += 1) {
+      await harness.stores.dedup.checkAndRecordAgent(TENANT_A, device.deviceId, TEST_AGENT_REF, randomUUID());
+    }
+    expect(await inbound(evicted!.envelope.id)).toBe('duplicate');
+    // The refusal committed and the dedup write never happened.
+    await harness.stores.steerRefusals.record(TENANT_A,
+      { taskId: task.taskId, steerMessageId: unacked!.envelope.id, reason: 'task_not_active', deviceId: device.deviceId });
+    expect(await inbound(unacked!.envelope.id)).toBe('duplicate');
+
+    expect(commits).toBe(1);
+    expect((await harness.cloud.readSteerRefusal(TENANT_A, task.taskId, unacked!.envelope.id))?.reason).toBe('task_not_active');
   });
 
   it('rejects a refusal whose id is not derived from the steer, or that names no steer sent to this task', async () => {

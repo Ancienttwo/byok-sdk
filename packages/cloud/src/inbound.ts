@@ -797,16 +797,16 @@ async function applyInboundGate(
     }
   }
 
-  let lifecycleRefusal: Refused | undefined;
+  let settled: InboundResult | undefined;
   try {
-    lifecycleRefusal = await applyLifecycle(stores, deviceId, taskId, envelope, activityBounds, attempt.agentRef);
+    settled = await applyLifecycle(stores, deviceId, taskId, envelope, activityBounds, attempt.agentRef);
   } catch (caught) {
     if (isCloudError(caught, 'activity_batch_too_large')) return refuse('activity_batch_too_large');
     if (isCloudError(caught, 'activity_task_settled') || isCloudError(caught, 'approval_timeline_settled')) return refuse('task_settled_by_cloud');
     if (isCloudError(caught, 'activity_history_gap')) return refuse('task_settled_by_cloud');
     throw caught;
   }
-  if (lifecycleRefusal !== undefined) return lifecycleRefusal;
+  if (settled !== undefined) return settled;
   return completeInboundEnvelope(stores, deviceId, envelope.id, attempt.agentRef);
 }
 
@@ -838,7 +838,7 @@ async function applyLifecycle(
   envelope: Envelope,
   activityBounds: ActivityBounds,
   persistedAgentRef: AgentRef,
-): Promise<Refused | undefined> {
+): Promise<InboundResult | undefined> {
   switch (envelope.type) {
     case 'task.claim': {
       // The claiming adapter's own self-report, carried straight through as
@@ -925,20 +925,22 @@ async function applyLifecycle(
  * A recorded refusal is answered before the mailbox is read, because the
  * steer's row may since have been dead-lettered or removed. Only the first
  * refusal must prove the cloud sent this steer to this device for this task.
+ * The recorded refusal, not the bounded envelope dedup, makes a replay a
+ * `duplicate`: the ring may have evicted the id, or never received it.
  */
 async function recordSteerRefusal(
   stores: TenantStores,
   deviceId: string,
   taskId: string,
   envelope: Extract<Envelope, { type: 'task.steer_refused' }>,
-): Promise<Refused | undefined> {
+): Promise<InboundResult | undefined> {
   const { steerMessageId, reason } = envelope.payload;
   if (envelope.id !== await steerRefusalEnvelopeId(steerMessageId)) return refuse('steer_refusal_id_mismatch');
-  if (await stores.steerRefusals.get(taskId, steerMessageId) !== undefined) return undefined;
+  if (await stores.steerRefusals.get(taskId, steerMessageId) !== undefined) return { outcome: 'duplicate' };
   const steer = await stores.mailbox.readMessage({ deviceId, messageId: steerMessageId });
   if (steer === undefined || !namesSteerOf(steer.body, taskId)) return refuse('steer_refusal_unknown_steer');
-  await stores.steerRefusals.record({ taskId, steerMessageId, reason, deviceId });
-  return undefined;
+  const { created } = await stores.steerRefusals.record({ taskId, steerMessageId, reason, deviceId });
+  return created ? undefined : { outcome: 'duplicate' };
 }
 
 /** The mailbox row is the cloud's own encoded `task.steer` for this task; a tombstone or another type is not. */
