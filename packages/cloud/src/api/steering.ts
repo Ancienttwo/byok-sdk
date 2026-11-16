@@ -7,7 +7,7 @@ import {
   type TaskSteerSealedPayload,
 } from '@byok-sdk/protocol';
 import { ByokCloudError } from '../errors.js';
-import { uuidFromSha256 } from '../offer-identity.js';
+import { uuidFromSha256 } from '@byok-sdk/protocol';
 import { releaseSealedCiphertext, sealedCiphertextRef } from '../sealed-ciphertext.js';
 import { sameSealedProjection } from '../sealed-comparison.js';
 import { SteerRejectedError } from '../steer-control.js';

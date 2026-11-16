@@ -4,7 +4,7 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { StaleApprovalError, pendingApproval, type PendingApproval } from '../approval-control.js';
 import type { ApprovalTimelineTail } from '../approval-timeline.js';
 import { ByokCloudError } from '../errors.js';
-import { uuidFromSha256 } from '../offer-identity.js';
+import { uuidFromSha256 } from '@byok-sdk/protocol';
 import type { TaskAttempt } from '../stores/ports.js';
 import { tenantStoresFor, type CloudRootStores } from '../tenant-stores.js';
 import { isTerminalAttemptStatus, type EnqueuePaths } from './enqueue.js';

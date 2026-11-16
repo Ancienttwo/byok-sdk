@@ -16,7 +16,7 @@
 import { describe, expect, it } from 'vitest';
 import { contentHash } from '@byok-sdk/core';
 import { TASK_ATTEMPT_STATUSES } from '@byok-sdk/cloud';
-import { TENANT_A, TENANT_B } from './fixtures';
+import { PI_EXECUTOR, TENANT_A, TENANT_B } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
@@ -34,7 +34,7 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
         for (const owned of [false, true]) {
           const taskId = owned ? 'cancel-owned' : 'cancel-unowned';
           await stores.tasks.reserveAgentOffer(TENANT_A, { taskId, deviceId: 'device-1', agentRef: AGENT_REF });
-          if (owned) await stores.tasks.claim(TENANT_A, { taskId, deviceId: 'device-1' });
+          if (owned) await stores.tasks.claim(TENANT_A, { taskId, deviceId: 'device-1', executor: PI_EXECUTOR });
           await stores.cancellations.request(TENANT_A, {
             taskId, proposedMessageId: `message-${taskId}`,
             materialize: async () => ({ body: 'cancel', bodyHash: contentHash(`sha256:${'a'.repeat(64)}`), byteSize: 6n }),
@@ -121,6 +121,7 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
         const first = await stores.tasks.claim(TENANT_A, {
           taskId: 'task-1',
           deviceId: 'device-1',
+          executor: PI_EXECUTOR,
         });
         expect(first).toMatchObject({ ownerDeviceId: 'device-1', status: 'claimed' });
 
@@ -128,12 +129,14 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
         const second = await stores.tasks.claim(TENANT_A, {
           taskId: 'task-1',
           deviceId: 'device-2',
+          executor: PI_EXECUTOR,
         });
         expect(second?.ownerDeviceId).toBe('device-1');
         // ...and the owner's own re-claim is idempotent, not a second win.
         const repeat = await stores.tasks.claim(TENANT_A, {
           taskId: 'task-1',
           deviceId: 'device-1',
+          executor: PI_EXECUTOR,
         });
         expect(repeat?.ownerDeviceId).toBe('device-1');
         expect((await stores.tasks.get(TENANT_A, 'task-1'))?.ownerDeviceId).toBe('device-1');
@@ -146,7 +149,7 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
 
         const claimants = ['device-1', 'device-2', 'device-3', 'device-4'];
         const results = await Promise.all(
-          claimants.map((deviceId) => stores.tasks.claim(TENANT_A, { taskId: 'task-1', deviceId })),
+          claimants.map((deviceId) => stores.tasks.claim(TENANT_A, { taskId: 'task-1', deviceId, executor: PI_EXECUTOR })),
         );
 
         const owners = new Set(results.map((result) => result?.ownerDeviceId));
@@ -160,7 +163,7 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
     it('records lifecycle transitions', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         await stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-1', deviceId: 'device-1', agentRef: AGENT_REF });
-        await stores.tasks.claim(TENANT_A, { taskId: 'task-1', deviceId: 'device-1' });
+        await stores.tasks.claim(TENANT_A, { taskId: 'task-1', deviceId: 'device-1', executor: PI_EXECUTOR });
 
         const running = await stores.tasks.recordStatus(TENANT_A, {
           taskId: 'task-1',
@@ -218,7 +221,7 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
     it('writes nothing for a task that was never offered', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         expect(
-          await stores.tasks.claim(TENANT_A, { taskId: 'guessed', deviceId: 'device-1' }),
+          await stores.tasks.claim(TENANT_A, { taskId: 'guessed', deviceId: 'device-1', executor: PI_EXECUTOR }),
         ).toBeUndefined();
         expect(
           await stores.tasks.recordStatus(TENANT_A, { taskId: 'guessed', status: 'running', agentRef: AGENT_REF }),
@@ -235,19 +238,19 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
      * redelivered claim restamp the snapshot would let a late, stale, or absent
      * self-report reopen or close the gate on an already-running task.
      */
-    it('snapshots the claiming runtime once and never lets a re-claim restamp it', async () => {
+    it('snapshots the claiming executor once and never lets a re-claim restamp it', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         await stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-1', deviceId: 'device-1', agentRef: AGENT_REF });
 
         const claimed = await stores.tasks.claim(TENANT_A, {
           taskId: 'task-1',
           deviceId: 'device-1',
-          runtime: 'pi',
+          executor: PI_EXECUTOR,
           capabilities: { steer: true },
         });
         expect(claimed).toMatchObject({
           ownerDeviceId: 'device-1',
-          claimedRuntime: 'pi',
+          claimedExecutor: PI_EXECUTOR,
           claimedRuntimeCapabilities: { steer: true },
         });
 
@@ -256,21 +259,21 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
         const repeat = await stores.tasks.claim(TENANT_A, {
           taskId: 'task-1',
           deviceId: 'device-1',
-          runtime: 'codex',
+          executor: { kind: 'runtime', runtimeId: 'codex' },
           capabilities: { steer: false },
         });
-        expect(repeat?.claimedRuntime).toBe('pi');
+        expect(repeat?.claimedExecutor).toEqual(PI_EXECUTOR);
         expect(repeat?.claimedRuntimeCapabilities).toEqual({ steer: true });
 
         // ...and a losing claim from another device cannot write it either.
         await stores.tasks.claim(TENANT_A, {
           taskId: 'task-1',
           deviceId: 'device-2',
-          runtime: 'claude',
+          executor: { kind: 'harness', harnessId: 'acme-harness' },
         });
 
         const stored = await stores.tasks.get(TENANT_A, 'task-1');
-        expect(stored?.claimedRuntime).toBe('pi');
+        expect(stored?.claimedExecutor).toEqual(PI_EXECUTOR);
         expect(stored?.claimedRuntimeCapabilities).toEqual({ steer: true });
       });
     });
@@ -279,22 +282,22 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
       await withCloudComposition(factory, async ({ stores }) => {
         const taskId = 'custom-task';
         const deviceId = 'device-1';
-        const expected = { ownerDeviceId: deviceId, claimedHarnessId: 'acme-harness',
+        const harness = { kind: 'harness', harnessId: 'acme-harness' } as const;
+        const other = { kind: 'harness', harnessId: 'other' } as const;
+        const expected = { ownerDeviceId: deviceId, claimedExecutor: harness,
           claimedRuntimeCapabilities: { steer: true }, status: 'claimed' };
         await stores.tasks.reserveAgentOffer(TENANT_A, { taskId, deviceId, agentRef: AGENT_REF });
         expect(await stores.tasks.claim(TENANT_A, { taskId, deviceId,
-          harnessId: 'acme-harness', capabilities: { steer: true } })).toMatchObject(expected);
+          executor: harness, capabilities: { steer: true } })).toMatchObject(expected);
         for (const retry of [
-          { deviceId, harnessId: 'other', capabilities: { steer: false } },
-          { deviceId: 'device-2', harnessId: 'other' },
-          { deviceId, runtime: 'pi' as const },
-          { deviceId },
+          { deviceId, executor: other, capabilities: { steer: false } },
+          { deviceId: 'device-2', executor: other },
+          { deviceId, executor: PI_EXECUTOR },
         ]) expect(await stores.tasks.claim(TENANT_A, { taskId, ...retry })).toMatchObject(expected);
-        expect(await stores.tasks.claim(TENANT_B, { taskId, deviceId, harnessId: 'other' })).toBeUndefined();
+        expect(await stores.tasks.claim(TENANT_B, { taskId, deviceId, executor: other })).toBeUndefined();
         expect(await stores.tasks.get(TENANT_A, taskId)).toMatchObject(expected);
         expect(await stores.tasks.getMany(TENANT_A, [taskId])).toMatchObject([expected]);
         expect((await stores.tasks.list(TENANT_A, { limit: 10 })).attempts).toMatchObject([expected]);
-        expect((await stores.tasks.get(TENANT_A, taskId))?.claimedRuntime).toBeUndefined();
       });
     });
 
@@ -394,17 +397,17 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
 
         await tick();
         await stores.tasks.reserveAgentOffer(TENANT_A, { taskId, deviceId: 'device-1', agentRef: AGENT_REF });
-        await stores.tasks.claim(TENANT_A, { taskId, deviceId: 'device-2' });
+        await stores.tasks.claim(TENANT_A, { taskId, deviceId: 'device-2', executor: PI_EXECUTOR });
         expect(await stores.tasks.get(TENANT_A, taskId)).not.toHaveProperty('claimedAt');
 
         await tick();
-        const claimed = await stores.tasks.claim(TENANT_A, { taskId, deviceId: 'device-1', runtime: 'pi' });
+        const claimed = await stores.tasks.claim(TENANT_A, { taskId, deviceId: 'device-1', executor: PI_EXECUTOR });
         const claimedAt = handle.now();
         expect(claimed).toMatchObject({ offeredAt, claimedAt, updatedAt: claimedAt });
 
         await tick();
-        await stores.tasks.claim(TENANT_A, { taskId, deviceId: 'device-1', runtime: 'pi' });
-        await stores.tasks.claim(TENANT_A, { taskId, deviceId: 'device-2', runtime: 'pi' });
+        await stores.tasks.claim(TENANT_A, { taskId, deviceId: 'device-1', executor: PI_EXECUTOR });
+        await stores.tasks.claim(TENANT_A, { taskId, deviceId: 'device-2', executor: PI_EXECUTOR });
         await stores.tasks.recordStatus(TENANT_A, { taskId, status: 'running', agentRef: AGENT_REF });
         expect(await stores.tasks.get(TENANT_A, taskId)).toMatchObject({ offeredAt, claimedAt });
         expect(await stores.tasks.get(TENANT_A, taskId)).not.toHaveProperty('firstOutputAt');
@@ -459,7 +462,7 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
 
         await stores.tasks.reserveAgentOffer(TENANT_A, { ...output, agentRef: AGENT_REF });
         expect(await stores.tasks.recordFirstOutput(TENANT_A, output)).not.toHaveProperty('firstOutputAt');
-        await stores.tasks.claim(TENANT_A, output);
+        await stores.tasks.claim(TENANT_A, { ...output, executor: PI_EXECUTOR });
         expect(await stores.tasks.recordFirstOutput(TENANT_A, { taskId, deviceId: 'device-2' })).not.toHaveProperty('firstOutputAt');
         expect(await stores.tasks.recordFirstOutput(TENANT_B, output)).toBeUndefined();
 
@@ -479,7 +482,7 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
       await withCloudComposition(factory, async ({ stores }) => {
         const output = { taskId: `task-late-draft-${status}`, deviceId: 'device-1' };
         await stores.tasks.reserveAgentOffer(TENANT_A, { ...output, agentRef: AGENT_REF });
-        await stores.tasks.claim(TENANT_A, output);
+        await stores.tasks.claim(TENANT_A, { ...output, executor: PI_EXECUTOR });
         await stores.tasks.recordStatus(TENANT_A, { taskId: output.taskId, status, agentRef: AGENT_REF });
         expect(await stores.tasks.recordFirstOutput(TENANT_A, output)).toMatchObject({ status });
         expect(await stores.tasks.get(TENANT_A, output.taskId)).not.toHaveProperty('firstOutputAt');
@@ -495,7 +498,7 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
         });
         await stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'unclaimed', deviceId: 'device-1', agentRef: AGENT_REF });
         await stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'claimed', deviceId: 'device-1', agentRef: AGENT_REF });
-        await stores.tasks.claim(TENANT_A, { taskId: 'claimed', deviceId: 'device-1' });
+        await stores.tasks.claim(TENANT_A, { taskId: 'claimed', deviceId: 'device-1', executor: PI_EXECUTOR });
 
         await handle.advanceTime(1_000);
         expect((await cancel('unclaimed'))?.attempt).toMatchObject({ status: 'cancelled', terminalAt: handle.now() });
@@ -513,17 +516,17 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
       });
     });
 
-    it('records no snapshot for a claim that carried none: absent, not defaulted', async () => {
+    it('records no capability snapshot for a claim that carried none: absent, not defaulted', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         await stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-1', deviceId: 'device-1', agentRef: AGENT_REF });
         const claimed = await stores.tasks.claim(TENANT_A, {
           taskId: 'task-1',
           deviceId: 'device-1',
+          executor: PI_EXECUTOR,
         });
-        expect(claimed?.claimedRuntime).toBeUndefined();
         expect(claimed?.claimedRuntimeCapabilities).toBeUndefined();
         const stored = await stores.tasks.get(TENANT_A, 'task-1');
-        expect(stored?.claimedRuntime).toBeUndefined();
+        expect(stored?.claimedExecutor).toEqual(PI_EXECUTOR);
         expect(stored?.claimedRuntimeCapabilities).toBeUndefined();
       });
     });

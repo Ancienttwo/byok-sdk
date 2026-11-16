@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { tenantId, type Clock } from '@byok-sdk/core';
 import { createEnvelope } from '@byok-sdk/protocol';
+import { PI_EXECUTOR } from './fixtures';
 import { createInMemoryByokCloud, handleInboundEnvelope, tenantStoresFor, DEFAULT_ACTIVITY_TTL_MS,
   type AgentMessageDraftStore, type AgentMessageDraftApplyInput } from '@byok-sdk/cloud';
 
@@ -117,7 +118,7 @@ export function runAgentMessageDraftConformance(name: string, factory: AgentMess
         expect(await h.store.read(tenant, taskId)).toBeUndefined();
         expect(await handleInboundEnvelope(bound, deviceId, frame, undefined, undefined, undefined, h.clock.now().toISOString())).toEqual({ outcome: 'accepted' });
         expect(await h.store.read(tenant, taskId)).toMatchObject({ text: '你好' });
-        const terminal = type === 'task.complete' ? createEnvelope(type, { agentRef, summary: 'done', sessionRef: 'session' }, { taskId })
+        const terminal = type === 'task.complete' ? createEnvelope(type, { agentRef, executor: PI_EXECUTOR, summary: 'done', sessionRef: 'session' }, { taskId })
           : type === 'task.cancelled' ? createEnvelope(type, { agentRef }, { taskId })
           : createEnvelope(type, { agentRef, reason: 'stop' }, { taskId });
         expect(await handleInboundEnvelope(bound, deviceId, terminal)).toEqual({ outcome: 'accepted' });

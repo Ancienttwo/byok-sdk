@@ -1,6 +1,7 @@
 import { contentHash, tenantId } from '@byok-sdk/core';
 import { describe, expect, it } from 'vitest';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
+import { PI_EXECUTOR } from './fixtures';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
 
@@ -31,7 +32,7 @@ export function runTaskCancellationConformance(factory: CloudCompositionFactory)
         });
 
         await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'claimed', deviceId: 'device-1', agentRef: AGENT_REF });
-        await stores.tasks.claim(TENANT, { taskId: 'claimed', deviceId: 'device-1' });
+        await stores.tasks.claim(TENANT, { taskId: 'claimed', deviceId: 'device-1', executor: PI_EXECUTOR });
         const claimed = await stores.cancellations.request(TENANT, {
           taskId: 'claimed',
           proposedMessageId: 'cancel-claimed',
@@ -64,7 +65,7 @@ export function runTaskCancellationConformance(factory: CloudCompositionFactory)
       await withCloudComposition(factory, async (handle) => {
         const { stores } = handle;
         await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'retired', deviceId: 'device-retired', agentRef: AGENT_REF });
-        await stores.tasks.claim(TENANT, { taskId: 'retired', deviceId: 'device-retired' });
+        await stores.tasks.claim(TENANT, { taskId: 'retired', deviceId: 'device-retired', executor: PI_EXECUTOR });
         const first = await stores.cancellations.request(TENANT, {
           taskId: 'retired',
           proposedMessageId: 'cancel-retired',

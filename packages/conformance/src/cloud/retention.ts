@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_APPROVAL_TIMELINE_TTL_MS, REQUEST_RECEIPT_PREFIXES } from '@byok-sdk/cloud';
-import { TENANT_A, TENANT_B, registration } from './fixtures';
+import { TENANT_A, TENANT_B, registration, PI_EXECUTOR } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
@@ -79,7 +79,7 @@ export function runCloudRetentionConformance(name: string, factory: CloudComposi
           // An approval timeline expires only after its task's output closes (#1113 A3).
           const close = async (tenant: typeof TENANT_A, taskId: string) => {
             await handle.stores.tasks.reserveAgentOffer(tenant, { taskId, deviceId: 'device-1', agentRef: AGENT_REF });
-            await handle.stores.tasks.claim(tenant, { taskId, deviceId: 'device-1' });
+            await handle.stores.tasks.claim(tenant, { taskId, deviceId: 'device-1', executor: PI_EXECUTOR });
             await handle.stores.tasks.recordStatus(tenant, { taskId, status: 'complete', agentRef: AGENT_REF });
           };
           for (let n = 1; n <= 3; n++) await close(TENANT_A, `tail-${n}`);

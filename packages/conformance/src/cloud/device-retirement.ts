@@ -34,7 +34,7 @@ import {
   type TaskRedactionCodec,
 } from '@byok-sdk/cloud';
 import { describe, expect, it } from 'vitest';
-import { registration } from './fixtures';
+import { registration, PI_EXECUTOR } from './fixtures';
 import {
   withCloudComposition,
   type CloudCompositionFactory,
@@ -81,7 +81,7 @@ async function seedDevice(
   await mailbox.append(TENANT, { deviceId, messageId: id('offer'), body: envelope(id('offered')) });
   for (const suffix of ['claimed', 'running', 'cancel-requested', 'complete']) {
     await stores.tasks.reserveAgentOffer(TENANT, { taskId: id(suffix), deviceId, agentRef: AGENT_REF });
-    await stores.tasks.claim(TENANT, { taskId: id(suffix), deviceId });
+    await stores.tasks.claim(TENANT, { taskId: id(suffix), deviceId, executor: PI_EXECUTOR });
   }
   await stores.tasks.recordStatus(TENANT, { taskId: id('running'), status: 'running', agentRef: AGENT_REF });
   await stores.tasks.recordStatus(TENANT, { taskId: id('complete'), status: 'complete', agentRef: AGENT_REF });
@@ -348,7 +348,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         await stores.devices.register(TENANT, registration('busy'));
         for (const taskId of ['busy-a', 'busy-b']) {
           await stores.tasks.reserveAgentOffer(TENANT, { taskId, deviceId: 'busy', agentRef: AGENT_REF });
-          await stores.tasks.claim(TENANT, { taskId, deviceId: 'busy' });
+          await stores.tasks.claim(TENANT, { taskId, deviceId: 'busy', executor: PI_EXECUTOR });
         }
         // Hold task a inside its own cancellation, the way any in-flight task mutation would.
         let entered!: () => void;
@@ -394,7 +394,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         await mailbox.limit(TENANT, 1_000_000n);
         await stores.devices.register(TENANT, registration('late'));
         await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'late-task', deviceId: 'late', agentRef: AGENT_REF });
-        await stores.tasks.claim(TENANT, { taskId: 'late-task', deviceId: 'late' });
+        await stores.tasks.claim(TENANT, { taskId: 'late-task', deviceId: 'late', executor: PI_EXECUTOR });
         await mailbox.append(TENANT, { deviceId: 'late', messageId: 'late-offer', body: envelope('late-task') });
 
         const release = await handle.holdMailboxExpiry();
@@ -569,7 +569,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         const { stores, mailbox } = handle;
         await mailbox.limit(TENANT, 1_000_000n);
         await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'done', deviceId: 'device-b', agentRef: AGENT_REF });
-        await stores.tasks.claim(TENANT, { taskId: 'done', deviceId: 'device-b' });
+        await stores.tasks.claim(TENANT, { taskId: 'done', deviceId: 'device-b', executor: PI_EXECUTOR });
         const done = await stores.tasks.recordStatus(TENANT, { taskId: 'done', status: 'complete', agentRef: AGENT_REF });
         const row = await mailbox.append(TENANT, { deviceId: 'device-b', messageId: 'late', body: envelope('done', 'steer') });
 
@@ -583,7 +583,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
       await withCloudComposition(factory, async (handle) => {
         const { stores, mailbox } = handle;
         await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'stopping', deviceId: 'device-c', agentRef: AGENT_REF });
-        await stores.tasks.claim(TENANT, { taskId: 'stopping', deviceId: 'device-c' });
+        await stores.tasks.claim(TENANT, { taskId: 'stopping', deviceId: 'device-c', executor: PI_EXECUTOR });
         const requested = await stores.cancellations.request(TENANT, {
           taskId: 'stopping',
           proposedMessageId: 'stopping-cancel',
@@ -645,7 +645,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'revoke-offered', deviceId: 'archived-revoke', agentRef: AGENT_REF });
         await mailbox.append(TENANT, { deviceId: 'archived-revoke', messageId: 'revoke-offer', body: envelope('revoke-offered') });
         await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'revoke-claimed', deviceId: 'archived-revoke', agentRef: AGENT_REF });
-        await stores.tasks.claim(TENANT, { taskId: 'revoke-claimed', deviceId: 'archived-revoke' });
+        await stores.tasks.claim(TENANT, { taskId: 'revoke-claimed', deviceId: 'archived-revoke', executor: PI_EXECUTOR });
 
         await stores.devices.revoke(TENANT, 'archived-revoke');
 

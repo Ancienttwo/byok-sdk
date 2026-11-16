@@ -27,7 +27,7 @@
  * in this file becomes conditional on it not having been called.
  */
 import { describe, expect, it } from 'vitest';
-import { registration, TENANT_A, TENANT_B } from './fixtures';
+import { registration, TENANT_A, TENANT_B, PI_EXECUTOR } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
@@ -208,7 +208,7 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
 
         expect(await stores.tasks.get(TENANT_B, 'task-1')).toBeUndefined();
         expect(
-          await stores.tasks.claim(TENANT_B, { taskId: 'task-1', deviceId: 'device-9' }),
+          await stores.tasks.claim(TENANT_B, { taskId: 'task-1', deviceId: 'device-9', executor: PI_EXECUTOR }),
         ).toBeUndefined();
         expect(
           await stores.tasks.recordStatus(TENANT_B, { taskId: 'task-1', status: 'failed', agentRef: AGENT_REF }),
@@ -218,6 +218,7 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
         expect(await stores.tasks.get(TENANT_A, 'task-1')).toMatchObject({
           status: 'offered',
           deviceId: 'device-1',
+          executor: PI_EXECUTOR,
         });
         expect(await stores.tasks.get(TENANT_B, 'task-1')).toBeUndefined();
       });

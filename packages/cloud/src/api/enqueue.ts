@@ -23,7 +23,8 @@ import {
 } from '@byok-sdk/protocol';
 import { sameAgentRef } from '../agent-message-disposition.js';
 import { ByokCloudError, DeviceRetiredError, TaskOfferAppendRefusedError } from '../errors.js';
-import { taskOfferMessageId, uuidFromSha256 } from '../offer-identity.js';
+import { uuidFromSha256 } from '@byok-sdk/protocol';
+import { taskOfferMessageId } from '../offer-identity.js';
 import { firstSealedPayload } from '../sealed-comparison.js';
 import { retainSealedCiphertext, sealedCiphertextCommitted, sealedCiphertextRef } from '../sealed-ciphertext.js';
 import type { AgentEgressRecord, TaskAttemptStatus } from '../stores/ports.js';

@@ -8,7 +8,7 @@ import {
 } from '@byok-sdk/protocol';
 import * as e2eeMember from '../e2ee-member.js';
 import { ByokCloudError } from '../errors.js';
-import { uuidFromSha256 } from '../offer-identity.js';
+import { uuidFromSha256 } from '@byok-sdk/protocol';
 import type { EnqueuePaths } from './enqueue.js';
 
 interface Dependencies {

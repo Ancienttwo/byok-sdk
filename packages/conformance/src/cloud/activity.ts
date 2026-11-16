@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createByokCloud, createInMemoryByokCloud, AGENT_HOME_CONTRACT_CAPABILITY, createHmacTokenSigner, capabilityDeclarationForPorts, type ActivityStore, type ActivityAppendInput } from '@byok-sdk/cloud';
 import { createEnvelope } from '@byok-sdk/protocol';
-import { TENANT_A, sealedOutputMember } from './fixtures';
+import { PI_EXECUTOR, TENANT_A, sealedOutputMember } from './fixtures';
 
 export interface ActivityCompositionHandle {
   readonly store: ActivityStore;
@@ -58,12 +58,12 @@ export function runActivityConformance(name: string, factory: ActivityCompositio
           return { deviceId: body.deviceId, authorization: { authorization: `Bearer ${body.accessToken}` } };
         } };
         const TEST_AGENT_REF = { agentId: 'test-agent', profileRevision: 'rev-1' };
-        const offerPayload = (instruction: string) => ({ instruction, agentRef: TEST_AGENT_REF, session: { mode: 'resume' as const, sessionRef: 'test-session' } });
+        const offerPayload = (instruction: string) => ({ instruction, agentRef: TEST_AGENT_REF, session: { mode: 'resume' as const, sessionRef: 'test-session' }, target: { lane: 'runtime' as const, runtimeId: 'pi' as const } });
         const device = await harness.pairDevice(TENANT_A);
         await base.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [AGENT_HOME_CONTRACT_CAPABILITY] });
         const taskId = 'empty-progress';
         await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { taskId, payload: offerPayload('work') });
-        const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId });
+        const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR }, { taskId });
         const progress = createEnvelope('task.progress', { seq: 1, events: [] }, { taskId });
         const result = await harness.json('/byok/messages', { method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' }, body: JSON.stringify({ messages: [claim, progress] }) });
         expect(result).toMatchObject({ status: 200, body: { accepted: 2 } });
