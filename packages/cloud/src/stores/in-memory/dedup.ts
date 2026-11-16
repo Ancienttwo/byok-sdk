@@ -16,7 +16,12 @@ import type { InboundDedupStore } from '../ports.js';
 export const DEDUP_RING_CAPACITY = 1024;
 
 export class InMemoryInboundDedupStore implements InboundDedupStore {
-  readonly #rings = new Map<string, Set<string>>();
+  /**
+   * Rings per (tenant, device), then per ledger: `''` is the device-physical
+   * ledger, an `agentReliabilityKey` an Agent-bound one. Grouping by device is
+   * what lets retirement drop every ledger of one device in a single delete.
+   */
+  readonly #devices = new Map<string, Map<string, Set<string>>>();
   readonly #capacity: number;
 
   constructor(capacity: number = DEDUP_RING_CAPACITY) {
@@ -24,7 +29,7 @@ export class InMemoryInboundDedupStore implements InboundDedupStore {
   }
 
   async checkAndRecord(tenant: TenantId, deviceId: string, envelopeId: string): Promise<boolean> {
-    return this.#checkAndRecord(tenantKey(tenant, deviceId), envelopeId);
+    return this.#checkAndRecord(tenant, deviceId, '', envelopeId);
   }
 
   async checkAndRecordAgent(
@@ -34,16 +39,28 @@ export class InMemoryInboundDedupStore implements InboundDedupStore {
     envelopeId: string,
   ): Promise<boolean> {
     return this.#checkAndRecord(
-      tenantKey(tenant, agentReliabilityKey('inbound-dedup', deviceId, agentRef, '')),
+      tenant,
+      deviceId,
+      agentReliabilityKey('inbound-dedup', deviceId, agentRef, ''),
       envelopeId,
     );
   }
 
-  #checkAndRecord(key: string, envelopeId: string): boolean {
-    let ring = this.#rings.get(key);
+  async deleteDevice(tenant: TenantId, deviceId: string): Promise<void> {
+    this.#devices.delete(tenantKey(tenant, deviceId));
+  }
+
+  #checkAndRecord(tenant: TenantId, deviceId: string, ledger: string, envelopeId: string): boolean {
+    const deviceKey = tenantKey(tenant, deviceId);
+    let ledgers = this.#devices.get(deviceKey);
+    if (ledgers === undefined) {
+      ledgers = new Map<string, Set<string>>();
+      this.#devices.set(deviceKey, ledgers);
+    }
+    let ring = ledgers.get(ledger);
     if (ring === undefined) {
       ring = new Set<string>();
-      this.#rings.set(key, ring);
+      ledgers.set(ledger, ring);
     }
     if (ring.has(envelopeId)) return true;
     ring.add(envelopeId);

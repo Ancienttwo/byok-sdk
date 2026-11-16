@@ -114,6 +114,7 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
     crypto,
     core.objects,
     core.mailbox,
+    core.presence,
     objectBytes,
   );
   const proofReceiptRetention = { authority: proofReceiptAuthority };

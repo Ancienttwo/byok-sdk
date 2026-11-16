@@ -130,9 +130,29 @@ export interface DeviceRegistration {
  *    the rows stop holding mailbox quota and raise the device's
  *    `recoverableFrom`, nothing is deleted, and no later append for that id
  *    commits until the id is registered again, which reopens the stream.
+ * 3. The device's presence hint, challenge nonces and inbound dedup ledgers
+ *    are deleted through `deleteDevice` on {@link DeviceScopedStores}, only
+ *    once the registration change is durable: in the same transaction where
+ *    those stores share its storage, otherwise after it commits and before
+ *    the next registration change starts. A registration change that fails
+ *    or rolls back deletes none of it, so a device that is still registered
+ *    never loses its dedup ledger. When the call resolves, `PresenceStore`
+ *    reads omit the device, `NonceStore.consumeIfValid` is `false` for every
+ *    nonce issued to it before, and every earlier envelope id reads as unseen.
  *
  * Neither the task history nor the mailbox rows go away: what the device did
  * and what it was sent stay readable after its grant is gone.
+ *
+ * Assertion-replay entries are not device-scoped state: retirement leaves
+ * them until the assertion expires and `collectExpired` removes them. They are
+ * a deny-list guarding authentication, so deleting one would let an assertion
+ * spent before the retirement authenticate again once the same id registers
+ * with the same key (#2264).
+ *
+ * The device-scoped stores do not check the registration on write, so a
+ * write admitted just before a retirement can recreate state just after it.
+ * Presence and nonces then expire by TTL; a recreated dedup entry stays until
+ * the id is revoked again, which clears it (see `revoke`).
  */
 export interface DeviceDirectory {
   /** Registers the device. With `input.machineId` set this ALSO deletes this tenant/product's prior rows carrying that same machine identity — one physical machine, one row — and retires each under `device_superseded`. In the same transaction it reopens the registered id's mailbox stream (`MailboxStore.reopenStream`), so a fresh grant for a retired id receives mail again. */
@@ -140,28 +160,22 @@ export interface DeviceDirectory {
   /** The row `tenant` owns under `deviceId` — `undefined` including when the device exists under a DIFFERENT tenant. */
   get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
   /**
-   * Deletes the registration and the device-scoped state it owned (presence,
-   * challenge nonces, inbound dedup), and retires the device under
-   * `device_revoked` in the same transaction (see above). A no-op for a device
-   * this tenant cannot address. Afterwards every read answers exactly as it
-   * does for a device that was never registered.
+   * Deletes the registration and retires the device under `device_revoked`
+   * (see above). Afterwards every read answers exactly as it does for a device
+   * that was never registered.
    *
-   * Assertion-replay entries are not deleted: they stay until the assertion
-   * expires and `collectExpired` removes them. Revocation and machine
-   * supersession must leave them in place, because an assertion spent before
-   * the retirement would otherwise authenticate again once the same id
-   * registers with the same key.
+   * The device-scoped state of `(tenant, deviceId)` is deleted whether or not
+   * a row was removed; tasks and mailbox rows are retired only when one was.
+   * So a revoke whose state cleanup failed (the call rejects) is recovered by
+   * calling it again, and a repeated revoke also clears state a racing write
+   * recreated. For an id this tenant does not own it changes nothing another
+   * tenant can see: every device-scoped store is keyed by tenant first.
    *
-   * How far the device-state deletion physically reaches is driver-scoped.
-   * The durable (Postgres) driver deletes the registration and every
-   * dependent device-scoped row in the same transaction, so the state is gone
-   * the moment `revoke` resolves. The in-memory reference directory deletes
-   * only the registration: presence, nonces and dedup are separate maps it
-   * does not own, so a presence hint expires on its own `expiresAt` TTL and,
-   * until then, is excluded from every projection by the readiness
-   * active-device filter (`activeDeviceIds`, built from the surviving rows).
-   * The observable contract above holds either way — no read path can see a
-   * revoked device. Retirement of tasks and mailbox rows is not driver-scoped.
+   * Machine supersession has no such retry, because the caller of `register`
+   * does not know the superseded ids. When a custom device-scoped store
+   * rejects after the registration committed, `register` rejects; the
+   * superseded id's presence and nonces then expire by TTL, and its dedup
+   * entries stay until that id is revoked or its tenant is erased.
    */
   revoke(tenant: TenantId, deviceId: string): Promise<void>;
   list(tenant: TenantId): Promise<readonly DeviceRecord[]>;
@@ -251,6 +265,8 @@ export interface NonceStore {
    * for the sole winner; every other case returns `false`.
    */
   consumeIfValid(tenant: TenantId, deviceId: string, nonce: string): Promise<boolean>;
+  /** Deletes every nonce issued to (tenant, deviceId), used or not. Called by device retirement. */
+  deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +291,19 @@ export interface InboundDedupStore {
     agentRef: AgentRef,
     envelopeId: string,
   ): Promise<boolean>;
+  /**
+   * Deletes the device-physical ledger and every Agent-bound ledger of
+   * (tenant, deviceId), so each earlier envelope id reads as unseen. Called by
+   * device retirement.
+   */
+  deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
+}
+
+/** The stores whose state for one device retirement deletes (see {@link DeviceDirectory}). */
+export interface DeviceScopedStores {
+  readonly presence: Pick<PresenceStore, 'deleteDevice'>;
+  readonly nonces: Pick<NonceStore, 'deleteDevice'>;
+  readonly dedup: Pick<InboundDedupStore, 'deleteDevice'>;
 }
 
 // ---------------------------------------------------------------------------

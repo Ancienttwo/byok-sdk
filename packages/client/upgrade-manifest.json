@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "ad2dd659c418aa97edd0331d9fce4b105953c19216721329975fba0f42bcfb07"
+    "snapshotSha256": "112d09353ef288d06cfe5b9afaff9c848c912f1a45cb0e774c8446b922b0712e"
   },
   "configFields": {
     "status": "tracked",
@@ -204,6 +204,63 @@
       "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2248",
       "items": [
         "export:@byok-sdk/bot-collaboration/host-kit#supersededDeliveryIds"
+      ]
+    },
+    {
+      "id": "remove-create-in-memory-blobs",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud removes createInMemoryBlobs(objects, bytes). It only returned bytes.bind(objects); call objectBytes.bind(objects) on the InMemoryBlobBytes from createInMemoryBlobBytes() instead.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#in-memory-blob-factory",
+      "items": [
+        "export:@byok-sdk/cloud#createInMemoryBlobs"
+      ]
+    },
+    {
+      "id": "device-state-delete-ports",
+      "impact": "breaking",
+      "summary": "@byok-sdk/core PresenceStore and @byok-sdk/cloud NonceStore and InboundDedupStore gain a required deleteDevice(tenant, deviceId): Promise<void> that removes every hint, nonce or dedup ledger of that device; device retirement calls it. Hosts with a custom implementation of any of these ports add the method; the in-memory reference stores implement it.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#store-ports-gain-deletedevice",
+      "items": [
+        "export:@byok-sdk/core#PresenceStore",
+        "export:@byok-sdk/core#InMemoryPresenceStore",
+        "export:@byok-sdk/cloud#NonceStore",
+        "export:@byok-sdk/cloud#InboundDedupStore",
+        "export:@byok-sdk/cloud#InMemoryNonceStore",
+        "export:@byok-sdk/cloud#InMemoryInboundDedupStore"
+      ]
+    },
+    {
+      "id": "in-memory-directory-device-state",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud createInMemoryCloudStores takes a required presence: PresenceStore after mailbox (pass core.presence), and InMemoryDeviceDirectory takes a required third argument DeviceScopedStores { presence, nonces, dedup }, so in-memory revoke and machine supersession delete that state with the device row.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#in-memory-composition-wiring",
+      "items": [
+        "export:@byok-sdk/cloud#createInMemoryCloudStores",
+        "export:@byok-sdk/cloud#InMemoryDeviceDirectory",
+        "export:@byok-sdk/cloud#DeviceScopedStores"
+      ]
+    },
+    {
+      "id": "device-retirement-clears-state",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud DeviceDirectory.revoke and machine supersession in register must delete the retired device's presence hint, challenge nonces and inbound dedup ledgers once the registration change is durable; revoke clears that state even when no row is left, so a retry recovers a failed cleanup. Device-assertion replay entries are kept until they expire. A Host with a custom DeviceDirectory calls deleteDevice on its presence, nonce and dedup stores on both paths. ByokCloud.listPresence on the in-memory composition no longer shows a retired device until its TTL. An envelope resent after the same deviceId is registered again may be processed a second time.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retirement-contract-for-a-custom-devicedirectory",
+      "items": [
+        "behavior:device-retirement-clears-state"
+      ]
+    },
+    {
+      "id": "postgres-device-state-delete",
+      "impact": "additive",
+      "summary": "@byok-sdk/cloud-dataplane PostgresPresenceStore, PostgresNonceStore and PostgresInboundDedupStore implement deleteDevice. Postgres revoke deletes the id's presence, nonce and dedup rows even when no device row is left.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#postgres-stores",
+      "items": [
+        "export:@byok-sdk/cloud-dataplane#PostgresPresenceStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresNonceStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresInboundDedupStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresPresenceStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresNonceStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresInboundDedupStore"
       ]
     },
     {
@@ -458,6 +515,36 @@
       "entry": "wire-v7-steer-refused"
     },
     {
+      "item": "export:@byok-sdk/cloud#DeviceScopedStores",
+      "change": "added",
+      "entry": "in-memory-directory-device-state"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryDeviceDirectory",
+      "change": "changed",
+      "entry": "in-memory-directory-device-state"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryInboundDedupStore",
+      "change": "changed",
+      "entry": "device-state-delete-ports"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryNonceStore",
+      "change": "changed",
+      "entry": "device-state-delete-ports"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InboundDedupStore",
+      "change": "changed",
+      "entry": "device-state-delete-ports"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#NonceStore",
+      "change": "changed",
+      "entry": "device-state-delete-ports"
+    },
+    {
       "item": "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
       "change": "changed",
       "entry": "wire-v7-execution-target"
@@ -483,9 +570,59 @@
       "entry": "wire-v7-steer-refused"
     },
     {
+      "item": "export:@byok-sdk/cloud#createInMemoryBlobs",
+      "change": "removed",
+      "entry": "remove-create-in-memory-blobs"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#createInMemoryCloudStores",
+      "change": "changed",
+      "entry": "in-memory-directory-device-state"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresInboundDedupStore",
+      "change": "changed",
+      "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresNonceStore",
+      "change": "changed",
+      "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresPresenceStore",
+      "change": "changed",
+      "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresInboundDedupStore",
+      "change": "changed",
+      "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresNonceStore",
+      "change": "changed",
+      "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPresenceStore",
+      "change": "changed",
+      "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/core#InMemoryPresenceStore",
+      "change": "changed",
+      "entry": "device-state-delete-ports"
+    },
+    {
       "item": "export:@byok-sdk/core#MailboxStore",
       "change": "changed",
       "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/core#PresenceStore",
+      "change": "changed",
+      "entry": "device-state-delete-ports"
     },
     {
       "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",

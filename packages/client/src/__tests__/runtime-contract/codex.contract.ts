@@ -165,7 +165,7 @@ defineRuntimeContract(`codex runtime contract (${target.mode} ${target.expectedV
     expect(draftText((await excluded()).events, descriptor)).toContain('runtime contract reply');
   }),
   'gate.auto': notAdvertised(descriptor, 'toolAuthorizationAuto'),
-  'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); }),
+  'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); await resumeTurns(); }),
 }, CODEX_ABSENT_ISOLATION_SOURCES);
 
 defineRuntimeCases(`codex runtime cases (${target.mode} ${target.expectedVersion})`, {

@@ -107,6 +107,7 @@ export function openCodeContract(
   });
 
   const descriptor = adapter().descriptor;
+  const lifecycle = openCodeLifecycle(runtime, target, openCodeEnv);
   const plan: ContractPlan = {
     'detect.version': check(async () => {
       const { env } = await openCodeEnv(`${runtime}-version`, 'http://127.0.0.1:1/v1');
@@ -128,9 +129,9 @@ export function openCodeContract(
     'isolation.sessionPersistence': notAdvertised(descriptor, 'isolation.sessionPersistence'),
     drafts: notAdvertised(descriptor, 'messageDraft'),
     'gate.auto': notAdvertised(descriptor, 'toolAuthorizationAuto'),
-    'egress.declaredHostsOnly': egressCheck(async () => { await turn(); }, declaredHosts),
+    'egress.declaredHostsOnly': { ...egressCheck(async () => { await turn(); await mcp(); await lifecycle.runAll(); }, declaredHosts), timeoutMs: 1_200_000 },
   };
-  return { title: `${line} runtime contract (${target.mode} ${target.expectedVersion})`, descriptor, plan, lifecycle: openCodeLifecycle(runtime, target, openCodeEnv), target, openCodeEnv };
+  return { title: `${line} runtime contract (${target.mode} ${target.expectedVersion})`, descriptor, plan, lifecycle, target, openCodeEnv, declaredHosts };
 }
 
 const isAlive = (pid: number): boolean => {
@@ -309,6 +310,7 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
   });
 
   return {
+    runAll: async () => { await resumed(); await refused(); await cancelled(); await completed(); },
     title: `${runtime} runtime contract: OpenCode lifecycle cases (${target.mode} ${target.expectedVersion})`,
     cases: {
       'opencode.resume': ['a second turn resumes the same native session with its history, and a different workspace is refused', check(async () => {

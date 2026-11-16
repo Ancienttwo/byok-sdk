@@ -22,6 +22,9 @@ import type { ByokPool } from '../pool.js';
 
 const NONCE_BYTES = 24;
 
+/** Device retirement's nonce delete; `devices.ts` runs it in its own transaction. */
+export const DELETE_DEVICE_NONCES = 'DELETE FROM auth_nonce WHERE tenant_id = $1 AND device_id = ANY($2::text[])';
+
 export class PostgresNonceStore implements NonceStore {
   readonly #pool: Pool;
   readonly #clock: Clock;
@@ -71,5 +74,9 @@ export class PostgresNonceStore implements NonceStore {
       [tenant, deviceId, nonce, this.#clock.now().toISOString()],
     );
     return result.rowCount === 1;
+  }
+
+  async deleteDevice(tenant: TenantId, deviceId: string): Promise<void> {
+    await this.#pool.query(DELETE_DEVICE_NONCES, [tenant, [deviceId]]);
   }
 }

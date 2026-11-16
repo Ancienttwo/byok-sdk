@@ -2,6 +2,7 @@ import { generateKeyPairSync, sign } from 'node:crypto';
 import {
   DEVICE_PROOF_SCHEMA_ID,
   InMemoryMailboxStore,
+  InMemoryPresenceStore,
   createMutableClock,
   deviceProofSigningInput,
   tenantId,
@@ -18,6 +19,15 @@ import { PROOF_RECEIPT_RETENTION_FLOOR_MS } from '../maintenance';
 import { createWebCrypto } from '../crypto/web-crypto';
 import { InMemoryDeviceDirectory } from '../stores/in-memory/device-directory';
 import { InMemoryTaskAttemptState } from '../stores/in-memory/task-attempts';
+import { InMemoryInboundDedupStore } from '../stores/in-memory/dedup';
+import { InMemoryNonceStore } from '../stores/in-memory/nonces';
+
+/** Retirement's device-scoped state is not under test here. */
+const NO_DEVICE_STATE = {
+  presence: { deleteDevice: async () => undefined },
+  nonces: { deleteDevice: async () => undefined },
+  dedup: { deleteDevice: async () => undefined },
+};
 
 const TENANT = tenantId('tenant-a');
 const BODY = new TextEncoder().encode('{"value":"truth"}');
@@ -41,7 +51,7 @@ describe('device proof authentication (I3)', () => {
   beforeEach(async () => {
     clock.set(new Date(NOW));
     bodyHash = await crypto.sha256(BODY);
-    devices = new InMemoryDeviceDirectory(new InMemoryTaskAttemptState(clock), new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }));
+    devices = new InMemoryDeviceDirectory(new InMemoryTaskAttemptState(clock), new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }), NO_DEVICE_STATE);
     await devices.register(TENANT, {
       productId: 'product-a',
       deviceId: 'device-a',
@@ -145,7 +155,7 @@ describe('device proof authentication (I3)', () => {
     await devices.revoke(TENANT, 'device-a');
     await expect(verify(valid)).resolves.toBeUndefined();
 
-    devices = new InMemoryDeviceDirectory(new InMemoryTaskAttemptState(clock), new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }));
+    devices = new InMemoryDeviceDirectory(new InMemoryTaskAttemptState(clock), new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }), NO_DEVICE_STATE);
     await devices.register(TENANT, {
       productId: 'product-a',
       deviceId: 'device-a',
@@ -219,5 +229,39 @@ describe('device proof authentication (I3)', () => {
     const base = claims();
     const reversed = Object.fromEntries(Object.entries(base).reverse()) as DeviceProofProtectedClaims;
     await expect(verify(envelope(reversed))).resolves.toBeDefined();
+  });
+});
+
+describe('in-memory device retirement cleanup (#2237)', () => {
+  it('a revoke whose state cleanup rejects is recovered by revoking again', async () => {
+    const clock = createMutableClock(new Date(NOW));
+    const dedup = new InMemoryInboundDedupStore();
+    let failures = 1;
+    const devices = new InMemoryDeviceDirectory(
+      new InMemoryTaskAttemptState(clock),
+      new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }),
+      {
+        presence: new InMemoryPresenceStore(clock),
+        nonces: new InMemoryNonceStore(clock, createWebCrypto()),
+        dedup: {
+          deleteDevice: async (tenant, deviceId) => {
+            if (failures-- > 0) throw new Error('injected dedup cleanup failure');
+            await dedup.deleteDevice(tenant, deviceId);
+          },
+        },
+      },
+    );
+    await devices.register(TENANT, {
+      productId: 'product-1', deviceId: 'device-1', deviceName: 'device-1',
+      devicePublicKey: 'pk-device-1', proofKeyId: 'identity', proofKeyEpoch: 0,
+    });
+    await dedup.checkAndRecord(TENANT, 'device-1', 'envelope-1');
+
+    await expect(devices.revoke(TENANT, 'device-1')).rejects.toThrow('injected dedup cleanup failure');
+    await expect(devices.get(TENANT, 'device-1')).resolves.toBeUndefined();
+    await expect(dedup.checkAndRecord(TENANT, 'device-1', 'envelope-1')).resolves.toBe(true);
+
+    await devices.revoke(TENANT, 'device-1');
+    await expect(dedup.checkAndRecord(TENANT, 'device-1', 'envelope-1')).resolves.toBe(false);
   });
 });

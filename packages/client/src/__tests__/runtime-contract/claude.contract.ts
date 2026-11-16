@@ -199,7 +199,7 @@ defineRuntimeContract(`claude runtime contract (${target.mode} ${target.expected
     expect(summaries.some(summary => summary.includes(outside))).toBe(true);
     expect(written).toBe(false);
   }),
-  'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); await agentStyled(); await agentStyledInherited(); await gated(); }, [
+  'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); await agentStyled(); await agentStyledInherited(); await gated(); await ownTurn(); }, [
     { phase: 'detect', target: 'api.anthropic.com:443', reason: '`claude auth status` checks an ANTHROPIC_API_KEY with Anthropic' },
   ]),
 }, CLAUDE_ABSENT_ISOLATION_SOURCES);
@@ -221,7 +221,7 @@ const lastMessage = (request: ProviderRequest): { role?: string; toolResult: boo
  * blocking command, and the follow-up the SDK sends while it runs must wait
  * for it (#1892: OAR refuses the prompt busy and holds it).
  */
-async function ownTurn() {
+const ownTurn = once(async () => {
   const box = await createSandbox('claude-own-turn');
   const recorder = await fileEgress();
   const bash = (command: string, background: boolean): ProviderStep =>
@@ -266,7 +266,7 @@ async function ownTurn() {
   } finally {
     await provider.close();
   }
-}
+});
 
 defineRuntimeCases(`claude runtime contract: claude cases (${target.mode} ${target.expectedVersion})`, {
   ownTurn: ['a follow-up sent during a turn Claude runs on its own is held until that turn ends, and adds no turn end of its own', check(async () => {

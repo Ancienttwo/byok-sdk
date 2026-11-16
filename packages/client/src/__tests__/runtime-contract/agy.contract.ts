@@ -215,6 +215,7 @@ defineRuntimeCases(`agy runtime contract: agy cases (${target.mode} ${target.exp
     const box = await createSandbox('agy-proxy-env');
     const provider = await startLoopbackProvider('gemini', () => ({ kind: 'text', chunks: CONTRACT_REPLY_CHUNKS }));
     try {
+      // This case tests an independently configured proxy, so its traffic cannot use the egress recorder.
       const dead = 'http://127.0.0.1:9';
       const env = { ...baseEnv(box.home), GEMINI_API_KEY: REAL_KEY, HTTP_PROXY: dead, HTTPS_PROXY: dead, NO_PROXY: new URL(provider.origin).host };
       const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home: await ownedHome(), resolveBin }), provider.origin);

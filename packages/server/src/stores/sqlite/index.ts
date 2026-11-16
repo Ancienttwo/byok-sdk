@@ -500,14 +500,20 @@ class SqliteCoordinator {
     });
   }
 
-  transactionSync<T>(body: (db: DatabaseSync) => T, afterCommit: (result: T) => void): Promise<T> {
-    return this.run((db) => {
+  /**
+   * `afterCommit` runs only once `body` committed, and still inside this
+   * operation's queue slot: no other coordinator operation starts until it
+   * settles. When it rejects, the commit stands and the call rejects.
+   */
+  transactionSync<T>(body: (db: DatabaseSync) => T, afterCommit: (result: T) => void | Promise<void>): Promise<T> {
+    return this.run(async (db) => {
       db.exec('BEGIN IMMEDIATE');
       let result: T;
       try { result = body(db); db.exec('COMMIT'); }
       catch (cause) { this.#changedTasks.clear(); try { db.exec('ROLLBACK'); } catch {} throw cause; }
-      // No await splits the committed SQL state from its process-local ledger.
-      afterCommit(result);
+      // No await splits the committed SQL state from its process-local ledger:
+      // `afterCommit` starts synchronously, right after COMMIT.
+      await afterCommit(result);
       return result;
     });
   }
@@ -1612,10 +1618,15 @@ export function createSqliteEmbeddedStores(
     dependencies.crypto,
     objects,
     mailbox,
+    core.presence,
     createInMemoryBlobBytes(dependencies.clock, dependencies.crypto),
     (rows) => new SqliteTaskArchiveStore(coordinator, dependencies.clock, rows),
   );
-  const devices = new SqliteDeviceDirectory(coordinator, dependencies.clock);
+  const devices = new SqliteDeviceDirectory(coordinator, dependencies.clock, {
+    presence: core.presence,
+    nonces: inMemoryCloud.stores.nonces,
+    dedup: inMemoryCloud.stores.dedup,
+  });
   const pairing = new InMemoryPairingCodeStore(dependencies.clock, devices);
   const cloud: CloudStores = {
     ...inMemoryCloud.stores,
