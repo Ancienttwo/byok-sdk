@@ -147,7 +147,10 @@ describe('terminal durability and actual harness boundaries', () => {
         const terminal = decodeEnvelope((await cloud.readTerminalBody(offer.taskId))!);
         expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', executor: { kind: 'harness', harnessId: 'acme-harness' }, retryable: false,
           recovery: { kind: 'daemon_interrupted', offerId: offer.envelope.id } });
-        expect((await cloud.readTaskAttempt(offer.taskId))?.claimedExecutor).toEqual(claimed ? { kind: 'harness', harnessId: 'acme-harness' } : undefined);
+        // An unclaimed recovery settles the attempt without making the device its owner.
+        const attempt = await cloud.readTaskAttempt(offer.taskId);
+        expect(attempt?.claimedExecutor).toEqual(claimed ? { kind: 'harness', harnessId: 'acme-harness' } : undefined);
+        expect(attempt?.ownerDeviceId).toBe(claimed ? device.deviceId : undefined);
         expect(adapter.startCalls).toHaveLength(0);
       });
     }

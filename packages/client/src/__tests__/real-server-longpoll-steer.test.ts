@@ -90,7 +90,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
 
     // The gate opens: no SteerRejectedError, and the envelope survives the
     // long-poll delivery all the way into the session.
-    await expect(handle.steer('keep going')).resolves.toBeUndefined();
+    await expect(handle.steer('keep going')).resolves.toEqual({ messageId: expect.any(String) });
 
     await vi.waitFor(() => expect(session.steerCalls).toEqual(['keep going']));
     expect(session.steerAttempts).toBe(1);
