@@ -7,13 +7,13 @@ import type { AutonomyGate } from './autonomy';
 const auto: AutonomyGate = { autonomy: 'auto', record: () => { throw new Error('auto records nothing'); } };
 
 /** A plain collaboration slice and K4 facts by Turn id. The rules need no ledger and no Host. */
-function setup() {
+function setup(targets = ['b']) {
   const bot = (id: string) => ({ id, name: id, archived: false, execution: { deviceId: `${id}-device`, payload: { agentRef: { agentId: id, profileRevision: '1' } } } });
-  const state: DelegationState = { team: { bots: { a: bot('a'), b: bot('b') } }, turns: {}, budgets: {}, delegations: {}, batches: {}, units: {},
+  const state: DelegationState = { team: { bots: { a: bot('a'), b: bot('b'), c: bot('c') } }, turns: {}, budgets: {}, delegations: {}, batches: {}, units: {},
     replies: {}, rejected: [], audit: [] };
   const root = addTurn(state, { id: 'root', root: 'root', source: 'user', request: 'Ask b', botId: 'a', hop: 0, authority: 'owner' });
   const events: string[] = [], emit = (id: string) => { events.push(id); };
-  applyDelegate(state, root, 'task', { delegate: [{ to: 'b', request: 'Check' }] }, false, 0, emit, (_kind, work) => work(), auto);
+  applyDelegate(state, root, 'task', { delegate: targets.map(to => ({ to, request: 'Check' })) }, false, 0, emit, (_kind, work) => work(), auto);
   const d = state.delegations[hash(['task', 'delegate', 0])]!;
   const intents: Record<string, IntentFact & { started?: boolean; declineCode?: string }> = {};
   const facts: IntentFacts = {
@@ -73,4 +73,24 @@ it('ignores a failed reply check after its delegation resolves and excludes reso
   expect(delegationDue(state)).toEqual([]);
   d.nextCheckAt = 1;
   expect(delegationDue(state)).toEqual([]);
+});
+
+it('keeps an uncertain sibling reply slot when a report arrives during initiator suspension', () => {
+  const { state, d, intents, facts, emit } = setup(['b', 'c']);
+  const sibling = state.delegations[hash(['task', 'delegate', 1])]!;
+  intents[sibling.id] = { taskId: 'c-task', started: true };
+  settleDelegations(state, facts, 1, emit);
+  settleDelegations(state, facts, 12, emit, { cancelGraceMs: 10, uncertainAfterMs: 10 });
+  expect(sibling.status).toBe('uncertain');
+  const initiator = state.team.bots.a!;
+  state.team.bots = { ...state.team.bots, a: { ...initiator, participation: 'suspended' } };
+  resolveDelegation(state, d, 'answered', 13, emit);
+  expect(d).toMatchObject({ verdict: 'answered', undelivered: 'initiator_suspended' });
+  expect(d.replyTurnId).toBeUndefined();
+  const slots = state.batches.task!.slots;
+  expect(slots.map(id => state.units[id]!.state)).toEqual(['reserved', 'released']);
+  state.team.bots = { ...state.team.bots, a: initiator };
+  resolveDelegation(state, sibling, 'answered', 14, emit);
+  expect(state.turns[sibling.replyTurnId!]).toMatchObject({ source: 'bot_reply', botId: 'a', status: 'queued', unit: slots[0] });
+  expect(state.units[slots[0]!]).toMatchObject({ state: 'reserved', turnId: sibling.replyTurnId });
 });

@@ -172,20 +172,22 @@ function report(state: DelegationState, batch: Batch, rows: Delegation[], id: st
   const initiator = inactive(state.team.bots[origin.botId]);
   if (initiator) {
     // §8.5: the verdict stays in the ledger, with no reply Turn. The projection shows why.
-    for (const slot of batch.slots) if (!state.units[slot]!.turnId) releaseUnit(state, slot);
     for (const row of rows) row.undelivered = `initiator_${initiator}`;
-    return;
+  } else {
+    const slot = batch.slots.find(unit => state.units[unit]!.state === 'reserved' && !state.units[unit]!.turnId);
+    const replies = rows.map(entry);
+    const turn = addTurn(state, { id, root: origin.root, source: 'bot_reply', botId: origin.botId, hop: origin.hop,
+      authority: origin.authority ?? 'bot', replies, ...(refusalReport ? { refusalReport } : {}), ...(slot ? { unit: slot } : {}),
+      request: `Delegation replies: ${replies.map(r => `${r.from} ${r.verdict}${r.reason ? ` (${r.reason})` : ''}`).join('; ')}` });
+    if (slot) state.units[slot]!.turnId = id;
+    else { turn.status = 'delivered'; turn.conclusion = 'delivered'; }
+    for (const row of rows) row.replyTurnId = id;
   }
-  const slot = batch.slots.find(unit => state.units[unit]!.state === 'reserved' && !state.units[unit]!.turnId);
-  const replies = rows.map(entry);
-  const turn = addTurn(state, { id, root: origin.root, source: 'bot_reply', botId: origin.botId, hop: origin.hop,
-    authority: origin.authority ?? 'bot', replies, ...(refusalReport ? { refusalReport } : {}), ...(slot ? { unit: slot } : {}),
-    request: `Delegation replies: ${replies.map(r => `${r.from} ${r.verdict}${r.reason ? ` (${r.reason})` : ''}`).join('; ')}` });
-  if (slot) state.units[slot]!.turnId = id;
-  else { turn.status = 'delivered'; turn.conclusion = 'delivered'; }
-  for (const row of rows) row.replyTurnId = id;
   // The batch keeps one free slot for each accepted delegation that is not reported yet (§6.2).
-  const open = batch.delegationIds.filter(key => state.delegations[key]!.requestTurnId && !state.delegations[key]!.replyTurnId).length;
+  const open = initiator === 'archived' ? 0 : batch.delegationIds.filter(key => {
+    const row = state.delegations[key]!;
+    return row.requestTurnId && !row.replyTurnId && !row.undelivered;
+  }).length;
   batch.slots.filter(unit => state.units[unit]!.state === 'reserved' && !state.units[unit]!.turnId).slice(open)
     .forEach(unit => releaseUnit(state, unit));
 }
