@@ -1969,9 +1969,12 @@ the order of the guide's §3. The first match wins.
 | Other human, 1:1 | `not_owner`. Audit only. |
 | Human, group | `room_input`. `roomInput` with the principal. Mention entities select seats. |
 
-The input key is `inboundKey(message)`, the hash of channel, conversation id,
-and platform message id. A redelivered event returns the same id. The Host
-never scans text for mentions.
+The input key is `inboundKey(message)`, the hash of channel, conversation kind,
+conversation id and platform message id. A direct chat and a group with the
+same id have separate keys. A redelivered event returns the same id. The Host
+never scans text for mentions. Upgrading from the previous key format loses
+deduplication once for events already in flight; drain inbound delivery before
+upgrading or allow for those events to be admitted again.
 
 `BotOptions.owner` is the owner principal id. The default is `owner`. Only the
 human principal with this id passes the owner check. These owner APIs take an

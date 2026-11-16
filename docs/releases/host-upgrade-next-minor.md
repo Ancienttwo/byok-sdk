@@ -4,6 +4,20 @@ Draft checklist for changes after 0.43.0. Earlier Hosts must first apply the [0.
 
 Add future Host-visible changes here; do not amend the 0.43.0 cut's upgrade-manifest entries. The 0.43.0 release record archived that manifest unchanged and established the 0.43.0 release snapshot as the next baseline.
 
+## Bot collaboration inbound conversation identity (#2250)
+
+`@byok-sdk/bot-collaboration` `inboundKey(message)` now hashes channel,
+conversation kind, conversation id and platform message id. Direct and group
+conversations with the same id no longer share inbound or receive command
+identities. Existing team configurations remain valid, including a room id
+that equals a Bot id.
+
+Every inbound key changes. An event already in flight across the upgrade can
+be admitted again once because its previous deduplication identity no longer
+matches. Drain inbound delivery before upgrading, or account for that one-time
+redelivery. Hosts that persist or compare inbound keys must use the new keys;
+there is no compatibility lookup of the old key.
+
 ## OAR 0.109.0 (#2235)
 
 The vendored OAR moves from 0.105.0 to 0.109.0 (`packages/client/vendor/oar/4eb5919/`, fork branch `byok/0.109.0`). No public type, export or configuration field changes. The upgrade manifest declares the three behavior-only breaking changes below as `model-confirmation-non-retryable`, `agy-model-confirmation-deadline` and `claude-queued-write-failure`.
