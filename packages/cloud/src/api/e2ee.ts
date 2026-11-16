@@ -30,7 +30,7 @@ export function createE2eeApi({ options, assertAgentCapabilities, enqueueAgentCo
   e2eeMemberContext: (tenant: TenantId) => e2eeMember.E2eeMemberContext;
 } {
   function e2eeMemberContext(tenant: TenantId): e2eeMember.E2eeMemberContext {
-    const store = options.e2eeMemberStore;
+    const store = options.cloud.e2eeMember;
     if (store === undefined) {
       throw new ByokCloudError('e2ee_member_store_unavailable', 'E2EE member storage is not configured for this deployment.');
     }

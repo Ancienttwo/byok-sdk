@@ -1344,6 +1344,7 @@ export declare function verifyNonceSignature(crypto: CloudCrypto, devicePublicKe
  */
 import { type CapabilityDeclaration } from '@byok-sdk/core';
 import type { ByokCloudOptions } from './cloud.js';
+import type { CloudStores } from './stores/ports.js';
 /** The hosted capability vocabulary this package knows how to serve. */
 export declare const CLOUD_CAPABILITIES: {
     /** `GET /byok/events` long-poll receive (§8). */
@@ -1431,8 +1432,8 @@ export declare const CLOUD_CAPABILITIES: {
      * The E2EE member device routes (#654): register a member key bundle,
      * append and read the member chain, put and read scope key packages, and
      * read the relayed client pairing MAC. Composition-bound like
-     * `truth.records`: declaring it without an `e2eeMemberStore`, or passing one
-     * without declaring it, is refused at construction.
+     * `truth.records`: declaring it without a `CloudStores.e2eeMember`, or
+     * passing one without declaring it, is refused at construction.
      */
     readonly e2eeMember: 'e2ee.member';
     /**
@@ -1477,7 +1478,7 @@ export interface FullCapabilityDeclarationOptions {
      * deployment does not hold — so it is off unless a composition says otherwise.
      */
     readonly includeHostMcpTaskContext?: boolean;
-    /** `e2ee.member` is default-off: the composition must supply an `e2eeMemberStore`. */
+    /** `e2ee.member` is default-off: the composition's `CloudStores` must carry an `e2eeMember`. */
     readonly includeE2eeMember?: boolean;
 }
 /**
@@ -1486,16 +1487,26 @@ export interface FullCapabilityDeclarationOptions {
  * `createByokCloud` refuses a capability declared without all of its ports and
  * a port passed without its capability, and `capabilityDeclarationForPorts`
  * declares exactly the capabilities whose ports are all present.
+ *
+ * A port is a `createByokCloud` option, except `cloud.e2eeMember`: the E2EE
+ * member store is a store of the composition, so the device directory that
+ * retires its state and the routes that serve it read the same one (#2267).
  */
 export declare const CAPABILITY_PORTS: {
     readonly "blobs.contentproxy": readonly ["blobContentProxy"];
     readonly "truth.records": readonly ["truthCommitter", "truthObjectDownloads"];
     readonly "skills.pack": readonly ["skillPacks"];
     readonly "agent.memory.projection": readonly ["agentMemoryProjectionAuthorizer", "agentMemoryProjectionStore"];
-    readonly "e2ee.member": readonly ["e2eeMemberStore"];
+    readonly "e2ee.member": readonly ["cloud.e2eeMember"];
 };
-/** The `createByokCloud` ports a capability is bound to. */
-export type CapabilityPorts = Pick<ByokCloudOptions, (typeof CAPABILITY_PORTS)[keyof typeof CAPABILITY_PORTS][number]>;
+/** The name of one capability port in {@link CAPABILITY_PORTS}. */
+export type CapabilityPortName = (typeof CAPABILITY_PORTS)[keyof typeof CAPABILITY_PORTS][number];
+/** The `createByokCloud` inputs a port-bound capability is bound to. */
+export type CapabilityPorts = Pick<ByokCloudOptions, Exclude<CapabilityPortName, 'cloud.e2eeMember'>> & {
+    readonly cloud?: Pick<CloudStores, 'e2eeMember'>;
+};
+/** The port `name` in `ports`, `undefined` when absent. */
+export declare function capabilityPort(ports: CapabilityPorts, name: CapabilityPortName): unknown;
 /**
  * The declaration a composition's ports back: every standard capability, each
  * port-bound capability exactly when all of its ports are present, and never
@@ -1545,7 +1556,6 @@ import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, Pa
 import { type DeviceTerminal, type TerminalResult } from './terminal-result.js';
 import type { MailboxWake } from './mailbox-wake.js';
 import { type TaskRedactionResult, type TaskRedactionStore } from './task-redaction.js';
-import type { E2eeMemberStore } from './e2ee-member.js';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract.js';
 /** Matches the reference server's ceiling (§7). */
 export declare const DEFAULT_MAX_BLOB_SIZE_BYTES: number;
@@ -1640,8 +1650,6 @@ export interface ByokCloudOptions {
     readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
     /** Durable authority for {@link ByokCloud.redactTasks}. Without it, `redactTasks` fails closed. */
     readonly taskRedactionStore?: TaskRedactionStore;
-    /** Durable authority for the E2EE member chain, key packages and pairing MACs. Without it, those calls fail closed. */
-    readonly e2eeMemberStore?: E2eeMemberStore;
     readonly maxBlobSizeBytes?: number;
     readonly longPollHoldMs?: number;
     readonly eventsPageLimit?: number;
@@ -2245,6 +2253,8 @@ export interface InMemoryByokCloudOptions {
     readonly publicRouteLimiter?: ByokCloudOptions['publicRouteLimiter'];
     readonly agentMemoryProjectionAuthorizer?: AgentMemoryProjectionAuthorizer;
     readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
+    /** Adds `stores.e2eeMember` and declares `e2ee.member` (see `createInMemoryCloudStores`). */
+    readonly e2eeMember?: boolean;
 }
 export interface InMemoryByokCloud {
     readonly mailboxWake: MailboxWake;
@@ -2719,6 +2729,26 @@ export interface E2eeMemberStore {
         readonly deviceId: string;
         readonly now: string;
     }): Promise<string | undefined>;
+    /**
+     * Deletes the device's member state: the scope key packages addressed to the
+     * member the device registered, then that registration with its device
+     * pairing MAC, then the client pairing MAC relayed to it. The member chain,
+     * scope epochs and their `keyId`s, shred records, the member's KEM floor and
+     * recorded proof requests stay, so the member id is free for another device
+     * and keeps its floor. A device with no state is a no-op.
+     *
+     * A device directory calls it for the revoked id on every revoke and for
+     * each superseded id, once the registration change is durable
+     * (`DeviceDirectory`, retirement rule 3). A store that shares the
+     * directory's database may run the same deletes in the directory's
+     * transaction instead.
+     *
+     * A Host that assembles `CloudStores` and its directory itself, without a
+     * standard factory's `e2eeMember` opt-in, must give the same instance to
+     * `CloudStores.e2eeMember` and to the directory. Nothing checks it at run
+     * time; a second instance would serve routes that retirement never cleans.
+     */
+    deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
 }
 /**
  * The result a store recorded with a device write, read back for a replay.
@@ -2867,7 +2897,7 @@ export declare const CLOUD_ERROR_CODES: {
     readonly task_content_redacted: 'task_content_redacted';
     /** `redactTasks` was called on a deployment that has no `taskRedactionStore`. */
     readonly task_redaction_unavailable: 'task_redaction_unavailable';
-    /** An E2EE member call on a deployment that has no `e2eeMemberStore`. */
+    /** An E2EE member call on a deployment whose `CloudStores` has no `e2eeMember`. */
     readonly e2ee_member_store_unavailable: 'e2ee_member_store_unavailable';
     /** A different member chain entry is stored at that seq, or the first new entry does not follow the head. Read the chain again. */
     readonly e2ee_member_chain_conflict: 'e2ee_member_chain_conflict';
@@ -3364,7 +3394,7 @@ export type { TruthCommitErrorCode } from './truth/errors.js';
 export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ABANDON_CAUSES, TASK_ATTEMPT_STATUSES, TASK_ATTEMPT_ACTIVE_STATUSES, TASK_ATTEMPT_UNFINISHED_STATUSES, } from './stores/ports.js';
 export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract.js';
 export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, DeviceScopedStores, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskAbandonCause, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports.js';
-export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryE2eeMemberStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index.js';
+export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index.js';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index.js';
 export type { DeviceTerminal } from './terminal-result.js';
 export { AgentExecutionInputSchema, SealedAgentExecutionInputSchema, type AgentExecutionInput, type SealedAgentExecutionInput, } from './agent-execution.js';
@@ -3967,58 +3997,8 @@ export declare class InMemoryDeviceDirectory implements DeviceDirectory {
     readiness(tenant: TenantId, presence: PresenceStore): Promise<TenantReadiness>;
     resolveByDeviceId(deviceId: string): Promise<DeviceRecord | undefined>;
 }
-// ==== @byok-sdk/cloud dist/stores/in-memory/e2ee-member.d.ts ====
-import type { TenantId } from '@byok-sdk/core';
-import type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeScopeKeyPackagePutInput, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow } from '../../e2ee-member.js';
-import type { RequestReceiptStore } from '../ports.js';
-/**
- * Reference E2EE member store. Each method checks and writes in one
- * synchronous step, so no other call interleaves with it. A shred receipt
- * goes to `receipts`, the composition's request receipt store, after that
- * step. Appends run one at a time through their receipt writes, so a later
- * shred of a scope cannot record its receipt before the first one.
- */
-export declare class InMemoryE2eeMemberStore implements E2eeMemberStore {
-    #private;
-    constructor(receipts: Pick<RequestReceiptStore, 'record'>);
-    appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult>;
-    readChainEntries(tenant: TenantId, input: {
-        readonly afterSeq: number;
-        readonly limit: number;
-    }): Promise<readonly E2eeMemberChainRow[]>;
-    putScopeKeyPackages(tenant: TenantId, { rows, proof }: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult>;
-    readOwnScopeKeyPackages(tenant: TenantId, input: {
-        readonly scopeId: string;
-        readonly recipient: string;
-        readonly afterEpoch: number;
-        readonly limit: number;
-    }): Promise<{
-        readonly rows: readonly E2eeScopeKeyPackageRow[];
-        readonly scopeHeadEpoch: number | undefined;
-    }>;
-    readScopeKeyPackages(tenant: TenantId, input: {
-        readonly scopeId: string;
-        readonly epoch?: number;
-        readonly recipient?: string;
-    }): Promise<readonly E2eeScopeKeyPackageRow[]>;
-    registerMember(tenant: TenantId, input: E2eeMemberRegistrationInput): Promise<E2eeMemberRegisterResult>;
-    readMemberRegistration(tenant: TenantId, input: {
-        readonly deviceId: string;
-        readonly now: string;
-    }): Promise<E2eeMemberRegistrationRow | undefined>;
-    putClientPairingMac(tenant: TenantId, input: {
-        readonly deviceId: string;
-        readonly body: string;
-        readonly expiresAt: string;
-    }): Promise<'stored' | 'not_registered'>;
-    readClientPairingMac(tenant: TenantId, input: {
-        readonly deviceId: string;
-        readonly now: string;
-    }): Promise<string | undefined>;
-}
 // ==== @byok-sdk/cloud dist/stores/in-memory/index.d.ts ====
 export { InMemoryAgentMessageDraftStore } from './agent-message-draft.js';
-export { InMemoryE2eeMemberStore } from './e2ee-member.js';
 /**
  * The in-memory reference implementation of every cloud-local port.
  *
@@ -4079,8 +4059,13 @@ export type InMemoryTaskArchiveFactory = (rows: InMemoryEphemeralTaskRows) => Ta
  * @param taskArchive Absent, the archive rewrites the in-memory core `mailbox`
  *   and `objects`, and construction throws when they are another core's. A
  *   host with another core supplies the archive that owns its rows.
+ * @param options `e2eeMember: true` adds `stores.e2eeMember`, for a deployment
+ *   that declares `e2ee.member`. The device directory retires the same
+ *   instance.
  */
-export declare function createInMemoryCloudStores(clock: Clock, crypto: CloudCrypto, objects: ObjectStore, mailbox: MailboxStore, presence: PresenceStore, objectBytes: InMemoryBlobBytes, taskArchive?: InMemoryTaskArchiveFactory): InMemoryCloudComposition;
+export declare function createInMemoryCloudStores(clock: Clock, crypto: CloudCrypto, objects: ObjectStore, mailbox: MailboxStore, presence: PresenceStore, objectBytes: InMemoryBlobBytes, taskArchive?: InMemoryTaskArchiveFactory, options?: {
+    readonly e2eeMember?: boolean;
+}): InMemoryCloudComposition;
 // ==== @byok-sdk/cloud dist/stores/in-memory/mailbox-wake.d.ts ====
 import type { MailboxWake } from '../../mailbox-wake.js';
 import type { TaskEventsWake } from '../../task-events-wake.js';
@@ -4378,6 +4363,7 @@ export declare const CLOUD_PORT_INTERFACES: Readonly<Record<CloudStoreName, stri
 // ==== @byok-sdk/cloud dist/stores/ports.d.ts ====
 import type { AgentMessageDraftStore } from '../agent-message-draft.js';
 import type { TaskArchiveStore } from '../task-archive.js';
+import type { E2eeMemberStore } from '../e2ee-member.js';
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
@@ -4498,6 +4484,9 @@ export interface DeviceRegistration {
  *    never loses its dedup ledger. When the call resolves, `PresenceStore`
  *    reads omit the device, `NonceStore.consumeIfValid` is `false` for every
  *    nonce issued to it before, and every earlier envelope id reads as unseen.
+ *    When the composition has an E2EE member store (`CloudStores.e2eeMember`),
+ *    the device's member state goes in the same step
+ *    (`E2eeMemberStore.deleteDevice`).
  *
  * Neither the task history nor the mailbox rows go away: what the device did
  * and what it was sent stay readable after its grant is gone.
@@ -4638,6 +4627,8 @@ export interface DeviceScopedStores {
     readonly presence: Pick<PresenceStore, 'deleteDevice'>;
     readonly nonces: Pick<NonceStore, 'deleteDevice'>;
     readonly dedup: Pick<InboundDedupStore, 'deleteDevice'>;
+    /** The composition's `CloudStores.e2eeMember`, the same instance; absent when it has none. */
+    readonly e2eeMember?: Pick<E2eeMemberStore, 'deleteDevice'>;
 }
 export declare const TASK_ATTEMPT_STATUSES: readonly ['offered', 'claimed', 'running', 'cancel_requested', 'complete', 'failed', 'cancelled'];
 export type TaskAttemptStatus = (typeof TASK_ATTEMPT_STATUSES)[number];
@@ -5139,6 +5130,11 @@ export interface InboundRateLimiter {
  * composition. {@link BlobContentProxy} is deliberately absent — it is an
  * optional input to `createByokCloud`, not a port, precisely so that the
  * bundle can stay all-or-nothing while byte proxying stays optional.
+ *
+ * `e2eeMember` is the one optional store: it is present exactly when the
+ * deployment declares `e2ee.member`. It lives here, not in the
+ * `createByokCloud` options, so the device directory that retires a device's
+ * member state and the routes that serve it use the same store (#2267).
  */
 export interface CloudStores {
     readonly activity: ActivityStore;
@@ -5157,8 +5153,9 @@ export interface CloudStores {
     readonly blobs: CloudBlobStore;
     readonly rateLimiter: InboundRateLimiter;
     readonly taskArchive: TaskArchiveStore;
+    readonly e2eeMember?: E2eeMemberStore;
 }
-/** Names of every port in {@link CloudStores}, in contract order. */
+/** Names of every required port in {@link CloudStores}, in contract order. */
 export declare const CLOUD_STORE_NAMES: readonly ['activity', 'approvals', 'agentMessageDraft', 'devices', 'pairingCodes', 'pairing', 'nonces', 'dedup', 'tasks', 'cancellations', 'receipts', 'egress', 'proofReceipts', 'blobs', 'rateLimiter', 'taskArchive'];
 export type CloudStoreName = (typeof CLOUD_STORE_NAMES)[number];
 export interface ReceiptCollectExpiredInput extends CollectExpiredInput {

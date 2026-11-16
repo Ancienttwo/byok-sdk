@@ -257,7 +257,7 @@ flowchart TB
   classDef out fill:#1e40af,stroke:#bfdbfe,stroke-width:2px,color:#fff
 
   Decl["capability 声明<br/>server 由 ports 推导：capabilityDeclarationForPorts"]:::in
-  Ports["注入的 ports<br/>blobContentProxy · truthCommitter<br/>skillPacks · e2eeMemberStore 等"]:::in
+  Ports["注入的 ports<br/>blobContentProxy · truthCommitter<br/>skillPacks · cloud.e2eeMember 等"]:::in
   Check["assertDeclarationMatchesPorts<br/>声明了但缺 port：构造失败<br/>有 port 但未声明：构造失败"]:::kernel
   Reg["CloudRouteRegistry.register<br/>public · device · proof · presigned"]:::kernel
   App["私有 Hono app<br/>mounted 读回 app.routes"]:::kernel

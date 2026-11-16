@@ -2,7 +2,7 @@
 import { timingSafeEqual, createHash } from 'node:crypto';
 import { createByokCloud, createHmacTokenSigner, createInProcessMailboxWake, createWebCrypto, fullCapabilityDeclaration,
   type ByokCloudObserver } from '@byok-sdk/cloud';
-import { createByokPool, createPostgresCloudStores, createPostgresCoreStores, PostgresE2eeMemberStore, PostgresProofReceiptRetentionAuthority } from '@byok-sdk/cloud-dataplane/runtime';
+import { createByokPool, createPostgresCloudStores, createPostgresCoreStores, PostgresProofReceiptRetentionAuthority } from '@byok-sdk/cloud-dataplane/runtime';
 import { memberAsset, readMemberCiphertext } from '../../member-readback';
 import { CANARY_METHODS, decodeCanaryRpc, encodeCanaryRpc } from '../../../../hosted-bot-collaboration/src/canary-cloud.test-support';
 
@@ -47,10 +47,10 @@ export default {
       const clock = { now: () => new Date() }, crypto = createWebCrypto();
       const objectStorage = { ...JSON.parse(env.BYOK_CANARY_STORAGE), signingClock: clock };
       const core = createPostgresCoreStores({ pool, clock, objectStorage });
-      const stores = await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 50, burst: 100 }, pool, clock, crypto, objectStorage });
+      const stores = await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 50, burst: 100 }, pool, clock, crypto, objectStorage, e2eeMember: true });
       const full = fullCapabilityDeclaration(undefined, { includeE2eeMember: true });
       const cloud = createByokCloud({ proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(pool) }, core, cloud: stores, clock, crypto,
-        mailboxWake: createInProcessMailboxWake({ fallbackMs: 100 }), e2eeMemberStore: new PostgresE2eeMemberStore(pool, clock),
+        mailboxWake: createInProcessMailboxWake({ fallbackMs: 100 }),
         tokenSigner: createHmacTokenSigner(Uint8Array.from(env.BYOK_TOKEN_SECRET.match(/../gu)!, byte => parseInt(byte, 16)), clock),
         capabilities: { ...full, capabilities: full.capabilities.filter(capability => capability !== 'blobs.contentproxy') }, observer });
       if (route.startsWith('/byok/')) return await cloud.fetch(request);

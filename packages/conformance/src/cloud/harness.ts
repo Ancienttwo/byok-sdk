@@ -16,7 +16,7 @@ import { runCloudRetentionConformance } from './retention';
  * predicate rather than reaching for the database's `now()`.
  */
 import { describe } from 'vitest';
-import type { BlobDeclaration, BlobObservation, CloudStores } from '@byok-sdk/cloud';
+import type { BlobDeclaration, BlobObservation, CloudStores, E2eeMemberStore } from '@byok-sdk/cloud';
 import {
   contentHash,
   type CoreStores,
@@ -161,6 +161,11 @@ export interface CloudCompositionHandle {
    * nothing can reach inside its one retirement transaction (SQLite).
    */
   failMailboxExpiry?(): Promise<() => Promise<void>>;
+  /**
+   * The composition's `CloudStores.e2eeMember`, which its directory retires
+   * (#2267). Absent where the composition has no E2EE member store (SQLite).
+   */
+  readonly e2eeMember?: E2eeMemberStore;
   /**
    * Holds the next mailbox expiry until the returned release runs, so a case
    * can act while a retirement is in flight. A composition whose retirement is
