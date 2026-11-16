@@ -6,7 +6,7 @@ import { RuntimeDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFai
 import { DAEMON_TASK_FAILURE } from '../task-failure.js';
 import { MAX_TIMER_DELAY_MS } from '../../util/timer-delay.js';
 import type { ActiveTask } from './support.js';
-import { raceSettleFirst, taskFinalizing } from './support.js';
+import { raceSettleFirst, taskFinalizing, taskTerminalSelected } from './support.js';
 import type { TaskRunner } from '../task-runner.js';
 import { DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS, MAX_DURATION_EXCEEDED_REASON_PREFIX } from './state.js';
 import { hostFor } from './host.js';
@@ -317,9 +317,7 @@ export async function handleSteer(this: TaskRunner, taskId: string, steerMessage
     // A cancel runs ahead of this steer (#2304). Its teardown, from the
     // terminal it selects to retirement, closed the session under the steer,
     // so the steer never reached the runtime.
-    const current = hostFor(this).current(taskId);
-    if (this['tasks'].get(taskId) !== active || current?.terminal !== undefined
-      || current?.phase === 'terminalizing' || current?.phase === 'retiring') {
+    if (this['tasks'].get(taskId) !== active || taskTerminalSelected(this, taskId)) {
       await refuseSteer.call(this, taskId, steerMessageId, 'task_not_active');
       return;
     }

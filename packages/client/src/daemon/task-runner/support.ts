@@ -717,6 +717,12 @@ export function taskTearingDown(runner: TaskRunner, taskId: string): boolean {
     || phase === 'finished' || phase === 'declined';
 }
 
+/** The task selected its terminal: from that selection until it retires, its teardown owns the session. */
+export function taskTerminalSelected(runner: TaskRunner, taskId: string): boolean {
+  const current = hostFor(runner).current(taskId);
+  return current?.terminal !== undefined || current?.phase === 'terminalizing' || current?.phase === 'retiring';
+}
+
 /** The old `finalizationStarted` flag: the terminal is sent and cleanup owns the task. */
 export function taskFinalizing(runner: TaskRunner, taskId: string): boolean {
   return hostFor(runner).current(taskId)?.phase === 'retiring';
