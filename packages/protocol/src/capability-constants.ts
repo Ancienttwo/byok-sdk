@@ -38,9 +38,6 @@ export const AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY = 'agent-home-projec
 /** Contract §8.1's capability gate for `byok-task-assertion-v1` tool authority. */
 export const HOST_MCP_TASK_CONTEXT_CAPABILITY = 'host-mcp-task-context' as const;
 
-/** Daemon capability required before an exact local provider profile may be offered. */
-export const PROVIDER_PROFILE_BINDING_CAPABILITY = 'provider-profile-binding' as const;
-
 /** Device capability required before a Host may enqueue `provider.provisioning.available`. */
 export const PROVIDER_PROVISIONING_CAPABILITY = 'provider-provisioning.v1' as const;
 

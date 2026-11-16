@@ -2,12 +2,26 @@
 export const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
 
 /**
- * Wire protocol version. Every v6 change is a version bump, a gated addition
+ * Wire protocol version. Every v7 change is a version bump, a gated addition
  * or a strip-safe addition: see docs/protocol.md "Freeze rule", which is the
  * one statement of the rule, and `src/wire-additions.ts`, which declares the
- * receiver-capability gates and additions. No v6 release has been published
- * yet, so `src/__tests__/compat.test.ts` has no published v6 decoder to prove
+ * receiver-capability gates and additions. No v7 release has been published
+ * yet, so `src/__tests__/compat.test.ts` has no published v7 decoder to prove
  * additions against; cross-release gates stay unproven until one exists.
+ *
+ * v7 replaces the offer's `runtime`, `harnessId` and `dispatchSelection` with
+ * one required `target` union, and the claim's `runtime` and `harnessId` with
+ * a required `executor`; terminals echo `executor`. It adds the
+ * daemon-to-server `task.steer_refused` (#2009), removes the server
+ * capability advertisement, `limits.maxTokens`, `task.claim.agentId` and the
+ * device flags `steer` and `provider-profile-binding`, types the decline
+ * codes, and bounds the plaintext steer text, the decline reason and the
+ * hello capability list. The `POST /byok/messages` frame accepts any positive
+ * `v`: an entry of another major is answered `rejected` with
+ * `protocol_version_unsupported`, and an unknown daemon-to-server type with
+ * `type_unsupported`. A v6 envelope is rejected; there is no v6 reader.
+ * Start the server side on a new store, pair again, then upgrade the
+ * daemons.
  *
  * v6 splits the runtime capability `isolation.userContext` into one bit per
  * source a runtime can keep out: `userInstructions`, `userOutputStyle`,
@@ -57,7 +71,7 @@ export const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
  * attest tool executables. The artifact names its counted tools in
  * `toolNames`.
  */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /**
  * The device runs `homeAccess: 'memory-reader'` Agent offers: each reader
@@ -69,26 +83,23 @@ export const PROTOCOL_VERSION = 6;
 export const AGENT_HOME_READERS_CAPABILITY = 'agent-home-readers' as const;
 
 /**
- * Capability flags. The daemon sends its flags in `conn.hello`; the server
- * sends its own on every long-poll response (`EventsPollResponse`). Additional
- * flags may be introduced without a protocol version bump; unrecognized flags
- * must be ignored by both sides.
+ * Device capability flags. The daemon sends its flags in `conn.hello`; the
+ * server advertises none (wire v7). A server gates a server-to-daemon surface
+ * on them (`wire-additions.ts`). Additional flags may be introduced without a
+ * protocol version bump; unrecognized flags must be ignored.
  *
- * `dispatch-selection` (additive-minor) is a correctness gate for the
- * optional offer `dispatchSelection` control field. An older v1 daemon
- * legally strips unknown optional fields, so a server must never send an
- * authoritative provider/model selection unless the target connection
- * advertises this flag. Absence means reject before task creation, not send
- * an offer that could reach a different provider.
+ * `dispatch-selection` gates the model lanes of an offer `target`
+ * (`subscription`, `byok`, `byok-profile`): a daemon advertises it when it is
+ * configured to run a selected provider and model. Absence means reject
+ * before task creation, not send an offer that could reach a different
+ * provider.
  *
  * `toolset-selection` (additive-minor) means the daemon understands an
  * offer's `requiredToolsets` and can resolve its logical ids against local
  * MCP configuration.
  */
 export const CAPABILITY_FLAGS = [
-  'steer',
   'dispatch-selection',
-  PROVIDER_PROFILE_BINDING_CAPABILITY,
   'toolset-selection',
   'agent-home-contract',
   AGENT_HOME_READERS_CAPABILITY,
@@ -126,7 +137,6 @@ import {
   AGENT_HOME_PROJECTION_CAPABILITY,
   AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY,
   HOST_MCP_TASK_CONTEXT_CAPABILITY,
-  PROVIDER_PROFILE_BINDING_CAPABILITY,
   PROVIDER_PROVISIONING_CAPABILITY,
   AGENT_MEMORY_INTENT_CAPABILITY,
   AGENT_MEMORY_SELECTION_CAPABILITY,

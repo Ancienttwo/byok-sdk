@@ -716,3 +716,29 @@ export const InputPreparationRejectionReasonSchema = z.enum([
   'input_preparation_record_log_unsupported',
 ]);
 export type InputPreparationRejectionReason = z.infer<typeof InputPreparationRejectionReasonSchema>;
+
+/**
+ * Why a device refused a prepared `task.offer` (wire v7): the `task.decline`
+ * code of each refusal. All are terminal for the offer: re-offering the same
+ * reference against the same device state reaches the same answer.
+ */
+export const PREPARED_OFFER_DECLINE_CODES = [
+  'preparation_lane_unconfigured',
+  'preparation_result_schema_mismatch',
+  'preparation_not_found',
+  'preparation_not_ready',
+  'preparation_device_mismatch',
+  'preparation_agent_mismatch',
+  'preparation_profile_revision_mismatch',
+  'preparation_policy_revision_mismatch',
+  'preparation_request_digest_mismatch',
+  'preparation_artifact_digest_mismatch',
+  'agent_memory_mismatch',
+  'preparation_runtime_identity_mismatch',
+  'preparation_tool_set_mismatch',
+  'preparation_tool_binding_digest_mismatch',
+  'preparation_observation_digest_mismatch',
+  'preparation_tool_surface_unfingerprintable',
+  'preparation_already_pinned',
+] as const;
+export type PreparedOfferDeclineCode = (typeof PREPARED_OFFER_DECLINE_CODES)[number];
