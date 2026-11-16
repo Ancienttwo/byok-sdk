@@ -361,6 +361,28 @@ A plaintext `task.steer` text is at most 65,536 UTF-8 bytes
 enqueues. A sealed steer is not checked on the device. `conn.hello` carries
 at most 64 capability flags.
 
+### Pairing registration fence (#2045)
+
+`POST /byok/pair` fences machine supersession with a compare-and-set on the
+machine's current device. See
+"Registration fence" in [§6.1](../protocol.md#61-pairing--post-byokpair-v2).
+
+- `PairRequest` requires `expectedDeviceDigest` (`null` or a
+  `pairDeviceDigest`). A v6 client gets `400`.
+- `401` carries `code: 'pairing_code_invalid'`. The new `409`
+  `pairing_superseded` carries only `currentDeviceDigest`, and its code stays
+  redeemable.
+- Custom cloud stores: `DeviceRegistration` and `PairingEnrollmentInput`
+  require `expectedDeviceDigest`. `DeviceDirectory.register` returns
+  `DeviceRegistrationResult` (`registered` or `conflict`), and
+  `PairingEnrollment.redeemAndRegister` returns `PairingEnrollmentResult`
+  (`registered`, `conflict` or `code_invalid` in place of `undefined`).
+  With `machineId`, the fence check, the supersession and the insert form
+  one atomic section per machine; a conflict writes nothing and consumes no
+  code. The cloud conformance suite has a case for each rule.
+- The reference stores, the hosted data plane and the client pairing flow:
+  phase 1.
+
 ### Phase 1 and 2 items
 
 - Host APIs for steer refusals and their cursors (te2): phase 1.

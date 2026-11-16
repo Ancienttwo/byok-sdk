@@ -3028,8 +3028,10 @@ auth/device-flow UI, outside this protocol's concern) plus a freshly
 generated device keypair register the device and mint its first token.
 
 ```
-Request  (PairRequestSchema):  { pairingCode, deviceName, devicePublicKey, machineId? }
+Request  (PairRequestSchema):  { pairingCode, deviceName, devicePublicKey, machineId?, expectedDeviceDigest }
 Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint?, expiresIn }
+409      (PairSupersededResponseSchema):     { error, code: "pairing_superseded", currentDeviceDigest }
+401      (PairingCodeInvalidResponseSchema): { error, code: "pairing_code_invalid" }
 ```
 
 - `devicePublicKey`: Ed25519 public key, base64url-encoded.
@@ -3044,6 +3046,9 @@ Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint?, 
   product of its own — those still come
   only from the redeemed pairing code's claims — and a client that cannot
   resolve one omits the field, in which case no supersession happens at all.
+- `expectedDeviceDigest`: REQUIRED, `null` or a device digest. It fences
+  machine supersession; see "Registration fence" below. A request without it
+  is a pre-v7 client and gets `400`.
 - `accessToken`: JWT, ~1h lifetime.
 - `tenantId`: required opaque, non-secret tenant binding copied exactly from
   the authenticated redeemed pairing-code/device row. It is bounded to 1–200
@@ -3081,6 +3086,86 @@ and row-write happen in one step, and the code's single-use semantics are what
 make it exclusive: a second redeem is rejected before any row is written.
 From that point the device row — not any token payload — is the authority on
 which tenant and product a device belongs to.
+
+**Registration fence (#2045, wire v7).** Without a fence, a pairing that
+lost the race for its local credential slot could still land on the server
+after its successor and supersede the successor's device, so the device that
+holds the slot would find itself retired. The fence is a compare-and-set on
+the machine's current device.
+
+*Device digest.* `pairDeviceDigest({ tenantId, productId, deviceId })` in
+`@byok-sdk/protocol` is the only definition; the client and every store call
+it. It is SHA-256 over the UTF-8 bytes of the JSON array
+`["byok-pair-device-v1", tenantId, productId, deviceId]`, encoded as
+unpadded base64url (43 characters). A JSON array of strings has one
+serialization, so fields cannot run into each other. Tenant and product salt
+the digest, so it does not match across scopes. Device ids are minted by the
+server as random UUIDs, so a digest reveals only whether the device changed.
+
+*Server decision*, in this order, inside the registration transaction:
+
+1. **Replay.** A code already used with the same binding (`deviceName`,
+   `devicePublicKey`, `machineId`, proof key; not `expectedDeviceDigest`)
+   returns its completion as `200` while that device is registered, without
+   reading the fence. A same-code retry after a timeout keeps working even
+   when the fence has moved.
+2. **Code.** An unknown, expired or otherwise used code gets `401`
+   `pairing_code_invalid`. The three are indistinguishable.
+3. **No `machineId`.** Nothing is superseded, so the fence is not read and
+   the device registers. Such a registration never retires another device.
+4. **Fence.** The server reads the current device of
+   `(tenantId, productId, machineId)` after every earlier registration of
+   that machine has committed. If `expectedDeviceDigest` is its digest, or
+   both are `null`, it supersedes that device, registers, and consumes the
+   code. Otherwise it answers `409` `pairing_superseded` with
+   `currentDeviceDigest`, the current device's digest or `null`. A `409`
+   changes nothing and consumes nothing: the same code stays redeemable.
+
+The `409` and `401` bodies carry a fixed `error` text and their `code`; the
+`409` adds `currentDeviceDigest` and nothing else the server knows.
+
+*Client rule* (wire v7 client):
+
+- Every pairing stages a local attempt carrying the digest of the slot's
+  current enrollment (`null` when there is none), including a re-pair of the
+  device's own enrollment, and sends it unchanged. A same-code retry resends
+  the stored value.
+- Only a schema-valid `409` `pairing_superseded` is a fence conflict. Any
+  other answer is unknown and keeps the attempt.
+- On a conflict, the `pair()` invocation that sent the request may adopt
+  `currentDeviceDigest` and resend once with the same code and key, and only
+  if the slot still holds exactly its attempt (store identity, attempt,
+  code and key). It never adopts from persisted state or in a later
+  invocation. A lost attempt ends the pairing with no retry.
+- A second conflict ends the pairing with a typed, retryable busy error. It
+  happens only when two pairings of the same machine run at once.
+
+A stale request names a device its successor has already superseded, and
+every commit installs a fresh server-minted id, so the stale request can no
+longer match. Only the owning invocation can learn the new digest.
+
+*Residual risks*, accepted and documented:
+
+- **Orphans.** A stale pairing without `machineId`, or one into another
+  tenant, can still register an orphan device row. It retires nothing; the
+  Host revokes it.
+- **Keychain restore (CE-1).** A user who restores a keychain backup holding
+  the stale attempt within the seconds a pairing is in flight lets that
+  invocation adopt and supersede its successor. Only server state could tell
+  the two apart.
+- **Server database rollback (CE-2).** Restored rows bring back old current
+  devices and codes, and stale requests can match again.
+- **Revoked successor (CE-3).** After the Host revokes the successor, the
+  machine has no current device again, and a stale `null` request can
+  register an orphan. Only the device the Host chose was revoked; the next
+  pairing of that machine supersedes the orphan.
+- **Code validity probe.** A `409` does not consume the code, so a code
+  holder can repeat it until the code expires and learn that the code is
+  valid (the same bit `401` versus `200` gives) and whether that machine's
+  device changed. The public pairing rate limit bounds the attempts.
+- **v7 client, v6 server.** A v6 server drops the unknown field and registers
+  without the fence; the client then halts at the handshake. Upgrade the
+  cloud first.
 
 ### 6.2 Token renewal — `POST /byok/challenge` + `POST /byok/token`
 
