@@ -670,7 +670,8 @@ does that on the Host's explicit acknowledgement. It never runs on its own.
 - An unknown root throws. A root that is already archived counts as
   `alreadyArchivedRoots`.
 - Each call also moves the command records of archived roots and the records
-  with no root. They answer replays for at least `retentionMs`, which must be
+  with no root. A record's root is the root of the command's own Turn, not of
+  an input batch Turn that the command sealed ahead of it (#2254). They answer replays for at least `retentionMs`, which must be
   seven days or more; a later call removes them after that. A retry after the
   window decides again, and an archived Turn, input or round id makes the
   commit throw `RetiredIdentityError` and change nothing. A store makes that

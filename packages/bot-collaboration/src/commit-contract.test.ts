@@ -221,6 +221,11 @@ it('records the root of the input itself when the input also seals an earlier du
   expect(state.turns[own(first)]).toBeDefined();
   expect(state.commands?.c1?.root).toBe(own(first));
   expect(state.commands?.c2?.root).toBe(own(second));
+  // #2254: an answer seals k2's open batch ahead of its own Turn, and its record still takes the answer Turn's root.
+  state.questions.q = { id: 'q', turnId: own(first), value: { kind: 'ask_user', question: 'Go?', answerKind: 'text' } as never };
+  commitCommand(state, { scope: 's', commandId: 'c3', command: { kind: 'answer', questionId: 'q', answer: 'yes' } },
+    { scope: 's', recordCallbacks: true, archived: () => undefined, admitted: () => {} }, ports(state, () => {}));
+  expect([!!state.turns[own(second)], state.commands?.c3?.root]).toEqual([true, hash(['answer', 'q'])]);
 });
 
 /**

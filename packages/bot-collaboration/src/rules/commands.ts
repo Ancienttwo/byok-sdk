@@ -481,7 +481,10 @@ function commandRoot(state: CommandState, command: Command, disposition: Disposi
   // The input's own Turn or batch decides first: an input can also seal an earlier batch, which adds that batch's Turn.
   const value = disposition.outcome === 'accepted' ? disposition.value : undefined;
   if ((command.kind === 'input' || command.kind === 'receive') && typeof value === 'string') return turnRoot(value) ?? value;
-  if (turns.length) return state.turns[turns[0]!]!.root;
+  // A new Turn first seals its Bot's open input batch, whose Turn comes ahead of the command's own (#2254). A batch Turn
+  // decides only when it is the command's only Turn: a cancel that sealed the batch it cancels.
+  const own = turns.find(id => !state.turns[id]!.inputIds) ?? turns[0];
+  if (own !== undefined) return state.turns[own]!.root;
   if (rounds.length) return state.team.rounds[rounds[0]!]!.root;
   switch (command.kind) {
     case 'answer': return turnRoot(Object.hasOwn(state.questions, command.questionId) ? state.questions[command.questionId]!.turnId : undefined);
