@@ -407,7 +407,12 @@ test('#2286: core admits exactly its sqlite-node entry', t => {
   const write = value => f.write(path, { ...manifest, exports: { ...manifest.exports, './sqlite-node': value } });
   write(entry);
   assert.doesNotThrow(() => selectImpact([path], f));
-  for (const invalid of [{ ...entry, types: './dist/other.d.ts' }, { ...entry, default: './dist/other.js' }, { types: entry.types, node: { import: './dist/sqlite-node.js' } }]) {
+  // Part A shipped a node-only shape first; exactly that shape may move to this one.
+  const partA = { types: entry.types, node: { import: './dist/sqlite-node.js' } };
+  write(partA); rebase(f, 'core with the part A entry');
+  write(entry);
+  assert.doesNotThrow(() => selectImpact([path], f));
+  for (const invalid of [{ ...entry, types: './dist/other.d.ts' }, { ...entry, default: './dist/other.js' }, { ...partA, default: entry.default }]) {
     write(invalid);
     assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
   }

@@ -375,11 +375,15 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   } else {
     if (!version(before.version) || !version(after.version)) throw new Error('Invalid package version');
     delete before.version; delete after.version;
-    // #2286: core gains exactly its sqlite-node entry. One-time: remove this admission in the release
-    // that ships #2286 part A, once that release's core manifest is the base (as #2218 removed spent admissions).
+    // #2286: core gains exactly its sqlite-node entry, from none or from part A's node-only shape. One-time: remove
+    // this admission in the release that ships #2286, once that release's core manifest is the base (as #2218 did).
     const sqliteNode = { types: './dist/sqlite-node.d.ts', default: './dist/sqlite-node.js' };
-    if (path === 'packages/core/package.json' && before.exports?.['./sqlite-node'] === undefined
-      && isDeepStrictEqual(after.exports?.['./sqlite-node'], sqliteNode)) delete after.exports['./sqlite-node'];
+    const partA = { types: './dist/sqlite-node.d.ts', node: { import: './dist/sqlite-node.js' } };
+    const prior = before.exports?.['./sqlite-node'];
+    if (path === 'packages/core/package.json' && (prior === undefined || isDeepStrictEqual(prior, partA))
+      && isDeepStrictEqual(after.exports?.['./sqlite-node'], sqliteNode)) {
+      if (prior === undefined) delete after.exports['./sqlite-node']; else after.exports['./sqlite-node'] = prior;
+    }
   }
   // After every dedicated admission, so an edge a branch above already reviewed is not taken here.
   qualify.push(...admitRegisteredPrivateManifest(before, after, path, { base, cwd, workspaceGraph }));
