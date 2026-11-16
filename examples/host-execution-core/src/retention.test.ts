@@ -331,7 +331,14 @@ describe('Host ledger format', () => {
   });
 
   it('writes the format into the main file when it creates a ledger', () => {
-    const { filename } = open();
+    // The schema commits in the transaction that decided the file was empty; journal_mode changes only after it.
+    const exec = vi.spyOn(DatabaseSync.prototype, 'exec');
+    let filename = '';
+    try {
+      filename = open().filename;
+      const steps = exec.mock.calls.map(([sql]) => sql.trim().split(/\s+/).slice(0, 2).join(' '));
+      expect(steps.filter(step => /^(BEGIN|COMMIT|ROLLBACK|PRAGMA journal_mode)/.test(step))).toEqual(['BEGIN IMMEDIATE', 'COMMIT', 'PRAGMA journal_mode=WAL']);
+    } finally { exec.mockRestore(); }
     const read = new DatabaseSync(`file:${filename}?mode=ro&immutable=1`, { readOnly: true });
     try { expect(read.prepare('SELECT owner, version FROM host_store_format').all()).toEqual([{ owner: 'k4', version: 1 }]); }
     finally { read.close(); }

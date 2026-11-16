@@ -240,26 +240,20 @@ export class HostLedger {
       // ledger after the read above. It reads the format in a write transaction, before any persistent pragma or DDL.
       // Not handled: when the main file has no schema and the WAL holds an older one, closing the refused connection
       // checkpoints that WAL into the main file; its logical content is kept.
+      // An empty file gets its schema in this same transaction, so the lock is held from the decision to the commit.
       this.db.exec('BEGIN IMMEDIATE');
-      let created = false;
       try {
         if (admitFormat(this.db, formats) === 'empty') {
-          // journal_mode cannot change inside a transaction, and an empty file holds nothing to protect.
-          this.db.exec('ROLLBACK; PRAGMA journal_mode=WAL; BEGIN IMMEDIATE');
-          created = admitFormat(this.db, formats) === 'empty';
-          if (created) {
-            this.db.exec(SCHEMA);
-            const row = this.db.prepare('INSERT INTO host_store_format VALUES (?, ?)');
-            for (const [owner, version] of Object.entries(formats)) row.run(owner, version);
-          }
+          this.db.exec(SCHEMA);
+          const row = this.db.prepare('INSERT INTO host_store_format VALUES (?, ?)');
+          for (const [owner, version] of Object.entries(formats)) row.run(owner, version);
         }
         this.db.prepare('INSERT OR IGNORE INTO host_ledger VALUES (?, ?)').run(tenant, JSON.stringify(empty()));
         this.db.exec('COMMIT');
       } catch (error) { if (this.db.isTransaction) this.db.exec('ROLLBACK'); throw error; }
-      if (created) {
-        // The main file then holds the format, so the next open decides it before any write.
-        this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-      } else this.db.exec('PRAGMA journal_mode=WAL');
+      // journal_mode cannot change inside a transaction. A new ledger committed its schema to the main file in rollback
+      // mode, so the next open decides it before any write.
+      this.db.exec('PRAGMA journal_mode=WAL');
     } catch (error) { this.db.close(); throw error; }
   }
   snapshot(): LedgerState {
