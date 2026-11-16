@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "d940aa4d8d088c6376521a5bcd4e27b588c0a39320f752e0aaa191b5c17b83ce"
+    "snapshotSha256": "09c01115eb3c931db69fe09558145c31cccf263a5198f49ecf9e194983732b4f"
   },
   "configFields": {
     "status": "tracked",
@@ -41,7 +41,105 @@
       "items": [
         "behavior:claude-queued-write-failure"
       ]
+    },
+    {
+      "id": "remove-task-terminal-read",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes AgentSessionHandoffStore.getTaskTerminal(). Remove reads; recordTaskTerminal() still persists failure evidence and returns its write receipt.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#task-terminal-evidence",
+      "items": [
+        "export:@byok-sdk/client#AgentSessionHandoffStore"
+      ]
+    },
+    {
+      "id": "remove-unused-team-workspace-methods",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes LocalTeamWorkspace/LocalTeamWorkspaceService.getWorkspace(), updateWorkspace() and validateMemberLease(). Use listWorkspaces() for definitions and message operations for lease validation; create a separately named workspace for a different definition.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#team-workspaces",
+      "items": [
+        "export:@byok-sdk/client#LocalTeamWorkspace",
+        "export:@byok-sdk/client#LocalTeamWorkspaceService"
+      ]
+    },
+    {
+      "id": "remove-egress-drop-receipts",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes AgentEgressController.dropReceipts(), its buffer and AgentEgressDropReceipt. Call noteTransportDrop() with only the reason. Read status() for lane counters and the last reason; retain any per-drop audit history at the Host transport boundary.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#egress-drop-receipts",
+      "items": [
+        "export:@byok-sdk/client#AgentEgressDropReceipt"
+      ]
+    },
+    {
+      "id": "remove-standalone-daemon-log",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes openDaemonLog() and DaemonLog. Embedding Hosts that write individual log lines must own their sink and rotation; daemon-wide stdout/stderr routing is not a standalone line-writer replacement.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#standalone-daemon-log-writer",
+      "items": [
+        "export:@byok-sdk/client#openDaemonLog",
+        "export:@byok-sdk/client#DaemonLog"
+      ]
+    },
+    {
+      "id": "remove-service-exit-disposition",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes serviceExitDisposition() and ServiceExitDisposition. Use EXIT_CODE_CONTRACT for documented statuses and configure stop-on-zero/restart-on-failure in the Host supervisor; generated SDK service units already enforce that policy.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#service-exit-disposition",
+      "items": [
+        "export:@byok-sdk/client#serviceExitDisposition",
+        "export:@byok-sdk/client#ServiceExitDisposition"
+      ]
+    },
+    {
+      "id": "remove-pi-rpc-close-wait",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes PiRpcClient.waitClosed() from its declaration closure. Observe the owned child close event via an injected spawnFn for passive closure; dispose() initiates process-tree cleanup and is not a passive wait.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pi-rpc-close-wait",
+      "items": [
+        "behavior:remove-pi-rpc-close-wait"
+      ]
     }
   ],
-  "changes": []
+  "changes": [
+    {
+      "item": "export:@byok-sdk/client#AgentEgressDropReceipt",
+      "change": "removed",
+      "entry": "remove-egress-drop-receipts"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentSessionHandoffStore",
+      "change": "changed",
+      "entry": "remove-task-terminal-read"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonLog",
+      "change": "removed",
+      "entry": "remove-standalone-daemon-log"
+    },
+    {
+      "item": "export:@byok-sdk/client#LocalTeamWorkspace",
+      "change": "changed",
+      "entry": "remove-unused-team-workspace-methods"
+    },
+    {
+      "item": "export:@byok-sdk/client#LocalTeamWorkspaceService",
+      "change": "changed",
+      "entry": "remove-unused-team-workspace-methods"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceExitDisposition",
+      "change": "removed",
+      "entry": "remove-service-exit-disposition"
+    },
+    {
+      "item": "export:@byok-sdk/client#openDaemonLog",
+      "change": "removed",
+      "entry": "remove-standalone-daemon-log"
+    },
+    {
+      "item": "export:@byok-sdk/client#serviceExitDisposition",
+      "change": "removed",
+      "entry": "remove-service-exit-disposition"
+    }
+  ]
 }

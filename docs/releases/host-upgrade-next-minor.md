@@ -34,3 +34,58 @@ agy's ACP command now carries `--gemini-dir <owned home>/.gemini`, the directory
 One failure path changes. If Claude's own turn ends between the busy refusal and the queue, 0.43.0 wrote the input inside `queue()` (`packages/client/vendor/oar/2f81b34/shared/stream-json/session.ts:247-259`), and a failed stdin write rejected `followUp()` with retryable `RuntimeExecutionFailure` `claude follow-up instruction transport failed` (`packages/client/src/adapters/claude/claude-adapter.ts:772-775`). The write now happens after the queue request is answered (`packages/client/vendor/oar/4eb5919/shared/stream-json/session.ts:253-263`), outside the writes `followUp()` awaits, so `followUp()` resolves. The write failure fails the Claude process (`packages/client/src/adapters/claude/stream-session.ts:94-99`), and the session's `events` iteration then throws the retryable run failure for the ended process: `claude runtime event transport failed` or `claude runtime process ended before a terminal result frame` (`packages/client/src/adapters/claude/claude-adapter.ts:671-684`).
 
 This affects only a Host that embeds `ClaudeAdapter` directly; the daemon does not call `followUp()`, so daemon Hosts need no change. An embedding Host must treat a resolved `followUp()` as accepted for delivery, not as written, and handle the failure from `events` as it handles any mid-turn process failure: the follow-up was not delivered, so resend it on a new session.
+
+## Removed unused client APIs
+
+### Task terminal evidence
+
+`AgentSessionHandoffStore.getTaskTerminal()` is removed. Stop calling the unused
+read API. Production failure handling still awaits `recordTaskTerminal()` to
+persist evidence before sending `task.fail`; use that write receipt when recording
+a failure. There is no public terminal-evidence read replacement.
+
+### Team workspaces
+
+`LocalTeamWorkspace.getWorkspace()`, `updateWorkspace()` and
+`validateMemberLease()` (also exposed by `LocalTeamWorkspaceService`) are removed,
+along with the unused
+`UpdateTeamWorkspaceInput` declaration. Use `listWorkspaces()` to inspect workspace
+definitions. Validate a member lease by performing the intended `postMessage()`,
+`readMessages()` or `ackMessages()` operation; each resolves the lease itself.
+There is no public in-place membership/limit update API. Create a separately named
+workspace with the desired definition and issue its member leases instead.
+
+### Egress drop receipts
+
+`AgentEgressController.dropReceipts()` and `AgentEgressDropReceipt` are removed,
+including the unused in-memory receipt buffer. `noteTransportDrop(reason)` no
+longer accepts an optional `AgentRef`; pass only the drop reason. Use `status()` for each lane's
+`dropped`, `replaced` and `lastDropReason`. Per-drop history is no longer retained;
+Hosts needing an audit history must collect it at their own transport boundary.
+
+### Standalone daemon log writer
+
+`openDaemonLog()` and `DaemonLog` are removed. An embedding Host that writes its
+own individual log lines must own its log sink, append complete lines and apply
+its own retention/rotation policy. `DaemonLogOptions` remains because the daemon's
+internal process-output router still uses it. That router captures all stdout
+and stderr for the daemon process; it is not a same-semantics replacement for a
+Host's standalone line writer and is not exported from the package entrypoint.
+
+### Service exit disposition
+
+`serviceExitDisposition()` and `ServiceExitDisposition` are removed.
+`EXIT_CODE_CONTRACT` and `ExitCode` remain for documented exit statuses. Hosts
+with their own service supervision must configure stop on exit 0 and restart on
+failure in that supervisor. The SDK-generated launchd, systemd and WinSW units
+already enforce that policy; `daemonExitCode()` remains unchanged.
+
+### Pi RPC close wait
+
+`PiRpcClient.waitClosed()` is removed from the published declaration closure.
+Hosts that inject a `spawnFn` and need to observe child transport closure must
+subscribe to their owned child's `close` event. Consumers can drain `events` and
+inspect `terminalError` / `processExited` for RPC termination. `dispose()` remains
+the explicit process-tree cleanup receipt; calling it initiates termination and
+is not a passive close wait. Internal process-tree cleanup still waits for the
+client's private close promise.

@@ -494,27 +494,6 @@ export class AgentSessionHandoffStore {
     });
   }
 
-  async getTaskTerminal(expectedInput: AgentTaskTerminalMatch): Promise<AgentTaskTerminalEvidence | undefined> {
-    const expected: AgentTaskTerminalMatch = {
-      agentRef: validateAgentRef(expectedInput.agentRef),
-      taskId: expectedInput.taskId,
-      runtimeId: expectedInput.runtimeId,
-      ...(expectedInput.home === undefined ? {} : { home: expectedInput.home }),
-      cwd: path.resolve(expectedInput.cwd),
-      ...(expectedInput.homeAccess === undefined ? {} : { homeAccess: expectedInput.homeAccess }),
-    };
-    const filePath = await this.taskTerminalFilePath(expected);
-    return this.enqueue(filePath, async () => {
-      const entry = await this.loadTaskTerminal(filePath);
-      if (entry !== undefined && !sameTaskTerminalMatch(entry, expected)) {
-        throw new AgentSessionHandoffMismatchError(
-          `task ${expected.taskId} terminal evidence does not match AgentRef/profileRevision/runtime/cwd exactly`,
-        );
-      }
-      return entry;
-    });
-  }
-
   private async filePath(
     match: Pick<AgentSessionHandoffMatch, 'agentRef' | 'sessionRef' | 'runtimeId' | 'home' | 'cwd'>,
   ): Promise<string> {

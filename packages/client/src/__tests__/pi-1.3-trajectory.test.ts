@@ -1,3 +1,4 @@
+import { spawn, type SpawnOptions } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promises as fs, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +9,7 @@ import { Type } from 'typebox';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { mapPiMessageToAgentEvent } from '../adapters/pi/events';
 import { OFFICIAL_PI_PROVENANCE } from '../adapters/pi/official-pi-installation.mjs';
-import { PiRpcClient, type PiRpcMessage } from '../adapters/pi/rpc-client';
+import { PiRpcClient, type PiRpcMessage, type SpawnFn } from '../adapters/pi/rpc-client';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 
 const clients: PiRpcClient[] = [];
@@ -159,15 +160,21 @@ describe('Octop T0: synthetic RPC records through the real SDK parser and mapper
   it.each(['normal', 'tool-error', 'interrupted', 'killed'] as const)('replays %s without a Pi process or provider', async scenario => {
     const record = new URL(`${scenario}.jsonl`, records);
     const frames: PiRpcMessage[] = [];
+    let closed!: Promise<void>;
+    const spawnFn = ((command: string, args: readonly string[], options: SpawnOptions) => {
+      const child = spawn(command, args, options);
+      closed = new Promise<void>(resolve => child.once('close', () => resolve()));
+      return child;
+    }) as SpawnFn;
     const client = new PiRpcClient({ command: process.execPath,
       args: [fileURLToPath(new URL('./fixtures/pi-trajectory-replay.mjs', import.meta.url)), fileURLToPath(record), scenario],
-      cwd: import.meta.dirname, env: {}, onFrame: frame => { frames.push(frame); },
+      cwd: import.meta.dirname, env: {}, spawnFn, onFrame: frame => { frames.push(frame); },
     });
     clients.push(client);
     expect(await client.send({ type: 'replay_synthetic' })).toMatchObject({ success: true });
     const raw: PiRpcMessage[] = [];
     for await (const frame of client.events) raw.push(frame);
-    await client.waitClosed();
+    await closed;
     const lines = (await fs.readFile(record, 'utf8')).split('\n');
     if (scenario === 'killed') {
       expect(lines.at(-1)).toBe('{"type":"tool_execution_end"');

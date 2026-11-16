@@ -18,16 +18,10 @@ export const EXIT_CODE_CONTRACT = Object.freeze({
 } as const);
 
 export type ExitCode = keyof typeof EXIT_CODE_CONTRACT;
-export type ServiceExitDisposition = (typeof EXIT_CODE_CONTRACT)[ExitCode]['service'];
 
 export const EXIT_SUCCESS = 0;
 export const EXIT_FAILURE = 1;
 export const EXIT_CONFIG = 78;
-
-/** What a service manager does after `code`; a status outside the contract (a signal, an unknown code) restarts. */
-export function serviceExitDisposition(code: number): ServiceExitDisposition {
-  return code === EXIT_SUCCESS ? 'stop' : 'restart';
-}
 
 /** How `start` ended without crashing; a crash is a throw and exits {@link EXIT_FAILURE}. */
 export interface DaemonExitOutcome { readonly kind: 'stopped' | 'halted' }

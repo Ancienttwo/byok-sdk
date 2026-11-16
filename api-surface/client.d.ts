@@ -862,7 +862,6 @@ export declare class PiRpcClient {
      * swallowing it here loses nothing.
      */
     kill(): void;
-    waitClosed(): Promise<void>;
     dispose(): Promise<void>;
     private processTreeOptions;
     /**
@@ -2083,7 +2082,7 @@ export declare class AgentContentReadPolicyEngine {
 // ==== @byok-sdk/client dist/daemon/agent-egress-controller.d.ts ====
 import { type AgentEvent } from '@byok-sdk/protocol';
 import type { AgentRef } from '../agent-home.js';
-import { type AgentEgressDropReason, type AgentEgressDropReceipt, type AgentEgressPolicy, type AgentEgressStatus } from './agent-egress-policy.js';
+import { type AgentEgressDropReason, type AgentEgressPolicy, type AgentEgressStatus } from './agent-egress-policy.js';
 import { type AgentReliableAck, type AgentContentReceiptWithoutReliableIdentity, type AgentReliableEgressRecord } from './agent-egress-spool.js';
 export interface AgentEgressControllerOptions {
     readonly policy: Readonly<AgentEgressPolicy>;
@@ -2130,15 +2129,13 @@ export declare class AgentEgressController {
     private reliableAppendTail;
     private readonly latestStatus;
     private readonly reliableStatus;
-    private readonly drops;
     private active;
     constructor(options: AgentEgressControllerOptions);
     get policy(): Readonly<AgentEgressPolicy>;
     /** Permanently fail closed after its authenticated enrollment is replaced. */
     deactivate(): void;
     status(): AgentEgressStatus;
-    dropReceipts(): readonly AgentEgressDropReceipt[];
-    noteTransportDrop(reason: AgentEgressDropReason, agentRef?: AgentRef): void;
+    noteTransportDrop(reason: AgentEgressDropReason): void;
     /**
      * Coalesce to the latest value before TaskRunner builds a `task.progress`
      * envelope. Events go to the Host as the runtime produced them. An `error`
@@ -2167,14 +2164,6 @@ export declare class AgentEgressController {
 // ==== @byok-sdk/client dist/daemon/agent-egress-policy.d.ts ====
 import { type AgentEgressDropReason, type AgentEgressPolicy, type AgentEvent } from '@byok-sdk/protocol';
 export type { AgentEgressDropReason, AgentEgressPolicy } from '@byok-sdk/protocol';
-export interface AgentEgressDropReceipt {
-    lane: 'latest-value' | 'reliable';
-    reason: AgentEgressDropReason;
-    agentId?: string;
-    tenantId?: string;
-    eventId?: string;
-    occurredAt: string;
-}
 export interface AgentEgressLaneStatus {
     pendingEvents: number;
     pendingBytes: number;
@@ -3030,7 +3019,6 @@ export declare class AgentSessionHandoffStore {
     recordTaskTerminal(input: Omit<AgentTaskTerminalEvidence, 'updatedAt' | 'terminalCause'> & {
         readonly home?: string;
     }): Promise<AgentTaskTerminalEvidence>;
-    getTaskTerminal(expectedInput: AgentTaskTerminalMatch): Promise<AgentTaskTerminalEvidence | undefined>;
     private filePath;
     private taskTerminalFilePath;
     private enqueue;
@@ -9039,12 +9027,6 @@ export interface CreateTeamWorkspaceInput {
     readonly members: readonly string[];
     readonly limits: TeamWorkspaceLimits;
 }
-export interface UpdateTeamWorkspaceInput {
-    readonly workspaceId: string;
-    readonly expectedRevision: TeamWorkspaceRevision;
-    readonly members: readonly string[];
-    readonly limits?: TeamWorkspaceLimits;
-}
 export interface CreateTeamMemberLeaseInput {
     readonly workspaceId: string;
     readonly memberId: string;
@@ -9136,23 +9118,13 @@ export declare class LocalTeamWorkspace {
     /** Create the secure state directory; it is safe to call on every start. */
     initialize(): Promise<void>;
     createWorkspace(input: CreateTeamWorkspaceInput): Promise<TeamWorkspaceDefinition>;
-    getWorkspace(workspaceId: string): Promise<TeamWorkspaceDefinition | undefined>;
     listWorkspaces(): Promise<readonly TeamWorkspaceDefinition[]>;
     /** Local operator read for the tmux pane; it does not create or advance a member receipt. */
     inspectMessages(workspaceId: string, afterSeq?: number): Promise<readonly TeamMessage[]>;
-    /** CAS-guarded membership/limit update.  A revision change invalidates all leases. */
-    updateWorkspace(input: UpdateTeamWorkspaceInput): Promise<TeamWorkspaceDefinition>;
     createMemberLease(input: CreateTeamMemberLeaseInput): Promise<TeamMemberLease>;
     revokeMemberLease(input: {
         readonly lease: TeamMemberLease;
     }): Promise<void>;
-    /** Validate the opaque lease and return its daemon-owned identity. */
-    validateMemberLease(lease: TeamMemberLease): Promise<Readonly<{
-        workspaceId: string;
-        memberId: string;
-        registryRevision: TeamWorkspaceRevision;
-        expiresAt: string;
-    }>>;
     postMessage(input: TeamPostMessageInput): Promise<TeamMessageAcceptedReceipt>;
     /** Metadata-only operator notification view. Never advances delivery or acknowledgement. */
     notificationSnapshot(input: TeamReadMessagesInput): Promise<{
@@ -9952,7 +9924,7 @@ export { AgentMemoryIntentNoticeError, AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASON
 export type { AgentMemoryIntentNoticeFailureReason, } from './daemon/agent-memory-intent.js';
 export { AgentMemorySnapshotLimitError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory.js';
 export type { AgentMemoryRedactor, AgentMemoryProjectionGrant, AgentMemoryHostedProjection, } from './daemon/agent-memory.js';
-export type { AgentEgressDropReceipt, AgentEgressLaneStatus, AgentEgressStatus, } from './daemon/agent-egress-policy.js';
+export type { AgentEgressLaneStatus, AgentEgressStatus, } from './daemon/agent-egress-policy.js';
 export { AGENT_CONTENT_READ_CAPABILITIES, AGENT_CONTENT_READ_CAPABILITY_WORKSPACE, AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT, AGENT_CONTENT_READ_CAPABILITY_ARTIFACT, } from './daemon/agent-content-read.js';
 export type { AgentContentReadSurface, AgentContentReadDecision, AgentContentReadReason, AgentContentReadRoot, AgentContentReadPolicy, AgentContentReadPolicySelection, AgentContentReadRequest, AgentContentReadResult, AgentContentReadAllowed, AgentContentReadDenied, AgentContentSessionIdentity, AgentContentAuditReceipt, } from './daemon/agent-content-read.js';
 export { McpToolsetRevisionConflictError, McpToolsetDefinitionRevisionConflictError, } from './daemon/toolset-registry.js';
@@ -10068,10 +10040,10 @@ export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecyc
 export type { ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState, } from './lifecycle/service-unit.js';
 export { checkUpgradeFrom } from './lifecycle/upgrade-from.js';
 export type { UpgradeFromBreakingEntry, UpgradeFromRefusalCode, UpgradeFromReport, UpgradeTrainPackage, } from './lifecycle/upgrade-from.js';
-export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes.js';
-export type { ExitCode, ServiceExitDisposition } from './lifecycle/exit-codes.js';
-export { DAEMON_LOG_LIMITS, inspectServiceLogs, openDaemonLog, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log.js';
-export type { DaemonLog, DaemonLogOptions, ServiceLogReport } from './lifecycle/service-log.js';
+export { EXIT_CODE_CONTRACT } from './lifecycle/exit-codes.js';
+export type { ExitCode } from './lifecycle/exit-codes.js';
+export { DAEMON_LOG_LIMITS, inspectServiceLogs, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log.js';
+export type { DaemonLogOptions, ServiceLogReport } from './lifecycle/service-log.js';
 export { applyLoginShellEnvironment } from './lifecycle/service-environment.js';
 export { serviceEnvironmentStatus } from './login-shell-environment.js';
 export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from './runtime/environment.js';
@@ -11264,12 +11236,9 @@ export declare const EXIT_CODE_CONTRACT: Readonly<{
     };
 }>;
 export type ExitCode = keyof typeof EXIT_CODE_CONTRACT;
-export type ServiceExitDisposition = (typeof EXIT_CODE_CONTRACT)[ExitCode]['service'];
 export declare const EXIT_SUCCESS = 0;
 export declare const EXIT_FAILURE = 1;
 export declare const EXIT_CONFIG = 78;
-/** What a service manager does after `code`; a status outside the contract (a signal, an unknown code) restarts. */
-export declare function serviceExitDisposition(code: number): ServiceExitDisposition;
 /** How `start` ended without crashing; a crash is a throw and exits {@link EXIT_FAILURE}. */
 export interface DaemonExitOutcome {
     readonly kind: 'stopped' | 'halted';
@@ -11900,19 +11869,6 @@ export interface DaemonLogOptions {
     maxBytes?: number;
     maxFiles?: number;
 }
-export interface DaemonLog {
-    /** The active file. */
-    readonly path: string;
-    /** Appends one line (a trailing newline is added). Rotates first when the line would cross `maxBytes`. */
-    write(line: string): void;
-    close(): void;
-}
-/**
- * Opens the daemon log in `logDir`. Writes are synchronous so lines keep
- * their order and survive a crash right after them. A single line longer
- * than `maxBytes` is still written whole, into a fresh file.
- */
-export declare function openDaemonLog(options: DaemonLogOptions): DaemonLog;
 /**
  * Routes everything this process writes to `process.stdout` and
  * `process.stderr` (every `console.*` call included) into the daemon log

@@ -6,7 +6,6 @@ import {
   LocalTeamWorkspace,
   TEAM_WORKSPACE_DIRECTORY,
   TEAM_WORKSPACE_MAX_BODY_BYTES,
-  TeamWorkspaceConflictError,
   TeamWorkspaceLeaseError,
   TeamWorkspaceQuotaError,
   TeamWorkspaceReceiptError,
@@ -55,7 +54,7 @@ describe('LocalTeamWorkspace', () => {
     const afterRestart = await restarted.readMessages({ lease: alice });
     expect(afterRestart.messages).toEqual([]);
     expect(afterRestart.receipt).toMatchObject({ acknowledgedThroughSeq: 2, deliveredThroughSeq: 2 });
-    expect(await restarted.getWorkspace('room')).toEqual(definition);
+    expect(await restarted.listWorkspaces()).toEqual([definition]);
 
     const statePath = path.join(dir, TEAM_WORKSPACE_DIRECTORY, 'state.json');
     const raw = await fs.readFile(statePath, 'utf8');
@@ -77,7 +76,7 @@ describe('LocalTeamWorkspace', () => {
 
     const replacement = await service.createMemberLease({ workspaceId: 'room', memberId: 'alice' });
     await expect(service.postMessage({ lease: { ...replacement, memberId: 'bob' }, body: 'wrong member' })).rejects.toBeInstanceOf(TeamWorkspaceLeaseError);
-    expect((await service.validateMemberLease(replacement)).memberId).toBe('alice');
+    expect((await service.postMessage({ lease: replacement, body: 'replacement bearer' })).memberId).toBe('alice');
   });
 
   it('enforces delivery-before-ack and monotonic per-member receipts', async () => {
@@ -101,7 +100,7 @@ describe('LocalTeamWorkspace', () => {
     const service = new LocalTeamWorkspace(dir);
     await service.createWorkspace({ workspaceId: 'room', members: ['alice'], limits: limits({ maxMembers: 1, maxMessages: 2, maxBytes: 5 }) });
     const alice = await service.createMemberLease({ workspaceId: 'room', memberId: 'alice' });
-    await expect(service.updateWorkspace({ workspaceId: 'room', expectedRevision: (await service.getWorkspace('room'))!.revision, members: ['alice', 'bob'] })).rejects.toBeInstanceOf(TeamWorkspaceQuotaError);
+    await expect(service.createWorkspace({ workspaceId: 'oversized', members: ['alice', 'bob'], limits: limits({ maxMembers: 1 }) })).rejects.toBeInstanceOf(TeamWorkspaceQuotaError);
     await service.postMessage({ lease: alice, body: '12345' });
     await expect(service.postMessage({ lease: alice, body: '6' })).rejects.toBeInstanceOf(TeamWorkspaceQuotaError);
     await expect(service.postMessage({ lease: alice, body: '12345' })).rejects.toBeInstanceOf(TeamWorkspaceQuotaError);
@@ -128,14 +127,4 @@ describe('LocalTeamWorkspace', () => {
     await expect(service.postMessage({ lease, body: 'ok', contentType: 'text/plain\nmalicious' })).rejects.toBeInstanceOf(TeamWorkspaceValidationError);
   });
 
-  it('uses an expected revision for member-set changes and invalidates all prior leases', async () => {
-    const dir = await tempDir();
-    const service = new LocalTeamWorkspace(dir);
-    const initial = await service.createWorkspace({ workspaceId: 'room', members: ['alice'], limits: limits() });
-    const alice = await service.createMemberLease({ workspaceId: 'room', memberId: 'alice' });
-    const next = await service.updateWorkspace({ workspaceId: 'room', expectedRevision: initial.revision, members: ['alice', 'bob'] });
-    expect(next.members).toEqual(['alice', 'bob']);
-    await expect(service.postMessage({ lease: alice, body: 'stale' })).rejects.toBeInstanceOf(TeamWorkspaceLeaseError);
-    await expect(service.updateWorkspace({ workspaceId: 'room', expectedRevision: initial.revision, members: ['alice'] })).rejects.toBeInstanceOf(TeamWorkspaceConflictError);
-  });
 });

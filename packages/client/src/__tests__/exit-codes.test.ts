@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { daemonExitCode, EXIT_CODE_CONTRACT, serviceExitDisposition } from '../lifecycle/exit-codes';
+import { daemonExitCode, EXIT_CODE_CONTRACT } from '../lifecycle/exit-codes';
 import { generateLaunchdPlist } from '../lifecycle/launchd';
 import { generateSystemdUnit } from '../lifecycle/systemd';
 import { generateWinswXml } from '../lifecycle/winsw';
@@ -49,12 +49,7 @@ describe('lifecycle/exit-codes (#1097): the exit-code contract', () => {
     for (const [code, files] of found) {
       expect(Object.hasOwn(EXIT_CODE_CONTRACT, code), `exit ${code} in ${files.join(', ')} has no EXIT_CODE_CONTRACT entry`).toBe(true);
     }
-    for (const [code, entry] of Object.entries(EXIT_CODE_CONTRACT)) expect(serviceExitDisposition(Number(code))).toBe(entry.service);
-  });
-
-  it('only 0 stops a service; a signal or unknown status restarts', () => {
-    expect(serviceExitDisposition(0)).toBe('stop');
-    for (const code of [1, 2, 78, 137, 143, 255]) expect(serviceExitDisposition(code)).toBe('restart');
+    for (const [code, entry] of Object.entries(EXIT_CODE_CONTRACT)) expect(entry.service).toBe(Number(code) === 0 ? 'stop' : 'restart');
   });
 
   it('start --service exits only 0 (stop, halt) — a crash throws and exits 1', () => {

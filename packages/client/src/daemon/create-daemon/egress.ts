@@ -10,7 +10,7 @@ import type { DaemonScope } from './scope.js';
 export function dispatchReliableRecord(daemonScope: DaemonScope, record: AgentReliableEgressRecord): void {
   const { daemonState, reliableEnvelopes } = daemonScope;
   if (record.sessionRef === undefined) {
-    daemonState.agentEgress.noteTransportDrop('invalid_envelope', record.agentRef);
+    daemonState.agentEgress.noteTransportDrop('invalid_envelope');
     return;
   }
   // With no connection the append stays durable; every session open sends it
