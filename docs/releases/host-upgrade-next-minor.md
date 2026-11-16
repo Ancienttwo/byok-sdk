@@ -509,12 +509,15 @@ at most 64 capability flags.
 
 - **Claim and terminal executor.** The cloud records the winning claim's
   `executor` as `TaskAttempt.claimedExecutor`. A replayed claim must name the
-  same executor. A harness claim needs a `harness` or `auto` target, and a
-  `harness` target needs a claim of that harness. After a claim, every
-  terminal must echo exactly that executor. Before a claim, a terminal carries
-  none: a cancel or an unclaimed `daemon_interrupted` recovery. A
-  `task.complete` with no claim is rejected. An unclaimed recovery is no
-  longer checked against the offer's target.
+  same executor. A claim's executor must be one the offer's target allows:
+  any under `auto`, otherwise exactly the named runtime or harness. After a
+  claim, every terminal must echo exactly that executor. Before a claim, a
+  cancel carries none, and a `task.complete` is rejected. An unclaimed
+  `daemon_interrupted` recovery may name the executor its device admitted
+  before a claim that never reached the cloud; it must be one the offer's
+  target allows, and it records no claim or owner. `TerminalResult.executor`
+  (and the third argument of `projectTerminalResult`) is the claimed
+  executor, so a task that was never claimed has none.
 - **Renamed inbound refusal reasons** (`INBOUND_REFUSAL_REASONS`, as an
   observer reports them; the wire codes are unchanged). Rename these strings
   if your observer matches them:

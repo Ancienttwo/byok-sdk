@@ -3476,7 +3476,7 @@ export interface TerminalResult {
     readonly failure?: TaskFailureReading;
     readonly recordedAt: string;
 }
-export declare function projectTerminalResult(taskId: string, receipt: RequestReceipt): TerminalResult;
+export declare function projectTerminalResult(taskId: string, receipt: RequestReceipt, claimedExecutor: ClaimedExecutor | undefined): TerminalResult;
 // ==== @byok-sdk/cloud dist/truth/contract.d.ts ====
 import type { ContentHash, TenantId, TruthBodyRef, TruthManifestEntry, TruthManifestQuery, TruthRecord, TruthRecordKind, TruthRecordSelector } from '@byok-sdk/core';
 import { z } from 'zod';

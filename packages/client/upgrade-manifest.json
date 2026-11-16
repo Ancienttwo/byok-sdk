@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "5e336f392e5b623867554849b3030ed3c7c7c98650ef12155fcac3409d7d0998"
+    "snapshotSha256": "c62a423fcfb7947653bdbfe9e4b2cbaaea22c5ef8725760df8f439f992a74722"
   },
   "configFields": {
     "status": "tracked",
@@ -496,14 +496,15 @@
     {
       "id": "wire-v7-cloud-executor",
       "impact": "breaking",
-      "summary": "@byok-sdk/cloud reads the v7 claim executor: InMemoryTaskAttemptStore.claim and TenantBoundTaskAttempts.claim take executor, SteerRejectedError.executor replaces runtime and TerminalResult.executor replaces harnessId. INBOUND_REFUSAL_REASONS renames claim_harness_mismatch to claim_executor_mismatch and terminal_harness_mismatch to terminal_executor_mismatch, removes claim_harness_and_runtime_conflict, and adds steer_refusal_id_mismatch, steer_refusal_unknown_steer and task_not_claimed. Rename the reason strings an observer matches.",
+      "summary": "@byok-sdk/cloud reads the v7 claim executor: InMemoryTaskAttemptStore.claim and TenantBoundTaskAttempts.claim take executor, SteerRejectedError.executor replaces runtime, and TerminalResult.executor replaces harnessId and is the attempt's claimed executor (absent when the task was never claimed); projectTerminalResult takes that claimed executor as a third argument. INBOUND_REFUSAL_REASONS renames claim_harness_mismatch to claim_executor_mismatch and terminal_harness_mismatch to terminal_executor_mismatch, removes claim_harness_and_runtime_conflict, and adds steer_refusal_id_mismatch, steer_refusal_unknown_steer and task_not_claimed. Rename the reason strings an observer matches.",
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
       "items": [
         "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
         "export:@byok-sdk/cloud#TenantBoundTaskAttempts",
         "export:@byok-sdk/cloud#SteerRejectedError",
         "export:@byok-sdk/cloud#TerminalResult",
-        "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS"
+        "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+        "export:@byok-sdk/cloud#projectTerminalResult"
       ]
     },
     {
@@ -521,7 +522,7 @@
     {
       "id": "wire-v7-cloud-terminal-executor",
       "impact": "breaking",
-      "summary": "@byok-sdk/cloud handleInboundEnvelope and POST /byok/messages reject a task.complete, task.fail or task.cancelled whose executor differs from TaskAttempt.claimedExecutor, including one that carries an executor before any claim and a task.complete with no claim (terminal_executor_mismatch, wire not_permitted). An unclaimed daemon_interrupted recovery is no longer compared with the offer target. Devices on v7 echo the claimed executor; nothing for the Host to change beyond the reason rename.",
+      "summary": "@byok-sdk/cloud handleInboundEnvelope and POST /byok/messages hold the executor to the claim and the offer. A task.claim whose executor the offer target does not allow is rejected (claim_offer_mismatch): any executor under auto, otherwise exactly the named runtime or harness. After a claim, a task.complete, task.fail or task.cancelled whose executor differs from TaskAttempt.claimedExecutor is rejected (terminal_executor_mismatch, wire not_permitted), and so is a task.complete with no claim and an unclaimed cancel or ordinary failure that carries an executor. An unclaimed daemon_interrupted recovery may name the executor its device admitted: it must be one the offer target allows (terminal_executor_mismatch otherwise), and it records no claim or owner. Devices on v7 echo the claimed executor; nothing for the Host to change beyond the reason rename.",
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
       "items": [
         "behavior:wire-v7-cloud-terminal-executor"
@@ -846,6 +847,11 @@
       "item": "export:@byok-sdk/cloud#createInMemoryCloudStores",
       "change": "changed",
       "entry": "in-memory-directory-device-state"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#projectTerminalResult",
+      "change": "changed",
+      "entry": null
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED",
