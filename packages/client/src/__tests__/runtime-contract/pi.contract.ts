@@ -96,7 +96,8 @@ async function turn(agentUserContext: 'inherit' | 'excluded') {
     const mcpServers = { host: await writeSubmitResultServer(box.root, receipt) };
     const env = { ...baseEnv(box.home), PI_CODING_AGENT_DIR: agentDir, ...recorder.env };
     const events = await runTurn(turnAdapter({
-      agentUserContext, agentSkillPaths: [path.join(hostDir, 'skills/host-skill/SKILL.md')], agentExtensionPaths: [path.join(hostDir, 'host-hook.ts')],
+      // A skill directory, the form a Host names: Pi discovers `host-skill/SKILL.md` below it.
+      agentUserContext, agentSkillPaths: [path.join(hostDir, 'skills')], agentExtensionPaths: [path.join(hostDir, 'host-hook.ts')],
     }), 'Call the submit_result tool, then finish.', {
       workspaceDir: box.workspace, agentHome: box.workspace, env, mcpServers, mcpToolsetTools: await observeServers(mcpServers, env),
     });

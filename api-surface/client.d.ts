@@ -975,6 +975,13 @@ import { type AgyAdapterOptions } from './antigravity/agy-adapter.js';
 export interface PiRuntimeConfig {
     /** `PiAdapterOptions.agentUserContext`: `excluded` keeps user Pi resources and settings out of an Agent task (model and auth stores stay). Default `inherit`. */
     agentUserContext?: PiAdapterOptions['agentUserContext'];
+    /**
+     * `PiAdapterOptions.agentSkillPaths`: absolute skill files or directories
+     * the Host authorizes for every Agent task on the ordinary RPC lane,
+     * including under `excluded`. Each must exist and be readable when a task
+     * starts. The durable and prepared lanes run none. Default `[]`.
+     */
+    agentSkillPaths?: PiAdapterOptions['agentSkillPaths'];
     /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
     /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */

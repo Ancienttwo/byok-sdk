@@ -1664,7 +1664,7 @@ were read from each adapter's constructor options and launch arguments on
 
 | Runtime | Host-provided skills today | Where it comes from |
 | --- | --- | --- |
-| Pi, ordinary RPC lane | yes | `PiAdapterOptions.agentSkillPaths`, absolute files or directories, passed to Pi as `additionalSkillPaths` by the RPC host |
+| Pi, ordinary RPC lane | yes | `DaemonConfig.runtimes.pi.agentSkillPaths` or `PiAdapterOptions.agentSkillPaths`, absolute files or directories, passed to Pi as `additionalSkillPaths` by the RPC host |
 | Pi, prepared and durable lanes | no | The lanes reject explicit resource paths before spawning |
 | Claude | no | `ClaudeAdapterOptions` has no skill option and the launch adds no skill flag; the user's own skills still load |
 | Codex | no | `CodexAdapterOptions` has no skill option; `features.plugins=false` removes plugin skills only, and `$HOME/.agents/skills` still loads |
@@ -1685,19 +1685,41 @@ SDK seam. The positive controls show that those runtimes read that layout at
 the qualified version; they are a test writing the SDK's own root, not a
 contract that a task receives a Host's file, and the layout can change with
 the runtime's version. The rows above state what an adapter option declares
-and the SDK guarantees. The only Host-skill seam this line left a place for is
-a `DaemonConfig` field for `PiAdapterOptions.agentSkillPaths`, and it stays
-unopened until a product needs it (#1846).
+and the SDK guarantees. The one Host-skill seam is the Pi one (#2169); another
+runtime joins it under the same key only with a contract-suite positive
+control that shows the model received the skill.
 
-`PiAdapterOptions.agentSkillPaths` is an adapter option, not a
-`DaemonConfig` field: `runtime-adapters.test.ts` classifies it and
-`agentExtensionPaths` as `embedded-only`, so a Host that wants them builds the
-`PiAdapter` and passes it to `createDaemonWithAdapters`. The paths are frozen
-at adapter construction and apply to Agent RPC operations including resume;
-they must exist and be readable, and Pi owns skill parsing and its advisory
-diagnostics (see [Pi explicitly authorized resources](#pi-explicitly-authorized-resources)).
-The prepared and durable lanes reject them before spawning, and a memory-reader
-operation passes none (`packages/client/src/adapters/pi/pi-adapter.ts:697`).
+`DaemonConfig.runtimes.pi.agentSkillPaths` (`PiRuntimeConfig` for
+`createRuntimeAdapters`) projects to `PiAdapterOptions.agentSkillPaths`.
+`agentExtensionPaths` stays an `embedded-only` adapter option. The rules:
+
+- **Paths.** Absolute, unique and without NUL; config check reports any other
+  value as `DaemonConfigInvalidError` at `runtimes.pi.agentSkillPaths`. The
+  list is frozen at adapter construction and applies to Agent RPC operations,
+  including resume. A path may name a `SKILL.md` file or a directory Pi
+  scans for skills. Pi owns skill parsing and its advisory diagnostics (see
+  [Pi explicitly authorized resources](#pi-explicitly-authorized-resources)).
+- **Existence.** Checked when an Agent task starts, not at config check: the
+  adapter refuses a missing or unreadable path before Pi spawns, as a
+  non-retryable `RuntimeExecutionFailure`, and the RPC host checks again at
+  its digest-bound boundary.
+- **Symlinks and owner.** Symlinks are followed and the owner and mode are not
+  checked. The Host names the path; it is trusted as `agentExtensionPaths`,
+  which runs Host-chosen code, already is.
+- **Lanes.** The prepared lane refuses Agent resources before spawning. A
+  non-empty list with `runtimes.pi.durableLane` is a config error, because the
+  durable lane runs no Agent resources. A memory-reader operation passes none.
+  Under a `keys-profile` launch the paths travel in the digest-bound host
+  config, which the keys launcher forwards without reading.
+- **File scope.** Skill paths are Host inputs the RPC host loads; they are not
+  part of the offer's file-scope grant and do not widen what the Agent's tools
+  reach. Pi lists each skill's name, description and path in the system
+  prompt and tells the model to load it with `read`. Under a file-scoped offer
+  the SDK's scoped `read` refuses a path outside the granted roots
+  (`file_scope_denied`, `outside_scope`), so the model cannot load the skill on
+  its own; a `/skill:<name>` instruction still expands it, because the host
+  reads the file. A skill the model must load itself under a file scope has to
+  sit under a granted root.
 
 For Claude and Codex the absence is narrower than for the rest: the user's own
 skills keep loading even under `agentUserContext: 'excluded'`, because Claude

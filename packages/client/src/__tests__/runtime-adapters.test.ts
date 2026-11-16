@@ -10,6 +10,7 @@ import type { DshAdapterOptions } from '../adapters/dsh/dsh-adapter';
 import type { GrokAdapterOptions } from '../adapters/grok/grok-adapter';
 import type { PiAdapterOptions } from '../adapters/pi/pi-adapter';
 import { createRuntimeAdapters, type RuntimeAdaptersConfig } from '../adapters';
+import { buildRuntimeAdapters } from '../adapters/runtime-adapters';
 import { createDaemon, type DaemonConfig } from '../daemon/create-daemon';
 import { DaemonConfigInvalidError } from '../daemon-config-invalid-error';
 import { DAEMON_CONFIG_SCHEMA } from '../daemon/config-schema/schema.generated';
@@ -68,11 +69,12 @@ afterEach(() => { constructed.splice(0); });
 const versionPolicy = { qualifiedVersion: '1.0.0', unqualified: 'warn' } as const;
 const DSH = { home: path.join(os.tmpdir(), 'byok-dsh-home'), model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' } };
 const AGY = { home: path.join(os.tmpdir(), 'byok-agy-home') };
+const PI_SKILLS = [path.join(os.tmpdir(), 'byok-pi-skills')];
 const FACTORY_CONFIG: RuntimeAdaptersConfig = {
   nativeAssetRoot: path.join(os.tmpdir(), 'byok-native-assets'),
   runtimeAllowlist: ['pi', 'claude', 'codex', 'grok', 'dsh', 'agy'],
   runtimes: {
-    pi: { agentUserContext: 'excluded', versionPolicy, packageDir: path.join(os.tmpdir(), 'byok-pi-assets') },
+    pi: { agentUserContext: 'excluded', agentSkillPaths: PI_SKILLS, versionPolicy, packageDir: path.join(os.tmpdir(), 'byok-pi-assets') },
     claude: { agentUserContext: 'excluded', agentSessionPersistence: 'disabled', versionPolicy },
     codex: { agentUserMcpServers: 'excluded', versionPolicy },
     grok: { compatInstructions: 'disabled', agentUserMcpServers: 'excluded', versionPolicy },
@@ -113,6 +115,7 @@ describe('createRuntimeAdapters', () => {
     expect(factory.map(({ id }) => id)).toEqual(['pi', 'claude', 'codex', 'grok', 'dsh', 'agy']);
     expect(constructed).toEqual(factory);
     expect(adapters.map((adapter) => adapter.descriptor.versionPolicy)).toEqual([versionPolicy, versionPolicy, versionPolicy, versionPolicy, versionPolicy, versionPolicy]);
+    expect(factory[0]?.options).toMatchObject({ agentUserContext: 'excluded', agentSkillPaths: PI_SKILLS });
     expect(factory.at(-2)?.options).toMatchObject({ ...DSH, sandbox: 'read-only', versionPolicy });
     expect(factory.at(-1)?.options).toMatchObject({ ...AGY, model: 'gemini-3.8-flash', versionPolicy });
   });
@@ -151,8 +154,17 @@ describe('createRuntimeAdapters', () => {
     expectInvalid({ runtimes: { pi: { packageDir: 'pi-assets' } } }, 'runtimes.pi.packageDir', /absolute path/);
     expectInvalid({ runtimeEnvironment: { pass: ['PATH', 'PI_PACKAGE_DIR'] } }, 'runtimeEnvironment.pass', /runtimes\.pi\.packageDir/);
     expectInvalid({ runtimes: { pi: { durableLane: true } as never } }, 'runtimes.pi.durableLane', /only the SDK daemon builds the durable Pi lane/);
+    expectInvalid({ runtimes: { pi: { agentSkillPaths: ['skills'] } } }, 'runtimes.pi.agentSkillPaths', /unique list of absolute local paths/);
+    expectInvalid({ runtimes: { pi: { agentSkillPaths: [...PI_SKILLS, ...PI_SKILLS] } } }, 'runtimes.pi.agentSkillPaths', /unique list of absolute local paths/);
     expectInvalid({ runtimes: { claude: { agentSessionPersistence: 'off' as never } } }, 'runtimes.claude.agentSessionPersistence', /one of "disabled", "enabled"/);
     expectInvalid({ runtimeAllowlist: 'pi' as never }, 'runtimeAllowlist', /an array of strings/);
+    expect(constructed).toHaveLength(0);
+  });
+
+  it('refuses Agent skill paths together with the durable lane, which runs no Agent resources', () => {
+    expect(() => buildRuntimeAdapters({ runtimes: { pi: { durableLane: true, agentSkillPaths: PI_SKILLS } } }, undefined)).toThrow(expect.objectContaining({
+      issues: [expect.objectContaining({ code: 'invalid_value', path: 'runtimes.pi.agentSkillPaths', message: expect.stringMatching(/durableLane/) })],
+    }));
     expect(constructed).toHaveLength(0);
   });
 
@@ -171,7 +183,7 @@ describe('createRuntimeAdapters', () => {
 type OptionSource = `runtimes.${string}` | keyof RuntimeAdaptersConfig | 'embedded-only';
 const OPTION_SOURCES = {
   pi: {
-    agentUserContext: 'runtimes.pi.agentUserContext', agentSkillPaths: 'embedded-only', agentExtensionPaths: 'embedded-only',
+    agentUserContext: 'runtimes.pi.agentUserContext', agentSkillPaths: 'runtimes.pi.agentSkillPaths', agentExtensionPaths: 'embedded-only',
     nativeAssetRoot: 'nativeAssetRoot', runtimeEnvironment: 'runtimeEnvironment', packageDir: 'runtimes.pi.packageDir',
     durableLane: 'runtimes.pi.durableLane', resolveBin: 'embedded-only', spawnFn: 'embedded-only', byokLauncher: 'piByokLauncher',
     sdkHelperHost: 'sdkHelperHost', validateProviderProfileBinding: 'embedded-only', versionPolicy: 'runtimes.pi.versionPolicy',

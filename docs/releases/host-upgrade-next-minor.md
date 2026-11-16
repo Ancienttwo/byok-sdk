@@ -150,3 +150,26 @@ client's private close promise.
 - A Turn whose reason changes while it stays blocked gets one more `blocked:` id per reason. The byte count of `schema_over_budget` follows the team, so each team change can add one row while the Turn stays blocked. A reason that comes back republishes the same id and value; deduplicate by id.
 
 A Host that routes projections by the `blocked:` prefix needs no change. A Host that builds `blocked:<turnId>` or reads the turn id from the projection id must match the `blocked:` prefix and read `turnId` and `code` from the value.
+
+## Pi Agent skills from DaemonConfig (#2169)
+
+`DaemonConfig.runtimes.pi.agentSkillPaths` (also `PiRuntimeConfig` for
+`createRuntimeAdapters`) takes the absolute skill files or directories a Host
+authorizes for Pi Agent tasks. It projects to
+`PiAdapterOptions.agentSkillPaths`, so a Host no longer has to build its own
+`PiAdapter` and call `createDaemonWithAdapters` to hand Pi its skills. Unset
+keeps the default `[]`; no Host action is required.
+
+- Config check refuses a relative, duplicated or NUL-carrying path, and a
+  non-empty list together with `runtimes.pi.durableLane`, as
+  `DaemonConfigInvalidError` at `runtimes.pi.agentSkillPaths`.
+- The prepared lane still refuses Agent resources before spawning.
+- A skill path that is missing or unreadable when an Agent task starts now
+  fails that start before Pi spawns, as a non-retryable `RuntimeExecutionFailure`.
+  It used to surface as a retryable `runtime_exited` start failure, so the
+  task was retried against the same missing file. This applies to an embedded
+  `PiAdapter` too.
+- Under a file-scoped offer the SDK's scoped `read` refuses a skill outside the
+  granted roots (`outside_scope`), so the model cannot load it on its own;
+  `/skill:<name>` still expands it. Symlinks are followed and the owner is not
+  checked. See [Host-provided skills](../adapter-capabilities.md#host-provided-skills-by-runtime-1846).

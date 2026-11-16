@@ -9,6 +9,7 @@ import { DaemonConfigInvalidError } from '../daemon-config-invalid-error.js';
 import type { DaemonConfigIssue } from '../daemon/config-schema/validate.js';
 import { versionPolicyConfigIssues } from '../daemon-config-version-policy.js';
 import { PiAdapter, PI_PACKAGE_DIR_ENV, validatePiByokLauncherConfig, type PiAdapterOptions, type PiByokLauncherConfig } from './pi/pi-adapter.js';
+import { parsePiAgentResources } from './pi/agent-resources.js';
 import { ClaudeAdapter, type ClaudeAdapterOptions } from './claude/claude-adapter.js';
 import { CodexAdapter, assertCodexSandboxSetting, type CodexAdapterOptions, type CodexSandboxSetting } from './codex/codex-adapter.js';
 import { GrokAdapter, type GrokAdapterOptions } from './grok/grok-adapter.js';
@@ -19,6 +20,13 @@ import { AgyAdapter, type AgyAdapterOptions } from './antigravity/agy-adapter.js
 export interface PiRuntimeConfig {
   /** `PiAdapterOptions.agentUserContext`: `excluded` keeps user Pi resources and settings out of an Agent task (model and auth stores stay). Default `inherit`. */
   agentUserContext?: PiAdapterOptions['agentUserContext'];
+  /**
+   * `PiAdapterOptions.agentSkillPaths`: absolute skill files or directories
+   * the Host authorizes for every Agent task on the ordinary RPC lane,
+   * including under `excluded`. Each must exist and be readable when a task
+   * starts. The durable and prepared lanes run none. Default `[]`.
+   */
+  agentSkillPaths?: PiAdapterOptions['agentSkillPaths'];
   /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
   versionPolicy?: RuntimeVersionPolicy;
   /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */
@@ -214,7 +222,7 @@ export function createRuntimeAdapters(config: RuntimeAdaptersConfig): RuntimeAda
  * {@link createRuntimeAdapters} after its own validation.
  */
 export function buildRuntimeAdapters(config: DaemonRuntimeAdaptersConfig, piByokLauncher: PiByokLauncherConfig | undefined): RuntimeAdapter[] {
-  const issues = piPackageDirIssues(config);
+  const issues = piRuntimeConfigIssues(config);
   if (issues.length > 0) throw new DaemonConfigInvalidError(issues);
   const ids = config.runtimeAllowlist
     ? SDK_BUILT_RUNTIME_IDS.filter((id) => config.runtimeAllowlist?.includes(id))
@@ -295,6 +303,7 @@ function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig
         ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }),
         ...(pi?.durableLane === true ? { durableLane: true } : {}),
         ...(pi?.agentUserContext === undefined ? {} : { agentUserContext: pi.agentUserContext }),
+        ...(pi?.agentSkillPaths === undefined ? {} : { agentSkillPaths: pi.agentSkillPaths }),
         ...(pi?.packageDir === undefined ? {} : { packageDir: pi.packageDir }),
         ...(pi?.versionPolicy === undefined ? {} : { versionPolicy: pi.versionPolicy }),
       });
@@ -380,9 +389,26 @@ function buildAgyAdapter(config: DaemonRuntimeAdaptersConfig, environment: Pick<
   }
 }
 
-/** `runtimes.pi.packageDir` is the one Pi asset root: absolute, and never also passed by Pi's effective environment policy. */
-function piPackageDirIssues(config: DaemonRuntimeAdaptersConfig): DaemonConfigIssue[] {
+/**
+ * `runtimes.pi.packageDir` is the one Pi asset root: absolute, and never also
+ * passed by Pi's effective environment policy. `runtimes.pi.agentSkillPaths`
+ * follows the adapter's own path rule, and the durable lane, which runs no
+ * Agent resources, refuses a non-empty list.
+ */
+function piRuntimeConfigIssues(config: DaemonRuntimeAdaptersConfig): DaemonConfigIssue[] {
   const issues: DaemonConfigIssue[] = [];
+  const skillPaths: unknown = config.runtimes?.pi?.agentSkillPaths;
+  if (skillPaths !== undefined) {
+    try {
+      const parsed = parsePiAgentResources({ agentUserContext: 'inherit', skillPaths, extensionPaths: [] });
+      if (parsed.skillPaths.length > 0 && config.runtimes?.pi?.durableLane === true) {
+        issues.push(invalid('runtimes.pi.agentSkillPaths', 'DaemonConfig.runtimes.pi.agentSkillPaths must be empty with runtimes.pi.durableLane, which runs no Agent resources'));
+      }
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error;
+      issues.push(invalid('runtimes.pi.agentSkillPaths', 'DaemonConfig.runtimes.pi.agentSkillPaths must be a unique list of absolute local paths'));
+    }
+  }
   const packageDir = config.runtimes?.pi?.packageDir;
   if (packageDir !== undefined && !(typeof packageDir === 'string' && isAbsolute(packageDir))) {
     issues.push(invalid('runtimes.pi.packageDir', 'DaemonConfig.runtimes.pi.packageDir must be an absolute path'));
@@ -447,7 +473,7 @@ function runtimeAdaptersConfigIssues(config: RuntimeAdaptersConfig): DaemonConfi
     }
     issues.push(...versionPolicyConfigIssues(config));
   }
-  issues.push(...piPackageDirIssues(config));
+  issues.push(...piRuntimeConfigIssues(config));
   return issues;
 }
 
