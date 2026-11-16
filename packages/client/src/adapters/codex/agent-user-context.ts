@@ -31,12 +31,14 @@ function userCodexHome(env: Readonly<Record<string, string | undefined>>, platfo
 
 /**
  * Builds the SDK-owned `CODEX_HOME` of one Agent task in `dir` and returns it.
- * Codex writes a refreshed login through the link (0.160 in place; 0.167
- * resolves the link and replaces the target), so the user's `auth.json` keeps
- * the live refresh token. The thread store links to the Agent's own store in
- * `agentHome`. A task without a sealed Agent home, a user home without
- * `auth.json`, and a Windows account that may not create symbolic links (no
- * Developer Mode, not an administrator) refuse the start.
+ * Codex writes a refreshed login through the link (0.160 in place; 0.167 and
+ * later resolve the link and replace the target, under a lock beside it), so
+ * the user's `auth.json` keeps the live refresh token. The thread store links
+ * to the Agent's own store in `agentHome`. A task without a sealed Agent home
+ * and a user home without `auth.json` refuse the start. A Windows account that
+ * may not create symbolic links (no Developer Mode, not an administrator) is
+ * refused at detection (`agent_user_context_unavailable`), and again here if
+ * the privilege changed since.
  */
 export function createCodexAgentHome(env: Readonly<Record<string, string | undefined>>, dir: string, agentHome: string | undefined, platform: NodeJS.Platform = process.platform): Promise<string> {
   return createOwnedRuntimeHome({

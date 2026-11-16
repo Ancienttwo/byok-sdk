@@ -45,6 +45,7 @@ import { CODEX_VERSION_POLICY, codexVersionToken } from './codex-version.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
 import { verifyCodexUserMcpServersExcluded, withCodexUserMcpServersExcluded } from './agent-user-mcp-servers.js';
 import { assertCodexFileCredentials, createCodexAgentHome } from './agent-user-context.js';
+import { ownedRuntimeHomeLinksAvailable } from '../owned-runtime-home.js';
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
@@ -192,6 +193,16 @@ export class CodexAdapter implements RuntimeAdapter {
         });
       } catch {
         return { kind: 'refused', reason: 'app_server_unavailable' };
+      }
+      if (this.options.agentUserContext === 'excluded') {
+        let linksAvailable: boolean;
+        try {
+          linksAvailable = await ownedRuntimeHomeLinksAvailable();
+        } catch {
+          return { kind: 'probe-failed' };
+        }
+        // Refuses the whole runtime: the option is per adapter, and detection precedes every offer.
+        if (!linksAvailable) return { kind: 'refused', reason: 'agent_user_context_unavailable' };
       }
       let authPresent = false;
       try {

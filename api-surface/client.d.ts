@@ -14551,8 +14551,9 @@ export interface RuntimeDetectionAdvisory {
  * `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode.
  * `platform_unsupported`: the host platform is not in {@link RuntimeAdapterDescriptor.platforms}; no probe ran.
  * `runtime_environment_unavailable`: the login-shell capture or, on win32, the logon registry read failed (`code`), so the runtime has no environment to start in (#1095, #1317).
+ * `agent_user_context_unavailable`: the adapter has `agentUserContext: 'excluded'` and this account may not create the symbolic links its SDK-owned runtime home needs (win32 without Developer Mode or an administrator daemon, #2241). Every task of the runtime is refused on this device, Agent task or not.
  */
-export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported' | 'runtime_environment_unavailable';
+export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported' | 'runtime_environment_unavailable' | 'agent_user_context_unavailable';
 /**
  * Each `true` is a guarantee the runtime contract suite checks; `false` means
  * the SDK makes no such guarantee for this runtime (#1103).

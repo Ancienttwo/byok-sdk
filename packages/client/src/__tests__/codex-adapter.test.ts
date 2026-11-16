@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { createCodexAgentHome } from '../adapters/codex/agent-user-context';
+import * as ownedRuntimeHome from '../adapters/owned-runtime-home';
 import type { Session, MessageDraftDelta } from '../types';
 import {
   RuntimeExecutionFailure,
@@ -882,6 +883,33 @@ describe('CodexAdapter agentUserContext (#1565)', () => {
     dirs.push(dir);
     vi.spyOn(fs, 'symlink').mockRejectedValueOnce(Object.assign(new Error('operation not permitted'), { code: 'EPERM' }));
     await expect(createCodexAgentHome({ CODEX_HOME: user }, dir, path.join(dir, 'agent-home'), 'win32')).rejects.toMatchObject({
-      message: 'codex Agent user context exclusion refused: Windows refused to create a symbolic link (EPERM); turn on Developer Mode or run the daemon as an administrator' });
+      message: "codex Agent user context exclusion refused: Windows refused to create a symbolic link (EPERM); turn on Developer Mode, run the daemon as an administrator, or set agentUserContext to 'inherit' on this device" });
+  });
+
+  it('refuses detection when the SDK-owned home cannot be built, probing only under excluded (#2241)', async () => {
+    const probe = vi.spyOn(ownedRuntimeHome, 'ownedRuntimeHomeLinksAvailable').mockResolvedValue(false);
+    expect(await adapter().detect()).toMatchObject({ kind: 'available' });
+    expect(probe).not.toHaveBeenCalled();
+    expect(await adapter({ agentUserContext: 'excluded' }).detect()).toEqual({ kind: 'refused', reason: 'agent_user_context_unavailable' });
+    probe.mockRejectedValueOnce(Object.assign(new Error('access denied'), { code: 'EACCES' }));
+    expect(await adapter({ agentUserContext: 'excluded' }).detect()).toEqual({ kind: 'probe-failed' });
+  });
+
+  it('probes a file link once per process on Windows only and removes the probe files', async () => {
+    const tmp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-probe-')));
+    dirs.push(tmp);
+    vi.spyOn(os, 'tmpdir').mockReturnValue(tmp);
+    const symlink = vi.spyOn(fs, 'symlink');
+    expect(await ownedRuntimeHome.ownedRuntimeHomeLinksAvailable('darwin')).toBe(true);
+    expect(symlink).not.toHaveBeenCalled();
+    // An unexpected error is not an answer: it rejects and is not cached.
+    symlink.mockRejectedValueOnce(Object.assign(new Error('access denied'), { code: 'EACCES' }));
+    await expect(ownedRuntimeHome.ownedRuntimeHomeLinksAvailable('win32')).rejects.toMatchObject({ code: 'EACCES' });
+    expect(await fs.readdir(tmp)).toEqual([]);
+    symlink.mockRejectedValueOnce(Object.assign(new Error('operation not permitted'), { code: 'EPERM' }));
+    expect(await ownedRuntimeHome.ownedRuntimeHomeLinksAvailable('win32')).toBe(false);
+    expect(await fs.readdir(tmp)).toEqual([]);
+    expect(await ownedRuntimeHome.ownedRuntimeHomeLinksAvailable('win32')).toBe(false);
+    expect(symlink).toHaveBeenCalledTimes(2);
   });
 });

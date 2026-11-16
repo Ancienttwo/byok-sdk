@@ -2,7 +2,7 @@
 // operation for an offer (see ./support.ts for how a member module runs).
 import { awaitAdmission } from '../admission-wait.js';
 import { observeRuntimeDetection } from '../../runtime-detection.js';
-import { runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable.js';
+import { AGENT_USER_CONTEXT_WINDOWS_REMEDY, runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable.js';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../../types.js';
 import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment.js';
 import type { McpStdioServerConfig } from '../../types.js';
@@ -298,7 +298,9 @@ export async function pickAdapter(
         ok: false,
         reason: detected.kind === 'refused' && detected.reason === 'platform_unsupported'
           ? `platform_unsupported: runtime "${requestedRuntime}" does not support ${process.platform}`
-          : `runtime "${requestedRuntime}" is not installed/available on this device`,
+          : detected.kind === 'refused' && detected.reason === 'agent_user_context_unavailable'
+            ? `agent_user_context_unavailable: runtime "${requestedRuntime}" cannot keep user context out on this device. ${AGENT_USER_CONTEXT_WINDOWS_REMEDY}`
+            : `runtime "${requestedRuntime}" is not installed/available on this device`,
         retryable: runtimeUnavailableRetryable(runtimeUnavailable.cause),
         runtimeUnavailable,
       };

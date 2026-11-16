@@ -232,7 +232,7 @@ export function attachRuntimeExecutables(observations: RuntimeObservation[], val
   });
 }
 
-const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze(['app_server_unavailable', 'acp_unavailable', 'platform_unsupported']);
+const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze(['app_server_unavailable', 'acp_unavailable', 'platform_unsupported', 'agent_user_context_unavailable']);
 const ENVIRONMENT_CODES: readonly string[] = SERVICE_ENVIRONMENT_UNAVAILABLE_CODES;
 const MAX_VERSION_CHARS = 256;
 const MAX_EXECUTABLE_PATH_CHARS = 4096;

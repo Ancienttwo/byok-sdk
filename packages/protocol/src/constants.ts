@@ -56,6 +56,12 @@ export const RUNTIME_UNAVAILABLE_CAUSES = Object.freeze([
   'runtime_not_allowed',
   /** Automatic selection exhausted every candidate. */
   'none_available',
+  /**
+   * Detection: `refused` / `agent_user_context_unavailable`. The device cannot
+   * build the SDK-owned runtime home that `agentUserContext: 'excluded'` needs
+   * (on Windows: no symbolic links without Developer Mode or an administrator).
+   */
+  'agent_user_context_unavailable',
 ] as const);
 
 /** One append-only `runtime_unavailable` cause. */

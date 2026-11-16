@@ -101,6 +101,7 @@ it('maps every explicit detection failure to its typed cause and retryable defau
     [{ kind: 'refused', reason: 'acp_unavailable' } as const, 'acp_unavailable', true],
     [{ kind: 'refused', reason: 'platform_unsupported' } as const, 'platform_unsupported', true],
     [{ kind: 'refused', reason: 'runtime_environment_unavailable', code: 'timeout' } as const, 'environment_unavailable', false],
+    [{ kind: 'refused', reason: 'agent_user_context_unavailable' } as const, 'agent_user_context_unavailable', true],
   ] as const;
   for (const [detection, cause, retryable] of cases) {
     adapter.detect = async () => detection;
@@ -110,6 +111,9 @@ it('maps every explicit detection failure to its typed cause and retryable defau
     expect(declined.payload).toMatchObject({ code: 'runtime_unavailable', retryable, runtimeUnavailable: { cause } });
     if (cause === 'environment_unavailable') {
       expect((declined.payload as { runtimeUnavailable?: { code?: string } }).runtimeUnavailable?.code).toBe('timeout');
+    }
+    if (cause === 'agent_user_context_unavailable') {
+      expect(declined.payload).toMatchObject({ reason: `agent_user_context_unavailable: runtime "codex" cannot keep user context out on this device. Windows refused to create a symbolic link (EPERM); turn on Developer Mode, run the daemon as an administrator, or set agentUserContext to 'inherit' on this device` });
     }
   }
   expect(adapter.startCalls).toHaveLength(0);

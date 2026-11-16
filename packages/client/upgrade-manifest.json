@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "cf0abedb3032a5910dcbaa798fa5bfbcae5437984e451c38a62ac99a8563f120"
+    "snapshotSha256": "da5abd9945a9d7ccac2abf757aaa703e514a9515a5b90e1766372f99ac60c136"
   },
   "configFields": {
     "status": "tracked",
@@ -170,6 +170,23 @@
         "export:@byok-sdk/client#ExpiringClassId",
         "export:@byok-sdk/client#resolveStorageConfig"
       ]
+    },
+    {
+      "id": "agent-user-context-unavailable-cause",
+      "impact": "additive",
+      "summary": "On Windows, a @byok-sdk/client Codex adapter with agentUserContext 'excluded' now refuses detection with RuntimeDetectionRefusalReason 'agent_user_context_unavailable' when the account cannot create symbolic links (Developer Mode off, non-administrator daemon). Every Codex offer on that device, Agent task or not, is then declined before claim with runtimeUnavailable.cause 'agent_user_context_unavailable' and retryable: true, in task.decline, conn.hello and the presence publish request. A Host may receive this new cause. RUNTIME_UNAVAILABLE_CAUSES is append-only (@byok-sdk/protocol messages.ts): a Host must accept a cause it does not recognize; readRuntimeUnavailableCause reads it as unknown and keeps the token. The fix on the device is to turn on Developer Mode, run the daemon as an administrator, or set agentUserContext to 'inherit'.",
+      "migration": "docs/adapter-capabilities.md#agentusercontext-codex",
+      "items": [
+        "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
+        "export:@byok-sdk/client/adapters#RuntimeDetectionRefusalReason",
+        "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
+        "export:@byok-sdk/protocol#PresencePublishRequestSchema",
+        "export:@byok-sdk/protocol#RUNTIME_UNAVAILABLE_CAUSES",
+        "export:@byok-sdk/protocol#RuntimeUnavailableEntrySchema",
+        "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+        "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
+        "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSES"
+      ]
     }
   ],
   "changes": [
@@ -238,6 +255,11 @@
       "entry": "remove-unused-team-workspace-methods"
     },
     {
+      "item": "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
+      "change": "changed",
+      "entry": "agent-user-context-unavailable-cause"
+    },
+    {
       "item": "export:@byok-sdk/client#ServiceExitDisposition",
       "change": "removed",
       "entry": "remove-service-exit-disposition"
@@ -266,6 +288,46 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeDetectionRefusalReason",
+      "change": "changed",
+      "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
+      "change": "changed",
+      "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PresencePublishRequestSchema",
+      "change": "changed",
+      "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RUNTIME_UNAVAILABLE_CAUSES",
+      "change": "changed",
+      "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeUnavailableEntrySchema",
+      "change": "changed",
+      "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+      "change": "changed",
+      "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
+      "change": "changed",
+      "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSES",
+      "change": "changed",
+      "entry": "agent-user-context-unavailable-cause"
     },
     {
       "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",

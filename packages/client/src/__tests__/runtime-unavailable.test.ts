@@ -16,6 +16,7 @@ const DETECTION_CASES: readonly {
   { result: { kind: 'refused', reason: 'app_server_unavailable' }, cause: 'app_server_unavailable' },
   { result: { kind: 'refused', reason: 'acp_unavailable' }, cause: 'acp_unavailable' },
   { result: { kind: 'refused', reason: 'platform_unsupported' }, cause: 'platform_unsupported' },
+  { result: { kind: 'refused', reason: 'agent_user_context_unavailable' }, cause: 'agent_user_context_unavailable' },
 ];
 
 /** #1103 §3.3: one boolean per cause, kept deliberately in this test so a new cause must decide. */
@@ -32,6 +33,7 @@ const RETRYABLE: Record<RuntimeUnavailableCause, boolean> = {
   runtime_not_configured: false,
   runtime_not_allowed: false,
   none_available: true,
+  agent_user_context_unavailable: true,
 };
 
 describe('runtime_unavailable cause mapping (#1103 B2a)', () => {
