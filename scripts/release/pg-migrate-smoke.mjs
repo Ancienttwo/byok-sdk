@@ -202,9 +202,13 @@ try {
       `  await upgradePool.query("INSERT INTO storage_usage (tenant_id, committed_object_bytes, committed_inline_bytes, mailbox_bytes, object_count, updated_at) VALUES ('tenant-upgrade', 1024, 128, 18, 2, '2026-08-20T00:04:00.000Z')");\n` +
       `  const before = await readSeedRows(upgradePool);\n` +
       `\n` +
-      `  const upgraded = await migrate(upgradePool, directory);\n` +
-      `  assert.deepEqual([...upgraded.applied], expected.slice(baseline.length), 'candidate must apply only migrations newer than v0.4.2');\n` +
-      `  assert.deepEqual([...upgraded.alreadyApplied], baseline, 'candidate must retain the v0.4.2 ledger');\n` +
+      // Wire v7 starts on a new database: the migration that opens it refuses a
+      // database holding rows before it changes anything, so the stored rows and
+      // every earlier migration stay as they were.
+      `  await assert.rejects(migrate(upgradePool, directory), /0040_wire_v7: table \\w+ holds rows/, 'candidate must refuse a database that holds rows');\n` +
+      `  const upgradedLedger = await upgradePool.query('SELECT version FROM byok_schema_migration ORDER BY version');\n` +
+      `  const upgraded = { applied: upgradedLedger.rows.map((row) => row.version).slice(baseline.length) };\n` +
+      `  assert.deepEqual(upgraded.applied, expected.slice(baseline.length).filter((version) => version < '0040'), 'candidate must apply every migration before the wire v7 cut');\n` +
       `  assert.deepEqual(await readSeedRows(upgradePool), before, 'candidate migration changed existing stream/mailbox/truth/quota rows');\n` +
       // v0.4.2 seeded the retired counter with a non-zero value; the candidate
       // drops the column (0025, #387) instead of leaving a second mailbox
@@ -229,12 +233,10 @@ try {
       `  assert.equal(await replay.consume(replayInput), false, 'task consumption must not reset the device replay key');\n` +
       `  const replayRows = await upgradePool.query('SELECT schema, jti FROM device_assertion_replay ORDER BY schema');\n` +
       `  assert.deepEqual(replayRows.rows, [DEVICE_ASSERTION_SCHEMA_ID, TASK_ASSERTION_SCHEMA_ID].map((schema) => ({ schema, jti: replayInput.jti })), 'both replay lanes must stay distinguishable in the upgraded ledger');\n` +
-      `  const final = await migrate(upgradePool, directory);\n` +
-      `  assert.deepEqual([...final.applied], []);\n` +
-      `  assert.deepEqual([...final.alreadyApplied], expected);\n` +
+      `  await assert.rejects(migrate(upgradePool, directory), /0040_wire_v7: table \\w+ holds rows/, 'a second run must refuse the same database');\n` +
       `  const publicTables = await controlPool.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name");\n` +
       `  assert.deepEqual(publicTables.rows, [], 'role-isolated migrations must leave public empty');\n` +
-      `  console.log('[pg-migrate-smoke] role-isolated empty install applied ' + expected.length + ' migration(s); tag-bound v0.4.2 fixture preserved stream/mailbox/truth/quota rows, applied ' + upgraded.applied.join(', ') + ', and admitted exactly one of 64 concurrent replay consumes per schema for the same JTI');\n` +
+      `  console.log('[pg-migrate-smoke] role-isolated empty install applied ' + expected.length + ' migration(s); tag-bound v0.4.2 fixture applied ' + upgraded.applied.join(', ') + ', was refused at the wire v7 cut with its stream/mailbox/truth/quota rows unchanged, and admitted exactly one of 64 concurrent replay consumes per schema for the same JTI');\n` +
       `} finally {\n` +
       `  await Promise.allSettled([emptyPool?.end(), upgradePool?.end()]);\n` +
       `  try {\n` +
