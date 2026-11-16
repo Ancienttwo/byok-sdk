@@ -43,7 +43,7 @@ describe('sealed fields on the server dispatch lanes (#654)', () => {
   });
 
   it.each(hidden('sealing', SEALING, {
-    instruction: 'do the thing', runtime: 'codex', agentRef: AGENT_REF, terminalProjection: { mode: 'none' },
+    instruction: 'do the thing', target: { lane: 'runtime', runtimeId: 'codex' }, agentRef: AGENT_REF, terminalProjection: { mode: 'none' },
   }))('executions.submit refuses a hidden payload key: %s', async (_label, payload) => {
     const byok = createByokServer({ productId: 'acme' });
     try {
@@ -62,7 +62,7 @@ describe('sealed fields on the server dispatch lanes (#654)', () => {
       await expect(byok.executions.submit({
         taskId: 'sealed-refusal',
         deviceId: 'dev_ghost',
-        payload: { instruction: 'do the thing', runtime: 'codex', agentRef: AGENT_REF, terminalProjection: { mode: 'none' }, ...extra },
+        payload: { instruction: 'do the thing', target: { lane: 'runtime', runtimeId: 'codex' }, agentRef: AGENT_REF, terminalProjection: { mode: 'none' }, ...extra },
       } as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
       expect((await byok.tasks.list()).tasks).toEqual([]);
     } finally { await byok.close(); }

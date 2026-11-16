@@ -369,7 +369,7 @@ await server.executions.submit({
   deviceId,
   payload: {
     instruction: 'Find five qualified prospects and draft follow-ups.',
-    runtime: 'claude',
+    target: { lane: 'runtime', runtimeId: 'claude' },
     agentRef,
     egressPolicy,
     terminalProjection: { mode: 'none' },
@@ -442,35 +442,37 @@ fake timers.
 
 ## SQLite schema version
 
-The current schema is v8. It includes a durable approval timeline alongside the
-existing task, enrollment, receipt and wake authorities, the retired-device
-stream tombstone on `mailbox_cursor` (#1160) and the durable task activity log
-(`activity_log_head`, `activity_log_entry`; #1113). A new database and a v8, v7
-or v6 file can open. An older file is upgraded in place once, in the open
-transaction, one step at a time. From v6 to v7 the two tombstone columns are
-added, and the stream of every device the directory no longer holds is closed
-as `device_revoked` with its pending rows expired. From v7 to v8 the activity
-log tables are created empty: earlier builds kept activity only in process
-memory, so no pre-upgrade history exists to carry over. Pairings and other rows
-are kept, so no re-enrollment is needed. Versions 1–5 and unknown versions are
-rejected; there is no migration selector or other automatic adoption path.
+The current schema is v10 (wire v7). It holds the task, enrollment, receipt,
+wake, approval timeline, activity log and steer refusal authorities. A new
+database and a v10 file open; no older file is upgraded in place. Wire v7
+starts on a new store: export the history you need from the old file, point
+`storage.path` at a new file and pair the devices again. `inspectSqliteStore`
+reports an older file as `new-path-repair`.
 
-Preserve existing databases. For a file older than v6, stop the previous owner
-and explicitly select a new state path and enrollment. Do not delete history or
-edit version markers to make an old database open. Approval observations that
-existed only in an old process's memory cannot be recovered.
+The schema is decided before anything writes to the file. The store first
+reads the file's metadata through a read-only, immutable connection, which
+takes no lock, writes nothing and creates no journal, WAL or SHM file, and
+refuses an older, newer or foreign file there. Only then does it open the file
+for writing (exclusive locking and WAL). The same check inside the schema
+transaction stays the authority for a file that changes in between. A refused
+file is not read for business data, deleted or rewritten.
+
+One residual is accepted ([#2286](https://github.com/Ancienttwo/byok-sdk/issues/2286)):
+the immutable read sees the main file only. An older-version store that
+crashed before its first checkpoint keeps its schema in the WAL, so the
+pre-check finds no metadata and lets the writable open go ahead; that open
+refuses the schema, but WAL replay and the checkpoint on close have already
+rewritten the main file. Such a store holds almost no data.
 
 Open failures use `SqliteSchemaError` with `foundVersion` and `requiredVersion`:
 
-- `SQLITE_SCHEMA_UNSUPPORTED`: unsupported schema or removed migration option.
-- `SQLITE_SCHEMA_INVALID`: a required authority is missing or malformed.
-- `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: pending mailbox bytes are not wire v4.
+- `SQLITE_SCHEMA_UNSUPPORTED`: an older or newer schema, or the removed migration option.
+- `SQLITE_SCHEMA_INVALID`: no BYOK metadata in a non-empty file, or a required authority is missing or malformed.
+- `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: pending mailbox bytes are not the current wire major.
 
-A declared v8 file missing its approval or activity log tables fails closed
-instead of silently recreating an empty authority. Existing database contents
-are not adopted, rewritten or deleted on a version refusal. New files create
-their schema and version marker in one transaction. Older builds cannot open
-v8, so a store cannot roll back past this release once it has been opened.
+A declared v10 file missing one of its authorities fails closed instead of
+silently recreating an empty one. New files create their schema and version
+marker in one transaction. Older builds cannot open v10.
 
 ## Persistent host request identity
 

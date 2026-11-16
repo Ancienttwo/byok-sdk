@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "6e30fabf23669668ed6ad8188e5b1bbb0f61e36b2d9cd380900c67dc2fde666d"
+    "snapshotSha256": "02d6c8c9ff85486b0fc556706a94c671ab705074ca6fc73b4a9dfc3a60911dc0"
   },
   "configFields": {
     "status": "tracked",
@@ -383,6 +383,40 @@
       ]
     },
     {
+      "id": "wire-v7-server-execution-target",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server follows the wire v7 execution target. DispatchInput (AgentResumeDispatchInput) takes one required target: ExecutionTarget in place of runtime, harnessId and dispatchSelection; pass { lane: 'auto' } for the device's own runtime preference. TaskSnapshot and the task.state ByokServerEvent expose claimedExecutor (a runtime or a harness) in place of claimedRuntime and claimedHarnessId, and SteerRejectedError carries executor in place of runtime. An execution-core intent's fresh execution template must name a concrete target; auto is refused.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/server#AgentResumeDispatchInput",
+        "export:@byok-sdk/server#ByokServerEvent",
+        "export:@byok-sdk/server#TaskSnapshot",
+        "export:@byok-sdk/server#SteerRejectedError"
+      ]
+    },
+    {
+      "id": "wire-v7-server-steer-refused",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server reports steer refusals. TaskHandle.steer resolves { messageId }, the id a refusal names, and refuses text over TASK_STEER_TEXT_MAX_BYTES UTF-8 bytes with ByokCloudError coordination_input_invalid before anything is enqueued. ServerTaskEvent gains { kind: 'steer_refused', messageId, reason, at }: a task's event feed yields the refusals recorded before its terminal, and ByokServer.tasks.readSteerRefusal and listSteerRefusals (SteerRefusal) read any refusal, including one recorded after the feed ended. tasks.events cursors move from te1. to te2.; a te1. cursor is refused with cursor_unknown. Exhaustive switches over ServerTaskEvent need the new arm.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/server#ServerTaskEvent",
+        "export:@byok-sdk/server#TaskHandle",
+        "export:@byok-sdk/server#ByokServer",
+        "export:@byok-sdk/server#SteerRefusal"
+      ]
+    },
+    {
+      "id": "wire-v7-server-sqlite-store",
+      "impact": "breaking",
+      "acceptance": "new-path-repair",
+      "summary": "The embedded server SQLite store moves to schema version 10 for wire v7 and upgrades no older file in place: opening a version 6 to 9 file fails with SqliteSchemaError SQLITE_SCHEMA_UNSUPPORTED, and inspectSqliteStore reports new-path-repair. Start the v7 server on a new state path and pair the daemons again; keep the old file to export its history first. Version 10 adds the task_steer_refusal table and keeps the claimed executor in two task_attempt columns, at most one of them set.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "store:server-sqlite"
+      ]
+    },
+    {
       "id": "service-uninstall-stops-before-pointers",
       "impact": "breaking",
       "summary": "Corrects a 0.43.0 regression by restoring the 0.42.0 order: @byok-sdk/client ServiceInstallation.uninstall() runs the lifecycle's uninstall (stop, then unit removal) while current still points at the installed payload, then removes current, previous, versions/, snapshots/ and the receipt, so a Windows stop program under current runs instead of every uninstall failing with service_stop_failed. A failed, refused or timed-out stop throws as is and removes nothing: the unit and current both stay, so the service can start again until uninstall() is retried. This narrows the #2011 guarantee that a unit left behind starts no payload: when the stop succeeds and the unit's removal fails, the unit stays with current and a boot or login can start it. Retry uninstall() after any failure.",
@@ -579,19 +613,9 @@
       "entry": "remove-task-terminal-read"
     },
     {
-      "item": "export:@byok-sdk/client#DAEMON_HALT_REASONS",
-      "change": "changed",
-      "entry": "wire-v7-client-negotiation-halt"
-    },
-    {
       "item": "export:@byok-sdk/client#DaemonEvent",
       "change": "changed",
       "entry": "grok-agent-user-context"
-    },
-    {
-      "item": "export:@byok-sdk/client#DaemonLifecycle",
-      "change": "changed",
-      "entry": "wire-v7-client-negotiation-halt"
     },
     {
       "item": "export:@byok-sdk/client#DaemonLog",
@@ -627,16 +651,6 @@
       "item": "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
-    },
-    {
-      "item": "export:@byok-sdk/client#RuntimeOperationManifest",
-      "change": "changed",
-      "entry": "wire-v7-client-execution-target"
-    },
-    {
-      "item": "export:@byok-sdk/client#RuntimeTaskInput",
-      "change": "changed",
-      "entry": "wire-v7-client-execution-target"
     },
     {
       "item": "export:@byok-sdk/client#ServiceExitDisposition",
@@ -677,16 +691,6 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeDetectionRefusalReason",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
-    },
-    {
-      "item": "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
-      "change": "changed",
-      "entry": "wire-v7-client-execution-target"
-    },
-    {
-      "item": "export:@byok-sdk/client/adapters#taskRuntimeTarget",
-      "change": "changed",
-      "entry": "wire-v7-client-execution-target"
     },
     {
       "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
@@ -1204,6 +1208,46 @@
       "entry": "agent-user-context-unavailable-cause"
     },
     {
+      "item": "export:@byok-sdk/server#AgentResumeDispatchInput",
+      "change": "changed",
+      "entry": "wire-v7-server-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/server#ByokServer",
+      "change": "changed",
+      "entry": "wire-v7-server-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/server#ByokServerEvent",
+      "change": "changed",
+      "entry": "wire-v7-server-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/server#ServerTaskEvent",
+      "change": "changed",
+      "entry": "wire-v7-server-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/server#SteerRefusal",
+      "change": "added",
+      "entry": "wire-v7-server-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/server#SteerRejectedError",
+      "change": "changed",
+      "entry": "wire-v7-server-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskHandle",
+      "change": "changed",
+      "entry": "wire-v7-server-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskSnapshot",
+      "change": "changed",
+      "entry": "wire-v7-server-execution-target"
+    },
+    {
       "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",
       "change": "changed",
       "entry": "k4-settlement-notice"
@@ -1212,6 +1256,13 @@
       "item": "export:@byok-sdk/server/execution-core#HostOptions",
       "change": "changed",
       "entry": "k4-settlement-notice"
+    },
+    {
+      "item": "store:server-sqlite",
+      "change": "changed",
+      "before": "schema_version=9",
+      "after": "schema_version=10",
+      "entry": "wire-v7-server-sqlite-store"
     },
     {
       "item": "union:wire#task.steer_refused",

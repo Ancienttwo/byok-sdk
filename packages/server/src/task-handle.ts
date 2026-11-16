@@ -6,7 +6,7 @@ import {
   type TaskAttempt,
   type TenantId,
 } from '@byok-sdk/cloud';
-import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
+import type { ClaimedExecutor, TaskState } from '@byok-sdk/protocol';
 import type { TaskEventRelay } from './relay.js';
 import { readTaskEvents, type TaskEventDeps } from './task-events.js';
 import type { ServerTaskEvent, TaskHandle, TaskResult } from './types.js';
@@ -15,7 +15,7 @@ function steerRejectionMessage(
   taskId: string,
   code: SteerRejectionCode,
   state: TaskState,
-  runtime: RuntimeId | undefined,
+  executor: ClaimedExecutor | undefined,
 ): string {
   switch (code) {
     case 'task_terminal':
@@ -23,16 +23,21 @@ function steerRejectionMessage(
     case 'task_not_running':
       return `cannot steer task ${taskId}: not running (state ${state})`;
     case 'steer_unsupported_runtime':
-      return `cannot steer task ${taskId}: claimed runtime ${runtime ?? '(unknown)'} does not support steering`;
+      return `cannot steer task ${taskId}: claimed ${executorLabel(executor)} does not support steering`;
   }
+}
+
+function executorLabel(executor: ClaimedExecutor | undefined): string {
+  if (executor === undefined) return 'executor (unknown)';
+  return executor.kind === 'runtime' ? `runtime ${executor.runtimeId}` : `harness ${executor.harnessId}`;
 }
 
 /**
  * Thrown by {@link TaskHandle.steer} when the kernel refuses the steer.
  *
  * This package keeps its OWN class rather than re-exporting the kernel's, and
- * that is deliberate rather than a leftover. The two carry the same `taskId`,
- * `code` and `runtime`, and differ in exactly one field: the kernel reports
+ * that is deliberate rather than a leftover. The two carry the same `taskId`
+ * and `code`, and differ in the fields read from the projection: the kernel reports
  * `status: TaskAttemptStatus` — its coarse, execution-free attempt disposition
  * (`running`, `offered`, …) — while this surface reports `state: TaskState`,
  * the WIRE vocabulary every other member of this package speaks
@@ -44,7 +49,8 @@ function steerRejectionMessage(
  *
  * So the state here is not translated from the kernel's field — it is READ,
  * through the very projection `byok.tasks.get(taskId)` answers with, at the
- * moment of the refusal. One authority, two readers, no second mapping.
+ * moment of the refusal, and so is `executor`. One authority, two readers, no
+ * second mapping.
  *
  * Deviation from design packet §1.2, which had this class move to
  * `@byok-sdk/cloud` with the server re-exporting it: the wire `TaskState`
@@ -57,21 +63,21 @@ export class SteerRejectedError extends Error {
   readonly code: SteerRejectionCode;
   /** The task's state at the moment the steer was refused. */
   readonly state: TaskState;
-  /** `TaskSnapshot.claimedRuntime` — `undefined` when nothing was ever recorded, which is itself a reason `steer_unsupported_runtime` can fire. */
-  readonly runtime: RuntimeId | undefined;
+  /** `TaskSnapshot.claimedExecutor` — `undefined` when no claim was recorded, which is itself a reason `steer_unsupported_runtime` can fire. */
+  readonly executor: ClaimedExecutor | undefined;
 
   constructor(
     taskId: string,
     code: SteerRejectionCode,
     state: TaskState,
-    runtime: RuntimeId | undefined,
+    executor: ClaimedExecutor | undefined,
   ) {
-    super(steerRejectionMessage(taskId, code, state, runtime));
+    super(steerRejectionMessage(taskId, code, state, executor));
     this.name = 'SteerRejectedError';
     this.taskId = taskId;
     this.code = code;
     this.state = state;
-    this.runtime = runtime;
+    this.executor = executor;
   }
 }
 
@@ -99,11 +105,15 @@ function refusalCode(kernelCode: SteerRejectionCode, state: TaskState): SteerRej
 export interface TaskHandleDeps extends TaskEventDeps {
   readonly cloud: ByokCloud;
   /**
-   * The task's current `TaskSnapshot.state` and `updatedAt`, or `undefined`
-   * when the attempt is gone. The snapshot projection itself — never a second
-   * derivation.
+   * The task's current `TaskSnapshot.state`, `updatedAt` and
+   * `claimedExecutor`, or `undefined` when the attempt is gone. The snapshot
+   * projection itself — never a second derivation.
    */
-  readonly readState: (taskId: string) => Promise<{ readonly state: TaskState; readonly at: string } | undefined>;
+  readonly readState: (taskId: string) => Promise<{
+    readonly state: TaskState;
+    readonly at: string;
+    readonly executor?: ClaimedExecutor;
+  } | undefined>;
   /** The read-back this handle's `result()` answers with. */
   readonly readResult: (taskId: string) => Promise<TaskResult | undefined>;
 }
@@ -185,18 +195,19 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
       return rejectPendingApproval(deps, taskId, reason, opts);
     },
 
-    async steer(text: string): Promise<void> {
+    async steer(text: string): Promise<{ readonly messageId: string }> {
       try {
-        await deps.cloud.steerTask(deps.tenant, taskId, { text });
+        const { envelope } = await deps.cloud.steerTask(deps.tenant, taskId, { text });
+        return { messageId: envelope.id };
       } catch (caught) {
         if (!(caught instanceof KernelSteerRejectedError)) throw caught;
-        const state = (await deps.readState(taskId))?.state;
+        const snapshot = await deps.readState(taskId);
         // A refused steer is a non-event, so nothing it did could have removed
         // the attempt between the gate and this read. If the attempt is gone
         // anyway, the store lost it: report the kernel's own refusal rather
         // than inventing a `TaskState` for a task that no longer has one.
-        if (state === undefined) throw caught;
-        throw new SteerRejectedError(taskId, refusalCode(caught.code, state), state, caught.runtime);
+        if (snapshot === undefined) throw caught;
+        throw new SteerRejectedError(taskId, refusalCode(caught.code, snapshot.state), snapshot.state, snapshot.executor);
       }
     },
 

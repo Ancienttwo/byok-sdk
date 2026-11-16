@@ -56,7 +56,7 @@ describe('logical MCP toolset dispatch', () => {
 
     await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId,
       instruction: 'find qualified leads',
-      runtime: 'claude',
+      target: { lane: 'runtime', runtimeId: 'claude' },
       requiredToolsets: ['salesko'],
     });
     const offer = await nextEnvelope(daemon);
