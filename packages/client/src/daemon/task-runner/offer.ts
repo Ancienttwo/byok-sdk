@@ -46,7 +46,6 @@ function offerFactsFor(taskId: string, payload: AcceptedOfferPayload): OfferFact
     requiredToolsets: [...(payload.requiredToolsets ?? [])],
     strict: false,
     sealed: payload.sealing !== undefined,
-    target: payload.target,
     ...(sessionRef === undefined ? {} : { sessionRef }),
     ...(payload.limits?.maxDurationMs === undefined ? {} : { maxDurationMs: payload.limits.maxDurationMs }),
     ...(message === undefined ? {} : {
