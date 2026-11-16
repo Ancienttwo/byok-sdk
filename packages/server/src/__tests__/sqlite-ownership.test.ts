@@ -210,19 +210,6 @@ describeSqlite('SQLite single-process ownership', { timeout: 20_000 }, () => {
     finally { await reopened.close(); }
   });
 
-  it('refuses a current file missing its active-task index without recreating it', async () => {
-    const path = databasePath();
-    await open(path).close();
-    const old = new DatabaseSync(path);
-    old.exec('DROP INDEX task_attempt_status_idx');
-    old.close();
-    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID' }));
-    const inspect = new DatabaseSync(path, { readOnly: true });
-    try {
-      expect(inspect.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'task_attempt_status_idx'").get()).toBeUndefined();
-    } finally { inspect.close(); }
-  });
-
   it('uses the actual exclusive WAL handle with the default grace and no lock sibling or SHM', () => {
     const path = databasePath();
     const database = openSqliteDatabase(path);

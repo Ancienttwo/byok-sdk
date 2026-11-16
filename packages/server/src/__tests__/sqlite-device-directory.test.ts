@@ -99,15 +99,49 @@ describe('SQLite durable device authority', () => {
     try {
       writer.exec('PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;');
       writer.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('pending', 'wal')").run();
-      // Copied while the writer holds them, so the WAL still has its frames.
-      copyFileSync(source, path);
-      copyFileSync(`${source}-wal`, `${path}-wal`);
+      // Copied while the writer holds them, so the WAL still has its frames and the SHM its index.
+      for (const suffix of ['', '-wal', '-shm']) copyFileSync(`${source}${suffix}`, `${path}${suffix}`);
     } finally { writer.close(); }
-    const digest = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
-    const before = [digest(path), digest(`${path}-wal`)];
+    const files = ['', '-wal', '-shm'].map((suffix) => `${path}${suffix}`);
+    const digests = () => files.map((file) => createHash('sha256').update(readFileSync(file)).digest('hex'));
+    const before = digests();
     expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '9' }));
-    expect([digest(path), digest(`${path}-wal`)]).toEqual(before);
-    expect(readdirSync(join(path, '..')).sort()).toEqual(['server.sqlite', 'server.sqlite-wal']);
+    expect(digests()).toEqual(before);
+    expect(readdirSync(join(path, '..')).sort()).toEqual(['server.sqlite', 'server.sqlite-shm', 'server.sqlite-wal']);
+  });
+
+  it('refuses a current file missing any index or trigger, without recreating it', async () => {
+    const reference = database(); await open(reference).close();
+    const read = new DatabaseSync(reference, { readOnly: true });
+    const objects = read.prepare("SELECT type, name FROM sqlite_master WHERE type IN ('index', 'trigger') AND sql IS NOT NULL").all() as { type: string; name: string }[];
+    read.close();
+    expect(objects.length).toBeGreaterThan(10);
+    for (const { type, name } of objects) {
+      const path = database(); await open(path).close();
+      const edit = new DatabaseSync(path); edit.exec(`DROP ${type.toUpperCase()} ${name}`); edit.close();
+      expect(() => open(path), name).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID' }));
+      const check = new DatabaseSync(path, { readOnly: true });
+      expect(check.prepare('SELECT 1 FROM sqlite_master WHERE name = ?').get(name), name).toBeUndefined();
+      check.close();
+    }
+  });
+
+  it('refuses a current file whose index definition differs', async () => {
+    const path = database(); await open(path).close();
+    const edit = new DatabaseSync(path);
+    edit.exec('DROP INDEX task_attempt_status_idx; CREATE INDEX task_attempt_status_idx ON task_attempt (tenant_id, status)');
+    edit.close();
+    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', message: expect.stringContaining('index task_attempt_status_idx') }));
+  });
+
+  it.each([
+    ['table', 'CREATE TABLE future_authority (id TEXT PRIMARY KEY)'],
+    ['index', 'CREATE INDEX future_idx ON request_receipt (recorded_at)'],
+    ['trigger', 'CREATE TRIGGER future_trigger AFTER INSERT ON request_receipt BEGIN SELECT 1; END'],
+  ])('refuses a current file holding an unknown %s, which a newer build wrote', async (_kind, ddl) => {
+    const path = database(); await open(path).close();
+    const edit = new DatabaseSync(path); edit.exec(ddl); edit.close();
+    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '10' }));
   });
 
   it('rejects unknown versions and malformed old databases without marking them migrated', async () => {
