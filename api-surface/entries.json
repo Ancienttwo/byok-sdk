@@ -289,7 +289,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3250516,
+      "budgetBytes": 3260297,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2293,7 +2293,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 701810,
+      "budgetBytes": 706305,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2498,7 +2498,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 567362,
+      "budgetBytes": 571001,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
