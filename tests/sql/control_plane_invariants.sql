@@ -41,6 +41,7 @@
 --   deploy/sql/0037_agent_memory_projection_sealed.sql (sealed member on the memory projection head, contentMac and padded length on its receipt, one-form checks; no new table or key)
 --   deploy/sql/0038_task_agent_ref_required.sql (tenant-first task_agentless_retired: the task-id fence for tasks retired without an Agent identity; a whole task row plus retired_at)
 --   deploy/sql/0039_task_agent_ref_not_null.sql (task.agent_id and task.agent_profile_revision become NOT NULL; no new table or key)
+--   deploy/sql/0040_wire_v7.sql (tenant-first task_steer_refusal; byok_wire_epoch, the store's one-row wire epoch, which like the migration ledger belongs to no tenant; one-executor check on task)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -1202,7 +1203,7 @@ BEGIN
     JOIN pg_namespace n ON n.oid = t.relnamespace
    WHERE n.nspname = current_schema()
      AND t.relkind = 'r'
-     AND t.relname <> 'byok_schema_migration'
+     AND t.relname NOT IN ('byok_schema_migration', 'byok_wire_epoch')
      AND NOT EXISTS (
        SELECT 1
          FROM pg_attribute a
@@ -1264,7 +1265,7 @@ BEGIN
           AND a.attnum = x.indkey[0]
    WHERE n.nspname = current_schema()
      AND t.relkind = 'r'
-     AND t.relname <> 'byok_schema_migration'
+     AND t.relname NOT IN ('byok_schema_migration', 'byok_wire_epoch')
      AND x.indisunique
      AND COALESCE(a.attname, '<expression>') <> 'tenant_id'
      AND NOT (t.relname = 'device'       AND a.attname = 'device_id')

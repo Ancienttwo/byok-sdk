@@ -363,25 +363,39 @@ Additive: `CloudStores.e2eeMember`, `DeviceScopedStores.e2eeMember`, the
 
 ## Service uninstall stops before it removes `current` (#2274)
 
-This corrects a 0.43.0 regression by restoring the 0.42.0 order.
-`@byok-sdk/client` `ServiceInstallation.uninstall()` runs the lifecycle's
-uninstall, which stops the service, while `current` still points at the
-installed payload, and only then removes `current`, `previous`, `versions/`,
-`snapshots/` and the receipt. 0.43.0 removed `current` first (#2011), so a
-Windows stop program under `current` was gone when the stop ran, and every
-uninstall failed with `service_stop_failed`.
+This corrects a 0.43.0 regression. `@byok-sdk/client`
+`ServiceInstallation.uninstall()` now stops and unregisters the service while
+`current` still points at the installed payload, then removes `current`, then
+the unit and launcher, then `previous`, `versions/`, `snapshots/` and the
+receipt. 0.43.0 removed `current` before the stop (#2011), so a Windows stop
+program under `current` was gone when the stop ran, and every uninstall failed
+with `service_stop_failed`.
 
 - A stop that fails, times out or is refused (a stop program that exits
-  non-zero, a refused or timed-out `launchctl bootout`) throws as is and
-  removes nothing: the unit and `current` both stay, so the service can start
-  again, for example at the next login, and `uninstall()` can be retried.
-- The cost narrows the 0.43.0 guarantee that a unit an uninstall leaves
-  behind starts no payload (#2011). When the stop succeeds and the unit's
-  removal then fails, the unit stays with `current`, as in 0.42.0, so a boot
-  or login can start the installed payload until `uninstall()` is retried.
-  Retry `uninstall()` after any failure.
+  non-zero, a refused or timed-out `launchctl bootout`) throws as is, without
+  a retry, and removes nothing: the unit and `current` both stay, so the
+  service can start again, for example at the next login, until `uninstall()`
+  is retried.
+- A unit whose removal fails after the stop stays without `current`, so a
+  boot or login starts no payload, as in 0.43.0 (#2011, #2279). A timed-out
+  `daemon-reload` after the unit files are removed is thrown the same way.
+- A Windows `user` scope lifecycle's `stop()`, and the stop inside
+  `uninstall()`, now run the Host's `stop` program only while a launcher
+  runs. With none running they write the stop marker and return. A retried
+  `uninstall()` therefore finishes after `current` is gone, instead of
+  failing with `service_stop_failed` because a stop program under `current`
+  no longer exists (#2279).
+- A first install that fails to activate, start or pass its health check
+  cleans up in the same order: stop and unregister, remove `current`, then
+  the unit and launcher. A leftover unit can no longer start the payload that
+  failed its health check. When the unit cannot be removed, the
+  `install_health_check_failed` message lists `service unit and launcher`
+  first among the remaining artifacts; when the stop fails, it lists
+  `service registration, current pointer` before it.
 
-No Host change is needed for a stop program that runs from under `current`.
+Retry `uninstall()` after any failure; a retry finishes once the cause is
+fixed. No Host change is needed for a stop program that runs from under
+`current`.
 
 ## Wire v7
 
@@ -415,8 +429,8 @@ supported:
 - The Host's K4 frozen work and outbox snapshots rotate: start them fresh on
   the v7 store.
 - The SQLite startup check refuses a pending row of another major
-  (`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`). The hosted data plane's store
-  check: phase 1.
+  (`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`). The hosted data plane checks the
+  database's wire epoch instead; see "Cloud data plane" below.
 
 ### What a v6 daemon sees
 
@@ -514,12 +528,15 @@ at most 64 capability flags.
 
 - **Claim and terminal executor.** The cloud records the winning claim's
   `executor` as `TaskAttempt.claimedExecutor`. A replayed claim must name the
-  same executor. A harness claim needs a `harness` or `auto` target, and a
-  `harness` target needs a claim of that harness. After a claim, every
-  terminal must echo exactly that executor. Before a claim, a terminal carries
-  none: a cancel or an unclaimed `daemon_interrupted` recovery. A
-  `task.complete` with no claim is rejected. An unclaimed recovery is no
-  longer checked against the offer's target.
+  same executor. A claim's executor must be one the offer's target allows:
+  any under `auto`, otherwise exactly the named runtime or harness. After a
+  claim, every terminal must echo exactly that executor. Before a claim, a
+  cancel carries none, and a `task.complete` is rejected. An unclaimed
+  `daemon_interrupted` recovery may name the executor its device admitted
+  before a claim that never reached the cloud; it must be one the offer's
+  target allows, and it records no claim or owner. `TerminalResult.executor`
+  (and the third argument of `projectTerminalResult`) is the claimed
+  executor, so a task that was never claimed has none.
 - **Renamed inbound refusal reasons** (`INBOUND_REFUSAL_REASONS`, as an
   observer reports them; the wire codes are unchanged). Rename these strings
   if your observer matches them:
@@ -527,8 +544,20 @@ at most 64 capability flags.
   - `terminal_harness_mismatch` is now `terminal_executor_mismatch`;
   - `claim_harness_and_runtime_conflict` is removed: a claim can no longer
     express it.
-  - New: `steer_refusal_id_mismatch` (wire `payload_invalid`) and
-    `steer_refusal_unknown_steer` (wire `not_permitted`).
+  - New: `steer_refusal_id_mismatch` (wire `payload_invalid`),
+    `steer_refusal_unknown_steer` (wire `not_permitted`) and
+    `task_not_claimed` (wire `not_permitted`).
+- **Reports before a claim** (#2289). Before a task is claimed, the cloud
+  takes only `task.claim`, `task.decline`, `task.cancelled` and a
+  `task.fail` with `recovery` from the offered device. Every other task
+  report is rejected with `task_not_claimed` (wire `not_permitted`) and
+  changes nothing: `task.started`, `task.progress`, `task.artifact`,
+  `task.await_approval`, `task.approval_resolved`, `task.steer_refused`,
+  `task.complete`, and a `task.fail` without `recovery`. The previous
+  release took them, so an unclaimed task could become running, awaiting
+  approval or terminal with no owner. Reports from any other device were already rejected
+  (`task_not_found_for_device`). A device that claims before it reports
+  sees no change.
 - **Renamed fields.** `SteerRejectedError.executor` replaces `.runtime`, and
   `TerminalResult.executor` replaces `.harnessId`.
 - **Steer refusals.** Read them with
@@ -545,6 +574,34 @@ at most 64 capability flags.
   `rejected` and `protocol_version_unsupported`, and an unknown type with
   `rejected` and `type_unsupported`, each with HTTP 200. The handshake answer
   carries `ingress` and no `capabilities`.
+
+### Cloud data plane (`@byok-sdk/cloud-dataplane`)
+
+- **New database.** Run the migrations on a new Postgres database, then write
+  the storage entitlements and retention policy. `0040_wire_v7.sql` stops
+  before any change when any table already holds a row, Host configuration
+  included, with an error that names the table. Otherwise it records wire
+  epoch 7 in `byok_wire_epoch`.
+- **Startup check.** `createPostgresCloudStores` rejects a database whose
+  epoch is not 7, or that has none, with `PostgresStoreEpochUnsupportedError`
+  (`code: 'POSTGRES_STORE_EPOCH_UNSUPPORTED'`, `requiredEpoch`, `foundEpoch`
+  when present) and changes nothing. It replaces the pending-mailbox check:
+  `PostgresMailboxProtocolUnsupportedError` and
+  `POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED` are removed. Match the new code
+  where you matched the old one.
+- **New store.** `PostgresTaskSteerRefusalStore` is the `steerRefusals` port
+  (table `task_steer_refusal`); `createPostgresCloudStores` includes it.
+  Archive, redaction, retention and device retirement keep its rows; tenant
+  erasure deletes them (`TENANT_ERASURE_TABLES`).
+- **Claims.** A claimed task stores exactly one executor, in
+  `claimed_runtime` or `claimed_harness_id` (a new CHECK).
+- **One schema.** The migrations and the preflight act on the first schema of
+  the connecting role's `search_path` in that database. Run the migrations and
+  the cloud with the same role, database and `search_path`; changing the
+  `search_path` between them points the cloud at another schema.
+- **Cut over at once.** Per-task locks (steer refusals, approval timeline) use
+  new keys, which a v6 process does not take. Do not run v6 and v7 cloud
+  processes against one database; v7 starts on a new one.
 
 ### Embedded server (`@byok-sdk/server`)
 
@@ -577,3 +634,75 @@ at most 64 capability flags.
 
 - Host APIs for steer refusals and their cursors (te2): phase 1.
 - Upgrade-manifest entries for the cloud, server, client and store changes, and their API surface: phase 1 and 2. Phase 0 lists the protocol and port entries.
+
+## Removed cloud and data-plane APIs
+
+These names had no caller in the SDK or its known Hosts. Remove the import and
+use the replacement named here.
+
+### `@byok-sdk/cloud`
+
+- **Board feed client.** `BoardFeedClient`, `BoardFeedRetryableError`,
+  `BoardFeedStoppedError` and the `BoardFeed*` types are removed. Read the
+  board through the device routes or `TenantStores.board`.
+- **Host facade methods.** `ByokCloud` no longer has these methods:
+  - `completeAgentHomeProjection` and `completeInputPreparation`. The device
+    completion routes still complete both.
+  - `listBoardItems` and `acceptBoardItem`. Use the tenant board store
+    (`list`, `updateStatus`).
+  - `enqueueSealedAgentOffer` and `enqueueSealedAgentEgressOffer`, with
+    `SealedAgentDispatchInput` and `SealedAgentEgressDispatchInput`.
+    `submitSealedAgentExecution` is the hosted sealed lane. The plaintext
+    resume lanes still refuse `sealing` and `sealed` with
+    `coordination_input_invalid`.
+  - `enqueueProviderProvisioningNotice`, with
+    `ProviderProvisioningNoticeInput`.
+- **Constants and aliases.** These are removed:
+  - `CLOUD_PORT_INTERFACES`; `CLOUD_PORT_METHODS` stays.
+  - `TRUTH_RECORD_CAPABILITY` and `TRUTH_INLINE_CONTENT_TYPE`. Use
+    `CLOUD_CAPABILITIES.truthRecords`.
+  - `CapabilitiesResponseSchema` and `CapabilitiesResponse`. Use
+    `CapabilityDeclarationSchema` and `CapabilityDeclaration` from
+    `@byok-sdk/core`.
+  - `receiptRetentionClass`.
+- **In-memory projection adapters.** `InMemoryAgentMemoryProjectionStore`
+  and `InMemoryAgentMemoryProjectionAuthorizer` are no longer exported. A
+  hosted composition supplies its own projection ports.
+- **Approval identity.** Every approval observation names its `approvalId`:
+  `approval_requested`, a local `approval_resolved`, and a host approve or
+  reject. `ApprovalObservationSchema`, `ApprovalTimelineEventSchema` and
+  `PendingApproval` now require the field. A stored timeline that holds an
+  observation without one is refused when read; no id is synthesized.
+  Wire v7 starts on new stores, so a v7 store never holds one.
+- **Archive input.** `taskArchiveInput` requires `agentRef`.
+- **Error code.** `task_attempt_agent_ref_missing` is removed from
+  `CLOUD_ERROR_CODES`. Migration 0039 makes the Agent columns `NOT NULL`, so
+  the read that raised it cannot fail.
+
+### `@byok-sdk/cloud-dataplane`
+
+- **Resident Postgres wakes.** `createPostgresMailboxWake`,
+  `createPostgresTaskEventsWake`, `MailboxWakeProbeMissedError`,
+  `TaskEventsWakeProbeMissedError` and their types are removed. Use the
+  cloud's in-process wake with its bounded `fallbackMs` reread. The SQL
+  triggers stay.
+- **Composition factories.** These are removed; construct the class instead:
+  - `createPostgresCloudMaintenance` and `PostgresCloudMaintenanceOptions`:
+    use `PostgresCloudCleanup`.
+  - `createPostgresTenantErasure` and
+    `PostgresTenantErasureCompositionOptions`: use `PostgresTenantErasure`.
+  - `createPostgresTaskRedactionStore`: use `PostgresTaskRedactionStore`.
+  - `createPostgresAgentMemoryProjectionStore`: use
+    `PostgresAgentMemoryProjectionStore`.
+- **Retention policy store.** `PostgresRetentionPolicyStore`,
+  `TenantRetentionPolicy` and `TenantRetentionPolicyInput` are removed. The
+  `tenant_retention_policy` table and `runMaintenance` are unchanged: the
+  Host writes and reads the policy with SQL and passes it to maintenance.
+- **Mailbox rows.** Every outbox read validates the row's tenant with
+  `tenantId()`, so a row with an invalid `tenant_id` fails the read with
+  `ByokCoreError` `tenant_id_invalid`. Rows the SDK wrote are unaffected.
+- **Agentless retirement.** `retireAgentlessTasks` and its option and result
+  types are removed. It moved pre-0039 rows that had no Agent identity, and
+  wire v7 starts on a new database. The retired-id fence stays: a task id in
+  `task_agentless_retired` still refuses a new offer with
+  `agent_task_already_exists`.

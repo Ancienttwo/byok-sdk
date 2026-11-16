@@ -23,7 +23,8 @@ audit policy, tenant write quiescence, and the decision to invoke this package.
 
 ## Run
 
-Create a direct-DSN pool and call `createPostgresTenantErasure`. Invoke
+Create a direct-DSN pool and construct `PostgresTenantErasure` over an
+`R2ObjectMaintenanceStore` with the serving deployment's R2 options. Invoke
 `eraseTenant(tenant, operationId)` until its typed result is terminal:
 
 | Result | Meaning | Operator action |

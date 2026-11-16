@@ -72,6 +72,7 @@ describe('observer.onInboundRefused', () => {
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload(),
     });
+    await handleInboundEnvelope(stores, device.deviceId, createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR }, { taskId }));
     const envelope = oversizedProgress(taskId);
 
     expect(await handleInboundEnvelope(stores, device.deviceId, envelope, undefined, undefined, observer).then((result) => result.outcome)).toBe(
@@ -201,7 +202,7 @@ describe('observer.onInboundRefused', () => {
       const device = await harness.pairDevice(TENANT_A);
       await grantAgentHome(harness, TENANT_A, device.deviceId);
       const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-      const messages = [oversizedProgress(taskId), createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR }, { taskId })];
+      const messages = [createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR }, { taskId }), oversizedProgress(taskId)];
       const response = await harness.request('/byok/messages', {
         method: 'POST',
         headers: { ...device.authorization, 'content-type': 'application/json' },
@@ -212,8 +213,8 @@ describe('observer.onInboundRefused', () => {
       expect(response.status).toBe(200);
       const answer = await response.json();
       expect(answer).toEqual({ accepted: 1, rejected: 1, outcomes: [
-        { id: messages[0]!.id, outcome: 'rejected', reason: 'limit_exceeded' },
-        { id: messages[1]!.id, outcome: 'accepted' },
+        { id: messages[0]!.id, outcome: 'accepted' },
+        { id: messages[1]!.id, outcome: 'rejected', reason: 'limit_exceeded' },
       ] });
       answers.push(answer);
     }

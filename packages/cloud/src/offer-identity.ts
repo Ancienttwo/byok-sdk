@@ -1,5 +1,5 @@
 import { uuidFromSha256, type AgentRef } from '@byok-sdk/protocol';
-export async function taskOfferMessageId(tenant: string, taskId: string, deviceId: string, agentRef: AgentRef | undefined,
+export async function taskOfferMessageId(tenant: string, taskId: string, deviceId: string, agentRef: AgentRef,
   sha256: (bytes: Uint8Array) => Promise<string>): Promise<string> {
   return uuidFromSha256(await sha256(new TextEncoder().encode(JSON.stringify({ domain: 'byok:task-offer', tenant, taskId, deviceId, agentRef }))));
 }

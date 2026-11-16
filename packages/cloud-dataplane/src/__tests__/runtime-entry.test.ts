@@ -35,7 +35,6 @@ if (!existsSync(DIST_RUNTIME)) {
 /** Every online symbol the subpath must carry, by name. */
 const ONLINE_EXPORTS = [
   // Portable maintenance policy and its shared error contract
-  'PostgresRetentionPolicyStore',
   'CLOUD_CLEANUP_ERROR_CODES',
   'CloudCleanupError',
   // pool
@@ -50,16 +49,15 @@ const ONLINE_EXPORTS = [
   'PostgresProofRequestReceiptStore',
   'PostgresRequestReceiptStore',
   'PostgresTaskAttemptStore',
+  'PostgresTaskSteerRefusalStore',
   'PostgresTaskCancellationStore',
   'PostgresAgentMemoryProjectionStore',
-  'createPostgresAgentMemoryProjectionStore',
   'PostgresTaskRedactionStore',
-  'createPostgresTaskRedactionStore',
   'PostgresE2eeMemberStore',
   'createPostgresCloudStores',
-  // the composition's pending-mailbox wire-major fence
-  'POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED',
-  'PostgresMailboxProtocolUnsupportedError',
+  // the composition's store wire-epoch fence
+  'POSTGRES_STORE_EPOCH_UNSUPPORTED',
+  'PostgresStoreEpochUnsupportedError',
   // R2 blobs
   'DEFAULT_MAX_ATTEMPTS',
   'DEFAULT_PRESIGN_TTL_SECONDS',
@@ -89,7 +87,6 @@ const ONLINE_EXPORTS = [
 
 /** Operations that belong to the root entry and must never reach the subpath. */
 const NODE_ONLY_EXPORTS = [
-  'createPostgresMailboxWake',
   'migrate',
   'migrationsDir',
   'readMigrationFiles',
@@ -98,7 +95,6 @@ const NODE_ONLY_EXPORTS = [
   'verifyMigrations',
   'MigrationStateMismatchError',
   'PostgresCloudCleanup',
-  'createPostgresCloudMaintenance',
 ];
 
 const runtimeNamespace = runtime as unknown as Record<string, unknown>;

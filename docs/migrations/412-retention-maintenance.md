@@ -20,8 +20,8 @@ pairing codes, activity and approvals. Use the retention conformance suites.
   (5 minutes ±20%, limit 500 by default), joins concurrent calls, and waits for
   the pass to settle before closing storage. There is no disable flag.
 - Hosted cron/alarm calls `cloud.runMaintenance({ tenant, now, policy, limit })`.
-  Read/write tenant policy through `PostgresRetentionPolicyStore` exported from
-  `@byok-sdk/cloud-dataplane/runtime`. Missing policy fails closed. Delete calls
+  The Host stores the tenant policy (the `tenant_retention_policy` table stays
+  for it, written and read with SQL) and passes it in. Delete calls
   to `PostgresCloudCleanup.runTenant` and its policy methods; there is no alias.
   Dead-letter operations, reconciliation and usage rebuild remain operator APIs.
 - All SDK receipt families and unknown prefixes are identity fences. The

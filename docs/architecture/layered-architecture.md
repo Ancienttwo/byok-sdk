@@ -90,7 +90,7 @@ flowchart TB
 | L1 | `@byok-sdk/core` | 9.6k / 48 | store ports `CoreStores`（`packages/core/src/stores.ts`）；`createInMemoryCoreStores`（`packages/core/src/in-memory/index.ts:45`）；子路径 `./sealed-payload` |
 | L2 | `@byok-sdk/cloud` | 15.3k / 83 | `createByokCloud`（`packages/cloud/src/cloud.ts:1021`）；`createInMemoryByokCloud`（`packages/cloud/src/composition/in-memory.ts:106`） |
 | L3 | `@byok-sdk/server` | 6.3k / 20 | `createByokServer`（`packages/server/src/index.ts:365`）；`listenLoopback`（`packages/server/src/loopback.ts:84`） |
-| L3 | `@byok-sdk/cloud-dataplane` | 10.8k / 41 | `./runtime`：`createByokPool` 与 Postgres、R2 stores（`packages/cloud-dataplane/src/runtime.ts`）；根入口另有 `migrate`、`createPostgresMailboxWake` 等 Node-only 能力（`packages/cloud-dataplane/src/index.ts`） |
+| L3 | `@byok-sdk/cloud-dataplane` | 10.8k / 41 | `./runtime`：`createByokPool` 与 Postgres、R2 stores（`packages/cloud-dataplane/src/runtime.ts`）；根入口另有 `migrate` 等 Node-only 能力（`packages/cloud-dataplane/src/index.ts`） |
 | L3 | `@byok-sdk/ui-runtime` | 0.9k / 5 | `projectTimeline`、`replayTimeline`（`packages/ui-runtime/src/timeline.ts:360,373`） |
 | 设备 | `@byok-sdk/client` | 73.9k / 342（含 7 个 `.d.ts`）；`vendor/` 99.9k | `createDaemon`（`packages/client/src/daemon/create-daemon.ts:963`）；`createDaemonWithAdapters`（同文件 `:718`）；`byok-agent` 等 8 个 bin；子路径 `./adapters`、`./agent-memory`、`./assertion-client`、`./mcp-server`、`./mcp-server/http`、`./testing` |
 | 旁路 | `@byok-sdk/keys` | 9.7k / 42 | `ProviderRegistry`（`packages/keys/src/registry.ts:184`）；`byok-pi-provider-launcher`；子路径 `./pi-catalog`、`./model-route` |

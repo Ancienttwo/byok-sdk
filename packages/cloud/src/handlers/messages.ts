@@ -70,6 +70,7 @@ const WIRE_REFUSAL_REASONS = {
   content_receipt_request_mismatch: 'not_permitted',
   task_not_found_for_device: 'not_permitted',
   task_owned_by_other_device: 'not_permitted',
+  task_not_claimed: 'not_permitted',
   agent_identity_mismatch: 'not_permitted',
   terminal_executor_mismatch: 'not_permitted',
   claim_device_mismatch: 'not_permitted',

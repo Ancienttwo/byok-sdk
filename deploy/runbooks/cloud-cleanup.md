@@ -17,15 +17,11 @@ Operational contract for S4B-c on the Postgres + R2 composition. Authorities:
 3. Call the kernel from one hosted scheduler per tenant:
 
 ```ts
-import { PostgresRetentionPolicyStore } from '@byok-sdk/cloud-dataplane/runtime';
-
-const policies = new PostgresRetentionPolicyStore(pool, clock);
-const policy = await policies.readRetentionPolicy(tenant);
+// `policy` is the tenant's `RetentionPolicy` (from `@byok-sdk/cloud`), as the Host stores it.
 const report = await cloud.runMaintenance({ tenant, now, policy, limit: 500 });
 ```
 
-There is no policy translator: `TenantRetentionPolicyInput` extends the kernel
-`RetentionPolicy`. Its fields are positive bigint milliseconds:
+The policy is the kernel `RetentionPolicy`. Its fields are positive bigint milliseconds:
 `mailboxAckedRetentionMs` (default 24h), `mailboxUnackedRetentionMs` (7d),
 `mailboxDeadLetterRetentionMs` (30d), `requestReceiptRetentionMs` (24h),
 `objectOrphanGraceMs` (24h). The reference
@@ -312,7 +308,7 @@ policy row, referenced by an entitlement or not, and stops before any change
 if one holds a window outside 1..9007199254740991 ms or two mailbox windows
 whose sum exceeds 9007199254740991 ms (`Number.MAX_SAFE_INTEGER`, the largest
 window the application accepts). Find those rows first and correct their
-windows through the policy store before migrating:
+windows with SQL before migrating:
 
 ```sql
 SELECT tenant_id, policy_id FROM tenant_retention_policy

@@ -10,8 +10,6 @@ import type {
 } from '@byok-sdk/core';
 import { z } from 'zod';
 
-export const TRUTH_RECORD_CAPABILITY = 'truth.records';
-export const TRUTH_INLINE_CONTENT_TYPE = 'application/vnd.byok.truth+utf8';
 export const TRUTH_REQUEST_ID_MAX_LENGTH = 120;
 export const TRUTH_RECORD_KEY_MAX_LENGTH = 200;
 export const TRUTH_LABEL_MAX_LENGTH = 200;

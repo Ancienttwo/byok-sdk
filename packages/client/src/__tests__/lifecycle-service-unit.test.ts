@@ -3,7 +3,7 @@ import { promises as nodeFs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createServiceLifecycle } from '../lifecycle/create-service-lifecycle';
+import { createManagedServiceLifecycle, createServiceLifecycle } from '../lifecycle/create-service-lifecycle';
 import type { Runner } from '../util/exec-runner';
 import type { ServiceDefinition, ServiceLifecycle } from '../lifecycle/service-types';
 import {
@@ -141,12 +141,19 @@ describe.each(PLATFORMS)('lifecycle (#1097) unit classification on $platform', (
     }
   });
 
-  it('uninstall removes the unit, the launcher and the owner record', async () => {
+  it.each(['uninstall', 'held'] as const)('%s removes the unit, the launcher and the owner record; a held deactivate leaves them for removeFiles (#2279)', async (via) => {
     const fs = memoryServiceFs(WINSW_BIN);
-    const lifecycle = lifecycleFor(platform, fs, okRunner());
+    const lifecycle = createManagedServiceLifecycle(def(), { platform, deps: { run: okRunner(), fs, homedir: () => '/h', getuid: () => 501 } });
     await lifecycle.install();
     expect(fs.files.has(OWNER_RECORD)).toBe(true);
-    await lifecycle.uninstall();
+    if (via === 'uninstall') await lifecycle.uninstall();
+    else {
+      await lifecycle.owned(async (held) => {
+        await held.deactivate();
+        expect([fs.files.has(unitPath), fs.files.has(OWNER_RECORD)]).toEqual([true, true]);
+        await held.removeFiles();
+      });
+    }
     expect(fs.files.has(unitPath)).toBe(false);
     if (platform !== 'win32') expect(fs.files.has(launcherPath)).toBe(false);
     expect(fs.files.has(OWNER_RECORD)).toBe(false);

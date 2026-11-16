@@ -8,7 +8,6 @@ import {
   AgentContentReadPayloadSchema,
   AgentHomeProjectionPayloadSchema,
   AgentInputPreparationPayloadSchema,
-  ProviderProvisioningAvailablePayloadSchema,
   AgentMemoryIntentAvailablePayloadSchema,
   type AgentRef,
 } from '@byok-sdk/protocol';
@@ -42,7 +41,6 @@ export function createAgentControlsApi({
   | 'enqueueAgentContentRead'
   | 'enqueueAgentHomeProjection'
   | 'enqueueInputPreparation'
-  | 'enqueueProviderProvisioningNotice'
   | 'enqueueAgentMemoryIntentNotice'
 > {
   return {
@@ -186,39 +184,6 @@ export function createAgentControlsApi({
         );
       }
       return { ...control, status };
-    },
-
-    async enqueueProviderProvisioningNotice(tenant, deviceId, input) {
-      // Strict one-field body first: an extra field (ciphertext, config,
-      // identity) is a validation failure here, before any admission read or
-      // mailbox allocation, never a stripped-and-sent notice.
-      const payload = ProviderProvisioningAvailablePayloadSchema.parse(input);
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('provider.provisioning.available', payload));
-      const messageId = uuidFromSha256(
-        await options.crypto.sha256(
-          new TextEncoder().encode(
-            JSON.stringify({
-              domain: 'byok:provider-provisioning-notice',
-              tenant,
-              deviceId,
-              requestId: payload.requestId,
-            }),
-          ),
-        ),
-      );
-      const control = await enqueueAgentControlEnvelope(tenant, deviceId, messageId, (seq) =>
-        createEnvelope('provider.provisioning.available', payload, { id: messageId, seq }),
-      );
-      if (
-        control.envelope.type !== 'provider.provisioning.available' ||
-        control.envelope.payload.requestId !== payload.requestId
-      ) {
-        throw new ByokCloudError(
-          'mailbox_receipt_mismatch',
-          `Mailbox message ${messageId} does not carry provider provisioning notice ${payload.requestId}.`,
-        );
-      }
-      return control;
     },
 
     async enqueueAgentMemoryIntentNotice(tenant, deviceId, input) {
