@@ -154,7 +154,7 @@ function createFixture(withStore = true): Fixture {
       const response = await request('/byok/pair', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ pairingCode: code, deviceName: 'test-device', devicePublicKey: keys.publicKeyBase64Url }),
+        body: JSON.stringify({ pairingCode: code, deviceName: 'test-device', devicePublicKey: keys.publicKeyBase64Url, expectedDeviceDigest: null }),
       });
       const body = (await response.json()) as { deviceId: string; accessToken: string };
       await base.stores.devices.recordCapabilities(tenant, { deviceId: body.deviceId, capabilities: CAPABILITIES });

@@ -380,7 +380,13 @@ machine's current device. See
   With `machineId`, the fence check, the supersession and the insert form
   one atomic section per machine; a conflict writes nothing and consumes no
   code. The cloud conformance suite has a case for each rule.
-- The reference stores and the hosted data plane: phase 1.
+- `createPairingCode` refuses a `productId` longer than 64 characters
+  (`PAIRING_CODE_PRODUCT_ID_MAX_LENGTH`) with `ByokCloudError` code
+  `pairing_product_id_invalid`, and mints nothing. Hosts with longer product
+  ids shorten them before upgrading.
+- The in-memory, SQLite and Postgres reference stores implement the fence.
+  Postgres serializes registrations of one machine with
+  `pg_advisory_xact_lock`; no schema change.
 
 #### Client pairing
 

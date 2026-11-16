@@ -160,6 +160,7 @@ export async function pairFakeDaemon(
       pairingCode,
       deviceName: opts.deviceName ?? 'test-laptop',
       devicePublicKey: identity.publicKeyBase64Url,
+      expectedDeviceDigest: null,
     }),
   });
   if (!pairRes.ok) {

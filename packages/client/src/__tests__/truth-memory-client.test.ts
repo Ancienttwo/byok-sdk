@@ -482,6 +482,7 @@ describe('truth memory client', () => {
       devicePublicKey: publicJwk.x,
       proofKeyId: 'identity',
       proofKeyEpoch: 0,
+      expectedDeviceDigest: null,
     });
     const auth = new AuthManager({ serverUrl: 'http://local', store });
     await auth.loadExisting();

@@ -61,7 +61,7 @@ describe('SQLite custom-harness claim authority', () => {
     let runtime = open();
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
-        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
       await runtime.bound.devices.recordCapabilities({ capabilities: ['agent-home-contract', 'custom-harness'],
         harnesses: [{ id: harnessId, capabilities }, { id: 'other', capabilities }] });
       const offer = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, {
@@ -112,7 +112,7 @@ describe('SQLite custom-harness claim authority', () => {
     let runtime = open();
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
-        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
       await runtime.bound.devices.recordCapabilities({ capabilities: ['agent-home-contract'] });
       const { taskId } = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, { payload });
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', {

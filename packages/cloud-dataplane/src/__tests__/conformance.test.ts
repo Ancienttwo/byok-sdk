@@ -197,6 +197,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres offer delivery composition', () => {
         devicePublicKey: 'fixture-public-key',
         proofKeyId: 'fixture-proof',
         proofKeyEpoch: 1,
+        expectedDeviceDigest: null,
       });
       await stores.devices.recordCapabilities(OFFER_TENANT, {
         deviceId: 'device-offer-sequence',

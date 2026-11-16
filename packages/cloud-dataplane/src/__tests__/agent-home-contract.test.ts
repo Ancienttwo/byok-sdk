@@ -38,6 +38,7 @@ if (POSTGRES_URL === undefined) {
           devicePublicKey: 'agent-home-public-key',
           proofKeyId: 'agent-home-proof-key',
           proofKeyEpoch: 0,
+          expectedDeviceDigest: null,
         });
         await devices.recordCapabilities(TENANT, {
           deviceId: 'agent-home-device',

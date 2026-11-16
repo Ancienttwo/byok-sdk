@@ -1,4 +1,4 @@
-import type { HarnessInfo } from '@byok-sdk/protocol';
+import { pairDeviceDigest, type HarnessInfo } from '@byok-sdk/protocol';
 /**
  * Postgres {@link DeviceDirectory}.
  *
@@ -31,7 +31,7 @@ import {
   type TenantReadinessDevice,
   type TenantReadiness,
 } from '@byok-sdk/core';
-import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
+import type { DeviceDirectory, DeviceRecord, DeviceRegistration, DeviceRegistrationResult } from '@byok-sdk/cloud';
 import type { Pool, PoolClient } from 'pg';
 import type { ByokPool } from '../pool.js';
 import { BEGIN_OUTBOX_WRITE, reopenDeviceStream } from './core/outbox-writer.js';
@@ -154,17 +154,27 @@ async function rollback(client: PoolClient): Promise<void> {
 }
 
 /**
+ * The registration fence's per-machine lock key (#2045). A JSON array of
+ * strings has one serialization, so no field can run into its neighbour.
+ */
+function machineLockKey(tenant: TenantId, productId: string, machineId: string): string {
+  return JSON.stringify(['byok-pair-machine-v1', tenant, productId, machineId]);
+}
+
+/**
  * The client-scoped registration mutation shared by standalone device
  * registration and pairing enrollment. Its caller owns the transaction so the
  * guarded pairing-code update, machine supersession cleanup, and insert can
  * commit or roll back together, and opens it with `BEGIN_OUTBOX_WRITE`.
+ *
+ * `conflict` has written nothing; the caller rolls the transaction back.
  */
 export async function registerDeviceOnClient(
   client: PoolClient,
   tenant: TenantId,
   input: DeviceRegistration,
   now: string,
-): Promise<DeviceRecord> {
+): Promise<DeviceRegistrationResult> {
   // Re-pairing an existing device replaces its registration in place rather
   // than creating a second row, matching the in-memory reference. `revoked`
   // resets because a fresh pairing IS a new grant.
@@ -190,6 +200,23 @@ export async function registerDeviceOnClient(
   // the DELETE's effect and the unique index would reject exactly the
   // supersession this exists to perform.
   if (input.machineId !== undefined) {
+    // The fence (#2045): one registration of this machine at a time holds the
+    // transaction-scoped lock, and under READ COMMITTED the read after it sees
+    // every earlier registration of the machine that committed. So two
+    // registrations never both pass the fence on the same current device,
+    // including when there is none. The check precedes every write.
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      machineLockKey(tenant, input.productId, input.machineId),
+    ]);
+    const current = await client.query<{ device_id: string }>(
+      'SELECT device_id FROM device WHERE tenant_id = $1 AND product_id = $2 AND machine_id = $3',
+      [tenant, input.productId, input.machineId],
+    );
+    const currentId = current.rows[0]?.device_id;
+    const currentDeviceDigest = currentId === undefined
+      ? null
+      : await pairDeviceDigest({ tenantId: tenant, productId: input.productId, deviceId: currentId });
+    if (currentDeviceDigest !== input.expectedDeviceDigest) return { outcome: 'conflict', currentDeviceDigest };
     const superseded = await client.query<{ device_id: string }>(
       `DELETE FROM device
         WHERE tenant_id = $1 AND product_id = $2 AND machine_id = $3 AND device_id <> $4
@@ -231,7 +258,7 @@ export async function registerDeviceOnClient(
   // A fresh grant for an id that was retired reopens its stream; the rows,
   // cursor and seq it kept stay as they are.
   await reopenDeviceStream(client, tenant, input.deviceId);
-  return toRecord(result.rows[0]!);
+  return { outcome: 'registered', device: toRecord(result.rows[0]!) };
 }
 
 /** Read one active device while a caller-owned transaction still holds its authority lock. */
@@ -257,13 +284,13 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
     this.#clock = clock;
   }
 
-  async register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord> {
+  async register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRegistrationResult> {
     const client = await this.#pool.connect();
     try {
       await client.query(BEGIN_OUTBOX_WRITE);
-      const record = await registerDeviceOnClient(client, tenant, input, this.#clock.now().toISOString());
-      await client.query('COMMIT');
-      return record;
+      const result = await registerDeviceOnClient(client, tenant, input, this.#clock.now().toISOString());
+      await client.query(result.outcome === 'conflict' ? 'ROLLBACK' : 'COMMIT');
+      return result;
     } catch (cause) {
       await rollback(client);
       throw cause;

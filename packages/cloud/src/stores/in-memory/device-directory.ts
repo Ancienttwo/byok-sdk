@@ -1,4 +1,4 @@
-import type { HarnessInfo } from '@byok-sdk/protocol';
+import { pairDeviceDigest, type HarnessInfo } from '@byok-sdk/protocol';
 /**
  * In-memory {@link DeviceDirectory}.
  *
@@ -33,7 +33,13 @@ import {
   type TenantReadinessDevice,
   type TenantReadiness,
 } from '@byok-sdk/core';
-import type { DeviceDirectory, DeviceRecord, DeviceRegistration, DeviceScopedStores } from '../ports.js';
+import type {
+  DeviceDirectory,
+  DeviceRecord,
+  DeviceRegistration,
+  DeviceRegistrationResult,
+  DeviceScopedStores,
+} from '../ports.js';
 import type { InMemoryTaskAttemptState } from './task-attempts.js';
 import { settleDeviceAttempts } from './task-retirement.js';
 
@@ -51,11 +57,11 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
     this.#state = state;
   }
 
-  register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord> {
+  register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRegistrationResult> {
     return this.#serialized(() => this.#register(tenant, input));
   }
 
-  async #register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord> {
+  async #register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRegistrationResult> {
     const record: DeviceRecord = {
       tenantId: tenant,
       productId: input.productId,
@@ -80,21 +86,32 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
     //
     // The device being registered is skipped: re-pairing the SAME deviceId is
     // an in-place replacement below, not a supersession of itself.
+    //
+    // The fence (#2045) reads the machine's current device inside this
+    // serialized section, before anything is written: registrations of one
+    // machine never both observe the same current device, and a conflict
+    // leaves every row, attempt, stream and device-scoped state untouched.
     const superseded: Array<readonly [string, DeviceRecord]> = [];
     if (input.machineId !== undefined) {
+      let current: DeviceRecord | undefined;
       for (const [key, existing] of [...this.#byTenant]) {
-        if (existing.deviceId === record.deviceId) continue;
         if (existing.tenantId !== tenant) continue;
         if (existing.productId !== input.productId) continue;
         if (existing.machineId !== input.machineId) continue;
+        current = existing;
+        if (existing.deviceId === record.deviceId) continue;
         superseded.push([key, existing]);
       }
+      const currentDeviceDigest = current === undefined
+        ? null
+        : await pairDeviceDigest({ tenantId: tenant, productId: current.productId, deviceId: current.deviceId });
+      if (currentDeviceDigest !== input.expectedDeviceDigest) return { outcome: 'conflict', currentDeviceDigest };
     }
     const key = tenantKey(tenant, record.deviceId);
     if (superseded.length === 0) {
       await this.#mailbox.reopenStream(tenant, { deviceId: record.deviceId });
       this.#remember(key, record);
-      return record;
+      return { outcome: 'registered', device: record };
     }
     const registered = await this.#tasks.exclusive(async () => {
       const replaced = this.#byTenant.get(key);
@@ -115,7 +132,7 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
       return record;
     });
     for (const [, existing] of superseded) await this.#deleteDeviceState(tenant, existing.deviceId);
-    return registered;
+    return { outcome: 'registered', device: registered };
   }
 
   async get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined> {

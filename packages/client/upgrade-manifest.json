@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "7b6f5536a248b3a619e46b3fb221e737a310961f2c466593011e7d07ec5cc2cf"
+    "snapshotSha256": "115160d47b74622f9ec443b6118ca3091675fd5679dddf8cd0d6ea6e62f57af8"
   },
   "configFields": {
     "status": "tracked",
@@ -428,12 +428,34 @@
       "summary": "@byok-sdk/cloud DeviceRegistration and PairingEnrollmentInput require expectedDeviceDigest. DeviceDirectory.register returns DeviceRegistrationResult (registered or conflict) and PairingEnrollment.redeemAndRegister returns PairingEnrollmentResult (registered, conflict, or code_invalid in place of undefined). A custom store checks the fence, supersedes and inserts in one atomic section per (tenant, product, machineId); a conflict writes nothing and consumes no code, and a consumed code with the same binding replays before the fence is read. Run the cloud conformance suite.",
       "migration": "docs/releases/host-upgrade-next-minor.md#pairing-registration-fence-2045",
       "items": [
+        "export:@byok-sdk/cloud#AuthPlane",
+        "export:@byok-sdk/cloud#InMemoryPairingCodeStore",
         "export:@byok-sdk/cloud#DeviceDirectory",
         "export:@byok-sdk/cloud#DeviceRegistration",
         "export:@byok-sdk/cloud#DeviceRegistrationResult",
         "export:@byok-sdk/cloud#PairingEnrollment",
         "export:@byok-sdk/cloud#PairingEnrollmentInput",
-        "export:@byok-sdk/cloud#PairingEnrollmentResult"
+        "export:@byok-sdk/cloud#PairingEnrollmentResult",
+        "export:@byok-sdk/cloud#PairInput"
+      ]
+    },
+    {
+      "id": "wire-v7-pairing-product-id-bound",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud createPairingCode (and the server's pairing.createPairingCode) refuses a productId longer than PAIRING_CODE_PRODUCT_ID_MAX_LENGTH (64) with ByokCloudError code pairing_product_id_invalid and mints nothing. The device keys its enrollment and every pairDeviceDigest by productId, so it is bounded where it enters. CLOUD_ERROR_CODES gains pairing_product_id_invalid.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pairing-registration-fence-2045",
+      "items": [
+        "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
+        "export:@byok-sdk/cloud#PAIRING_CODE_PRODUCT_ID_MAX_LENGTH"
+      ]
+    },
+    {
+      "id": "wire-v7-pairing-product-id-refused",
+      "impact": "breaking",
+      "summary": "createPairingCode throws ByokCloudError pairing_product_id_invalid for a productId over 64 characters and mints nothing.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pairing-registration-fence-2045",
+      "items": [
+        "behavior:wire-v7-pairing-product-id-refused"
       ]
     },
     {
@@ -705,6 +727,16 @@
       "entry": "wire-v7-execution-target"
     },
     {
+      "item": "export:@byok-sdk/cloud#AuthPlane",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
+      "change": "changed",
+      "entry": "wire-v7-pairing-product-id-bound"
+    },
+    {
       "item": "export:@byok-sdk/cloud#CLOUD_STORE_NAMES",
       "change": "changed",
       "entry": "wire-v7-steer-refused"
@@ -750,6 +782,11 @@
       "entry": "device-state-delete-ports"
     },
     {
+      "item": "export:@byok-sdk/cloud#InMemoryPairingCodeStore",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
       "item": "export:@byok-sdk/cloud#InboundDedupStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
@@ -758,6 +795,16 @@
       "item": "export:@byok-sdk/cloud#NonceStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#PAIRING_CODE_PRODUCT_ID_MAX_LENGTH",
+      "change": "added",
+      "entry": "wire-v7-pairing-product-id-bound"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#PairInput",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud#PairingEnrollment",

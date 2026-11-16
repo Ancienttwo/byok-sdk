@@ -48,6 +48,7 @@ function setup() {
     }
     await base.stores.devices.register(tenant, {
       productId: 'product', deviceId, deviceName: deviceId, devicePublicKey: `${deviceId}-key`, proofKeyId: 'identity', proofKeyEpoch: 0,
+      expectedDeviceDigest: null,
     });
     await base.stores.devices.recordCapabilities(tenant, { deviceId, capabilities: [...capabilities] });
     const member = await newMember(deviceId);

@@ -1241,10 +1241,16 @@ export declare function authenticateDeviceProof(input: unknown, request: DeviceP
  */
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { CloudCrypto } from '../crypto/port.js';
-import type { CloudStores, DeviceRecord, PairingCodeInfo } from '../stores/ports.js';
+import type { CloudStores, DeviceRecord, PairingCodeInfo, PairingEnrollmentResult } from '../stores/ports.js';
 import { type TokenSigner } from './tokens.js';
 /** ~10min, matching the reference server's pairing-code lifetime. */
 export declare const PAIRING_CODE_TTL_MS: number;
+/**
+ * The longest `productId` a pairing code may carry. The device keys its
+ * enrollment and every `pairDeviceDigest` by it, so it is bounded where it
+ * enters the system: at the mint.
+ */
+export declare const PAIRING_CODE_PRODUCT_ID_MAX_LENGTH = 64;
 /** The paired identity key is the first and only proof key in S6. */
 export declare const DEVICE_IDENTITY_PROOF_KEY_ID = "identity";
 export declare const DEVICE_IDENTITY_PROOF_KEY_EPOCH = 0;
@@ -1254,6 +1260,8 @@ export interface PairInput {
     readonly devicePublicKey: string;
     /** Optional client-hashed machine identity (protocol §6.1). Carried into registration verbatim; it is never a tenant or product authority. */
     readonly machineId?: string;
+    /** The registration fence (#2045, protocol §6.1), carried into enrollment verbatim. */
+    readonly expectedDeviceDigest: string | null;
 }
 export interface MintedAccessToken {
     readonly accessToken: string;
@@ -1261,18 +1269,23 @@ export interface MintedAccessToken {
     readonly expiresIn: number;
 }
 export interface AuthPlane {
-    /** Host control plane: mint a single-use code carrying the tenant/product a device will land in. */
+    /**
+     * Host control plane: mint a single-use code carrying the tenant/product a
+     * device will land in. Rejects with `pairing_product_id_invalid` when
+     * `productId` is longer than {@link PAIRING_CODE_PRODUCT_ID_MAX_LENGTH}.
+     */
     createPairingCode(tenant: TenantId, input: {
         readonly productId: string;
         readonly ttlMs?: number;
     }): Promise<PairingCodeInfo>;
     /**
-     * Redeem a code and register the device it pairs, in one step. `undefined`
+     * Redeem a code and register the device it pairs, in one step. `code_invalid`
      * for a code that is unknown, expired, or already used — one answer for all
-     * three. Single-use redemption is what makes this exclusive: a second
-     * redeem never reaches the row write.
+     * three — and `conflict` when the fence does not name the machine's current
+     * device, which consumes nothing. Single-use redemption is what makes this
+     * exclusive: a second redeem never reaches the row write.
      */
-    redeemAndRegister(input: PairInput): Promise<DeviceRecord | undefined>;
+    redeemAndRegister(input: PairInput): Promise<PairingEnrollmentResult>;
     /** The pre-tenant device lookup §6.2's wire contract forces. `undefined` for unknown AND revoked alike — no existence oracle. */
     resolveDevice(deviceId: string): Promise<DeviceRecord | undefined>;
     issueNonce(device: DeviceRecord): Promise<string>;
@@ -2831,6 +2844,8 @@ export declare const CLOUD_ERROR_CODES: {
     readonly maintenance_result_invalid: 'maintenance_result_invalid';
     /** A pairing code that is unknown, expired, or already redeemed (§6.1). */
     readonly pairing_code_invalid: 'pairing_code_invalid';
+    /** `createPairingCode` was given a `productId` longer than `PAIRING_CODE_PRODUCT_ID_MAX_LENGTH`. Nothing was minted. */
+    readonly pairing_product_id_invalid: 'pairing_product_id_invalid';
     /** The composition handed a device row whose tenant is not a mintable `TenantId`. */
     readonly device_tenant_invalid: 'device_tenant_invalid';
     /**
@@ -3342,7 +3357,7 @@ export { DEFAULT_DEVICE_PROOF_CLOCK_SKEW_MS, DEFAULT_DEVICE_PROOF_MAX_LIFETIME_M
 export type { AuthenticatedDeviceProof, DeviceProofAuthDeps, DeviceProofRequestBinding, } from './auth/device-proof.js';
 export { authenticateHostedDeviceAssertion, authenticateHostedTaskAssertion } from './auth/device-assertion.js';
 export type { HostedDeviceAssertionAuthDeps, HostedTaskAssertionAuthDeps } from './auth/device-assertion.js';
-export { DEVICE_IDENTITY_PROOF_KEY_EPOCH, DEVICE_IDENTITY_PROOF_KEY_ID, PAIRING_CODE_TTL_MS, createAuthPlane, } from './auth/plane.js';
+export { DEVICE_IDENTITY_PROOF_KEY_EPOCH, DEVICE_IDENTITY_PROOF_KEY_ID, PAIRING_CODE_PRODUCT_ID_MAX_LENGTH, PAIRING_CODE_TTL_MS, createAuthPlane, } from './auth/plane.js';
 export type { AuthPlane, AuthPlaneDeps, MintedAccessToken, PairInput } from './auth/plane.js';
 export { createWebCrypto } from './crypto/web-crypto.js';
 export type { CloudCrypto } from './crypto/port.js';
@@ -3927,7 +3942,7 @@ export declare class InMemoryInboundDedupStore implements InboundDedupStore {
     deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/device-directory.d.ts ====
-import type { HarnessInfo } from '@byok-sdk/protocol';
+import { type HarnessInfo } from '@byok-sdk/protocol';
 /**
  * In-memory {@link DeviceDirectory}.
  *
@@ -3954,12 +3969,12 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  * the SQL stores' one transaction (#1119).
  */
 import { type MailboxStore, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
-import type { DeviceDirectory, DeviceRecord, DeviceRegistration, DeviceScopedStores } from '../ports.js';
+import type { DeviceDirectory, DeviceRecord, DeviceRegistration, DeviceRegistrationResult, DeviceScopedStores } from '../ports.js';
 import type { InMemoryTaskAttemptState } from './task-attempts.js';
 export declare class InMemoryDeviceDirectory implements DeviceDirectory {
     #private;
     constructor(tasks: InMemoryTaskAttemptState, mailbox: MailboxStore, state: DeviceScopedStores);
-    register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
+    register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRegistrationResult>;
     get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
     /**
      * Revocation removes the registration, then deletes the device-scoped state
@@ -4141,24 +4156,24 @@ export declare class InMemoryNonceStore implements NonceStore {
  * In-memory {@link PairingCodeStore}: single-use codes bound to the tenant and
  * product they were minted for.
  *
- * Enrollment answers `undefined` for unknown, expired, and already-used alike.
- * The reference server distinguishes those three in its 401 text; a hosted,
- * multi-tenant surface deliberately does not — the code is a bearer credential
- * addressable across every tenant, and "already used" versus "never existed"
- * is exactly the difference an attacker enumerating codes would pay for.
+ * Enrollment answers `code_invalid` for unknown, expired, and already-used
+ * alike: the code is a bearer credential addressable across every tenant, and
+ * "already used" versus "never existed" is exactly the difference an attacker
+ * enumerating codes would pay for.
  *
  * Code issuance and enrollment project this one authority into separate ports.
  * The enrollment path serializes each code through registration and flips
- * `used` only after its shared device directory has accepted the row.
+ * `used` only after its shared device directory has accepted the row; a fence
+ * `conflict` from the directory leaves the code unused (#2045).
  */
 import { type CollectExpiredInput, type CollectExpiredResult, type Clock, type TenantId } from '@byok-sdk/core';
-import type { DeviceDirectory, DeviceRecord, PairingEnrollment, PairingEnrollmentInput, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore } from '../ports.js';
+import type { DeviceDirectory, PairingEnrollment, PairingEnrollmentInput, PairingEnrollmentResult, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore } from '../ports.js';
 export declare class InMemoryPairingCodeStore implements PairingCodeStore, PairingEnrollment {
     #private;
     constructor(clock: Clock, devices: DeviceDirectory);
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     issue(tenant: TenantId, input: PairingCodeIssueInput): Promise<PairingCodeInfo>;
-    redeemAndRegister(input: PairingEnrollmentInput): Promise<DeviceRecord | undefined>;
+    redeemAndRegister(input: PairingEnrollmentInput): Promise<PairingEnrollmentResult>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/proof-receipts.d.ts ====
 import { type Clock, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';

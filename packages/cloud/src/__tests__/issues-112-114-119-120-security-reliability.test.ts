@@ -81,6 +81,7 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
       pairingCode: pairing.code,
       deviceName: 'durable-pairing',
       devicePublicKey: keys.publicKeyBase64Url,
+      expectedDeviceDigest: null,
     };
     const pair = (body: unknown) => harness.request('/byok/pair', { method: 'POST', headers, body: JSON.stringify(body) });
 

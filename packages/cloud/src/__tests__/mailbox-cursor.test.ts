@@ -336,6 +336,7 @@ describe('enqueueAgentOffer', () => {
     await base.stores.devices.register(TENANT_A, {
       deviceId: 'dev_whoever', productId: 'probe', deviceName: 'fixture',
       devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1,
+      expectedDeviceDigest: null,
     });
     await base.stores.devices.recordCapabilities(TENANT_A, { deviceId: 'dev_whoever', capabilities: [AGENT_HOME_CONTRACT_CAPABILITY] });
     await expect(
