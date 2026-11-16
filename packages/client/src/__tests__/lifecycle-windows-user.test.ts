@@ -96,17 +96,26 @@ describe('lifecycle/windows-user (#1337)', () => {
     expect(events.filter((event) => !event.startsWith('query:'))).toEqual([]);
   });
 
-  it('stops by writing the stop marker, then running the stop program, then waiting for the launcher to exit', async () => {
+  it('stops by writing the stop marker, then running the stop program while a launcher runs, then waiting for the launcher to exit', async () => {
     const { events, lifecycle } = harness([true, true, false]);
     await lifecycle.stop();
-    expect(events).toEqual([`write:${MARKER}`, 'stop-program:C:\\acme\\stop.exe', 'query:true', 'query:true', 'query:false']);
+    expect(events).toEqual([`write:${MARKER}`, 'query:true', 'stop-program:C:\\acme\\stop.exe', 'query:true', 'query:false']);
+  });
+
+  it('with no launcher running, stop and uninstall write the stop marker and run no stop program: it may live under a removed current (#2279)', async () => {
+    const { fs, events, lifecycle } = harness([false], 1);
+    await lifecycle.stop();
+    expect([events, fs.files.has(MARKER)]).toEqual([[`write:${MARKER}`, 'query:false'], true]);
+    await lifecycle.install();
+    await lifecycle.uninstall();
+    expect([events.filter((event) => event.startsWith('stop-program')), fs.files.has(UNIT)]).toEqual([[], false]);
   });
 
   it('keeps the stop marker and reports service_stop_failed when the stop program exits non-zero', async () => {
     const { fs, events, lifecycle } = harness([true], 1);
     await expect(lifecycle.stop()).rejects.toEqual(new ServiceUnitError('service_stop_failed'));
     expect(fs.files.has(MARKER)).toBe(true);
-    expect(events.some((event) => event.startsWith('query:'))).toBe(false);
+    expect(events).toEqual([`write:${MARKER}`, 'query:true', 'stop-program:C:\\acme\\stop.exe']);
   });
 
   it('reports service_unload_timeout when the launcher outlives the stop deadline', async () => {
@@ -118,7 +127,7 @@ describe('lifecycle/windows-user (#1337)', () => {
     const stop = { command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] };
     const lifecycle = createServiceLifecycle(def({ windows: { scope: 'user', stop } }), {
       platform: 'win32',
-      deps: { fs: memoryServiceFs(), run: vi.fn(async () => ({ code: 0, stdout: '', stderr: '' })), appData: () => 'C:\\Users\\Jo Smith\\AppData\\Roaming' },
+      deps: { fs: memoryServiceFs(), run: vi.fn(async () => ({ code: 0, stdout: '4242', stderr: '' })), appData: () => 'C:\\Users\\Jo Smith\\AppData\\Roaming' },
     });
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
     try {
