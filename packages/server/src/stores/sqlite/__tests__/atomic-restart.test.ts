@@ -104,7 +104,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     try {
       await composition.cloud.devices.register(TENANT, {
         productId: 'product-1', deviceId: 'device-1', deviceName: 'device-1',
-        devicePublicKey: 'pk-device-1', proofKeyId: 'identity', proofKeyEpoch: 0,
+        devicePublicKey: 'pk-device-1', proofKeyId: 'identity', proofKeyEpoch: 0, expectedDeviceDigest: null,
       });
       await composition.cloud.tasks.reserveAgentOffer(TENANT, { taskId: 'task-retire', deviceId: 'device-1', agentRef: AGENT_REF });
       await composition.core.presence.publish(TENANT, { deviceId: 'device-1', level: 'online', ttlMs: 60_000, minimumIntervalMs: 0 });

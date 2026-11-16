@@ -407,13 +407,17 @@ class SqliteCoordinator {
     this.#changedTasks.clear();
   }
 
-  transaction<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T> {
+  /** `afterCommit` behaves as in {@link transactionSync}. */
+  transaction<T>(
+    operation: (db: DatabaseSync) => T | Promise<T>,
+    afterCommit?: (result: T) => void | Promise<void>,
+  ): Promise<T> {
     return this.run(async (db) => {
       db.exec('BEGIN IMMEDIATE');
+      let result: T;
       try {
-        const result = await operation(db);
+        result = await operation(db);
         db.exec('COMMIT');
-        return result;
       } catch (error) {
         this.#changedTasks.clear();
         try {
@@ -423,6 +427,8 @@ class SqliteCoordinator {
         }
         throw error;
       }
+      await afterCommit?.(result);
+      return result;
     });
   }
 

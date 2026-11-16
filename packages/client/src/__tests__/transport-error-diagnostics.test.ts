@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from '../daemon/auth-manager';
 import { exportPrivateKeyPem } from '../daemon/device-keys';
 import { LongPollClient, LongPollRouteError } from '../daemon/long-poll-transport';
-import { seedDeviceEnrollment } from './fixtures/device-enrollment';
+import { seedAuthHoldingToken, seedDeviceEnrollment } from './fixtures/device-enrollment';
 import { describeEndpoint } from '../daemon/url';
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -28,16 +28,8 @@ describe('LongPollRouteError names the failing route', () => {
   beforeEach(async () => {
     const storeDir = await tmpDir('byok-transport-diagnostics-store-');
     const store = createTestDeviceStore(storeDir);
-    await seedDeviceEnrollment(store, {
-      deviceId: 'dev-1',
-      tenantId: 'tenant-transport',
-      accessToken: 'tok-1',
-      expiresAt: new Date(Date.now() + 3_600_000).toISOString(), // far future — never renews, never touches the network
-      devicePrivateKeyPem: 'unused-in-this-test',
-      devicePublicKey: 'unused-in-this-test',
-    });
-    auth = new AuthManager({ serverUrl: 'http://example.invalid', store });
-    await auth.loadExisting();
+    // The held token outlives the test — never renews, never touches the network.
+    auth = await seedAuthHoldingToken(store, 'http://example.invalid', { deviceId: 'dev-1', tenantId: 'tenant-transport' });
 
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -50,9 +42,10 @@ describe('LongPollRouteError names the failing route', () => {
   });
 
   /**
-   * An `AuthManager` whose stored token is already expired, so the very first
-   * `getValidAccessToken()` must renew — i.e. it fails (or reports the device
-   * revoked) BEFORE any request to `/byok/events` or `/byok/messages` is made.
+   * An `AuthManager` freshly loaded from the store, which holds no access
+   * token (#2045), so the very first `getValidAccessToken()` must exchange one
+   * — i.e. it fails (or reports the device revoked) BEFORE any request to
+   * `/byok/events` or `/byok/messages` is made.
    * The keypair is real because renewal imports it before it ever reaches the
    * network; a placeholder PEM would fail for the wrong reason.
    */
@@ -64,8 +57,6 @@ describe('LongPollRouteError names the failing route', () => {
     await seedDeviceEnrollment(store, {
       deviceId: 'dev-expired',
       tenantId: 'tenant-transport',
-      accessToken: 'tok-expired',
-      expiresAt: new Date(Date.now() - 3_600_000).toISOString(),
       devicePrivateKeyPem: exportPrivateKeyPem(keys.privateKey),
       devicePublicKey: publicJwk.x ?? 'x',
     });

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMutableClock, tenantId, type TenantId } from '@byok-sdk/core';
 import { runE2eeMemberStoreConformance } from '@byok-sdk/conformance';
-import { E2EE_SCOPE_ID_MAX_LENGTH } from '@byok-sdk/protocol';
+import { E2EE_SCOPE_ID_MAX_LENGTH, pairDeviceDigest } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import type { Pool } from 'pg';
 import { migrate } from '../migrate';
@@ -65,7 +65,14 @@ async function waitForLockWait(pool: Pool): Promise<void> {
   throw new Error('the revoke never waited on the held package lock');
 }
 
-async function seed(devices: PostgresDeviceDirectory, store: PostgresE2eeMemberStore, tenant: TenantId, deviceId: string, machineId?: string) {
+async function seed(
+  devices: PostgresDeviceDirectory,
+  store: PostgresE2eeMemberStore,
+  tenant: TenantId,
+  deviceId: string,
+  machineId?: string,
+  expectedDeviceDigest: string | null = null,
+) {
   await devices.register(tenant, {
     productId: 'product',
     deviceId,
@@ -74,6 +81,7 @@ async function seed(devices: PostgresDeviceDirectory, store: PostgresE2eeMemberS
     proofKeyId: 'identity',
     proofKeyEpoch: 0,
     ...(machineId === undefined ? {} : { machineId }),
+    expectedDeviceDigest,
   });
   const memberId = `member-${deviceId}`;
   expect(await store.registerMember(tenant, { deviceId, memberId, bundle: `{"memberId":"${memberId}"}`, deviceMac: 'mac', macExpiresAt: EXPIRES, request: freshRequest() })).toBe('registered');
@@ -146,7 +154,8 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device cleanup removes the device memb
       const devices = new PostgresDeviceDirectory(scope.pool, createMutableClock());
       const store = new PostgresE2eeMemberStore(scope.pool, createMutableClock());
       const old = await seed(devices, store, TENANT_A, 'old-device', MACHINE);
-      const fresh = await seed(devices, store, TENANT_A, 'new-device', MACHINE);
+      const fresh = await seed(devices, store, TENANT_A, 'new-device', MACHINE,
+        await pairDeviceDigest({ tenantId: TENANT_A, productId: 'product', deviceId: 'old-device' }));
 
       await expect(devices.get(TENANT_A, 'old-device')).resolves.toBeUndefined();
       await expect(memberRows(scope.pool, TENANT_A, 'old-device', old)).resolves.toEqual({ member_key: 0, pairing_mac: 0, packages: 0 });

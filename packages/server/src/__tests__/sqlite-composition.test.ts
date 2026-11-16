@@ -82,7 +82,7 @@ describeSqlite('createByokServer SQLite composition', () => {
       'agent-egress-fresh-session', 'terminal-projection-selection', 'agent-memory-selection'];
     const openStores = () => createSqliteEmbeddedStores({ path }, { clock: createMutableClock(), crypto: createWebCrypto() });
     const seed = openStores();
-    await seed.cloud.devices.register(tenant, { deviceId, productId, deviceName: 'fixture', devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
+    await seed.cloud.devices.register(tenant, { deviceId, productId, deviceName: 'fixture', devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
     await seed.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities });
     await seed.close();
     faults.push("CREATE TEMP TRIGGER fail_append BEFORE INSERT ON main.mailbox_message BEGIN SELECT RAISE(ABORT, 'injected append failure'); END;");

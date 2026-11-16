@@ -26,8 +26,9 @@ import { ByokCoreError } from './errors.js';
 export type TenantId = string & { readonly __byokTenantId: unique symbol };
 
 /**
- * Upper bound on tenant id length. Not a security boundary — a bound so a
- * pathological id cannot become an unbounded key prefix inside a store.
+ * Upper bound on tenant id length, in UTF-16 code units (`length`), the unit
+ * of `@byok-sdk/protocol`'s `isPairingText`. Not a security boundary — a bound
+ * so a pathological id cannot become an unbounded key prefix inside a store.
  */
 export const TENANT_ID_MAX_LENGTH = 200;
 
@@ -38,6 +39,16 @@ export const TENANT_ID_MAX_LENGTH = 200;
  * between `(a, bc)` and `(ab, c)`.
  */
 export const TENANT_KEY_SEPARATOR = '\u0000';
+
+/**
+ * A tenant id has no control character (C0, which includes the NUL
+ * separator, or C1) and no unpaired surrogate: a device stores it, and this
+ * keeps it within three UTF-8 bytes per code unit as JSON (#2045). The other
+ * copy of this rule is `@byok-sdk/protocol`'s `isPairingText` and
+ * `PairResponseTenantIdSchema`; core depends on no other package. The client's
+ * `device-credential-store.test.ts` asserts the two accept and refuse the same ids.
+ */
+const CONTROL_OR_UNPAIRED_SURROGATE = /[\p{Cc}\p{Cs}]/u;
 
 /**
  * The single mint point for {@link TenantId}.
@@ -73,8 +84,8 @@ export function tenantId(value: string): TenantId {
       `Tenant id must be at most ${TENANT_ID_MAX_LENGTH} characters.`,
     );
   }
-  if (candidate.includes(TENANT_KEY_SEPARATOR)) {
-    throw new ByokCoreError('tenant_id_invalid', 'Tenant id must not contain a NUL character.');
+  if (CONTROL_OR_UNPAIRED_SURROGATE.test(candidate)) {
+    throw new ByokCoreError('tenant_id_invalid', 'Tenant id must be well-formed text without control characters.');
   }
   return candidate as TenantId;
 }
@@ -90,7 +101,7 @@ export function isTenantId(value: unknown): value is TenantId {
     value.length > 0 &&
     value.trim() === value &&
     value.length <= TENANT_ID_MAX_LENGTH &&
-    !value.includes(TENANT_KEY_SEPARATOR)
+    !CONTROL_OR_UNPAIRED_SURROGATE.test(value)
   );
 }
 

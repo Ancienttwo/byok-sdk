@@ -107,8 +107,6 @@ async function seedLocal(storeDir: string, overrides: Partial<DeviceRecord> = {}
   const record: DeviceRecord = {
     deviceId: 'device-local',
     tenantId: TENANT,
-    accessToken: 'secret-access-token-value',
-    expiresAt: '2030-01-01T00:00:00.000Z',
     devicePrivateKeyPem: exportPrivateKeyPem(keys.privateKey),
     devicePublicKey: x,
     ...overrides,
@@ -186,7 +184,6 @@ describe('readDeviceEnrollmentIdentity', () => {
       enrollmentRevision: '0',
     });
     const serialized = JSON.stringify(paired);
-    expect(serialized).not.toContain(record.accessToken);
     expect(serialized).not.toContain(record.devicePrivateKeyPem);
     expect(serialized).not.toContain(record.devicePublicKey);
     expect(await fs.readFile(path.join(storeDir, 'device.json'), 'utf8')).toBe(before);
@@ -278,7 +275,6 @@ describe('createStoredDeviceProofSigner', () => {
       JSON.stringify(envelope),
     ]) {
       expect(surface).not.toContain(pemBody);
-      expect(surface).not.toContain(record.accessToken);
     }
   });
 

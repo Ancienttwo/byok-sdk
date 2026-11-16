@@ -1,6 +1,6 @@
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -25,12 +25,20 @@ vi.mock('node:child_process', async (importOriginal) => {
 const nativeWindowsSmoke =
   process.platform === 'win32' && process.env.BYOK_NATIVE_WINDOWS_CREDENTIAL_SMOKE === '1';
 
+/** The entry stores a real Ed25519 key's seed and derives its public key. */
+function deviceKey() {
+  const keys = generateKeyPairSync('ed25519');
+  return {
+    devicePublicKey: keys.publicKey.export({ format: 'jwk' }).x!,
+    devicePrivateKeyPem: keys.privateKey.export({ format: 'pem', type: 'pkcs8' }) as string,
+  };
+}
+
 it.runIf(process.platform === 'darwin')('real macOS credentials survive fresh readers only in their explicit test keychain', async () => {
   const keychain = await createTestKeychain();
   const storeDir = await mkdtemp(path.join(os.tmpdir(), 'byok-native-device-'));
   const options = { productId: 'isolated-native-custody', storeDir, macosKeychainPath: keychain.path };
-  const record = { deviceId: 'device', tenantId: 'tenant', devicePublicKey: 'public',
-    accessToken: 'synthetic-test-token', expiresAt: '2030-01-01T00:00:00.000Z', devicePrivateKeyPem: 'synthetic-private' };
+  const record = { deviceId: 'device', tenantId: 'tenant', ...deviceKey() };
   try {
     const store = new DeviceCredentialStore(options);
     expect(await store.read()).toBeUndefined();
@@ -51,10 +59,7 @@ const TEST_TIMEOUT_MS = 120_000;
 const record = {
   deviceId: 'device-native-windows-ci',
   tenantId: 'tenant-native-windows-ci',
-  devicePublicKey: 'fixture-public-key',
-  accessToken: 'fixture-access-token',
-  expiresAt: '2030-01-01T00:00:00.000Z',
-  devicePrivateKeyPem: 'fixture-private-key',
+  ...deviceKey(),
 } as const;
 
 function uniqueProductId(label: string): string {
@@ -71,7 +76,10 @@ async function pairingSequence(productId: string, storeDir: string): Promise<voi
   const { custody, records } = memberRecords(productId, storeDir);
   const store = new DeviceCredentialStore({ productId, storeDir });
   await records.clear();
-  await store.saveFirstPairingAttempt({ kind: 'first-pairing-attempt-v1', deviceName: 'native', devicePublicKey: record.devicePublicKey, devicePrivateKeyPem: record.devicePrivateKeyPem });
+  await store.savePairingAttempt({
+    kind: 'pairing-attempt-v2', attemptId: 'A'.repeat(22), codeDigest: 'c'.repeat(43), storeIdentity: 'a'.repeat(64),
+    deviceName: 'native', devicePrivateKeyPem: record.devicePrivateKeyPem, expectedDeviceDigest: null,
+  });
   await store.replace(record);
   await custody.replace('member-keys', 'keys');
   await custody.replace('pairing-verification', 'pending');

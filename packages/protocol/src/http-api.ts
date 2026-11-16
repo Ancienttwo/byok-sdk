@@ -24,6 +24,7 @@ import {
   AgentMemoryProjectionMutationSchema,
   AgentMemoryProjectionReceiptSchema,
 } from './agent-memory-projection.js';
+import { PairDeviceDigestSchema } from './pair-device-digest.js';
 
 /**
  * HTTP-side request/response shapes for the reference server's auth and blob
@@ -44,9 +45,35 @@ import {
 // register the device and mint its first access token.
 // ---------------------------------------------------------------------------
 
+/**
+ * Every field a device stores from a pairing has a bound (#2045). 64 is the
+ * longest Linux hostname (`HOST_NAME_MAX`) and holds the reference
+ * `dev_<uuid>` device id. Bounds count UTF-16 code units, checked only by
+ * {@link isPairingText}.
+ */
+export const PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH = 64;
+export const PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH = 64;
+
+/**
+ * The pairing text rule for every field a pairing stores (`deviceName`,
+ * `deviceId`, `tenantId`): 1 to `maxUnits` UTF-16 code units (`length`, not
+ * code points), well-formed (no unpaired surrogate) and with no control
+ * character (C0, DEL, C1). Each code unit then costs at most three UTF-8
+ * bytes as JSON. Every boundary that checks one of these fields calls this;
+ * `@byok-sdk/core`'s tenant id mint (`tenantId`, `isTenantId` in
+ * `core/src/tenant.ts`) restates it, because core depends on no other package;
+ * the client's `device-credential-store.test.ts` asserts the two accept and
+ * refuse the same tenant ids.
+ */
+export function isPairingText(value: string, maxUnits: number): boolean {
+  return value.length > 0 && value.length <= maxUnits && !/[\p{Cc}\p{Cs}]/u.test(value);
+}
+
 export const PairRequestSchema = z.object({
   pairingCode: z.string(),
-  deviceName: z.string(),
+  deviceName: z.string().refine((value) => isPairingText(value, PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH), {
+    message: `deviceName must be 1 to ${PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH} UTF-16 code units of well-formed text without control characters`,
+  }),
   /** Ed25519 public key, base64url-encoded. Private key stays device-local (OS keychain or 0600 file). */
   devicePublicKey: z.string(),
   /**
@@ -58,8 +85,52 @@ export const PairRequestSchema = z.object({
    * exact digest. A client that cannot resolve one omits the field entirely.
    */
   machineId: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
+  /**
+   * Registration fence (#2045): the `pairDeviceDigest` of the device this
+   * client last knew as current for its slot, or `null` when it knew none.
+   * With `machineId`, the server registers only when this equals the digest
+   * of the current device of (tenant, product, machineId) — `null` for none —
+   * and otherwise answers `409` {@link PairSupersededResponseSchema} without
+   * consuming the code. Without `machineId` nothing is superseded, so the
+   * server ignores it. Required, never omitted: a request without it is a
+   * pre-v7 client and gets `400`.
+   */
+  expectedDeviceDigest: PairDeviceDigestSchema.nullable(),
 });
 export type PairRequest = z.infer<typeof PairRequestSchema>;
+
+/**
+ * The typed rejections of `POST /byok/pair` (§6.1). Each body carries a fixed
+ * `error` text and its `code`, and nothing else the server knows, except the
+ * one field the `409` carries. The texts are literals so no server can tell
+ * one cause of a rejection from another, or leak a detail, through them.
+ */
+export const PAIRING_CODE_INVALID_CODE = 'pairing_code_invalid';
+export const PAIRING_SUPERSEDED_CODE = 'pairing_superseded';
+
+/**
+ * `401`: the code is unknown, expired or already used. The three answer with
+ * this one body, so a code holder learns nothing more than that it failed.
+ */
+export const PairingCodeInvalidResponseSchema = z.object({
+  error: z.literal('invalid pairing code'),
+  code: z.literal(PAIRING_CODE_INVALID_CODE),
+});
+export type PairingCodeInvalidResponse = z.infer<typeof PairingCodeInvalidResponseSchema>;
+
+/**
+ * `409`: `expectedDeviceDigest` is not the digest of the machine's current
+ * device. Nothing changed and the code is not consumed. `currentDeviceDigest`
+ * is that device's digest, or `null` when the machine has none; only the
+ * pairing invocation that still owns its local attempt may resend once with
+ * it (§6.1).
+ */
+export const PairSupersededResponseSchema = z.object({
+  error: z.literal('pairing superseded'),
+  code: z.literal(PAIRING_SUPERSEDED_CODE),
+  currentDeviceDigest: PairDeviceDigestSchema.nullable(),
+});
+export type PairSupersededResponse = z.infer<typeof PairSupersededResponseSchema>;
 
 /**
  * The authenticated tenant projection is opaque to the wire protocol. It is
@@ -73,17 +144,17 @@ export type PairRequest = z.infer<typeof PairRequestSchema>;
 export const PAIR_RESPONSE_TENANT_ID_MAX_LENGTH = 200;
 export const PairResponseTenantIdSchema = z
   .string()
-  .min(1)
-  .max(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH)
+  .refine((value) => isPairingText(value, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH), {
+    message: `tenantId must be 1 to ${PAIR_RESPONSE_TENANT_ID_MAX_LENGTH} UTF-16 code units of well-formed text without control characters`,
+  })
   .refine((value) => value.trim() === value, {
     message: 'tenantId must not have leading or trailing whitespace',
-  })
-  .refine((value) => !value.includes('\u0000'), {
-    message: 'tenantId must not contain a NUL character',
   });
 
 export const PairResponseSchema = z.object({
-  deviceId: z.string(),
+  deviceId: z.string().refine((value) => isPairingText(value, PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH), {
+    message: `deviceId must be 1 to ${PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH} UTF-16 code units of well-formed text without control characters`,
+  }),
   /** JWT, ~1h lifetime. */
   accessToken: z.string(),
   /** Opaque hint for when/how to renew (e.g. an ISO timestamp); not itself a credential. */

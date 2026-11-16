@@ -4,12 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Envelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import type { FleetJitter } from '../daemon/deterministic-jitter';
 import { MAX_RETRY_AFTER_MS, parseRetryAfterMs } from '../daemon/long-poll-transport';
-import { seedDeviceEnrollment } from './fixtures/device-enrollment';
+import { seedAuthHoldingToken } from './fixtures/device-enrollment';
 import { TEST_ACTIVITY_INGRESS } from './fixtures/activity-ingress';
 
 const serverUrl = 'http://backoff.invalid';
@@ -32,13 +31,7 @@ async function setup(reply: Reply) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-backoff-'));
   roots.push(root);
   const store = createTestDeviceStore(root);
-  await seedDeviceEnrollment(store, {
-    deviceId, tenantId: 'backoff-tenant', accessToken: 'fixture-token',
-    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-    devicePrivateKeyPem: 'fixture-private-key', devicePublicKey: 'fixture-public-key',
-  });
-  const auth = new AuthManager({ serverUrl, store });
-  await auth.loadExisting();
+  const auth = await seedAuthHoldingToken(store, serverUrl, { deviceId, tenantId: 'backoff-tenant' });
   const helloAt: number[] = [];
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input));

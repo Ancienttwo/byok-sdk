@@ -3,13 +3,17 @@ import {
   PAIR_RESPONSE_TENANT_ID_MAX_LENGTH,
   PairRequestSchema,
   PairResponseSchema,
+  PairSupersededResponseSchema,
+  PairingCodeInvalidResponseSchema,
   TokenResponseSchema,
 } from '../http-api';
+import { pairDeviceDigest } from '../pair-device-digest';
 
 const pairRequest = {
   pairingCode: 'PAIRCODE',
   deviceName: 'test-device',
   devicePublicKey: 'public-key',
+  expectedDeviceDigest: null,
 };
 
 const pairResponse = {
@@ -38,14 +42,60 @@ describe('authenticated enrollment HTTP DTOs', () => {
     ['leading whitespace', ' tenant-a'],
     ['trailing whitespace', 'tenant-a '],
     ['NUL', 'tenant-\u0000a'],
+    ['C1 control', 'tenant-\u0085a'],
+    ['unpaired surrogate', 'tenant-\ud800a'],
     ['oversize', 't'.repeat(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH + 1)],
+    ['oversize in UTF-16 code units', '\u{1F600}'.repeat(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH / 2 + 1)],
   ])('rejects malformed or oversize tenantId: %s', (_label, tenantId) => {
     expect(() => PairResponseSchema.parse({ ...pairResponse, tenantId })).toThrow();
+  });
+
+  it('bounds deviceName and deviceId in UTF-16 code units, not code points', () => {
+    // 33 astral characters are 33 code points and 66 code units.
+    for (const [length, ok] of [[32, true], [33, false]] as const) {
+      const text = '\u{1F600}'.repeat(length);
+      expect(PairRequestSchema.safeParse({ ...pairRequest, deviceName: text }).success).toBe(ok);
+      expect(PairResponseSchema.safeParse({ ...pairResponse, deviceId: text }).success).toBe(ok);
+    }
   });
 
   it('accepts the exact maximum bounded opaque tenant shape', () => {
     const tenantId = 't'.repeat(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH);
     expect(PairResponseSchema.parse({ ...pairResponse, tenantId }).tenantId).toBe(tenantId);
+  });
+});
+
+describe('pairing registration fence (#2045)', () => {
+  const device = { tenantId: 'tenant-a', productId: 'product-1', deviceId: 'dev_00000000-0000-4000-8000-000000000001' };
+  // sha256 of the UTF-8 JSON ["byok-pair-device-v1","tenant-a","product-1","dev_…0001"], base64url.
+  const digest = 'tzsyfqhh4gYtGgBolqwyp1Gdmlf2Ql_VtYYVCfhs35Q';
+
+  it('digests [namespace, tenant, product, deviceId] and salts by scope', async () => {
+    expect(await pairDeviceDigest(device)).toBe(digest);
+    expect(await pairDeviceDigest({ ...device, productId: 'product-2' })).toBe('unydIpi7GMLKG7LXwEBkletoqW5V8IK1gYTAJiNDoPQ');
+  });
+
+  it('requires expectedDeviceDigest, null or one canonical digest', () => {
+    const { expectedDeviceDigest: _omitted, ...v6Request } = pairRequest;
+    expect(PairRequestSchema.safeParse(v6Request).success).toBe(false);
+    expect(PairRequestSchema.parse({ ...pairRequest, expectedDeviceDigest: digest }).expectedDeviceDigest).toBe(digest);
+    for (const malformed of [`${digest}=`, digest.slice(0, -1), `${digest.slice(0, -1)}R`]) {
+      expect(PairRequestSchema.safeParse({ ...pairRequest, expectedDeviceDigest: malformed }).success).toBe(false);
+    }
+  });
+
+  it('types the 401 and 409 bodies and keeps server facts out of them', () => {
+    expect(PairingCodeInvalidResponseSchema.parse({ error: 'invalid pairing code', code: 'pairing_code_invalid' })).toEqual({
+      error: 'invalid pairing code',
+      code: 'pairing_code_invalid',
+    });
+    const conflict = { error: 'pairing superseded', code: 'pairing_superseded', currentDeviceDigest: digest };
+    expect(PairSupersededResponseSchema.parse({ ...conflict, deviceId: device.deviceId })).toEqual(conflict);
+    expect(PairSupersededResponseSchema.parse({ ...conflict, currentDeviceDigest: null }).currentDeviceDigest).toBeNull();
+    const { currentDeviceDigest: _absent, ...untyped } = conflict;
+    expect(PairSupersededResponseSchema.safeParse(untyped).success).toBe(false);
+    expect(PairSupersededResponseSchema.safeParse({ ...conflict, error: 'device dev_1 replaced' }).success).toBe(false);
+    expect(PairingCodeInvalidResponseSchema.safeParse({ error: 'pairing code expired', code: 'pairing_code_invalid' }).success).toBe(false);
   });
 });
 

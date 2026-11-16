@@ -64,6 +64,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device assertion replay authority', ()
         devicePublicKey: publicJwk.x,
         proofKeyId: 'identity',
         proofKeyEpoch: 0,
+        expectedDeviceDigest: null,
       });
       const claims: DeviceAssertionClaims = {
         version: 1,

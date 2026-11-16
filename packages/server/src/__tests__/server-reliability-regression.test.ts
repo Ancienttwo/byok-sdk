@@ -52,6 +52,7 @@ async function cloudWithFirstMailboxAppendFailure() {
   await composition.stores.devices.register(TENANT, {
     productId: PRODUCT_ID, deviceId: 'device-a', deviceName: 'mailbox-retry-fixture',
     devicePublicKey: 'fixture-key', proofKeyId: 'fixture-proof', proofKeyEpoch: 1,
+    expectedDeviceDigest: null,
   });
   await composition.stores.devices.recordCapabilities(TENANT, { deviceId: 'device-a', capabilities: ['agent-home-contract'] });
   let fail = true;

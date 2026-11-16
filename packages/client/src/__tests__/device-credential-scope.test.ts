@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { DeviceStore } from '../daemon/store';
 import { DeviceCredentialStore, type DeviceCommandRunner } from '../daemon/device-credential-store';
+import { exportPrivateKeyPem, generateDeviceKeyPair } from '../daemon/device-keys';
 
 describe('device credential identity', () => {
   it('shares product credentials across metadata directories and isolates other products', async () => {
@@ -27,8 +28,9 @@ describe('device credential identity', () => {
     const first = store('/unused/first', productId);
     const second = store('/unused/second', productId);
     const other = store('/unused/first', randomUUID());
-    const record = { deviceId: 'device', tenantId: 'tenant', devicePublicKey: 'public',
-      accessToken: 'token', expiresAt: '2030-01-01T00:00:00.000Z', devicePrivateKeyPem: 'private' };
+    const keys = generateDeviceKeyPair();
+    const record = { deviceId: 'device', tenantId: 'tenant',
+      devicePublicKey: keys.publicKeyBase64Url, devicePrivateKeyPem: exportPrivateKeyPem(keys.privateKey) };
     try {
       await first.credentials.replace(record);
       expect(await second.credentials.read()).toEqual(record);
