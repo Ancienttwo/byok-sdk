@@ -7,6 +7,8 @@ composition over Postgres and R2.
 
 ## Release status
 
+Preparing the next MINOR: follow the [Host upgrade checklist](docs/releases/host-upgrade-next-minor.md).
+
 The current stable release is **0.43.0** for all nine public packages, an owner-approved
 MINOR published on 2026-11-14 (UTC), with 21 breaking and 4 additive upgrade-manifest
 entries, including the task HOME behavior change (#2084). Wire remains v6.
