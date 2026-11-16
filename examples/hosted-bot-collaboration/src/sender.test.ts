@@ -429,6 +429,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       expect(await channelStore.claimDelivery(scope, 'd1', now, times)).toEqual({ kind: 'readback', attempt: 1, lease });
       await channelStore.commit(scope, { scope, commandId: randomUUID(), command: { kind: 'resend_delivery', deliveryId: 'd1' } }, now);
       expect(await row(scope, 'd1')).toMatchObject({ settled_at: String(clock) });
+      await expect(channelStore.bindDevice(scope, 'replacement-device')).resolves.toBe(1);
       await channelStore.readDelivery(scope, 'd1', 1, lease, 'absent', now, TIMES.readbackMs);
       expect((await channelStore.read(scope)).channel!.deliveries.d1).toMatchObject({ state: 'unknown', attempts: 1 });
       clock += TIMES.leaseMs;

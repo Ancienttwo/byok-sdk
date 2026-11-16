@@ -1402,7 +1402,6 @@ export class HostedCollaborationStore {
           return done({ kind: 'moved' });
         }
         if (row.state === 'unknown') {
-          if (supersededDeliveryIds(deliveries!).has(id)) return done({ kind: 'none' });
           // Another sender's readback holds the row until its lease passes, and a row that waits is not due yet.
           if (Number(index.next_at) > now) return done({ kind: 'none' });
           if (times.readback) {
@@ -1637,10 +1636,12 @@ export class HostedCollaborationStore {
    */
   private async indexDeliveries(client: PoolClient, scopeKey: string, before: Split, after: Split, now: number | undefined): Promise<void> {
     const old = before.entities.get('delivery'), next = after.entities.get('delivery');
+    const inserted: Record<string, Delivery> = {};
     for (const [key, body] of next ?? []) {
       const prior = old?.get(key);
       if (prior === body) continue;
       const row = JSON.parse(body) as Delivery, was = prior === undefined ? undefined : JSON.parse(prior) as Delivery;
+      if (!was) inserted[row.id] = row;
       const promoted = was?.state === 'staged';
       if (row.state === 'staged' || promoted && row.state === 'rejected') continue;
       if (!was || promoted) {
@@ -1654,7 +1655,7 @@ export class HostedCollaborationStore {
         await client.query('UPDATE outbox SET next_at = $3 WHERE scope = $1 AND key = $2', [scopeKey, key, row.nextAttemptAt ?? 0]);
       }
     }
-    const superseded = supersededDeliveryIds(Object.fromEntries([...next ?? []].map(([key, body]) => [key, JSON.parse(body) as Delivery])));
+    const superseded = supersededDeliveryIds(inserted);
     if (superseded.size) {
       if (now === undefined) throw new Error('A settled delivery needs the clock of its writer');
       await client.query("UPDATE outbox SET settled_at = $3 WHERE scope = $1 AND kind = 'delivery' AND key = ANY($2::text[]) AND settled_at IS NULL",
