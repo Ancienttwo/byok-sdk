@@ -572,7 +572,7 @@
     {
       "id": "server-sqlite-format-before-write",
       "impact": "breaking",
-      "summary": "@byok-sdk/server's SQLite store decides a file's format with @byok-sdk/core/sqlite-node readSqliteFileUnchanged before it opens the file for writing: an older, newer or foreign file, and a current file missing a table, column, trigger or index, is refused with SqliteSchemaError while its bytes, WAL and directory stay unchanged. A missing table or index in a current file is no longer recreated (SQLITE_SCHEMA_INVALID). The removed migration option is no longer checked. A new store checkpoints its metadata into the main file when it is created.",
+      "summary": "@byok-sdk/server's SQLite store decides a file's format with @byok-sdk/core/sqlite-node readSqliteFileUnchanged before it opens the file for writing, and refuses with SqliteSchemaError while the file's bytes, WAL, SHM and directory stay unchanged: an older, newer or foreign file; a current file whose tables, indexes or triggers differ from schema 10's by name or definition (a missing or changed one is SQLITE_SCHEMA_INVALID and is no longer recreated; an unknown one is SQLITE_SCHEMA_UNSUPPORTED). The removed migration option is no longer checked. A new store checkpoints its metadata into the main file when it is created.",
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
       "items": [
         "behavior:server-sqlite-format-before-write"

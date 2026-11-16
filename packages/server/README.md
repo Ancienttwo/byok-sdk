@@ -451,8 +451,11 @@ reports an older file as `new-path-repair`.
 The format is decided before anything writes to the file. The store first
 checks the file through `@byok-sdk/core/sqlite-node`'s read-only, immutable
 connection, which takes no lock, writes nothing and creates no journal, WAL or
-SHM file. It refuses an older, newer or foreign file there, and a current file
-missing any table, column, trigger or index it needs; nothing is recreated.
+SHM file. It refuses an older, newer or foreign file there. A current file
+must hold exactly schema 10's tables, indexes and triggers, each with the
+definition this build creates: a missing or changed object is
+`SQLITE_SCHEMA_INVALID` and nothing is recreated; an object schema 10 does not
+know means a newer build wrote the file, and is `SQLITE_SCHEMA_UNSUPPORTED`.
 Only then does it open the file for writing (exclusive locking and WAL). The
 same check inside the schema transaction stays the authority for a file that
 changes in between. A new store checkpoints its metadata into the main file as
