@@ -3729,7 +3729,8 @@ export interface DaemonConfigJsonSchema {
     readonly anyOf?: readonly DaemonConfigJsonSchema[];
     readonly properties?: Readonly<Record<string, DaemonConfigJsonSchema>>;
     readonly required?: readonly string[];
-    readonly additionalProperties?: DaemonConfigJsonSchema;
+    /** `false`: the object is closed; any key outside `properties` is unknown. */
+    readonly additionalProperties?: DaemonConfigJsonSchema | false;
     readonly items?: DaemonConfigJsonSchema;
     readonly prefixItems?: readonly DaemonConfigJsonSchema[];
     readonly minItems?: number;
@@ -13248,6 +13249,13 @@ export interface RuntimeObservation {
 }
 /** The daemon and explicit local probes project the same detection authority. */
 export declare function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, detected: RuntimeDetectResult): RuntimeObservation;
+/** A control `status` from an earlier daemon release; its runtime evidence is refused, not dropped. */
+export declare class ControlStatusShapeUnsupportedError extends Error {
+    readonly fields: readonly string[];
+    constructor(fields: readonly string[]);
+}
+/** The runtimes of a control `status` result. */
+export declare function parseControlStatusRuntimes(status: object): RuntimeObservation[] | undefined;
 /**
  * Reject unreadable observations; never infer availability from another
  * discovery shape. `audit` reads the redacted `runtimes-detected` record;

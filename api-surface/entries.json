@@ -1383,7 +1383,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private pure todo runtime",
-      "budgetBytes": 372058,
+      "budgetBytes": 372588,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
