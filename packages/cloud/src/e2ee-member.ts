@@ -255,6 +255,11 @@ export interface E2eeMemberStore {
    * (`DeviceDirectory`, retirement rule 3). A store that shares the
    * directory's database may run the same deletes in the directory's
    * transaction instead.
+   *
+   * A Host that assembles `CloudStores` and its directory itself, without a
+   * standard factory's `e2eeMember` opt-in, must give the same instance to
+   * `CloudStores.e2eeMember` and to the directory. Nothing checks it at run
+   * time; a second instance would serve routes that retirement never cleans.
    */
   deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
 }

@@ -303,8 +303,11 @@ const composition = createInMemoryCloudStores(clock, crypto, core.objects, core.
 // or: createInMemoryByokCloud({ e2eeMember: true }), which also declares e2ee.member
 ```
 
-A Host that builds `CloudStores` itself sets `e2eeMember` on it and gives the
-same instance to its device directory (see the retirement contract below).
+A Host that builds `CloudStores` and its directory itself, without a standard
+factory's opt-in, must give the same instance to `CloudStores.e2eeMember` and
+to its device directory (see the retirement contract below). Nothing checks
+this at run time: a second instance would serve the routes while retirement
+cleans the other one.
 
 ### Capability ports read cloud.e2eeMember
 
