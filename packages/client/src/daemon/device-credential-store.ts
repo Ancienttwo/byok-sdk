@@ -3,7 +3,7 @@ import { createHash, createPrivateKey } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import * as path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
-import { PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH, PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH } from '@byok-sdk/protocol';
+import { isPairingText, PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH, PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH } from '@byok-sdk/protocol';
 import { publicKeyOfPrivateKeyPem } from './device-keys.js';
 import {
   deleteWin32Credential,
@@ -215,6 +215,7 @@ function assertRecord(value: unknown): asserts value is DeviceRecord {
   if (
     credential.deviceId.length === 0 ||
     credential.deviceId.length > PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH ||
+    !isPairingText(credential.deviceId) ||
     credential.devicePublicKey.length === 0 ||
     credential.devicePrivateKeyPem.length === 0
   ) {
@@ -248,6 +249,7 @@ function assertPairingAttempt(value: unknown): asserts value is PairingAttempt {
     (attempt.expectedDeviceDigest !== null && (typeof attempt.expectedDeviceDigest !== 'string' || !BASE64URL_43.test(attempt.expectedDeviceDigest))) ||
     attempt.deviceName.length === 0 ||
     attempt.deviceName.length > PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH ||
+    !isPairingText(attempt.deviceName) ||
     attempt.devicePrivateKeyPem.length === 0
   ) {
     throw new DeviceCredentialStoreError('OS credential entry has an invalid pairing attempt shape');
@@ -291,80 +293,47 @@ function freezeAttempt(attempt: PairingAttempt): PairingAttempt {
 const ED25519_PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
 
 /**
- * The entry stores each key as its 32-byte seed and no public key: both are
- * deterministic projections of the seed, and the PEM form would cost the
- * entry bound (`OS_CREDENTIAL_ENTRY_MAX_BYTES`) about 200 bytes per key.
+ * The entry stores each key as its 32-byte seed and no public key: both the
+ * PEM and the public key are deterministic projections of the seed.
  */
-function seedOfPrivateKeyPem(pem: string): string {
-  let key;
-  try {
-    key = createPrivateKey(pem);
-  } catch {
-    throw new DeviceCredentialStoreError('device private key is not a PKCS8 Ed25519 key');
+function seedOf(devicePrivateKeyPem: string): string {
+  const der = createPrivateKey(devicePrivateKeyPem).export({ format: 'der', type: 'pkcs8' });
+  if (der.length !== 48 || !der.subarray(0, 16).equals(ED25519_PKCS8_PREFIX)) {
+    throw new DeviceCredentialStoreError('device private key is not an Ed25519 key');
   }
-  if (key.asymmetricKeyType !== 'ed25519') throw new DeviceCredentialStoreError('device private key is not a PKCS8 Ed25519 key');
-  return (key.export({ format: 'jwk' }) as { d: string }).d;
+  return der.subarray(16).toString('base64url');
 }
 
-function privateKeyPemOfSeed(seed: unknown): string {
+function privateKeyPemOf(seed: unknown): string {
   if (typeof seed !== 'string' || !BASE64URL_43.test(seed)) throw new DeviceCredentialStoreError('OS credential entry has an invalid device key');
   const der = Buffer.concat([ED25519_PKCS8_PREFIX, Buffer.from(seed, 'base64url')]);
-  return createPrivateKey({ key: der, format: 'der', type: 'pkcs8' }).export({ type: 'pkcs8', format: 'pem' }) as string;
-}
-
-/**
- * Free text (`tenantId`, `deviceId`, `deviceName`) is stored as base64url
- * UTF-16LE: two bytes per code unit for any content. As JSON text, a control
- * character or a lone surrogate would take six, and only these fields' lengths
- * are bounded, not their content; this keeps the worst-case entry within
- * `OS_CREDENTIAL_ENTRY_MAX_BYTES` for every value the bounds allow.
- */
-function storedText(value: string): string {
-  return Buffer.from(value, 'utf16le').toString('base64url');
-}
-
-function textOfStored(value: unknown): unknown {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]*$/u.test(value)) return undefined;
-  const bytes = Buffer.from(value, 'base64url');
-  if (bytes.length % 2 !== 0 || bytes.toString('base64url') !== value) return undefined;
-  return bytes.toString('utf16le');
+  return createPrivateKey({ key: der, format: 'der', type: 'pkcs8' }).export({ format: 'pem', type: 'pkcs8' }) as string;
 }
 
 function storedRecord(record: DeviceRecord): object {
   if (publicKeyOfPrivateKeyPem(record.devicePrivateKeyPem) !== record.devicePublicKey) {
     throw new DeviceCredentialStoreError('device public key does not match its private key');
   }
-  return {
-    deviceId: storedText(record.deviceId), tenantId: storedText(record.tenantId),
-    deviceKey: seedOfPrivateKeyPem(record.devicePrivateKeyPem),
-  };
+  return { deviceId: record.deviceId, tenantId: record.tenantId, deviceKey: seedOf(record.devicePrivateKeyPem) };
 }
 
 function storedAttempt(attempt: PairingAttempt): object {
-  const { devicePrivateKeyPem, deviceName, ...fields } = freezeAttempt(attempt);
-  return { ...fields, deviceName: storedText(deviceName), deviceKey: seedOfPrivateKeyPem(devicePrivateKeyPem) };
+  const { devicePrivateKeyPem, ...fields } = freezeAttempt(attempt);
+  return { ...fields, deviceKey: seedOf(devicePrivateKeyPem) };
 }
 
+/** The asserts below check every field; a stored value that is not an object has no `deviceKey`. */
 function recordOfStored(value: unknown): DeviceRecord {
-  if (typeof value !== 'object' || value === null || Array.isArray(value) || 'kind' in value) {
-    throw new DeviceCredentialStoreError('OS credential entry has an invalid device credential shape');
-  }
-  const stored = value as { deviceId?: unknown; tenantId?: unknown; deviceKey?: unknown };
-  const devicePrivateKeyPem = privateKeyPemOfSeed(stored.deviceKey);
-  const record = {
-    deviceId: textOfStored(stored.deviceId), tenantId: textOfStored(stored.tenantId),
-    devicePublicKey: publicKeyOfPrivateKeyPem(devicePrivateKeyPem), devicePrivateKeyPem,
-  };
+  const { deviceKey, ...fields } = Object(value) as Record<string, unknown>;
+  const devicePrivateKeyPem = privateKeyPemOf(deviceKey);
+  const record = { ...fields, devicePublicKey: publicKeyOfPrivateKeyPem(devicePrivateKeyPem), devicePrivateKeyPem };
   assertRecord(record);
   return freezeRecord(record);
 }
 
 function attemptOfStored(value: unknown): PairingAttempt {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new DeviceCredentialStoreError('OS credential entry has an invalid pairing attempt shape');
-  }
-  const { deviceKey, deviceName, ...fields } = value as Record<string, unknown>;
-  const attempt = { ...fields, deviceName: textOfStored(deviceName), devicePrivateKeyPem: privateKeyPemOfSeed(deviceKey) };
+  const { deviceKey, ...fields } = Object(value) as Record<string, unknown>;
+  const attempt = { ...fields, devicePrivateKeyPem: privateKeyPemOf(deviceKey) };
   assertPairingAttempt(attempt);
   return freezeAttempt(attempt);
 }

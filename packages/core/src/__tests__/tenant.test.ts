@@ -22,7 +22,7 @@ describe('tenantId', () => {
     expect(typeof tenant).toBe('string');
   });
 
-  it('rejects empty, padded, over-long, and NUL-bearing ids', () => {
+  it('rejects empty, padded, over-long, and control-character-bearing ids', () => {
     const rejected = [
       '',
       ' ',
@@ -31,6 +31,8 @@ describe('tenantId', () => {
       '\ttenant-a',
       'a'.repeat(TENANT_ID_MAX_LENGTH + 1),
       `tenant${TENANT_KEY_SEPARATOR}a`,
+      'tenant\u0085a',
+      'tenant\ud800a',
     ];
     for (const value of rejected) {
       const error = (() => {

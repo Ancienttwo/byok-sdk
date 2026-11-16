@@ -1054,16 +1054,17 @@ keeps the current enrollment usable; retrying after restart uses the staged key.
 Renewal of the current enrollment writes nothing, so the attempt stays. A
 successful replacement promotes the new enrollment, and the other store then
 reads as not bound. After promotion, the entry is an ordinary enrollment again.
-Every stored field is bounded, so an enrollment beside an attempt always fits
-the 2,400-byte OS entry: the worst case is 1,962 bytes. An injected
+Every stored field is bounded in length and is text without control
+characters, so an enrollment beside an attempt always fits the 2,400-byte OS
+entry: the worst case is 2,106 bytes. An injected
 `DeviceCredentialBackend` (`read`, `readPairingAttempt`, `savePairingAttempt`,
 `replace`, `clear`) must keep the same staging semantics; `replace` promotes a
 pairing and discards its attempt.
 
-**Device name too long.** `deviceName`, or the hostname when it is unset, must
-be 1 to 64 characters. A longer one fails `config check`, and pairing throws
-`PairingInputInvalidError` (`field: 'deviceName'`) before it stages or sends
-anything; set `deviceName`. A `machineId` resolver that does not return a
+**Device name refused.** `deviceName`, or the hostname when it is unset, must
+be 1 to 64 characters of well-formed text without control characters. Any
+other value fails `config check`, and pairing throws `PairingInputInvalidError`
+(`field: 'deviceName'`) before it stages or sends anything; set `deviceName`. A `machineId` resolver that does not return a
 lowercase hex SHA-256 fails the same way with `field: 'machineId'`.
 
 **Staged pairing of another store.** Every pairing stages an attempt in the OS

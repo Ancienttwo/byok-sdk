@@ -233,6 +233,7 @@ describe.each(['OS entry', 'injected backend'] as const)('registration fence (#2
   it.each([
     { field: 'deviceName', options: { deviceName: 'h'.repeat(65) } },
     { field: 'deviceName', options: { deviceName: '' } },
+    { field: 'deviceName', options: { deviceName: 'name\u0007' } },
     { field: 'machineId', options: { machineId: async () => 'not-a-digest' } },
   ])('refuses an out-of-bound $field before staging or sending (%#)', async ({ field, options }) => {
     const storeDir = path.join(root, 'bounded');

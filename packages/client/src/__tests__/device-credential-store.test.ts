@@ -187,13 +187,11 @@ describe('replacement pairing credential authority', () => {
     expectedDeviceDigest: null,
   };
   const encoded = (value: unknown): string => `byok-device-credential-v2:${Buffer.from(JSON.stringify(value), 'utf8').toString('base64')}`;
-  // The stored form: a key as its seed, no public key, free text as base64url UTF-16LE.
+  // The stored form: a key as its seed, and no public key.
   const seed = (pem: string) => (createPrivateKey(pem).export({ format: 'jwk' }) as { d: string }).d;
-  const text = (value: string) => Buffer.from(value, 'utf16le').toString('base64url');
   const storedRecord = (record: typeof credentials) =>
-    ({ deviceId: text(record.deviceId), tenantId: text(record.tenantId), deviceKey: seed(record.devicePrivateKeyPem) });
-  const storedAttempt = ({ devicePrivateKeyPem, deviceName, ...fields }: PairingAttempt) =>
-    ({ ...fields, deviceName: text(deviceName), deviceKey: seed(devicePrivateKeyPem) });
+    ({ deviceId: record.deviceId, tenantId: record.tenantId, deviceKey: seed(record.devicePrivateKeyPem) });
+  const storedAttempt = ({ devicePrivateKeyPem, ...fields }: PairingAttempt) => ({ ...fields, deviceKey: seed(devicePrivateKeyPem) });
 
   function provider(initial?: string) {
     let value = initial;
@@ -219,10 +217,11 @@ describe('replacement pairing credential authority', () => {
     expect(entry.value()).toBeUndefined();
   });
 
-  it('fits the largest enrollment beside a pairing attempt in one entry, whatever the text content', async () => {
-    // Every stored field at its bound, two different keys. Control characters
-    // and lone surrogates are the costliest content as JSON text.
-    const worst = (length: number) => `x${'\u0001\ud800'.repeat(length).slice(0, length - 2)}x`;
+  it('fits the largest enrollment beside a pairing attempt in one entry', async () => {
+    // Every stored field at its bound, two different keys. Pairing text has no
+    // control character or unpaired surrogate, so a three-byte character is
+    // the widest JSON a code unit can take.
+    const worst = (length: number) => '\u4e2d'.repeat(length);
     const record = {
       deviceId: worst(PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH), tenantId: worst(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH), ...deviceKey(),
     };
@@ -232,8 +231,8 @@ describe('replacement pairing credential authority', () => {
     const entry = provider();
     await entry.open().replace(record);
     await entry.open().savePairingAttempt(largest);
-    // Measured worst case: 1,962 bytes of the 2,400-byte bound.
-    expect(Buffer.byteLength(entry.value()!)).toBe(1_962);
+    // Measured worst case: 2,106 bytes of the 2,400-byte bound.
+    expect(Buffer.byteLength(entry.value()!)).toBe(2_106);
     expect(Buffer.byteLength(entry.value()!)).toBeLessThanOrEqual(OS_CREDENTIAL_ENTRY_MAX_BYTES);
     await expect(entry.open().read()).resolves.toEqual(record);
     await expect(entry.open().readPairingAttempt()).resolves.toEqual(largest);
@@ -269,7 +268,7 @@ describe('replacement pairing credential authority', () => {
     { record: undefined, attempt: storedAttempt(attempt) },
     { record: storedRecord(credentials), attempt: undefined },
     { record: { ...storedRecord(credentials), deviceKey: '' }, attempt: storedAttempt(attempt) },
-    { record: { ...storedRecord(credentials), deviceId: 'not utf-16' }, attempt: storedAttempt(attempt) },
+    { record: { ...storedRecord(credentials), deviceId: 'control\u0001' }, attempt: storedAttempt(attempt) },
     { record: storedRecord(credentials), attempt: { ...storedAttempt(attempt), machineId: 1 } },
     { record: { ...storedRecord(credentials), kind: 'pairing-attempt-v2' }, attempt: storedAttempt(attempt) },
   ])('rejects a malformed wrapper without exposing or overwriting either member (%#)', async (members) => {

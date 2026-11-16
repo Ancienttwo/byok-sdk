@@ -40,6 +40,14 @@ export const TENANT_ID_MAX_LENGTH = 200;
 export const TENANT_KEY_SEPARATOR = '\u0000';
 
 /**
+ * A tenant id has no control character (C0, which includes the NUL
+ * separator, or C1) and no unpaired surrogate: a device stores it, and this
+ * keeps it within three UTF-8 bytes per code unit as JSON (#2045). Kept in
+ * step with `@byok-sdk/protocol`'s `isPairingText`.
+ */
+const CONTROL_OR_UNPAIRED_SURROGATE = /[\p{Cc}\p{Cs}]/u;
+
+/**
  * The single mint point for {@link TenantId}.
  *
  * Fail-closed: empty, whitespace-padded, over-long, non-string, or
@@ -73,8 +81,8 @@ export function tenantId(value: string): TenantId {
       `Tenant id must be at most ${TENANT_ID_MAX_LENGTH} characters.`,
     );
   }
-  if (candidate.includes(TENANT_KEY_SEPARATOR)) {
-    throw new ByokCoreError('tenant_id_invalid', 'Tenant id must not contain a NUL character.');
+  if (CONTROL_OR_UNPAIRED_SURROGATE.test(candidate)) {
+    throw new ByokCoreError('tenant_id_invalid', 'Tenant id must be well-formed text without control characters.');
   }
   return candidate as TenantId;
 }
@@ -90,7 +98,7 @@ export function isTenantId(value: unknown): value is TenantId {
     value.length > 0 &&
     value.trim() === value &&
     value.length <= TENANT_ID_MAX_LENGTH &&
-    !value.includes(TENANT_KEY_SEPARATOR)
+    !CONTROL_OR_UNPAIRED_SURROGATE.test(value)
   );
 }
 

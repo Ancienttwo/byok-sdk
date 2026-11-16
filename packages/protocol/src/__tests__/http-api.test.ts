@@ -42,6 +42,8 @@ describe('authenticated enrollment HTTP DTOs', () => {
     ['leading whitespace', ' tenant-a'],
     ['trailing whitespace', 'tenant-a '],
     ['NUL', 'tenant-\u0000a'],
+    ['C1 control', 'tenant-\u0085a'],
+    ['unpaired surrogate', 'tenant-\ud800a'],
     ['oversize', 't'.repeat(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH + 1)],
   ])('rejects malformed or oversize tenantId: %s', (_label, tenantId) => {
     expect(() => PairResponseSchema.parse({ ...pairResponse, tenantId })).toThrow();

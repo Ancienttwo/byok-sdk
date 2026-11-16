@@ -405,11 +405,21 @@
     {
       "id": "wire-v7-pair-field-bounds",
       "impact": "breaking",
-      "summary": "@byok-sdk/protocol bounds PairRequest.deviceName and PairResponse.deviceId to 1-64 characters (PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH, PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH), so every field a device stores from a pairing has a bound. A server rejects a longer deviceName with 400; a client refuses a longer deviceId.",
+      "summary": "@byok-sdk/protocol bounds PairRequest.deviceName and PairResponse.deviceId to 1-64 characters (PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH, PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH), so every field a device stores from a pairing has a bound. A server rejects a longer deviceName with 400; a client refuses a longer deviceId. deviceName, deviceId and tenantId must also be isPairingText: well-formed text with no control character (C0, DEL, C1) and no unpaired surrogate.",
       "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
       "items": [
         "export:@byok-sdk/protocol#PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH",
-        "export:@byok-sdk/protocol#PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH"
+        "export:@byok-sdk/protocol#PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH",
+        "export:@byok-sdk/protocol#isPairingText"
+      ]
+    },
+    {
+      "id": "wire-v7-tenant-id-text",
+      "impact": "breaking",
+      "summary": "@byok-sdk/core tenantId() and isTenantId refuse any control character or unpaired surrogate, not only NUL, matching the protocol's isPairingText. A Host that mints such tenant ids changes them before upgrading.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-tenant-id-text"
       ]
     },
     {

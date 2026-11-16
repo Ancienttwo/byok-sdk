@@ -140,14 +140,15 @@ export class PairingBusyError extends Error {
 
 /**
  * A pairing input is out of its wire bound, checked before anything is staged
- * or sent (#2045): `deviceName` is empty or longer than
- * `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` (set `deviceName` when the hostname
- * is longer), or `machineId` is not lowercase hex SHA-256.
+ * or sent (#2045): `deviceName` is empty, longer than
+ * `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` or not `isPairingText` (set
+ * `deviceName` when the hostname is not), or `machineId` is not lowercase hex
+ * SHA-256.
  */
 export class PairingInputInvalidError extends Error {
   constructor(readonly field: 'deviceName' | 'machineId') {
     super(field === 'deviceName'
-      ? `deviceName must be 1 to ${PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH} characters; set deviceName when the hostname is longer`
+      ? `deviceName must be 1 to ${PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH} characters of text without control characters; set deviceName when the hostname is not`
       : 'machineId must be a lowercase hex SHA-256');
     this.name = 'PairingInputInvalidError';
   }

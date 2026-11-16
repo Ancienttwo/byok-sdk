@@ -411,7 +411,11 @@ machine's current device. See
   `cause`.
 - **Wire bounds.** `PairRequest.deviceName` is 1 to 64 characters and
   `PairResponse.deviceId` 1 to 64 (`PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH`,
-  `PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH`). A client refuses a longer `deviceId`
+  `PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH`). Both, and every tenant id, must be
+  well-formed text without control characters (`isPairingText`). The core
+  tenant id mint (`tenantId`, `isTenantId`) now refuses any control character
+  or unpaired surrogate, not only NUL; a Host that mints tenant ids with such
+  characters changes them before upgrading. A client refuses a longer `deviceId`
   as `AuthResponseInvalidError` and writes nothing. A Host whose hostnames
   exceed 64 characters sets `deviceName`: `config check` reports it, and
   pairing throws `PairingInputInvalidError` (`field: 'deviceName'`). A

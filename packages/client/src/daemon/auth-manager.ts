@@ -6,6 +6,7 @@ import {
   BYOK_TOKEN_PATH,
   ChallengeResponseSchema,
   DeviceNotRegisteredResponseSchema,
+  isPairingText,
   PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH,
   PairingCodeInvalidResponseSchema,
   PairResponseSchema,
@@ -349,7 +350,7 @@ export class AuthManager {
         const observedDeviceName = this.opts.deviceName ?? os.hostname();
         const observedMachineId = await this.opts.machineId?.();
         // The wire bounds both, and the staged attempt stores both.
-        if (observedDeviceName.length === 0 || observedDeviceName.length > PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH) {
+        if (observedDeviceName.length === 0 || observedDeviceName.length > PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH || !isPairingText(observedDeviceName)) {
           throw new PairingInputInvalidError('deviceName');
         }
         if (observedMachineId !== undefined && !/^[0-9a-f]{64}$/u.test(observedMachineId)) throw new PairingInputInvalidError('machineId');
