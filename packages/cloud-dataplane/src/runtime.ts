@@ -39,6 +39,7 @@ export {
   PostgresProofRequestReceiptStore,
   PostgresRequestReceiptStore,
   PostgresTaskAttemptStore,
+  PostgresTaskSteerRefusalStore,
   PostgresTaskCancellationStore,
   PostgresActivityStore,
   PostgresAgentMessageDraftStore,
@@ -50,8 +51,8 @@ export {
   createPostgresTaskRedactionStore,
   PostgresE2eeMemberStore,
   createPostgresCloudStores,
-  POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED,
-  PostgresMailboxProtocolUnsupportedError,
+  POSTGRES_STORE_EPOCH_UNSUPPORTED,
+  PostgresStoreEpochUnsupportedError,
 } from './stores/index.js';
 export type {
   PostgresCloudStoreOptions,

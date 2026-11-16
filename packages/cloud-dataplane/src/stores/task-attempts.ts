@@ -29,7 +29,7 @@ import {
   type TaskAttemptStore,
 } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { ClaimedExecutor, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import type { Pool } from 'pg';
 import type { ByokPool } from '../pool.js';
 
@@ -94,10 +94,11 @@ export function taskRowToAttempt(row: TaskRow): TaskAttempt {
     // former.
     ...(row.owner_device_id === null ? {} : { ownerDeviceId: row.owner_device_id }),
     status: row.status as TaskAttemptStatus,
-    // `claimed_runtime` is written only by the guarded claim UPDATE below, so a
-    // non-null value here is always the winning claim's own self-report.
-    ...(row.claimed_harness_id == null ? {} : { claimedHarnessId: row.claimed_harness_id }),
-    ...(row.claimed_runtime === null ? {} : { claimedRuntime: row.claimed_runtime as RuntimeId }),
+    // The executor columns are written only by the guarded claim UPDATE below,
+    // so a non-null value here is always the winning claim's own self-report.
+    // A CHECK keeps at most one of them set (0021), and exactly one once owned (0040).
+    ...(row.claimed_harness_id == null ? {} : { claimedExecutor: { kind: 'harness', harnessId: row.claimed_harness_id } }),
+    ...(row.claimed_runtime === null ? {} : { claimedExecutor: { kind: 'runtime', runtimeId: row.claimed_runtime as RuntimeId } }),
     ...(row.claimed_runtime_capabilities === null
       ? {}
       : { claimedRuntimeCapabilities: row.claimed_runtime_capabilities }),
@@ -365,8 +366,7 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
     input: {
       readonly taskId: string;
       readonly deviceId: string;
-      readonly runtime?: RuntimeId;
-      readonly harnessId?: string;
+      readonly executor: ClaimedExecutor;
       readonly capabilities?: RuntimeCapabilities;
     },
   ): Promise<TaskAttempt | undefined> {
@@ -391,9 +391,9 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
         input.taskId,
         input.deviceId,
         this.#now(),
-        input.runtime ?? null,
+        input.executor.kind === 'runtime' ? input.executor.runtimeId : null,
         input.capabilities === undefined ? null : JSON.stringify(input.capabilities),
-        input.harnessId ?? null,
+        input.executor.kind === 'harness' ? input.executor.harnessId : null,
       ],
     );
     const won = claimed.rows[0];

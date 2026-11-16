@@ -287,7 +287,7 @@ describe.skipIf(!RUN)('Topology H on a real workerd: two devices, one hosted Hos
       deviceId: device.deviceId,
       payload: {
         instruction: `h-worker turn for device ${device.name}`,
-        runtime: 'codex',
+        target: { lane: 'runtime', runtimeId: 'codex' },
         agentRef: device.agentRef,
         session: { mode: 'fresh' },
         egressPolicy: EGRESS_POLICY,
@@ -317,7 +317,7 @@ describe.skipIf(!RUN)('Topology H on a real workerd: two devices, one hosted Hos
   }
 
   function claim(device: Device, taskId: string, agentRef: AgentRef = device.agentRef): Envelope {
-    return createEnvelope('task.claim', { deviceId: device.deviceId, agentRef, runtime: 'codex' }, { taskId });
+    return createEnvelope('task.claim', { deviceId: device.deviceId, agentRef, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId });
   }
 
   function intentOf(ledger: Ledger, taskId: string): Intent {
@@ -501,7 +501,7 @@ describe.skipIf(!RUN)('Topology H on a real workerd: two devices, one hosted Hos
     const completeA = await send(deviceA, [
       createEnvelope(
         'task.complete',
-        { agentRef: deviceA.agentRef, summary: 'device a done', finalMessage: 'a: final', sessionRef: 'session-a' },
+        { agentRef: deviceA.agentRef, executor: { kind: 'runtime', runtimeId: 'codex' }, summary: 'device a done', finalMessage: 'a: final', sessionRef: 'session-a' },
         { taskId: taskA },
       ),
     ]);
@@ -513,7 +513,7 @@ describe.skipIf(!RUN)('Topology H on a real workerd: two devices, one hosted Hos
       [
         createEnvelope(
           'task.complete',
-          { agentRef: deviceB.agentRef, summary: 'device b done', finalMessage: 'b: final', sessionRef: 'session-b' },
+          { agentRef: deviceB.agentRef, executor: { kind: 'runtime', runtimeId: 'codex' }, summary: 'device b done', finalMessage: 'b: final', sessionRef: 'session-b' },
           { taskId: taskB },
         ),
       ],

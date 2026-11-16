@@ -50,6 +50,7 @@ const ONLINE_EXPORTS = [
   'PostgresProofRequestReceiptStore',
   'PostgresRequestReceiptStore',
   'PostgresTaskAttemptStore',
+  'PostgresTaskSteerRefusalStore',
   'PostgresTaskCancellationStore',
   'PostgresAgentMemoryProjectionStore',
   'createPostgresAgentMemoryProjectionStore',
@@ -57,9 +58,9 @@ const ONLINE_EXPORTS = [
   'createPostgresTaskRedactionStore',
   'PostgresE2eeMemberStore',
   'createPostgresCloudStores',
-  // the composition's pending-mailbox wire-major fence
-  'POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED',
-  'PostgresMailboxProtocolUnsupportedError',
+  // the composition's store wire-epoch fence
+  'POSTGRES_STORE_EPOCH_UNSUPPORTED',
+  'PostgresStoreEpochUnsupportedError',
   // R2 blobs
   'DEFAULT_MAX_ATTEMPTS',
   'DEFAULT_PRESIGN_TTL_SECONDS',

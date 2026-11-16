@@ -186,7 +186,7 @@ export function executionInput(taskId: string, deviceId: string, instruction: st
     deviceId,
     payload: {
       instruction,
-      runtime: 'codex',
+      target: { lane: 'runtime', runtimeId: 'codex' },
       agentRef: AGENT_REF,
       session: { mode: 'fresh' },
       egressPolicy: EGRESS_POLICY,
@@ -226,6 +226,7 @@ export async function publishEnvelope(taskId: string, text: string, messageId: s
 export function completeEnvelope(taskId: string, text: string, artifactRefs: readonly unknown[] = []): Envelope {
   return createEnvelope('task.complete', {
     agentRef: AGENT_REF,
+    executor: { kind: 'runtime', runtimeId: 'codex' },
     sessionRef: SESSION_REF,
     summary: `summary ${text}`,
     finalMessage: `final ${text}`,
@@ -255,7 +256,7 @@ export async function startTask(host: RedactionHost, device: Device, taskId: str
     'task.offer',
     taskId,
   ]);
-  await expectAccepted(device.send(createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, runtime: 'codex' }, { taskId })));
+  await expectAccepted(device.send(createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId })));
   await expectAccepted(device.send(createEnvelope('task.started', {}, { taskId })));
   await expectAccepted(device.send(progressEnvelope(taskId, 1, canary.text)));
   const messageId = randomUUID();
