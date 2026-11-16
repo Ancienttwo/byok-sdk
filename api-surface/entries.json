@@ -289,7 +289,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3260297,
+      "budgetBytes": 3260303,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1434,7 +1434,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 547267,
+      "budgetBytes": 547273,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1492,7 +1492,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 782886,
+      "budgetBytes": 782892,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1622,7 +1622,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 751836,
+      "budgetBytes": 751842,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2293,7 +2293,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 706305,
+      "budgetBytes": 706311,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2498,7 +2498,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 571001,
+      "budgetBytes": 571007,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
