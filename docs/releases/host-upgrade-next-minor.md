@@ -14,6 +14,13 @@ Provider profile stores with an earlier provider-kind schema are refused with
 with `would_do_unsupported_old`. Keep the old files intact and explicitly
 configure a separate current store. Hosted stores also reject would-do rows
 held in an old frame or lacking `turnId` without converting or archiving them.
+Hosted stores with an old `entity_kind_check` are refused with
+`hosted_schema_unsupported_old` before any DDL. The server ledger opening
+boundary is handled separately by #2286.
+
+macOS Keychain values without the configured prefix are refused with
+`KEYCHAIN_LEGACY_UNSUPPORTED`. An explicit provider reconfiguration with a
+new key overwrites a same-name legacy record; back up what you need first.
 
 `scopeSecretStore`, `listPiCatalogModels`, `sealedRoutineInstruction`, the
 TruthStore provider profile adapter, and the local Host switch importer and its

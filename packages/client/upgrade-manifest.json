@@ -18,7 +18,7 @@
     {
       "id": "retire-compatibility-apis",
       "impact": "breaking",
-      "summary": "The keys and bot-collaboration Host APIs remove compatibility migrators, unused helpers, the TruthStore provider adapter and local Host switch import. Remove their calls and use a supported provider store; local Host export remains available.",
+      "summary": "The keys and bot-collaboration Host APIs remove compatibility migrators, unused helpers, the TruthStore provider adapter and its PROVIDER_TRUTH_INVALID error code, and local Host switch import. Remove their calls and use a supported provider store; local Host export remains available.",
       "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
       "items": [
         "export:@byok-sdk/keys#scopeSecretStore",
@@ -29,6 +29,8 @@
         "export:@byok-sdk/keys#TruthStoreProviderProfileStoreOptions",
         "export:@byok-sdk/keys#PROVIDER_PROFILE_TRUTH_RECORD_KEY",
         "export:@byok-sdk/keys#MacOsKeychainSecretStoreOptions",
+        "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
+        "export:@byok-sdk/keys#ByokKeysErrorCode",
         "export:@byok-sdk/bot-collaboration/host-kit#migrateWouldDo",
         "export:@byok-sdk/bot-collaboration/host-kit#WouldDoMigration",
         "export:@byok-sdk/bot-collaboration/host-kit#sealedRoutineInstruction",
@@ -40,11 +42,18 @@
     {
       "id": "reject-unprefixed-keychain-records",
       "impact": "breaking",
-      "summary": "@byok-sdk/keys MacOsKeychainSecretStore.get refuses an unprefixed record with KEYCHAIN_SECRET_DECODE_FAILED; the allowUnprefixedRead option is removed. Configure a current-format credential separately.",
+      "summary": "@byok-sdk/keys MacOsKeychainSecretStore refuses an unprefixed record with KEYCHAIN_LEGACY_UNSUPPORTED and does not delete it. Explicit provider reconfiguration overwrites a same-name legacy record; back up what you need first.",
       "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
       "items": [
         "behavior:reject-unprefixed-keychain-records"
       ]
+    },
+    {
+      "id": "reject-hosted-old-entity-constraint",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example refuses an older entity kind constraint with hosted_schema_unsupported_old before DDL; preserve the old store and provision a separate current store.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": ["behavior:reject-hosted-old-entity-constraint"]
     },
     {
       "id": "reject-older-provider-kind-store",

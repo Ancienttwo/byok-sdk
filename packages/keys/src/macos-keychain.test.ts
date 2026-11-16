@@ -83,7 +83,7 @@ describe('MacOsKeychainSecretStore.available', () => {
       throw raw;
     } });
     await expect(subject.available()).resolves.toBe(false);
-    for (const [operation, code] of [[() => subject.get('key'), 'KEYCHAIN_READ_FAILED'], [() => subject.delete('key'), 'KEYCHAIN_DELETE_FAILED'], [() => subject.set('key', 'value'), 'KEYCHAIN_WRITE_FAILED']] as const) {
+    for (const [operation, code] of [[() => subject.get('key'), 'KEYCHAIN_READ_FAILED'], [() => subject.delete('key'), 'KEYCHAIN_READ_FAILED'], [() => subject.set('key', 'value'), 'KEYCHAIN_WRITE_FAILED']] as const) {
       const failure = await operation().catch((error: unknown) => error);
       expect(failure).toMatchObject({ code: kind === 'start' ? 'KEYCHAIN_UNAVAILABLE' : code });
       if (kind === 'start' || kind === 'input') expect(failure).toMatchObject({ cause: { code: raw.code, name: raw.name, message: kind === 'input' ? 'command input failed: EPIPE' : 'spawn failed: EACCES' } });
@@ -191,10 +191,10 @@ describe('MacOsKeychainSecretStore.get', () => {
     await expect(store().get('model-openai-api-key')).resolves.toBe(secret);
   });
 
-  it('fails closed on an unprefixed stored value by default', async () => {
+  it('refuses an unprefixed stored value', async () => {
     runner.queue({ exitCode: 0, stdout: `${CANARY}\n` });
     await expect(store().get('model-openai-api-key')).rejects.toThrowError(
-      expect.objectContaining({ code: 'KEYCHAIN_SECRET_DECODE_FAILED' }),
+      expect.objectContaining({ code: 'KEYCHAIN_LEGACY_UNSUPPORTED' }),
     );
   });
 
@@ -331,9 +331,9 @@ describe('MacOsKeychainSecretStore.set', () => {
 
 describe('MacOsKeychainSecretStore.delete', () => {
   it('deletes through delete-generic-password', async () => {
-    runner.queue({ exitCode: 0 });
+    runner.queue({ exitCode: 0, stdout: encoded(CANARY) }, { exitCode: 0 });
     await expect(store().delete('model-openai-api-key')).resolves.toBe(true);
-    expect(runner.invocations[0]?.args).toEqual([
+    expect(runner.invocations[1]?.args).toEqual([
       'delete-generic-password',
       '-a',
       'local-device',
@@ -343,11 +343,11 @@ describe('MacOsKeychainSecretStore.delete', () => {
   });
 
   it('appends the explicitly selected keychain to the delete argv', async () => {
-    runner.queue({ exitCode: 0 });
+    runner.queue({ exitCode: 0, stdout: encoded(CANARY) }, { exitCode: 0 });
     await expect(
       store({ keychainPath: KEYCHAIN_PATH }).delete('model-openai-api-key'),
     ).resolves.toBe(true);
-    expect(runner.invocations[0]?.args).toEqual([
+    expect(runner.invocations[1]?.args).toEqual([
       'delete-generic-password',
       '-a',
       'local-device',
@@ -357,13 +357,22 @@ describe('MacOsKeychainSecretStore.delete', () => {
     ]);
   });
 
+  it('refuses to delete an unprefixed legacy entry without exposing its value', async () => {
+    runner.queue({ exitCode: 0, stdout: `${CANARY}\n` });
+    const error = await store().delete('model-openai-api-key').catch((caught: unknown) => caught as Error);
+    expect(error).toMatchObject({ code: 'KEYCHAIN_LEGACY_UNSUPPORTED' });
+    expect(String(error)).not.toContain(CANARY);
+    expect(runner.invocations).toHaveLength(1);
+    expect(runner.invocations[0]?.args[0]).toBe('find-generic-password');
+  });
+
   it('returns false when the entry was already absent', async () => {
     runner.queue({ exitCode: 44 });
     await expect(store().delete('model-openai-api-key')).resolves.toBe(false);
   });
 
   it('maps any other non-zero exit to KEYCHAIN_DELETE_FAILED', async () => {
-    runner.queue({ exitCode: 1 });
+    runner.queue({ exitCode: 0, stdout: encoded(CANARY) }, { exitCode: 1 });
     await expect(store().delete('model-openai-api-key')).rejects.toThrowError(
       expect.objectContaining({ code: 'KEYCHAIN_DELETE_FAILED' }),
     );

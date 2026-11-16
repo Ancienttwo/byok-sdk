@@ -78,6 +78,9 @@ export class MacOsKeychainSecretStore<TName extends string = string>
   async delete(name: TName): Promise<boolean> {
     const service = this.#service(name);
     this.#assertMacOs();
+    const stored = await this.#readStored(service);
+    if (stored === undefined) return false;
+    this.#assertPrefix(stored);
     const result = await this.#invoke('DELETE', [
       'delete-generic-password',
       '-a',
@@ -99,6 +102,11 @@ export class MacOsKeychainSecretStore<TName extends string = string>
   async get(name: TName): Promise<string | undefined> {
     const service = this.#service(name);
     this.#assertMacOs();
+    const stored = await this.#readStored(service);
+    return stored === undefined ? undefined : this.#decode(stored);
+  }
+
+  async #readStored(service: string): Promise<string | undefined> {
     const result = await this.#invoke('READ', [
       'find-generic-password',
       '-a',
@@ -115,7 +123,7 @@ export class MacOsKeychainSecretStore<TName extends string = string>
         'macOS Keychain could not read the requested secret',
       );
     }
-    return this.#decode(result.stdout.replace(/\r?\n$/u, ''));
+    return result.stdout.replace(/\r?\n$/u, '');
   }
 
   async has(name: TName): Promise<boolean> {
@@ -209,13 +217,17 @@ export class MacOsKeychainSecretStore<TName extends string = string>
    * Fail-closed inverse of the storage encoding. The error message never
    * echoes the undecodable value — it may still be somebody's live credential.
    */
-  #decode(storedSecret: string): string {
+  #assertPrefix(storedSecret: string): void {
     if (!storedSecret.startsWith(this.#storagePrefix)) {
       throw new ByokKeysError(
-        'KEYCHAIN_SECRET_DECODE_FAILED',
-        'macOS Keychain returned a value without this store\'s storage prefix',
+        'KEYCHAIN_LEGACY_UNSUPPORTED',
+        'macOS Keychain returned a legacy value without this store\'s storage prefix',
       );
     }
+  }
+
+  #decode(storedSecret: string): string {
+    this.#assertPrefix(storedSecret);
     const decoded = decodeStrictBase64Utf8(
       storedSecret.slice(this.#storagePrefix.length),
     );

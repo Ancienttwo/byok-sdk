@@ -178,7 +178,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     const f = await fixture();
     const host = hostKeychain('byok-b64-v1:');
     await expect(runPiProviderLauncher(f.launch(), { createSecretStore: () => host.store }))
-      .rejects.toMatchObject({ code: 'KEYCHAIN_SECRET_DECODE_FAILED' });
+      .rejects.toMatchObject({ code: 'KEYCHAIN_LEGACY_UNSUPPORTED' });
     expect(await fs.readdir(f.projection)).toEqual([]);
   });
 

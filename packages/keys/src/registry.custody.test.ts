@@ -189,6 +189,13 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     await expect(profiles.getPending('openai')).resolves.toBeUndefined();
   });
 
+  it('explicitly replaces a legacy entry without exposing it', async () => {
+    await registry().configure(OPENAI, OLD_KEY);
+    vi.spyOn(secrets, 'get').mockRejectedValueOnce(new ByokKeysError('KEYCHAIN_LEGACY_UNSUPPORTED', 'legacy'));
+    await expect(registry().replaceSecret('openai', NEW_KEY)).resolves.toMatchObject({ configuration_pending: false });
+    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
+  });
+
   it('a new key overwrites a previous entry the store cannot read (#1946)', async () => {
     await registry().configure(OPENAI, OLD_KEY);
     const corrupted = () => vi.spyOn(secrets, 'get').mockRejectedValueOnce(new ByokKeysError('KEYCHAIN_SECRET_CORRUPTED', 'undecodable'));
