@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "c113e4df8fc7e468ded34acf86d405f56b9d5af6125b938f633a102ad8a1d662"
+    "snapshotSha256": "6f02abbe6c901b2c5d6a91042a99ab914883f4b02c858f4adc1a6f6054fabeed"
   },
   "configFields": {
     "status": "tracked",
@@ -1793,6 +1793,13 @@
       "item": "entry:@byok-sdk/core/sqlite-node",
       "change": "added",
       "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "example:host-execution-core",
+      "change": "changed",
+      "before": "K4 0.0.1 src-sha256=a62de5b4c4495e5e",
+      "after": "K4 0.0.1 src-sha256=8c1fbd81a7d14099",
+      "entry": "wire-v7-execution-target"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
@@ -5233,6 +5240,11 @@
       "item": "export:@byok-sdk/protocol#steerRefusalEnvelopeId",
       "change": "added",
       "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#targetsPi",
+      "change": "added",
+      "entry": "wire-v7-execution-target"
     },
     {
       "item": "export:@byok-sdk/protocol#uuidFromSha256",
