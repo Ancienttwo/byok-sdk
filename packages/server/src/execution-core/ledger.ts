@@ -1,4 +1,6 @@
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
+import { existsSync } from 'node:fs';
+import { readSqliteFileUnchanged, sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
 import { loadSqliteModule } from '../sqlite-support.js';
 import type { MemoryIntentRow } from './memory.js';
 import { hash, isOccurrenceIntentKey, occurrenceIntentKey, taskId, time, type Json, type LedgerState, type Occurrence } from './model.js';
@@ -11,7 +13,25 @@ export interface ProjectionOutboxLimits { maxCount?: number; maxBytes?: number }
  * It must not change the state. An application registers it once, so a plain `compact` call cannot skip it.
  */
 export type CompactVeto = (state: Readonly<LedgerState>, intentKey: string) => string | undefined;
-export interface HostLedgerOptions { projectionOutboxLimits?: ProjectionOutboxLimits; compactVeto?: CompactVeto }
+export interface HostLedgerOptions {
+  projectionOutboxLimits?: ProjectionOutboxLimits; compactVeto?: CompactVeto;
+  /**
+   * The format of each layer stored in this ledger besides K4's own `k4` row, by owner, for example K8's `{ k8: 3 }`.
+   * An existing ledger opens only when its `host_store_format` rows are exactly these plus `k4`.
+   */
+  expectedFormats?: Readonly<Record<string, number>>;
+}
+/** The version of K4's own tables and ledger body, the `k4` row of `host_store_format`. */
+const K4_FORMAT = 1;
+/**
+ * An existing Host ledger whose `host_store_format` rows differ from the formats this ledger expects, or that has tables
+ * and no `host_store_format` (written before format metadata). It is refused before any write: keep the file and open a
+ * new ledger file.
+ */
+export class HostStoreFormatError extends Error {
+  readonly code = 'host_store_format_unsupported' as const;
+  constructor(message: string) { super(message); this.name = 'HostStoreFormatError'; }
+}
 export interface ProjectionOutboxUsage { count: number; bytes: number }
 /** Capacity refusal contains no projection identity or payload. */
 export class OutboxFullError extends Error {
@@ -100,7 +120,7 @@ export interface LedgerDumpMemoryTombstone { intentId: string; approval: string;
  * It carries no tenant id: `loadForSwitch` writes it into another, empty tenant.
  */
 export interface LedgerDump {
-  version: 1;
+  version: 2;
   body: LedgerState;
   tombstones: LedgerDumpTombstone[];
   rows: LedgerDumpRow[];
@@ -108,6 +128,48 @@ export interface LedgerDump {
 }
 const TOMBSTONE_KINDS: ReadonlySet<string> = new Set(['intent', 'application', 'slot', 'row']);
 const TENANT_TABLES = ['host_ledger', 'host_retired_identity', 'host_retired_memory_intent', 'host_application_row'] as const;
+const SCHEMA = `CREATE TABLE host_store_format (owner TEXT PRIMARY KEY, version INTEGER NOT NULL);
+  CREATE TABLE host_ledger (tenant TEXT PRIMARY KEY, body TEXT NOT NULL);
+  CREATE TABLE host_retired_identity (
+    tenant TEXT NOT NULL, kind TEXT NOT NULL, identity TEXT NOT NULL, expires_at INTEGER,
+    PRIMARY KEY (tenant, kind, identity));
+  CREATE INDEX host_retired_expiry ON host_retired_identity (tenant, expires_at);
+  CREATE TABLE host_retired_memory_intent (
+    tenant TEXT NOT NULL, intent_id TEXT NOT NULL, approval TEXT NOT NULL, body TEXT NOT NULL, expires_at INTEGER NOT NULL,
+    PRIMARY KEY (tenant, intent_id));
+  CREATE INDEX host_retired_memory_approval ON host_retired_memory_intent (tenant, approval);
+  CREATE INDEX host_retired_memory_expiry ON host_retired_memory_intent (tenant, expires_at);
+  CREATE TABLE host_application_row (
+    tenant TEXT NOT NULL, namespace TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL, expires_at INTEGER,
+    PRIMARY KEY (tenant, namespace, id));
+  CREATE INDEX host_application_row_expiry ON host_application_row (tenant, namespace, expires_at);`;
+
+function expectedFormats(extra: Readonly<Record<string, number>> | undefined): Readonly<Record<string, number>> {
+  const formats: Record<string, number> = { k4: K4_FORMAT };
+  for (const [owner, version] of Object.entries(extra ?? {})) {
+    if (!owner || owner === 'k4' || !Number.isSafeInteger(version) || version < 1) throw new Error('Expected formats name another layer and a positive integer version');
+    formats[owner] = version;
+  }
+  return Object.freeze(formats);
+}
+
+/** Decides a ledger's format from its tables and `host_store_format` rows: 'empty' for a file with no tables. */
+function admitFormat(db: DatabaseSync, expected: Readonly<Record<string, number>>): 'empty' | 'current' {
+  const tables = db.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all().map(row => String(row.name));
+  if (!tables.includes('host_store_format')) {
+    if (tables.length === 0) return 'empty';
+    throw new HostStoreFormatError('This Host ledger was written before format metadata. Keep it and open a new ledger file.');
+  }
+  const found = new Map(db.prepare('SELECT owner, version FROM host_store_format').all().map(row => [String(row.owner), Number(row.version)]));
+  for (const [owner, version] of Object.entries(expected)) {
+    if (!found.has(owner)) throw new HostStoreFormatError(`This Host ledger has no ${owner} format; it was not written for ${owner}. Open a new ledger file.`);
+    if (found.get(owner) !== version) throw new HostStoreFormatError(`This Host ledger holds ${owner} format ${found.get(owner)}; this build reads ${version}. Keep it and open a new ledger file.`);
+  }
+  for (const owner of found.keys()) {
+    if (!Object.hasOwn(expected, owner)) throw new HostStoreFormatError(`This Host ledger holds ${owner} data, and it was opened without the ${owner} format. Open it with that layer's options.`);
+  }
+  return 'current';
+}
 const expiry = (value: unknown): number | null => value === null ? null : time(value as number);
 const text = (value: unknown, what: string): string => {
   if (typeof value !== 'string' || !value) throw new Error(`Invalid switch dump ${what}`);
@@ -124,7 +186,7 @@ const serialized = (value: unknown, what: string): string => {
 };
 
 function empty(): LedgerState {
-  return { version: 1, sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {},
+  return { sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {},
     occurrences: {}, slots: {}, outbox: {}, applied: {}, application: {}, scanWake: null };
 }
 
@@ -140,6 +202,8 @@ export class HostLedger {
   private readonly projectionLimits?: Readonly<ProjectionOutboxLimits>;
   /** An application checks this identity to prove that its veto guards every compaction. */
   readonly compactVeto?: CompactVeto;
+  /** The `host_store_format` rows of this ledger by owner: `k4` and each expected format. A layer checks its own row here. */
+  readonly formats: Readonly<Record<string, number>>;
   constructor(filename: string, readonly tenant: string, options: HostLedgerOptions = {}) {
     if (options.compactVeto !== undefined) {
       if (typeof options.compactVeto !== 'function') throw new Error('The compact veto must be a function');
@@ -154,32 +218,36 @@ export class HostLedger {
       this.projectionLimits = Object.freeze({ maxCount, maxBytes });
     }
     if (!filename || !tenant.trim()) throw new Error('Select a Host database and tenant');
+    const formats = this.formats = expectedFormats(options.expectedFormats);
+    // #2286: the format is decided on the unchanged main file, before the writable open, its pragmas or any DDL.
+    const unchanged = readSqliteFileUnchanged(filename, db => admitFormat(db, formats));
     // The bundler drops the `node:` prefix from static imports, and `sqlite` has no unprefixed builtin.
     const { DatabaseSync: Database } = loadSqliteModule();
-    this.db = new Database(filename);
-    this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
-      CREATE TABLE IF NOT EXISTS host_ledger (tenant TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS host_retired_identity (
-        tenant TEXT NOT NULL, kind TEXT NOT NULL, identity TEXT NOT NULL, expires_at INTEGER,
-        PRIMARY KEY (tenant, kind, identity));
-      CREATE INDEX IF NOT EXISTS host_retired_expiry ON host_retired_identity (tenant, expires_at);
-      CREATE TABLE IF NOT EXISTS host_retired_memory_intent (
-        tenant TEXT NOT NULL, intent_id TEXT NOT NULL, approval TEXT NOT NULL, body TEXT NOT NULL, expires_at INTEGER NOT NULL,
-        PRIMARY KEY (tenant, intent_id));
-      CREATE INDEX IF NOT EXISTS host_retired_memory_approval ON host_retired_memory_intent (tenant, approval);
-      CREATE INDEX IF NOT EXISTS host_retired_memory_expiry ON host_retired_memory_intent (tenant, expires_at);
-      CREATE TABLE IF NOT EXISTS host_application_row (
-        tenant TEXT NOT NULL, namespace TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL, expires_at INTEGER,
-        PRIMARY KEY (tenant, namespace, id));
-      CREATE INDEX IF NOT EXISTS host_application_row_expiry ON host_application_row (tenant, namespace, expires_at);`);
-    this.db.prepare('INSERT OR IGNORE INTO host_ledger VALUES (?, ?)').run(tenant, JSON.stringify(empty()));
+    this.db = new Database(sqliteOpenPath(filename));
+    try {
+      this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
+      if (unchanged !== 'current') {
+        // A new or empty file, or one whose schema is only in its WAL: the decision on this connection is the authority.
+        // Not handled: an older ledger that crashed before its first checkpoint was already changed by WAL replay here.
+        this.db.exec('BEGIN IMMEDIATE');
+        try {
+          if (admitFormat(this.db, formats) === 'empty') {
+            this.db.exec(SCHEMA);
+            const row = this.db.prepare('INSERT INTO host_store_format VALUES (?, ?)');
+            for (const [owner, version] of Object.entries(formats)) row.run(owner, version);
+          }
+          this.db.exec('COMMIT');
+        } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+        // The main file then holds the format, so the next open decides it before any write.
+        if (filename !== ':memory:' && existsSync(`${filename}-wal`)) this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+      }
+      this.db.prepare('INSERT OR IGNORE INTO host_ledger VALUES (?, ?)').run(tenant, JSON.stringify(empty()));
+    } catch (error) { this.db.close(); throw error; }
   }
   snapshot(): LedgerState {
     const row = this.db.prepare('SELECT body FROM host_ledger WHERE tenant=?').get(this.tenant);
     if (typeof row?.body !== 'string') throw new Error('Missing Host ledger');
-    const state = JSON.parse(row.body) as LedgerState;
-    if (state.version !== 1) throw new Error('Unsupported Host ledger version');
-    return state;
+    return JSON.parse(row.body) as LedgerState;
   }
   projectionOutboxUsage(): ProjectionOutboxUsage { return projectionUsage(this.snapshot()); }
   transaction<T>(apply: (state: LedgerState, rows: ApplicationRows) => T): T {
@@ -422,7 +490,7 @@ export class HostLedger {
   /** The rows of this tenant, inside the caller's transaction: the dump, and the load's read-back. */
   private readDump(): LedgerDump {
     return {
-      version: 1,
+      version: 2,
       body: this.snapshot(),
       tombstones: this.db.prepare('SELECT kind, identity, expires_at FROM host_retired_identity WHERE tenant=? ORDER BY kind, identity')
         .all(this.tenant).map(row => ({ kind: row.kind as LedgerDumpTombstone['kind'], identity: String(row.identity),
@@ -448,9 +516,9 @@ export class HostLedger {
     if (typeof verify !== 'function') throw new Error('A switch load needs a read-back check');
     if (this.outboxListeners.size) throw new Error('Load a switch dump before any core is bound to this ledger');
     const input = record(dump, 'document');
-    if (input.version !== 1) throw new Error('Unsupported switch dump version');
+    // Version 2 (#2286): the body has no version; host_store_format holds the ledger's format.
+    if (input.version !== 2) throw new Error('Unsupported switch dump version');
     const body = record(input.body, 'body') as unknown as LedgerState;
-    if (body.version !== 1) throw new Error('Unsupported Host ledger version');
     for (const name of ['tombstones', 'rows', 'memoryTombstones'] as const) if (!Array.isArray(input[name])) throw new Error(`Invalid switch dump ${name}`);
     const tombstones = (input.tombstones as unknown[]).map(value => {
       const row = record(value, 'tombstone');
