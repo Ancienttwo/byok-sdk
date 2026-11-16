@@ -7,6 +7,7 @@ import { createDeviceSimulator } from '@byok-sdk/testkit';
 import { createEnvelope, PROTOCOL_VERSION, type Envelope } from '@byok-sdk/protocol';
 import { policy } from '@byok-sdk/example-host-execution-core/test-support';
 import { BetaLedger, type TaskArguments } from './index';
+import { runtimeTarget } from './model';
 import { AGENT, AGENT_EXECUTION_CAPABILITIES } from './tools.test-support';
 
 const cleanup: Array<() => void | Promise<void>> = [];
@@ -32,10 +33,10 @@ async function host() {
   const reservation = ledger.reserveTask(caller, input, session.deviceId);
   const dispatch = async () => {
     await server.executions.submit({ taskId: reservation.taskId, deviceId: reservation.binding.deviceId, payload: {
-      runtime: reservation.binding.arguments.runtime, session: { mode: 'fresh' }, instruction: reservation.binding.arguments.instruction,
+      target: runtimeTarget(reservation.binding.arguments.runtime), session: { mode: 'fresh' }, instruction: reservation.binding.arguments.instruction,
       agentRef: reservation.binding.agentRef!, egressPolicy: policy, terminalProjection: { mode: 'none' } } });
     const handle = { taskId: reservation.taskId };
-    await send(createEnvelope('task.claim', { deviceId: session.deviceId, agentRef: AGENT, runtime: 'pi' }, { taskId: handle.taskId }));
+    await send(createEnvelope('task.claim', { deviceId: session.deviceId, agentRef: AGENT, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: handle.taskId }));
     await send(createEnvelope('task.started', {}, { taskId: handle.taskId }));
     expect((await server.tasks.get(handle.taskId))?.state).toBe('Running');
     return handle;
@@ -53,7 +54,7 @@ it('keeps a pre-dispatch reservation occupied across missing SDK state and Host-
   expect((await f.server.tasks.get(handle.taskId))?.state).toBe('Cancelled');
   expect(await f.ledger.reconcileTask(handle.taskId)).toBe(false);
   expect(f.ledger.quota(f.caller).runningTasks).toBe(1);
-  await f.send(createEnvelope('task.cancelled', { agentRef: AGENT, reason: 'Device acknowledged cancellation' }, { taskId: handle.taskId }));
+  await f.send(createEnvelope('task.cancelled', { agentRef: AGENT, executor: { kind: 'runtime', runtimeId: 'pi' }, reason: 'Device acknowledged cancellation' }, { taskId: handle.taskId }));
   expect(await f.ledger.reconcileTask(handle.taskId)).toBe(true);
   expect(await f.ledger.reconcileTask(handle.taskId)).toBe(true);
   expect(f.ledger.quota(f.caller)).toMatchObject({ runningTasks: 0, remainingSubmits: 59 });
@@ -64,7 +65,7 @@ it('revokes authorization without killing the SDK task or releasing its slot', a
   f.ledger.revokeKey(f.issued.key.keyId);
   expect((await f.server.tasks.get(handle.taskId))?.state).toBe('Running');
   expect(await f.ledger.reconcileTask(handle.taskId)).toBe(false);
-  await f.send(createEnvelope('task.complete', { agentRef: AGENT, summary: 'Device fixture completed', sessionRef: 'b2-fixture-session' }, { taskId: handle.taskId }));
+  await f.send(createEnvelope('task.complete', { agentRef: AGENT, executor: { kind: 'runtime', runtimeId: 'pi' }, summary: 'Device fixture completed', sessionRef: 'b2-fixture-session' }, { taskId: handle.taskId }));
   expect((await f.server.tasks.get(handle.taskId))?.state).toBe('Complete');
   expect(await f.ledger.reconcileTask(handle.taskId)).toBe(true);
 });

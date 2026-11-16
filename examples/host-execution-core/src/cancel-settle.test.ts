@@ -13,7 +13,7 @@ it('settles a cancelled claimed task soon after its device terminal, without wai
   const first = await host.core.enqueue(host.intent('cancel'));
   const session = await running('cancel');
   await vi.waitFor(async () => expect(await host!.server.tasks.attempt(first.taskId)).toMatchObject({
-    ownerDeviceId: host!.deviceId, claimedRuntime: 'pi',
+    ownerDeviceId: host!.deviceId, claimedExecutor: { kind: 'runtime', runtimeId: 'pi' },
   }), { timeout: 5000 });
   // Hold the device terminal until the Host cancel event and its drain are complete.
   let release!: () => void;
@@ -39,7 +39,7 @@ it('probes a cancelled task terminal without Host ledger writes until the termin
   host = await openHost({ reconcileMs: 60_000 });
   const intent = await host.core.enqueue(host.intent('quiet'));
   const session = await running('quiet');
-  await vi.waitFor(async () => expect(await host!.server.tasks.attempt(intent.taskId)).toMatchObject({ claimedRuntime: 'pi' }), { timeout: 5000 });
+  await vi.waitFor(async () => expect(await host!.server.tasks.attempt(intent.taskId)).toMatchObject({ claimedExecutor: { kind: 'runtime', runtimeId: 'pi' } }), { timeout: 5000 });
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   vi.spyOn(session, 'interrupt').mockImplementation(async () => { session.interrupted = true; await gate; });
@@ -71,7 +71,7 @@ it('keeps probing after failed terminal reads and settles soon after the reads r
   } }) });
   const intent = await host.core.enqueue(host.intent('flaky'));
   const session = await running('flaky');
-  await vi.waitFor(async () => expect(await host!.server.tasks.attempt(intent.taskId)).toMatchObject({ claimedRuntime: 'pi' }), { timeout: 5000 });
+  await vi.waitFor(async () => expect(await host!.server.tasks.attempt(intent.taskId)).toMatchObject({ claimedExecutor: { kind: 'runtime', runtimeId: 'pi' } }), { timeout: 5000 });
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   vi.spyOn(session, 'interrupt').mockImplementation(async () => { session.interrupted = true; await gate; });

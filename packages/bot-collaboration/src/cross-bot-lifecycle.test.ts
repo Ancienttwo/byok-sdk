@@ -102,13 +102,13 @@ it('§8.4 submitted, not claimed -> tasks.cancel, attempt reads back cancelled, 
   const d = t.delegationOf(t.taskOf(root));
   const task = t.taskOf(d.id);
   await vi.waitFor(async () => { await t.host().drain(); expect(await fixture.server.tasks.attempt(task)).toBeDefined(); }, { timeout: 5000 });
-  expect(await fixture.server.tasks.attempt(task)).not.toHaveProperty('claimedRuntime');
+  expect(await fixture.server.tasks.attempt(task)).not.toHaveProperty('claimedExecutor');
   expect(t.delegation(d.id).status).toBe('queued');
   hidden = undefined;
   expect(await verdict(d.id)).toMatchObject({ verdict: 'refused', reason: 'target_archived', cancel: { reason: 'target_archived', targetTurnId: d.id } });
   const attempt = await fixture.server.tasks.attempt(task);
   expect(attempt).toMatchObject({ status: 'cancelled' });
-  expect(attempt?.claimedRuntime).toBeUndefined();
+  expect(attempt?.claimedExecutor).toBeUndefined();
   expect(t.host().core.intent(d.id)).toMatchObject({ conclusion: 'cancelled' });
   await fixture.online();
   await refusedOnce(d.id, a);

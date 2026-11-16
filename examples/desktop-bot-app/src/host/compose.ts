@@ -149,6 +149,9 @@ function hostDaemonConfig(options: Pick<HostCompositionOptions, 'productId' | 'p
   return {
     productId: options.productId,
     productName: options.productName,
+    // The Host pairs only with its own embedded server, so the app name identifies the device; a machine
+    // hostname can exceed the 64-character pairing bound.
+    deviceName: options.productName,
     serverUrl,
     storeDir: options.storeDir,
     // K8 projects each Bot's persona into its Agent home; without it no Bot becomes ready.

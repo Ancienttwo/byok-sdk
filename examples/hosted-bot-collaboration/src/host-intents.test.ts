@@ -35,7 +35,7 @@ const port = {
   },
   attempt: async (task: string) => {
     const input = submitted.get(task);
-    return input && { taskId: task, deviceId: input.deviceId, agentRef: input.payload.agentRef, status: 'completed', claimedRuntime: 'r', ownerDeviceId: input.deviceId };
+    return input && { taskId: task, deviceId: input.deviceId, agentRef: input.payload.agentRef, status: 'completed', claimedExecutor: { kind: 'runtime', runtimeId: 'pi' }, ownerDeviceId: input.deviceId };
   },
   cancel: async () => undefined,
 } as unknown as HostedTaskPort & FrozenSubmitPort;

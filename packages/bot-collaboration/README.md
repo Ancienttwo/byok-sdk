@@ -574,7 +574,8 @@ new BotCollaboration(server, ledger, { ...options,
   of an upgraded ledger still go into its pack.
 - **Native sessions.** `dreaming.nativeSessions` defaults to `true` and requests
   native session input for the same window when the device advertises support.
-  Set it to `false` to omit the request. The device switch is off by default;
+  Only a template whose `target` names Pi gets the request; any other template
+  dreams without it. Set it to `false` to omit the request. The device switch is off by default;
   see [Native session input](../../docs/security.md#native-session-input) for
   what it sends to the configured model provider.
 - **Queue.** A dream joins the Bot's FIFO behind the Turns of its sync, and user

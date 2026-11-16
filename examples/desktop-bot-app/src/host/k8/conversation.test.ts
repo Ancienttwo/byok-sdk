@@ -65,7 +65,7 @@ async function open(): Promise<Fixture> {
   const { deviceId } = await daemon.pair((await server.pairing.createPairingCode({ productId })).code);
   await daemon.start(); await ready(daemon);
   const execution: ExecutionTemplate = { deviceId, agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'desktop' }, payload: {
-    runtime: 'pi', session: { mode: 'fresh' }, instruction: 'Answer the user.', agentRef: { agentId: 'host', profileRevision: '1' }, egressPolicy: policy,
+    target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, instruction: 'Answer the user.', agentRef: { agentId: 'host', profileRevision: '1' }, egressPolicy: policy,
     messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 },
     terminalProjection: { mode: 'result-document', contract: 'desktop-test-v1', schema: { type: 'object' } },
   } };

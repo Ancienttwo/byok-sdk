@@ -5,7 +5,7 @@ import type { ByokServer } from '@byok-sdk/server';
 import { RequiredToolsetsSchema, TerminalProjectionSelectionSchema, type TerminalProjectionSelection } from '@byok-sdk/protocol';
 import type { ScopedTool } from './http';
 import type { BetaLedger } from './ledger';
-import { BetaError, canonicalJson, invalid, object, taskArguments, text, type Caller, type RoutineReservation,
+import { BetaError, canonicalJson, invalid, object, runtimeTarget, taskArguments, text, type Caller, type RoutineReservation,
   type TaskArguments } from './model';
 import { input, integer, json, selectDevice } from './tools';
 
@@ -109,7 +109,7 @@ export function createRoutineTools(options: RoutineToolOptions): ScopedTool[] {
     if (!key.agentRef) throw new Error('A routine grant has no AgentRef');
     const { schedule, task } = parsed.definition;
     return { id: reservation.routineId, version: 1, timeZone: schedule.tz, rule: schedule as unknown as Json,
-      execution: { deviceId, payload: { runtime: task.runtime, session: { mode: 'fresh' }, instruction: task.instruction, agentRef: key.agentRef,
+      execution: { deviceId, payload: { target: runtimeTarget(task.runtime), session: { mode: 'fresh' }, instruction: task.instruction, agentRef: key.agentRef,
         egressPolicy: options.egressPolicy, terminalProjection: parsed.terminalProjection,
         ...(task.toolsets ? { requiredToolsets: [...task.toolsets] } : {}) } },
       waitMs: options.waitMs, lateAfterMs: options.lateAfterMs };
@@ -199,10 +199,10 @@ export function createRoutineTools(options: RoutineToolOptions): ScopedTool[] {
           const routine = routineOf(state, reservation.routineId);
           // K4 completion is the only authority that frees a routine slot.
           if (routine?.lifecycle === 'completed' && !reservation.slotReleased) ledger.releaseRoutineSlot(reservation.routineId);
-          const execution = routine?.definition.execution.payload;
+          const target = routine?.definition.execution.payload.target;
           const last = lastOccurrence(state, reservation.routineId);
           return { ...view(state, reservation), localId: reservation.localId, createdAt: iso(reservation.createdAt),
-            ...(routine ? { schedule: routine.definition.rule, runtime: execution?.runtime } : {}),
+            ...(routine ? { schedule: routine.definition.rule, runtime: target?.lane === 'runtime' ? target.runtimeId : undefined } : {}),
             ...(last ? { lastOccurrence: last } : {}) };
         });
         return json({ routines, ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }) });
