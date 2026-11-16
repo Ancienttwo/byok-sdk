@@ -12,7 +12,8 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { sealRoutineTemplate } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { ROUTINE_LATE_AFTER_MS, type SealedRoutineAction, sealedRoutineInstruction } from '@byok-sdk/bot-collaboration/host-kit';
+import { ROUTINE_LATE_AFTER_MS, type SealedRoutineAction } from '@byok-sdk/bot-collaboration/host-kit';
+import { sealedTestInstruction } from '@byok-sdk/bot-collaboration/testing';
 import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout';
 import { openHome, RUN, until, type Home } from './worker.test-support';
 
@@ -38,7 +39,7 @@ async function sealedAction(deviceId: string, agentId: string, schedule: SealedR
   const agentRef = template(deviceId, agentId).payload.agentRef;
   const sealed = await sealRoutineTemplate({ tenantId: 'tenant', scopeKey: Uint8Array.from({ length: 32 }, (_, index) => index), sealing,
     chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` }, sender: 'A'.repeat(43), routineRef: { routineId, definitionVersion, notAfter },
-    agentRef, instruction: sealedRoutineInstruction(prompt) });
+    agentRef, instruction: sealedTestInstruction(prompt) });
   return { routineId, definitionVersion, schedule,
     sealed: { sealing, template: sealed, agentRef: { agentId: agentRef.agentId, profileRevision: agentRef.profileRevision }, notAfter } };
 }

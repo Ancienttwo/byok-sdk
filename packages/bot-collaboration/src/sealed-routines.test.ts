@@ -2,8 +2,8 @@ import { describe, expect, it, beforeAll } from 'vitest';
 import { hash, promoteOccurrence, recordOccurrence, routineCommands, routineTemplateBinding, sealRoutineTemplate, type LedgerState,
   type Routine } from '@byok-sdk/server/execution-core';
 import { sealContent } from '@byok-sdk/core/sealed-payload';
-import { template } from './k4-fixtures.test-support';
-import { BOT_ROUTINE, botRoutines, resealDefinition, routineCalendar, routineTurn, sealedDefinition, sealedRoutineInstruction, sealedTemplate,
+import { sealedTestInstruction, template } from './k4-fixtures.test-support';
+import { BOT_ROUTINE, botRoutines, resealDefinition, routineCalendar, routineTurn, sealedDefinition, sealedTemplate,
   SealedRoutineVersionError, updateDefinition, type SealedRoutineAction, type SealedRoutineTemplate } from './routines';
 import { SYSTEM_PROMPT } from './rules/schema';
 import { syncTurn } from './rules/sync';
@@ -18,7 +18,7 @@ const scopeKey = Uint8Array.from({ length: 32 }, (_, index) => index);
 async function sealed(routineId: string, definitionVersion: number, prompt = 'Check the watchlist.'): Promise<SealedRoutineTemplate> {
   const agentRef = execution.payload.agentRef;
   const template = await sealRoutineTemplate({ tenantId: 'product:p', scopeKey, sealing, chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
-    sender: 'A'.repeat(43), routineRef: { routineId, definitionVersion, notAfter }, agentRef, instruction: sealedRoutineInstruction(prompt) });
+    sender: 'A'.repeat(43), routineRef: { routineId, definitionVersion, notAfter }, agentRef, instruction: sealedTestInstruction(prompt) });
   return { sealing, template, agentRef: { agentId: agentRef.agentId, profileRevision: agentRef.profileRevision }, notAfter };
 }
 function ledger() {
@@ -148,7 +148,7 @@ describe('sealed Bot routines (#953)', () => {
   });
 
   it('seals the K8 Turn frame with every action and no ContextPack', () => {
-    const instruction = sealedRoutineInstruction('Check the watchlist.');
+    const instruction = sealedTestInstruction('Check the watchlist.');
     expect(instruction).toBe(`${SYSTEM_PROMPT}\n\nRequest:\nCheck the watchlist.`);
     expect(instruction).not.toContain('\n\nContextPack:\n');
   });

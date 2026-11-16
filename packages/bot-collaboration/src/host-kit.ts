@@ -35,8 +35,8 @@ export type { CheckedOffer, ConfirmableSpec, MainAction, OutcomeOffer, TurnActio
 export type { Card, CollaborationState, Delegation, InputBatch, ReplyEntry, SealReason, Turn, UserInput } from './model.js';
 export { BOT_DREAM, BOT_ROUTINE, botRoutines } from './routines.js';
 export { DEFAULT_DREAM_MAX_DURATION_MS, DREAM_WAIT_MS, type DreamBot, type DreamingOptions, type DreamRecord, type DreamSkip, type DreamState, type OpenDream } from './dream.js';
-export { CommitConflict, commitInLedger, migrateWouldDo, retainInLedger, revisionOf } from './commit.js';
-export type { Command, CommandPorts, CommitRequest, CommitResult, Disposition, OutboxIntent, WouldDoMigration } from './commit.js';
+export { CommitConflict, commitInLedger, retainInLedger, revisionOf } from './commit.js';
+export type { Command, CommandPorts, CommitRequest, CommitResult, Disposition, OutboxIntent } from './commit.js';
 export type { BotRoutine, BotRoutineInput } from './routines.js';
 export type { BotProfile, Room, Round, Seat, TeamState } from './team-model.js';
 export { DEFAULT_MEMBER_MENTIONS, ROOM_GRACE_MS, ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES, memberMentions, type MemberMentions, type RoomMessage } from './rooms.js';
@@ -48,7 +48,6 @@ export { DeviceModeError, type DeviceTopology, type SwitchWork } from './topolog
 export { SWITCH_EXPORT_VERSION, SWITCH_SECTIONS, SwitchExportError, sealSwitchExport, switchAttempts, verifySwitchExport, type ArchivedRecord, type ExecutionRecord, type IntentRecord, type MessageReceipt,
   type OccurrenceRecord, type OutboxRecord, type RoutineRecord, type SwitchContent, type SwitchDevice, type SwitchExport, type SwitchExportRefusal,
   type SwitchManifest, type SwitchSection, type TombstoneRecord } from './migration.js';
-export { commitImport, discardImport, importForSwitch } from './switch.js';
 export { DeviceSwitchingError, SwitchExportedError, SwitchImportedError, type SwitchReceipt } from './migration.js';
 export { botOutcomePorts, outcomeFailure, routeTerminal, runHostIntentHandler, syncHead, syncTail } from './adapter-steps.js';
 export { isOwner, verified } from './channel.js';
@@ -60,7 +59,7 @@ export { checkDreamInstruction, dreamIntentIds, dreamPolicy, reconcileDreamRouti
 export { exportMarkOf, type SwitchExportMark, type SwitchHeader } from './migration.js';
 export { stateOf } from './model.js';
 export { concludeRoutineTurn, createDefinition, endable, owned, resealDefinition, ROUTINE_LATE_AFTER_MS, ROUTINE_WAIT_MS, routineCalendar,
-  routineOccurrence, routineTurn, sealedDefinition, sealedRoutineInstruction, sealedTemplate, SealedRoutineVersionError, updateDefinition,
+  routineOccurrence, routineTurn, sealedDefinition, sealedTemplate, SealedRoutineVersionError, updateDefinition,
   type SealedRoutineAction } from './routines.js';
 export { sealLedger } from './switch.js';
 export { applyHomeTerminal, applyManagement, applyModels, checkHomeReadback, failHomeFlush, homeEnqueued, homeHead, homeRequests, planHomeRetry,

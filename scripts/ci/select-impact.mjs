@@ -468,6 +468,8 @@ export const reviewedScripts = Object.freeze({
   'scripts/architecture/dependency-graph.mjs': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
   'scripts/architecture/dependency-graph.test.mjs': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
   'scripts/architecture/dependency-baseline.json': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
+  'scripts/public-packages.mjs': { tests: ['scripts/api-surface/check-api-surface.test.mjs', 'scripts/release/check-upgrade-manifest.test.mjs'], install: true, families: ['npm-release-pack'] },
+  'scripts/release/install-graph.mjs': { tests: ['scripts/release/pack-and-smoke.test.mjs'], install: true, families: ['npm-release-pack'] },
   'scripts/docs/device-setup.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
   'scripts/docs/device-setup.test.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
   // #1387: the test imports acorn (module-scan.mjs), and install also selects the
@@ -500,9 +502,6 @@ export const reviewedScripts = Object.freeze({
   'scripts/release/node-next-consumer-probe.mjs': {
     tests: [], families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
   },
-  // #1828: the one-time relative-specifier codemod. Open branches rerun it by hand; the release pack's
-  // NodeNext consumer probe proves the specifiers it writes.
-  'scripts/codemod/relative-js-specifiers.mjs': { tests: [], families: ['npm-release-pack'] },
   // #1378: the shared Secret Service wrapper that these family jobs run their
   // suites under. build-test also runs it, but plan-ci never lets a routine
   // path select build-test (the same rule as .node-version).

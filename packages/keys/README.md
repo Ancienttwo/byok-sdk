@@ -192,10 +192,7 @@ One run through magpie is recorded in
 The SQLite profile schema changes in this candidate. Existing stores are
 rejected and preserved: explicitly provision a separate current-schema store
 after reviewing the old configuration. Do not delete an old store or infer its
-missing model settings. Opening a store never converts it. The Host's explicit
-`migrateProviderProfileStore(path)` call converts only a store whose sole
-difference is an earlier `provider_kind` CHECK set; see the
-[0.41.0 Host upgrade checklist](../../docs/releases/host-upgrade-0.41.0.md#stores).
+missing model settings. Opening a store never converts it.
 
 Key-based BYOK: a validated provider profile, credential-backed auth headers, and
 direct transports to OpenAI-compatible and Anthropic providers.
@@ -203,9 +200,7 @@ direct transports to OpenAI-compatible and Anthropic providers.
 Choose `provider_kind: 'opencode-go'` explicitly for OpenCode Go. Key checks
 send a fresh `x-opencode-session` per check; the endpoint URL does not select
 this behavior. The added kind widens the SQLite `provider_kind` CHECK set.
-An older store reports `migration-required`: stop store users, take a backup,
-and call `migrateProviderProfileStore(path)` before opening it. The migration
-keeps profiles and their credential-store key references; keys need no re-entry.
+An older store is refused with `PROVIDER_STORE_SCHEMA_STALE` and remains unchanged.
 For Pi execution also declare `pi_model.api: 'openai-completions'` and
 `pi_model.providerId: 'opencode-go'` explicitly; the provider kind does not infer
 Pi's identity. See the [0.42.0 Host upgrade checklist](../../docs/releases/host-upgrade-0.42.0.md#opencode-go-key-checks-and-profile-stores)
@@ -215,9 +210,7 @@ Status: **P5 + Pi provider launcher done** — the pure-function layer (K0), the
 backed by the macOS Keychain and the Windows Credential Manager (K1), and the
 configure/resolve registry with pluggable profile persistence (K2) have all
 landed. K3 settled the settings-page question, recorded under
-[Not in this package](#not-in-this-package). P5 adds the tenant-bound
-`TruthStoreProviderProfileStore` without moving provider secrets out of the OS
-credential store.
+[Not in this package](#not-in-this-package). Provider secrets stay in the OS credential store.
 
 ## Security boundary
 
@@ -386,9 +379,8 @@ if (submission.ok) {
 }
 ```
 
-- `listPiCatalogModels({ provider, api })` lists the pinned catalog entries.
-  An entry is `representable` (input, reasoning, thinking levels) or
-  `unrepresentable` (blocking paths). Model ids are the default labels.
+- The model view lists pinned catalog entries as `representable` (input, reasoning,
+  thinking levels) or `unrepresentable` (blocking paths). Model ids are the default labels.
 - Choosing a vendor fills its adapter, auth mode and base URL and resets the
   model. `custom` gets no defaults unless the policy's `custom_defaults` sets
   them.
@@ -527,7 +519,6 @@ dependency and the workspace release floor.
 | --- | --- | --- |
 | `InMemoryProviderProfileStore` | Node 24.22.1+ | — the whole configure/resolve lifecycle works |
 | `SqliteProviderProfileStore` | Node 22.5+ (`node:sqlite`) | fails closed with `PROVIDER_STORE_UNAVAILABLE` |
-| `TruthStoreProviderProfileStore` | Node 24.22.1+ plus an injected tenant-bound `TruthStore` | stale CAS or malformed/hash-mismatched authority fails closed; never falls back to SQLite |
 | `byok-pi-provider-launcher` | Node 22.5+ (`node:sqlite`) and macOS/Windows for authenticated profiles | fails closed; `auth_mode: none` does not require a credential backend |
 
 On macOS, an isolated host may select one explicit credential authority with
@@ -639,7 +630,6 @@ whatever `index.ts` re-exports; nothing here is reachable by deep import.
 | `command-runner.ts` | The `CommandRunner` injection seam the macOS backend is written against, so no unit test touches a real credential store |
 | `profile-store.ts` | The `ProviderProfileStore` persistence contract, plus the in-memory implementation |
 | `sqlite-profile-store.ts` | `SqliteProviderProfileStore` — on-disk profile persistence on `node:sqlite` |
-| `truth-profile-store.ts` | `TruthStoreProviderProfileStore` — tenant-bound deterministic registry snapshot with CAS and integrity validation |
 | `sqlite-support.ts` | Runtime `node:sqlite` capability detection and owner-only database file/directory creation |
 | `registry.ts` | `ProviderRegistry` — the configure / replaceSecret / list / resolve / delete lifecycle that binds a profile store to a secret store under the custody lock and hands back a ready client |
 | `custody.ts` | Credential-custody contract: configuration lock, pending markers, operation watermarks, receipts, and the closed rejection / key-check code sets |

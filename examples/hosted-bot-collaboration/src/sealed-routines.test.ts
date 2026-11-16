@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hash, sealRoutineTemplate, type FrozenSubmitPort, type Json, type RoutineDefinition, type SealedAgentExecutionInput } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { routineCalendar, type SealedRoutineAction, sealedRoutineInstruction, SealedRoutineVersionError } from '@byok-sdk/bot-collaboration/host-kit';
+import { routineCalendar, type SealedRoutineAction, SealedRoutineVersionError } from '@byok-sdk/bot-collaboration/host-kit';
 import type { SealedRoutineTemplate } from '@byok-sdk/bot-collaboration/rules';
-import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/bot-collaboration/testing';
+import { sealedTestInstruction, seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/bot-collaboration/testing';
 import { HostedCommandEntry, type EntryCaller } from './entry';
 import { freezeIntent, HostedSubmitter } from './intents';
 import { storedKey } from './layout';
@@ -30,7 +30,7 @@ const agentRef = template('device', 'main').payload.agentRef;
 async function sealed(definitionVersion: number, prompt: string): Promise<SealedRoutineTemplate> {
   const template = await sealRoutineTemplate({ tenantId: 'tenant', scopeKey: Uint8Array.from({ length: 32 }, (_, index) => index), sealing,
     chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` }, sender: 'A'.repeat(43), routineRef: { routineId: ID, definitionVersion, notAfter },
-    agentRef, instruction: sealedRoutineInstruction(prompt) });
+    agentRef, instruction: sealedTestInstruction(prompt) });
   return { sealing, template, agentRef: { agentId: agentRef.agentId, profileRevision: agentRef.profileRevision }, notAfter };
 }
 

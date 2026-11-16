@@ -5,7 +5,7 @@ export { cardCallVectors, cardVectors, coalesceVectors, commitVectors, deviceVec
   type DeviceSubject, type HomeCalls, type HomeSubject, type ReplySubject, type RoomSubject, type SeedTeam, type SettlementSubject,
   type SyncIntentRecord, type SyncSubject } from './commit-vectors.test-support.js';
 export { deliveryVectors, FINAL_BODY, replyToken, type DeliverySubject } from './delivery-vectors.test-support.js';
-export { policy, template } from './k4-fixtures.test-support.js';
+export { policy, sealedTestInstruction, template } from './k4-fixtures.test-support.js';
 export { openLTestHost, ResultStubAdapter, ResultStubSession, type LTestHost } from './l-test-host.test-support.js';
 export { RETENTION_NOW, retentionVectors, type RetentionSubject } from './retention-vectors.test-support.js';
 export { routineVectors, type OccurrenceRow, type RoutineSubject } from './routine-vectors.test-support.js';

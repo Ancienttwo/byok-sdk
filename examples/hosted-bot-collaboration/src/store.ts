@@ -23,7 +23,7 @@ import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type Inte
 import { DDL, STORE_VERSION } from './ddl';
 import { cancelIntent, commandIntentFacts, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { syncDreamSlice } from './dreams';
-import { HostedStoreVersionError, inSchema, lockScope, SCHEMA } from './transaction';
+import { HostedStoreVersionError, inSchema, lockScope, refuseOldWouldDo, SCHEMA } from './transaction';
 import { decideMessage, messageCommandId, type AgentMessageInput, type HostedIntentMessageHandler, type MessageDecision } from './messages';
 import { decideFinish, type HostedIntentHandler, type TaskEvidence } from './reconcile';
 import { archivedRow, commitInStore, commitStored, decideRetention } from './retention';
@@ -85,8 +85,6 @@ export class InboundCommandError extends Error {
  * It is Host configuration from verified identity, never a field of the message.
  */
 export interface InboundIdentity { owner: string; self?: Record<string, readonly string[]> }
-/** The one-shot row migrations of `migrate()` (#1756). */
-export interface MigrateResult { wouldDoBackfilled: number; wouldDoArchived: number }
 export interface HostedStoreOptions {
   /**
    * The Host config of a scope: its model templates and read-only toolsets (#793 S9). Every port and sync reads it. A store
@@ -260,58 +258,14 @@ export class HostedCollaborationStore {
     this.timers = timers && { cancelGraceMs: timers.cancelGraceMs, uncertainAfterMs: timers.uncertainAfterMs };
   }
 
-  /**
-   * Creates the schema and its tables when they are absent, and runs the one-shot row migrations. `wouldDoArchived` counts
-   * the would-do rows that no live Turn owns any more (#1756): they move to the archived rows instead of getting a `turnId`.
-   */
-  async migrate(): Promise<MigrateResult> {
-    return await this.transaction(async client => {
+  /** Create the current hosted schema, refusing unsupported stored layouts. */
+  async migrate(): Promise<void> {
+    await this.transaction(async client => {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`hosted-collaboration:${this.schema}`]);
-      await client.query(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`);
+      const schemaDdl = await client.query<{ sql: string }>("SELECT format('CREATE SCHEMA IF NOT EXISTS %I', $1::text) AS sql", [this.schema]);
+      await client.query(schemaDdl.rows[0]!.sql);
       await client.query(DDL);
-      const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
-      // An L import on older code kept `wouldDo` in the frame. It is a mapped entity kind now, so a write would empty the
-      // frame map and lose the rows. Move each one into an entity row, once, under the same scope locks.
-      const held = await client.query<{ scope: string; state_version: number; frame: string }>(
-        `SELECT scope, state_version, frame::text FROM scope WHERE frame::jsonb -> 'wouldDo' IS NOT NULL AND frame::jsonb -> 'wouldDo' <> '{}'::jsonb
-         ORDER BY scope FOR UPDATE`);
-      for (const row of held.rows) {
-        if (row.state_version !== STORE_VERSION) throw new HostedStoreVersionError(row.state_version);
-        const frame = JSON.parse(row.frame) as Record<string, unknown>, wouldDo = frame.wouldDo;
-        if (!object(wouldDo)) throw new Error(`Cannot migrate would-do rows for ${row.scope}: invalid frame`);
-        let ordinal = 0;
-        for (const [id, body] of Object.entries(wouldDo)) {
-          await client.query('INSERT INTO entity (scope, kind, key, ordinal, body) VALUES ($1, $2, $3, $4, $5::json)', [row.scope, 'would_do', storedKey(id), ordinal++, JSON.stringify(body)]);
-        }
-        frame.wouldDo = {};
-        await client.query('UPDATE scope SET frame = $2::json WHERE scope = $1', [row.scope, JSON.stringify(frame)]);
-      }
-      // A would-do row written before #1756 has no `turnId`. The K4 task id names it exactly: the CHECKs pin each intent and
-      // earlier-generation task_id to taskId(key, generation), and a Turn's intent key is the Turn id. A row whose intent
-      // was compacted, or whose Turn left the state, has no live owner: it is archived, as retention would move it.
-      const rows = await client.query<{ scope: string; state_version: number; key: string; body: string; turn: string | null }>(
-        `SELECT e.scope, s.state_version, e.key, e.body::text, owner.key AS turn FROM entity e JOIN scope s ON s.scope = e.scope
-         LEFT JOIN LATERAL (SELECT task.key FROM (SELECT key, task_id FROM intent WHERE scope = e.scope
-           UNION ALL SELECT key, task_id FROM intent_execution WHERE scope = e.scope) task
-           JOIN entity turn ON turn.scope = e.scope AND turn.kind = 'turn' AND turn.key = task.key
-           WHERE task.task_id = e.body ->> 'taskId') owner ON true
-         WHERE e.kind = 'would_do' AND e.body::jsonb ->> 'turnId' IS NULL ORDER BY e.scope, e.key FOR UPDATE OF s, e`);
-      const result: MigrateResult = { wouldDoBackfilled: 0, wouldDoArchived: 0 };
-      for (const row of rows.rows) {
-        if (row.state_version !== STORE_VERSION) throw new HostedStoreVersionError(row.state_version);
-        const body = JSON.parse(row.body) as Record<string, unknown>;
-        if (row.turn === null) {
-          await client.query(`INSERT INTO archived_row (scope, namespace, id, body, expires_at) VALUES ($1, 'wouldDo', $2, $3::json, NULL)
-            ON CONFLICT (scope, namespace, id) DO UPDATE SET body = excluded.body`, [row.scope, row.key, row.body]);
-          await client.query(`DELETE FROM entity WHERE scope = $1 AND kind = 'would_do' AND key = $2`, [row.scope, row.key]);
-          result.wouldDoArchived++;
-        } else {
-          await client.query(`UPDATE entity SET body = $3::json WHERE scope = $1 AND kind = 'would_do' AND key = $2`,
-            [row.scope, row.key, JSON.stringify({ ...body, turnId: idOf(row.turn) })]);
-          result.wouldDoBackfilled++;
-        }
-      }
-      return result;
+      await refuseOldWouldDo(client);
     }, false);
   }
 
@@ -1532,6 +1486,7 @@ export class HostedCollaborationStore {
   private async snapshot(client: PoolClient, key: string): Promise<CollaborationState> {
     const head = await client.query<{ state_version: number; frame: string }>('SELECT state_version, frame::text AS frame FROM scope WHERE scope = $1', [key]);
     if (head.rows[0] && head.rows[0].state_version !== STORE_VERSION) throw new HostedStoreVersionError(head.rows[0].state_version);
+    if (head.rows[0]) await refuseOldWouldDo(client, key);
     const rows = await this.load(client, key, head.rows[0]?.frame ?? EMPTY_FRAME, undefined);
     return stateOf({ collaboration: assemble(rows) as unknown as Json });
   }

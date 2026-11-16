@@ -4,7 +4,6 @@ import { ByokKeysError } from './errors';
 import {
   DEFAULT_SECRET_ENVELOPE_PREFIX,
   EnvelopeScopedSecretStore,
-  scopeSecretStore,
   secretScopeId,
 } from './secret-scope';
 import { InMemorySecretStore } from './secret-store';
@@ -66,46 +65,6 @@ describe('secretScopeId', () => {
     ).toThrowError(
       expect.objectContaining({ code: 'LOCAL_ACCOUNT_SCOPE_INVALID' }),
     );
-  });
-});
-
-describe('scopeSecretStore', () => {
-  it('delegates to the store\'s required scope() with the derived id', async () => {
-    const store = new InMemorySecretStore();
-    const scoped = scopeSecretStore(store, SCOPE);
-    await scoped.set(NAME, CANARY);
-    await expect(store.get(NAME)).resolves.toBeUndefined();
-    await expect(store.scope(secretScopeId(SCOPE)).get(NAME)).resolves.toBe(
-      CANARY,
-    );
-  });
-
-  it('gives two different scopes two different views', async () => {
-    const store = new InMemorySecretStore();
-    const left = scopeSecretStore(store, SCOPE);
-    const right = scopeSecretStore(store, {
-      account_id: 'acct-2',
-      workspace_id: 'ws-1',
-    });
-    await left.set(NAME, 'left');
-    await right.set(NAME, 'right');
-    await expect(left.get(NAME)).resolves.toBe('left');
-    await expect(right.get(NAME)).resolves.toBe('right');
-  });
-
-  it('passes an injected store scope error on only through the secret-store boundary (#2133)', () => {
-    const store = new InMemorySecretStore();
-    const cases = [
-      [new ByokKeysError('KEYCHAIN_UNAVAILABLE', CANARY, { cause: new Error(CANARY) }), 'KEYCHAIN_UNAVAILABLE'],
-      [new Error(CANARY, { cause: new Error(CANARY) }), 'PROVIDER_SECRET_STORE_FAILED'],
-    ] as const;
-    for (const [thrown, code] of cases) {
-      vi.spyOn(store, 'scope').mockImplementationOnce(() => { throw thrown; });
-      const error = (() => { try { scopeSecretStore(store, SCOPE); } catch (caught) { return caught as Error; } })();
-      expect(error).toMatchObject({ code });
-      expect(error?.cause).toBeUndefined();
-      expect(`${error?.message} ${error?.stack}`).not.toContain(CANARY);
-    }
   });
 });
 

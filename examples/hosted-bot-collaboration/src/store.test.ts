@@ -197,15 +197,16 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
       const wouldDo = { w1: { id: 'w1', botId: 'main', turnId: 't1', taskId: 'x', action: 'create_routine' as const, index: 0, at: 1, detail: null } };
       await legacy.store.seed('would-do', state => { seedCollaboration(state); state.wouldDo = wouldDo; });
       expect((await legacy.store.read('would-do')).wouldDo).toEqual(wouldDo);
-      // A frame that an L import on older code wrote holds the rows inline: migrate moves them into entity rows once.
+      // A frame from an old import is rejected without changing it.
       const key = JSON.stringify('would-do'), schema = `"${legacy.store.schema}"`;
       const { rows: [held] } = await legacy.pool.query<{ frame: string }>(`SELECT frame::text FROM ${schema}.scope WHERE scope = $1`, [key]);
       await legacy.pool.query(`UPDATE ${schema}.scope SET frame = $2::json WHERE scope = $1`, [key, JSON.stringify({ ...JSON.parse(held!.frame), wouldDo })]);
       await legacy.pool.query(`DELETE FROM ${table} WHERE scope = $1 AND kind = 'would_do'`, [key]);
-      await legacy.store.migrate();
-      const { rows: [moved] } = await legacy.pool.query<{ frame: string }>(`SELECT frame::text FROM ${schema}.scope WHERE scope = $1`, [key]);
-      expect(JSON.parse(moved!.frame).wouldDo).toEqual({});
-      expect((await legacy.store.read('would-do')).wouldDo).toEqual(wouldDo);
+      const select = await legacy.pool.query<{ sql: string }>("SELECT format('SELECT frame::text FROM %I.scope WHERE scope = $1', $1::text) AS sql", [legacy.store.schema]);
+      const before = (await legacy.pool.query(select.rows[0]!.sql, [key])).rows;
+      await expect(legacy.store.migrate()).rejects.toMatchObject({ code: 'would_do_unsupported_old' });
+      await expect(legacy.store.read('would-do')).rejects.toMatchObject({ code: 'would_do_unsupported_old' });
+      expect((await legacy.pool.query(select.rows[0]!.sql, [key])).rows).toEqual(before);
     } finally { await legacy.close(); }
   });
 

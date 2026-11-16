@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { HostLedger } from '@byok-sdk/server/execution-core';
 import type { StoreCompatibility } from '@byok-sdk/client';
-import { wouldDoNeedsMigration } from './commit.js';
 import { OldCollaborationStateError, stateOf } from './model.js';
 import { checkTopology } from './topology.js';
 import { checkSwitchRecords } from './switch.js';
@@ -31,11 +30,7 @@ export function inspectLedger(path: string, tenant: string): StoreCompatibility 
       try {
         const state = stateOf(ledger.snapshot().application);
         checkTopology(state); checkSwitchRecords(state);
-        if (state.switchExport) return { store, path: file, verdict: 'accepted',
-          reason: 'This build opens the exported ledger; run migrateWouldDo if the switch is aborted' };
-        return wouldDoNeedsMigration(state)
-          ? { store, path: file, verdict: 'migration-required', reason: 'Would-do rows lack turnId; run migrateWouldDo before serving' }
-          : { store, path: file, verdict: 'accepted', reason: 'This build opens the ledger' };
+        return { store, path: file, verdict: 'accepted', reason: 'This build opens the ledger' };
       } finally { ledger.close(); }
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;

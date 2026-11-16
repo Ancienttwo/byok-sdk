@@ -61,37 +61,6 @@ export function retainInLedger(ledger: HostLedger, input: RetentionInput, limits
     occurrenceOpen: turnId => { const occurrence = s.occurrences[routineOccurrence({ id: turnId })]; return !!occurrence && !occurrence.conclusion; },
   }, rows));
 }
-const wouldDoRowNeedsMigration = (row: { turnId?: string }): boolean => row.turnId === undefined;
-export function wouldDoNeedsMigration(state: CollaborationState): boolean {
-  return Object.values(state.wouldDo ?? {}).some(wouldDoRowNeedsMigration);
-}
-/** The result of `migrateWouldDo`: rows that got their `turnId`, and rows archived because no live Turn owns them. */
-export interface WouldDoMigration { backfilled: number; archived: number }
-/**
- * The one-shot migration of would-do rows written before #1756, which have no `turnId`. The operator runs it once before
- * the new code serves. Each Turn intent of K4 has the task id `taskId(turnId, generation)` for each of its generations, so
- * the row's task id names its Turn exactly. A row whose intent was compacted, or whose Turn left the state, has no live
- * owner: it moves to the `wouldDo` application rows, as retention would move it, and is counted.
- */
-export function migrateWouldDo(ledger: HostLedger): WouldDoMigration {
-  return writeLedger(ledger, (s, rows) => {
-    const state = stateOf(s.application), owners = new Map<string, string>(), result: WouldDoMigration = { backfilled: 0, archived: 0 };
-    for (const intent of Object.values(s.intents)) {
-      if (!Object.hasOwn(state.turns, intent.key)) continue;
-      for (let generation = 0; generation <= intent.generation; generation++) owners.set(taskId(intent.key, generation), intent.key);
-    }
-    for (const row of Object.values(state.wouldDo ?? {})) {
-      if (!wouldDoRowNeedsMigration(row)) continue;
-      const turnId = owners.get(row.taskId);
-      if (turnId !== undefined) { row.turnId = turnId; result.backfilled++; continue; }
-      // SAFETY: The persisted would-do row consists of JSON fields and can be stored as an application row.
-      rows.put('wouldDo', row.id, row as unknown as Json);
-      delete state.wouldDo![row.id];
-      result.archived++;
-    }
-    return result;
-  });
-}
 /**
  * The intents that user input goes ahead of (#1229): a Bot Turn whose source is a routine occurrence or another Bot's
  * request, and a dream (#1475). A self continuation, an answer result or a Bot reply keeps its FIFO position.

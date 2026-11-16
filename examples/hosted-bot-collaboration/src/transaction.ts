@@ -8,6 +8,21 @@ export class HostedStoreVersionError extends Error {
   constructor(readonly version: number) { super(`Unsupported hosted collaboration store version ${version}`); this.name = 'HostedStoreVersionError'; }
 }
 
+/** An old would-do layout is unsupported and remains untouched. */
+export class HostedOldWouldDoError extends Error {
+  readonly code = 'would_do_unsupported_old' as const;
+  constructor() { super('Unsupported hosted would-do layout'); this.name = 'HostedOldWouldDoError'; }
+}
+
+/** Inspect layout markers only, before reading or writing any scope contents. */
+export async function refuseOldWouldDo(client: PoolClient, scopeKey?: string): Promise<void> {
+  const result = await client.query(`SELECT 1 FROM scope s WHERE ($1::text IS NULL OR s.scope = $1) AND (
+    (s.frame::jsonb -> 'wouldDo' IS NOT NULL AND s.frame::jsonb -> 'wouldDo' <> '{}'::jsonb) OR
+    EXISTS (SELECT 1 FROM entity e WHERE e.scope = s.scope AND e.kind = 'would_do' AND e.body::jsonb ->> 'turnId' IS NULL)
+  ) LIMIT 1`, [scopeKey ?? null]);
+  if (result.rows.length) throw new HostedOldWouldDoError();
+}
+
 export const SCHEMA = /^[a-z_][a-z0-9_]{0,62}$/;
 
 /** Runs `work` in one transaction with `search_path` set to `schema`. A throw rolls back every row. */
@@ -64,5 +79,6 @@ export async function lockScope(client: PoolClient, scopeKey: string, step?: 'sw
     'SELECT state_version, frame::text AS frame FROM scope WHERE scope = $1 FOR UPDATE', [scopeKey]);
   if (!head.rows[0]) throw new Error('Unknown hosted collaboration scope');
   if (head.rows[0].state_version !== STORE_VERSION) throw new HostedStoreVersionError(head.rows[0].state_version);
+  await refuseOldWouldDo(client, scopeKey);
   return head.rows[0].frame;
 }

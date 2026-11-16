@@ -5,7 +5,6 @@ import {
   PI_THINKING_LEVELS,
   applyModelRouteChange,
   createModelRouteDraft,
-  listPiCatalogModels,
   modelRouteContext,
   modelRouteSubmission,
   modelRouteView,
@@ -87,19 +86,18 @@ const SYNTHETIC: PiModelCatalogTable = {
 
 describe('catalog view', () => {
   it('lists pinned entries with their classification, input, reasoning and thinking levels', () => {
-    const groq = listPiCatalogModels({ provider: 'groq', api: 'openai-completions' });
-    expect(groq.find((entry) => entry.model === 'llama-3.3-70b-versatile')).toEqual({
+    const context = modelRouteContext();
+    const choices = (vendor: 'groq' | 'zai') => field(named(context, { field: 'provider_kind', value: vendor }), context, 'model').choices!;
+    expect(choices('groq').find((entry) => entry.value === 'llama-3.3-70b-versatile')).toMatchObject({
       model: 'llama-3.3-70b-versatile', api: 'openai-completions', status: 'representable',
       input: ['text'], reasoning: false, thinking_levels: ['off'],
     });
-    expect(groq.find((entry) => entry.model === 'openai/gpt-oss-120b')).toMatchObject({
+    expect(choices('groq').find((entry) => entry.value === 'openai/gpt-oss-120b')).toMatchObject({
       status: 'representable', reasoning: true, thinking_levels: ['low', 'medium', 'high'],
     });
-    expect(listPiCatalogModels({ provider: 'zai' }).find((entry) => entry.model === 'glm-4.7')).toMatchObject({
+    expect(choices('zai').find((entry) => entry.value === 'glm-4.7')).toMatchObject({
       api: 'openai-completions', status: 'representable', thinking_levels: ['off', 'minimal', 'low', 'medium', 'high'],
     });
-    expect(listPiCatalogModels({ provider: 'groq', api: 'anthropic-messages' })).toEqual([]);
-    expect(listPiCatalogModels({ provider: 'custom' })).toEqual([]);
   });
 
   it('names an unrepresentable entry with the paths that block it', () => {

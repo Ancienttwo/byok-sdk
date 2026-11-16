@@ -2,7 +2,6 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { InMemoryTruthStore, tenantId } from '@byok-sdk/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PROVIDER_CUSTODY_RECEIPT_LIMIT } from './custody';
@@ -18,7 +17,6 @@ import type { CommandRunner } from './command-runner';
 import { LinuxSecretServiceSecretStore } from './linux-secret-service';
 import { InMemorySecretStore, type ModelProviderSecretName, modelProviderSecretName } from './secret-store';
 import { SqliteProviderProfileStore, providerConfigurationLockPath } from './sqlite-profile-store';
-import { TruthStoreProviderProfileStore } from './truth-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
 
 /** An object whose primitive form is a known code, carrying a fake key in its own fields. */
@@ -359,18 +357,6 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     });
     await expect(registry().setDefaultModelProvider('other')).resolves.toMatchObject({ enabled: true });
     vi.mocked(profiles.get).mockRestore();
-
-    // A TruthStore write that lands but is not confirmed is committed: no rollback, no marker.
-    const truth = new InMemoryTruthStore({ now: () => new Date(clock) });
-    const truthProfiles = new TruthStoreProviderProfileStore({ tenant: tenantId('custody'), truthStore: truth });
-    const truthRegistry = new ProviderRegistry({ now: () => new Date(clock), profileStore: truthProfiles, secretStore: secrets });
-    await truthRegistry.configure(OPENAI, OLD_KEY);
-    const write = truth.writeSnapshot.bind(truth);
-    vi.spyOn(truth, 'writeSnapshot').mockImplementationOnce(async (...args) => ({ ...(await write(...args)), body: { kind: 'inline', body: '{}' } }));
-    await expect(truthRegistry.configure({ ...OPENAI, model: 'gpt-5.2-mini' }, NEW_KEY)).rejects.toMatchObject({ code: 'PROVIDER_CHANGE_COMMITTED' });
-    await expect(truthProfiles.get('openai')).resolves.toMatchObject({ model: 'gpt-5.2-mini' });
-    await expect(truthProfiles.getPending('openai')).resolves.toBeUndefined();
-    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
 
     vi.spyOn(secrets, 'has').mockRejectedValueOnce(new Error('store refused'));
     await expect(registry().setDefaultModelProvider('missing')).rejects.toMatchObject({ code: 'PROVIDER_NOT_CONFIGURED' });

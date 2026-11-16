@@ -117,7 +117,6 @@ export type { WindowsCredentialManagerSecretStoreOptions } from './windows-crede
 export {
   DEFAULT_SECRET_ENVELOPE_PREFIX,
   EnvelopeScopedSecretStore,
-  scopeSecretStore,
   secretScopeId,
 } from './secret-scope.js';
 export type { SecretScope } from './secret-scope.js';
@@ -132,15 +131,9 @@ export {
   secureSqliteFilePermissions,
 } from './sqlite-support.js';
 
-export { SqliteProviderProfileStore, migrateProviderProfileStore } from './sqlite-profile-store.js';
-export type { ProviderProfileStoreMigration, SqliteProviderProfileStoreOptions } from './sqlite-profile-store.js';
+export { SqliteProviderProfileStore } from './sqlite-profile-store.js';
+export type { SqliteProviderProfileStoreOptions } from './sqlite-profile-store.js';
 export { inspectProviderProfileStore } from './store-compatibility.js';
-
-export {
-  PROVIDER_PROFILE_TRUTH_RECORD_KEY,
-  TruthStoreProviderProfileStore,
-} from './truth-profile-store.js';
-export type { TruthStoreProviderProfileStoreOptions } from './truth-profile-store.js';
 
 export {
   PROVIDER_CONFIGURATION_LOCK_WAIT_MS,
