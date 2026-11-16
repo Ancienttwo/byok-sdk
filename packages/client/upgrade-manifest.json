@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "269c8eace40ac7a615fd6bcae01d029d53a1e7dc4c89dab20d2bbe7e6aae1da4"
+    "snapshotSha256": "09c01115eb3c931db69fe09558145c31cccf263a5198f49ecf9e194983732b4f"
   },
   "configFields": {
     "status": "tracked",
@@ -79,6 +79,16 @@
         "export:@byok-sdk/client#openDaemonLog",
         "export:@byok-sdk/client#DaemonLog"
       ]
+    },
+    {
+      "id": "remove-service-exit-disposition",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes serviceExitDisposition() and ServiceExitDisposition. Use EXIT_CODE_CONTRACT for documented statuses and configure stop-on-zero/restart-on-failure in the Host supervisor; generated SDK service units already enforce that policy.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#service-exit-disposition",
+      "items": [
+        "export:@byok-sdk/client#serviceExitDisposition",
+        "export:@byok-sdk/client#ServiceExitDisposition"
+      ]
     }
   ],
   "changes": [
@@ -108,9 +118,19 @@
       "entry": "remove-unused-team-workspace-methods"
     },
     {
+      "item": "export:@byok-sdk/client#ServiceExitDisposition",
+      "change": "removed",
+      "entry": "remove-service-exit-disposition"
+    },
+    {
       "item": "export:@byok-sdk/client#openDaemonLog",
       "change": "removed",
       "entry": "remove-standalone-daemon-log"
+    },
+    {
+      "item": "export:@byok-sdk/client#serviceExitDisposition",
+      "change": "removed",
+      "entry": "remove-service-exit-disposition"
     }
   ]
 }

@@ -70,3 +70,11 @@ its own retention/rotation policy. `DaemonLogOptions` remains because the daemon
 internal process-output router still uses it. That router captures all stdout
 and stderr for the daemon process; it is not a same-semantics replacement for a
 Host's standalone line writer and is not exported from the package entrypoint.
+
+### Service exit disposition
+
+`serviceExitDisposition()` and `ServiceExitDisposition` are removed.
+`EXIT_CODE_CONTRACT` and `ExitCode` remain for documented exit statuses. Hosts
+with their own service supervision must configure stop on exit 0 and restart on
+failure in that supervisor. The SDK-generated launchd, systemd and WinSW units
+already enforce that policy; `daemonExitCode()` remains unchanged.

@@ -544,8 +544,8 @@ export { checkUpgradeFrom } from './lifecycle/upgrade-from.js';
 export type {
   UpgradeFromBreakingEntry, UpgradeFromRefusalCode, UpgradeFromReport, UpgradeTrainPackage,
 } from './lifecycle/upgrade-from.js';
-export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes.js';
-export type { ExitCode, ServiceExitDisposition } from './lifecycle/exit-codes.js';
+export { EXIT_CODE_CONTRACT } from './lifecycle/exit-codes.js';
+export type { ExitCode } from './lifecycle/exit-codes.js';
 export { DAEMON_LOG_LIMITS, inspectServiceLogs, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log.js';
 export type { DaemonLogOptions, ServiceLogReport } from './lifecycle/service-log.js';
 // Issue #392: one-time login-shell environment capture for service-launched (or Dock-launched) hosts.

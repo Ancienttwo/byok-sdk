@@ -10041,8 +10041,8 @@ export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecyc
 export type { ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState, } from './lifecycle/service-unit.js';
 export { checkUpgradeFrom } from './lifecycle/upgrade-from.js';
 export type { UpgradeFromBreakingEntry, UpgradeFromRefusalCode, UpgradeFromReport, UpgradeTrainPackage, } from './lifecycle/upgrade-from.js';
-export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes.js';
-export type { ExitCode, ServiceExitDisposition } from './lifecycle/exit-codes.js';
+export { EXIT_CODE_CONTRACT } from './lifecycle/exit-codes.js';
+export type { ExitCode } from './lifecycle/exit-codes.js';
 export { DAEMON_LOG_LIMITS, inspectServiceLogs, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log.js';
 export type { DaemonLogOptions, ServiceLogReport } from './lifecycle/service-log.js';
 export { applyLoginShellEnvironment } from './lifecycle/service-environment.js';
@@ -11237,12 +11237,9 @@ export declare const EXIT_CODE_CONTRACT: Readonly<{
     };
 }>;
 export type ExitCode = keyof typeof EXIT_CODE_CONTRACT;
-export type ServiceExitDisposition = (typeof EXIT_CODE_CONTRACT)[ExitCode]['service'];
 export declare const EXIT_SUCCESS = 0;
 export declare const EXIT_FAILURE = 1;
 export declare const EXIT_CONFIG = 78;
-/** What a service manager does after `code`; a status outside the contract (a signal, an unknown code) restarts. */
-export declare function serviceExitDisposition(code: number): ServiceExitDisposition;
 /** How `start` ended without crashing; a crash is a throw and exits {@link EXIT_FAILURE}. */
 export interface DaemonExitOutcome {
     readonly kind: 'stopped' | 'halted';
