@@ -251,6 +251,7 @@
 //   SealedAgentExecutionInput -> dist/agent-execution.d.ts
 //   SealedAgentExecutionInputSchema -> dist/agent-execution.d.ts
 //   StaleApprovalError -> dist/approval-control.d.ts
+//   SteerRefusalRecord -> dist/stores/ports.d.ts
 //   SteerRejectedError -> dist/steer-control.d.ts
 //   SteerRejectionCode -> dist/steer-control.d.ts
 //   TASK_ABANDON_CAUSES -> dist/stores/ports.d.ts
@@ -295,6 +296,7 @@
 //   TaskRedactionStore -> dist/task-redaction.d.ts
 //   TaskRedactionStoreInput -> dist/task-redaction.d.ts
 //   TaskRedactionTaskResult -> dist/task-redaction.d.ts
+//   TaskSteerRefusalStore -> dist/stores/ports.d.ts
 //   TenantBoundActivity -> dist/tenant-stores.d.ts
 //   TenantBoundApprovalTimeline -> dist/tenant-stores.d.ts
 //   TenantBoundBlobs -> dist/tenant-stores.d.ts
@@ -676,19 +678,21 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
         }>>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        runtime: z.ZodOptional<z.ZodEnum<{
-            claude: "claude";
-            codex: "codex";
-            pi: "pi";
-        }>>;
-        harnessId: z.ZodOptional<z.ZodString>;
-        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        target: z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"auto">;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"runtime">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>;
+        }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
                 claude: "claude";
                 codex: "codex";
             }>;
-            providerId: z.ZodNull;
             modelId: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"byok">;
@@ -707,7 +711,10 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
                     "image-input": "image-input";
                 }>>;
             }, z.core.$strict>;
-        }, z.core.$strict>], "lane">>;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"harness">;
+            harnessId: z.ZodString;
+        }, z.core.$strict>], "lane">;
         terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             mode: z.ZodLiteral<"none">;
         }, z.core.$strict>, z.ZodObject<{
@@ -717,7 +724,6 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
         }, z.core.$strict>], "mode">>>;
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
-            maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strict>>;
         egressPolicy: z.ZodOptional<z.ZodObject<{
             policyRevision: z.ZodString;
@@ -799,19 +805,21 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
         }>>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        runtime: z.ZodOptional<z.ZodEnum<{
-            claude: "claude";
-            codex: "codex";
-            pi: "pi";
-        }>>;
-        harnessId: z.ZodOptional<z.ZodString>;
-        dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        target: z.ZodDiscriminatedUnion<[z.ZodObject<{
+            lane: z.ZodLiteral<"auto">;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"runtime">;
+            runtimeId: z.ZodEnum<{
+                claude: "claude";
+                codex: "codex";
+                pi: "pi";
+            }>;
+        }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
                 claude: "claude";
                 codex: "codex";
             }>;
-            providerId: z.ZodNull;
             modelId: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"byok">;
@@ -830,7 +838,10 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
                     "image-input": "image-input";
                 }>>;
             }, z.core.$strict>;
-        }, z.core.$strict>], "lane">>;
+        }, z.core.$strict>, z.ZodObject<{
+            lane: z.ZodLiteral<"harness">;
+            harnessId: z.ZodString;
+        }, z.core.$strict>], "lane">;
         terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             mode: z.ZodLiteral<"none">;
         }, z.core.$strict>, z.ZodObject<{
@@ -840,7 +851,6 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
         }, z.core.$strict>], "mode">>>;
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
-            maxTokens: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strict>>;
         egressPolicy: z.ZodOptional<z.ZodObject<{
             policyRevision: z.ZodString;
@@ -1442,7 +1452,7 @@ import type { AgentMessageConsumers } from './agent-message-disposition.js';
 import { type AgentHomeProjectionReceiptInput } from './agent-home-projections.js';
 import { type InputPreparationReceiptInput } from './input-preparations.js';
 import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from './agent-memory-projection.js';
-import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, TaskAbandonCause, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports.js';
+import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, SteerRefusalRecord, TaskAbandonCause, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports.js';
 import { type DeviceTerminal, type TerminalResult } from './terminal-result.js';
 import type { MailboxWake } from './mailbox-wake.js';
 import { type TaskRedactionResult, type TaskRedactionStore } from './task-redaction.js';
@@ -1663,6 +1673,12 @@ export interface ByokCloud {
         readonly text: string;
     }): Promise<EnqueuedAgentControl>;
     steerSealedTask(tenant: TenantId, taskId: string, payload: TaskSteerSealedPayload): Promise<EnqueuedAgentControl>;
+    readSteerRefusal(tenant: TenantId, taskId: string, steerMessageId: string): Promise<SteerRefusalRecord | undefined>;
+    listSteerRefusals(tenant: TenantId, query: {
+        readonly taskId: string;
+        readonly afterRevision: number;
+        readonly limit: number;
+    }): Promise<readonly SteerRefusalRecord[]>;
     readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
     readTaskOffer(tenant: TenantId, taskId: string): Promise<TaskOfferReadback | undefined>;
     listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
@@ -2133,7 +2149,7 @@ import type { TenantId } from '@byok-sdk/core';
 import { type ActivityBounds } from './coordination.js';
 import type { TenantStores } from './tenant-stores.js';
 export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected';
-export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'sealed_payload_unsupported', 'sealed_output_required', 'sealed_ciphertext_invalid', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'task_settled_by_cloud', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid', 'terminal_receipt_not_canonical'];
+export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'sealed_payload_unsupported', 'sealed_output_required', 'sealed_ciphertext_invalid', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_executor_mismatch', 'claim_device_mismatch', 'claim_executor_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'task_settled_by_cloud', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid', 'terminal_receipt_not_canonical', 'steer_refusal_id_mismatch', 'steer_refusal_unknown_steer'];
 export type InboundRefusalReason = (typeof INBOUND_REFUSAL_REASONS)[number];
 // support
 interface Refused {
@@ -2237,7 +2253,7 @@ export { TruthCommitError, isTruthCommitError } from './truth/errors.js';
 export type { TruthCommitErrorCode } from './truth/errors.js';
 export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ABANDON_CAUSES, TASK_ATTEMPT_STATUSES, TASK_ATTEMPT_ACTIVE_STATUSES, TASK_ATTEMPT_UNFINISHED_STATUSES, } from './stores/ports.js';
 export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract.js';
-export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, DeviceScopedStores, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskAbandonCause, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports.js';
+export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, DeviceScopedStores, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, SteerRefusalRecord, TaskSteerRefusalStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskAbandonCause, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports.js';
 export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index.js';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index.js';
 export type { DeviceTerminal } from './terminal-result.js';
@@ -2371,17 +2387,17 @@ export declare class CloudRouteRegistry {
     get fetch(): (request: Request, ...rest: unknown[]) => Response | Promise<Response>;
 }
 // ==== @byok-sdk/cloud dist/steer-control.d.ts ====
-import type { RuntimeId } from '@byok-sdk/protocol';
+import type { ClaimedExecutor } from '@byok-sdk/protocol';
 import type { TaskAttemptStatus } from './stores/ports.js';
 export type SteerRejectionCode = 'steer_unsupported_runtime' | 'task_not_running' | 'task_terminal';
 export declare class SteerRejectedError extends Error {
     readonly taskId: string;
     readonly code: SteerRejectionCode;
     readonly status: TaskAttemptStatus;
-    readonly runtime: RuntimeId | undefined;
+    readonly executor: ClaimedExecutor | undefined;
     constructor(taskId: string, code: SteerRejectionCode,
     status: TaskAttemptStatus,
-    runtime: RuntimeId | undefined);
+    executor: ClaimedExecutor | undefined);
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/activity.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult, type Clock, type TenantId } from '@byok-sdk/core';
@@ -2652,7 +2668,7 @@ export declare class InMemoryRequestReceiptStore implements RequestReceiptStore 
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/task-attempts.d.ts ====
 import { type Clock, type TenantId } from '@byok-sdk/core';
-import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { ClaimedExecutor, RuntimeCapabilities } from '@byok-sdk/protocol';
 import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptCounts, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '../ports.js';
 import { type TaskChanged } from './task-change-map.js';
 // support
@@ -2704,8 +2720,7 @@ export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
     claim(tenant: TenantId, input: {
         taskId: string;
         deviceId: string;
-        runtime?: RuntimeId;
-        harnessId?: string;
+        executor: ClaimedExecutor;
         capabilities?: RuntimeCapabilities;
     }): Promise<TaskAttempt | undefined>;
     recordStatus(tenant: TenantId, input: {
@@ -2751,7 +2766,7 @@ import type { E2eeMemberStore } from '../e2ee-member.js';
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 import type { MailboxBody, MailboxMessage, PresenceStore, StorageReservation, TenantId, TenantReadiness } from '@byok-sdk/core';
-import type { AgentEgressReliablePayload, AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { AgentEgressReliablePayload, AgentRef, ClaimedExecutor, RuntimeCapabilities } from '@byok-sdk/protocol';
 export type { AgentRef } from '@byok-sdk/protocol';
 import type { ActivityStore } from '../activity.js';
 import type { ApprovalTimelineStore } from '../approval-timeline.js';
@@ -2858,8 +2873,7 @@ export interface TaskAttempt {
     readonly agentRef: AgentRef;
     readonly ownerDeviceId?: string;
     readonly status: TaskAttemptStatus;
-    readonly claimedRuntime?: RuntimeId;
-    readonly claimedHarnessId?: string;
+    readonly claimedExecutor?: ClaimedExecutor;
     readonly claimedRuntimeCapabilities?: RuntimeCapabilities;
     readonly terminalCause?: string;
     readonly cancellation?: {
@@ -2925,8 +2939,7 @@ export interface TaskAttemptStore {
     claim(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;
-        readonly runtime?: RuntimeId;
-        readonly harnessId?: string;
+        readonly executor: ClaimedExecutor;
         readonly capabilities?: RuntimeCapabilities;
     }): Promise<TaskAttempt | undefined>;
     recordStatus(tenant: TenantId, input: {
@@ -2970,6 +2983,31 @@ export interface RequestReceiptStore {
         readonly created: boolean;
     }>;
     get(tenant: TenantId, key: string): Promise<RequestReceipt | undefined>;
+}
+export interface SteerRefusalRecord {
+    readonly taskId: string;
+    readonly steerMessageId: string;
+    readonly reason: string;
+    readonly deviceId: string;
+    readonly recordedAt: string;
+    readonly revision: number;
+}
+export interface TaskSteerRefusalStore {
+    record(tenant: TenantId, input: {
+        readonly taskId: string;
+        readonly steerMessageId: string;
+        readonly reason: string;
+        readonly deviceId: string;
+    }): Promise<{
+        readonly refusal: SteerRefusalRecord;
+        readonly created: boolean;
+    }>;
+    get(tenant: TenantId, taskId: string, steerMessageId: string): Promise<SteerRefusalRecord | undefined>;
+    list(tenant: TenantId, query: {
+        readonly taskId: string;
+        readonly afterRevision: number;
+        readonly limit: number;
+    }): Promise<readonly SteerRefusalRecord[]>;
 }
 export interface AgentEgressRecord {
     readonly tenantId: TenantId;
@@ -3070,6 +3108,7 @@ export interface CloudStores {
     readonly tasks: TaskAttemptStore;
     readonly cancellations: TaskCancellationStore;
     readonly receipts: RequestReceiptStore;
+    readonly steerRefusals: TaskSteerRefusalStore;
     readonly egress: AgentEgressStore;
     readonly proofReceipts: ProofRequestReceiptStore;
     readonly blobs: CloudBlobStore;
@@ -3077,7 +3116,7 @@ export interface CloudStores {
     readonly taskArchive: TaskArchiveStore;
     readonly e2eeMember?: E2eeMemberStore;
 }
-export declare const CLOUD_STORE_NAMES: readonly ['activity', 'approvals', 'agentMessageDraft', 'devices', 'pairingCodes', 'pairing', 'nonces', 'dedup', 'tasks', 'cancellations', 'receipts', 'egress', 'proofReceipts', 'blobs', 'rateLimiter', 'taskArchive'];
+export declare const CLOUD_STORE_NAMES: readonly ['activity', 'approvals', 'agentMessageDraft', 'devices', 'pairingCodes', 'pairing', 'nonces', 'dedup', 'tasks', 'cancellations', 'receipts', 'steerRefusals', 'egress', 'proofReceipts', 'blobs', 'rateLimiter', 'taskArchive'];
 export type CloudStoreName = (typeof CLOUD_STORE_NAMES)[number];
 export interface ReceiptCollectExpiredInput extends CollectExpiredInput {
     readonly requestBefore: string;
@@ -3214,15 +3253,19 @@ export interface TaskRedactionStore {
 import type { AgentMessageDraftStore } from './agent-message-draft.js';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 import { type BoardClaimInput, type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type BoardStatusUpdateInput, type BoardUnclaimInput, type ContentHash, type CoreStores, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type ObjectManifestEntry, type ObjectReferenceInput, type Principal, type PresenceHint, type PresenceHintInput, type TenantReadiness, type StorageFinalizeInput, type StorageFinalizeResult, type StorageReservation, type StorageReservationInput, type TenantId } from '@byok-sdk/core';
-import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { AgentRef, ClaimedExecutor, RuntimeCapabilities } from '@byok-sdk/protocol';
 import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake.js';
 import type { ActivityAppendInput, ActivityTail, ActivityReadOptions } from './activity.js';
 import type { ApprovalTimelineAppendInput, ApprovalTimelineTail } from './approval-timeline.js';
-import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, RateLimitDecision, RateLimitUnit, RequestReceipt, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports.js';
+import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, SteerRefusalRecord, TaskSteerRefusalStore, RateLimitDecision, RateLimitUnit, RequestReceipt, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports.js';
 export interface TenantBoundMailbox {
     watch(deviceId: string, signal: AbortSignal): MailboxWakeSubscription;
     append(input: MailboxAppendInput): Promise<MailboxMessage>;
     readAfter(query: MailboxReadQuery): Promise<MailboxPage>;
+    readMessage(input: {
+        readonly deviceId: string;
+        readonly messageId: string;
+    }): Promise<MailboxMessage | undefined>;
     recordDelivery(input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
     advanceCursor(input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
     readCursor(deviceId: string): Promise<MailboxCursorState>;
@@ -3302,8 +3345,7 @@ export interface TenantBoundTaskAttempts {
     claim(input: {
         readonly taskId: string;
         readonly deviceId: string;
-        readonly runtime?: RuntimeId;
-        readonly harnessId?: string;
+        readonly executor: ClaimedExecutor;
         readonly capabilities?: RuntimeCapabilities;
     }): Promise<TaskAttempt | undefined>;
     recordStatus(input: {
@@ -3331,6 +3373,12 @@ export interface TenantBoundReceipts {
         readonly created: boolean;
     }>;
     get(key: string): Promise<RequestReceipt | undefined>;
+}
+// support
+export interface TenantBoundSteerRefusals {
+    record(input: Parameters<TaskSteerRefusalStore['record']>[1]): ReturnType<TaskSteerRefusalStore['record']>;
+    get(taskId: string, steerMessageId: string): Promise<SteerRefusalRecord | undefined>;
+    list(query: Parameters<TaskSteerRefusalStore['list']>[1]): Promise<readonly SteerRefusalRecord[]>;
 }
 // support
 export interface TenantBoundAgentEgress {
@@ -3381,6 +3429,7 @@ export interface TenantStores {
     readonly dedup: TenantBoundDedup;
     readonly receipts: TenantBoundReceipts;
     readonly egress: TenantBoundAgentEgress;
+    readonly steerRefusals: TenantBoundSteerRefusals;
     readonly blobs: TenantBoundBlobs;
     readonly objects: TenantBoundObjects;
     readonly quota: TenantBoundQuota;
@@ -3393,7 +3442,7 @@ export interface CloudRootStores {
 }
 export declare function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores;
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
-import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TaskFailPayload, type TaskFailureReading, type TaskDeclineCodeReading } from '@byok-sdk/protocol';
+import { type AgentRef, type BlobRef, type ClaimedExecutor, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TaskFailPayload, type TaskFailureReading, type TaskDeclineCodeReading } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports.js';
 // support
 declare const DEVICE_TERMINAL_TYPES: readonly ['task.complete', 'task.fail', 'task.decline', 'task.cancelled'];
@@ -3405,7 +3454,7 @@ export interface DeviceTerminal {
 }
 export interface TerminalResult {
     readonly taskId: string;
-    readonly harnessId?: string;
+    readonly executor?: ClaimedExecutor;
     readonly recovery?: TaskFailPayload['recovery'];
     readonly state: 'complete' | 'failed' | 'cancelled';
     readonly agentRef?: AgentRef;
