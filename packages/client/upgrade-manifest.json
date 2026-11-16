@@ -14,6 +14,34 @@
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
+  "entries": [
+    {
+      "id": "model-confirmation-non-retryable",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client Codex and agy starts whose runtime keeps a model other than the requested one now fail non-retryable (OAR ModelConfirmationError): task.fail carries retryable: false and failure.class 'unknown', and an embedding Host sees RuntimeExecutionFailure retry 'non-retryable', where earlier releases reported retryable. The reason text is unchanged. Do not retry these starts as transient; change the requested model or the runtime's model access, then send a new task. dsh, Grok and OpenCode are unchanged.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#unconfirmed-models-fail-non-retryable-codex-agy",
+      "items": [
+        "behavior:model-confirmation-non-retryable"
+      ]
+    },
+    {
+      "id": "agy-model-confirmation-deadline",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client agy starts that request a model may now wait up to the 30 s request deadline (packages/client/vendor/oar/4eb5919/runtimes/antigravity/session.ts:42) before failing a model mismatch; a matching update still confirms the switch immediately. A conflicting config_option_update followed by the requested model now starts the task instead of failing, and a real mismatch reaches task.fail about 30 s after the switch instead of immediately. A Host start timeout shorter than 30 s now fires first and never receives the ModelConfirmationError failure; allow at least the 30 s deadline for agy starts that request a model.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agy-model-mismatches-wait-up-to-the-request-deadline",
+      "items": [
+        "behavior:agy-model-confirmation-deadline"
+      ]
+    },
+    {
+      "id": "claude-queued-write-failure",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client/adapters ClaudeAdapter session followUp() no longer rejects with retryable RuntimeExecutionFailure 'claude follow-up instruction transport failed' when the write of a queued follow-up fails after Claude's own turn ended: followUp() resolves and the session's events iteration throws the retryable process failure instead. Only Hosts that embed ClaudeAdapter directly are affected; the daemon does not call followUp(). Treat a resolved followUp() as accepted, not written, and on an events failure resend the follow-up on a new session.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#claude-queued-follow-up-write-failures",
+      "items": [
+        "behavior:claude-queued-write-failure"
+      ]
+    }
+  ],
   "changes": []
 }
