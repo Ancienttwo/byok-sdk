@@ -130,12 +130,16 @@ export interface MessageBatchPostResult {
 }
 
 /**
- * The server refused the whole request with HTTP 400, before reading any
- * envelope: a server of another wire major cannot parse this major's frame.
+ * The server refused the whole request with a permanent 4xx before reading
+ * any envelope; on a lone `conn.hello` that means it cannot read this wire
+ * major (a v6 server answers 400 to a v7 frame).
  */
 export interface MessageBatchRefusal {
-  readonly refusedStatus: 400;
+  readonly refusedStatus: number;
 }
+
+/** 4xx answers that are not a refused frame: auth, entitlement retry, size and rate limits. */
+const NOT_A_FRAME_REFUSAL: ReadonlySet<number> = new Set([401, 403, 409, 413, 429]);
 
 /** Finding R1: soft cap on `LongPollClient`'s own `warnedValidationFailureSeqs` bookkeeping — see that field's own doc comment for why this is a simple "clear outright" reset rather than an eviction policy: a rare/pathological path, not a hot one. */
 const MAX_TRACKED_VALIDATION_FAILURE_WARNINGS = 1000;
@@ -358,7 +362,7 @@ export class LongPollClient {
     if (!res.ok) {
       this.noteRetryAfter(res);
       this.warnRouteFailure(this.messagesEndpoint, res.status, undefined);
-      return res.status === 400 ? { refusedStatus: 400 } : undefined;
+      return res.status >= 400 && res.status < 500 && !NOT_A_FRAME_REFUSAL.has(res.status) ? { refusedStatus: res.status } : undefined;
     }
     try {
       const response = MessagesSendResponseSchema.parse(await res.json());

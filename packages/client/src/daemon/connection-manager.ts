@@ -320,6 +320,11 @@ export class ConnectionManager {
           continue;
         }
       }
+      const helloOutcome = answer?.outcomes[0];
+      if (helloOutcome?.outcome === 'rejected' && helloOutcome.reason === 'protocol_version_unsupported') {
+        this.haltOnNegotiation({ refusedStatus: 200 });
+        return;
+      }
       if (answer !== undefined && (answer.rejected ?? 0) > 0) {
         console.error('[byok/client] the server rejected this device\'s conn.hello; the daemon halts (re-pair, or check product and protocol version)');
         this.halt('handshake_rejected');
@@ -387,9 +392,10 @@ export class ConnectionManager {
   }
 
   /**
-   * A whole-request 400 to the lone handshake: a server of another wire
-   * major cannot parse this frame (a v6 server requires `v: 6`). No wire
-   * field states the peer major there, so `peerVersion` stays unset.
+   * The peer cannot read this wire major: a permanent 4xx to the lone
+   * handshake (a v6 server requires `v: 6`), or a `rejected` hello with
+   * `protocol_version_unsupported` (HTTP 200). Neither states the peer
+   * major, so `peerVersion` stays unset.
    */
   private haltOnNegotiation(refusal: MessageBatchRefusal): void {
     const error = new ProtocolNegotiationError({ localVersion: PROTOCOL_VERSION, httpStatus: refusal.refusedStatus });
@@ -535,8 +541,11 @@ export class ConnectionManager {
         }
         await this.opts.onOutboundSettled?.(batch.map((envelope) => settlementFor(envelope, byId.get(envelope.id)!)));
         // A refreshed snapshot is a handshake like any other.
-        if (batch.some((envelope) => envelope.type === 'conn.hello' && byId.get(envelope.id)!.outcome === 'rejected')) {
-          this.halt('handshake_rejected');
+        const refusedHello = batch.map((envelope) => envelope.type === 'conn.hello' ? byId.get(envelope.id)! : undefined)
+          .find((outcome) => outcome?.outcome === 'rejected');
+        if (refusedHello?.outcome === 'rejected') {
+          if (refusedHello.reason === 'protocol_version_unsupported') this.haltOnNegotiation({ refusedStatus: 200 });
+          else this.halt('handshake_rejected');
         }
         return undefined;
       } catch (error) {

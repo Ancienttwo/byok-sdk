@@ -3638,7 +3638,7 @@ every later major keeps it, so a peer of any major can read it:
 ```
 
 A daemon whose lone `conn.hello` gets a `protocol_version_unsupported`
-outcome, or a 4xx answer other than 401, 403, 413 and 429, halts with
+outcome, or a 4xx answer other than 401, 403, 409, 413 and 429, halts with
 `ProtocolNegotiationError` (`code: 'protocol_negotiation_failed'`,
 `localVersion`, `httpStatus`, and `peerVersion` only when the peer stated its
 major). A refusal never implies which major the peer speaks. A coordinated
