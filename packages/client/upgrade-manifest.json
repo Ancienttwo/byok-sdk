@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "35c698c6f6709bdb0c3f375900162c8e5f7fdcc859ffc88ed44119aa675c4ab4"
+    "snapshotSha256": "7b6f5536a248b3a619e46b3fb221e737a310961f2c466593011e7d07ec5cc2cf"
   },
   "configFields": {
     "status": "tracked",
@@ -1173,6 +1173,11 @@
       "item": "export:@byok-sdk/protocol#createEnvelope",
       "change": "changed",
       "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#isPairingText",
+      "change": "added",
+      "entry": "wire-v7-pair-field-bounds"
     },
     {
       "item": "export:@byok-sdk/protocol#offerSelectionViolation",
