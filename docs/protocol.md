@@ -5,36 +5,73 @@ the M1-2 (server) and M1-3 (client) implementers — the schemas in
 `packages/protocol/src/` are authoritative; this document explains the rules
 those schemas encode and why.
 
-Status: wire version `v:6`, **FROZEN**. The pi, claude, and codex runtime
+Status: wire version `v:7`, **FROZEN**. The pi, claude, and codex runtime
 adapters have all exercised the wire (M2); every M1/M2 protocol gap identified
 along the way has been closed in place. From this point forward, this
 document and the schemas in `packages/protocol/src/` describe a closed
 contract — see "Freeze rule" immediately below for exactly what "frozen"
 does and doesn't allow.
 
-Only wire major `6` is currently supported. v6 splits one field: the runtime
+Only wire major `7` is currently supported.
+
+**Wire major 7.** v7 changes how an offer names what to run, what a claim
+reports, and how a peer of another major is refused:
+
+- `task.offer` carries one required `target` in place of `runtime`,
+  `harnessId` and `dispatchSelection` (§2, "`task.offer` target").
+  `task.claim` carries one required `executor` in place of `agentId`,
+  `runtime` and `harnessId` (§3.1). `task.complete` requires `executor`;
+  `task.fail` and `task.cancelled` may carry it.
+- The new daemon-to-server `task.steer_refused` reports a steer the device
+  received and did not deliver to the runtime (§2, "`task.steer_refused`").
+- `task.decline.code` has a typed list of known codes
+  ([§3.2, Decline codes](#decline-codes)). The code stays optional and open.
+- New bounds: a plaintext `task.steer.text` is at most 65,536 UTF-8 bytes,
+  `task.decline.reason` is bounded like `task.fail.reason`, and
+  `conn.hello.capabilities` holds at most 64 flags.
+- Removed: the server capability advertisement (`capabilities` on the
+  `GET /byok/events` and `POST /byok/messages` responses), `limits.maxTokens`,
+  the offer selection rules `runtime_selection_mismatch` and
+  `harness_selection_conflict`, the always-null `providerId` of the
+  subscription lane, and the device flags `steer` and
+  `provider-profile-binding`.
+- `POST /byok/messages` accepts an entry of any positive `v` in its frame and
+  refuses an entry of another major on its own. The shape of that refusal is
+  frozen from v7 on ([Cross-version refusal](#cross-version-refusal-frozen)).
+  An unknown daemon-to-server type is refused per entry with
+  `type_unsupported`.
+
+Each removal, new required field and new bound narrows a shipped shape, so
+this is a major (Freeze rule, path 1).
+
+There is no v6 reader and no capability negotiation between v6 and v7. Every
+envelope must carry major `7`. A v6 daemon that reaches a v7 cloud gets
+`protocol_version_unsupported` on its hello and halts; a v7 daemon cannot use
+a v6 server and halts with `ProtocolNegotiationError`
+([Cross-version refusal](#cross-version-refusal-frozen)). A `conn.hello` whose
+`protocolVersions` omits `7` is refused with
+`hello_protocol_version_unsupported`. v7 starts on a new store: retained v6
+records are not migrated. The Host exports its history first, devices pair
+again, and the Host's frozen work and outbox snapshots rotate. Upgrade the
+cloud first, then the daemons; between the two upgrades, v6 daemons halt. The
+startup checks refuse a pending row of another major
+([SQLite startup check](#sqlite-startup-check-for-wire-major-upgrades)). The
+Host steps are in [the next MINOR Host upgrade](releases/host-upgrade-next-minor.md#wire-v7).
+0.43.0 is the last v6 release.
+
+History: v6 split one field: the runtime
 capability `isolation.userContext` in `RuntimeCapabilities` is replaced by one
 bit per source of user-level context a runtime can keep out
 (`userInstructions`, `userOutputStyle`, `userMemory`, `userSkills`,
 `userHookContext`), beside the unchanged `userMcpServers` and
 `sessionPersistence`, so on `conn.hello` runtimes and harnesses, on
-`task.claim` and in presence. Every other v5 shape is unchanged. Removing a
-field narrows a shipped shape: a v5 reader would strip the new bits and a v6
-reader `userContext`, so mixed peers would silently lose the isolation facts.
-That is why it is a major (Freeze rule, path 1). There is no derived
-`userContext` field.
-
-There is no v5 reader and no capability negotiation between v5 and v6. Every
-envelope must carry major `6`. A v5 daemon is refused at the version boundary
-and receives no v6 offer; a `conn.hello` whose `protocolVersions` omits `6` is
-refused with `hello_protocol_version_unsupported`. A v6 daemon cannot use a
-v5 server. The startup checks refuse a pending v5 row: the embedded server
-([SQLite startup check](#sqlite-startup-check-for-wire-major-upgrades)), the
-hosted data plane (`POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED`) and the daemon
-journal (`DaemonJournalProtocolUnsupportedError`). Retained `acked` and
-`expired` rows do not block startup. There is no drain or upgrade-precheck
-tool for this cut: rebuild a local store that still refuses, then upgrade the
-server side and the daemons together. The wire facts are in
+`task.claim` and in presence. Removing a field narrows a shipped shape, so it
+was a major. There was no v5 reader. The startup checks refused a pending v5
+row: the embedded server, the hosted data plane
+(`POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED`) and the daemon journal
+(`DaemonJournalProtocolUnsupportedError`); retained `acked` and `expired` rows
+did not block startup. There was no drain or upgrade-precheck tool for that
+cut. The wire facts are in
 [the wire v6 migration](migrations/wire-v6-isolation-sources.md). 0.40.0 is
 the last v5 release.
 
@@ -126,37 +163,67 @@ envelope as v2. Package/application SemVer remains unrelated to wire admission.
 
 ## Freeze rule
 
-`PROTOCOL_VERSION` is `6`. Every v6 change takes exactly one of three paths.
+`PROTOCOL_VERSION` is `7`. Every v7 change takes exactly one of three paths.
 Compatibility is decided by `packages/protocol/src/__tests__/compat.test.ts`,
-not by author judgment. The published 0.41.0 v6 decoder is pinned as the
-cross-release baseline (see the evidence list below).
+not by author judgment. No v7 release is published yet, so no published v7
+decoder is pinned as an oracle: until one is, the suite proves v7
+self-consistency only and cross-release gates are unproven (see the evidence
+list below).
 
-1. **Version bump.** Bump `PROTOCOL_VERSION`; server and client upgrade
-   together under "Server supports N and N-1" below. This is the only path
-   for a change that narrows anything a release already shipped: removing or
-   retyping a field, a message type, a capability flag, a task state or a
-   transition; making an optional field required; adding a bound, a pattern,
-   an enum restriction or strictness to an existing shape; or renaming a
-   message type.
+**Changes that need a major.** Each of these narrows something a release
+already shipped, so it takes path 1:
+
+- removing or retyping a field, a message type, a capability flag, a task
+  state or a transition;
+- making an optional field required;
+- adding a bound, a pattern, an enum restriction or strictness to an
+  existing shape;
+- renaming a field or a message type;
+- adding a daemon-to-server message type, unless it is a report that is
+  safe to lose (see "Daemon-to-server additions" below);
+- adding a value to a closed enum on a daemon-to-server message, that is,
+  one whose receiver rejects a value it does not know. A new value on a
+  server-to-daemon message can take path 2 instead, as
+  `agentMemory: 'read-if-admitted'` did.
+
+1. **Version bump.** Bump `PROTOCOL_VERSION`; the server side and the daemons
+   upgrade together. No cut has an N-1 reader: the server accepts only the
+   current major. This is the only path for the changes listed above.
 2. **Gated addition.** The addition is declared in `WIRE_ADDITIONS`
-   (`packages/protocol/src/wire-additions.ts`) as `gated`, with a capability
-   flag that older releases do not know. The sender refuses a message
-   carrying the addition, before it creates the task or appends to the
-   mailbox, unless the receiver durably advertised the flag. Gates exist only on
-   server-to-daemon messages: v6 has no server flag, and every
-   daemon-to-server surface is baseline. An older receiver therefore never
-   sees it. Required for a new message
-   type, for a field on a strict payload (the offers, control payloads and
-   the `instruction` blob-ref), and for any field whose loss would change what
-   the receiver executes or acknowledges. `homeAccess` on the Agent offers
-   (`agent-home-readers`) is the worked example. Senders take their flags
-   from `requiredReceiverCapabilities(type, payload)`, which reads the same
-   table.
+   (`packages/protocol/src/wire-additions.ts`) with a device capability flag
+   that older releases do not know. The sender refuses a message carrying
+   the addition, before it creates the task or appends to the mailbox, unless
+   the receiving device durably advertised the flag. Gates exist only on
+   server-to-daemon messages, because only the device advertises flags. An
+   older receiver therefore never sees it. Required for a new
+   server-to-daemon message type, for a field on a strict payload (the
+   offers, control payloads and the `instruction` blob-ref), and for any
+   field whose loss would change what the receiver executes or acknowledges.
+   `homeAccess` on the Agent offers (`agent-home-readers`) is the worked
+   example. Senders take their flags from
+   `requiredReceiverCapabilities(type, payload)`, which reads the same table.
 3. **Strip-safe addition.** A new optional field on a strip-unknown payload,
    a new `AgentEvent` variant, a new capability flag, or a new key inside
    `RuntimeInfo.capabilities`. An older receiver drops it. `WIRE_ADDITIONS`
    holds no row for this path: v6 deleted every strip-safe row, and the field
    stays optional with absence meaning unknown.
+
+**Daemon-to-server additions.** The server advertises nothing: v7 removed
+the server capability channel. So there is no server flag to gate a
+daemon-to-server addition on, and path 2 does not apply to it. Under these
+semantics a new daemon-to-server message type needs a major, unless it meets
+one precondition: it is a report that is safe to lose. A v7 cloud answers an
+unknown daemon-to-server type per entry, `rejected` with `type_unsupported`.
+The daemon treats that answer as permanent for that one envelope: it does not
+retry it, moves on, and records the type as unsupported for the rest of the
+session, so it stops sending it. A type added later without a major therefore
+reaches an older cloud as a lost report and nothing more. A type whose loss
+would change a task outcome, a delivery fact or an acknowledgement does not
+meet the precondition. A new value of an open vocabulary
+(`task.decline.code`, `task.fail.failure.class`,
+`task.decline.runtimeUnavailable.cause`, `task.steer_refused.reason`, a denied
+`agent.content.receipt` `reason`) stays additive: an older receiver keeps the
+token and reads it as `unknown`.
 
 `compat.test.ts` holds the wire evidence:
 
@@ -186,69 +253,59 @@ cross-release baseline (see the evidence list below).
   the version boundary, and the v5 HTTP lines that carry envelopes too.
   Rewriting only the version is not an upgrade: v6 removed
   `isolation.userContext`.
-- **v6 self-consistency.** `golden/v6.envelopes.ndjson` and
-  `golden/v6.http.ndjson` start from the v5 corpora with `v` rewritten and
-  `isolation.userContext` renamed `userInstructions`, plus lines that carry
-  the new isolation bits. Before `golden/v6.releases.json` registered a
-  release, a line could still be edited in place: the presence line
-  (`v6.http.ndjson:21`) carries the new bits that way, and #1573 rewrote the
-  `TokenResponse` lines to `{ accessToken, expiresIn }`. With 0.41.0
-  registered, the corpora are append-only. The current decoder reads every
-  line back to the committed JSON, and the current HTTP decoders read every
-  literal body to its independently authored value (messages responses must
-  account for their `batchLength`). The v6 corpus carries every message type,
-  every `WIRE_ADDITIONS` entry, a result-document `task.offer` with `schema`
-  for each offer lane (resume, resume with `egressPolicy`, fresh, prepared),
-  and an `approvalId` on every approval request and decision.
-  `golden/v6.releases.json` registers the published 0.41.0 release, the first v6
-  release, and the published 0.42.0 and 0.43.0 releases, and has no `floor`. Each registered v6 entry pins both corpus
-  prefixes, and the lines it covers are immutable.
+- **Retired v6 evidence (negative oracle).** `golden/v6.envelopes.ndjson`,
+  `golden/v6.http.ndjson` and the v6 registry `golden/v6.releases.json`
+  (0.41.0 through 0.43.0) are byte-identical to what the last v6 release
+  shipped and read-only. The current decoder rejects every v6 envelope line at
+  the version boundary, and the v6 HTTP lines that carry envelopes too.
+  Rewriting only the version is not an upgrade: v7 replaced the offer
+  selectors with `target`, made the claim's `executor` required and removed
+  the server capability advertisement.
+- **v7 self-consistency.** `golden/v7.envelopes.ndjson` and
+  `golden/v7.http.ndjson` start from the v6 corpora, rewritten to the v7
+  shapes by a script, plus lines for the v7 additions: `task.steer_refused`
+  with each known reason and an unknown token, each `target` lane, both
+  `executor` kinds, the decline code groups, the steer text bound, and the
+  per-entry `rejected` answers of `POST /byok/messages`. Until
+  `golden/v7.releases.json` registers a release, a line can still be edited
+  in place; after that the corpora are append-only. The current decoder reads
+  every line back to the committed JSON, and the current HTTP decoders read
+  every literal body to its independently authored value (messages responses
+  must account for their `batchLength`). The v7 corpus carries every message
+  type, every `WIRE_ADDITIONS` entry, a result-document `task.offer` with
+  `schema` for each offer lane (resume, resume with `egressPolicy`, fresh,
+  prepared), and an `approvalId` on every approval request and decision.
+  `golden/v7.releases.json` registers no release yet and has no `floor`. Each
+  registered v7 entry will pin both corpus prefixes, and the lines it covers
+  are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
-  published 0.40.0 registry tarball, the last v5 release. It rejects every v6
-  corpus line and a v6 `conn.hello`: a v5 peer cannot read v6 bytes. Nothing it
-  produces is v6 evidence, and it never enters the v6 registry. Its
-  `requiredReceiverCapabilities` derives, for every v5 `task.offer` line that
-  release shipped, the flags of the current table plus `custom-harness` and
-  `terminal-projection-selection`, which v6 retired (`task-offer-gates.test.ts`).
+  published 0.43.0 registry tarball, the last v6 release. It rejects every v7
+  corpus line and a v7 `conn.hello`: a v6 peer cannot read v7 bytes. Nothing it
+  produces is v7 evidence, and it never enters the v7 registry.
 
-The published 0.41.0 v6 decoder reads the current corpus and proves the
-current gated declarations. The current schema must accept every released
-shape; new gated rows must carry a flag unknown to 0.41.0.
+No test runs a published v7 decoder yet, so the gated declarations are not
+proven against a released v7 decoder. That evidence starts when a published
+v7 release is pinned as an oracle. From then on, the current schema must
+accept every released shape, and a new gated row must carry a flag unknown to
+that release.
 
-The v6 table is the v5 table minus the retired rows (#1573). The server flags
-`agent-message-draft`, `runtime-failure-class`, `runtime-quota-scope`,
-`resident-memory-over-limit`, `sealed-output-ciphertext-ref` and
-`mailbox-read-ahead` are gone, and so is the server's `sealed-payload-v1`,
-`sealed-payload-v2` and `native-sessions` advertisement:
-`CLOUD_PROTOCOL_CAPABILITIES` is empty, and the server accepts sealed
-daemon-to-server output by the task's frozen `sealing`. The device flags
-`custom-harness`, `terminal-projection-selection`, `blob-upload` and
-`runtime-unavailable-cause` are gone, so the `harnessId` and
-`terminalProjection` offer rows are removed. Every strip-safe row is deleted:
-the table holds only gated server-to-daemon rows. The v5 oracle check in
-`task-offer-gates.test.ts` expects the v5 flags minus `custom-harness` and
-`terminal-projection-selection`. The new isolation bits replace `userContext`
-among the runtime capability matrix fields.
-
-History: the v5 table was the v4 table: the `durableLane` rename touched no
-gate.
-
-History: v4 started from the v3 table minus the server `approval_resolved` gate (every
-v4 server reads `task.approval_resolved`) and minus the rows of the removed
-runtime-only offers (`harnessId` on the v3 `task.offer` and
-`task.offer_with_toolsets`, gated on `custom-harness`). The v3 Agent offer
-types are one `task.offer` in v4, so each gate a v3 type carried is a type,
-field or value row on `task.offer`. The `terminalProjection` and `harnessId`
-rows were retired in v6 (#1573):
+The v7 table is the v6 table with one change: the `dispatchSelection` row is
+three value rows, one for each model lane of `target` (`subscription`, `byok`,
+`byok-profile`), each gated on `dispatch-selection`. The `auto`, `runtime`
+and `harness` lanes need no flag. The device flags `steer` and
+`provider-profile-binding` are gone with no row: no gate read `steer`, and
+`provider-profile-binding` was checked only by the sender, so a device that
+cannot run a `byok-profile` target declines it. A `WireAddition` row is now
+only `{ surface, field?, value?, capability }`, always a device flag on a
+server-to-daemon surface; the `kind`, `rule` and `advertisedBy` members are
+gone with the server capability channel.
 
 | `task.offer` carries | Device flag |
 | --- | --- |
 | (every offer) | `agent-home-contract` |
-| `dispatchSelection` | `dispatch-selection` |
+| `target.lane: 'subscription'`, `'byok'` or `'byok-profile'` | `dispatch-selection` |
 | `requiredToolsets` | `toolset-selection` |
-| `terminalProjection` | `terminal-projection-selection` |
 | `homeAccess` | `agent-home-readers` |
-| `harnessId` | `custom-harness` |
 | `agentMemory` | `agent-memory-selection` |
 | `agentMemory: 'read-if-admitted'` | `agent-memory-read-if-admitted` |
 | `agentMemory: 'read-write-if-admitted'` | `agent-memory-read-write-if-admitted` |
@@ -259,6 +316,33 @@ rows were retired in v6 (#1573):
 | `session.mode: 'fresh'` | `agent-egress-fresh-session` |
 | `preparation` | `agent-input-preparation-v9` |
 | `sealing` | `sealed-payload-v1` (generated from the split table, §2.5) |
+| `sealing.categories` includes `agent-message` or `memory-projection` | `sealed-payload-v2` |
+
+History: the v6 table was the v5 table minus the retired rows (#1573). The
+server flags `agent-message-draft`, `runtime-failure-class`,
+`runtime-quota-scope`, `resident-memory-over-limit`,
+`sealed-output-ciphertext-ref` and `mailbox-read-ahead` were gone, and so was
+the server's `sealed-payload-v1`, `sealed-payload-v2` and `native-sessions`
+advertisement: `CLOUD_PROTOCOL_CAPABILITIES` was empty, and the server
+accepted sealed daemon-to-server output by the task's frozen `sealing`. The
+device flags `custom-harness`, `terminal-projection-selection`, `blob-upload`
+and `runtime-unavailable-cause` were gone, so the `harnessId` and
+`terminalProjection` offer rows were removed. Every strip-safe row was
+deleted: the table held only gated server-to-daemon rows. The new isolation
+bits replaced `userContext` among the runtime capability matrix fields.
+
+History: the v5 table was the v4 table: the `durableLane` rename touched no
+gate.
+
+History: v4 started from the v3 table minus the server `approval_resolved` gate (every
+v4 server reads `task.approval_resolved`) and minus the rows of the removed
+runtime-only offers (`harnessId` on the v3 `task.offer` and
+`task.offer_with_toolsets`, gated on `custom-harness`). The v3 Agent offer
+types are one `task.offer` in v4, so each gate a v3 type carried is a type,
+field or value row on `task.offer`. The v4 table also had a
+`dispatchSelection` row (`dispatch-selection`, replaced in v7), a
+`terminalProjection` row (`terminal-projection-selection`) and a `harnessId`
+row (`custom-harness`); the last two were retired in v6 (#1573).
 
 The sealed rows of `task.steer` and the task outputs are generated the same
 way (§2.5). Against the v3 table (0.30.2), admission differs in two places:
@@ -275,8 +359,8 @@ way (§2.5). Against the v3 table (0.30.2), admission differs in two places:
 Apart from `approval_resolved`, no flag became baseline in v4: the flags a
 daemon advertises together with `agent-home-contract` and the egress flags
 stay gates. The v3 reset already made the v2 strip-safe
-rows and the v2 `result-document` gate baseline. `WIRE_ADDITIONS` keeps the
-`gated` rows, most of which name device capabilities a daemon advertises only
+rows and the v2 `result-document` gate baseline. `WIRE_ADDITIONS` keeps only
+gated rows, most of which name device capabilities a daemon advertises only
 when it is configured for the surface (Agent home, readers, egress, input
 preparation, provisioning, memory intents). Senders still take admission
 flags from `requiredReceiverCapabilities`.
@@ -289,8 +373,9 @@ stripping it. A daemon also checks the
 gates on its own side: before it opens a sealed offer or starts any work, it
 computes `requiredReceiverCapabilities('task.offer', payload)` on the wire
 payload and declines non-retryably when a flag is missing from its own
-`conn.hello`. The `reason` is `offer_capability_missing: this daemon does not
-advertise <flags>`. A task whose `sealing.categories` includes `task-output`
+`conn.hello`. The decline carries `code: 'offer_capability_missing'`, and its
+`reason` is `offer_capability_missing: this daemon does not advertise
+<flags>`. A task whose `sealing.categories` includes `task-output`
 is declined with the sealed code `sealed_key_unavailable` instead, because a
 decline for such a task must take a closed sealed-code form (§2.5). Its
 `reason` is that code alone; the missing flags appear only in the device log
@@ -342,7 +427,7 @@ extends the earlier official-Pi exception to input-preparation v8. The strict
 preparation request, receipt binding and the prepared offer require explicit
 `agentMemory: 'none' | 'read' | 'read-write'`. `INPUT_PREPARATION_WIRE_VERSION` and
 record schema were 8 at that cut; admission requires `agent-input-preparation-v8`. The outer
-envelope was then v1 (it is v6 now). Binding and observation digests use domain v2. This is a paired
+envelope was then v1 (it is v7 now). Binding and observation digests use domain v2. This is a paired
 upgrade, with no old reader, mode default or dual token. Drain pre-cut preparation
 requests and prepared Executions first. The exception does not change unrelated
 strict messages; downstream deployment is separate from this source cut.
@@ -350,14 +435,16 @@ strict messages; downstream deployment is separate from this source cut.
 **Unknown observability remains ignorable; unknown executable work is not acknowledged.**
 An unrecognized executable message has no durable disposition, so the daemon
 freezes the mailbox cursor rather than silently losing the work. Unknown nested
-observability fields and events retain the tolerance described below. **Server supports N and N-1.** A server negotiates the highest
-protocol version common to its own supported set and the daemon's
-`conn.hello.protocolVersions[]` list, and must continue accepting the
-immediately-prior major version so a fleet of daemons can roll forward
-without a hard cutover. (The v1 → v2 cut deliberately has no N-1 reader:
-the server accepts only `v:2`, so server and client upgrade together. The
-v2 → v3, v3 → v4, v4 → v5 and v5 → v6 cuts are the same: the server
-accepted only `v:3`, then only `v:4`, then only `v:5`, and now only `v:6`.)
+observability fields and events retain the tolerance described below.
+
+**One major at a time.** A server accepts only its own `PROTOCOL_VERSION`; it
+does not keep a reader for the prior major. No cut so far has an N-1 reader:
+v1 → v2, v2 → v3, v3 → v4, v4 → v5, v5 → v6 and v6 → v7 each made the server
+side and the daemons upgrade together. The server accepted only `v:2`, then
+`v:3`, `v:4`, `v:5`, `v:6`, and now only `v:7`. A daemon whose
+`conn.hello.protocolVersions[]` omits the server's major is refused at the
+handshake. From v7 on, that refusal has a frozen shape a peer of any major
+reads ([Cross-version refusal](#cross-version-refusal-frozen)).
 
 **The observability-vs-control asymmetry.** Unknown is TOLERATED for
 observability data, but FAIL-CLOSED for control/security data:
@@ -615,8 +702,8 @@ in your head and in any redelivery/ordering code.
 
 **`conn.*` envelopes never advance the redelivery cursor.** `conn.hello` is
 submitted as the first daemon→server long-poll message and has no
-cursor-advancing side effect. Server capability advertisement arrives in
-`EventsPollResponse.capabilities` (an empty array in v6), and cursor accounting covers every server → daemon control that requires durable
+cursor-advancing side effect. The server advertises no capabilities (v7
+removed the channel), and cursor accounting covers every server → daemon control that requires durable
 handler completion, including `task.*`, `agent.egress.ack`,
 `agent.content.read`, and `agent.home.projection`; it excludes `conn.*`.
 
@@ -673,8 +760,8 @@ append/send; receipt and ack are delivery facts, not session authority.
 
 | Type | Dir | `task_id` | `seq` | Payload | Sent when |
 |---|---|---|---|---|---|
-| `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `harnesses?`, `runtimeUnavailable?` (additive — §11.4.1), `configuredToolsets?`, `cursor?` | First message on an authenticated long-poll session (including after reconnect) |
-| `task.offer` | S→D | **required** | **required** | `agentRef`, `session` (§1.3), `instruction` (absent on a prepared offer; may move into `sealed`, §2.5), `preparation?` (§2.0), `agentMemory?` (§2.2), `agentMemoryCommit?` (§2.2), `nativeSessions?` (§2.2), `homeAccess?` (§2.2), `requiredToolsets?`, `runtime?`, `harnessId?`, `dispatchSelection?` (see below), `terminalProjection?`, `limits?`, `egressPolicy?` (§2.1), `messageEgress?`; sealed branch also `sealing`, `sealed?`, `routineRef?` (§2.5) | An Agent dispatch, execution or prepared Execution targets a device that advertises every flag its fields need (Freeze rule) |
+| `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]` (at most 64 device flags), `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `harnesses?`, `runtimeUnavailable?` (additive — §11.4.1), `configuredToolsets?`, `cursor?` | First message on an authenticated long-poll session (including after reconnect) |
+| `task.offer` | S→D | **required** | **required** | `agentRef`, `session` (§1.3), `instruction` (absent on a prepared offer; may move into `sealed`, §2.5), `preparation?` (§2.0), `agentMemory?` (§2.2), `agentMemoryCommit?` (§2.2), `nativeSessions?` (§2.2), `homeAccess?` (§2.2), `requiredToolsets?`, `target` (required; see below), `terminalProjection?`, `limits?` (`maxDurationMs?` only), `egressPolicy?` (§2.1), `messageEgress?`; sealed branch also `sealing`, `sealed?`, `routineRef?` (§2.5) | An Agent dispatch, execution or prepared Execution targets a device that advertises every flag its fields need (Freeze rule) |
 | `agent.egress.ack` | S→D | optional | **required** | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
 | `agent.content.read` | S→D | optional | **required** | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
 | `agent.home.projection` | S→D | forbidden | **required** | exact `requestId`, AgentRef/profile revision, SHA-256 projection identity, bounded opaque JSON | A durable task-free projection targets one exact capable device |
@@ -684,17 +771,18 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.approve` | S→D | **required** | **required** | `approvalId` (required — §5.3) | `TaskHandle.approve()` while `AwaitApproval` |
 | `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId` (required — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
-| `task.steer` | S→D | **required** | **required** | `text` | `TaskHandle.steer()` while `Running` |
-| `task.claim` | D→S | **required** | optional | `deviceId`, `agentId?`, `agentRef?`, `runtime?` (M5, additive — §3.1), `capabilities?` (S0, additive — §11.5) | Daemon accepts an offer (idempotent CAS) |
+| `task.steer` | S→D | **required** | **required** | `text` (plaintext: at most 65,536 UTF-8 bytes) | `TaskHandle.steer()` while `Running` |
+| `task.claim` | D→S | **required** | optional | `deviceId`, `agentRef?`, `executor` (required — §3.1), `capabilities?` (S0, additive — §11.5), `admission?` (§3.1) | Daemon accepts an offer (idempotent CAS) |
 | `task.started` | D→S | **required** | optional | `{}` | Daemon actually starts the runtime session — `Claimed → Running` |
-| `task.decline` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?`, `code?`, `runtimeUnavailable?` (additive — §3.2) | Daemon fail-closed-rejects an offer *before* claiming — `Offered → Failed` |
+| `task.decline` | D→S | **required** | optional | `reason` (bounded like `task.fail.reason`), `retryable?`, `agentRef?`, `code?` (open; [Decline codes](#decline-codes)), `runtimeUnavailable?` (additive — §3.2), `admission?` (§3.1) | Daemon fail-closed-rejects an offer *before* claiming — `Offered → Failed` |
 | `task.progress` | D→S | **required** | optional | `seq` (payload-level batch order — §1.2), `events[]` | Batches of normalized `AgentEvent`s |
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
 | `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId` (required — §5.3) | A session or the control socket requested approval (§5) |
-| `task.complete` | D→S | **required** | optional | `summary`, `finalMessage?` (additive — Freeze rule), `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` (additive — §2.2), `residentMemoryOverLimit?` (§2.2) | Runtime reached `turn_end` |
-| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `failure?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?`, `residentMemoryOverLimit?` | Task ends in error; `failure` (with its quota `scope`) and `residentMemoryOverLimit` (§2.2) are baseline, no server flag |
-| `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?`, `residentMemoryOverLimit?` | Task ends `Cancelled` (server- or daemon-initiated); `residentMemoryOverLimit` is baseline (§2.2) |
+| `task.complete` | D→S | **required** | optional | `executor` (required), `summary`, `finalMessage?` (additive — Freeze rule), `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` (additive — §2.2), `residentMemoryOverLimit?` (§2.2) | Runtime reached `turn_end` |
+| `task.fail` | D→S | **required** | optional | `executor?`, `reason`, `retryable?`, `failure?`, `recovery?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?`, `residentMemoryOverLimit?` | Task ends in error; `failure` (with its quota `scope`) and `residentMemoryOverLimit` (§2.2) are baseline, no server flag |
+| `task.cancelled` | D→S | **required** | optional | `executor?`, `reason?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?`, `residentMemoryOverLimit?` | Task ends `Cancelled` (server- or daemon-initiated); `residentMemoryOverLimit` is baseline (§2.2) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2); baseline, no capability gate |
+| `task.steer_refused` | D→S | **required** | optional | exactly `{ steerMessageId, reason }` (strict; `reason` open) | The device received a `task.steer` and did not deliver it to the runtime (see below); plaintext even on a sealed task |
 | `agent.message.draft` | D→S | **required** | optional | `agentRef`, `revision`, UTF-8 `offset`, `text` (≤ 16 KiB), `overflow?: true` | Display-only snapshot frames; baseline, no capability gate |
 | `agent.egress.reliable` | D→S | optional | optional | exact Agent/session/policy identity, stable `eventId`/`cursor`, payload hash and byte count | A locally fsynced reliable event is sent or retried |
 | `agent.content.receipt` | D→S | optional | optional | exact request/actor/Agent/session/runtime/cwd/policy/target/MIME/decode identity; allowed includes hash/size/BlobRef, denied includes zero bytes and typed reason | Local content policy and audit completed |
@@ -721,6 +809,86 @@ Both branches are strict, and so is every nested control object, `limits`
 included, except the shared `BlobRef` inside `instruction`. Each optional
 field is gated on a device flag; the Freeze rule
 lists the rows and the daemon's own check of them.
+
+#### `task.offer` target
+
+`target` (required, wire v7) is what the offer asks the device to run. It is
+one strict discriminated union on `lane`, so no two selectors can disagree:
+
+| `lane` | Members | Meaning |
+| --- | --- | --- |
+| `auto` | none | The device picks a built-in runtime by its own preference |
+| `runtime` | `runtimeId` | A built-in runtime (`pi`, `claude`, `codex`) with the device's own model |
+| `subscription` | `runtimeId: 'claude' \| 'codex'`, `modelId` | A vendor CLI with its subscription credentials and this model |
+| `byok` | `runtimeId: 'pi'`, `providerId`, `modelId` | A BYOK provider and model, run only through Pi |
+| `byok-profile` | `runtimeId: 'pi'`, `providerProfile: { profileRef, profileRevision, profileHash, modelId, requiredCapabilities }` | An exact local provider profile, run only through Pi |
+| `harness` | `harnessId` | A custom harness the device advertised in `conn.hello.harnesses` |
+
+Absence carries no meaning: an offer without `target` fails decoding. The
+subscription lane has no `providerId`; v6 carried it as an always-null
+member. Every model id and provider id is non-empty, at most 160 characters,
+and rejects NUL, CR and LF.
+
+The three model lanes (`subscription`, `byok`, `byok-profile`) are gated on
+the device flag `dispatch-selection` (Freeze rule): the server and hosted
+cloud refuse such an offer before task creation unless the target device
+advertises the flag, instead of sending an offer that could reach a different
+provider. The daemon selects the adapter from `runtimeId` or `harnessId`, and
+adapters pass the exact model (and, for Pi, provider) to the runtime. No
+layer infers a missing provider or model or falls back to another target.
+
+A `byok-profile` ref is an opaque device-local identity, its revision is
+canonical decimal, and its hash is lowercase SHA-256 over the normalized
+non-secret runtime profile. Base URL, auth mode and credential bytes never
+enter the offer. The daemon validates ref, revision, hash, model and required
+capabilities against the read-only local authority before claim, and the
+credential-custody launcher checks the same binding again before credential
+access and Pi spawn. Missing or stale state is a fail-closed decline, never a
+fallback to `providerId` or provider kind. No flag gates the lane beyond
+`dispatch-selection`: a device that cannot run it declines.
+
+`target` is a request. What the device actually ran is the claim's
+`executor` (§3.1).
+
+#### `task.steer_refused`
+
+A daemon-to-server report (wire v7, #2009): the device received this
+`task.steer` and did not deliver it to the runtime. The payload is strict:
+
+```ts
+{ steerMessageId: string /* uuid: envelope id of the refused task.steer */,
+  reason: 'input_too_large' | 'steer_unsupported' | 'task_not_active' | string }
+```
+
+- `input_too_large`: the steer text is larger than the runtime accepts.
+- `steer_unsupported`: the runtime running the task cannot take a steer.
+- `task_not_active`: the task is not running on this device, for example it
+  already ended.
+
+`reason` is an open vocabulary (#1121), like the decline code: a well-formed
+reason this version does not know is accepted and kept, and
+`readSteerRefusalReason` reads it as `unknown` with `reportedReason`. The
+envelope needs `task_id`; `seq` is optional, as on every daemon-to-server
+type.
+
+The envelope id is deterministic: `steerRefusalEnvelopeId(steerMessageId)`,
+the UUID that `uuidFromSha256` derives from
+`sha256(JSON.stringify({ domain: 'byok:task-steer-refused', steerMessageId }))`.
+Every replay of one refusal is the same envelope, whatever its reason, so the
+first reason recorded wins. The server refuses a refusal whose envelope id is
+not this one.
+
+The payload names the steer by id and carries no content, so it is plaintext
+on a sealed task too; it has no sealed branch. It needs no capability gate:
+every v7 server reads it. The cloud accepts it in every task state, terminal
+states included. A Host's refusal feed for a task ends at the task's
+terminal, so a refusal the cloud commits after the terminal is read by its
+steer id.
+
+A plaintext `task.steer` `text` is at most 65,536 UTF-8 bytes
+(`TASK_STEER_TEXT_MAX_BYTES`); the sender refuses a longer text before it
+enqueues the steer. The plaintext of a sealed steer is not checked on the
+device: it is opened after delivery.
 
 ### 2.0 Prepared Executions
 
@@ -907,41 +1075,6 @@ applied projection record. The host compares it with the terminal `agentRef`
 and decides whether the result is usable. The cloud read model
 (`readTaskResult`) projects it verbatim.
 
-**An Agent offer's `dispatchSelection` is the authoritative LLM target when
-present.** It is a strict discriminated union:
-
-- subscription: `{lane:'subscription', runtimeId:'claude'|'codex',
-  providerId:null, modelId:string}`;
-- BYOK: `{lane:'byok', runtimeId:'pi', providerId:string, modelId:string}`.
-- exact local profile: `{lane:'byok-profile', runtimeId:'pi',
-  providerProfile:{profileRef,profileRevision,profileHash,modelId,
-  requiredCapabilities}}`.
-
-Every id is non-empty, bounded to 160 characters, and rejects NUL/CR/LF. The
-daemon selects the adapter from `runtimeId`; a `runtime` that is also present
-must equal it, and every Host offer lane rejects disagreement before task
-creation. The Agent offers are strict, so a daemon that does not know the
-field refuses the offer; the server first requires the target device to
-advertise the `dispatch-selection` capability (`WIRE_ADDITIONS`), and absence
-rejects before task creation instead of degrading to an offer without a
-selection. The daemon repeats the runtime
-check before claim and selects the adapter
-from `dispatchSelection.runtimeId`. Adapters then pass the exact model (and, for
-Pi, provider) to the runtime. No layer may infer a missing provider/model or
-fall back to another target. Offers that do not use provider selection keep
-the `runtime?` behavior, but the selection path never degrades into it after a
-selection was supplied.
-
-The `byok-profile` lane additionally requires the target daemon to advertise
-`provider-profile-binding`. Its ref is an opaque device-local identity, its
-revision is canonical decimal, and its hash is lowercase SHA-256 over the
-normalized non-secret runtime profile. Base URL, auth mode, and credential
-bytes never enter the offer. The daemon validates ref/revision/hash/model and
-required capabilities against the read-only local authority before claim, and
-the credential-custody launcher rechecks the same binding before credential
-access and Pi spawn. Missing or stale state is a fail-closed refusal, never a
-fallback to `providerId` or provider kind.
-
 **An Agent offer's `requiredToolsets` names the Host MCP toolsets the task
 needs.** It carries only bounded logical ids (1–16) such as `salesko.crm`; it
 never carries an executable command, environment, header, token, cookie, or
@@ -1102,10 +1235,12 @@ its memory admission.
 ([#1526](https://github.com/Ancienttwo/byok-sdk/issues/1526)).** Both timestamps are
 integers and `fromMs <= toMs`. The offer selection rule
 `native_sessions_selection_invalid` (§3.2,
-**Offer selection rules**) admits the field only with a fresh
-session, `agentMemory: 'none'`, and `terminalProjection` absent or
+**Offer selection rules**) admits the field only with an explicit Pi
+`target` (lane `runtime`, `byok` or `byok-profile` with `runtimeId: 'pi'`), a
+fresh session, `agentMemory: 'none'`, and `terminalProjection` absent or
 `{ mode: 'none' }`. It rejects any `agentMemoryCommit`, `homeAccess`, `preparation`,
-`requiredToolsets`, `messageEgress` or `harnessId`. The Host offer schemas refuse
+`requiredToolsets` or `messageEgress`. An `auto` or `harness` target does not
+qualify. The Host offer schemas refuse
 such a plain or sealed payload before conditional resolution; the wire decoder
 accepts it, and a device declines it non-retryably. The wire-addition
 offer row requires the target device's `native-sessions` capability; a literal
@@ -2392,21 +2527,39 @@ alone.
 `task.started` from the device that already owns a `Running` task is a
 no-op, not an illegal-transition error.
 
-**`task.claim.runtime` (M5, additive minor): the ACTUALLY-selected runtime,
-distinct from the offer's `runtime`/`TaskSnapshot.runtime` (the merely
-REQUESTED one, unchanged by this addition) — when an offer names no runtime
-the daemon auto-selects in `claude → codex → pi` order (pi is the fallback,
-tried last, only once nothing more capable is available; overridable
-per-daemon via `DaemonConfig.runtimePreference`), and this field is what lets
-the server finally learn which adapter it picked, recorded separately as
-`TaskSnapshot.claimedRuntime`.**
+**`task.claim.executor` (wire v7, required): what the device actually runs
+the task with**, distinct from the offer's `target` (the merely requested
+one). It is one strict union, a built-in runtime or a custom harness, and
+never a model:
+
+```ts
+type ClaimedExecutor =
+  | { kind: 'runtime'; runtimeId: 'pi' | 'claude' | 'codex' }
+  | { kind: 'harness'; harnessId: string };
+```
+
+For an `auto` target the device picks by its own preference
+(`DaemonConfig.runtimePreference`), and `executor` is the only way the server
+learns what ran. The winning claim records it once as the attempt's
+`claimedExecutor` (cloud `TaskAttempt`, reference server `TaskSnapshot`); a
+redelivered or losing claim leaves it as it is. v7 replaced the claim's
+`runtime` and `harnessId` with this field and removed `agentId`;
+`agentRef` names the Agent.
+
+The terminals echo it. `task.complete` requires `executor`: a task completes
+only from `Running`, so every completion follows a claim. `task.fail` and
+`task.cancelled` carry it optionally on the wire. A device that restarts
+after acknowledging an offer it never claimed reports `daemon_interrupted`
+with no executor, and a cancel before any claim omits it. After a claim, the
+server requires the terminal's `executor` and requires it to equal the
+claimed one.
 
 **Attempt phase instants (#980, cloud only).** `@byok-sdk/cloud` records four
 write-once instants on its `TaskAttempt`, from the same clock and in the same
 format as `updatedAt`:
 
 - `offeredAt`: the offer that creates the attempt.
-- `claimedAt`: the winning `task.claim`, written with `claimedRuntime`; a
+- `claimedAt`: the winning `task.claim`, written with `claimedExecutor`; a
   redelivered or losing claim leaves it as it is.
 - `firstOutputAt`: the first `agent.message.draft` with text, or the first
   `agent.message.publish`, after the claim. `task.progress` is not output, and
@@ -2417,7 +2570,7 @@ format as `updatedAt`:
 - `terminalAt`: the first entry into `Complete`, `Failed` or `Cancelled`,
   including a cancellation of an unclaimed attempt.
 
-Like `claimedRuntime`, each stops changing at the transition that sets it, so
+Like `claimedExecutor`, each stops changing at the transition that sets it, so
 none is the execution state ADR-028 keeps out of cloud. An instant that was
 not recorded is absent: attempts stored before these fields are not backfilled, and
 a reader reports no duration that needs a missing instant. The wire is
@@ -2493,9 +2646,12 @@ rule is appended at the end only.
 | --- | --- | --- | --- |
 | 1 | `agent_memory_selection_invalid` | `homeAccess: 'memory-reader'` with `agentMemory` `read-write` or `read-write-if-admitted` | `['agentMemory']` |
 | 2 | `agent_memory_selection_invalid` | `homeAccess: 'memory-reader'` with `agentMemoryCommit` | `['agentMemoryCommit']` |
-| 3 | `native_sessions_selection_invalid` | `nativeSessions` with a session that is not fresh, `agentMemory` other than `none` (or absent), a `terminalProjection` other than `none`, or any of `agentMemoryCommit`, `homeAccess`, `preparation`, `requiredToolsets`, `messageEgress`, `harnessId`, checked in that order | the first such field |
-| 4 | `runtime_selection_mismatch` | `runtime` differs from `dispatchSelection.runtimeId` | `['runtime']` |
-| 5 | `harness_selection_conflict` | `harnessId` with `runtime` or `dispatchSelection` | `['harnessId']` |
+| 3 | `native_sessions_selection_invalid` | `nativeSessions` without an explicit Pi `target` (lane `runtime`, `byok` or `byok-profile` with `runtimeId: 'pi'`; `auto` and `harness` do not qualify), then with a session that is not fresh, `agentMemory` other than `none` (or absent), a `terminalProjection` other than `none`, or any of `agentMemoryCommit`, `homeAccess`, `preparation`, `requiredToolsets`, `messageEgress`, checked in that order | `['target']`, else the first such field |
+
+v7 deleted the rules `runtime_selection_mismatch` and
+`harness_selection_conflict`: with one `target` union, the disagreements they
+caught cannot be expressed. A native-sessions offer needs an explicit Pi
+target first, because native sessions run only a fresh memory-only Pi task.
 
 The device runs the capability and `native_sessions_unsupported` gates before
 the predicate, so those codes win over these rules. The wire decoder does not
@@ -2503,10 +2659,9 @@ run these rules; a structural `task.offer` rule (prepared shape, `egressPolicy`,
 `routineRef`) still fails decoding. A Host can check before it enqueues:
 `HostOfferPlainPayloadSchema.safeParse(payload)` gives the same answer as the
 kernel, and its issue's `params.rule` equals the decline code the device would
-send; a sealed task's decline carries the same code. The sealed decline
-codes and the open token `runtime_unavailable` (sent with
-`runtimeUnavailable`) also set `code`; other declines omit it. Hosts
-classify busy by `code`; `reason` is display text only. Cloud `readTaskResult` reads the code
+send; a sealed task's decline carries the same code. The other known codes
+are listed under [Decline codes](#decline-codes); a decline with no fitting
+code omits it. Hosts classify by `code`; `reason` is display text only. Cloud `readTaskResult` reads the code
 (`readDeclineCode`), and `readDeviceTerminal` / embedded `tasks.deviceTerminal`
 preserve it verbatim in the canonical envelope.
 
@@ -2532,6 +2687,69 @@ boolean and never a device self-healing promise.
 Both decline branches accept `admission` (§3.1, which says which declines
 carry it). It is plaintext on a sealed decline: only `reason` moves into the
 ciphertext.
+
+#### Decline codes
+
+`DECLINE_CODES` (`packages/protocol/src/messages.ts`) lists every
+`task.decline` code this version knows; it is append-only. `code` stays
+optional and open (#1121): a well-formed code a receiver does not know is
+kept verbatim and read as `unknown` with `reportedCode` (`readDeclineCode`).
+`reason` is display text, bounded on every parse by the same
+`boundFailureReason` as `task.fail.reason` (credentials redacted, at most
+`TASK_FAIL_REASON_MAX_BYTES` UTF-8 bytes).
+
+A code names device state, never user content: no code is derived from a
+path, a file name or prompt text. That is why codes stay plaintext on a
+sealed task, while only `reason` is sealed. The sealed refusal codes go only
+on the plaintext decline (§2.5); the sealed decline branch accepts every
+other known code.
+
+| Code | Meaning (device state) |
+| --- | --- |
+| **Agent home** | |
+| `agent_home_writer_busy` | The Agent home already has a writer Attempt, or its lease or initialization conflicts |
+| `agent_home_reader_busy` | The Agent home cannot admit another memory-reader Attempt |
+| **Sealed task input** (§2.5; plaintext branch only, `reason` is the code) | |
+| `sealed_key_unavailable` | The device holds no usable scope key, or cannot seal its output |
+| `sealed_open_failed` | The sealed offer or steer did not open |
+| `sealed_content_mac_mismatch` | The opened content does not match its content MAC |
+| `sealing_policy_mismatch` | The offer's `sealing` breaks the device's sealing policy |
+| `native_sessions_unsupported` | Native sessions are not available on this device, including when the owner switched them off after enqueue |
+| **Offer selection rules** (above) | |
+| `agent_memory_selection_invalid` | The offer's memory selection needs a writer, and it is a memory-reader Attempt |
+| `native_sessions_selection_invalid` | A native-sessions offer is not a fresh memory-only Pi offer |
+| **Offer admission** | |
+| `runtime_unavailable` | No runtime that can run the target is available (with `runtimeUnavailable`, §3.2) |
+| `offer_capability_missing` | The device does not advertise a flag the offer needs (Freeze rule) |
+| `preparation_store_unavailable` | The device's input-preparation store could not be opened |
+| `agent_memory_commit_unavailable` | The device cannot honor `agentMemoryCommit`: no strict memory backend, or the durable lane |
+| `agent_memory_unavailable` | The device does not admit, or could not bind, the Agent memory tools |
+| `tool_authorization_unsupported` | The runtime cannot gate tool calls before they run |
+| `file_scope_conflicts_with_all` | A file-scope policy applies only to auto tasks |
+| `file_scope_unsupported` | The device cannot enforce a file scope on this platform |
+| **Prepared offers** (`PREPARED_OFFER_DECLINE_CODES`, `input-preparation.ts`; each is terminal for the offer) | |
+| `preparation_lane_unconfigured` | The device has no input-preparation lane |
+| `preparation_result_schema_mismatch` | The offered result selection differs from the one the preparation froze |
+| `preparation_not_found` | The device's store holds no preparation under this reference |
+| `preparation_not_ready` | The preparation is not ready to admit an Execution |
+| `preparation_device_mismatch` | The preparation was counted on another device |
+| `preparation_agent_mismatch` | The preparation was counted for another Agent |
+| `preparation_profile_revision_mismatch` | The Agent's profile revision moved since the preparation was counted |
+| `preparation_policy_revision_mismatch` | The operator's limits-policy revision moved since the preparation was counted |
+| `preparation_request_digest_mismatch` | The offer's request digest is not the recorded one |
+| `preparation_artifact_digest_mismatch` | The offer's artifact digest is not the recorded one |
+| `agent_memory_mismatch` | The offer's memory mode differs from the recorded binding |
+| `preparation_runtime_identity_mismatch` | The installed runtime is not the one that compiled the artifact |
+| `preparation_tool_set_mismatch` | The live tool set is not the counted one |
+| `preparation_tool_binding_digest_mismatch` | The live tool definitions or argv differ from the counted ones |
+| `preparation_observation_digest_mismatch` | The live tool schemas differ from the counted ones |
+| `preparation_tool_surface_unfingerprintable` | The live tool surface could not be fingerprinted |
+| `preparation_already_pinned` | Another Execution already consumed this preparation |
+| **Input-preparation rejections** | Every `InputPreparationRejectionReason` (`input-preparation.ts`), with the meaning it has there, for example `unsupported_input` and `limit_exceeded` |
+
+v7 typed these codes. Before v7 the offer admission outcomes other than
+`runtime_unavailable` were only a `<code>: ` prefix of `reason`; a v7 device
+sends them as `code` too.
 
 ### 3.3 Cancelled is its own message, not `task.fail(reason:'cancelled')` (M1 gap #6)
 
@@ -3250,8 +3468,8 @@ interface TerminalInferenceUsage {
 ```
 
 `runtime` is the adapter that actually started the task. `provider` and
-`model` are absent unless that adapter itself observed them; an offered
-`dispatchSelection` is a requested target, not an observation, and must never
+`model` are absent unless that adapter itself observed them; an offer's
+`target` is a requested target, not an observation, and must never
 be echoed as telemetry. `clientVersion` is copied only from the process-
 immutable `localAgentRelease.version` that the Local Agent distribution owns;
 it is never inferred from a runtime version, package metadata, lockfile,
@@ -3304,7 +3522,7 @@ path.
 ```
 GET /byok/events?cursor=N
   Query    (EventsPollQuerySchema):    { cursor?, afterSeq? }
-  Response (EventsPollResponseSchema): { events: unknown[], cursor, capabilities: string[], ingress: ActivityIngress }
+  Response (EventsPollResponseSchema): { events: unknown[], cursor, ingress: ActivityIngress }
 ```
 
 The page schema decodes the page only. Each `events` entry is decoded on its
@@ -3334,22 +3552,18 @@ bounded `conn.hello` capability snapshot. The route accepts that one non-task
 envelope only when its device, product, and protocol version exactly match the
 authenticated principal. The server accepting it is what "open" means: it
 proves the credentials, the enrollment, and the product and protocol match in
-one round trip, without waiting for work or a held poll. The answer carries
-the same `capabilities` advertisement a poll does (§8.2). Only an open session
+one round trip, without waiting for work or a held poll. Only an open session
 polls and sends other messages, so `conn.hello` is the first message of every
 session, including after every reconnect. Any route failure (a failed or
 unusable poll, a failed send) ends the session; the daemon's one reconnect
 loop handshakes again after a deterministic fleet-jittered delay. A rejected
 hello, a revoked device (§6.3), or a lost replay cursor (§9) ends the
-daemon's run as halted instead; it does not reconnect.
+daemon's run as halted instead; it does not reconnect. So does a hello the
+peer does not negotiate: the daemon halts with `ProtocolNegotiationError`
+([Cross-version refusal](#cross-version-refusal-frozen)).
 
-`capabilities` on a poll is the server capability advertisement for THIS
-response, is refreshed on every successful poll, and is applied before the
-response's events are delivered. It is required (since wire v3); an empty list
-advertises nothing, and a page without it is a route failure.
-An HTTP/network/response-validation failure ends the session and withdraws
-the last advertisement immediately: no earlier request remains authoritative
-after that failure.
+The server advertises no capabilities: v7 removed `capabilities` from the
+poll and send responses. A daemon gates nothing on server state.
 Anything a server needs for a per-task decision must therefore
 travel on a `task.*` message, not be inferred from connection state — this is
 exactly why claim-time capabilities ride `task.claim` (§11.5) rather than
@@ -3386,14 +3600,47 @@ TTL hint and is not an execution or admission signal.
 ```
 POST /byok/messages
   Request  (MessagesSendRequestSchema):  { messages: Envelope[] }   // capped at 256 per batch
-  Response (MessagesSendResponseSchema): { accepted: number, rejected?: number, capabilities?: string[], outcomes: Outcome[], ingress?: ActivityIngress }
+  Response (MessagesSendResponseSchema): { accepted: number, rejected?: number, outcomes: Outcome[], ingress?: ActivityIngress }
+  Outcome: { id: uuid, outcome: 'accepted' | 'duplicate' | 'rejected', reason? }
 ```
 
-`capabilities` is present only on the answer to a batch whose `conn.hello`
-the server accepted (the §8.1 handshake), and carries the same advertisement a
-poll response does. Every other answer omits it, and absence means "no
-update", never an empty list. The field is additive and optional; the schema
-is non-strict, so an N-1 daemon ignores it.
+The frame checks only that each entry has a positive integer `v` and a UUID
+`id`; each entry is then decoded on its own with `parseMessage`, so one
+invalid envelope is answered `rejected` with `payload_invalid` without
+failing the batch. A `rejected` outcome's `reason` is one of
+`payload_invalid`, `not_permitted`, `limit_exceeded`, `state_conflict`,
+`unsupported`, `protocol_version_unsupported` or `type_unsupported`; a
+receiver reads a reason it does not know as `unknown`.
+
+- `protocol_version_unsupported`: the entry's `v` is another wire major.
+- `type_unsupported`: the entry is a daemon-to-server type this server does
+  not know. The daemon treats it as permanent for that envelope: it does not
+  retry it, moves on, and records the type as unsupported for the rest of the
+  session (Freeze rule, "Daemon-to-server additions").
+
+#### Cross-version refusal (frozen)
+
+From v7 on, a server refuses an entry of another major with this shape, and
+every later major keeps it, so a peer of any major can read it:
+
+```ts
+// HTTP 200
+{ accepted: number, rejected: number,
+  outcomes: [{ id, outcome: 'rejected', reason: 'protocol_version_unsupported' }, ...] }
+```
+
+A daemon whose lone `conn.hello` gets a `protocol_version_unsupported`
+outcome, or a 4xx answer other than 401, 403, 413 and 429, halts with
+`ProtocolNegotiationError` (`code: 'protocol_negotiation_failed'`,
+`localVersion`, `httpStatus`, and `peerVersion` only when the peer stated its
+major). A refusal never implies which major the peer speaks. A coordinated
+upgrade of the server side and the daemons resolves it.
+
+| Daemon → cloud | What happens |
+| --- | --- |
+| v6 daemon → v7 cloud | The v7 frame accepts the v6 entry and answers it `rejected` with `protocol_version_unsupported`. The v6 daemon reads `rejected > 0` on its lone hello as a refused handshake and halts with `handshake_rejected`; it does not reconnect. A v6 daemon that was not paired again into the v7 store is expected to stop earlier, at authentication with `device_revoked`; this is not yet verified against a v6 daemon |
+| v7 daemon → v6 cloud | The v6 frame requires `v: 6`, so the whole request fails with HTTP 400. The v7 daemon halts with `ProtocolNegotiationError` (`httpStatus: 400`, no `peerVersion`) |
+| v7 daemon → later cloud | The later cloud answers with the frozen shape above. The v7 daemon halts with `ProtocolNegotiationError` |
 
 Authed (bearer access token). Each envelope in `messages` is routed through
 the server's single inbound gate (the reference implementation's
@@ -3839,7 +4086,8 @@ extensions.
 
 **Rule: a runtime that cannot honor a field it was offered MUST refuse it —
 decline the offer, refuse to start — never silently drop or approximate it.**
-`limits.maxTokens`, which no bundled adapter counts, is the current example.
+v7 removed `limits.maxTokens`, which no bundled adapter counted, rather than
+keep a field every runtime had to refuse.
 
 ### 11.2 Per-runtime capability matrix
 
@@ -3860,24 +4108,23 @@ real binary observations from fixture proofs and still-unverified behavior.
 All bundled runtimes declare `approvalInteractive: false`: they never request
 approval and are never handed the approval channel (§5.1).
 
-**Connection-level `steer` capability = logical OR across every configured
-adapter's own `capabilities().steer`.** `conn.hello.capabilities` (the
-connection-wide flag list — distinct from any one runtime's own
-`RuntimeInfo.capabilities.steer`, §11.4) includes `'steer'` if AT LEAST ONE
-configured adapter reports `steer: true`. Today Pi and Codex report true;
-Claude reports false. A daemon configured only with Claude does not advertise
-the connection-level steer flag.
+**There is no connection-level `steer` flag.** v7 removed the device flag
+`steer`, which was the logical OR of every configured adapter's
+`capabilities().steer` and which no gate read. Discovery reads each runtime's
+own `RuntimeInfo.capabilities.steer` (§11.4). Today Pi and Codex report true;
+Claude reports false.
 
-**The connection-level `steer` flag is discovery-only; steer authority is
-decided per task, from the claim.** At claim time the server snapshots
+**Steer authority is decided per task, from the claim.** At claim time the server snapshots
 `task.claim.capabilities` (§11.5) — the claiming adapter's own self-report —
 onto the task record, and `steerTask()` rejects with a typed
 `steer_unsupported_runtime` error before any envelope is built whenever that
 snapshot does not say `steer: true`. A `task.steer` envelope therefore never
 reaches the wire for a runtime that cannot honor it. On the receiving side a
-daemon that is still handed an unsupported steer (a forged or pre-gate
-message) records it as a non-retryable protocol error and acks it: the
-envelope is consumed, the cursor advances, and redelivery does not loop.
+daemon that is still handed a steer it does not deliver (a runtime that
+cannot steer, a task no longer active, a text larger than the runtime
+accepts) reports `task.steer_refused` with the matching reason (§2) and acks
+the steer: the envelope is consumed, the cursor advances, and redelivery does
+not loop.
 
 **That snapshot has exactly one source, and no fallback.** The server reads
 the claim payload and nothing else: not the connection-level flag list, not
@@ -3915,7 +4162,7 @@ Per-runtime fill (empirical, `packages/client/src/adapters/*/events.ts`):
 
 `model` (1 to 160 characters) is the model the provider served for that
 observation, exactly as the runtime reported it; it is never the requested
-model id or `dispatchSelection`. A name over 160 characters is dropped whole,
+model id or the offer `target`. A name over 160 characters is dropped whole,
 never truncated. Pi sets it from pi-ai's `AssistantMessage.responseModel`,
 which pi-ai fills only for the providers that report a served model; pi-ai's
 `model` is the requested id and is not read. Claude sets it on the turn's
@@ -3971,8 +4218,7 @@ stripped — a closed, typed shape a consumer can rely on; only the recognized
 fields round-trip.
 
 This is populated from the exact same adapter `capabilities()` call §11.2's
-matrix and the connection-level `steer` OR (§11.2, last paragraph) are both
-derived from — see `create-daemon.ts`'s `detectRuntimes`/
+matrix is derived from — see `create-daemon.ts`'s `detectRuntimes`/
 `toRuntimeInfoCapabilities`, which is now a pure passthrough of the adapter's
 own declaration and synthesizes no value of its own. `approvalInteractive` is
 therefore per-adapter truth — whether that adapter's sessions call
@@ -4210,7 +4456,7 @@ a normal slow turn.
 
 Compatibility between releases is decided by
 `packages/protocol/src/__tests__/compat.test.ts` (see "Freeze rule"; it tests
-the published v6 baseline and that the last v5 release rejects v6 bytes). It replaces the hand-built
+v7 self-consistency and that the last v6 release rejects v7 bytes). It replaces the hand-built
 future-peer simulation this section used to describe. What remains below is
 the receiver policy that the suite and the behavioural tests rely on: which
 unknowns a current receiver tolerates and which it refuses. Four scenarios,
@@ -4245,8 +4491,8 @@ each with its real evidence:
    through the real end-to-end `decodeEnvelope` entrypoint (not just the
    isolated payload schema) to close the loop.
 4. **Handshake version negotiation: a daemon advertising a set that contains
-   the server's single `PROTOCOL_VERSION` (today `6`) agrees on it; a set
-   without it (e.g. `[5]`) gets a clean, typed failure, not a hang.** The
+   the server's single `PROTOCOL_VERSION` (today `7`) agrees on it; a set
+   without it (e.g. `[6]`) gets a clean, typed failure, not a hang.** The
    schema half (`conn.hello.protocolVersions` accepts a set that overlaps the
    server's version and a disjoint one; the schema never referees
    negotiation) is in `version-negotiation-drill.test.ts`. The negotiated version is selected at
@@ -4254,8 +4500,10 @@ each with its real evidence:
    single `PROTOCOL_VERSION`; a disjoint set is rejected before any task
    message is accepted. The real integration test exercises the rejection
    path and a timeout race, so incompatibility is observable rather than a
-   hanging request. The v1 → v2, v2 → v3, v3 → v4, v4 → v5 and v5 → v6 cuts have no N-1 reader, so the "highest common
-   version across an N/N-1 range" policy remains future work.
+   hanging request. An envelope whose `v` is another major is refused per
+   entry with `protocol_version_unsupported`
+   ([Cross-version refusal](#cross-version-refusal-frozen)). No cut, v6 → v7
+   included, has an N-1 reader.
 
 **Adjacent honest note (gatekeeper advisory, docs-only, no code change): an
 interrupted HTTP poll is not an at-most-once claim.** Rate limiting, network
@@ -4292,23 +4540,24 @@ an already delivered identity is refused even after mailbox retention.
 `PROTOCOL_VERSION` remains 1. The new optional fields and `custom-harness`
 capability preserve every existing builtin runtime meaning and golden envelope.
 Retired in v6 (#1573): the `custom-harness` flag is gone, and `harnesses` on
-`conn.hello` and `harnessId` on an offer need no flag.
+`conn.hello` and a harness offer need no flag. In v7 a harness is one lane of
+the offer `target` and one kind of the claim `executor`.
 
 - `conn.hello.harnesses`: at most 64 unique custom descriptors with `id`, optional
   `version` (1–128 characters), and `capabilities`. IDs are lower-case ASCII
   segments separated by `.`, `_` or `-`, begin with a letter, are at most 128
   characters, and exclude `pi`, `claude`, `codex`. This is an
   authenticated, replace-all durable device snapshot, without secret/env/path data.
-- All offer-family payloads may require `harnessId`, mutually exclusive with
-  builtin `runtime` and `dispatchSelection`. The host checks the target device's
+- An offer names a harness with `target: { lane: 'harness', harnessId }`, so it
+  cannot also name a built-in runtime or a model. The host checks the target device's
   advertised harness inventory before task reservation. A harness missing from
   the inventory is rejected; unknown fields must not silently change execution identity.
-- `task.claim.harnessId` identifies the actual custom adapter and cannot coexist
-  with `runtime`. It must be advertised and match any explicit sealed selection.
-  The ownership CAS records it once as `claimedHarnessId`; retries cannot rewrite
+- `task.claim.executor: { kind: 'harness', harnessId }` identifies the actual
+  custom adapter. It must be advertised and match any explicit sealed selection.
+  The ownership CAS records it once as `claimedExecutor`; retries cannot rewrite
   execution identity. Claim-carried capabilities remain the steer authority.
-- `task.complete`, `task.fail`, `task.cancelled` echo that exact custom identity.
-  A missing, different, or unexpected custom identity is rejected. Builtin usage
+- `task.complete`, `task.fail`, `task.cancelled` echo that exact `executor`
+  after a claim (§3.1). A missing, different, or unexpected executor is rejected. Builtin usage
   metrics keep their existing schema; the SDK does not invent custom usage.
 
 Independent inbound handlers retain per-task control order. Acknowledgement only
@@ -4327,10 +4576,9 @@ offer receipt and exact offer UUID; a missing receipt is a rejection.
 
 A local admission may commit before the cloud accepts claim. If cloud ownership
 is absent, this bound recovery report can settle the task without asserting or
-creating a claim. Its custom harness is the device's local admission fact;
-automatic selection is permitted when the offer imposes no runtime selection.
-If cloud ownership exists, all terminals, including recovery, must match
-`claimedHarnessId` exactly. Ordinary failures gain no exception. The terminal
+creating a claim, and it carries no `executor`. If cloud ownership exists, all
+terminals, including recovery, must carry `executor` equal to
+`claimedExecutor`. Ordinary failures gain no exception. The terminal
 read model copies `recovery` verbatim; `TaskAttempt` remains cloud claim authority.
 Deploy the supporting server before using these recovery reports. Migration
 0021 remains required for custom claims; the recovery object lives in existing
@@ -4375,14 +4623,22 @@ Older consumers ignore these optional fields.
 ## SQLite startup check for wire-major upgrades
 
 The embedded server checks every pending mailbox row when it opens SQLite.
-A major other than the current `PROTOCOL_VERSION` (6), a missing major, or
+A major other than the current `PROTOCOL_VERSION` (7), a missing major, or
 malformed JSON causes `SqliteSchemaError` with code
-`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`. SQLite schema version 5 alone does not
-prove that the pending wire rows use v6. Retained `acked` and `expired` rows
-do not block startup. The check does not change or retire mailbox rows.
-Stored v3, v4 and v5 receipts are not migrated. A store a v3 build wrote is
-not supported; a store a v4 or v5 build wrote opens once no pending row of
-that major is left.
+`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`. The SQLite schema version alone does
+not prove that the pending wire rows use v7. Retained `acked` and `expired`
+rows do not block startup. The check does not change or retire mailbox rows.
+Stored v3, v4, v5 and v6 receipts are not migrated.
+
+**v7 starts on a new store.** Retained v6 records (terminal receipts, task
+history, attempts) are not migrated, so a store a v6 build wrote is not
+supported, even when no pending v6 row is left: start the v7 server side on a
+new store. The Host exports the history it needs before it upgrades, devices
+pair again into the new store, and the Host's frozen work and outbox
+snapshots rotate. The startup check below catches only pending rows of
+another major; passing it does not make an older store usable. A store a v3
+build wrote is not supported either; a store a v4 or v5 build wrote opened
+under v6 once no pending row of that major was left.
 
 On an offline copy, this query lists the pending rows that would stop
 startup:
@@ -4392,14 +4648,15 @@ SELECT tenant_id, device_id, seq, message_id
 FROM mailbox_message
 WHERE state = 'pending'
   AND CASE WHEN json_valid(body)
-    THEN json_type(body, '$.v') IS NOT 'integer' OR json_extract(body, '$.v') <> 6
+    THEN json_type(body, '$.v') IS NOT 'integer' OR json_extract(body, '$.v') <> 7
     ELSE 1 END;
 ```
 
 An empty result confirms only the envelope-major check. It does not prove full
-payload validity or task completion. The v5 to v6 cut has no drain tool or
-upgrade precheck: if rows remain, move the database aside and start on a new
-store, as the [0.41.0 Host upgrade guide](releases/host-upgrade-0.41.0.md#rebuild-local-stores)
+payload validity or task completion. The v6 to v7 cut has no drain tool or
+upgrade precheck, and it starts on a new store anyway: move the database
+aside and start on a new store, as the
+[next MINOR Host upgrade](releases/host-upgrade-next-minor.md#wire-v7)
 describes. Do not delete rows to force startup.
 A fresh server database needs fresh device enrollment. Changing only the client
 `storeDir` keeps the OS credential for the same `productId`.

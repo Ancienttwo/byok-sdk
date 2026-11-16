@@ -173,3 +173,113 @@ keeps the default `[]`; no Host action is required.
   granted roots (`outside_scope`), so the model cannot load it on its own;
   `/skill:<name>` still expands it. Symlinks are followed and the owner is not
   checked. See [Host-provided skills](../adapter-capabilities.md#host-provided-skills-by-runtime-1846).
+
+## Wire v7
+
+Draft. Phase 0 landed the protocol contract; phase 1 (cloud, server, client)
+and phase 2 (integration) complete this section. Items marked "phase 1" are
+not in the SDK yet. The wire facts are in
+[the protocol](../protocol.md).
+
+`PROTOCOL_VERSION` is 7. There is no v6 reader: a v6 peer and a v7 peer
+cannot talk to each other.
+
+### Operator order
+
+1. Export the Host history you need from the v6 store.
+2. Upgrade the cloud (embedded server, `@byok-sdk/cloud`,
+   `@byok-sdk/cloud-dataplane`) onto a new store.
+3. Pair every device again into the new store.
+4. Upgrade the daemons.
+
+Between the cloud upgrade and a daemon's upgrade, that v6 daemon halts. Plan
+the window. AiphaBee's Local Agent and byok-host upgrade in the same release.
+
+### New store
+
+v7 starts on a new store. Retained v6 records (terminal receipts, task
+history, attempts) are not migrated, and a store a v6 build wrote is not
+supported:
+
+- Export the history you need before you upgrade.
+- Devices pair again; a v6 device credential does not carry over.
+- The Host's K4 frozen work and outbox snapshots rotate: start them fresh on
+  the v7 store.
+- The SQLite startup check refuses a pending row of another major
+  (`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`). The hosted data plane's store
+  check: phase 1.
+
+### What a v6 daemon sees
+
+- **Not paired again:** expected to stop at authentication with
+  `device_revoked`. To be verified in phase 1 against the pinned v6 daemon;
+  it must halt, not reconnect forever.
+- **Paired again into the v7 store:** its lone `conn.hello` gets
+  `rejected` with `protocol_version_unsupported`. It reads that as a refused
+  handshake and halts with `handshake_rejected`.
+
+A v7 daemon that reaches a v6 cloud gets HTTP 400 on its hello and halts with
+`ProtocolNegotiationError` (`code: 'protocol_negotiation_failed'`,
+`localVersion`, `httpStatus`; `peerVersion` only when the peer stated it).
+Upgrade both sides to resolve it.
+
+### Offer `target` and claim `executor`
+
+- `task.offer` takes one required `target` in place of `runtime`,
+  `harnessId` and `dispatchSelection`. Lanes: `auto`, `runtime`,
+  `subscription` (no `providerId`), `byok`, `byok-profile`, `harness`. The
+  three model lanes still need the device flag `dispatch-selection`.
+- `nativeSessions` needs an explicit Pi target (lane `runtime`, `byok` or
+  `byok-profile` with `runtimeId: 'pi'`).
+- `task.claim` takes one required `executor`
+  (`{ kind: 'runtime', runtimeId }` or `{ kind: 'harness', harnessId }`) in
+  place of `runtime`, `harnessId` and `agentId`. `task.complete` requires it;
+  `task.fail` and `task.cancelled` carry it after a claim.
+- Cloud `TaskAttempt.claimedExecutor` replaces `claimedRuntime` and
+  `claimedHarnessId`. Host offer and task APIs that took `runtime`,
+  `harnessId` or `dispatchSelection`: phase 1.
+
+### `task.steer_refused`
+
+A device reports a steer it received and did not deliver with
+`task.steer_refused { steerMessageId, reason }`. Reasons: `input_too_large`,
+`steer_unsupported`, `task_not_active`; the list is open. The first reason
+wins. The report is plaintext on sealed tasks too.
+
+The Host feed of a task's refusals ends at the task's terminal. A refusal the
+cloud commits after the terminal is read by steer id only. Host APIs
+(`readSteerRefusal`, the refusal list and its cursor, the steer message id
+returned by `TaskHandle.steer`): phase 1.
+
+### Removed fields and flags
+
+- `capabilities` on the `GET /byok/events` and `POST /byok/messages`
+  responses: the server advertises nothing.
+- `limits.maxTokens` on `task.offer`.
+- The offer selection rules `runtime_selection_mismatch` and
+  `harness_selection_conflict`.
+- The device flags `steer` and `provider-profile-binding`.
+- `WireAddition.kind`, `.rule` and `.advertisedBy`.
+
+### Decline codes
+
+`DECLINE_CODES` lists every known `task.decline` code: Agent home, sealed
+input, selection rules, offer admission (for example
+`offer_capability_missing`, `file_scope_unsupported`), prepared offers
+(`PREPARED_OFFER_DECLINE_CODES`) and the input-preparation rejections. `code`
+stays optional and open: read it with `readDeclineCode`, and expect
+`unknown` with `reportedCode`. Codes stay plaintext on sealed tasks.
+`task.decline.reason` is now bounded and redacted like `task.fail.reason`.
+See [Decline codes](../protocol.md#decline-codes).
+
+### Steer text bound
+
+A plaintext `task.steer` text is at most 65,536 UTF-8 bytes
+(`TASK_STEER_TEXT_MAX_BYTES`); the sender refuses a longer one before it
+enqueues. A sealed steer is not checked on the device. `conn.hello` carries
+at most 64 capability flags.
+
+### Phase 1 and 2 items
+
+- Host APIs for steer refusals and their cursors (te2): phase 1.
+- Upgrade-manifest entries for the cloud, server, client and store changes, and their API surface: phase 1 and 2. Phase 0 lists the protocol and port entries.
