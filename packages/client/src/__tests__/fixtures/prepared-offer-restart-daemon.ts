@@ -355,7 +355,7 @@ function preparedOffer(
     {
       session: { mode: 'fresh' },
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-      runtime: 'pi',
+      target: { lane: 'runtime', runtimeId: 'pi' },
       agentRef: agentRefOf(agentId),
       requiredToolsets: [TOOLSET_ID],
       agentMemory: 'none',

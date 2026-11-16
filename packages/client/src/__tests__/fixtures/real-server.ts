@@ -121,7 +121,7 @@ export async function submitAgentTask(
     deviceId: input.deviceId,
     payload: {
       instruction: input.instruction,
-      runtime: input.runtime ?? 'pi',
+      target: { lane: 'runtime', runtimeId: input.runtime ?? 'pi' },
       agentRef: input.agentRef ?? { agentId: `e2e-agent-${randomUUID()}`, profileRevision: 'rev-1' },
       session: { mode: 'fresh' },
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -162,8 +162,8 @@ export async function dispatchResumedAgentTask(
   const agentRef = input.agentRef ?? { agentId: `e2e-agent-${randomUUID()}`, profileRevision: 'rev-1' };
   // The seed runs on the same adapter the resume names, so the session handoff matches exactly.
   const target = input.harnessId !== undefined
-    ? { harnessId: input.harnessId }
-    : { runtime: input.runtime ?? (adapter.descriptor.id as RuntimeId) };
+    ? { target: { lane: 'harness' as const, harnessId: input.harnessId } }
+    : { target: { lane: 'runtime' as const, runtimeId: input.runtime ?? (adapter.descriptor.id as RuntimeId) } };
   const seedTaskId = `seed-${randomUUID()}`;
   const seedSessions = adapter.sessions.length;
   await vi.waitFor(async () => {
